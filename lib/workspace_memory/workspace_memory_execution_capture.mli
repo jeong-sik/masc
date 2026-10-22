@@ -68,6 +68,19 @@ val restore : workspace:workspace ->
     and reject missing, conflicting, unreadable or cyclic ancestry. A retained
     child whose parent is still Subdividing cannot execute. This is neither
     restart enumeration nor a commit journal. *)
+val recoverable_successors : workspace:workspace ->
+  Lane_addon_tool_request_owner.retained list -> (string list, string) result
+(** Validate the complete freshly discovered original forest before recovery.
+    Every capture, physical workspace and whole predecessor/child derivation
+    must agree. A Subdividing parent may have no child yet, or exactly its
+    initial Captured child with no events; this known publication window is
+    validated without granting that child execution authority. An acknowledged
+    child must exist. Duplicate, dangling, cyclic or conflicting records reject
+    the whole inventory, including malformed unrelated members.
+    Return only parent IDs with already durable successor intentions. No new
+    ID, intent, admission, worker call or domain effect is authorized. Caller
+    must re-read each parent under the original lease/serializer and perform
+    ordinary full restore after recovering its exact existing intention. *)
 type expected_commit =
   | Classification_commit of Workspace_memory_ledger.t
   | Briefing_commit of Workspace_memory_briefing.t

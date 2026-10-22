@@ -17,13 +17,20 @@ val path_bytes_limit : int
 type t
 val create : unit -> t
 
-(** Records one [network.*] event, named by its wire method. A payload that is
-    not what BiDi documents, or a method not in {!subscribed_methods}, is an error. *)
-val event : t -> method_:string -> Yojson.Safe.t -> (unit, string) result
+(** Records one [network.*] event, named by its wire method. It never fails,
+    because the connection that feeds it also carries download evidence, and a
+    request must not end that. A null context, which BiDi allows, is counted as
+    unattributed. A payload that is not what BiDi documents, or a method not in
+    {!subscribed_methods}, is counted as malformed with the reason of the last one. *)
+val event : t -> method_:string -> Yojson.Safe.t -> unit
 
 (** The address as it is kept: scheme, host, port and path, the query's parameter
-    names with every value replaced, and no user info or fragment. [None] when it
-    is not an absolute address with a host. *)
+    names with every value replaced, and no user info or fragment. An address
+    with a scheme and no host (data:, blob:, file:) keeps the scheme alone and is
+    flagged as cut, because what follows can be the whole payload. [None] when
+    there is no scheme. *)
 val redact_url : string -> (string * bool) option
 
+(** The requests kept for one tab, oldest first, and how many older ones were dropped. [unattributedRequests]
+    and [malformedEvents] are about the whole session, not the tab. *)
 val to_json : t -> context:string -> Yojson.Safe.t

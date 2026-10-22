@@ -13,7 +13,7 @@ let completed ?(context = "tab-a") ?(status = 200) ?(response_headers = [ header
 let failed ?(context = "tab-a") req =
   obj [ "context", `String context; "redirectCount", `Int 0; "timestamp", `Int 30; "request", req
       ; "errorText", `String "NS_ERROR_NET_RESET" ]
-let record log ~method_ params = match Network.event log ~method_ params with Ok () -> () | Error detail -> fail detail
+let record log ~method_ params = Network.event log ~method_ params
 let member key json = Yojson.Safe.Util.member key json
 let requests log ~context = Yojson.Safe.Util.to_list (member "requests" (Network.to_json log ~context))
 
@@ -103,20 +103,44 @@ let test_tabs_are_separate () =
   check int "tab b" 1 (List.length (requests log ~context:"tab-b"));
   check int "tab c" 0 (List.length (requests log ~context:"tab-c"))
 
-let test_malformed_events_are_errors () =
+let session json = member "malformedEvents" json
+
+let test_what_bidi_allows_is_accepted () =
+  let log = Network.create () in
+  (* A null context, which BiDi allows for a request no tab is making. *)
+  record log ~method_:"network.beforeRequestSent"
+    (match before (request ~id:"nc" ()) with `Assoc f -> `Assoc (("context", `Null) :: List.remove_assoc "context" f) | o -> o);
+  (* Addresses with a scheme and no host. *)
+  List.iter (fun (id, url) -> record log ~method_:"network.beforeRequestSent" (before (request ~id ~url ())))
+    [ "d", "data:text/plain;base64,U0VDUkVUUEFZTE9BRA=="; "b", "blob:https://example.test/0000-1111"; "f", "file:///Users/someone/secret.txt" ];
+  let json = Network.to_json log ~context:"tab-a" in
+  check int "a null context is counted as unattributed" 1 (Yojson.Safe.Util.to_int (member "unattributedRequests" json));
+  check int "nothing here is malformed" 0 (Yojson.Safe.Util.to_int (member "count" (session json)));
+  let urls = List.map (fun row -> Yojson.Safe.Util.to_string (member "url" row)) (requests log ~context:"tab-a") in
+  check (list string) "a hostless address keeps its scheme alone" [ "data:"; "blob:"; "file:" ] urls;
+  let text = Yojson.Safe.to_string json in
+  List.iter (fun payload -> check bool (payload ^ " does not appear") false
+    (try ignore (Str.search_forward (Str.regexp_string payload) text 0); true with Not_found -> false))
+    [ "U0VDUkVUUEFZTE9BRA"; "0000-1111"; "secret.txt" ];
+  check bool "and the row says it was cut" true
+    (List.for_all (fun row -> member "urlCut" row = `Bool true) (requests log ~context:"tab-a"))
+
+let test_malformed_events_are_counted_and_never_fail_the_stream () =
   let log = Network.create () in
   let bad = [
     "an unsubscribed method", "network.authRequired", before (request ());
     "no context", "network.beforeRequestSent", obj [ "request", request (); "timestamp", `Int 1 ];
     "no request", "network.beforeRequestSent", obj [ "context", `String "t"; "timestamp", `Int 1 ];
-    "an address with no host", "network.beforeRequestSent", before (request ~url:"/relative" ());
+    "a relative address", "network.beforeRequestSent", before (request ~url:"/relative" ());
     "headers that are not a list", "network.beforeRequestSent",
       before (obj [ "request", `String "x"; "method", `String "GET"; "url", `String "https://e.test/"; "headers", `String "h" ]);
     "a completed response with no status", "network.responseCompleted",
       obj [ "context", `String "t"; "timestamp", `Int 1; "request", request ()
           ; "response", obj [ "mimeType", `String "m"; "bytesReceived", `Int 1 ] ] ] in
-  List.iter (fun (label, method_, params) ->
-    check bool (label ^ " is refused") true (Result.is_error (Network.event log ~method_ params))) bad;
+  List.iter (fun (_, method_, params) -> record log ~method_ params) bad;
+  let json = Network.to_json log ~context:"t" in
+  check int "each is counted" (List.length bad) (Yojson.Safe.Util.to_int (member "count" (session json)));
+  check bool "the last reason is kept" true (match member "last" (session json) with `String _ -> true | _ -> false);
   check int "nothing was recorded" 0 (List.length (requests log ~context:"t"))
 
 let test_the_verb_and_the_table () =
@@ -145,5 +169,6 @@ let () = run "browser network" [ "network", [
   test_case "the address is redacted" `Quick test_redact_url;
   test_case "the oldest drop and are counted" `Quick test_the_oldest_requests_drop_and_are_counted;
   test_case "tabs are separate" `Quick test_tabs_are_separate;
-  test_case "malformed events are errors" `Quick test_malformed_events_are_errors;
+  test_case "what BiDi allows is accepted" `Quick test_what_bidi_allows_is_accepted;
+  test_case "malformed events are counted" `Quick test_malformed_events_are_counted_and_never_fail_the_stream;
   test_case "the verb and the table" `Quick test_the_verb_and_the_table ] ]

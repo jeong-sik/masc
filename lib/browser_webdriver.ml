@@ -540,7 +540,12 @@ let rec execute_unlocked t = function
         | Browser_lane.Fill_node _ -> script t session (Browser_scene_script.runtime ^ Browser_interaction.script) [args]
       in
       match result with
-      | `Assoc fields -> Ok (`Assoc (("tabId", `Int tab_id) :: fields))
+      | `Assoc fields ->
+        (* A framed receipt reports the frame chain, because its [url] is the
+           innermost frame document's URL, not the tab's. *)
+        let framed = if frame_path = [] then []
+          else ["framePath", `List (List.map (fun selector -> `String selector) frame_path)] in
+        Ok (`Assoc (("tabId", `Int tab_id) :: framed @ fields))
       | _ -> Error (Protocol "invalid interaction response"))
   | Browser_lane.Page_capture { tab_id } ->
     let* session = session t in

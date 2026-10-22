@@ -497,10 +497,10 @@ let test_select_option () =
        ; "scrollX", `Int 0
        ; "scrollY", `Int 0
        ]);
-  let receipt = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action })) in
+  let receipt = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action })) in
   (match fake.sent with
    | [ Wire.Page_evaluate { expression; _ } ] ->
-     let args = Lane.interaction_args ~tab_id:0 ~expected_url action in
+     let args = Lane.interaction_args ~tab_id:0 ~frame_path:[] ~expected_url action in
      check string "select_option sends the shared interaction script with its selector and value"
        (Executor.evaluate_expression ~runtime:Executor.Scene_runtime ~body:Masc.Browser_interaction.script ~args)
        expression;
@@ -510,7 +510,7 @@ let test_select_option () =
    | _ -> fail "select_option must be exactly one page.evaluate");
   check string "the receipt keeps the action" "select_option" Yojson.Safe.Util.(member "action" receipt |> to_string);
   fake.evaluated <- Some (`Assoc ["interactionFailure", `Assoc ["message", `String "option_not_found"; "effectStarted", `Bool false]]);
-  (match Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action }) with
+  (match Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action }) with
    | Lane.Rejected_before_effect message ->
      check string "a page-script refusal is rejected before any effect, with its reason" "option_not_found" message
    | Lane.Answered _ | Lane.Lane_absent | Lane.Timed_out | Lane.Refused _ ->

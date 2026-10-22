@@ -437,12 +437,16 @@ let test_interact_enters_frames () =
     ignore (Driver.execute driver Lane.Tabs_list);
     order := [];
     let framed action = Lane.Page_interact {frame_path=["#frame"];tab_id=1;expected_url=None;action} in
-    (match Driver.execute driver (framed (Lane.Click "#go")) with
-     | Lane.Answered _ -> ()
-     | Lane.Refused _ | Lane.Rejected_before_effect _ | Lane.Lane_absent | Lane.Timed_out -> fail "framed click failed");
+    let framed_receipt = match Driver.execute driver (framed (Lane.Click "#go")) with
+      | Lane.Answered (`Assoc fields) -> (match List.assoc_opt "data" fields with Some data -> data | None -> fail "no data")
+      | Lane.Answered _ | Lane.Refused _ | Lane.Rejected_before_effect _ | Lane.Lane_absent | Lane.Timed_out -> fail "framed click failed" in
     let seen = List.rev !order in
     let index name = let rec go i = function [] -> fail (name ^ " never ran") | x :: _ when x = name -> i | _ :: rest -> go (i+1) rest in go 0 seen in
     check bool "the frame is entered before the page script runs" true (index "enter-frame" < index "script");
+    (match framed_receipt with
+     | `Assoc fields -> check bool "the receipt names the frame chain" true
+         (List.assoc_opt "framePath" fields = Some (`List [`String "#frame"]))
+     | _ -> fail "receipt is not an object");
     check bool "the pointer moves only after the frame is entered" true (index "enter-frame" < index "pointer");
     order := []; missing := true;
     (match Driver.execute driver (framed (Lane.Click "#go")) with
@@ -525,7 +529,7 @@ let test_dialog_opened_by_a_click_can_be_answered () =
     ignore (Driver.execute driver Lane.Tabs_list);
     let point : Lane.Pointer.point = {x=0.5;y=0.5} in
     let viewport : Lane.Pointer.viewport = {document_id="fixture";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
-    let click = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+    let click = Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Click_at {point;viewport;button=Lane.Pointer.Primary}} in
     (match Driver.execute driver click with
      | Lane.Refused _ | Lane.Answered _ -> ()

@@ -245,6 +245,63 @@ val evaluation_request_to_yojson
     before dispatch so an in-flight evaluation remains reconstructible after
     a process restart. *)
 
+(** {1 Original evaluation replay}
+
+    These ports consume host-retained original inputs, not worker judgments
+    or {!observation_to_yojson}. The caller must first validate the physical
+    journal, original input identity and captured gate authority. This pure
+    port neither reads current configuration nor grants execution authority. *)
+
+type replay_authority =
+  | Gate_available of Typesafeai_client.destination_id * Typesafeai_client.destination_id list
+  | Gate_unavailable of Typesafeai_config.unavailable_reason
+(** Availability and ordered destinations captured by the host for the
+    original pass, including explicit disabled/excluded decisions. *)
+
+type retained_evaluation =
+  { request : Yojson.Safe.t
+  ; returned : Yojson.Safe.t option
+  }
+(** [request] is the original {!evaluation_request_to_yojson} persisted by
+    [before_evaluate]; [returned] is {!evaluation_evidence_to_yojson} persisted
+    by [after_evaluate]. [None], an aborted record, and observer projections
+    are not completed evaluation evidence. *)
+
+type replay_error =
+  | Invalid_evidence of { index : int; detail : string }
+  | Incomplete_evaluation of int
+  | Missing_evaluation of int
+  | Extra_evaluations of int
+
+val replay_error_to_string : replay_error -> string
+
+val evaluation_evidence_to_yojson : evaluation -> Yojson.Safe.t
+(** Canonical original request plus typed response/refusal, without computed
+    absorption or copy decisions. Private evidence, not a secret-free view.
+    Pair it with the independently persisted pre-dispatch request. *)
+
+val restore
+  :  authority:replay_authority
+  -> new_observations:Yojson.Safe.t list
+  -> facts:Keeper_memory_os_types.fact list
+  -> new_claims:Keeper_memory_os_types.fact list
+  -> superseding:string list
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> evaluations:retained_evaluation list
+  -> (run_result, replay_error) result
+(** Rederive the original forward and reverse decisions from complete,
+    strictly decoded returned evaluations, consuming the exact request
+    sequence and answer coverage. Every request is rederived from the original
+    inputs, including state, questions, direction and destinations; successful
+    request-body digests and destination walks are checked. Missing, pending,
+    relabelled or surplus evidence refuses without provider calls. Original
+    transport failures and typed but judgment-invalid answers (including an
+    originally missing requested answer) retain their unsuccessful/partial
+    policy; an unrequested answer identity is rejected. No filesystem or
+    model effects occur. This does not authenticate a caller-supplied input
+    snapshot: original fact IDs and availability must already be bound to the
+    host's immutable original pass, never reconstructed from worker data. *)
+
 val absorbed_of_run : run_result -> Keeper_memory_os_types.absorbed_statement list
 
 val without_copies

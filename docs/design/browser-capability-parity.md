@@ -119,6 +119,29 @@ Chromium 쪽은 DevTools Protocol(`Input`, `Network`, `Runtime`, `Emulation`) �
 - 창 목록·만들기·닫기: Firefox 158 의 BiDi `browser.getClientWindows`, `browsingContext.create` 의 `type: window`, `browsingContext.close` 가 돈다(프로브).
   `Browser_lane.Action.t` 에 창 동작을 더해야 해서 `page.act` 를 쓰는 Add-on 모듈 여럿이 바뀐다. 탭 정리와 같은 방침(이 연결이 만든 창만)으로 한다.
 
+### 남은 단위를 코드로 확인한 결과 (2026-10-22)
+
+새 읽기 verb 는 `Page_downloads` 가 선례다. 이 verb 를 쓰는 곳을 세었다: 14개 모듈 46곳
+(`browser_lane.ml` 13, `browser_addon_tool.ml` 6, `browser_selection.ml` 5, `browser_addon_owner.ml` 5,
+`browser_webdriver.ml` 4, 그 밖 9개 모듈). 이 중 Add-on 쪽 다섯 모듈은 로컬 타입 검사 도구로 확인할 수 없어서
+`merge-compile` 에만 맡기게 된다. 그래서 verb 를 하나 더하는 단위는 한 PR 로 올리지 않고 쪼갠다.
+
+- **콘솔 읽기(5)**: 자동화 Firefox 에서 `log.entryAdded` 를 모으는 것이 출발점이다. 다만 이벤트를 받는
+  `Browser_bidi_downloads` 클라이언트는 다운로드 전용이다. `Browser_downloads.event` 는 구독하지 않은 이벤트를
+  오류로 돌려주고, 연결 객체(`connection`)의 `read` 도 다운로드 기록을 만든다. 일반화하려면 (1) 이벤트별 모델을 받는
+  구독 표, (2) 가득 찬 버퍼를 말없이 버리지 않고 `truncated` 로 보고하는 상한, (3) 새 verb(`page.console`),
+  (4) 도구 스키마 순서로 간다. 위 46곳 중 `Page_downloads` 와 같은 팔에 넣으면 되는 곳이 대부분이지만, 팔마다 의미를 읽어야 한다.
+- **네트워크 읽기(6)**: 같은 클라이언트에 `network.*` 구독을 더하는 일이고, 요청·응답 본문과 헤더에는 쿠키·토큰이 들어간다.
+  위 방침대로 소유한 브라우저에서만 열고, 헤더 값은 기본으로 가린다. 이 가리는 규칙은 운영자가 정해야 한다.
+- **쿠키·저장소(7)**: 자동화 Firefox 는 W3C classic `GET /session/{id}/cookie` 로 읽을 수 있고, Stagehand 4.1.0 에는
+  `context.cookies` 가 있다. 읽는 verb 가 새로 필요하고, 값은 기본으로 가려야 한다.
+- **클립보드(9)**: Stagehand 4.1.0 에 `context.clipboard_read_text`·`write_text` 가 있고 BiDi 에는 없다. 소유한 Chromium 에서만 열 수 있다.
+- **Gecko 전용 칸을 BiDi 로(10)**: 자동화 Firefox 의 `select`, 업로드, 다이얼로그는 classic WebDriver 의 요소 참조와
+  요소 클릭에 기대고 있다. BiDi 에는 요소 클릭이 없다. `select` 의 옵션은 페이지 밖에서 그려지는 팝업이라 좌표 클릭으로 대신하기 어렵다고 추정한다(확인하지 못했다).
+  업로드는 `input.setFiles` 가 있지만 운영자 브라우저에 파일을 넣는 일이라 `Upload_lease` 같은 승인 흐름이 먼저 필요하다.
+  다이얼로그는 `browsingContext.handleUserPrompt` 가 있으나, 운영자 탭의 확인 창을 대신 누르는 일이라 탭 정리·기록과 같은 "이 연결이 연 탭만" 원칙을 따르면 쓸 곳이 좁다.
+- **창 만들기·닫기(4)**: `Browser_lane.Action.t` 에 변형을 더해야 하고 14개 모듈 중 `page.act` 를 쓰는 Add-on 모듈이 함께 바뀐다.
+
 각 단위는 공개 도구 스키마(`config/tools/masc_browser_*.toml`), 어댑터, 표, fixture 를 같이 바꾼다.
 표만 바꾸고 어댑터가 없는 변경, 어댑터만 만들고 표를 안 바꾸는 변경은 받지 않는다.
 

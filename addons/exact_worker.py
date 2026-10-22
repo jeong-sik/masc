@@ -40,6 +40,13 @@ TOOL_OUTPUT = {"type": "object", "oneOf": [
 ]}
 HOST_RESULT = closed({"request_id": TEXT, "result": OBJECT})
 CONTROL = closed({"tool": TEXT, "arguments": OBJECT, "caller": OBJECT})
+# The typed result for a request this worker could never list to the host.
+REQUEST_BODY_REFUSED = {"status": "input_refused", "kind": "request_body_refused"}
+# The longest host line this worker reads, in declared frames. What the host
+# measures stays within one frame (a classification submit, a delivered result,
+# observation sources), and the JSON-RPC envelope around it is far smaller than
+# a frame. A longer line is read no further.
+HOST_LINE_FRAMES = 2
 
 
 @dataclass(frozen=True)
@@ -76,6 +83,15 @@ def canonical(value) -> str:
 
 def digest(value) -> str:
     return hashlib.sha256(canonical(value).encode("utf-8")).hexdigest()
+
+
+def is_digest(value) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def record_id(record: dict) -> str:
+    """A request record names its request; an admission refusal keeps only the id."""
+    return record["request"]["request_id"] if "request" in record else record["request_id"]
 
 
 def pairs(items) -> dict:
@@ -178,14 +194,23 @@ class Store:
         with os.fdopen(fd, "r", encoding="utf-8") as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
                 raise InvalidInput("Exact request record is not a regular file")
-            record = exact(decode(source.read()), {"version", "request", "digest", "result"}, "retained record")
-        if type(record["version"]) is not int or record["version"] != 1:
+            record = object_value(decode(source.read()), "retained record")
+        if type(record.get("version")) is not int or record["version"] != 1:
             raise InvalidInput("unknown Exact request record version")
-        request = self.contract.parse_request(record["request"])
-        if self.path(request["request_id"]).name != name or record["digest"] != digest(request):
-            raise InvalidInput("Exact request record identity or input digest disagrees")
-        if record["result"] is not None:
-            final_of_json(record["result"])
+        if set(record) == {"version", "request", "digest", "result"}:
+            request = self.contract.parse_request(record["request"])
+            if self.path(request["request_id"]).name != name or record["digest"] != digest(request):
+                raise InvalidInput("Exact request record identity or input digest disagrees")
+            if record["result"] is not None:
+                final_of_json(record["result"])
+        elif set(record) == {"version", "request_id", "digest", "result"}:
+            # Refused at admission (Worker.invoke): the body was never kept.
+            if self.path(record["request_id"]).name != name or not is_digest(record["digest"]):
+                raise InvalidInput("Exact admission refusal identity or input digest disagrees")
+            if record["result"] != REQUEST_BODY_REFUSED:
+                raise InvalidInput("an admission refusal holds only the request body refusal")
+        else:
+            raise InvalidInput("retained record is neither an Exact request nor an admission refusal")
         return record
 
     def read(self, request_id: str) -> dict | None:
@@ -220,7 +245,7 @@ class Store:
                         target.write(canonical(record) + "\n")
                         target.flush()
                         os.fsync(target.fileno())
-                    os.replace(temporary, self.path(record["request"]["request_id"]).name,
+                    os.replace(temporary, self.path(record_id(record)).name,
                                src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
                     temporary = None
                     os.fsync(directory_fd)
@@ -266,22 +291,30 @@ class Worker:
                     raise InvalidInput("only the admitted host operator may submit an Exact request")
                 exact(args, {"kind", "request"}, "submit")
                 request = self.contract.parse_request(args["request"])
-                # Admission precedes persistence; a frame that cannot be listed
-                # must not leave an intent that the host can never execute.
-                listing = {"requests": [self.host_request(request)]}
-                if not self.fits(listing):
-                    raise InvalidInput("Exact request exceeds the declared worker reply frame")
-                old = self.store.read(request["request_id"])
-                if old is not None and old["digest"] != digest(request):
-                    raise InvalidInput("request_id already belongs to different Exact request input")
-                if old is None:
-                    pending = [self.host_request(record["request"]) for record in self.store.records()
-                               if record["result"] is None]
-                    if not self.fits({"requests": pending + listing["requests"]}):
-                        return {"request_id": request["request_id"], "state": "capacity_wait"}
-                    old = {"version": 1, "request": request, "digest": digest(request), "result": None}
-                    self.store.write(old)
-                return self.status(request["request_id"], old)
+                request_id, request_digest = request["request_id"], digest(request)
+                # A retained request keeps its answer even if the declared frame
+                # changed after it was admitted.
+                old = self.store.read(request_id)
+                if old is not None:
+                    if old["digest"] != request_digest:
+                        raise InvalidInput("request_id already belongs to different Exact request input")
+                    return self.status(request_id, old)
+                listing = [self.host_request(request)]
+                if not self.fits({"requests": listing}):
+                    # No listing reply can carry this request, so it never
+                    # becomes an intent. The refusal is kept without the body:
+                    # a read after a lost reply gives this answer, not absent.
+                    refused = {"version": 1, "request_id": request_id, "digest": request_digest,
+                               "result": {**REQUEST_BODY_REFUSED}}
+                    self.store.write(refused)
+                    return self.status(request_id, refused)
+                pending = [self.host_request(record["request"]) for record in self.store.records()
+                           if record["result"] is None]
+                if not self.fits({"requests": pending + listing}):
+                    return {"request_id": request_id, "state": "capacity_wait"}
+                accepted = {"version": 1, "request": request, "digest": request_digest, "result": None}
+                self.store.write(accepted)
+                return self.status(request_id, accepted)
             case "read":
                 exact(args, {"kind", "request_id"}, "read")
                 request_id = text(args["request_id"], "request_id")
@@ -326,7 +359,7 @@ class Worker:
         records = self.store.records()
         fields = {"pending": sum(record["result"] is None for record in records),
                   "finished": sum(record["result"] is not None for record in records),
-                  "requests": [record["request"]["request_id"] for record in records]}
+                  "requests": [record_id(record) for record in records]}
         output = {"rows": [{"id": self.contract.row_id, "lane_id": self.contract.lane_id, "kind": "value",
                             "title": self.contract.title, "observed_at": time.time(),
                             "subject_id": self.contract.tool_name, "clock": None, "actor": None,
@@ -357,13 +390,27 @@ def tools(contract: Contract) -> list[dict]:
     ]
 
 
+def read_host_line(stream, limit: int) -> bytes | None:
+    """The next line, newline included, if it has at most limit bytes; b"" at
+    the end of input. A longer line gives None after only limit + 1 of its
+    bytes were read."""
+    line = stream.readline(limit + 1)
+    return None if len(line) > limit else line
+
+
 def serve(here: Path, contract: Contract) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--state", type=Path, required=True)
     options = parser.parse_args()
     manifest = tomllib.loads((here / "lane.toml").read_text(encoding="utf-8"))
     worker = Worker(options.state, manifest["resources"]["max_reply_bytes"], contract)
-    for line in sys.stdin.buffer:
+    line_limit = HOST_LINE_FRAMES * worker.max_reply_bytes
+    while (line := read_host_line(sys.stdin.buffer, line_limit)) != b"":
+        if line is None:
+            # The JSON-RPC id is inside the unread line, and the host waits only
+            # for a reply carrying it. Ending the connection is the answer the
+            # host sees; reading on would hold the whole line.
+            raise SystemExit(f"host line exceeds {line_limit} bytes; the worker reads no further")
         request_id = None
         try:
             rpc = object_value(decode(line.decode("utf-8")), "JSON-RPC")

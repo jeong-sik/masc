@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
+import tomllib
+import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +23,7 @@ sys.path.insert(0, str(ADDONS))
 import exact_worker
 
 SERVER = ADDONS / "workspace-curator" / "server.py"
+FRAME = tomllib.loads((SERVER.parent / "lane.toml").read_text(encoding="utf-8"))["resources"]["max_reply_bytes"]
 
 
 def request(request_id="original-classification", output="classification"):
@@ -190,6 +195,96 @@ class CuratorWorker(unittest.TestCase):
             result = self.run_worker(Path(directory), [read(original["request_id"]), listing()])
             self.assertEqual(self.output(result[0])["result"], {"status": "outcome_unknown"})
             self.assertEqual(self.output(result[1])["requests"], [])
+
+    def test_a_request_no_listing_can_carry_is_kept_as_a_typed_refusal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.module().CONTRACT
+            small, large = request("original-small"), {**request("original-large"), "system": "x" * 4096}
+            envelope = {"jsonrpc": "2.0", "id": 2 ** 53,
+                        "result": exact_worker.tool_result({"requests": [contract.host_request(small)]})}
+            frame = len((exact_worker.encode_output(envelope) + "\n").encode("utf-8"))
+            worker = exact_worker.Worker(Path(directory), frame, contract)
+            refused = {"request_id": large["request_id"], "state": "finished",
+                       "result": exact_worker.REQUEST_BODY_REFUSED}
+            self.assertEqual(worker.invoke({"kind": "submit", "request": large}, {"kind": "operator"}), refused)
+            self.assertEqual(worker.host_requests({}), {"requests": []})
+            kept = worker.store.path(large["request_id"])
+            self.assertEqual(set(json.loads(kept.read_text())), {"version", "request_id", "digest", "result"})
+            self.assertLess(kept.stat().st_size, len(large["system"]))
+            # Another worker on the same store, as after a lost reply.
+            reopened = exact_worker.Worker(Path(directory), frame, contract)
+            self.assertEqual(reopened.invoke({"kind": "read", "request_id": large["request_id"]},
+                                             {"kind": "operator"}), refused)
+            self.assertEqual(reopened.invoke({"kind": "submit", "request": large}, {"kind": "operator"}), refused)
+            with self.assertRaises(exact_worker.InvalidInput):
+                reopened.invoke({"kind": "submit", "request": {**large, "system": "y" * 4096}}, {"kind": "operator"})
+            with self.assertRaises(exact_worker.InvalidInput):
+                reopened.host_result({"request_id": large["request_id"], "result": {"status": "outcome_unknown"}})
+            self.assertEqual(reopened.host_result({"request_id": large["request_id"],
+                                                   "result": exact_worker.REQUEST_BODY_REFUSED}), {"accepted": True})
+            fields = reopened.observe({"binding": {}, "sources": []})["rows"][0]["fields"]
+            self.assertEqual((fields["pending"], fields["finished"], fields["requests"]),
+                             (0, 1, [large["request_id"]]))
+            # The refusal holds no capacity: a request that fits is admitted.
+            admitted = reopened.invoke({"kind": "submit", "request": small}, {"kind": "operator"})
+            self.assertEqual(admitted["state"], "pending")
+            self.assertEqual(reopened.host_requests({}), {"requests": [contract.host_request(small)]})
+
+    def test_an_admitted_request_keeps_its_answer_after_the_frame_shrinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.module().CONTRACT
+            original = request()
+            exact_worker.Worker(Path(directory), FRAME, contract).invoke(
+                {"kind": "submit", "request": original}, {"kind": "operator"})
+            # A frame that now holds no listing at all.
+            narrowed = exact_worker.Worker(Path(directory), 1, contract)
+            pending = {"request_id": original["request_id"], "state": "pending"}
+            self.assertEqual(narrowed.invoke({"kind": "submit", "request": original}, {"kind": "operator"}), pending)
+            self.assertEqual(narrowed.invoke({"kind": "read", "request_id": original["request_id"]},
+                                             {"kind": "operator"}), pending)
+
+    def test_a_host_line_longer_than_the_limit_is_never_held_whole(self):
+        limit = 1 << 20
+        stream = io.BytesIO(b"x" * (32 * limit) + b"\n" + b"{}\n")
+        tracemalloc.start()
+        try:
+            line = exact_worker.read_host_line(stream, limit)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertIsNone(line)
+        self.assertEqual(stream.tell(), limit + 1)
+        self.assertLess(peak, 2 * limit)
+        within = io.BytesIO(b"x" * (limit - 1) + b"\n")
+        self.assertEqual(exact_worker.read_host_line(within, limit), b"x" * (limit - 1) + b"\n")
+        self.assertEqual(exact_worker.read_host_line(within, limit), b"")
+
+    def test_a_submit_over_one_frame_gets_the_typed_refusal_through_the_real_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            large = {**request("original-large"), "system": "x" * FRAME}
+            replies = self.run_worker(state, [submit(large), read(large["request_id"]), listing()])
+            refused = {"request_id": large["request_id"], "state": "finished",
+                       "result": exact_worker.REQUEST_BODY_REFUSED}
+            self.assertEqual([self.output(reply) for reply in replies[:2]], [refused, refused])
+            self.assertEqual(self.output(replies[2])["requests"], [])
+
+    def test_a_line_over_two_frames_ends_the_worker_without_a_reply_or_a_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state"
+            state.mkdir()
+            large = {**request("original-large"), "system": "x" * (exact_worker.HOST_LINE_FRAMES * FRAME)}
+            operations = [{"method": "initialize", "params": {}}, submit(large), {"method": "ping"}]
+            source = Path(directory) / "input.jsonl"
+            source.write_text("".join(json.dumps({"jsonrpc": "2.0", "id": i, **operation}) + "\n"
+                                      for i, operation in enumerate(operations, 1)), encoding="utf-8")
+            with source.open("rb") as stdin:
+                completed = subprocess.run([sys.executable, str(SERVER), "--state", str(state)], stdin=stdin,
+                                           capture_output=True, timeout=10, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertNotEqual(completed.stderr, b"")
+            self.assertEqual([json.loads(line)["id"] for line in completed.stdout.splitlines()], [1])
+            self.assertEqual(list((state / "workspace-curator").iterdir()), [])
 
     def test_shared_import_works_in_the_packaged_mount_layout(self):
         with tempfile.TemporaryDirectory() as directory:

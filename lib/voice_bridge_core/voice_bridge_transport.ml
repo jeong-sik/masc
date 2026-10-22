@@ -43,11 +43,7 @@ let command_failure_reason output =
   if length <= command_failure_reason_bytes
   then output
   else
-    "..."
-    ^ String.sub
-        output
-        (length - command_failure_reason_bytes)
-        command_failure_reason_bytes
+    "..." ^ String_util.utf8_suffix ~max_bytes:command_failure_reason_bytes output
 ;;
 
 let write_text path content = Fs_compat.save_file path content

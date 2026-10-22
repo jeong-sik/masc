@@ -11,9 +11,11 @@ open Masc_tui_types
 (* Enough of the digest to tell two artifacts apart by eye -- the length
    [masc_tui_execute_result] shows for one -- with an ellipsis so a prefix
    does not read as the whole digest. *)
+let short_sha256_bytes = 12
+
 let short_sha256 sha256 =
-  if String.length sha256 <= 12 then sha256
-  else String.sub sha256 0 12 ^ "\xe2\x80\xa6"
+  if String.length sha256 <= short_sha256_bytes then sha256
+  else String_util.utf8_prefix ~max_bytes:short_sha256_bytes sha256 ^ "\xe2\x80\xa6"
 ;;
 
 let join = String.concat " \xc2\xb7 "

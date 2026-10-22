@@ -47,9 +47,12 @@ let result_traverse ~f items =
   loop [] items
 ;;
 
-(** Truncate string to [max_len], appending "..." if truncated. *)
+(** Truncate string to [max_len] bytes on a UTF-8 character boundary,
+    appending "..." if truncated. *)
 let clip s max_len =
-  if String.length s > max_len then String.sub s 0 max_len ^ "..." else s
+  if String.length s > max_len
+  then Agent_core_strings.utf8_prefix ~max_bytes:max_len s ^ "..."
+  else s
 ;;
 
 (** Safe substring: returns "" if start is past end or len is negative. *)

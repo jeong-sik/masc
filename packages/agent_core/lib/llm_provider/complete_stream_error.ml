@@ -11,7 +11,9 @@ let parse_error_raw_excerpt raw =
   let redacted = Secret_redactor.redact_string raw in
   if String.length redacted <= max_parse_error_raw_excerpt
   then redacted
-  else String.sub redacted 0 max_parse_error_raw_excerpt ^ "...(truncated)"
+  else
+    Agent_core_strings.utf8_prefix ~max_bytes:max_parse_error_raw_excerpt redacted
+    ^ "...(truncated)"
 ;;
 
 type refused_frame =

@@ -323,10 +323,13 @@ let decode_workspace_snapshot ~expected_base_path ~expected_masc_root json =
   in
   decode_snapshot json
 
+let bounded_json_max_bytes = 240
+
 let bounded_json json =
   let rendered = Yojson.Safe.to_string json in
-  if String.length rendered <= 240 then rendered
-  else String.sub rendered 0 240 ^ "..."
+  if String.length rendered <= bounded_json_max_bytes then rendered
+  else
+    String_util.utf8_prefix ~max_bytes:bounded_json_max_bytes rendered ^ "..."
 
 let required_nonempty_string json field =
   let* value = Masc.Tui_decode_fields.required_string_field json field in

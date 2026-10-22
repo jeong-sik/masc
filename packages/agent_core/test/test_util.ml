@@ -105,6 +105,14 @@ let test_clip_long () =
   check string "appends ellipsis" "abcde..." (Util.clip "abcdefghi" 5)
 ;;
 
+(* A Hangul syllable is three bytes. A cut at byte 4 lands inside the second
+   one; the clip stops after the first so the preview stays valid UTF-8. *)
+let test_clip_keeps_multibyte_character_whole () =
+  check string "cut inside a character backs up" "한..." (Util.clip "한글한글" 4);
+  check string "cut on a boundary keeps both" "한글..." (Util.clip "한글한글" 6);
+  check string "four-byte character" "..." (Util.clip "😀😀" 3)
+;;
+
 (* ── safe_sub ─────────────────────────────────────────── *)
 
 let test_safe_sub_normal () =
@@ -252,6 +260,7 @@ let () =
       , [ test_case "shorter" `Quick test_clip_short
         ; test_case "equal" `Quick test_clip_exact
         ; test_case "longer" `Quick test_clip_long
+        ; test_case "multibyte" `Quick test_clip_keeps_multibyte_character_whole
         ] )
     ; ( "safe_sub"
       , [ test_case "normal" `Quick test_safe_sub_normal

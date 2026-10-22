@@ -313,7 +313,7 @@ let short_channel reference =
   if length <= channel_reference_cells then reference
   else
     "\xe2\x80\xa6"
-    ^ String.sub reference (length - channel_reference_cells) channel_reference_cells
+    ^ String_util.utf8_suffix ~max_bytes:channel_reference_cells reference
 
 let connector_label name channel =
   match channel with

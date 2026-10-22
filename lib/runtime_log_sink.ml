@@ -51,18 +51,15 @@ let max_rendered_value_bytes = 160
 let max_rendered_fields = 16
 
 (* Truncate on a UTF-8 character boundary and say so, so a cut value is
-   never mistaken for the whole value.  Continuation bytes are 0b10xxxxxx;
-   walking back off them keeps the prefix decodable. *)
+   never mistaken for the whole value. *)
 let truncate_value value =
   let len = String.length value in
   if len <= max_rendered_value_bytes then value
-  else begin
-    let cut = ref max_rendered_value_bytes in
-    while !cut > 0 && Char.code value.[!cut] land 0xC0 = 0x80 do
-      decr cut
-    done;
-    Printf.sprintf "%s...(%dB)" (String.sub value 0 !cut) len
-  end
+  else
+    Printf.sprintf
+      "%s...(%dB)"
+      (String_util.utf8_prefix ~max_bytes:max_rendered_value_bytes value)
+      len
 
 (* A field the producer attached is rendered whatever its value: a key with a
    null value is a statement that the value is unset, and dropping it from the

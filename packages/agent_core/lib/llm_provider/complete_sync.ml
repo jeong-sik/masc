@@ -8,6 +8,11 @@
 include Complete_common
 include Complete_sampling
 
+(* An HTTP error body is cut for the log line. The cut keeps a multi-byte
+   character whole so a Korean error message is not logged with a broken last
+   character. *)
+let error_body_log_max_bytes = 200
+
 let non_streaming_body_timeout timeout_s =
   Http_client.TimeoutError
     { message =
@@ -758,9 +763,13 @@ let complete_http
                   body_len
                   body_balanced
                   parse_ok
-                  (if String.length body <= 200
+                  (if String.length body <= error_body_log_max_bytes
                    then body
-                   else String.sub body 0 200 ^ "..."));
+                   else
+                     Agent_core_strings.utf8_prefix
+                       ~max_bytes:error_body_log_max_bytes
+                       body
+                     ^ "..."));
               let body =
                 http_error_diagnostic_body ~provider_name ~config ~url ~code ~body
               in

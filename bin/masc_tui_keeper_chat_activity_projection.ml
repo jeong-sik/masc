@@ -153,12 +153,16 @@ let pad_to width text =
    names the tool the model meant, the suffix carries the degenerate tail
    ("...e+0061"). *)
 let tool_name_display_cap = 64
+let tool_name_head_bytes = 48
+let tool_name_tail_bytes = 14
 
 let display_tool_name wire_name =
   let name = Masc.Tool_display.list_label wire_name in
-  let length = String.length name in
-  if length <= tool_name_display_cap then name
-  else String.sub name 0 48 ^ ".." ^ String.sub name (length - 14) 14
+  if String.length name <= tool_name_display_cap then name
+  else
+    String_util.utf8_prefix ~max_bytes:tool_name_head_bytes name
+    ^ ".."
+    ^ String_util.utf8_suffix ~max_bytes:tool_name_tail_bytes name
 
 (* One formatter for rows drawn live and rows read back from the transcript.
    The names are padded to a common column so a block of calls lines up, which
@@ -855,12 +859,16 @@ let legend =
     ; (observed_action_word, "a tool call the server attributes to the skill above it")
     ]
 
+let proof_edge_bytes = 8
+let proof_full_bytes = 18
+
 let short_proof value =
   let value = safe_line value in
-  if String.length value <= 18 then value
+  if String.length value <= proof_full_bytes then value
   else
-    String.sub value 0 8 ^ "\xe2\x80\xa6"
-    ^ String.sub value (String.length value - 8) 8
+    String_util.utf8_prefix ~max_bytes:proof_edge_bytes value
+    ^ "\xe2\x80\xa6"
+    ^ String_util.utf8_suffix ~max_bytes:proof_edge_bytes value
 
 (* The full rows of one invocation: state and name, then each observed
    action, the proof coordinates and the detail. State first, then which

@@ -238,6 +238,24 @@ let test_empty_obj_get_bool () =
     (Json_util.get_bool empty_obj "anything")
 
 (* ================================================================
+   excerpt
+   ================================================================ *)
+
+let test_excerpt_short_json_is_unchanged () =
+  check string "fits" {|{"k":1}|} (Json_util.excerpt (`Assoc [ "k", `Int 1 ]))
+
+let test_excerpt_cuts_ascii_at_the_limit () =
+  check string "cut at max bytes" {|{"k":"abc...|}
+    (Json_util.excerpt ~max:9 (`Assoc [ "k", `String "abcdefgh" ]))
+
+(* The encoded prefix before the text is six bytes and each Hangul syllable is
+   three, so a cut at ten bytes lands inside the second syllable. The excerpt
+   stops after the first. *)
+let test_excerpt_keeps_a_multibyte_character_whole () =
+  check string "cut inside a character backs up" {|{"k":"가...|}
+    (Json_util.excerpt ~max:10 (`Assoc [ "k", `String "가나다라" ]))
+
+(* ================================================================
    Runner
    ================================================================ *)
 
@@ -409,5 +427,11 @@ let () =
            && Json_util.assoc_object_opt "o" (`Assoc [ "o", `Null ]) = None
            && Json_util.assoc_object_opt "o" (`Assoc [ "o", `Int 1 ]) = None
            && Json_util.assoc_object_opt "o" (`List []) = None));
+    ];
+    "excerpt", [
+      test_case "short json is unchanged" `Quick test_excerpt_short_json_is_unchanged;
+      test_case "ascii is cut at the limit" `Quick test_excerpt_cuts_ascii_at_the_limit;
+      test_case "multibyte character stays whole" `Quick
+        test_excerpt_keeps_a_multibyte_character_whole;
     ];
   ]

@@ -652,6 +652,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
  (libraries
+  masc_string_util
   masc_tui_keeper_chat_log
   masc_tui_message_layout
   masc_tui_image_preview
@@ -690,7 +691,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_transcript masc_tui_keeper_chat_activity_projection)
  (private_modules masc_tui_keeper_chat_activity_projection)
- (libraries masc.tool_types masc.runtime
+ (libraries masc_string_util masc.tool_types masc.runtime
   masc.keeper_chat_operations
   masc
   masc.agent_core
@@ -1008,7 +1009,7 @@
  (private_modules masc_tui_grapheme_segmentation)
  ; masc_tui_frame for the margin the chat composer's caret and the chat
  ; pane's width gate count from.
- (libraries masc_tui_frame uucp uuseg))
+ (libraries masc_string_util masc_tui_frame uucp uuseg))
 
 (library
  (name masc_tui_tool_detail)
@@ -1039,7 +1040,7 @@
  (name masc_tui_execute_result)
  (wrapped false)
  (modules masc_tui_execute_result)
- (libraries masc masc_tool_blob_store unix yojson))
+ (libraries masc masc_string_util masc_tool_blob_store unix yojson))
 
 (library
  (name masc_tui_browser_rejection)
@@ -1354,7 +1355,7 @@
  (name masc_tui_alphatex_score)
  (wrapped false)
  (modules masc_tui_alphatex_score)
- (libraries masc))
+ (libraries masc masc_string_util))
 
 ;; Score → ASCII tablature laid across a pane.
 (library
@@ -1382,7 +1383,7 @@
  (name masc_tui_attachment_action)
  (wrapped false)
  (modules masc_tui_attachment_action)
- (libraries masc_tui_types masc_tui_browser masc_tui_midi unix))
+ (libraries masc_tui_types masc_tui_browser masc_tui_midi masc_string_util unix))
 
 (library
  (name masc_tui_memo)
@@ -1457,7 +1458,7 @@
  (name masc_tui_board_attachments)
  (wrapped false)
  (modules masc_tui_board_attachments)
- (libraries masc_tui_types masc_tui_context_inspector))
+ (libraries masc_tui_types masc_tui_context_inspector masc_string_util))
 
 ;; The write side: raw artifact uploads and the staged-file sequencing the
 ;; compose send runs. Own library so the flow can be driven without the
@@ -2770,7 +2771,7 @@
  (name masc_tui_link_preview)
  (wrapped false)
  (modules masc_tui_link_preview)
- (libraries masc masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))
+ (libraries masc masc_string_util masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))
 
 (library
  (name masc_tui_image_mosaic)

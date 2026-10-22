@@ -35,7 +35,7 @@ let image_store_failed_placeholder ~reason =
 ;;
 
 let max_eager_reads_per_turn = 1
-let max_read_text_chars = 4000
+let max_read_text_bytes = 4000
 
 let string_of_mode = function
   | Eager -> "eager"
@@ -94,9 +94,9 @@ let eager_read_eviction_reason_of_outcome = function
 
 let truncate_read_text text =
   let length = String.length text in
-  if length <= max_read_text_chars
+  if length <= max_read_text_bytes
   then text
-  else String.sub text 0 max_read_text_chars ^ "\n[truncated]"
+  else String_util.utf8_prefix ~max_bytes:max_read_text_bytes text ^ "\n[truncated]"
 ;;
 
 (* Operator decision (2026-06-25, RFC §2.3-eager): exhaustive description, so a

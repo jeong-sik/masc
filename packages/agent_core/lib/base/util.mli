@@ -31,7 +31,8 @@ val snoc_list : 'a list -> 'a list -> 'a list
     Short-circuits on first [Error]. *)
 val result_traverse : f:('a -> ('b, 'e) result) -> 'a list -> ('b list, 'e) result
 
-(** Truncate string to [max_len], appending "..." if truncated. *)
+(** Truncate string to [max_len] bytes on a UTF-8 character boundary,
+    appending "..." if truncated. *)
 val clip : string -> int -> string
 
 (** Safe substring: returns "" if start is past end or len is negative. *)

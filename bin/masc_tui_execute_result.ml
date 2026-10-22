@@ -75,5 +75,5 @@ let shown_sha256_chars = 12
 
 let stored_text (reference : Tool_output.artifact_ref) =
   let digest = reference.sha256 in
-  let shown = String.sub digest 0 (min shown_sha256_chars (String.length digest)) in
+  let shown = String_util.utf8_prefix ~max_bytes:shown_sha256_chars digest in
   Printf.sprintf "artifact sha256:%s\xe2\x80\xa6 \xc2\xb7 %d bytes" shown reference.bytes

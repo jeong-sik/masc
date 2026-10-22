@@ -244,10 +244,16 @@ module Request_identity_set = struct
   let mem = Keys.mem
 end
 
+let request_id_full_bytes = 20
+let request_id_head_bytes = 6
+let request_id_tail_bytes = 12
+
 let compact_request_id value =
-  let length = String.length value in
-  if length <= 20 then value
-  else String.sub value 0 6 ^ ".." ^ String.sub value (length - 12) 12
+  if String.length value <= request_id_full_bytes then value
+  else
+    String_util.utf8_prefix ~max_bytes:request_id_head_bytes value
+    ^ ".."
+    ^ String_util.utf8_suffix ~max_bytes:request_id_tail_bytes value
 
 (* Whether [terminal_safe_text]'s first two passes would hand [text] back
    unchanged: it is valid UTF-8, carries no control byte, and has no scalar in

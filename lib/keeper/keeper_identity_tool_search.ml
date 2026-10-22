@@ -76,16 +76,6 @@ let names_param = "names"
    request of the turn from then on. *)
 let summary_max_bytes = 80
 
-(* Cutting mid-sequence would put invalid UTF-8 on the wire, so step back to
-   the first byte of the character that straddles the cut. *)
-let rec character_start s at =
-  if at <= 0
-  then 0
-  else if Char.code (String.unsafe_get s at) land 0xC0 = 0x80
-  then character_start s (at - 1)
-  else at
-;;
-
 let summary_of description =
   let first_line =
     match String.index_opt description '\n' with
@@ -95,7 +85,9 @@ let summary_of description =
   let line = String.trim first_line in
   if String.length line <= summary_max_bytes
   then line
-  else String.sub line 0 (character_start line summary_max_bytes) ^ "..."
+  else
+    (* Cutting mid-sequence would put invalid UTF-8 on the wire. *)
+    String_util.utf8_prefix ~max_bytes:summary_max_bytes line ^ "..."
 ;;
 
 (* The fixed half of what the model reads lives in

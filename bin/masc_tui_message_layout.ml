@@ -473,7 +473,7 @@ let fit_width text width =
            display cells agree even at the cut. Styled or Unicode rows still
            need grapheme pieces and the style reset below. *)
         let room = Int.max 0 (width - cut_mark_cells) in
-        String.sub text 0 room ^ cut_mark
+        String_util.utf8_prefix ~max_bytes:room text ^ cut_mark
     | Some _ | None ->
         let pieces = display_pieces text in
         let cells = pieces_width pieces in

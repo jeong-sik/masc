@@ -105,6 +105,8 @@ let read_state_strict config =
       |> Result.map Option.some
       |> Result.map_error (fun detail -> State_decode_error detail)
 
+let raw_snippet_max_bytes = 500
+
 let read_present_state config json =
   match workspace_state_of_yojson json with
   | Ok state -> state
@@ -112,8 +114,8 @@ let read_present_state config json =
       let repaired = recover_workspace_state config json in
       let raw_snippet =
         let s = Yojson.Safe.to_string json in
-        if String.length s <= 500 then s
-        else String.sub s 0 500 ^ "...(truncated)"
+        if String.length s <= raw_snippet_max_bytes then s
+        else String_util.utf8_prefix ~max_bytes:raw_snippet_max_bytes s ^ "...(truncated)"
       in
       Log.Misc.warn
         "read_state: deserialization failed (%s), raw=%s — repairing and rewriting"

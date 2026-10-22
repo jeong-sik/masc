@@ -791,3 +791,26 @@ this new public API connection. Full resolution-fault promotion, every fallback
 and unknown-effect path, execution of all public-branch response variants, durable autonomous waiting, dedicated waiting outcomes, snapshot/SSE revision
 and incarnation reconciliation, and persistent/reconnected Acting/TUI acceptance
 remain part of #38005.
+
+
+## HTTP resolution uncertainty across newer G (source, not executed)
+
+Two additional HTTP scenarios use real retained/canonical C installation and
+real SQLite resolution commit faults before starting a fresh Owner. With a
+precommit failure, global input still owns W although canonical C was already
+installed. A different Owner child publishes G from exact W. The original HTTP
+response must promote the recorded canonical W/S/C intent to Operation_input,
+recover the same retained C with its original source history, consume only the
+original wait and preserve all G bytes and its global reference across another
+Owner reopen. A different response kind remains refused.
+
+With a postcommit failure, actual resolution already consumed the wait and
+advanced global input to C. The separate child therefore prepares Producer from
+retained C before publishing G. The HTTP retry must report a duplicate, preserve
+G and leave the exact previously committed C continuation available. This case
+does not claim to dispatch that canonical C after G or to protect every later
+canonical continuation write. Those consumer paths require separate actual
+admission/execution evidence; retaining C alone is insufficient.
+
+These scenarios are source only until their exact-head minimum check completes.
+They do not extend an older head's passing evidence.

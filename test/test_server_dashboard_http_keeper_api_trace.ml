@@ -1078,7 +1078,15 @@ let test_input_response_http_accepts_only_original_wait ?(independent_global=fal
     let owner=Keeper_owner_registry.get ~base_path:dir ~keeper_name
       |> Result.map_error Keeper_owner_registry.lookup_error_to_string |> ok in
     match Keeper_owner.run_autonomous_if_idle owner (fun () ->
-      let context=Agent_core.Context.copy checkpoint.context ~eio:false in
+      (* A committed resolution advances global input to C. An uncommitted
+         resolution still owns W, even though C was physically installed. *)
+      let source=match commit_fault,partial with
+        | After_response_resolution,Some intent ->
+          Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:intent.candidate
+          |> Result.get_ok |> Keeper_checkpoint_store.exact_snapshot_checkpoint
+        | (No_response_fault | Before_response_intent | After_response_intent
+            | Before_response_resolution | After_response_resolution),(Some _ | None) -> checkpoint in
+      let context=Agent_core.Context.copy source.context ~eio:false in
       let scope=Keeper_execution_scope_id.autonomous_admission
         (Uuidm.of_string "00000000-0000-4000-8000-000000000041" |> Option.get) in
       let frame=Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
@@ -1087,11 +1095,11 @@ let test_input_response_http_accepts_only_original_wait ?(independent_global=fal
       Agent_core.Context.set context "independent-http-G" (`String "preserve original global context");
       let pending=inventory_pending ~run_id:"independent-http-G-run"
         ~request_id:"independent-http-G-request" ~question:"Independent HTTP G question?" in
-      let newer={checkpoint with Agent_core.Checkpoint.context;turn_count=checkpoint.turn_count+1;
-        messages=checkpoint.messages @ [Agent_core.Types.user_msg "Independent HTTP G history"];
+      let newer={source with Agent_core.Checkpoint.context;turn_count=source.turn_count+1;
+        messages=source.messages @ [Agent_core.Types.user_msg "Independent HTTP G history"];
         pending_input=Some pending;working_context=Some (`Assoc ["independent-http-G",`Bool true])} in
       let producer=Keeper_input_checkpoint_producer.prepare ~base_path:dir ~keeper_name ~session_dir
-        ~trace_id:meta.runtime.trace_id ~source:(Some checkpoint)
+        ~trace_id:meta.runtime.trace_id ~source:(Some source)
         |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> ok in
       Keeper_input_checkpoint_producer.publish_autonomous producer newer
         |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> ok |> ignore;
@@ -1184,8 +1192,12 @@ let test_input_response_http_accepts_only_original_wait ?(independent_global=fal
    | Before_response_resolution ->
      check int "fresh Owner reconciles retained intent against already consumed canonical" 200 status;
      let intent=Option.get partial in
-     let installed=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> Result.get_ok in
-     check bool "fresh confirmed rewrite keeps exact recorded C" true
+     let installed=if independent_global then begin
+       let branch=Keeper_owner_registry.direct_input_branch ~base_path:dir ~keeper_name ~operation_id
+         |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok |> Option.get in
+       Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:branch.checkpoint |> Result.get_ok
+     end else Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> Result.get_ok in
+     check bool "fresh confirmed installation keeps exact recorded C" true
        (Keeper_checkpoint_ref.equal intent.candidate (Keeper_checkpoint_store.exact_snapshot_reference installed));
      restart ();
      check bool "resolved original stays consumed across actual Owner reopen" true
@@ -1200,7 +1212,12 @@ let test_input_response_http_accepts_only_original_wait ?(independent_global=fal
      let intent=Option.get partial in
      check bool "actual consumed input relation survives original uncertain acknowledgement" true
        (Keeper_owner_registry.input_checkpoint ~base_path:dir ~keeper_name ~trace_id:meta.runtime.trace_id
-         |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok=Journal.Input_observed intent.candidate)
+         |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok=
+           Journal.Input_observed (if independent_global then global_reference else intent.candidate));
+     check bool "actual committed original C continuation remains exact after G" true
+       (Keeper_owner_registry.direct_checkpoint ~base_path:dir ~keeper_name ~operation_id
+         |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok=
+           Some (Keeper_semantic_execution.Agent_core intent.candidate))
    | No_response_fault ->
      check int "actual HTTP Registry Owner response accepts original wait" 200 status;
      let result=Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
@@ -1218,7 +1235,7 @@ let test_input_response_http_accepts_only_original_wait ?(independent_global=fal
        Yojson.Safe.Util.(json |> member "input_wait_observation" |> member "status" |> to_string);
      let status,_=post () in check int "same HTTP response is not admitted twice" 409 status);
   check_global ();
-  if independent_global then begin
+  if independent_global && commit_fault<>After_response_resolution then begin
     let branch=Keeper_owner_registry.direct_input_branch ~base_path:dir ~keeper_name ~operation_id
       |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok |> Option.get in
     check bool "HTTP response retains exact original branch origin" true
@@ -1230,8 +1247,12 @@ let test_input_response_http_accepts_only_original_wait ?(independent_global=fal
       | Agent_core.Hooks.Answer value -> "[User input] " ^ pending.request.question ^ ": " ^ Yojson.Safe.to_string value
       | Declined -> "[Input declined] " ^ pending.request.question
       | Timeout -> "[Input timed out] " ^ pending.request.question in
+    let response_source=match partial with
+      | None -> checkpoint
+      | Some intent -> Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:intent.source
+        |> Result.get_ok |> Keeper_checkpoint_store.exact_snapshot_checkpoint in
     check bool "HTTP branch retains original history and the typed response exactly once" true
-      (candidate.messages=checkpoint.messages @ [Agent_core.Types.user_msg response_message]);
+      (candidate.messages=response_source.messages @ [Agent_core.Types.user_msg response_message]);
     restart ();check_global ();
     let status,_=post () in check int "fresh Owner refuses duplicate original branch response" 409 status;
     check_global ()
@@ -1782,6 +1803,10 @@ let () =
             (test_input_response_http_accepts_only_original_wait ~independent_global:true ~commit_fault:Before_response_intent)
         ; test_case "HTTP uncertain branch intent survives restart without replacing G" `Quick
             (test_input_response_http_accepts_only_original_wait ~independent_global:true ~commit_fault:After_response_intent)
+        ; test_case "HTTP promotes installed canonical C to original branch after resolution precommit failure and newer G" `Quick
+            (test_input_response_http_accepts_only_original_wait ~independent_global:true ~commit_fault:Before_response_resolution)
+        ; test_case "HTTP duplicate after uncertain committed resolution preserves independently published G" `Quick
+            (test_input_response_http_accepts_only_original_wait ~independent_global:true ~commit_fault:After_response_resolution)
         ; test_case "input response requires exact explicit proof and an existing Owner" `Quick test_input_response_http_requires_explicit_exact_proof
         ; test_case "owned input ignores missing corrupt or stale canonical" `Quick test_input_wait_inventory_ignores_canonical_drift
         ; test_case "input wait never borrows unavailable retained or historical state" `Quick test_input_wait_inventory_refuses_unavailable_retained

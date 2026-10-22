@@ -7,16 +7,13 @@ module Binding = Server_workspace_memory_addon_validation
 module Ledger = Workspace_memory_ledger
 module Briefing = Workspace_memory_briefing
 module Context = Workspace_memory_context
+
+module Submit = Lane_addon_submit_once
 let ( let* ) = Result.bind
 
-type error = Unavailable of string | Rejected of string | Uncertain of string
-let error_to_string = function Unavailable detail | Rejected detail | Uncertain detail -> detail
-let runtime_error = function
-  | Runtime.Unavailable detail -> Unavailable detail
-  | Runtime.Outcome_unknown detail -> Uncertain detail
-  | Runtime.Host_refusal refusal -> (match refusal with
-      | Lane_addon_call_context.Rejected detail | Activity_disabled detail -> Rejected detail
-      | Unavailable detail | Activity_unobserved detail -> Unavailable detail)
+type error = Submit.error = Unavailable of string | Rejected of string | Uncertain of string
+let error_to_string = Submit.error_to_string
+let runtime_error = Submit.error_of_runtime
 let owned value = Result.map_error (fun error -> Unavailable (Owner.error_to_string error)) value
 let rejected value = Result.map_error (fun detail -> Rejected detail) value
 let reserved () =
@@ -75,7 +72,8 @@ let capture_briefing ~config ~prompt ~batch =
   capture ~config ~request_id (fun ~workspace ~destination ->
     Capture.briefing ~request_id ~workspace ~destination:(captured_destination destination) ~prompt ~batch)
 
-type wait = Capacity | Worker_pending | Worker_unknown | Missing_after_dispatch | Journal_recheck
+type wait = Submit.wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+  | Missing_after_dispatch | Journal_recheck
 type result =
   | Awaiting of wait * Owner.retained
   | Judgment of {capture:Capture.t;record:Owner.retained;final:Exact.final;expected:Capture.expected_commit}
@@ -83,44 +81,9 @@ type result =
   | Commit_pending of Owner.retained
   | Settled of Owner.retained
 
-type worker_state = Absent | Pending | Capacity_wait | Finished of Exact.final
-let reply ~capture (reply : Mcp_protocol.Mcp_types.tool_result) =
-  let context="Curator Add-on reply" in
-  let* ()=match reply.is_error with
-    | Some true -> Error (Unavailable (Agent_core.Mcp.text_of_tool_result reply))
-    | None | Some false -> Ok () in
-  let* json=match reply.structured_content with Some json -> Ok json
-    | None -> Error (Rejected "Curator reply has no structured content") in
-  let parse () =
-    let* fields=Candle_json.object_fields ~context json in
-    let* id,fields=Candle_json.field ~context "request_id" Candle_json.as_non_blank fields in
-    let* ()=if id=Capture.Request_id.to_string (Capture.request_id capture) then Ok ()
-      else Error "Curator reply belongs to another original request" in
-    let* state,fields=Candle_json.field ~context "state" Candle_json.as_string fields in
-    let* state,fields=match state with
-      | "absent" -> Ok (Absent,fields) | "pending" -> Ok (Pending,fields)
-      | "capacity_wait" -> Ok (Capacity_wait,fields)
-      | "finished" -> let* final,fields=Candle_json.field ~context "result"
-          (Exact.final_of_json ~schema:(Capture.output_schema capture)) fields in Ok (Finished final,fields)
-      | _ -> Error "Unknown Curator worker state" in
-    let* ()=Candle_json.finish ~context fields in Ok (state,json) in
-  rejected (parse ())
-
-type publication = New of Owner.retained | Acknowledged of Owner.retained
-let advance ~store record event =
-  match Owner.advance ~store ~expected:record ~event with
-  | Ok (Owner.Stored record) -> Ok (New record)
-  | Ok (Owner.Already_stored record) -> Ok (Acknowledged record)
-  | Ok (Owner.Unconfirmed detail) -> Error (Uncertain detail)
-  | Error error -> Error (Unavailable (Owner.update_error_to_string error))
-let record = function New record | Acknowledged record -> record
-let same_observation left right=match left,right with
-  | Progress.Waiting left,Progress.Waiting right
-  | Progress.Outcome_unknown left,Progress.Outcome_unknown right
-  | Progress.Absent left,Progress.Absent right -> Yojson.Safe.equal left right
-  | Progress.Waiting _,(Progress.Outcome_unknown _ | Progress.Absent _)
-  | Progress.Outcome_unknown _,(Progress.Waiting _ | Progress.Absent _)
-  | Progress.Absent _,(Progress.Waiting _ | Progress.Outcome_unknown _) -> false
+type publication = Submit.publication = New of Owner.retained | Acknowledged of Owner.retained
+let advance = Submit.advance
+let record = Submit.record
 let terminal ~capture ~record final =
   match final with
   | Exact.Call_final (Exact.Answered {output;_}) ->
@@ -140,105 +103,26 @@ let restore_original ~config ~request_id =
   let* workspace=Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path:config.Workspace.base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
   restore ~store ~workspace original
-let resume_with ~store ~base_path ~request_id ~call =
+let resume_with ~store ~base_path ~request_id ~prepare ~call =
   let* original=Eio_unix.run_in_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
   let* original=match original with Some original -> Ok original
     | None -> Error (Unavailable "Original Curator request is absent; resume cannot recreate it") in
   let* workspace=Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
   let* capture=restore ~store ~workspace original in
-  let publish original event=Eio_unix.run_in_systhread (fun () -> advance ~store original event) in
-  let observe (original : Owner.retained) reason observation evidence =
-    let observation=observation evidence in
-    match Progress.phase original.progress with
-    | Progress.Dispatch_pending (Some previous) when same_observation previous observation ->
-      Ok (Awaiting (reason,original))
-    | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending (None | Some _)
-    | Progress.Judged _ | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _
-    | Progress.Conflicted _ | Progress.Rejected _ | Progress.Subdividing _ | Progress.Subdivided _ ->
-      let* published=publish original (Progress.Execution_observed observation) in
-      Ok (Awaiting (reason,record published)) in
-  let finish original final =
-    let* _=terminal ~capture ~record:original final in
-    let event=match final with
-      | Exact.Call_final (Exact.Answered _) -> Progress.Judgment_retained (Exact.final_to_json final)
-      | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
-      | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused ->
-        Progress.Refused {stage=Progress.Execution;evidence=Exact.final_to_json final} in
-    let* published=publish original event in
-    terminal ~capture ~record:(record published) final in
-  let received original ~submission state evidence =
-    match state with
-    | Pending -> observe original Worker_pending (fun value -> Progress.Waiting value) evidence
-    | Absent -> observe original Missing_after_dispatch (fun value -> Progress.Absent value) evidence
-    | Capacity_wait ->
-      if submission then
-        let* published=publish original (Progress.Admission_declined evidence) in
-        Ok (Awaiting (Capacity,record published))
-      else Error (Rejected "Curator read cannot grant a pre-admission capacity refusal")
-    | Finished final -> finish original final in
-  let invoke arguments=let* response=call ~arguments in reply ~capture response in
-  let read=`Assoc ["kind",`String "read";"request_id",`String request_id] in
-  let admit original =
-    let* published=publish original Progress.Dispatch_intended in
-    match published with
-    | Acknowledged record -> Ok (Awaiting (Journal_recheck,record))
-    | New original ->
-      let* request=rejected (Binding.request capture) in
-      let submit=Binding.submit request in
-      (match invoke submit with
-       | Ok (state,evidence) -> received original ~submission:true state evidence
-       | Error error ->
-         (* Even a malformed reply may follow admission. Preserve the intent
-            and uncertainty; a later authoritative absence cannot undo it. *)
-         observe original Worker_unknown (fun value -> Progress.Outcome_unknown value)
-           (`Assoc ["detail",`String (error_to_string error)])) in
-  match Progress.phase original.progress with
-  | Progress.Judged judgment ->
-    let* final=rejected (Exact.final_of_json ~schema:(Capture.output_schema capture) judgment) in
-    (match final with
-     | Exact.Call_final (Exact.Answered _) -> terminal ~capture ~record:original final
-     | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
-     | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused ->
-       Error (Rejected "Original judgment does not contain an answered domain result"))
-  | Progress.Committing _ | Progress.Commit_unknown _ -> Ok (Commit_pending original)
-  | Progress.Rejected {stage=Progress.Execution;evidence}
-  | Progress.Subdividing ({stage=Progress.Execution;evidence},_)
-  | Progress.Subdivided ({stage=Progress.Execution;evidence},_) ->
-    let* final=rejected (Exact.final_of_json ~schema:(Capture.output_schema capture) evidence) in
-    (match final with
-     | Exact.Call_final (Exact.Answered _) -> Error (Rejected "Refused original work cannot contain an answered judgment")
-     | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
-     | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> terminal ~capture ~record:original final)
-  | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected {stage=Progress.Before_dispatch;_}
-  | Progress.Subdividing ({stage=Progress.Before_dispatch;_},_)
-  | Progress.Subdivided ({stage=Progress.Before_dispatch;_},_) -> Ok (Settled original)
-  | Progress.Captured | Progress.Admission_wait _ ->
-    let* state,_evidence=invoke read in
-    (match state with
-     | Absent -> admit original
-     | Pending | Capacity_wait | Finished _ ->
-       Error (Rejected "Worker state contradicts original pre-admission host progress"))
-  | Progress.Dispatch_pending _ ->
-    let* installation = rejected (Owner.installation_of_id original.installation_id) in
-    let* declaration_id = match installation with
-      | Owner.Configuration id -> Ok id
-      | Owner.Manual _ -> Error (Rejected "Original Curator work requires its configured installation") in
-    let* request = rejected (Binding.request capture) in
-    let* retained = Eio_unix.run_in_systhread (fun () ->
-      Exact.observe_retained ~store ~declaration_id ~schema:(Capture.output_schema capture) request)
-      |> Result.map_error (fun detail -> Unavailable detail) in
-    (match retained with
-     | Exact.Retained_terminal final -> finish original final
-     | Exact.Retained_absent | Exact.Retained_open ->
-       match invoke read with
-       | Ok (state,evidence) -> received original ~submission:false state evidence
-       | Error error -> observe original Worker_unknown (fun value -> Progress.Outcome_unknown value)
-           (`Assoc ["detail",`String (error_to_string error)]))
+  let* request=rejected (Binding.request capture) in
+  let* resumed=Submit.resume ~store ~label:"Curator" ~original ~request
+    ~schema:(Capture.output_schema capture) ~prepare ~call
+    ~terminal:(fun record final -> terminal ~capture ~record final) in
+  match resumed with
+  | Submit.Awaiting (wait,record) -> Ok (Awaiting (wait,record))
+  | Submit.Final result -> Ok result
+  | Submit.Commit_pending record -> Ok (Commit_pending record)
+  | Submit.Settled record -> Ok (Settled record)
 let resume ~config ~request_id =
   let reserved=reserved () in
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-  let call ~arguments =
+  let rebind () =
     let* export=resolve ~config ~reserved in
     (* Re-retain the exact original capture through the live Runtime owner.
        This checks logical destination without replacing captured revisions. *)
@@ -252,10 +136,16 @@ let resume ~config ~request_id =
            && destination.tool=original.tool then Ok ((),original.request,original.summary)
         else Error "Another installation cannot resume the original Curator request")
       |> Result.map_error runtime_error in
-    Runtime.call_exported_tool_with_principal ~principal:(Some Lane_addon_call_context.Operator)
-      ~config ~access:Lane_addon_sources.Operator_configuration ~reserved ~export ~arguments
-      |> Result.map_error runtime_error in
-  resume_with ~store ~base_path:config.Workspace.base_path ~request_id ~call
+    Ok export in
+  let call ~arguments =
+    match rebind () with
+    | Error error -> Error (Submit.Not_sent error)
+    | Ok export ->
+      Runtime.call_exported_tool_with_principal ~principal:(Some Lane_addon_call_context.Operator)
+        ~config ~access:Lane_addon_sources.Operator_configuration ~reserved ~export ~arguments
+      |> Result.map_error Submit.call_error_of_runtime in
+  resume_with ~store ~base_path:config.Workspace.base_path ~request_id
+    ~prepare:(fun () -> Result.map ignore (rebind ())) ~call
 
 type commit_result = Commit_waiting of Owner.retained | Committed of Owner.retained
   | Commit_conflict of Owner.retained
@@ -739,7 +629,9 @@ let deliver_observation ~config ~request_id =
   deliver_observation_with ~store ~base_path:config.Workspace.base_path
     ~registry:(Runs.global ()) ~request_id ~now:Time_compat.now
 module For_testing = struct
-  let resume=resume_with let settle=settle_with let narrow=narrow_local
+  let resume ~store ~base_path ~request_id ~call =
+    resume_with ~store ~base_path ~request_id ~prepare:(fun () -> Ok ()) ~call
+  let settle=settle_with let narrow=narrow_local
   let recover_successor=recover_successor
   let deliver_observation=deliver_observation_with
   let prepare_observation=prepare_observation_with

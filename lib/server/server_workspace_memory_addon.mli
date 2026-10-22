@@ -1,6 +1,7 @@
 (** Original Curator admission, worker-result and domain-commit boundaries.
     The existing serialized workspace owner retains the process lease. *)
-type error = Unavailable of string | Rejected of string | Uncertain of string
+type error = Lane_addon_submit_once.error =
+  | Unavailable of string | Rejected of string | Uncertain of string
 val error_to_string : error -> string
 val destination : config:Workspace.config -> (Lane_addon_runtime.tool_request_destination, error) result
 (** The live Add-on that provides [curate], read through the same fresh
@@ -20,7 +21,8 @@ val capture_briefing : config:Workspace.config -> prompt:Prompt_registry.prompt_
     prepared state to be saved and freshly confirmed first, by the serialized
     owner. An error may follow publication: discover original work before
     preparing another request. No model or domain save runs here. *)
-type wait = Capacity | Worker_pending | Worker_unknown | Missing_after_dispatch | Journal_recheck
+type wait = Lane_addon_submit_once.wait = Capacity | Worker_pending | Worker_unknown
+  | Worker_unreachable | Missing_after_dispatch | Journal_recheck
 type result =
   | Awaiting of wait * Lane_addon_tool_request_owner.retained
   | Judgment of { capture:Workspace_memory_execution_capture.t;
@@ -34,7 +36,8 @@ val resume : config:Workspace.config -> request_id:string -> (result, error) Std
     Existing judgments/commit progress need no live worker. Otherwise rebind the
     original installation and read before admission. Submit only after a newly
     published intent and authoritative absence; only an explicit capacity reply
-    permits another admission of this same ID. Lost replies, journal uncertainty,
+    or a submit the host refused before sending permits another admission of
+    this same ID ({!Lane_addon_submit_once.resume}). Lost replies, journal uncertainty,
     Already_stored and absence after dispatch never permit another submission.
     Consecutive equal observations reuse the current record without another
     journal write; changed kind/evidence remains a new original fact.
@@ -173,9 +176,9 @@ module For_testing : sig
     registry:Exact_lane_run_registry.t -> request_id:string -> now:(unit -> float) ->
     (observation, observation_error) Stdlib.result
   val resume : store:Lane_addon_store.t -> base_path:string -> request_id:string ->
-    call:(arguments:Yojson.Safe.t -> (Mcp_protocol.Mcp_types.tool_result, error) Stdlib.result) ->
-    (result, error) Stdlib.result
-  (** Same strict host/worker consumer; only the Runtime call edge is supplied. *)
+    call:Lane_addon_submit_once.call -> (result, error) Stdlib.result
+  (** Same strict host/worker consumer; only the Runtime call edge is supplied.
+      No pre-send check runs before the dispatch intent besides that edge. *)
   val settle : store:Lane_addon_store.t -> base_path:string -> request_id:string ->
     briefing_contract:(unit -> string) ->
     save:(Workspace_memory_execution_capture.expected_commit -> (unit, string) Stdlib.result) ->

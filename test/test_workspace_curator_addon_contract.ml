@@ -236,7 +236,7 @@ let test_capacity_retries_original_but_lost_admission_never_submits_again () =
       | `String "submit" ->
         submitted:=member "request" arguments :: !submitted;
         if List.length !submitted=1 then reply "capacity_wait" []
-        else Error (Consumer.Uncertain "original admission reply was lost")
+        else Error (Lane_addon_submit_once.Sent_unknown "original admission reply was lost")
       | _ -> fail "unexpected worker command" in
     let accepted value=get (Result.map_error Consumer.error_to_string value) in
     (match accepted (resume call) with
@@ -312,7 +312,7 @@ let test_repeated_observation_retains_original_history_without_another_fact () =
       (Yojson.Safe.equal initial (observation pending));
       check bool "equal pending preserves actual journal file identity and bytes" true
         (initial_files=journal_snapshot ())) [();();()];
-    let unknown detail ~arguments:_=Error (Consumer.Uncertain detail) in
+    let unknown detail ~arguments:_=Error (Lane_addon_submit_once.Sent_unknown detail) in
     let lost=observation (unknown "original transport lost") in
     let lost_files=journal_snapshot () in
     check bool "changed observation is retained" false (Yojson.Safe.equal initial lost);

@@ -21,7 +21,7 @@ or completion of the original 54 tasks.
   the same db31 source; no synthetic build identity was written.
 - The worker image was retained, not rebuilt. Its protocol, Exact worker,
   Curator server and manifest implementation bytes are unchanged between the
-  qualified host sources. The installation-only image reference remains the
+  qualified host sources. [Actual source/image identity](worker-source-identity.json) records the three Python byte comparisons, the sole TOML image selection difference, and the inspected image ID. The installation-only image reference remains the
   task-owned image used by the earlier real provider execution.
 
 ## Recovery with no worker
@@ -104,3 +104,7 @@ new request receipts. [Final Memory](final-memory.json),
 three-source result. Native/Dashboard observations are manual actual UI captures,
 not layout assertions or mocked API data. No full regression, release validation,
 main merge or operator installation is asserted by this evidence.
+
+![Actual final Off cleanup](dashboard-final-Off.png)
+
+![Actual retained six-run inventory](dashboard-six-originals-final-Off.png)

@@ -18,7 +18,7 @@
     "Off-inventory.json": "20a0efe71d12cfc6be22b4e2b3630e456cd0730b22b860eae6aaa59c439d4896",
     "Off-recovery-boundary.json": "af04542ee6eedcbaf7cd9bf8e1aab50634474d09d049e3376434d49ef5a9e26f",
     "On-new-incarnation-inventory.json": "1a70efaaec474750d92d3561d4c1c01cba629d3ba302092627dab0e97e9bd851",
-    "README.md": "57ac6ede9f4f365fe1974e7c94fd8836658bcc13d4839b687aac32e6a89b000f",
+    "README.md": "6644553f67ce0f13bbf1cbc6a68a7eb1171d629f76535140ec21df355f006901",
     "actual-Keeper-fact-completion.json": "62816911a22a00f704128ab3eab25c0655e21f5ec08ee69baf3bd9ae12aa3d79",
     "actual-health-identity.json": "63e43102610ca10acbb49cbbabd8db1e424000d6418ecbec5a4984e58705319f",
     "before-recovery.json": "207c6500fbe6d1490137fd1e95dc7971af7e33af29470faeeb911d2860b53ab8",
@@ -28,6 +28,7 @@
     "dashboard-final-Off.png": "c5fbd9bb9e80ed0ab33537544a1c6f49d94cdb9fa41e1df10ac24301fb059707",
     "dashboard-new-incarnation-On.png": "703f99c65ad17f8dd6fefeecbe49d14d1a8c43bfa3ccecdf2d559052cbfadb7f",
     "dashboard-original-Briefing-Off.png": "29192fb11ab5f33ef5fba5595a14ece98da23f60c73286bf8aaf5fd43f876b66",
+    "dashboard-six-originals-final-Off.png": "2ec69c8db348960feab29b0e698219b522909a2d0d8d24d605be1f789626d611",
     "execution-results.json": "1a0d66b8cc8a5d492d6626ebad936b4344591aacccaca1703374ae668fb15b4f",
     "final-Off-inventory.json": "b10224614981b1046d646fb73581f3ec4b357220945e615268c0a288b8a768f0",
     "final-boundary.json": "2b10a4fcdc9f99c99618fb0427b8475118873a84794c2d561c3f445edc3ea6cb",
@@ -48,6 +49,7 @@
     "originals-after-Off-recovery.json": "a1700d0d9635c949298f38bcff008cffc98df12a3909e077df8946e49185ff24",
     "originals-after-new-work.json": "0c8f5d36ba1617ebd92d9d7bdd6b2ddbdf6476e8f6d9df237850ef312f00e025",
     "owned-docker-Off.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "selected-tests.log": "8ea3390e88480967615bec23737743bff44a477e02a5e57bfeca3440eef8d42c"
+    "selected-tests.log": "8ea3390e88480967615bec23737743bff44a477e02a5e57bfeca3440eef8d42c",
+    "worker-source-identity.json": "225f4f491b59775012fa0976d72f2bc4ecf27ff0983bb003717ba3f634089bf9"
   }
 }

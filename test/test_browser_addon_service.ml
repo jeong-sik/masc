@@ -32,7 +32,8 @@ let scenario () =
             check bool "idle client does not block another request" true
               (match ok (W.reply_of_json (Yojson.Safe.from_string raw)) with
                | W.Snapshot_result _ -> true
-               | W.Poll_result _|Receipt|Issue_result _|Service_refusal _ -> false);
+               | W.Poll_result _|Receipt|Issue_result _|Service_refusal _
+               | Model_reply _|Download_reply _ -> false);
             Eio.Fiber.first
               (fun () -> Service.serve ~net ~owner ~socket_path:small ~max_message_bytes:1)
               (fun () ->

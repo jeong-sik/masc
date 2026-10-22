@@ -90,6 +90,42 @@ let test_non_success_error_retains_only_public_facts () =
     [Public.Invalid_input, `Bad_request, "invalid_input";
      Public.Store_unavailable, `Service_unavailable, "store_unavailable"]
 
+(* 2026-10-22: every Keeper Owner refused its journal at boot, and each TUI
+   message was answered store_unavailable, which the TUI must treat as a
+   possibly admitted request and resent every 0.5s. A command that never
+   reached an Owner admitted nothing, so it is answered owner_unavailable,
+   which the shared vocabulary marks as not accepted. *)
+let test_a_command_that_reached_no_owner_was_not_accepted () =
+  let module Shared = Masc.Keeper_chat_public_error in
+  let module Registry = Masc.Keeper_owner_registry in
+  let module Owner = Masc.Keeper_owner in
+  let registry =
+    [ Registry.Command_lookup_failed (Registry.Inventory_not_installed diagnostic)
+    ; Registry.Command_lookup_failed (Registry.Owner_not_found diagnostic)
+    ; Registry.Command_lookup_failed (Registry.Owner_unavailable diagnostic)
+    ; Registry.Command_lookup_failed
+        (Registry.Owner_initialization_failed (Owner.Store_unavailable diagnostic)) ] in
+  List.iter (fun cause ->
+    let kind = Control.operation_command_error_kind cause in
+    check bool "answered as an unavailable owner" true (kind = Public.Owner_unavailable);
+    check bool "nothing was admitted" true
+      (Shared.pre_acceptance kind = Shared.Not_accepted);
+    let error = private_failure kind in
+    check bool "the owner is unavailable, not the request" true
+      (error.Public.status = `Service_unavailable);
+    check_private_absent (Public.to_json error))
+    registry;
+  let store_failure = Registry.Command_rejected (Owner.Store_unavailable diagnostic) in
+  check bool "a store failure inside the Owner stays possibly admitted" true
+    (Shared.pre_acceptance (Control.operation_command_error_kind store_failure)
+     = Shared.Acceptance_unknown);
+  List.iter (fun kind ->
+    check bool ("the code of " ^ Shared.code kind ^ " reads back as its kind") true
+      (Shared.of_code (Shared.code kind) = Some kind))
+    Shared.all;
+  check bool "a code this build does not know reads as nothing" true
+    (Shared.of_code "not_a_public_code" = None)
+
 let () = run "Keeper public control replies"
     ["public replies", [
       test_case "queue effect survives interruption failure" `Quick
@@ -99,4 +135,6 @@ let () = run "Keeper public control replies"
       test_case "healthy priority has no error incident" `Quick
         test_healthy_priority_has_no_error_incident;
       test_case "non-success response retains only public facts" `Quick
-        test_non_success_error_retains_only_public_facts]]
+        test_non_success_error_retains_only_public_facts;
+      test_case "a command that reached no owner was not accepted" `Quick
+        test_a_command_that_reached_no_owner_was_not_accepted]]

@@ -632,10 +632,12 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
 let operation_command_error_kind = function
   | Keeper_owner_registry.Command_lifecycle_reserved _ -> Server_keeper_chat_public_error.Owner_stopping
   | Command_lookup_failed Inventory_stopping -> Server_keeper_chat_public_error.Owner_stopping
+  (* The command never reached an Owner, so nothing was admitted: the client
+     may stop fencing the request (Keeper_chat_public_error.pre_acceptance). *)
   | Command_lookup_failed
       (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
       | Owner_initialization_failed _) ->
-    Server_keeper_chat_public_error.Store_unavailable
+    Server_keeper_chat_public_error.Owner_unavailable
   | Command_rejected (Keeper_owner.Owner_stopping | Owner_closed) -> Server_keeper_chat_public_error.Owner_stopping
   | Command_rejected (Keeper_owner.Operation_rejected error) ->
     (match Keeper_owner.operation_error_kind error with
@@ -4006,6 +4008,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 
 module For_testing = struct
   let control_public_error = control_public_error
+  let operation_command_error_kind = operation_command_error_kind
   let operation_heartbeat_decision = operation_heartbeat_decision
   let persist_batch_user_rows = persist_batch_user_rows
   let operation_execution_of_outcome = operation_execution_of_outcome

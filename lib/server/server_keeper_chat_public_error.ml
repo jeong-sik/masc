@@ -1,7 +1,7 @@
-type kind =
+type kind = Keeper_chat_public_error.kind =
   | Invalid_input | Unknown_operation | Not_queued | Idempotency_conflict
-  | Native_call_unsettled | Store_unavailable | Owner_stopping | Interrupt_failed
-  | Operation_forbidden | Keeper_paused | Unknown_keeper
+  | Native_call_unsettled | Store_unavailable | Owner_unavailable | Owner_stopping
+  | Interrupt_failed | Operation_forbidden | Keeper_paused | Unknown_keeper
   | Journal_unreadable | Journal_corrupt | Journal_missing | Journal_pruned
   | Cursor_refusal of Keeper_chat_event_log.cursor_refusal
 
@@ -12,39 +12,32 @@ type t =
   ; incident_id : string
   }
 
+let status : kind -> Httpun.Status.t = function
+  | Invalid_input -> `Bad_request
+  | Unknown_operation -> `Not_found
+  | Not_queued -> `Conflict
+  | Idempotency_conflict -> `Conflict
+  | Native_call_unsettled -> `Conflict
+  | Store_unavailable -> `Service_unavailable
+  | Owner_unavailable -> `Service_unavailable
+  | Owner_stopping -> `Service_unavailable
+  | Interrupt_failed -> `Service_unavailable
+  | Operation_forbidden -> `Forbidden
+  | Keeper_paused -> `Conflict
+  | Unknown_keeper -> `Not_found
+  | Journal_unreadable -> `Service_unavailable
+  | Journal_corrupt -> `Service_unavailable
+  | Journal_missing -> `Not_found
+  | Journal_pruned -> `Gone
+  | Cursor_refusal (_ : Keeper_chat_event_log.cursor_refusal) -> `Bad_request
+;;
+
 let make ~incident_id kind =
-  let status, code, message = match kind with
-    | Invalid_input -> `Bad_request, "invalid_input", "The request is invalid."
-    | Unknown_operation -> `Not_found, "unknown_operation", "The operation was not found."
-    | Not_queued -> `Conflict, "not_queued", "The operation is no longer queued."
-    | Idempotency_conflict -> `Conflict, "idempotency_conflict",
-        "This operation identity already belongs to another request."
-    | Native_call_unsettled -> `Conflict, "native_call_unsettled",
-        "The operation has an unsettled native call."
-    | Store_unavailable -> `Service_unavailable, "store_unavailable",
-        "The operation store is unavailable."
-    | Owner_stopping -> `Service_unavailable, "owner_stopping",
-        "The Keeper owner is stopping."
-    | Interrupt_failed -> `Service_unavailable, "interrupt_failed",
-        "The active turn could not be interrupted."
-    | Operation_forbidden -> `Forbidden, "operation_forbidden",
-        "The operation belongs to another actor."
-    | Keeper_paused -> `Conflict, "keeper_paused",
-        "Resume the Keeper before prioritizing this operation."
-    | Unknown_keeper -> `Not_found, "unknown_keeper", "The Keeper was not found."
-    | Journal_unreadable -> `Service_unavailable, "journal_unreadable",
-        "The event journal is unavailable."
-    | Journal_corrupt -> `Service_unavailable, "journal_corrupt",
-        "The event journal requires operator attention."
-    | Journal_missing -> `Not_found, "journal_missing",
-        "No event journal exists for this turn."
-    | Journal_pruned -> `Gone, "journal_pruned",
-        "No event journal is available for the settled operation."
-    | Cursor_refusal refusal -> `Bad_request,
-        Keeper_chat_event_log.cursor_refusal_to_wire refusal,
-        "The event cursor cannot be used for this journal."
-  in
-  {status;code;message;incident_id}
+  { status = status kind
+  ; code = Keeper_chat_public_error.code kind
+  ; message = Keeper_chat_public_error.message kind
+  ; incident_id
+  }
 ;;
 
 let to_json error =

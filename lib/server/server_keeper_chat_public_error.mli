@@ -1,11 +1,13 @@
 (** Public Keeper chat errors contain only server-selected protocol values.
     Diagnostic text stays with the caller's typed cause and operator log. *)
-type kind =
+type kind = Keeper_chat_public_error.kind =
   | Invalid_input | Unknown_operation | Not_queued | Idempotency_conflict
-  | Native_call_unsettled | Store_unavailable | Owner_stopping | Interrupt_failed
-  | Operation_forbidden | Keeper_paused | Unknown_keeper
+  | Native_call_unsettled | Store_unavailable | Owner_unavailable | Owner_stopping
+  | Interrupt_failed | Operation_forbidden | Keeper_paused | Unknown_keeper
   | Journal_unreadable | Journal_corrupt | Journal_missing | Journal_pruned
   | Cursor_refusal of Keeper_chat_event_log.cursor_refusal
+(** The shared vocabulary ({!Keeper_chat_public_error}); this module adds the
+    HTTP status and the incident identity. *)
 
 type t = private
   { status : Httpun.Status.t

@@ -264,6 +264,7 @@ type cursor_refusal =
   | Offset_inside_row
   | Cursor_pair_mismatch
 
+val all_of_cursor_refusal : cursor_refusal list
 val cursor_refusal_to_wire : cursor_refusal -> string
 val cursor_refusal_of_wire : string -> cursor_refusal option
 

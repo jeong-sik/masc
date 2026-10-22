@@ -34,6 +34,9 @@ let rewrite name value = function
   | `Assoc fields -> `Assoc (List.map (fun (key, original) -> key, if key=name then value else original) fields)
   | _ -> fail "expected object"
 let state () = Masc_tui_types.create_state ~workspace:"reports" ~port:0 ~refresh_interval:0. ()
+let listed state result =
+  let owner = Updates.begin_listing state in
+  Updates.listed state ~owner result
 
 let exact_revision () =
   let first = revision markdown in
@@ -102,7 +105,7 @@ let selection_and_withdrawal () =
   let first = entry (revision markdown) in
   let second = entry (revision ~number:2 "new revision") in
   let state = state () in
-  let list entry = Updates.listed state (Ok { Catalog.entries=[entry]; notes=[] }) in
+  let list entry = listed state (Ok { Catalog.entries=[entry]; notes=[]; reports_complete=true }) in
   list first;
   let opened = ref None in
   Updates.open_selected state ~read:(fun ~key:uri -> opened := Some uri);
@@ -117,7 +120,7 @@ let selection_and_withdrawal () =
   state.resource_read_owner <- Some owner;
   Updates.read_done state ~request:{Catalog.key=Catalog.key first;owner} (Ok (Catalog.mcp_reading []));
   check bool "late revision cannot settle new one" true (state.resource_pending_key=Some (Catalog.key second));
-  Updates.listed state (Ok (get (Catalog.combine (Ok ([], `Complete)) (Error "403"))));
+  listed state (Ok (get (Catalog.combine (Ok ([], `Complete)) (Error "403"))));
   check bool "revoked report loses pending ownership" true (state.resource_pending_key=None);
   Updates.read_done state ~request:{Catalog.key=Catalog.key second;owner} (Ok (Catalog.mcp_reading []));
   check bool "revoked late reply cannot restore content" true (state.resource_content=None)
@@ -170,13 +173,13 @@ let pinned_refresh () =
   let state = state () in
   state.resource_content <- Some (Catalog.Report_revision current, reading.parts);
   state.resource_revision_history <- reading.revisions;
-  Updates.listed state (Ok {Catalog.entries=[entry third];notes=[]});
+  listed state (Ok {Catalog.entries=[entry third];notes=[];reports_complete=true});
   check bool "latest refresh retains older original" true
     (match state.resource_content with Some (_,parts) -> parts==reading.parts | None -> false);
   (match Catalog.entry_for_key [entry third] (Catalog.Report_revision current) with
    | Some (Catalog.Report report) -> check int "detail remains selected revision" 2 report.revision.revision
    | Some (Catalog.Mcp _) | None -> fail "pinned detail lost");
-  Updates.listed state (Ok {Catalog.entries=[];notes=[]});
+  listed state (Ok {Catalog.entries=[];notes=[];reports_complete=true});
   check bool "withdrawal clears body and history" true
     (state.resource_content=None && state.resource_revision_history=[] && state.resource_read_owner=None)
 
@@ -216,7 +219,7 @@ let filtered_selection () =
     (revision ~format:Published.Html html) in
   let mcp = Catalog.Mcp { (Catalog.metadata doc) with name="status" } in
   let state = state () in
-  Updates.listed state (Ok {Catalog.entries=[mcp;page;doc];notes=[]});
+  listed state (Ok {Catalog.entries=[mcp;page;doc];notes=[];reports_complete=true});
   Updates.select_scope state Catalog.Markdown_reports;
   let requested = ref None in
   Updates.open_selected state ~read:(fun ~key -> requested := Some key);
@@ -247,12 +250,12 @@ let captured_local_day () =
   let equivalent = { current with created_at="2026-10-21T09:00:00+09:00" } in
   let older = { current with created_at="2026-10-19T00:00:00Z" } in
   let state = state () in
-  Updates.listed state (Ok {Catalog.entries=[entry older;entry equivalent];notes=[]});
+  listed state (Ok {Catalog.entries=[entry older;entry equivalent];notes=[];reports_complete=true});
   Updates.toggle_today state ~now;
   check bool "timezone offsets compare as instants" true
     (Masc_tui_types.visible_resources state=Some [entry equivalent]);
   let captured = state.resource_day in
-  Updates.listed state (Ok {Catalog.entries=[entry current;entry older];notes=[]});
+  listed state (Ok {Catalog.entries=[entry current;entry older];notes=[];reports_complete=true});
   check bool "refresh preserves captured day" true (state.resource_day=captured);
   check bool "refresh reselects metadata on captured day" true
     (Masc_tui_types.visible_resources state=Some [entry current]);
@@ -275,6 +278,46 @@ let presentation_retains_source () =
   check bool "presentation makes no synthetic read" true
     (state.resource_pending_key=None && state.resource_read_owner=None)
 
+let superseded_catalog () =
+  let state = state () in
+  let old = entry {(revision markdown) with created_at="2026-10-20T00:00:00Z"}
+  and fresh = entry (revision ~number:2 markdown) in
+  let listing entry = Ok {Catalog.entries=[entry];notes=[];reports_complete=true} in
+  let checks = get (Masc_tui_artifact_checks.of_json ~received_at:42.
+    (`Assoc ["checks", `List []; "diagnostics", `List []])) in
+  (match Masc_tui_fetched.start ~equal:Unit.equal state.artifact_checks ~key:() with
+   | Started (reading, request) -> state.artifact_checks <-
+       Masc_tui_fetched.complete ~equal:Unit.equal reading request (Ok checks)
+   | Already_loading -> fail "unexpected initial read");
+  let day = match Time_codec.parse_rfc3339 "2026-10-21T00:00:00Z" with
+    | Ok seconds -> Catalog.local_day seconds
+    | Error Time_codec.Invalid_rfc3339 -> fail "fixture date" in
+  let count () = Option.bind state.resources_list (fun entries ->
+    Masc_tui_artifact_checks.unchecked_on_day ~day ~entries
+      ~reports_complete:state.resources_reports_complete state.artifact_checks) in
+  let first = Updates.begin_listing state in
+  let second = Updates.begin_listing state in
+  check bool "pending inventory cannot certify count" false state.resources_reports_complete;
+  Updates.listed state ~owner:first (listing old);
+  check (option int) "superseded result cannot settle pending count" None (count ());
+  Updates.listed state ~owner:second (listing fresh);
+  check (option int) "fresh catalog count" (Some 1) (count ());
+  Updates.listed state ~owner:first (listing old);
+  Updates.listed state ~owner:first (Error "late failure");
+  check bool "late success cannot replace current revisions" true
+    (state.resources_list=Some [fresh]);
+  check bool "late failure cannot change completeness" true state.resources_reports_complete;
+  check (option int) "late catalog cannot revert current count" (Some 1) (count ());
+  check (option string) "late failure cannot replace successful observation" None state.resources_error;
+  Updates.listed state ~owner:second (Error "duplicate completion");
+  check bool "completion owner consumed once" true state.resources_reports_complete;
+  let retired = Updates.begin_listing state in
+  Masc_tui_types.suspend_workspace_readings state;
+  Updates.listed state ~owner:retired (listing old);
+  check bool "withdrawn owner cannot restore completeness" false state.resources_reports_complete;
+  check (option int) "withdrawal cannot certify count" None (count ());
+  check bool "suspension preserves current rows" true (state.resources_list=Some [fresh])
+
 let () = run "published report resources" ["report reading",[
   test_case "pinned revision and body integrity" `Quick exact_revision;
   test_case "HTML original admission" `Quick html_source;
@@ -288,4 +331,5 @@ let () = run "published report resources" ["report reading",[
   test_case "navigation after a refused revision" `Quick failed_revision_navigation;
   test_case "filtered selection and detached reads" `Quick filtered_selection;
   test_case "captured local publication day" `Quick captured_local_day;
-  test_case "presentation preserves source" `Quick presentation_retains_source]]
+  test_case "presentation preserves source" `Quick presentation_retains_source;
+  test_case "catalog supersession and authority withdrawal" `Quick superseded_catalog]]

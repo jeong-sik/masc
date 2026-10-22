@@ -3,7 +3,7 @@ module Published = Masc.Published_artifact
 type report = { id : string; revision : Published.revision }
 type key = Mcp_uri of string | Report_revision of report
 type t = Mcp of Masc_tui_mcp.resource | Report of report
-type listing = { entries : t list; notes : string list }
+type listing = { entries : t list; notes : string list; reports_complete : bool }
 type reading = { parts : Masc_tui_mcp.resource_content list; revisions : report list }
 type scope = All_resources | Published_reports | Markdown_reports | Html_reports
 type layout = Full_width | Side_by_side
@@ -161,7 +161,7 @@ let walk_note = function
 let combine mcp reports = match mcp, reports with
   | Error mcp, Error reports -> Error ("MCP: " ^ mcp ^ " · Reports: " ^ reports)
   | Ok (rows, stop), Error detail ->
-    Ok { entries = List.map (fun row -> Mcp row) rows; notes = walk_note stop @ ["Reports: " ^ detail] }
-  | Error detail, Ok (entries, notes) -> Ok { entries; notes = ("MCP: " ^ detail) :: notes }
+    Ok { entries = List.map (fun row -> Mcp row) rows; notes = walk_note stop @ ["Reports: " ^ detail]; reports_complete=false }
+  | Error detail, Ok (entries, notes) -> Ok { entries; reports_complete=(notes=[]); notes = ("MCP: " ^ detail) :: notes }
   | Ok (rows, stop), Ok (reports, notes) ->
-    Ok { entries = List.map (fun row -> Mcp row) rows @ reports; notes = walk_note stop @ notes }
+    Ok { entries = List.map (fun row -> Mcp row) rows @ reports; reports_complete=(notes=[]); notes = walk_note stop @ notes }

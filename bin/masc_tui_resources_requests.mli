@@ -2,7 +2,9 @@
     it checks endpoint identity, owns cancellation and stamps completion. [check]
     rechecks the same captured authority after obtaining an MCP session. The
     list combines independent sources with their failure diagnostics. Reports
-    use the token-bound admin API with a fixed revision and verified original body. *)
+    use the token-bound admin API with a fixed revision and verified original body.
+    Every list dispatch allocates a fresh owner before launching; superseded
+    replies cannot replace a newer catalog or its completeness evidence. *)
 
 val launch_list
   :  Masc_tui_types.state

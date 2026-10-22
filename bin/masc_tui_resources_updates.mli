@@ -2,14 +2,25 @@
     immutable contents; terminal sanitization belongs to the renderer. Catalog keys and metadata remain immutable; terminal display sanitizes copies. Transport, scheduling,
     request clocks and terminal output remain caller-owned. *)
 
+val begin_listing : Masc_tui_types.state -> unit ref
+(** Allocate a fresh opaque owner and retire complete-count authority while
+    preserving the last report/MCP rows. Call on the UI fiber before dispatch. *)
+
 val listed :
   Masc_tui_types.state ->
+  owner:unit ref ->
   (Masc_tui_resource_catalog.listing, string) result ->
   unit
 (** Keep the open resource selected across a new listing, including a fixed
     report revision when its report is still listed. If it is absent, clamp the
     cursor and clear the reading that no longer has a listed resource. A failed
-    listing retains the previous inventory and records its error. Partial inventory and per-report diagnostics stay visible in the status line. *)
+    listing retains the previous inventory and records its error. Partial inventory and per-report diagnostics stay visible in the status line.
+    Only the current pending owner may apply success or failure, once. *)
+
+val checks_loaded : Masc_tui_types.state -> unit Masc_tui_fetched.request ->
+  (Masc_tui_artifact_checks.inventory, string) result -> unit
+(** Settle only the current shared-check read, independently of report bodies
+    and MCP inventory. Never creates a confirmation or changes selection. *)
 
 val read_done :
   Masc_tui_types.state -> request:Masc_tui_resource_catalog.read_request ->

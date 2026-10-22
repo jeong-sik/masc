@@ -29,13 +29,31 @@ let reconcile state =
       state.resource_focus <- Left_pane
     end
 
-let listed state result =
+let begin_listing state =
+  let owner = ref () in
+  state.resources_list_owner <- Some owner;
+  state.resources_reports_complete <- false;
+  owner
+
+let listed state ~owner result =
+  match state.resources_list_owner with
+  | None -> ()
+  | Some current when current != owner -> ()
+  | Some _ ->
+  state.resources_list_owner <- None;
   match result with
-  | Ok { Catalog.entries = rows; notes } ->
+  | Ok { Catalog.entries = rows; notes; reports_complete } ->
     state.resources_list <- Some rows;
+    state.resources_reports_complete <- reports_complete;
     state.resources_error <- (match notes with [] -> None | _ -> Some (String.concat " · " notes));
     reconcile state
-  | Error detail -> state.resources_error <- Some detail
+  | Error detail ->
+    state.resources_reports_complete <- false;
+    state.resources_error <- Some detail
+
+let checks_loaded state request result =
+  state.artifact_checks <- Masc_tui_fetched.complete ~equal:Unit.equal
+    state.artifact_checks request result
 
 let select_scope state scope =
   state.resource_scope <- scope;

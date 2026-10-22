@@ -3,7 +3,9 @@
 type report = private { id : string; revision : Masc.Published_artifact.revision }
 type key = Mcp_uri of string | Report_revision of report
 type t = Mcp of Masc_tui_mcp.resource | Report of report
-type listing = { entries : t list; notes : string list }
+type listing = { entries : t list; notes : string list; reports_complete : bool }
+(** [reports_complete] describes only the report authority. MCP failure does not
+    make a successful complete report inventory partial. *)
 type reading =
   { parts : Masc_tui_mcp.resource_content list
   ; revisions : report list

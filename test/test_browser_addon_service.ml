@@ -39,7 +39,12 @@ let scenario () =
               (fun () ->
                 ready small;let flow=connect small in Eio.Flow.copy_string "{}\n" flow;
                 let reader=Eio.Buf_read.of_flow flow ~max_size:4096 in
-                let output=Eio.Buf_read.take_all reader in
+                (* No reply fits a 1-byte bound, so the service closes without
+                   reading the rest of the request. Linux then resets the
+                   connection where macOS sends EOF; neither carries a byte. *)
+                let output=match Eio.Buf_read.take_all reader with
+                  | output -> output
+                  | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> "" in
                 check int "small bound is never exceeded by fallback" 0 (String.length output));
             Owner.revoke owner);
         check bool "normal socket removed after cancellation" false (Sys.file_exists path);

@@ -38,8 +38,10 @@ exception Not_private of string
    and the decision cannot pass. Group and other permission bits must be
    clear; a lease file must also have exactly one link. A close failure while
    refusing is dropped because the refusal is the error the caller reports. *)
-let private_directory = {Resource_requirement.kind=Unix.S_DIR;mode=Clear 0o077;links=Any_count}
-let private_file = {Resource_requirement.kind=Unix.S_REG;mode=Clear 0o077;links=Exactly_one}
+let private_directory =
+  {Resource_requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Clear 0o077;links=Any_count}
+let private_file =
+  {Resource_requirement.kind=Unix.S_REG;owner=Effective_user;mode=Clear 0o077;links=Exactly_one}
 let decided ~label requirement ~path fd =
   let refuse exn = (try Unix.close fd with Unix.Unix_error _ -> ()); raise exn in
   match Resource_requirement.check ~label requirement ~path (Unix.fstat fd) with

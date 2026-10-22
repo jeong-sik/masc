@@ -177,8 +177,10 @@ let test_private_inodes () = with_fixture (fun fixture ->
     (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"b");
   Unix.chmod directory 0o700;
   let sentinel = path fixture "sentinel" in write sentinel "preserve";
+  (* Only the second link may refuse it: the mode and owner already pass. *)
+  Unix.chmod sentinel 0o600;
   Unix.link sentinel (Filename.concat directory "lease");
-  not_private "a linked lease file" [Filename.concat directory "lease";"exactly one link";"2 links"]
+  not_private "a linked lease file" [Filename.concat (Unix.realpath directory) "lease";"2 links"]
     (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"c");
   let channel = open_in sentinel in
   let contents = Fun.protect ~finally:(fun () -> close_in channel) (fun () -> really_input_string channel 8) in

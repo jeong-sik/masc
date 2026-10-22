@@ -68,6 +68,20 @@ val narrow : config:Workspace.config -> request_id:string -> (successor_result, 
     permission to mint another child. No worker RPC, domain write or automatic
     scheduling runs here. Briefing preserves its original prepared state.
     Caller holds the workspace process lease throughout, including retries. *)
+type original = private {
+  capture : Workspace_memory_execution_capture.t;
+  record : Lane_addon_tool_request_owner.retained;
+}
+val discover : config:Workspace.config -> (original list, error) Stdlib.result
+(** Strict complete original discovery and physical/ancestry validation precede
+    every recovery write. Recover only already durable Subdividing intentions,
+    including child-retained-before-parent-ACK, then freshly discover and fully
+    restore every original. A missing acknowledged child, malformed member or
+    incomplete publication rejects the inventory; no partial list is complete.
+    Works locally while Off, minting no ID or new successor intention. It does
+    not dispatch, settle domains, prepare observers or schedule new roots.
+    Caller holds the workspace process lease and serializes the entire pass;
+    the result is an observation, not a grant to bypass fresh effect checks. *)
 type observation = {
   original : Lane_addon_tool_request_owner.retained;
   registration : Workspace_memory_observation_receipt.registration;
@@ -99,6 +113,10 @@ module For_testing : sig
     (successor_result, error) Stdlib.result
   (** Same actual strict parent/child journal and ancestry; no substituted
       publication edge or worker. *)
+  val discover : store:Lane_addon_store.t -> base_path:string ->
+    (original list, error) Stdlib.result
+  (** Same actual complete discovery, physical forest validation and existing
+      successor recovery. Only the store root/workspace is supplied. *)
   val prepare_observation : store:Lane_addon_store.t -> base_path:string ->
     request_id:string -> now:(unit -> float) -> (observation, error) Stdlib.result
   (** Same real journal and strict restore; only the first observer clock edge

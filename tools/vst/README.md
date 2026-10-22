@@ -79,7 +79,7 @@ state hashes, the reported plug-in identity/version, sample rate, frame count,
 peak and output path. These identify a render, not proof that a device played it.
 Native plug-in diagnostics remain on stderr, outside the JSON reply channel.
 
-Raw practice arrangement realization uses `render` with `timeline_path` instead
+Raw practice arrangement realization uses `render` with `frames_path` instead
 of `midi_path`, plus `expected_timeline_sha256`, `sample_rate` and
 `tail_seconds: 0`. The private hashed JSON input is
 `{schemaVersion:1, kind:"practice-vst", sampleRate, frames, events}`. `frames`
@@ -87,7 +87,22 @@ and each event's `frame` are canonical unsigned decimal strings; events are
 nondecreasing `{frame, bytes}` records strictly inside the render horizon.
 The host validates identity, frame/message bounds and authoritative preset
 policy before opening a plugin, and returns `timeline_sha256` instead of
-`midi_sha256`. Supplying both source types is an error.
+`midi_sha256`. Frame timelines require `origin_seconds: 0` (the default).
+
+Native arrangement MIDI projections use `render` with `timeline_path`,
+`timeline_sha256`, `timeline_event_count` and `timeline_duration`, plus optional
+`origin_seconds`. This input is the native `vst-midi-part` projection, distinct
+from the `practice-vst` frame timeline above. The host checks the projection's
+event count and hash through EOF and returns `timeline_sha256` and
+`timeline_event_count`. Exactly one of `midi_path`, `frames_path` or
+`timeline_path` must be supplied.
+
+`mix` combines rendered instances with `output_path`, `sample_rate`, total
+`frames` and nonempty `parts`. Each part supplies `output_path`, `wav_sha256`,
+its own `frames` and a nonnegative `frame_origin` on the shared PCM clock.
+The host verifies each opened source's hash, stereo format, sample rate and
+frame count before mixing, retains that file descriptor for reads, and
+publishes a complete WAV without overwriting an existing destination.
 
 The worker derives these MIDI1 events from verified raw UMP using the existing
 practice-monitor projection. High-resolution values are reduced for synthesis;

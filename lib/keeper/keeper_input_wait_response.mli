@@ -31,6 +31,7 @@ val checkpoint : t -> Agent_core.Checkpoint.t
 
 (** Original Owner maintenance authority and sealed physical response receipt. *)
 type authority
+type plan
 type receipt
 type installation_error =
   | Invalid_response of string
@@ -43,17 +44,26 @@ type installation_error =
       ; canonical : Keeper_checkpoint_ref.t
       }
 val authorize : session_root:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
-  waiting:Keeper_semantic_execution.input_wait -> authority
+  waiting:Keeper_semantic_execution.input_wait ->
+  recorded:Keeper_semantic_execution.input_response_intent option -> authority
 (** A caller-created authority cannot match the one captured by its Owner. *)
 val waiting : authority -> Keeper_semantic_execution.input_wait
-val install : net:Eio_context.eio_net -> authority:authority ->
-  response:Agent_core.Hooks.elicitation_response -> (receipt, installation_error) result
-(** Under the original exclusive maintenance child, verify exact retained input
-    and canonical request/scope/history, derive the Core response using the
-    canonical question, update a validated existing derived message_count to the
-    consumed history length, retain frozen bytes, then CAS canonical installation.
-    Missing/corrupt/diverged canonical requires reconciliation. Filesystem and
-    SQLite commits are separate. No failure mints a receipt or retry authority. *)
+val prepare_installation : net:Eio_context.eio_net -> authority:authority ->
+  response:Agent_core.Hooks.elicitation_response -> (plan, installation_error) result
+(** Validate original W, source S and complete metadata/history/scope; derive C
+    using Core, and freshly confirm durable retention of BOTH S and C before any
+    canonical change. A recorded intent requires the same response and exact
+    retained W/S/C, including rederivation of C. Only canonical S or recorded C
+    can be the predecessor. Reads alone grant no installation receipt. *)
+val planned_intent : plan -> Keeper_semantic_execution.input_response_intent
+val plan_belongs_to : plan -> authority -> bool
+val install : plan -> (receipt, installation_error) result
+(** The original Owner must first durably record this plan's exact intent under
+    its same exclusive child. Install exact S->C, or recorded-intent-proven C->C
+    through a fresh durable write, under the captured canonical predecessor CAS.
+    Filesystem and SQLite commits are separate; no failure mints a receipt or
+    automatic retry authority. A caller-made authority cannot match its Owner. *)
+val installed_intent : receipt -> Keeper_semantic_execution.input_response_intent
 val belongs_to : receipt -> authority -> bool
 val installed_checkpoint : receipt -> Keeper_checkpoint_ref.t
 val installation_error_to_string : installation_error -> string

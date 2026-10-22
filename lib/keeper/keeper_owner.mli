@@ -460,13 +460,19 @@ val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t ->
 type input_response_error =
   | Response_owner_error of error
   | Response_installation_error of Keeper_input_wait_response.installation_error
+  | Response_intent_error of
+      { prepared_intent : Keeper_semantic_execution.input_response_intent
+      ; cause : error
+      }
   | Response_commit_unconfirmed of
       { installed_checkpoint : Keeper_checkpoint_ref.t
       ; cause : error
       }
 (** Preserve the original typed failure. Owner lifecycle failure does not prove
     physical effects were absent. Installation outcomes retain their original
-    evidence. A commit failure after a sealed installation receipt also retains
+    evidence. Intent journal uncertainty occurs before canonical mutation and
+    retains the exact prepared W/S/C response fact. A commit failure after a
+    sealed installation receipt also retains
     its exact consumed checkpoint, whether the journal committed or not. *)
 val input_response_error_to_string : input_response_error -> string
 val respond_direct_input_wait : t -> net:Eio_context.eio_net ->

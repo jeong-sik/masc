@@ -967,7 +967,8 @@ let check_unavailable_inventory kind observed =
   check string "exact unavailable category" kind (observed |> member "error" |> member "kind" |> to_string)
 ;;
 
-type response_commit_fault = No_response_fault | Before_response_commit | After_response_commit
+type response_commit_fault = No_response_fault | Before_response_intent | After_response_intent
+  | Before_response_resolution | After_response_resolution
 
 let test_input_response_http_accepts_only_original_wait ~commit_fault () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
@@ -1024,15 +1025,63 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
     (Native.Terminal {call_id;disposition={Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;recovery=Agent_core.Agent.Retire}}) |> journal_ok;
   let waiting=Keeper_semantic_execution.input_wait ~checkpoint:reference ~pending |> ok in
   Journal.defer_direct_input_wait journal ~now:6. ~operation_id ~execution_digest:operation.execution_digest ~waiting |> journal_ok |> ignore;
+  let partial=match commit_fault with
+    | No_response_fault | Before_response_intent | After_response_intent -> None
+    | Before_response_resolution | After_response_resolution ->
+      (* Real retained/canonical installation plus a real SQLite resolution fault.
+         Startup below receives persisted crash facts, not a fake Owner receipt. *)
+      let module Response=Keeper_input_wait_response in
+      let context=Agent_core.Context.copy checkpoint.context in
+      let messages=checkpoint.messages @ [Agent_core.Types.assistant_msg "validated later source history"] in
+      (match Agent_core.Context.get_scoped context Session "message_count" with None -> ()
+       | Some _ -> Agent_core.Context.set_scoped context Session "message_count" (`Int (List.length messages)));
+      (* This is a canonical history extension with global input still W, not
+         an independent Producer G lineage integration fixture. *)
+      Fs_compat.save_file (Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id)
+        (Agent_core.Checkpoint.to_string {checkpoint with context;messages});
+      let authority=Response.authorize ~session_root:(Filename.dirname session_dir) ~operation_id ~waiting ~recorded:None in
+      let plan=Response.prepare_installation ~net:env#net ~authority ~response:Agent_core.Hooks.Declined
+        |> Result.map_error Response.installation_error_to_string |> ok in
+      let intent=Response.planned_intent plan in
+      Journal.prepare_direct_input_response journal ~now:7. ~operation_id ~execution_digest:operation.execution_digest ~intent |> journal_ok;
+      let receipt=Response.install plan |> Result.map_error Response.installation_error_to_string |> ok in
+      Fun.protect ~finally:Journal.For_testing.clear_commit_fault (fun () ->
+        Journal.For_testing.fail_next_commit (match commit_fault with After_response_resolution -> Fail_after_commit
+          | No_response_fault | Before_response_intent | After_response_intent | Before_response_resolution -> Fail_before_commit);
+        match Journal.resolve_direct_input_wait journal ~now:8. ~operation_id ~execution_digest:operation.execution_digest
+            ~observed:waiting ~checkpoint:(Response.installed_checkpoint receipt) with
+        | Error (Journal.Store_unavailable _) -> () | Error _ | Ok () -> fail "real resolution fault reported acceptance");
+      Some intent in
   Journal.close journal |> journal_ok;
-  Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config
-    |> Result.map_error Keeper_owner_registry.install_error_to_string |> ok |> ignore;
-  let body=Yojson.Safe.to_string (`Assoc ["action",`String "respond_input";
+  let owner_stop=ref None in
+  let start_owner () =
+    let installed,resolve_installed=Eio.Promise.create () in
+    let stop,resolve_stop=Eio.Promise.create () in
+    let ended,resolve_ended=Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Fun.protect ~finally:(fun () -> Eio.Promise.resolve resolve_ended ()) (fun () ->
+        Eio.Switch.run (fun owner_sw ->
+          let result=Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:None
+            ~on_turn_slot_released:None config in
+          Eio.Promise.resolve resolve_installed result;Eio.Promise.await stop)));
+    match Eio.Promise.await installed with
+    | Ok _ -> owner_stop:=Some (resolve_stop,ended)
+    | Error error -> fail (Keeper_owner_registry.install_error_to_string error) in
+  let stop_owner ()=match !owner_stop with
+    | None -> () | Some (stop,ended) -> owner_stop:=None;Eio.Promise.resolve stop ();Eio.Promise.await ended in
+  let restart ()=stop_owner ();start_owner () in
+  start_owner ();
+  Fun.protect ~finally:stop_owner (fun () ->
+  let fields=["action",`String "respond_input";
     "operation_id",`String (Keeper_chat_operation.Operation_id.to_string operation_id);
     "checkpoint_ref",`Assoc ["trace_id",`String trace_id;"turn_count",`Int reference.turn_count;"sha256",`String reference.sha256];
-    "pending_input",Agent_core.Agent_input_request.pending_to_json pending;"response",`Assoc ["kind",`String "declined"]]) in
-  let post ()=checkpoint_http_response ~meth:"POST" ~keeper_name ~body (fun reqd ->
-    Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post state (Httpun.Reqd.request reqd) reqd body) in
+    "pending_input",Agent_core.Agent_input_request.pending_to_json pending;"response",`Assoc ["kind",`String "declined"]] in
+  let post_fields fields =
+    let body=Yojson.Safe.to_string (`Assoc fields) in
+    checkpoint_http_response ~meth:"POST" ~keeper_name ~body (fun reqd ->
+      Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post state (Httpun.Reqd.request reqd) reqd body) in
+  let post ()=post_fields fields in
+  let wrong_response ()=post_fields (("response",`Assoc ["kind",`String "timeout"])::List.remove_assoc "response" fields) in
   (match commit_fault with
    | No_response_fault ->
      let canonical_path=Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
@@ -1052,41 +1101,62 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
            (Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
              |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok)));
      check string "failed response preserves canonical bytes" canonical_bytes (Fs_compat.load_file canonical_path)
-   | Before_response_commit | After_response_commit -> ());
+   | Before_response_resolution ->
+     let canonical_path=Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+     let before=Fs_compat.load_file canonical_path in
+     let status,_=wrong_response () in check int "consumed canonical cannot authorize another response kind" 409 status;
+     check string "wrong recovery response preserves consumed canonical evidence" before (Fs_compat.load_file canonical_path)
+   | Before_response_intent | After_response_intent | After_response_resolution -> ());
   let status,json=Fun.protect ~finally:Journal.For_testing.clear_commit_fault (fun () ->
+    (* Intent confirmation is now the first journal commit of an actual response.
+       Resolution faults were established explicitly with real SQLite above. *)
     (match commit_fault with
-     | No_response_fault -> ()
-     | Before_response_commit -> Journal.For_testing.fail_next_commit Fail_before_commit
-     | After_response_commit -> Journal.For_testing.fail_next_commit Fail_after_commit);
+     | No_response_fault | Before_response_resolution | After_response_resolution -> ()
+     | Before_response_intent -> Journal.For_testing.fail_next_commit Fail_before_commit
+     | After_response_intent -> Journal.For_testing.fail_next_commit Fail_after_commit);
     post ()) in
   (match commit_fault with
-   | Before_response_commit | After_response_commit ->
-     check int "installed response with unconfirmed journal is a server failure" 500 status;
-     check bool "unconfirmed response is never reported accepted" false
-       Yojson.Safe.Util.(json |> member "ok" |> to_bool);
-     let consumed=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> Result.get_ok in
-     check bool "journal fault follows actual consumed canonical installation" true
-       ((Keeper_checkpoint_store.exact_snapshot_checkpoint consumed).pending_input=None);
-     let consumed_reference=Keeper_checkpoint_store.exact_snapshot_reference consumed in
-     ignore (Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:consumed_reference |> Result.get_ok);
-     let remaining=Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
-       |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
-     let continuation=Keeper_owner_registry.direct_checkpoint ~base_path:dir ~keeper_name ~operation_id
-       |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
-     let observed=Keeper_owner_registry.input_checkpoint ~base_path:dir ~keeper_name ~trace_id:meta.runtime.trace_id
-       |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
-     (match commit_fault with
-      | Before_response_commit ->
-        check bool "precommit failure preserves original wait" true
-          (Option.equal Keeper_semantic_execution.equal_input_wait (Some waiting) remaining);
-        check bool "precommit failure enables no continuation" true (continuation=None);
-        check bool "precommit failure preserves input predecessor" true (observed=Journal.Input_observed reference)
-      | After_response_commit ->
-        check bool "uncertain postcommit has actually consumed original wait" true (remaining=None);
-        check bool "uncertain postcommit retains actual original continuation" true (Option.is_some continuation);
-        check bool "uncertain postcommit retains actual consumed input relation" true
-          (observed=Journal.Input_observed consumed_reference)
-      | No_response_fault -> fail "unreachable fault fixture")
+   | Before_response_intent | After_response_intent ->
+     check int "unconfirmed intent is a server failure before canonical mutation" 500 status;
+     check bool "uncertain intent is not acceptance" false Yojson.Safe.Util.(json |> member "ok" |> to_bool);
+     let canonical=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> Result.get_ok in
+     check bool "intent failure leaves canonical W unchanged" true
+       (Keeper_checkpoint_ref.equal reference (Keeper_checkpoint_store.exact_snapshot_reference canonical));
+     check bool "intent failure keeps original wait blocked" true
+       (Option.equal Keeper_semantic_execution.equal_input_wait (Some waiting)
+         (Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
+           |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok));
+     stop_owner ();
+     let journal=Journal.open_or_create ~path |> journal_ok in
+     let intent=Journal.direct_input_response_intent journal ~operation_id |> journal_ok in
+     check bool "actual intent commit survives actual Owner/store close" (commit_fault=After_response_intent) (Option.is_some intent);
+     Option.iter (fun intent -> List.iter (fun reference ->
+       ignore (Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference |> Result.get_ok))
+       [intent.Keeper_semantic_execution.source;intent.candidate]) intent;
+     Journal.close journal |> journal_ok;start_owner ();
+     (match intent with None -> () | Some _ ->
+       let status,_=wrong_response () in check int "fresh Owner refuses another recorded response kind" 409 status);
+     let status,_=post () in check int "fresh Owner accepts only exact original response after actual read" 200 status
+   | Before_response_resolution ->
+     check int "fresh Owner reconciles retained intent against already consumed canonical" 200 status;
+     let intent=Option.get partial in
+     let installed=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> Result.get_ok in
+     check bool "fresh confirmed rewrite keeps exact recorded C" true
+       (Keeper_checkpoint_ref.equal intent.candidate (Keeper_checkpoint_store.exact_snapshot_reference installed));
+     restart ();
+     check bool "resolved original stays consumed across actual Owner reopen" true
+       (Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
+        |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok=None);
+     let status,_=post () in check int "recovered response cannot be admitted twice" 409 status
+   | After_response_resolution ->
+     check int "actual committed resolution is observed as duplicate, not reaccepted" 409 status;
+     check bool "actual postcommit continuation is preserved" true
+       (Option.is_some (Keeper_owner_registry.direct_checkpoint ~base_path:dir ~keeper_name ~operation_id
+         |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok));
+     let intent=Option.get partial in
+     check bool "actual consumed input relation survives original uncertain acknowledgement" true
+       (Keeper_owner_registry.input_checkpoint ~base_path:dir ~keeper_name ~trace_id:meta.runtime.trace_id
+         |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok=Journal.Input_observed intent.candidate)
    | No_response_fault ->
      check int "actual HTTP Registry Owner response accepts original wait" 200 status;
      let result=Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
@@ -1098,7 +1168,8 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
      let status,json=get_checkpoint_inventory state ~keeper_name in check int "current input remains observable" 200 status;
      check string "host snapshot agrees input consumed" "owned_none"
        Yojson.Safe.Util.(json |> member "input_wait_observation" |> member "status" |> to_string);
-     let status,_=post () in check int "same HTTP response is not admitted twice" 409 status)
+     let status,_=post () in check int "same HTTP response is not admitted twice" 409 status))
+
 ;;
 
 let test_input_response_http_requires_explicit_exact_proof () =
@@ -1624,10 +1695,14 @@ let () =
             `Quick
             test_input_wait_inventory_tracks_exact_replacements
         ; test_case "HTTP accepts only original durable wait and snapshot observes consumption" `Quick (test_input_response_http_accepts_only_original_wait ~commit_fault:No_response_fault)
-        ; test_case "HTTP preserves physical installation before failed journal commit" `Quick
-            (test_input_response_http_accepts_only_original_wait ~commit_fault:Before_response_commit)
-        ; test_case "HTTP reports uncertain committed response as server failure" `Quick
-            (test_input_response_http_accepts_only_original_wait ~commit_fault:After_response_commit)
+        ; test_case "HTTP intent precommit failure preserves canonical and recovers under fresh Owner" `Quick
+            (test_input_response_http_accepts_only_original_wait ~commit_fault:Before_response_intent)
+        ; test_case "HTTP uncertain intent persists and resumes only its exact response after restart" `Quick
+            (test_input_response_http_accepts_only_original_wait ~commit_fault:After_response_intent)
+        ; test_case "fresh Owner reconciles actually consumed canonical after failed SQLite resolution" `Quick
+            (test_input_response_http_accepts_only_original_wait ~commit_fault:Before_response_resolution)
+        ; test_case "fresh Owner observes actually committed uncertain SQLite resolution" `Quick
+            (test_input_response_http_accepts_only_original_wait ~commit_fault:After_response_resolution)
         ; test_case "input response requires exact explicit proof and an existing Owner" `Quick test_input_response_http_requires_explicit_exact_proof
         ; test_case "owned input ignores missing corrupt or stale canonical" `Quick test_input_wait_inventory_ignores_canonical_drift
         ; test_case "input wait never borrows unavailable retained or historical state" `Quick test_input_wait_inventory_refuses_unavailable_retained

@@ -130,6 +130,10 @@ type error =
 type input_response_error =
   | Response_owner_error of error
   | Response_installation_error of Keeper_input_wait_response.installation_error
+  | Response_intent_error of
+      { prepared_intent : Keeper_semantic_execution.input_response_intent
+      ; cause : error
+      }
   | Response_commit_unconfirmed of
       { installed_checkpoint : Keeper_checkpoint_ref.t
       ; cause : error
@@ -232,6 +236,8 @@ type _ command =
   | Begin_direct_input_response : {operation_id:Operation_id.t;
       observed:Keeper_semantic_execution.input_wait; child:Keeper_interrupt_token.t} ->
       (input_response_writer,error) result command
+  | Prepare_direct_input_response : input_response_writer * Keeper_input_wait_response.plan ->
+      (unit,error) result command
   | Commit_direct_input_response : input_response_writer * Keeper_input_wait_response.receipt ->
       (unit,error) result command
   | Direct_input_wait : Operation_id.t -> (Keeper_semantic_execution.input_wait option, error) result command
@@ -457,6 +463,9 @@ let error_to_string = function
 let input_response_error_to_string = function
   | Response_owner_error error -> error_to_string error
   | Response_installation_error error -> Keeper_input_wait_response.installation_error_to_string error
+  | Response_intent_error {cause;_} ->
+    "input response intent was not confirmed; canonical installation did not begin in this attempt: "
+    ^ error_to_string cause
   | Response_commit_unconfirmed {cause;_} ->
     "input response files were installed but journal acknowledgement is unconfirmed; reconcile before retry: "
     ^ error_to_string cause
@@ -648,7 +657,7 @@ let answer : type response. response command -> answer = function
   | Exact_operation _ -> In_its_drain_step
   | Has_newer_original_queued _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
-  | Begin_direct_input_response _ | Commit_direct_input_response _ -> In_its_drain_step
+  | Begin_direct_input_response _ | Prepare_direct_input_response _ | Commit_direct_input_response _ -> In_its_drain_step
   | Direct_native_call _ | Direct_input_wait _ | Defer_direct_input_wait _ -> In_its_drain_step
   | Current_input_checkpoint | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _
   | Begin_history_clear _ | Commit_history_clear _ -> In_its_drain_step
@@ -2055,17 +2064,37 @@ let start
                       Error (Chat_operation_store.Invalid_input "response original operation is no longer queued") in
                   let* waiting = Chat_operation_store.direct_input_wait t.operation_store ~operation_id in
                   let* input = Chat_operation_store.input_checkpoint t.operation_store ~trace_id:meta.runtime.trace_id in
+                  let* recorded = Chat_operation_store.direct_input_response_intent t.operation_store ~operation_id in
                   match waiting,input with
                   | Some waiting,Chat_operation_store.Input_observed reference
                       when Keeper_semantic_execution.equal_input_wait waiting observed
                         && Keeper_checkpoint_ref.equal reference waiting.checkpoint ->
                     Ok {response_child=child;response_operation=operation_id;response_digest=operation.execution_digest;
-                      response_authority=Keeper_input_wait_response.authorize ~session_root:t.session_root ~operation_id ~waiting}
+                      response_authority=Keeper_input_wait_response.authorize ~session_root:t.session_root ~operation_id ~waiting ~recorded}
                   | (Some _ | None),(Input_observed _ | Input_unobserved | Prior_input_unavailable) ->
                     Error (Chat_operation_store.Invalid_input "response no longer names the exact original wait and input owner"))
               | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
                 Error (Operation_rejected (Chat_operation_store.Invalid_input
                   "response admission requires its unpaused original maintenance child and trace")))) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Prepare_direct_input_response (writer,plan), resolve) ->
+          let observed=Keeper_input_wait_response.waiting writer.response_authority in
+          let response=reject_if_stopping state (fun () ->
+            reject_if_shutdown shutdown_operation_id (fun () ->
+              match (Keeper_owner_reducer.projection state).meta,
+                  Atomic.get t.turn_in_flight,Atomic.get t.child_cancel with
+              | Some meta,Some {lane=Maintenance;interrupt_token;_},Some _
+                  when not meta.paused && Keeper_interrupt_token.equal interrupt_token writer.response_child
+                    && Keeper_id.Trace_id.equal meta.runtime.trace_id observed.checkpoint.trace_id
+                    && Keeper_input_wait_response.plan_belongs_to plan writer.response_authority ->
+                run_operation_command t ~label:"record original input response intent" (fun () ->
+                  Chat_operation_store.prepare_direct_input_response t.operation_store ~now:(t.now ())
+                    ~operation_id:writer.response_operation ~execution_digest:writer.response_digest
+                    ~intent:(Keeper_input_wait_response.planned_intent plan)) |> Result.map fst
+              | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
+                Error (Operation_rejected (Chat_operation_store.Invalid_input
+                  "response intent lost its original unpaused maintenance child and trace")))) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Commit_direct_input_response (writer,receipt), resolve) ->
@@ -2077,6 +2106,12 @@ let start
                   && Keeper_id.Trace_id.equal meta.runtime.trace_id observed.checkpoint.trace_id
                   && Keeper_input_wait_response.belongs_to receipt writer.response_authority ->
               run_operation_command t ~label:"accept original direct input response" (fun () ->
+                let ( let* ) = Result.bind in
+                let* recorded=Chat_operation_store.direct_input_response_intent t.operation_store ~operation_id:writer.response_operation in
+                let* () = match recorded with
+                  | Some intent when Keeper_semantic_execution.equal_input_response_intent intent
+                      (Keeper_input_wait_response.installed_intent receipt) -> Ok ()
+                  | Some _ | None -> Error (Chat_operation_store.Invalid_input "installed response lost its exact recorded intent") in
                 Chat_operation_store.resolve_direct_input_wait t.operation_store ~now:(t.now ())
                   ~operation_id:writer.response_operation ~execution_digest:writer.response_digest ~observed
                   ~checkpoint:(Keeper_input_wait_response.installed_checkpoint receipt)) |> Result.map fst
@@ -2923,7 +2958,12 @@ let respond_direct_input_wait t ~net ~operation_id ~observed ~response =
       | Some child -> Ok child | None -> invalid "response has no inherited maintenance child" in
     let* writer = request t (Begin_direct_input_response {operation_id;observed;child})
       |> Result.map_error (fun error -> Response_owner_error error) in
-    let* receipt = Keeper_input_wait_response.install ~net ~authority:writer.response_authority ~response
+    let* plan = Keeper_input_wait_response.prepare_installation ~net ~authority:writer.response_authority ~response
+      |> Result.map_error (fun error -> Response_installation_error error) in
+    let* () = request t (Prepare_direct_input_response (writer,plan))
+      |> Result.map_error (fun cause -> Response_intent_error
+        {prepared_intent=Keeper_input_wait_response.planned_intent plan;cause}) in
+    let* receipt = Keeper_input_wait_response.install plan
       |> Result.map_error (fun error -> Response_installation_error error) in
     request t (Commit_direct_input_response (writer,receipt))
       |> Result.map_error (fun cause -> Response_commit_unconfirmed

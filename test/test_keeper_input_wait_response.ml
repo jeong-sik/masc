@@ -175,7 +175,7 @@ let test_install_refuses_stale_nonhistory () =
   let retained=exact checkpoint in
   let reference=Store.exact_snapshot_reference retained in
   let waiting=Keeper_semantic_execution.input_wait ~checkpoint:reference ~pending:owned |> Result.get_ok in
-  let authority=Response.authorize ~session_root:root ~operation_id ~waiting in
+  let authority=Response.authorize ~session_root:root ~operation_id ~waiting ~recorded:None in
   let session_dir=Filename.concat root checkpoint.session_id in
   Fs_compat.mkdir_p session_dir;
   ignore (Store.retain_exact_snapshot ~session_dir retained |> Store.require_confirmed_installation |> Result.get_ok);
@@ -191,7 +191,7 @@ let test_install_refuses_stale_nonhistory () =
     (match Fs_compat.save_file_atomic canonical (Core.Checkpoint.to_string stale) with
      | Ok () -> () | Error detail -> fail detail);
     let before=Fs_compat.load_file canonical in
-    (match Response.install ~net:env#net ~authority ~response:Core.Hooks.Declined with
+    (match Response.prepare_installation ~net:env#net ~authority ~response:Core.Hooks.Declined with
      | Error (Response.Invalid_response _) -> ()
      | Error _ | Ok _ -> fail "stale nonhistory was accepted or misclassified");
     check string "refused response does not overwrite canonical evidence" before (Fs_compat.load_file canonical);
@@ -204,7 +204,22 @@ let test_install_refuses_stale_nonhistory () =
   let path=Store.agent_core_checkpoint_path ~session_dir ~session_id:checkpoint.session_id in
   (match Fs_compat.save_file_atomic path (Core.Checkpoint.to_string canonical) with
    | Ok () -> () | Error detail -> fail detail);
-  let receipt=match Response.install ~net:env#net ~authority ~response:(Core.Hooks.Answer (`String "yes")) with
+  (* Unsorted nested objects must derive the same exact C after the response
+     intent is supplied to fresh authority with a different answer key order. *)
+  let answer=Core.Hooks.Answer (`Assoc ["z",`Int 2;"a",`Assoc ["n",`Int 1;"b",`String "yes"]]) in
+  let replay_answer=Core.Hooks.Answer (`Assoc ["a",`Assoc ["b",`String "yes";"n",`Int 1];"z",`Int 2]) in
+  let plan=match Response.prepare_installation ~net:env#net ~authority ~response:answer with
+    | Ok plan -> plan | Error error -> fail (Response.installation_error_to_string error) in
+  let intent=Response.planned_intent plan in
+  check bool "preparation leaves canonical source unchanged" true
+    (Keeper_checkpoint_ref.equal intent.source
+      (Store.exact_snapshot_reference (Store.load_agent_core_exact_snapshot ~session_dir ~session_id:checkpoint.session_id |> Result.get_ok)));
+  check bool "canonical source may differ from original W" false (Keeper_checkpoint_ref.equal intent.source waiting.checkpoint);
+  List.iter (fun reference -> ignore (Store.load_retained_exact_snapshot ~session_dir ~reference |> Result.get_ok))
+    [intent.source;intent.candidate];
+  (* This physical-only fixture exercises the primitive. Actual intent journaling
+     and fresh Owner recovery are exercised through HTTP/SQLite below. *)
+  let receipt=match Response.install plan with
     | Ok receipt -> receipt | Error error -> fail (Response.installation_error_to_string error) in
   check bool "physical receipt stays bound to original authority" true (Response.belongs_to receipt authority);
   let consumed=Store.load_retained_exact_snapshot ~session_dir ~reference:(Response.installed_checkpoint receipt)
@@ -215,7 +230,30 @@ let test_install_refuses_stale_nonhistory () =
     (Core.Context.get_scoped consumed.context Session "message_count"=Some (`Int 2));
   check bool "physical Answer keeps original working context tools and MCP" true
     (consumed.working_context=checkpoint.working_context && consumed.tools=checkpoint.tools
-      && consumed.mcp_sessions=checkpoint.mcp_sessions)
+      && consumed.mcp_sessions=checkpoint.mcp_sessions);
+  let fresh=Response.authorize ~session_root:root ~operation_id ~waiting ~recorded:(Some intent) in
+  check bool "old receipt cannot become fresh authority" false (Response.belongs_to receipt fresh);
+  (match Response.prepare_installation ~net:env#net ~authority:fresh ~response:Core.Hooks.Timeout with
+   | Error (Response.Invalid_response _) -> () | Error _ | Ok _ -> fail "recovery changed recorded response");
+  let candidate_path=Filename.concat (Filename.concat session_dir Store.retained_dirname) (intent.candidate.sha256 ^ ".json") in
+  let candidate_bytes=Fs_compat.load_file candidate_path in
+  Fs_compat.save_file candidate_path "corrupt retained candidate";
+  Fun.protect ~finally:(fun () -> Fs_compat.save_file candidate_path candidate_bytes) (fun () ->
+    match Response.prepare_installation ~net:env#net ~authority:fresh ~response:replay_answer with
+    | Error (Response.Retained_unavailable _) -> () | Error _ | Ok _ -> fail "corrupt recorded C was replaced from source");
+  let recovered=Response.prepare_installation ~net:env#net ~authority:fresh ~response:replay_answer
+    |> function Ok plan -> plan | Error error -> fail (Response.installation_error_to_string error) in
+  let canonical_before=Store.load_agent_core_exact_snapshot ~session_dir ~session_id:checkpoint.session_id |> Result.get_ok in
+  let changed={consumed with working_context=Some (`Assoc ["other",`Bool true])} in
+  Fs_compat.save_file path (Core.Checkpoint.to_string changed);
+  (match Response.install recovered with
+   | Error (Response.Installation_unconfirmed _) -> () | Error _ | Ok _ -> fail "captured C CAS overwrote foreign canonical");
+  Fs_compat.save_file path (Store.exact_snapshot_canonical_bytes canonical_before);
+  let recovered=Response.prepare_installation ~net:env#net ~authority:fresh ~response:replay_answer
+    |> function Ok plan -> plan | Error error -> fail (Response.installation_error_to_string error) in
+  let receipt=Response.install recovered |> function Ok receipt -> receipt | Error error -> fail (Response.installation_error_to_string error) in
+  check bool "fresh confirmed rewrite belongs only to fresh authority" true (Response.belongs_to receipt fresh);
+  check bool "recovery installs the exact recorded candidate" true (Keeper_checkpoint_ref.equal intent.candidate (Response.installed_checkpoint receipt))
 
 let () =
   run "Keeper stored input response"

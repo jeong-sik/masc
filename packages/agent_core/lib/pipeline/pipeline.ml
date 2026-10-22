@@ -118,8 +118,9 @@ let stage_route
         }
         (fun tracer ->
            let trace_context = Tracing.trace_context_headers tracer in
-           match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
-           | Some capabilities when not capabilities.supports_native_streaming ->
+           let capabilities =
+             Provider_runtime_binding.capabilities_for_provider_config provider_config in
+           if not capabilities.supports_native_streaming then begin
              (* The full original response must reach the observer before
                 stage_collect removes or recovers tool names. Its raw block
                 indices and pre-admission inventory own Keeper's occurrences. *)
@@ -129,7 +130,7 @@ let stage_route
              Llm_provider.Streaming.emit_synthetic_events response
                (Llm_provider.Complete_stream.emit_stream_event on_event);
              Ok response
-           | Some _ | None ->
+           end else
              dispatch_stream
                ~sw
                ?clock

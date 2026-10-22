@@ -1,0 +1,41 @@
+{
+  "large_utf8": {
+    "before": {
+      "cpu_ms": 40.593000000000046,
+      "wall_ms": 40.753960609436035,
+      "allocated_bytes": 25693496.0
+    },
+    "after": {
+      "cpu_ms": 31.466499999999954,
+      "wall_ms": 31.517505645751953,
+      "allocated_bytes": 25636112.0
+    },
+    "cpu_change_percent": -22.482940408445007
+  },
+  "one_kib": {
+    "before": {
+      "cpu_ms": 44.437999999999946,
+      "wall_ms": 44.54183578491211,
+      "allocated_bytes": 23613696.0
+    },
+    "after": {
+      "cpu_ms": 36.14950000000002,
+      "wall_ms": 36.19396686553955,
+      "allocated_bytes": 23620824.0
+    },
+    "cpu_change_percent": -18.651829515279573
+  },
+  "short": {
+    "before": {
+      "cpu_ms": 11.412999999999993,
+      "wall_ms": 11.421561241149902,
+      "allocated_bytes": 33200912.0
+    },
+    "after": {
+      "cpu_ms": 11.31750000000001,
+      "wall_ms": 11.327505111694336,
+      "allocated_bytes": 33201752.0
+    },
+    "cpu_change_percent": -0.8367650924383074
+  }
+}

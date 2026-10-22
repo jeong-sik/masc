@@ -65,7 +65,7 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
                 | Some packet -> Eio_unix.run_in_systhread (fun () -> Masc.Lane_addon_packet.decode ~store packet)
                 | None -> Error "worker omitted observation packet" in
               Masc.Lane_addon_machine_history.retain history ~store ~instance_id
-                ~max_response_bytes:(Lane_addon_types.max_reply_bytes package) ~call:rpc output));
+                ~max_response_bytes:(Masc.Lane_addon_types.max_reply_bytes package) ~call:rpc output));
             action_schema=(fun () -> None);
             act=(fun ~arguments:_ -> Error "no fixture action port");
             stop=(fun () -> Ok (Masc.Lane_addon_lifecycle.Released {engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine";container_id=Some (instance_id)}))

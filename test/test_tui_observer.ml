@@ -500,7 +500,7 @@ let lane_resource_frame ?detail lifecycle =
     ; run_id = "run-7"
     ; package_id = "masc-dos"
     ; package_revision = "rev-1"
-    ; container_id = None
+    ; resource = None
     ; detail
     }
   in

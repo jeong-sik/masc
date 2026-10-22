@@ -26,7 +26,7 @@ let check (run : Runs.run) =
       ~verification_runs:[]
       ~goal_verification_runs:[]
     |> require
-    |> Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Librarian
+    |> Tui_decode.decode_lane_run_page ~lane:Lane_run_identity.Librarian
     |> require
   in
   Alcotest.(check (list string))
@@ -47,7 +47,7 @@ let check (run : Runs.run) =
   in
   Alcotest.(check string) "the detail is this run" run.run_id detail.lrd_run_id;
   Alcotest.(check bool) "the detail is a Librarian run" true
-    (detail.lrd_lane = Standalone_lane.Librarian);
+    (detail.lrd_lane = Lane_run_identity.Librarian);
   Alcotest.(check string)
     "the detail reports the recorded status"
     (Runs.status_label run.status)

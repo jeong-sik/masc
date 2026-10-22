@@ -729,18 +729,8 @@ let lane_run_status_style = function
   | Tui_decode.Lane_run_running -> Theme.info ()
   | Tui_decode.Lane_run_other _ -> Theme.muted ()
 
-let standalone_lane_label (state : state) (target : Standalone_lane.t) =
-  match state.standalone_lanes with
-  | None -> Standalone_lane.to_id target
-  | Some snapshot ->
-      (match
-         List.find_opt
-           (fun (lane : Tui_decode.standalone_lane) ->
-             Standalone_lane.equal lane.sl_lane target)
-           snapshot.Tui_decode.sls_lanes
-       with
-       | Some lane -> lane.sl_label
-       | None -> Standalone_lane.to_id target)
+let observed_lane_label (target : Lane_run_identity.t) =
+  Lane_run_identity.label target
 
 let lane_run_subject (run : Tui_decode.lane_run_summary) =
   match run.lrs_run_kind, run.lrs_subject_id with
@@ -754,7 +744,7 @@ let lane_run_subject (run : Tui_decode.lane_run_summary) =
 
 (** Recent retained runs of one standalone lane. The list is the paged summary:
     no payload ever crosses it, so Enter fetches one exact detail. *)
-let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
+let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
@@ -778,7 +768,7 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     Printf.sprintf "%s · %s (%s)  %s"
       (screen_title " MASC Lanes")
       (fit_width
-         (Terminal_text.single_line (standalone_lane_label state lane))
+         (Terminal_text.single_line (observed_lane_label lane))
          20)
       coverage (connection_badge state)
   in
@@ -787,13 +777,13 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
   box_divider buf cols;
   let identity_heading =
     match lane with
-    | Standalone_lane.Verifier -> "SUBJECT"
-    | Standalone_lane.Librarian
-    | Standalone_lane.Hitl_auto_judge
-    | Standalone_lane.Board_attention
-    | Standalone_lane.Workspace_curator
-    | Standalone_lane.Candle_appraiser
-    | Standalone_lane.Browser_stagehand -> "ACTOR"
+    | Lane_run_identity.Verifier -> "SUBJECT"
+    | Lane_run_identity.Librarian
+    | Lane_run_identity.Hitl_auto_judge
+    | Lane_run_identity.Board_attention
+    | Lane_run_identity.Workspace_curator
+    | Lane_run_identity.Candle_appraiser
+    | Lane_run_identity.Browser_stagehand -> "ACTOR"
   in
   (* The slot takes what the drawn columns leave. *)
   let run_layout =
@@ -1190,7 +1180,7 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
   in
   [ ( Ansi.reset
     , Printf.sprintf "  LANE  %s  ·  %s%s"
-        (Standalone_lane.to_id detail.lrd_lane)
+        (Lane_run_identity.to_id detail.lrd_lane)
         (Terminal_text.single_line
            (Tui_decode.lane_run_kind_label detail.lrd_run_kind))
         subject )

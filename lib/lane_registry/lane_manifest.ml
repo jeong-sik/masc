@@ -1,11 +1,5 @@
 let label : Lane_id.builtin -> string = function
-  | Lane_id.Exact Standalone_lane.Board_attention -> "Board Attention"
-  | Lane_id.Exact Standalone_lane.Hitl_auto_judge -> "HITL Auto Judge"
-  | Lane_id.Exact Standalone_lane.Librarian -> "Librarian"
-  | Lane_id.Exact Standalone_lane.Workspace_curator -> "Workspace Curator"
-  | Lane_id.Exact Standalone_lane.Verifier -> "Verifier"
-  | Lane_id.Exact Standalone_lane.Browser_stagehand -> "Browser Stagehand"
-  | Lane_id.Exact Standalone_lane.Candle_appraiser -> "Candle Appraiser"
+  | Lane_id.Exact lane -> Lane_run_identity.label (Standalone_lane.run_identity lane)
   | Lane_id.Browser Browser_lane.Lane_name.Live -> "Browser Lane (live)"
   | Lane_id.Browser Browser_lane.Lane_name.Automation -> "Browser Lane (automation)"
   | Lane_id.Browser Browser_lane.Lane_name.Stagehand -> "Browser Lane (stagehand)"

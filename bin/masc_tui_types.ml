@@ -3164,8 +3164,8 @@ type planning_mode =
     along so Left/Esc from a run returns to the list it came from. *)
 type lanes_mode =
   | Lanes_overview
-  | Lanes_run_list of Standalone_lane.t
-  | Lanes_run_detail of Standalone_lane.t * string
+  | Lanes_run_list of Lane_run_identity.t
+  | Lanes_run_detail of Lane_run_identity.t * string
   | Lanes_measurement_detail of string
   | Lanes_inventory_detail of string option
       (** [Some id] reads one Lane; [None] reads inventory-wide diagnostics. *)

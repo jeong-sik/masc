@@ -1,9 +1,11 @@
 import { parseTOML, type AST } from 'toml-eslint-parser'
 import { LANE_IDS } from '../api/dashboard-standalone-lanes'
+import { isLaneRunIdentity, type LaneRunIdentity } from '../api/dashboard-exact-lane-runs'
 import type { LaneInventoryRow } from '../api/lane-inventory'
 
 export type LaneNavigationTarget = { workspace: string } & (
   | { kind: 'exact'; lane: typeof LANE_IDS[number] }
+  | { kind: 'run_history'; lane: LaneRunIdentity }
   | { kind: 'browser'; lane: 'live' | 'automation' | 'stagehand' }
   | { kind: 'machine'; machine: 'msx' | 'dos' }
   | { kind: 'declaration'; path: string; installation: string | null }
@@ -24,6 +26,9 @@ export function parseLaneTarget(raw: string | undefined): ParsedLaneTarget {
       case 'exact':
         if (!LANE_IDS.some(lane => lane === fields.lane)) throw new Error()
         target = { kind: 'exact', workspace: fields.workspace, lane: fields.lane as typeof LANE_IDS[number] }; break
+      case 'run_history':
+        if (!isLaneRunIdentity(fields.lane)) throw new Error()
+        target = { kind: 'run_history', workspace: fields.workspace, lane: fields.lane }; break
       case 'browser':
         if (fields.lane !== 'live' && fields.lane !== 'automation' && fields.lane !== 'stagehand') throw new Error()
         target = { kind: 'browser', workspace: fields.workspace, lane: fields.lane }; break
@@ -55,12 +60,16 @@ export function laneTargetFor(row: LaneInventoryRow, workspace: string): LaneNav
   }
 }
 export function laneTargetParams(target: LaneNavigationTarget, diagnostics = false): Record<string, string> {
-  return { section: diagnostics ? 'internal-agents' : target.kind === 'declaration' || target.kind === 'instance' ? 'lane-addons' : 'runtime',
-    ...(!diagnostics && target.kind !== 'declaration' && target.kind !== 'instance' ? { view: 'config' } : {}), lane_target: JSON.stringify(target) }
+  const destination: LaneNavigationTarget = diagnostics && target.kind === 'exact'
+    ? { kind: 'run_history', workspace: target.workspace, lane: target.lane } : target
+  return { section: diagnostics || destination.kind === 'run_history' ? 'internal-agents'
+      : destination.kind === 'declaration' || destination.kind === 'instance' ? 'lane-addons' : 'runtime',
+    ...(!diagnostics && (destination.kind === 'exact' || destination.kind === 'browser' || destination.kind === 'machine') ? { view: 'config' } : {}),
+    lane_target: JSON.stringify(destination) }
 }
 export function laneTargetLabel(target: LaneNavigationTarget): string {
   switch (target.kind) {
-    case 'exact': return target.lane
+    case 'exact': case 'run_history': return target.lane
     case 'browser': return `browser.${target.lane}`
     case 'machine': return `machines.${target.machine}`
     case 'declaration': return target.path

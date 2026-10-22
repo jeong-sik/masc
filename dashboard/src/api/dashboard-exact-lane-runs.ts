@@ -1,12 +1,22 @@
 import { isRecord } from '../components/common/normalize'
 import { get, type AbortableRequestOptions } from './core'
 
-export type ExactLane =
-  | 'librarian_exact'
-  | 'workspace_curator_exact'
-  | 'candle_appraiser'
-  | 'hitl_auto_judge'
-  | 'board_attention_exact'
+export const EXACT_LANE_IDS = [
+  'librarian_exact',
+  'workspace_curator_exact',
+  'candle_appraiser',
+  'hitl_auto_judge',
+  'board_attention_exact',
+] as const
+export type ExactLane = typeof EXACT_LANE_IDS[number]
+
+// Retained logical work is independent of the current builtin model routes.
+// Verifier uses Task/Goal registries; Stagehand has no retained source yet.
+export const LANE_RUN_IDENTITIES = [...EXACT_LANE_IDS, 'verifier_exact', 'browser_stagehand_exact'] as const
+export type LaneRunIdentity = typeof LANE_RUN_IDENTITIES[number]
+export function isLaneRunIdentity(value: unknown): value is LaneRunIdentity {
+  return LANE_RUN_IDENTITIES.some(lane => lane === value)
+}
 
 export type ExactLaneRunStatus =
   | 'running'
@@ -92,13 +102,6 @@ export interface DashboardExactLaneRunsResponse {
   generatedAt: string
 }
 
-const LANES: readonly string[] = [
-  'librarian_exact',
-  'workspace_curator_exact',
-  'candle_appraiser',
-  'hitl_auto_judge',
-  'board_attention_exact',
-]
 const STATUSES: readonly string[] = [
   'running',
   'succeeded',
@@ -269,7 +272,7 @@ function parseRun(
   const status = string(raw.status, `${context}.status`)
   if (!STATUSES.includes(status)) fail(`${context}.status has unknown value ${JSON.stringify(status)}`)
   const lane = string(raw.lane, `${context}.lane`)
-  if (!LANES.includes(lane)) fail(`${context}.lane has unknown value ${JSON.stringify(lane)}`)
+  if (!EXACT_LANE_IDS.some(candidate => candidate === lane)) fail(`${context}.lane has unknown value ${JSON.stringify(lane)}`)
   if (raw.run_kind !== 'exact_output') fail(`${context}.run_kind must be exact_output`)
   const base = ['run_id', 'run_kind', 'lane', 'subject_id', 'actor', 'started_at', 'status']
     .concat(withPayloads ? ['input', 'payload_availability', 'skill_evidence'] : [])

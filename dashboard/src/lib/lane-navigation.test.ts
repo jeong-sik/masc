@@ -13,11 +13,28 @@ describe('Lane destinations at the URL and TOML boundaries', () => {
   })
   it.each([
     { kind: 'exact', workspace: '/workspace', lane: 'invented' },
+    { kind: 'run_history', workspace: '/workspace', lane: 'invented' },
+    { kind: 'run_history', workspace: '/workspace', lane: 'workspace_curator_exact', run_id: 'invented' },
     { kind: 'instance', workspace: '/workspace', instance: 'worker' },
     { kind: 'machine', workspace: '/workspace', machine: 'dos', extra: true },
     { kind: 'declaration', workspace: '/workspace', path: 'p' },
   ])('refuses incomplete or unknown selection instead of choosing a fallback: %j', target => {
     expect(parseLaneTarget(JSON.stringify(target)).kind).toBe('invalid')
+  })
+  it('opens retained Curator history through the real router independently of a settings target', () => {
+    const target = { kind: 'run_history' as const, workspace: '/workspace A', lane: 'workspace_curator_exact' as const }
+    replaceRoute('monitoring', laneTargetParams(target))
+    expect(route.value.params.section).toBe('internal-agents')
+    expect(route.value.params.view).toBeUndefined()
+    expect(parseLaneTarget(route.value.params.lane_target)).toEqual({ kind: 'target', target })
+    const current = { kind: 'exact' as const, workspace: target.workspace, lane: 'librarian_exact' as const }
+    replaceRoute('monitoring', laneTargetParams(current))
+    expect(route.value.params.section).toBe('runtime')
+    expect(route.value.params.view).toBe('config')
+    expect(parseLaneTarget(route.value.params.lane_target)).toEqual({ kind: 'target', target: current })
+    replaceRoute('monitoring', laneTargetParams(current, true))
+    expect(parseLaneTarget(route.value.params.lane_target)).toEqual({ kind: 'target',
+      target: { ...current, kind: 'run_history' } })
   })
   const browser: RuntimeLaneTarget = { kind: 'browser', workspace: '/workspace', lane: 'automation' }
   const machine: RuntimeLaneTarget = { kind: 'machine', workspace: '/workspace', machine: 'dos' }

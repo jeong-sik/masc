@@ -31,7 +31,6 @@
  (libraries
   masc.workspace_connection
   masc.browser_configuration
-  masc.toml_line_editor
   masc.voice_config
   masc.voice_setup
   masc.web_search_setup

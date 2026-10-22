@@ -30,6 +30,10 @@ val settle : configuration -> incarnation:string -> directory:string -> (unit, s
 (** Blocking recovery of this allocation's original child claim. Retire first,
     request termination by its kernel lease, and require Settled. A successful
     termination request alone does not establish cleanup. Never removes claims. *)
+val check_settled : configuration -> incarnation:string -> directory:string -> (unit, string) result
+(** Require what {!settle} requires, without retiring or signalling anything:
+    this allocation's original child claim is already Settled. A missing slot
+    is [Ok]; a reservation that was never published is refused. *)
 val cleanup : configuration -> incarnation:string -> directory:string -> (unit, string) result
 (** Host only, after the original worker claim has settled and its allocation
     inode has been verified. Settle the child, then remove only its private

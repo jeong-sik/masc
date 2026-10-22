@@ -81,12 +81,18 @@ type failed = { cause : failure; first : failure option }
 (** What a confirmed release stands on. [Never_created] requires no recorded
     execution authority and no resource. [Released] names the recorded engine
     that confirmed container absence. [Native_released] names the exact
-    installation and incarnation whose admission is retired and settled. *)
+    installation and incarnation whose admission is retired and settled.
+    [Native_retained] names one whose admission settled but whose resources
+    the host could not confirm released: the operator took them over. *)
 type release =
   | Never_created
   | Released of { engine : engine; container_id : string option }
   | Native_released of { installation_id : string; instance_id : string }
       (** Native retirement and actual admission settlement were confirmed. *)
+  | Native_retained of { installation_id : string; instance_id : string }
+      (** Native retirement and admission settlement were confirmed. The
+          resources the host could not confirm released stay where they are;
+          the host never removes them. *)
 
 (** [Detaching] keeps the failure that was in place when the detach began. *)
 type state =

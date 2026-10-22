@@ -27,6 +27,8 @@ let releases = [
   L.Never_created;
   L.Released { engine = engine_a; container_id = Some (String.make 64 'a') };
   L.Released { engine = apple; container_id = None };
+  L.Native_released { installation_id = "browser-work"; instance_id = "released-instance" };
+  L.Native_retained { installation_id = "browser-work"; instance_id = "retained-instance" };
 ]
 
 let states =
@@ -58,6 +60,9 @@ let test_older_and_malformed_shapes_are_errors () =
     (`Assoc ["kind", `String "failed"; "message", `String "cleanup incomplete"]);
   rejected "a failed state needs both causes" (`Assoc ["kind", `String "failed"]);
   rejected "an unknown kind" (`Assoc ["kind", `String "released"]);
+  rejected "retained release evidence without its installation"
+    (`Assoc ["kind", `String "detached";
+             "release", `Assoc ["kind", `String "native_retained"; "instance_id", `String "retained-instance"]]);
   rejected "an unknown failure"
     (`Assoc ["kind", `String "failed"; "failed", `Assoc ["cause", `Assoc ["kind", `String "mystery"]; "first", `Null]]);
   rejected "extra fields are not ignored"

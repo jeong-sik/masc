@@ -2,7 +2,7 @@ open Lane_addon_types
 module Fleet_ledger = Lane_addon_broadcast_delivery
 module Lifecycle = Lane_addon_lifecycle
 let ( let* ) = Result.bind
-type operation = Attach | Inspect | Observe | Detach | Slice | Evidence | Act | Action_status
+type operation = Attach | Inspect | Observe | Detach | Retain | Slice | Evidence | Act | Action_status
 type error = Request_rejected of string | Runtime_failed of string
 type evidence_destination = Preserve_only | To_keeper of string | To_broadcast
 type evidence_delivery = Delivery_receipt of Yojson.Safe.t | Delivery_failed of string
@@ -705,10 +705,11 @@ let check_release ~instance_id ~authority ~resource release =
             | Some (Lifecycle.Container_resource id) when container_id=Some id -> Ok release
             | Some (Lifecycle.Container_resource _ | Lifecycle.Native_resource _) -> refused ())
        | None | Some (Lifecycle.Container_authority _ | Lifecycle.Native_admission _) -> refused ())
-  | Lifecycle.Native_released receipt ->
+  | Lifecycle.Native_released {installation_id;instance_id=released}
+  | Lifecycle.Native_retained {installation_id;instance_id=released} ->
       (match authority with
-       | Some (Lifecycle.Native_admission owned) when receipt.installation_id=owned.installation_id
-           && receipt.instance_id=instance_id ->
+       | Some (Lifecycle.Native_admission owned) when installation_id=owned.installation_id
+           && released=instance_id ->
            (match resource with None | Some (Lifecycle.Native_resource _) -> Ok release
             | Some (Lifecycle.Container_resource _) -> refused ())
        | None | Some (Lifecycle.Container_authority _ | Lifecycle.Native_admission _) -> refused ())
@@ -1363,7 +1364,7 @@ let native_directories store installation_id =
   [native_claim_directory store Installation_slot ~id:installation_id]
 let native_result result = Result.map_error (fun error ->
   Lifecycle.Cleanup_unconfirmed (Native_addon_lease.error_to_string error)) result
-let native_settled claim =
+let native_settlement claim =
   let* status = offload (fun () -> Native_addon_lease.status claim) |> native_result in
   match status with
   | Native_addon_lease.Settled ->
@@ -1373,12 +1374,37 @@ let native_settled claim =
        | [] -> Error (Lifecycle.Cleanup_unconfirmed "native claim has no host slot"))
   | Awaiting_exec | Live _ | Cleanup_pending _ ->
       Error (Lifecycle.Cleanup_unconfirmed "native claim has not settled")
+(* For the callers that only need the claim settled: a retained allocation is
+   settled as well, and it is never removed by them. *)
+let native_settled claim =
+  Result.map (fun (_ : Browser_addon_socket.settlement) -> ()) (native_settlement claim)
+(* An allocation the operator retained is never reported as released, even
+   when the binding still says Failed because its own write did not land. *)
+let native_release ~installation_id ~instance_id = function
+  | Browser_addon_socket.Allocation_released -> Lifecycle.Native_released {installation_id;instance_id}
+  | Allocation_retained -> Lifecycle.Native_retained {installation_id;instance_id}
 let native_recover ~store ~installation_id ~instance_id =
   let* claim = offload (fun () -> Native_addon_lease.reopen
     ~directories:(native_directories store installation_id) ~instance_id) |> native_result in
   let* () = offload (fun () -> Native_addon_lease.request_termination claim) |> native_result in
-  let* () = native_settled claim in
-  Ok (Lifecycle.Native_released {installation_id;instance_id})
+  let* settlement = native_settlement claim in
+  Ok (native_release ~installation_id ~instance_id settlement)
+(* What the host still confirms before the operator takes an instance's
+   resources over: the admission is Settled (its process and process group are
+   gone), each browser child claim is already Settled, and the allocation keeps
+   its recorded identity. Nothing here retires a claim or signals a process. *)
+let native_retain ~store ~installation_id ~instance_id =
+  let lease result = Result.map_error Native_addon_lease.error_to_string result in
+  let* claim = offload (fun () -> Native_addon_lease.reopen
+    ~directories:(native_directories store installation_id) ~instance_id) |> lease in
+  let* status = offload (fun () -> Native_addon_lease.status claim) |> lease in
+  match status, Native_addon_lease.directories claim with
+  | Native_addon_lease.Settled, directory::_ ->
+      let* settlement = offload (fun () -> Browser_addon_socket.retain ~admission:claim ~directory) in
+      Ok (native_release ~installation_id ~instance_id settlement)
+  | Native_addon_lease.Settled, [] -> Error "native claim has no host slot"
+  | (Native_addon_lease.Awaiting_exec | Live _ | Cleanup_pending _), _ ->
+      Error "native claim has not settled; its process or process group may still run"
 let native_claim_root_requirement =
   {Resource_requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Clear 0o077;links=Any_count}
 let prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_live_instance =
@@ -1509,8 +1535,8 @@ let backend ~store ~artifact_store () = match !override with
                 Option.iter Browser_addon_client.revoke !browser_client;
                 let* _receipt=Lane_addon_native_worker.stop worker
                   |> Result.map_error (fun error -> Lifecycle.Cleanup_unconfirmed (Lane_addon_native_worker.error_to_string error)) in
-                let* ()=native_settled admission in
-                let receipt=Lifecycle.Native_released {installation_id;instance_id} in
+                let* settlement=native_settlement admission in
+                let receipt=native_release ~installation_id ~instance_id settlement in
                 combined_release:=Some receipt;Ok receipt in
             let wrap ~ready worker =
               let* browser=match !browser_client,socket with
@@ -2355,6 +2381,82 @@ let historical_detach ~sw ?(wait = false) m fields =
            raise exn));
     Ok (detaching, if not wait then Started else
           match !finished with Some state -> Finished state | None -> In_progress)
+(* The operator takes over the resources of a native instance whose cleanup
+   could not be confirmed (docs/design/browser-addon-lifecycle.md). The host
+   still confirms what it can observe, in [native_retain]. What it cannot
+   observe, a missing receipt or an allocation's contents, is not inferred: the
+   record says the operator took it over, and the declaration may start a new
+   instance. A refusal changes nothing. *)
+let retain_unconfirmed m args =
+  let* id = request_result (text args "instance_id") in
+  let refused detail = Error (Request_rejected detail) in
+  Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+    if Hashtbl.mem m.entries id then
+      refused "this Lane instance is still held by this server process; use Detach"
+    else
+    let previous = Hashtbl.find_opt m.recovering id in
+    match previous with
+    | Some (Cleaning _ | Publishing_cleanup _ | Cleanup_commit_failed _) ->
+        refused "cleanup of this instance is in progress; repeat once it ends"
+    | None | Some (Cleanup_request_failed _ | Cleanup_unconfirmed _) ->
+    let* fields = persisted_binding m id in
+    let* state = runtime_result (lifecycle_of_fields fields) in
+    let* failed = match state with
+      | Lifecycle.Failed ({cause = Lifecycle.Cleanup_unconfirmed _; _} as failed) -> Ok failed
+      | Lifecycle.Failed {cause = (Lifecycle.Engine_unreachable _ | Engine_mismatch _ | Slot_foreign _
+          | Slot_predecessor_unremovable _ | Worker_failed _ | Persistence_failed _ | Previous_process
+          | Effect_outcome_unknown _); _}
+      | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ | Lifecycle.Detached _ ->
+          refused "only a failed instance whose cleanup was not confirmed can be retained" in
+    let* authority,resource = runtime_result (retained_execution fields) in
+    let* installation_id = match authority with
+      | Some (Lifecycle.Native_admission {installation_id}) -> Ok installation_id
+      | None | Some (Lifecycle.Container_authority _) ->
+          refused "only a native instance can be retained; a container's engine confirms its absence" in
+    let* configuration = runtime_result (configuration_of_fields fields) in
+    let expected = match configuration with Some owner -> owner.id | None -> id in
+    let* () = if installation_id = expected then Ok ()
+      else Error (Runtime_failed "native installation authority mismatch") in
+    let restore () = match previous with
+      | None -> Hashtbl.remove m.recovering id
+      | Some recovery -> Hashtbl.replace m.recovering id recovery in
+    Hashtbl.replace m.recovering id (Cleaning fields);
+    let retained = try native_retain ~store:m.store ~installation_id ~instance_id:id with
+      | Eio.Cancel.Cancelled _ as exn -> restore (); raise exn
+      | exn -> Error (Printexc.to_string exn) in
+    match Result.bind retained (fun release ->
+        check_release ~instance_id:id ~authority ~resource release
+        |> Result.map_error Lifecycle.failure_detail) with
+    | Error detail -> restore (); refused ("the host could not confirm what it observes: " ^ detail)
+    | Ok release ->
+        let state = Lifecycle.Detached release in
+        let terminal = replace_state fields state in
+        let publication = {fields; terminal = Some terminal; terminal_state = state} in
+        let writer = Option.value ~default:default_cleanup_writer (Eio.Fiber.get cleanup_writer_key) in
+        (* The release already holds. As in [historical_detach], a raising log
+           call is a publication failure: the next maintenance beat retries
+           only the publication. *)
+        (try
+           (match release with
+            | Lifecycle.Native_retained _ ->
+                Log.Misc.warn "Lane Add-on instance %s was retained by the operator; resources not confirmed released stay in place (%s)"
+                  id (Lifecycle.failed_to_string failed)
+            | Lifecycle.Native_released _ | Lifecycle.Never_created | Lifecycle.Released _ ->
+                Log.Misc.info "Lane Add-on instance %s asked to be retained was found released (%s)"
+                  id (Lifecycle.failed_to_string failed));
+           publish_cleanup m ~id ~writer publication
+         with
+         | Eio.Cancel.Cancelled _ as exn ->
+             Hashtbl.replace m.recovering id (Cleanup_commit_failed (publication,"retain publication cancelled"));
+             raise exn
+         | exn -> Hashtbl.replace m.recovering id (Cleanup_commit_failed (publication,Printexc.to_string exn)));
+        match Hashtbl.find_opt m.recovering id with
+        | None -> Ok terminal
+        | Some (Cleanup_commit_failed (_,detail)) ->
+            Error (Runtime_failed ("retained, but the record was not saved; the next maintenance pass saves it: " ^ detail))
+        | Some (Cleaning _ | Cleanup_request_failed _ | Cleanup_unconfirmed _ | Publishing_cleanup _) ->
+            Error (Runtime_failed "retained, but the record's publication did not finish"))
+
 let configuration_json m ~access =
   match m.configuration_status with
   | None -> `Null
@@ -3186,7 +3288,7 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
   let allowed = match operation with
     | Attach -> ["manifest_path"; "run_id"; "binding"]
     | Inspect -> ["instance_id"]
-    | Observe | Detach -> ["instance_id"]
+    | Observe | Detach | Retain -> ["instance_id"]
     | Slice -> ["run_id"; "lane_id"; "since"; "until"]
     | Evidence -> ["instance_id"; "row_ids"; "keeper_name"; "broadcast"; "request_id"]
     | Act -> ["instance_id"; "expected_incarnation"; "request_id"; "action"]
@@ -3195,12 +3297,17 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
   let* () = if List.length names <> List.length (List.sort_uniq String.compare names)
     || List.exists (fun name -> not (List.mem name allowed)) names
     then Error (Request_rejected "duplicate or unknown Lane request field") else Ok () in
+  let* () = match operation, access with
+    | Retain, Lane_addon_sources.Operator_configuration -> Ok ()
+    | Retain, (Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated) ->
+        Error (Request_rejected "only the operator takes over a Lane instance's resources")
+    | (Attach | Inspect | Observe | Detach | Slice | Evidence | Act | Action_status), _ -> Ok () in
   let m = manager config in
   (* A durable delivery retry must authorize its saved caller before this
      lookup: its original source binding may already be gone. *)
   let* () = match operation with
     | Inspect | Slice | Attach | Evidence -> Ok ()
-    | Observe | Detach | Act | Action_status ->
+    | Observe | Detach | Retain | Act | Action_status ->
         let* id = request_result (text args "instance_id") in
         let* visibility = match Hashtbl.find_opt m.entries id with
           | Some e -> Ok e.visibility
@@ -3348,6 +3455,7 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
       if e.stopping then Error (Request_rejected "instance is stopping or detached")
       else if not e.running then Error (Request_rejected "worker stopped; detach and attach again to restart")
       else (wake e; Ok (entry_json e))
+  | Retain -> retain_unconfirmed m args
   | Detach ->
       let* id = request_result (text args "instance_id") in
       let* sw = match Eio_context.get_root_switch_opt () with

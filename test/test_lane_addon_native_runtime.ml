@@ -58,7 +58,7 @@ let with_fixture run =
       Eio_context.with_test_env ~sw ~clock ~net:(Eio.Stdenv.net env)
         ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
         R.For_testing.reset (); run clock root (Workspace.default_config root))))))
-let native_installation_with_slot seed_slot () = with_fixture (fun clock root config ->
+let write_native_manifest root =
   let script = Filename.concat root "worker.py" in write script server;
   let manifest = Filename.concat root "native.toml" in
   write manifest (Printf.sprintf {|id = "native-runtime"
@@ -72,6 +72,9 @@ max_reply_bytes = 65536
 [world.actions]
 tool = "lane_act"
 |} script root);
+  manifest
+let native_installation_with_slot seed_slot () = with_fixture (fun clock root config ->
+  let manifest = write_native_manifest root in
   let attach () = dispatch config R.Attach ["manifest_path",`String manifest;
     "run_id",`String "native-world";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
   let inspect id = dispatch config R.Inspect ["instance_id",`String id]
@@ -167,6 +170,94 @@ let interrupted_reservation () = native_installation_with_slot (fun directory ->
   ignore (Native_addon_lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"unpublished"
     |> Result.map_error Native_addon_lease.error_to_string |> require);
   write (Filename.concat directory "intent.json") "") ()
+(* The operator takes over an instance whose cleanup was not confirmed. Only
+   the operator may, only for that failure, and a refusal leaves the record as
+   it was. A browser allocation whose Gecko receipt is missing stays where it
+   is, and no later recovery reports it released. *)
+let operator_retain () = with_fixture (fun clock root config ->
+  let manifest = write_native_manifest root in
+  let id = dispatch config R.Attach ["manifest_path",`String manifest;
+    "run_id",`String "native-world";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
+  let inspect id = dispatch config R.Inspect ["instance_id",`String id]
+    |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+  let lifecycle id = require (Lane_addon_lifecycle.state_of_json (member "lifecycle" (inspect id))) in
+  wait clock (fun () -> match lifecycle id with
+    | Lane_addon_lifecycle.Attached | Observing -> (inspect id |> member "observation_seq" |> Yojson.Safe.Util.to_int)>0
+    | Failed failure -> fail (Lane_addon_lifecycle.failure_detail failure.cause)
+    | Detaching _ | Detached _ -> fail "native fixture retired before observation");
+  let captured = match inspect id with `Assoc fields -> fields | _ -> fail "captured binding is not an object" in
+  ignore (dispatch config R.Detach ["instance_id",`String id]);
+  wait clock (fun () -> match lifecycle id with
+    | Lane_addon_lifecycle.Detached _ -> true | Attached | Observing | Failed _ | Detaching _ -> false);
+  R.For_testing.reset ();
+  let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  (* The captured record, as instance [instance_id] admitted under its own
+     installation slot, failed with [cause]. *)
+  let seed ~instance_id ~authority cause =
+    let state = Lane_addon_lifecycle.Failed (Lane_addon_lifecycle.failed cause) in
+    let replaced = ["instance_id";"incarnation";"execution_authority";"resource";"phase";"lifecycle"] in
+    require (Lane_addon_store.save_binding store ~instance_id
+      (`Assoc (["instance_id",`String instance_id;"incarnation",`String instance_id;
+        "execution_authority",authority;"resource",`Null;
+        "phase",Lane_addon_types.phase_to_json (Lane_addon_lifecycle.project state);
+        "lifecycle",Lane_addon_lifecycle.state_to_json state]
+        @ List.filter (fun (name,_) -> not (List.mem name replaced)) captured))) in
+  let unconfirmed = Lane_addon_lifecycle.Cleanup_unconfirmed "missing automation-closed.json" in
+  let retain ?(access=Lane_addon_sources.Operator_configuration) id =
+    R.dispatch ~caller:"retain-tester" ~access ~config ~operation:R.Retain (`Assoc ["instance_id",`String id]) in
+  let still_failed id = match lifecycle id with
+    | Lane_addon_lifecycle.Failed _ -> true | Attached | Observing | Detaching _ | Detached _ -> false in
+  let release_kind id = inspect id |> member "lifecycle" |> member "release" |> text "kind" in
+  let authority = List.assoc "execution_authority" captured in
+  seed ~instance_id:id ~authority (Lane_addon_lifecycle.Worker_failed "start refused");
+  check bool "a failure other than unconfirmed cleanup is not retained" true
+    (Result.is_error (retain id) && still_failed id);
+  seed ~instance_id:id ~authority unconfirmed;
+  check bool "a Keeper cannot retain" true
+    (Result.is_error (retain ~access:(Lane_addon_sources.Keeper "native-keeper") id) && still_failed id);
+  check bool "an unauthenticated caller cannot retain" true
+    (Result.is_error (retain ~access:Lane_addon_sources.Unauthenticated id) && still_failed id);
+  ignore (dispatch config R.Retain ["instance_id",`String id]);
+  check string "an instance with no allocation left is found released" "native_released" (release_kind id);
+  check bool "a detached instance is not retained again" true (Result.is_error (retain id));
+  (* A browser allocation admitted under the record's own installation slot:
+     the worker never wrote its Gecko receipt and a profile was left behind. *)
+  let browser_instance () =
+    let instance_id = Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
+    let slot = Filename.concat (Filename.concat (Lane_addon_store.root store) "native-claims")
+      (Lane_addon_store.digest instance_id) in
+    Unix.mkdir slot 0o700;
+    let lease result = result |> Result.map_error Native_addon_lease.error_to_string |> require in
+    let context = require (Browser_addon_socket.context ~instance_id ~stagehand:None ~live_bidi:None ~models:None
+      ~automation:(Some {Browser_configuration.driver="/fixture/geckodriver";binary=None})) in
+    let admission = lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
+    let allocation = require (Browser_addon_socket.acquire ~admission ~directory:slot) in
+    let profiles = Filename.concat (Filename.dirname (Browser_addon_socket.socket_path allocation)) "profiles" in
+    Unix.mkdir profiles 0o700;
+    let left = Filename.concat profiles "escaped-browser-profile" in write left "kept";
+    lease (Native_addon_lease.retire admission);
+    seed ~instance_id ~authority:(Lane_addon_lifecycle.authority_to_json
+      (Lane_addon_lifecycle.Native_admission {installation_id=instance_id})) unconfirmed;
+    (instance_id, admission, slot, left) in
+  let cleanup_refused id = Result.is_error
+    (R.dispatch ~caller:"retain-tester" ~access:Lane_addon_sources.Operator_configuration ~config
+      ~operation:R.Detach (`Assoc ["instance_id",`String id])) in
+  let first, _, _, left = browser_instance () in
+  Fun.protect ~finally:(fun () -> remove (Filename.dirname (Filename.dirname left))) (fun () ->
+    check bool "recovery cannot release an allocation without its receipt" true (cleanup_refused first && still_failed first);
+    ignore (dispatch config R.Retain ["instance_id",`String first]);
+    check string "the operator's retention is recorded" "native_retained" (release_kind first);
+    check bool "the left profile stays in place" true (Sys.file_exists left));
+  (* The acquisition was retained but the binding still says Failed, as when
+     the binding write of a retain did not land: recovery reports the
+     retention, never a release. *)
+  let second, admission, slot, left = browser_instance () in
+  Fun.protect ~finally:(fun () -> remove (Filename.dirname (Filename.dirname left))) (fun () ->
+    check bool "the allocation is retained" true
+      (require (Browser_addon_socket.retain ~admission ~directory:slot) = Browser_addon_socket.Allocation_retained);
+    ignore (dispatch config R.Detach ["instance_id",`String second]);
+    check string "recovery of a retained allocation is not a release" "native_retained" (release_kind second);
+    check bool "the left profile stays in place" true (Sys.file_exists left)))
 let browser_server = {|import argparse,hashlib,json,os,socket,subprocess,sys,threading
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("mode")
@@ -491,4 +582,5 @@ let () =
     test_case "configuration resumes after interrupted slot namespace" `Quick interrupted_namespace;
     test_case "configuration resumes after interrupted slot metadata" `Quick interrupted_metadata;
     test_case "configuration retires unpublished reservation before fresh attach" `Quick interrupted_reservation;
+    test_case "the operator retains an unconfirmed native instance" `Quick operator_retain;
     test_case "browser service concurrent channels exact owner cancellation and failed readiness" `Quick browser_installation]]

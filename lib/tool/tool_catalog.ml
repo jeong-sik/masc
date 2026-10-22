@@ -322,6 +322,15 @@ let explicit_metadata : (string * metadata) list =
          schema, no dispatch path, route-authority only. Admin tier: only \
          the operator answers an installation's question."
         admin_tool );
+    (* Taking over a Lane instance's unconfirmed resources records the
+       operator's word for what the host cannot observe. A Keeper must not
+       record it, so the route sits at [CanAdmin]. *)
+    ( "lane_addon_retain_route",
+      hidden_runtime_tool
+        "Auth key for the Lane retain HTTP route; no schema, no dispatch \
+         path, route-authority only. Admin tier: only the operator takes \
+         over a Lane instance's resources."
+        admin_tool );
     (* Run schemas register from tool_run.ml; catalog still owns early auth metadata.
        RFC-0182: 7 dead admin tools (masc_execute_dry_run, masc_admin_cleanup,
        masc_admin_reset, masc_gc_force, masc_workspace_delete, masc_force_unbind,

@@ -142,7 +142,9 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ~cancel_receipt () = E
        this isolated fixture allocation without certifying product cleanup. *)
     Fs_compat.remove_tree directory)
   else (
-    ok (Socket.cleanup ~admission ~directory:slot);
+    (match ok (Socket.cleanup ~admission ~directory:slot) with
+     | Socket.Allocation_released -> ()
+     | Allocation_retained -> Alcotest.fail "the allocation was retained, not released");
     check bool "original allocation released" false (Sys.file_exists directory));
   Fs_compat.remove_tree slot)
 let cancellation_child () =

@@ -108,6 +108,14 @@ let settle c ~incarnation ~directory =
   match claim with
   | None -> Ok ()
   | Some claim -> let* ()=lease (Lease.request_termination claim) in settled claim
+let check_settled c ~incarnation ~directory = protect (fun () ->
+  match Unix.lstat c.claim_directory with
+  | _ ->
+    let* claim=lease (Lease.current ~directories:[c.claim_directory]) in
+    let* known=lease (Lease.cleanup_context claim) in
+    if known=Some (context c ~incarnation ~directory) then settled claim
+    else Error "Chrome child claim belongs to a different browser allocation"
+  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ())
 
 (* The host has already checked the original allocation inode and worker
    settlement. Never follow a profile symlink, and retain unexpected resources.

@@ -118,6 +118,14 @@ let settled claim =
 let settle c ~incarnation ~directory =
   let* claim=original c ~incarnation ~directory in
   match claim with None -> Ok () | Some claim -> let* ()=lease (Lease.request_termination claim) in settled claim
+let check_settled c ~incarnation ~directory = protect (fun () ->
+  match Unix.lstat c.claim_directory with
+  | _ ->
+    let* claim=lease (Lease.current ~directories:[c.claim_directory]) in
+    let* saved=lease (Lease.cleanup_context claim) in
+    if saved=Some (context c ~incarnation ~directory) then settled claim
+    else Error "Firefox child claim belongs to another allocation"
+  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ())
 let cleanup = settle
 let original_browser ~admission ~(receipt:Browser_process_owner.ready) =
   let* status=lease (Lease.status admission) in

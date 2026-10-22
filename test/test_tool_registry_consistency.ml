@@ -330,7 +330,7 @@ let test_browser_actions_have_mutating_dispatch_authority () =
 let test_route_auth_keys_are_dedicated_hidden_entries () =
   let route_keys =
     [ "keeper_tool_approval_route"; "keeper_tool_approval_mode_route";
-      "lane_addon_ask_answer_route" ]
+      "lane_addon_ask_answer_route"; "lane_addon_retain_route" ]
   in
   List.iter
     (fun name ->

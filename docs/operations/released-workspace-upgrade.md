@@ -172,6 +172,49 @@ prior-input reconciliation, source revalidation before any future installation,
 atomic installation and rollback remain to be implemented. This command cannot
 make an unresolved copied journal usable by a Keeper.
 
+### Explicit prior-input adoption in a derivative
+
+The database primitive `Keeper_chat_operation_store.Offline.prepare_input_adoption_copy`
+creates a separate derivative of the unresolved prepared journal. Its caller
+must supply a nonempty list of explicit `Operator_adopts_checkpoint` decisions,
+one exact retained checkpoint reference per selected trace. This is an operator
+adjudication of missing input history, not a reconstruction that the old journal
+can prove. A canonical file, the largest turn count, or `pending_input=None`
+does not establish that an earlier accepted answer was preserved; a decline or
+timeout may consume input without appending a message.
+
+The source must have the current exact schema, globally unavailable prior
+input and no imported input rows. The destination must be a distinct reserved
+empty database. The primitive copies all operation, semantic, frozen batch and
+sequence evidence without startup settlement, inserts exactly the selected
+references, and keeps the unavailable-history floor. An omitted historical
+trace still returns `Prior_input_unavailable`. It never becomes a fresh trace
+because it was absent from the decision list. Fresh stores and sources with
+already selected input rows are refused rather than reset or overwritten.
+
+`verify_input_adoption_copy` reads the original prepared journal and derivative
+in separate read-only snapshots, compares every original cell and the exact
+selection, and verifies the unchanged uncertainty floor. A failed or uncertain
+commit returns an error even when it installed the selected rows. Readback can
+establish which rows actually exist; it cannot certify file/directory syncs or
+turn the earlier error into a confirmed publication.
+
+The original published bundle stays immutable: its verifier requires zero
+input rows. Future operator integration must retain it, bind a derivative and
+the explicit decision to its source bundle/SHA and Keeper/current trace, verify
+and durably retain each exact payload at the input owner's session location,
+then publish a separate reconciliation manifest. Conflicting pending/consumed
+evidence and active or unknown-effect native calls require an explicit repair
+decision; a file's existence does not resolve them. Existing native continuation
+admission and the input producer's complete-pending/message-prefix checks remain
+in force. A history cut or compaction cannot bypass those checks through this
+primitive; its lineage remains unresolved until a separate valid witness exists.
+
+This layer provides only database derivation and relationship verification.
+No operator adoption command, derivative manifest, payload-selection authority,
+installation or rollback is implemented here. It does not make the CLI report
+`ready_to_install=true`, unblock every historical trace, or complete #38005.
+
 ### Input checkpoint producer boundary
 
 The next input layer captures an Owner-issued witness inside the original

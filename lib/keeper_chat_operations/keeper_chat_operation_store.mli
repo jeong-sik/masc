@@ -123,6 +123,45 @@ module Offline : sig
       prior history, and the absence of imported input rows. This verifies
       the relationship, not file durability, live-source freshness or input
       authority. Both handles must have no active caller transaction. *)
+
+  type prior_input_adoption = Operator_adopts_checkpoint of Keeper_checkpoint_ref.t
+  (** An explicit operator decision, not evidence inferred from a canonical
+      file, a maximum turn count or two absent pending requests. The caller
+      must validate and retain the exact payload and record the adjudication
+      with its source/bundle identity before exposing any installation.
+      Constructing this variant is not proof of human authorization. *)
+  type input_adoption_copy =
+    { original_records : prepared_copy
+    ; adopted_checkpoints : Keeper_checkpoint_ref.t list
+    }
+
+  val prepare_input_adoption_copy :
+    source:Sqlite3.db -> destination:Sqlite3.db ->
+    adoptions:prior_input_adoption list -> (input_adoption_copy, error) result
+  (** Derive a separate private copy from a validated current-schema journal
+      whose prior input is unavailable and whose input rows are still empty.
+      Requires a nonempty explicit selection with one checkpoint per trace.
+      Preserve every original operation/semantic/batch cell and sequence;
+      install exactly the selected input references and keep the global
+      unavailable-history floor. Omitted traces remain unavailable.
+
+      Never mutates or reuses the published source bundle, clears uncertainty,
+      chooses a checkpoint, reconstructs missing answers, settles executions,
+      or grants native continuation authority. The operator adapter must
+      preserve the original bundle and bind the derivative and retained
+      payloads in a separate manifest. No CLI adoption/installation is provided
+      by this database primitive. An uncertain commit is Error; preserve the
+      derivative as evidence and read its actual relationship before deciding
+      any next action. Handles are caller-owned with no active transactions. *)
+
+  val verify_input_adoption_copy :
+    source:Sqlite3.db -> destination:Sqlite3.db ->
+    adoptions:prior_input_adoption list -> (input_adoption_copy, error) result
+  (** Read-only verification of the original cells, unavailable global floor
+      and exact selected input references in a derivative. A row with consumed
+      pending_input=None is still selected ownership. This verifies identities
+      only: it cannot certify retained payloads, the operator decision, file
+      durability, live-source freshness or installation permission. *)
 end
 
 val open_or_create : path:string -> (t, error) result

@@ -362,6 +362,128 @@ let test_offline_copy_commit_uncertainty_does_not_confirm_preparation () =
     check string "failed preparation never alters source" before (raw_file source_path)))
     Store.For_testing.[Fail_before_commit;Fail_after_commit]
 
+let with_adoption_source f = with_path (fun original_path ->
+  with_open original_path (fun store ->
+    submit store ~now:1. "retained-original" (`Assoc ["message",`String "preserve the original input"]);
+    let running = claim store ~now:2. in
+    ignore (defer_checkpoint store ~now:3. running (checkpoint ()));
+    submit store ~now:4. "queued-original" (`Assoc []);
+    ignore (prepare store 901 [source 901]));
+  convert_fixture_to_exact_v2 original_path;
+  let prepared_path = Filename.concat (Filename.dirname original_path) "unresolved-original.sqlite3" in
+  with_db original_path (fun source -> with_db prepared_path (fun destination ->
+    ignore (Store.Offline.prepare_v2_copy ~source ~destination |> store_ok)));
+  let original_before = raw_file original_path and prepared_before = raw_file prepared_path in
+  let source = Sqlite3.db_open ~mode:`READONLY prepared_path in
+  Fun.protect ~finally:(fun () -> check bool "unresolved source closed" true (Sqlite3.db_close source)) (fun () ->
+    f ~prepared_path ~source;
+    check string "published unresolved source is never rewritten" prepared_before (raw_file prepared_path);
+    check string "original v2 evidence is never rewritten" original_before (raw_file original_path)))
+
+let adoption_reference name bytes =
+  let trace_id = Keeper_id.Trace_id.of_string name |> string_ok in
+  Keeper_checkpoint_ref.create ~trace_id ~turn_count:3 ~canonical_checkpoint_bytes:bytes
+  |> (function Ok reference -> reference | Error _ -> fail "adoption reference refused")
+let adopt reference = Store.Offline.Operator_adopts_checkpoint reference
+let derivative_path source_path name = Filename.concat (Filename.dirname source_path) name
+
+let test_explicit_input_adoption_preserves_unknown_traces_and_execution_cells () =
+  with_adoption_source (fun ~prepared_path ~source ->
+    let first = adoption_reference "adopted-a" "first exact payload" in
+    let second = adoption_reference "adopted-b" "second exact payload" in
+    let adoptions = [adopt second;adopt first] in
+    let path = derivative_path prepared_path "adopted.sqlite3" in
+    with_db path (fun destination ->
+      let receipt = Store.Offline.prepare_input_adoption_copy ~source ~destination ~adoptions |> store_ok in
+      check bool "receipt names exactly the selected trace identities" true
+        (List.equal Keeper_checkpoint_ref.equal receipt.adopted_checkpoints [first;second]);
+      check int "operation cells preserved" 2 receipt.original_records.operation_count;
+      List.iter (fun query -> check bool "adoption preserves original journal cells" true
+        (rows source query = rows destination query))
+        ["SELECT * FROM operations ORDER BY sequence";
+         "SELECT * FROM semantic_executions ORDER BY scope_key";
+         "SELECT * FROM operation_batch_members ORDER BY operation_id";
+         "SELECT * FROM metadata";"SELECT * FROM input_history"];
+      let verified = Store.Offline.verify_input_adoption_copy ~source ~destination ~adoptions |> store_ok in
+      check bool "read-only verification retains exact selection" true
+        (List.equal Keeper_checkpoint_ref.equal verified.adopted_checkpoints [first;second]));
+    let before = raw_file path in
+    with_db path (fun destination ->
+      ignore (Store.Offline.verify_input_adoption_copy ~source ~destination ~adoptions |> store_ok));
+    check string "verification never rewrites derivative" before (raw_file path);
+    let derivative = Store.open_existing ~path |> store_ok in
+    Fun.protect ~finally:(fun () -> Store.close derivative |> store_ok) (fun () ->
+      List.iter (fun reference -> check bool "selected trace has observed ownership" true
+        ((Store.input_checkpoint derivative ~trace_id:reference.Keeper_checkpoint_ref.trace_id |> store_ok)
+          = Store.Input_observed reference)) [first;second];
+      let omitted = Keeper_id.Trace_id.of_string "omitted-historical-trace" |> string_ok in
+      check bool "unselected history never becomes fresh" true
+        ((Store.input_checkpoint derivative ~trace_id:omitted |> store_ok) = Store.Prior_input_unavailable)))
+
+let test_input_adoption_requires_explicit_unique_selection_and_empty_destination () =
+  with_adoption_source (fun ~prepared_path ~source ->
+    let reference = checkpoint () in
+    List.iteri (fun index adoptions ->
+      with_db (derivative_path prepared_path (Printf.sprintf "refused-selection-%d.sqlite3" index))
+        (fun destination ->
+          assert_execution_error (Store.Offline.prepare_input_adoption_copy ~source ~destination ~adoptions);
+          check string "invalid selection does not create a schema" "0"
+            (scalar destination "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")))
+      [[];[adopt reference;adopt reference];
+       [adopt reference;adopt (adoption_reference "semantic-test-trace" "conflicting exact bytes")]];
+    with_db (derivative_path prepared_path "occupied-adoption.sqlite3") (fun destination ->
+      sql destination "CREATE TABLE original_evidence(value TEXT)";
+      sql destination "INSERT INTO original_evidence VALUES ('preserve')";
+      assert_execution_error (Store.Offline.prepare_input_adoption_copy ~source ~destination ~adoptions:[adopt reference]);
+      check string "occupied destination stays untouched" "preserve"
+        (scalar destination "SELECT value FROM original_evidence")))
+
+let test_input_adoption_never_replaces_existing_rows_or_fresh_history () =
+  with_path (fun source_path ->
+    with_open source_path (fun _ -> ());
+    with_db source_path (fun source ->
+      List.iteri (fun index setup ->
+        setup ();
+        let before = raw_file source_path in
+        with_db (derivative_path source_path (Printf.sprintf "rejected-source-%d.sqlite3" index)) (fun destination ->
+          assert_execution_error (Store.Offline.prepare_input_adoption_copy ~source ~destination ~adoptions:[adopt (checkpoint ())]);
+          check string "source rejection occurs before copying" "0"
+            (scalar destination "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"));
+        check string "rejected source bytes stay intact" before (raw_file source_path))
+        [(fun () -> ());
+         (fun () -> sql source "UPDATE input_history SET basis='prior_unavailable'";
+           sql source (Printf.sprintf "INSERT INTO input_checkpoints VALUES ('semantic-test-trace', 3, '%s')" (checkpoint ()).sha256))]))
+
+let test_input_adoption_verification_rejects_changed_rows_and_original_cells () =
+  with_adoption_source (fun ~prepared_path ~source ->
+    List.iteri (fun index mutate ->
+      with_db (derivative_path prepared_path (Printf.sprintf "tampered-adoption-%d.sqlite3" index)) (fun destination ->
+        let adoptions = [adopt (checkpoint ())] in
+        ignore (Store.Offline.prepare_input_adoption_copy ~source ~destination ~adoptions |> store_ok);
+        mutate destination;
+        assert_execution_error (Store.Offline.verify_input_adoption_copy ~source ~destination ~adoptions)))
+      [(fun db -> sql db "UPDATE metadata SET next_sequence=next_sequence+1");
+       (fun db -> sql db "UPDATE input_checkpoints SET turn_count=turn_count+1");
+       (fun db -> sql db "DELETE FROM input_checkpoints");
+       (fun db -> sql db (Printf.sprintf "INSERT INTO input_checkpoints VALUES ('unselected', 3, '%s')" (checkpoint ()).sha256));
+       (fun db -> sql db "UPDATE input_history SET basis='fresh'")])
+
+let test_input_adoption_commit_uncertainty_requires_readback () =
+  List.iter (fun fault -> with_adoption_source (fun ~prepared_path ~source ->
+    with_db (derivative_path prepared_path "uncertain-adoption.sqlite3") (fun destination ->
+      let adoptions = [adopt (checkpoint ())] in
+      Store.For_testing.fail_next_commit fault;
+      assert_execution_error (Store.Offline.prepare_input_adoption_copy ~source ~destination ~adoptions);
+      check string "unknown commit is not an adoption receipt"
+        (match fault with Store.For_testing.Fail_before_commit -> "0" | Fail_after_commit -> "1")
+        (scalar destination "SELECT COUNT(*) FROM input_checkpoints");
+      match fault with
+      | Store.For_testing.Fail_before_commit ->
+        assert_execution_error (Store.Offline.verify_input_adoption_copy ~source ~destination ~adoptions)
+      | Fail_after_commit ->
+        ignore (Store.Offline.verify_input_adoption_copy ~source ~destination ~adoptions |> store_ok))))
+    Store.For_testing.[Fail_before_commit;Fail_after_commit]
+
 let test_prior_generation_is_preserved () =
   with_path (fun path ->
     with_open path (fun store -> submit store ~now:5. "prior-journal" (`Assoc []));
@@ -555,6 +677,12 @@ let () =
         test_case "occupied destinations and corrupt source are refused" `Quick test_offline_copy_refuses_nonempty_destination_and_corrupt_source;
         test_case "reused sequence refuses preparation before copying" `Quick test_offline_copy_refuses_reused_sequence;
         test_case "uncertain commit never confirms preparation" `Quick test_offline_copy_commit_uncertainty_does_not_confirm_preparation ];
+      "explicit prior input adoption", [
+        test_case "selection preserves all original cells and omitted uncertainty" `Quick test_explicit_input_adoption_preserves_unknown_traces_and_execution_cells;
+        test_case "empty, duplicate and occupied selections refuse writes" `Quick test_input_adoption_requires_explicit_unique_selection_and_empty_destination;
+        test_case "fresh history and existing rows are never overwritten" `Quick test_input_adoption_never_replaces_existing_rows_or_fresh_history;
+        test_case "readback rejects changed selection and original evidence" `Quick test_input_adoption_verification_rejects_changed_rows_and_original_cells;
+        test_case "commit uncertainty requires actual relationship readback" `Quick test_input_adoption_commit_uncertainty_requires_readback ];
       "admitted input", [
         test_case "Direct input survives checkpoint deferral and independent work" `Quick test_input_survives_checkpoint_deferral_and_independent_work;
         test_case "canonical input identity rejects changed requests" `Quick test_input_canonical_idempotency_and_conflict;

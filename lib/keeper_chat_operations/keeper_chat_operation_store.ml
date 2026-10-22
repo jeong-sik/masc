@@ -1316,6 +1316,101 @@ module Offline = struct
           else Error (Integrity_error "prepared journal changed original evidence"))) in
     try verify () with
     | Sqlite3.Error detail | Sqlite3.SqliteError detail -> Error (Store_unavailable detail)
+
+  type prior_input_adoption = Operator_adopts_checkpoint of Keeper_checkpoint_ref.t
+  type input_adoption_copy =
+    { original_records : prepared_copy
+    ; adopted_checkpoints : Keeper_checkpoint_ref.t list
+    }
+
+  let selected_inputs adoptions =
+    let references = List.map (fun (Operator_adopts_checkpoint reference) -> reference) adoptions
+      |> List.sort (fun (left : Keeper_checkpoint_ref.t) right ->
+        String.compare (Keeper_id.Trace_id.to_string left.trace_id)
+          (Keeper_id.Trace_id.to_string right.trace_id)) in
+    let rec unique = function
+      | first::(second::_ as rest) ->
+        if Keeper_id.Trace_id.equal first.Keeper_checkpoint_ref.trace_id second.Keeper_checkpoint_ref.trace_id
+        then Error (Invalid_input "prior input adoption selects a trace more than once")
+        else unique rest
+      | [_] | [] -> Ok () in
+    match references with
+    | [] -> Error (Invalid_input "prior input adoption requires an explicit nonempty selection")
+    | _::_ -> let* () = unique references in Ok references
+
+  let validate_adoption_inputs db expected =
+    let* () = validate_schema db in
+    let* () = validate_payloads db in
+    let* history = input_history_with_db db in
+    let* inputs = input_checkpoint_rows db in
+    match history with
+    | Fresh_input_history -> Error (Invalid_input "input adoption requires unavailable prior history")
+    | Prior_input_history_unavailable ->
+      if List.equal Keeper_checkpoint_ref.equal inputs expected then Ok ()
+      else Error (Integrity_error "input adoption rows differ from the exact selection")
+
+  let adoption_summary (operations, semantics, batches, next_sequence) adopted_checkpoints =
+    { original_records = {operation_count=List.length operations;semantic_count=List.length semantics;
+        batch_member_count=List.length batches;next_sequence}
+    ; adopted_checkpoints }
+
+  let insert_adopted_input db (reference : Keeper_checkpoint_ref.t) =
+    with_statement db ~operation:"record explicitly adopted input checkpoint"
+      "INSERT INTO input_checkpoints(trace_id, turn_count, sha256) VALUES (?, ?, ?)" (fun stmt ->
+        let* () = bind_text db stmt ~operation:"bind adopted input trace" 1
+          (Keeper_id.Trace_id.to_string reference.trace_id) in
+        let* () = bind_int64 db stmt ~operation:"bind adopted input turn" 2
+          (Int64.of_int reference.turn_count) in
+        let* () = bind_text db stmt ~operation:"bind adopted input digest" 3 reference.sha256 in
+        expect_done db stmt ~operation:"record explicitly adopted input checkpoint")
+
+  let prepare_input_adoption_copy ~source ~destination ~adoptions =
+    let prepare () =
+      let* selected = selected_inputs adoptions in
+      let* objects = read_schema_objects destination in
+      let* application = single_int64 destination ~operation:"check adoption destination application" "PRAGMA application_id" in
+      let* version = single_int64 destination ~operation:"check adoption destination generation" "PRAGMA user_version" in
+      let* () = if source != destination && objects=[] && application=0L && version=0L then Ok ()
+        else Error (Invalid_input "input adoption requires a distinct reserved empty destination") in
+      let* () = exec source ~operation:"begin input adoption source snapshot" "BEGIN" in
+      Fun.protect ~finally:(fun () -> rollback source) (fun () ->
+        let* () = validate_adoption_inputs source [] in
+        let* before = raw_snapshot source in
+        let* () = backup ~source ~destination in
+        let* () = configure destination in
+        let* () = exec destination ~operation:"begin private input adoption" "BEGIN IMMEDIATE" in
+        Fun.protect ~finally:(fun () -> rollback destination) (fun () ->
+          let* () = validate_adoption_inputs destination [] in
+          let rec insert = function
+            | [] -> Ok ()
+            | reference::rest -> let* () = insert_adopted_input destination reference in insert rest in
+          let* () = insert selected in
+          let* () = validate_adoption_inputs destination selected in
+          let* after = raw_snapshot destination in
+          let* () = if before=after then Ok ()
+            else Error (Integrity_error "input adoption changed original execution evidence") in
+          let* () = commit destination in
+          Ok (adoption_summary before selected))) in
+    try prepare () with
+    | Sqlite3.Error detail | Sqlite3.SqliteError detail -> Error (Store_unavailable detail)
+
+  let verify_input_adoption_copy ~source ~destination ~adoptions =
+    let verify () =
+      let* selected = selected_inputs adoptions in
+      let* () = if source != destination then Ok ()
+        else Error (Invalid_input "input adoption verification requires distinct handles") in
+      let* () = exec source ~operation:"begin original input adoption verification" "BEGIN" in
+      Fun.protect ~finally:(fun () -> rollback source) (fun () ->
+        let* () = validate_adoption_inputs source [] in
+        let* before = raw_snapshot source in
+        let* () = exec destination ~operation:"begin derivative input adoption verification" "BEGIN" in
+        Fun.protect ~finally:(fun () -> rollback destination) (fun () ->
+          let* () = validate_adoption_inputs destination selected in
+          let* after = raw_snapshot destination in
+          if before=after then Ok (adoption_summary before selected)
+          else Error (Integrity_error "input adoption derivative changed original execution evidence"))) in
+    try verify () with
+    | Sqlite3.Error detail | Sqlite3.SqliteError detail -> Error (Store_unavailable detail)
 end
 
 let next_sequence db =

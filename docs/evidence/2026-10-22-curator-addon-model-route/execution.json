@@ -1,0 +1,75 @@
+{
+  "source": "4b1cdee1a046ef76ef288e14092890a8dd7e7cca",
+  "base": "9d5a9ad5e4c1f3722f2be17aec8aad732452d252",
+  "observed_at": "2026-10-22T03:33:49.759763+00:00",
+  "dashboard": {
+    "suites": 7,
+    "cases_passed": 175,
+    "failed": 0,
+    "provenance": "local real router/component/decoder tests with mocked API",
+    "command": "pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/dashboard-standalone-lanes.test.ts src/api/lane-inventory.test.ts src/lib/lane-navigation.test.ts src/components/lane-navigation-flow.test.ts src/components/runtime-toml-editor.test.ts src/components/internal-agents-monitor.test.ts src/components/tools/prompt-registry-panel.test.ts"
+  },
+  "typescript": "pnpm exec tsc --noEmit: PASS",
+  "eslint": "pnpm exec eslint <6 changed TS files>: PASS",
+  "ocaml_syntax": {
+    "files": 19,
+    "command": "ocamlc -stop-after parsing -c <each changed ML/MLI>",
+    "result": "PASS",
+    "type_or_link_check": false
+  },
+  "files_sha256": {
+    "dashboard/src/api/dashboard-standalone-lanes.test.ts": "6ae128189f76f80e18c7fbd227119bc6840c0fa88b7b9c1f43256ac80b984959",
+    "dashboard/src/api/dashboard-standalone-lanes.ts": "2994cb35567fe9b5a5d30f6f9143c49247d79d84348276329a04e02ffab8e85d",
+    "dashboard/src/api/fixtures/lane-inventory.json": "66e0d0a9a6b8eeee3cc646a4c78538bb1a5a075722c915fbdc58da7fd72653b9",
+    "dashboard/src/api/lane-inventory.test.ts": "a267eefcc86c8ccbfd95969f223c73b5e27545a2b15254dbb54089c0331ca825",
+    "dashboard/src/components/lane-navigation-flow.test.ts": "8061430d0b96e7c8df2908ea162e4dc6a73b4e739f086901d44f0e3219d7a66f",
+    "dashboard/src/components/runtime-toml-editor.test.ts": "30e092cdf6cfb005ec84cef4fb9a333eb31cf14f4bd6ca11f86646154770cd02",
+    "dashboard/src/lib/lane-navigation.test.ts": "b49b3ce753f5f37690cdbe235a6032b0833689b0b2b04701372b1083f3ee3e99",
+    "docs/design/lane-retained-observation-identity.md": "137b65c7886fb6392dafb40fa2d7436b01baaa603aa5caf4e077cba2cdd21858",
+    "docs/design/workspace-curator-addon-execution.md": "707c859d9fdfaa63a1fb5902a0e2cc8959e06c0adcc78f2846931c01a7594091",
+    "docs/design/workspace-curator-production-owner.md": "89e18ee4021ec04fb73cdea624f624172cc36f39a34ba2850be8a648a65477d1",
+    "docs/spec/05-keeper-agent.md": "bef2463ae8720d488ad106c77dab2b73823a3a0de186e9f88e951b75bdc0a116",
+    "docs/spec/12-memory-systems.md": "8df42f960e6991d49b05aea2e9f64e2defa6c20201e855284500f403e9916259",
+    "docs/spec/14-configuration.md": "2fd1a52955c1ae4d3898412ddabacaa0252a1818472d4aece1f88badd76ec2b5",
+    "lib/keeper/keeper_exact_lane_preference.ml": "505255f25bbc2ac709bb323dd4acfa128008d4250c87e29a953b8dc7204d2a6f",
+    "lib/lane_addon/lane_addon_sources.ml": "c353cd62227cd68578553430f502ffcf68fda5e2e77f5035308ae92f719f1d3a",
+    "lib/lane_registry/lane_manifest.ml": "69c57e656fdd0f9c4c868a58cb9b2f52b8ff0694011784754f14dabafefdfc6b",
+    "lib/runtime/runtime.ml": "35e3ff33683fffdc25311c4e17dc603533162d5c9e04d069acf61518e2689aca",
+    "lib/runtime/runtime.mli": "36ba7fd470839f9c0bc1ebc2a4a083ed3561ede170e3c0e737281e8f3477c112",
+    "lib/runtime/standalone_lane.ml": "2ce5c7b02565106817c3f931c957542c53aa8d0da734e428be445a44b86f28ca",
+    "lib/runtime/standalone_lane.mli": "74255acbb7a421334bfb788864e37c28fa0cea7500d9c46ef131b98e2e866181",
+    "lib/server/server_standalone_lane_projection.ml": "00ce9f3218cee3acf8f182e041902cb1855545c7e0e7646c145c1aee454cf10f",
+    "lib/tui_decode.ml": "0d9076bd0fc47b171d667f688e7c050d989c5403d855efe6f29ede958778e51f",
+    "reports/addon-lane-full-worklist-20261021.md": "278ed5012cd625068c8189106ea8b9b56300bcda133348815b4c3a78adf819ed",
+    "test/test_dashboard_http_core.ml": "26aae6d5919174293ad4c1db7efa7a61856c463a9237e84be5c38d332d08e752",
+    "test/test_dashboard_routing_body.ml": "b7de46f0a7085c12f45462123f53560c929df0940a9c12725a5148ef4dddda06",
+    "test/test_exact_output_catalog_precedence.ml": "d2f482a9808fc0b8e84de14bd4310cc3ec825d6d88f4737883c848c3e1cbd3bd",
+    "test/test_exact_output_catalog_precedence_fixture.ml": "8bea5e3c1001262422972af789c5757b27820ec14868ba57fd77b3886cf5099c",
+    "test/test_keeper_gate_effect_coverage.ml": "ceaa3963001d4f26653eb888d3d2383444cae1e3bce06d66051f159aaa7ca654",
+    "test/test_lane_id.ml": "ce2b848fe1764b6d7dc15d4f9a135a2661dcc8cba0d201cc96bc0d8c0e480ffc",
+    "test/test_runtime_config_validity.ml": "6d3e99ca3774b15ce28d978c255754952002b87baacac383327e1dc029bd7fba",
+    "test/test_runtime_per_keeper_routing.ml": "e5031b265885ccfeca5428b122094bc8f8b67543fdc691f7a5c5b707eef6860b",
+    "test/test_server_standalone_lane_projection.ml": "b6477604b2a4ea720ae07858d246a5067547688f6531a5893dba99cf15232cb9",
+    "test/test_tui_decode.ml": "6a46db0db578bce99480de36ae991897ea0b111ec4380f23e8f5945d6c6d5809"
+  },
+  "logs": {
+    "dashboard-selected.txt": {
+      "raw_sha256": "4b361bb74c4aefc2f86d1bf54716fa3c0634091902dd50dcf57aff5427a958e3",
+      "public_sha256": "2e22d138b46a8efc89338ce23b7aac209f1cadf8633b5120a213f3609418295f"
+    },
+    "typescript.txt": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eslint.txt": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "ocaml_execution": "not yet dispatched for this source",
+  "native_build": "not yet dispatched for this source",
+  "installed": false,
+  "live_provider": false,
+  "actual_browser_ui": false,
+  "original54_completion_claim": false
+}

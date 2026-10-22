@@ -61,3 +61,12 @@ describe('Lane destinations at the URL and TOML boundaries', () => {
     expect(() => declarationIdentity('id = ["pkg"]\n')).toThrow()
   })
 })
+
+// A retained observation is a valid read target, never a model-write capability.
+it('keeps Curator history addressable while refusing its builtin configuration link', () => {
+  const common = { workspace: '/workspace', lane: 'workspace_curator_exact' }
+  expect(parseLaneTarget(JSON.stringify({ ...common, kind: 'exact' })).kind).toBe('invalid')
+  expect(parseLaneTarget(JSON.stringify({ ...common, kind: 'run_history' }))).toEqual({
+    kind: 'target', target: { ...common, kind: 'run_history' },
+  })
+})

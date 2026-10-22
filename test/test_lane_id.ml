@@ -46,7 +46,16 @@ let test_unknown_wire_ids_read_as_no_lane () =
   List.iter
     (fun raw -> check bool (Printf.sprintf "%S is no lane" raw) true (Option.is_none (Lane_id.of_wire raw)))
     [ "exact/nope"; "machine/"; "package/a/b"; "package/a\000b"; "msx"; ""; "/msx"; "tape/msx"
-    ; "exact/librarian_exact/"; "browser/Live" ]
+    ; "exact/librarian_exact/"; "browser/Live"; "exact/workspace_curator_exact" ]
+;;
+
+let test_curator_observation_has_no_builtin_route () =
+  check bool "Curator cannot select a builtin configuration route" true
+    (Option.is_none (Standalone_lane.of_id "workspace_curator_exact"));
+  check bool "the original Curator observation still decodes" true
+    (match Lane_run_identity.of_id "workspace_curator_exact" with
+     | Some lane -> Lane_run_identity.equal lane Lane_run_identity.Workspace_curator
+     | None -> false)
 ;;
 
 let test_a_package_id_reads_back () =
@@ -173,6 +182,7 @@ let () =
         ; test_case "built-in wire ids are distinct" `Quick test_builtin_wire_ids_are_distinct
         ; test_case "built-ins are the three families" `Quick test_builtins_are_the_three_families
         ; test_case "unknown wire ids read as no lane" `Quick test_unknown_wire_ids_read_as_no_lane
+        ; test_case "Curator history is not a builtin route" `Quick test_curator_observation_has_no_builtin_route
         ; test_case "a package id reads back" `Quick test_a_package_id_reads_back
         ; test_case "declaration file names" `Quick test_declaration_file_names
         ; test_case "every listed file name reads back" `Quick

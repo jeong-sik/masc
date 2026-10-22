@@ -8,7 +8,9 @@ implemented. The original admission consumer now captures actual Runtime
 provenance and reads/submits/restores the original worker result. Its separate
 commit consumer now applies and recovers original Ledger/Briefing judgments;
 scoped lifecycle/result wake delivery now signals the existing owner. The [production scheduler](workspace-curator-production-owner.md) now uses this
-original execution path; registry delivery and installed UI parity remain.
+original execution path; the shared observer now delivers original registry receipts.
+The current builtin Curator configuration route is removed; actual provider,
+container lifetime and installed UI parity remain.
 This is not a claim of completed extraction or an installed replacement.
 
 Source baseline: `3145acf9fc32ab77c25d97ab7e5710194cd270cf`.

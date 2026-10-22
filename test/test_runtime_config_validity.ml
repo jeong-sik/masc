@@ -1310,6 +1310,34 @@ let test_addon_exact_output_lanes_load_with_builtin_rules () =
       [ "an output with a slash", "a", "b/c"; "a blank declaration id", " ", "author";
         "an upper-case output", "quiz", "Author" ]
 
+let test_curator_models_belong_to_the_actual_installation () =
+  let retired = "[runtime.exact_output_lanes.workspace_curator_exact]\nslots = [\"model.http\"]\n" in
+  (match Runtime_toml.parse_string retired with
+   | Ok _ -> fail "a retained observation cannot configure a builtin model route"
+   | Error errors ->
+     check bool "the refused table is identified" true
+       (List.exists (fun (error : Runtime_toml.parse_error) ->
+          String.equal error.path "runtime.exact_output_lanes.workspace_curator_exact") errors));
+  let source =
+    "[runtime.addon_exact_lanes.\"custom.curator\".classification]\nslots = [\"model.classify\"]\ncli_slots = [\"cli.classify\"]\n\n\
+     [runtime.addon_exact_lanes.\"custom.curator\".briefing]\nslots = [\"model.brief\"]\ncli_slots = [\"cli.brief\"]\n" in
+  match Runtime_toml.parse_string source with
+  | Error _ -> fail "actual installation output routes must parse"
+  | Ok config ->
+    let lanes = config.Runtime_schema.exact_output_lane_decls in
+    check int "two independent output routes" 2 (List.length lanes);
+    List.iter (fun (output,http,cli) ->
+      let lane = List.find (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+        String.equal (Runtime_schema.exact_lane_key lane.owner) ("custom.curator/" ^ output)) lanes in
+      check (list string) "output HTTP candidates" [http] lane.slot_ids;
+      check (list string) "output CLI candidates" [cli] lane.cli_slot_ids;
+      match lane.owner with
+      | Runtime_schema.Addon owner ->
+        check string "actual installation identity" "custom.curator" owner.declaration_id;
+        check string "declared output identity" output owner.output
+      | Runtime_schema.Builtin _ -> fail "an Addon output became a builtin route")
+      ["classification","model.classify","cli.classify"; "briefing","model.brief","cli.brief"]
+
 let test_addon_exact_output_lane_tables_are_refused_where_wrong () =
   List.iter (fun (label, config, path) ->
       match Runtime_toml.parse_string config with
@@ -2811,7 +2839,6 @@ let test_judgment_lanes_join_the_priority_queue () =
     [ "librarian_exact", "background"
     ; "hitl_auto_judge", "priority"
     ; "board_attention_exact", "priority"
-    ; "workspace_curator_exact", "standard"
     ; "verifier_exact", "priority"
     ; "browser_stagehand_exact", "standard"
     ; "candle_appraiser", "standard"
@@ -7352,6 +7379,8 @@ let () =
             test_exact_output_lane_rejects_unknown_lane_id;
           test_case "add-on exact-output lanes load with built-in rules" `Quick
             test_addon_exact_output_lanes_load_with_builtin_rules;
+          test_case "Curator models use the actual Addon installation" `Quick
+            test_curator_models_belong_to_the_actual_installation;
           test_case "add-on exact-output lane tables are refused where wrong" `Quick
             test_addon_exact_output_lane_tables_are_refused_where_wrong;
           test_case "lane rejects unknown keys" `Quick

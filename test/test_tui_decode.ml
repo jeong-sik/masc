@@ -6495,7 +6495,6 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
                 "Board Attention"
             ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
             ; standalone_lane_json "librarian_exact" "Librarian"
-            ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
             ; stagehand_lane_json ()
             ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
@@ -6586,7 +6585,6 @@ let test_decode_standalone_lane_keeps_the_run_start () =
               "board_attention_exact" "Board Attention"
           ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
           ; standalone_lane_json "librarian_exact" "Librarian"
-          ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
           ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
               "verifier_exact" "Verifier"
           ; stagehand_lane_json ()
@@ -6633,7 +6631,6 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
         ~selected_slots:
           [ `Assoc [ "slot_id", `String "qwen-primary"; "count", `Int 3 ] ]
         "librarian_exact" "Librarian"
-    ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
     ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
         "verifier_exact" "Verifier"
     ; stagehand_lane_json ()
@@ -6700,7 +6697,6 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
             [ board
             ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
             ; standalone_lane_json "librarian_exact" "Librarian"
-            ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
             ; stagehand_lane_json ()
             ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"

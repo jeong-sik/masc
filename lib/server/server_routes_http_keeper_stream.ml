@@ -629,26 +629,7 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
                 | Some detail -> [ ("audit_error", `String detail) ]))))
 ;;
 
-let operation_command_error_kind = function
-  | Keeper_owner_registry.Command_lifecycle_reserved _ -> Server_keeper_chat_public_error.Owner_stopping
-  | Command_lookup_failed Inventory_stopping -> Server_keeper_chat_public_error.Owner_stopping
-  | Command_lookup_failed
-      (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
-      | Owner_initialization_failed _) ->
-    Server_keeper_chat_public_error.Store_unavailable
-  | Command_rejected (Keeper_owner.Owner_stopping | Owner_closed) -> Server_keeper_chat_public_error.Owner_stopping
-  | Command_rejected (Keeper_owner.Operation_rejected error) ->
-    (match Keeper_owner.operation_error_kind error with
-     | Invalid_operation_input -> Server_keeper_chat_public_error.Invalid_input
-     | Unknown_operation -> Server_keeper_chat_public_error.Unknown_operation
-     | Operation_not_queued -> Server_keeper_chat_public_error.Not_queued
-     | Operation_idempotency_conflict -> Server_keeper_chat_public_error.Idempotency_conflict
-     | Operation_native_call_unsettled -> Server_keeper_chat_public_error.Native_call_unsettled
-     | Operation_store_unavailable -> Server_keeper_chat_public_error.Store_unavailable)
-  | Command_rejected
-      (Keeper_owner.Store_unavailable _ | Reducer_rejected _) ->
-    Server_keeper_chat_public_error.Store_unavailable
-;;
+let operation_command_error_kind = Keeper_chat_public_error.of_command_error
 
 let control_public_error kind detail =
   let error = Server_keeper_chat_public_error.make
@@ -4006,6 +3987,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 
 module For_testing = struct
   let control_public_error = control_public_error
+  let operation_command_error_kind = operation_command_error_kind
   let operation_heartbeat_decision = operation_heartbeat_decision
   let persist_batch_user_rows = persist_batch_user_rows
   let operation_execution_of_outcome = operation_execution_of_outcome

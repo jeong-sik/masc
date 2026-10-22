@@ -1390,6 +1390,7 @@ type cursor_refusal =
   | Offset_past_rows
   | Offset_inside_row
   | Cursor_pair_mismatch
+[@@deriving enumerate]
 
 let cursor_refusal_to_wire = function
   | Offset_past_rows -> "since_offset_past_rows"

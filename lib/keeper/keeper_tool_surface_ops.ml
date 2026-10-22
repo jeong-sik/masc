@@ -502,25 +502,8 @@ let direct_reply_visible_text json =
   | Error error -> Error error
 ;;
 
-let owner_operation_error_code = function
-  | Keeper_owner_registry.Command_lifecycle_reserved _ -> "owner_stopping"
-  | Command_lookup_failed Inventory_stopping -> "owner_stopping"
-  | Command_lookup_failed
-      (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
-      | Owner_initialization_failed _) ->
-    "store_unavailable"
-  | Command_rejected (Keeper_owner.Owner_stopping | Owner_closed) ->
-    "owner_stopping"
-  | Command_rejected (Keeper_owner.Operation_rejected error) ->
-    (match Keeper_owner.operation_error_kind error with
-     | Invalid_operation_input -> "invalid_input"
-     | Unknown_operation -> "unknown_operation"
-     | Operation_not_queued -> "not_queued"
-     | Operation_idempotency_conflict -> "idempotency_conflict"
-     | Operation_native_call_unsettled -> "native_call_unsettled"
-     | Operation_store_unavailable -> "store_unavailable")
-  | Command_rejected (Keeper_owner.Store_unavailable _ | Reducer_rejected _) ->
-    "store_unavailable"
+let owner_operation_error_code error =
+  Keeper_chat_public_error.(code (of_command_error error))
 ;;
 
 let operation_payload_error ~class_ code detail =
@@ -774,7 +757,7 @@ let operation_reference_arg args =
   let invalid detail =
     Error
       (`Assoc
-         [ "error", `String "invalid_input"
+         [ "error", `String Keeper_chat_public_error.(code Invalid_input)
          ; "message", `String detail
          ])
   in
@@ -810,14 +793,14 @@ let operation_target_arg args =
     |> Result.map Keeper_invocation_contract.target_name_of_target
     |> Result.map_error (fun error ->
       `Assoc
-        [ "error", `String "invalid_input"
+        [ "error", `String Keeper_chat_public_error.(code Invalid_input)
         ; "message",
           `String (Keeper_invocation_contract.request_error_to_string error)
         ])
   | _ ->
     Error
       (`Assoc
-         [ "error", `String "invalid_input"
+         [ "error", `String Keeper_chat_public_error.(code Invalid_input)
          ; "message", `String "operation list requires exactly target"
          ])
 ;;
@@ -915,7 +898,7 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
      | Ok None ->
        tool_result_error_data ~class_:Tool_result.Workflow_rejection
          (`Assoc
-            [ "error", `String "unknown_operation"
+            [ "error", `String Keeper_chat_public_error.(code Unknown_operation)
             ; "message", `String "Keeper chat operation was not found"
             ])
      | Ok (Some operation) ->
@@ -923,13 +906,13 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
         | Error detail ->
           tool_result_error_data ~class_:Tool_result.Dependency_unavailable
             (`Assoc
-               [ "error", `String "store_unavailable"
+               [ "error", `String Keeper_chat_public_error.(code Store_unavailable)
                ; "message", `String detail
                ])
         | Ok false ->
           tool_result_error_data ~class_:Tool_result.Workflow_rejection
             (`Assoc
-               [ "error", `String "unknown_operation"
+               [ "error", `String Keeper_chat_public_error.(code Unknown_operation)
                ; "message", `String "Keeper chat operation was not found"
                ])
         | Ok true ->
@@ -979,7 +962,7 @@ let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
      | Ok None ->
        tool_result_error_data ~class_:Tool_result.Workflow_rejection
          (`Assoc
-            [ "error", `String "unknown_operation"
+            [ "error", `String Keeper_chat_public_error.(code Unknown_operation)
             ; "message", `String "Keeper chat operation was not found"
             ])
      | Ok (Some operation) ->
@@ -987,13 +970,13 @@ let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
         | Error detail ->
           tool_result_error_data ~class_:Tool_result.Dependency_unavailable
             (`Assoc
-               [ "error", `String "store_unavailable"
+               [ "error", `String Keeper_chat_public_error.(code Store_unavailable)
                ; "message", `String detail
                ])
         | Ok false ->
           tool_result_error_data ~class_:Tool_result.Workflow_rejection
             (`Assoc
-               [ "error", `String "unknown_operation"
+               [ "error", `String Keeper_chat_public_error.(code Unknown_operation)
                ; "message", `String "Keeper chat operation was not found"
                ])
         | Ok true ->
@@ -1038,7 +1021,7 @@ let keeper_delegate_list_body ~(config : Workspace.config) ~caller args =
         | Error detail ->
           tool_result_error_data ~class_:Tool_result.Dependency_unavailable
             (`Assoc
-               [ "error", `String "store_unavailable"
+               [ "error", `String Keeper_chat_public_error.(code Store_unavailable)
                ; "message", `String detail
                ])))
 ;;

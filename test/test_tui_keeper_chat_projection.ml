@@ -1107,6 +1107,38 @@ let test_error_certainty () =
              ; code = Some "store_unavailable"
              }))
      = Chat.Outcome_unverified);
+  (* 2026-10-22: no Keeper had an Owner, the server answered every message
+     before any Owner saw it, and the TUI resent each one every 0.5s. *)
+  check bool "a request that reached no owner is a verified rejection" true
+    (Chat.error_certainty
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false
+             ; message = "owner unavailable"
+             ; code =
+                 Some
+                   Masc.Keeper_chat_public_error.(code Owner_unavailable)
+             }))
+     = Chat.Verified_rejected);
+  (* A re-POST after a checkpoint or an unverified attempt: this attempt
+     reaching no Owner does not show that the id admitted nothing. *)
+  check bool "a re-POST that reached no owner keeps the fence" true
+    (Chat.error_certainty ~was_unverified:true
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false
+             ; message = "owner unavailable"
+             ; code =
+                 Some
+                   Masc.Keeper_chat_public_error.(code Owner_unavailable)
+             }))
+     = Chat.Outcome_unverified);
+  check bool "a code this build does not know keeps the fence" true
+    (Chat.error_certainty
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false; message = "unknown"; code = Some "not_a_public_code" }))
+     = Chat.Outcome_unverified);
   check bool "changed-source idempotency conflict keeps the fence" true
     (Chat.error_certainty
        (Chat.protocol_error

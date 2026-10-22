@@ -465,18 +465,16 @@ let error_certainty ?(was_unverified = false) error =
         then Verified_rejected
         else Outcome_unverified
     | Protocol_error
-        { stream_error =
-            Run_failed
-          { accepted = false
-          ; code = Some ("invalid_input" | "owner_stopping" | "unknown_operation" | "not_queued")
-          ; _
-          }
-        ; _
-        } ->
-        Verified_rejected
-    | Protocol_error
-        { stream_error = Run_failed { accepted = false; _ }; _ } ->
-        Outcome_unverified
+        { stream_error = Run_failed { accepted = false; code; _ }; _ } ->
+        (* This build's [pre_acceptance] table decides whether the kind the
+           server named admitted nothing; a code this build does not know
+           stays unverified. *)
+        (match Option.bind code Masc.Keeper_chat_public_error.of_code with
+         | Some kind ->
+           (match Masc.Keeper_chat_public_error.pre_acceptance kind with
+            | Masc.Keeper_chat_public_error.Not_accepted -> Verified_rejected
+            | Masc.Keeper_chat_public_error.Acceptance_unknown -> Outcome_unverified)
+         | None -> Outcome_unverified)
     | Protocol_error
         { stream_error =
             (Run_failed { accepted = true; _ }

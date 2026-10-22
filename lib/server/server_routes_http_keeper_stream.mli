@@ -402,6 +402,10 @@ module For_testing : sig
     Server_keeper_chat_public_error.kind -> string -> Server_keeper_chat_public_error.t
   (** The real control-route failure boundary: retain diagnostic text in its
       operator log and return only fixed public facts with a generated ID. *)
+  val operation_command_error_kind :
+    Keeper_owner_registry.command_error -> Server_keeper_chat_public_error.kind
+  (** The public kind the submission and control routes answer a typed Owner
+      command failure with. *)
   val operation_heartbeat_decision :
     Keeper_owner.Chat_operation.state option ->
     [ `Send_comment | `Finish_stream | `Retain_idle_timeout ]

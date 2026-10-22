@@ -2495,7 +2495,11 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
                the eventual answer under the same operation identity. *)
             watch ~first_post:false ~since_seq:(resume_position ()) false
         | Error error
-          when Keeper_chat.error_certainty ~was_unverified error
+          (* A re-POST follows a checkpoint (the operation was admitted) or
+             an unverified attempt, so a refusal of this attempt does not
+             show that nothing was admitted under the id. *)
+          when Keeper_chat.error_certainty
+                 ~was_unverified:(was_unverified || not first_post) error
                = Keeper_chat.Outcome_unverified ->
             if not was_unverified
             then

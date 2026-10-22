@@ -113,14 +113,15 @@ let timeout_diagnostic ~base_path ~store ~server =
 let settle_all clock base_path store count=await_owner clock base_path (fun () ->
   List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=count && ready_summary base_path
   && Curator.For_testing.is_idle ~base_path && List.for_all (fun record -> is_finished record && observer_acknowledged record) (records store))
-let publish_routes base_path urls =
+let publish_routes ?(requires_token_measurement=false) base_path urls =
   let slots=List.mapi (fun i url -> {F.id="candidate-" ^ string_of_int i;base_url=url}) urls in
   let lanes=List.map (fun output ->
     let owner=match Runtime_schema.exact_lane_owner_of_key ("curator/" ^ output) with
       | Some owner -> owner | None -> fail "invalid actual Addon output key" in
     {Runtime_schema.owner;enabled=true;slot_ids=List.map (fun (s:F.target_fixture) -> s.id) slots;
       cli_slot_ids=[];max_output_tokens=Some F.fixture_max_output_tokens;thinking=None}) ["classification";"briefing"] in
-  Runtime_exact_output_registry.publish ~lanes (F.resolver_snapshot ~source:base_path slots)
+  Runtime_exact_output_registry.publish ~lanes
+    (F.resolver_snapshot ~requires_token_measurement ~source:base_path slots)
   |> Result.map_error Runtime_exact_output_registry.publication_error_to_string |> get |> ignore
 let backend env base_path delivery : Runtime.For_testing.backend = {
   start=(fun ~sw ~state_owner ~instance_id ~installation_id:_ ~package ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
@@ -191,7 +192,7 @@ let seed_size_refusal store capture =
   let record=advance store (original_record store capture) Progress.Dispatch_intended in
   advance store record (Progress.Refused {stage=Progress.Execution;
     evidence=Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final (Input_refused Input_capacity))})
-type provider_mode = Answer | Refuse_fact of string
+type provider_mode = Answer | Refuse_fact of string | Count_capacity
 let with_fixture ?(on_response_error=(fun _ _ -> ()))
     ?(off=false) ?(routes=true) ?(start_owner=true) ?(invalid_first=false)
     ?(claims=["An original production source"]) f =
@@ -231,10 +232,13 @@ let with_fixture ?(on_response_error=(fun _ _ -> ()))
         match matches with [(_,capture)] -> capture | [] | _::_::_ -> fail "provider has no unique original request" in
       let response bad _index body=
         try
+        match !mode with
+        | Count_capacity -> `OK,Yojson.Safe.to_string (`Assoc ["input_tokens",`Int 8192])
+        | Answer | Refuse_fact _ ->
         let original=original_for body in
         let output=match Capture.work original with
           | Capture.Classification {batch;_} ->
-            let refuse=bad || match !mode with Answer -> false | Refuse_fact claim ->
+            let refuse=bad || match !mode with Answer | Count_capacity -> false | Refuse_fact claim ->
               List.exists (fun (fact:Ledger.pending_fact) -> fact.claim=claim) batch.selected in
             `Assoc ["decisions",`List (if refuse then [] else List.map (fun (fact:Ledger.pending_fact) ->
               `Assoc ["fact_id",`String (Request.fact_id fact.fact);"kind",`String "create_claim";"value",`String fact.claim]) batch.selected)]
@@ -532,6 +536,10 @@ let test_registry_failure_does_not_block_new_work ()=
       check bool "fresh source reaches a confirmed classification despite registry failure" true
         (match fresh_classification with [record] -> is_finished record | [] | _::_::_ -> false);
       check int "fresh classification and Briefing each use the actual provider" 2 (F.post_count server);
+      check int "the refused original and two new domain originals are retained" 3 (List.length (records store));
+      check bool "unconfirmed registry delivery leaves every registration pending" true
+        (List.for_all (fun record -> match (Progress.observer record.Owner.progress).registration with
+          | Lane_addon_request_receipt.Pending _ -> true | Unobserved | Acknowledged _ -> false) (records store));
       let observer=Progress.observer (original_record store capture).progress in
       check bool "unconfirmed registry keeps both original receipts pending" true
         (match observer.registration,observer.completion with
@@ -583,6 +591,81 @@ let test_finished_identity_readded_after_observed_removal ()=
     check json "completed original progress stays unchanged" progress (Progress.to_json retained.progress);
     check json "completed original capture stays unchanged" original.request retained.request;
     check int "only new classification and synthesis call the provider" (calls+2) (F.post_count server))
+type forged_original = Refused_original | Size_refused_original | Active_original
+let test_forged_observation_still_blocks_new_work initial ()=
+  let refused_claim="An original with an invalid semantic receipt" in
+  let claims=match initial with
+    | Refused_original -> [refused_claim]
+    | Size_refused_original | Active_original -> [refused_claim;"A second whole original row"] in
+  with_fixture ~start_owner:false ~claims
+    (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls ~mode ~delivery:_ ->
+    reconcile_until_export clock ~config;
+    let capture=capture_classification config in
+    let original=match initial with
+      | Size_refused_original -> seed_size_refusal store capture
+      | Active_original -> original_record store capture
+      | Refused_original -> advance store (original_record store capture)
+          (Progress.Refused {stage=Progress.Before_dispatch;evidence=`Assoc ["reason",`String "original refusal"]}) in
+    let prepared=Consumer.prepare_observation ~config ~request_id:original.request_id |> consumed in
+    let replace key value=function
+      | `Assoc fields -> `Assoc (List.map (fun (name,previous) -> name,if name=key then value else previous) fields)
+      | _ -> fail "expected a retained receipt object" in
+    let receipt=prepared.registration.receipt in
+    let forged=Lane_addon_request_receipt.make ~observed_at:receipt.observed_at
+      ~payload:(replace "run_id" (`String "another-original-run") receipt.payload) |> get in
+    let wire=match get (Store.load_tool_request_owner store ~scope:Capture.scope ~request_id:original.request_id) with
+      | Some wire -> wire | None -> fail "original owner is missing" in
+    let history=match Progress.to_json prepared.original.progress with
+      | `List events -> `List (List.map (fun event ->
+        if member "event" event=`String "observer_registration_intended" then
+          replace "receipt" (Lane_addon_request_receipt.to_json forged) event else event) events)
+      | _ -> fail "expected original ordered progress" in
+    let forged_wire=replace "progress" history wire in
+    get (Store.save_tool_request_owner store ~scope:Capture.scope ~request_id:original.request_id forged_wire);
+    (match Consumer.deliver_observation ~config ~request_id:original.request_id with
+     | Error (Consumer.Original_observation_failed (Consumer.Rejected _)) -> ()
+     | Error (Original_observation_failed (Unavailable _ | Uncertain _) | Registry_delivery_failed _) | Ok _ ->
+       fail "semantic receipt forgery must remain an integrity failure");
+    commit_facts base_path (claims @ ["A separate source cannot bypass original integrity"]);
+    (match initial with
+     | Active_original ->
+       mode:=Count_capacity;
+       publish_routes ~requires_token_measurement:true base_path urls
+     | Refused_original | Size_refused_original -> ());
+    Curator.start ~sw ~config;
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path
+      && match initial with
+        | Refused_original | Size_refused_original -> true
+        | Active_original -> match Progress.phase (original_record store capture).progress with
+          | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ -> false
+          | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> true);
+    check int "invalid original receipt grants neither new root nor successor" 1 (List.length (records store));
+    (match initial with
+     | Active_original ->
+       let retained=original_record store capture in
+       (match Progress.phase retained.progress with
+        | Progress.Rejected {stage=Progress.Execution;evidence} ->
+          check json "actual token admission refusal settles the original without a child"
+            (Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final (Input_refused Input_capacity))) evidence
+        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+        | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+          fail "the active original did not retain its actual capacity refusal");
+       check int "the original performs one actual token-count request" 1 (F.post_count server);
+       check (list string) "capacity refusal runs before generation"
+         ["/v1/messages/count_tokens"] (F.request_paths server);
+       (match (Progress.observer retained.progress).registration with
+        | Lane_addon_request_receipt.Pending actual ->
+          check json "settlement preserves the invalid observer evidence"
+            (Lane_addon_request_receipt.to_json forged) (Lane_addon_request_receipt.to_json actual)
+        | Unobserved | Acknowledged _ -> fail "invalid registration was removed or acknowledged")
+     | Refused_original | Size_refused_original ->
+       check int "invalid original receipt dispatches no provider" 0 (F.post_count server);
+       check json "invalid receipt evidence remains unchanged" forged_wire
+         (match get (Store.load_tool_request_owner store ~scope:Capture.scope ~request_id:original.request_id) with
+          | Some wire -> wire | None -> fail "original evidence was removed"));
+    check bool "integrity failure retains maintenance demand" true
+      (match Curator.For_testing.snapshot ~base_path with
+       | Some owner -> owner.observation_retry | None -> false))
 let test_successor_frontier_ignores_an_old_semantic_destination ()=
   let old_claims=["Old configured selection a";"Old configured selection b"]
   and current_claims=["Current configured selection a";"Current configured selection b"] in
@@ -744,6 +827,12 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "registry delivery failure preserves new work and original ACK retries" `Quick
     test_registry_failure_does_not_block_new_work;
   test_case "finished source can return as new pending work after actual removal" `Quick test_finished_identity_readded_after_observed_removal;
+  test_case "invalid original observation still refuses new primary work" `Quick
+    (test_forged_observation_still_blocks_new_work Refused_original);
+  test_case "invalid original observation still refuses a new size successor" `Quick
+    (test_forged_observation_still_blocks_new_work Size_refused_original);
+  test_case "active original settles its actual size refusal without a new successor after observer integrity fails" `Quick
+    (test_forged_observation_still_blocks_new_work Active_original);
   test_case "only the current semantic destination supplies a size successor" `Quick test_successor_frontier_ignores_an_old_semantic_destination;
   test_case "complete malformed original inventory blocks replacement" `Quick test_complete_discovery_blocks_malformed_original;
   test_case "new child requires fresh Off and semantic configuration authority" `Quick test_new_child_requires_fresh_configured_admission;

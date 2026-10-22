@@ -128,7 +128,8 @@ val deliver_observation : config:Workspace.config -> request_id:string ->
     repopulate evicted registry history. A failed/lost ACK retries this observer
     path, never primary work. [Registry_delivery_failed] preserves retry demand
     without blocking new primary work. [Original_observation_failed] includes
-    prepare, fresh ACK validation and final restore failures; these still block
+    prepare, invalid original registry input, fresh ACK validation and final
+    restore failures; these still block
     new primary work because original journal integrity is unconfirmed.
     Caller holds the original workspace lease and
     serializes the entire pass. Available while Off; no model/worker/domain save. *)

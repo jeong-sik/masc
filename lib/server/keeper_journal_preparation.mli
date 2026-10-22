@@ -80,6 +80,8 @@ val adopt_input : run_dir:string -> expected_checkpoint_sha256:string -> input_p
 (** Explicit operator adoption of the assessed exact input state. Acquires the
     configured BasePath lease, revalidates all captured evidence, confirms
     durable retention at the input-owner location and derives a separate DB.
+    Reconfirmation refreshes only that exact retained file's captured identity;
+    unrelated evidence and subsequent edits still invalidate publication.
     Preserves source bundle, live journal, metadata and canonical checkpoint;
     publishes private metadata/checkpoint evidence and a separate manifest last.
     Retention failures preserve their exact installation evidence. Cancellation

@@ -626,8 +626,7 @@ let reconfirm_installation_retention plan =
   let* retained,_ = read_reference ~base_path ~path reference in
   (* Reconfirmation durably rewrites the same accepted bytes. Update only this
      file's witness; every unrelated pre-lease snapshot remains unchanged. *)
-  let refresh files = List.map (fun (captured,file) ->
-    if captured=path then captured,retained else captured,file) files in
+  let refresh = refresh_retained_witness ~path ~retained in
   Ok {plan with ji_input={plan.ji_input with ip_related=refresh plan.ji_input.ip_related};
     ji_files=refresh plan.ji_files}
 let install_using ~before_replacement

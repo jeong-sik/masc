@@ -1150,12 +1150,23 @@ let test_activation_brings_the_observed_tab_forward () =
    | Error (Peer.Before_effect _) -> ()
    | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) ->
      fail "Firefox's documented refusal is not before effect");
+  (* An error Firefox did not document for activation may come after the tab
+     moved; the tab is read again, so the outcome is known. *)
+  activate_error := Some "unknown error";
+  (match activate "https://example.test/" with
+   | Error (Peer.Partial_failure {receipt;_}) ->
+     check bool "the receipt reads the tab after the error" true
+       Yojson.Safe.Util.(member "action" receipt = `String "activate_tab" && member "active" receipt = `Bool true)
+   | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) -> fail "an answered activation error was not read again");
   activate_error := None;
   visible := false;
   match activate "https://example.test/" with
-  | Error (Peer.Outcome_unknown _) -> ()
-  | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _) ->
-    fail "a tab still hidden after activation was reported as in front"
+  | Error (Peer.Partial_failure {tab_id;receipt;_}) ->
+    check int "the partial names the tab" 1 tab_id;
+    check bool "a tab still hidden is reported as read, not in front" true
+      (Yojson.Safe.Util.member "active" receipt = `Bool false)
+  | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) ->
+    fail "a tab still hidden after activation was not reported as read"
 let test_tabs_name_their_window () =
   let peer = peer_of (fun method_ _ ->
     match method_ with

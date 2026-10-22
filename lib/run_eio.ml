@@ -88,7 +88,13 @@ let write_text_file path content =
 
 let write_run config (run : run_record) =
   let path = run_json_path config run.task_id in
-  write_json config path (run_record_to_json run)
+  match write_json_commit_result config path (run_record_to_json run) with
+  | Error detail -> Error (Storage_failure detail)
+  | Ok { mirror_error } ->
+    Option.iter
+      (fun detail -> Log.Misc.warn "run metadata committed; %s" detail)
+      mirror_error;
+    Ok ()
 
 let read_run config task_id : (run_record, error) result =
   let path = run_json_path config task_id in
@@ -117,8 +123,9 @@ let init config ~task_id ~agent_name : (run_record, string) result =
     let plan_file = plan_path config task_id in
     if not (path_exists config plan_file) then
       write_text_file plan_file "# Run Plan\n\n";
-    write_run config run;
-    Ok run
+    write_run config run
+    |> Result.map (fun () -> run)
+    |> Result.map_error error_to_string
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
@@ -144,8 +151,7 @@ let update_plan config ~task_id ~content : (run_record, error) result =
           let updated = { run with plan = content; updated_at = Masc_domain.now_iso () } in
           let path = plan_path config task_id in
           write_text_file path content;
-          write_run config updated;
-          Ok updated)
+          write_run config updated |> Result.map (fun () -> updated))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Storage_failure (Printexc.to_string e))

@@ -13,15 +13,17 @@ test('an attached snapshot exports to persistent project storage and drains the 
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:80,rows:24,write(){}})
   const timeline={duration:1,channels:0,midi:new Map(),manifest:{state:'recorded',input:{name:'Interface'}}}
   let completeExport
-  const substitutes = { StatusReader,process,join,resolve,randomUUID,safeText:String,emitKeypressEvents(){},
+  const substitutes = { StatusReader,join,resolve,randomUUID,safeText:String,emitKeypressEvents(){},
     mkdir:async path=>observed.mkdir.push(path),devices:async()=>({audio:[],midi:[]}),midiDestinations:async()=>[],readCapture:async()=>timeline,
     exportMidiClips:async(value,target)=>{observed.exports.push({value,target});await new Promise(resolve=>{completeExport=resolve});return [join(target,'keys.midi2')]},
     record(){throw new Error('Unexpected input acquisition')},spawn(){throw new Error('Unexpected player')},
     mkdtemp:async()=>{throw new Error('Unexpected temporary directory')},rm:async()=>{throw new Error('Unexpected removal')},
     tmpdir(){throw new Error('Unexpected temporary storage')},
+    prepareCapturedPlayback:async()=>{throw new Error('Unexpected playback preparation')},prepareCapturedWave:async()=>{throw new Error('Unexpected wave preparation')},
+    openPlayback(){throw new Error('Unexpected playback')},
     CaptureTimeline:class{},waveform(){throw new Error('Unexpected audio rendering')},
   }
-  const { viewSession } = await loadSubstituted(new URL('../music-session.mjs', import.meta.url), substitutes)
+  const { viewSession } = await loadSubstituted(new URL('../music-session.mjs', import.meta.url), substitutes, { globals: { process } })
   const abort=new AbortController()
   const done=viewSession({directory:'/private/take',root:'/project/recordings',exportRoot:'/project/exports',embedded:true,signal:abort.signal})
   try {

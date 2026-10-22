@@ -14,8 +14,8 @@ async function controller({ preview = async () => {}, exported = async () => {} 
     stdout: Object.assign(new EventEmitter(), { isTTY: true, columns: 100, rows: 24, write() {} }) }
   const asset = { name: 'Keys', parts: { midi: { sha256: 'a'.repeat(64) } } }
   const packets = [packet(0n, 'A', [JZZ.UMP.umpNoteOn(0, 0, 60, 0x9001)]), packet(100n, 'A', [JZZ.UMP.umpNoteOff(0, 0, 60, 0x1234)])]
-  const substitutes = { process, isDeepStrictEqual, newUmpEditor, umpEditorAction, umpEditorCommand, safeText: String, emitKeypressEvents() {} }
-  const { viewUmpEditor } = await loadSubstituted(new URL('../ump-tui.mjs', import.meta.url), substitutes)
+  const substitutes = { isDeepStrictEqual, newUmpEditor, umpEditorAction, umpEditorCommand, safeText: String, emitKeypressEvents() {} }
+  const { viewUmpEditor } = await loadSubstituted(new URL('../ump-tui.mjs', import.meta.url), substitutes, { globals: { process } })
   const abort = new AbortController()
   const done = viewUmpEditor({ asset, packets, signal: abort.signal, onPreview: preview, onExport: exported })
   const key = (name, text = '', extra = {}) => process.stdin.emit('keypress', text, { name, ...extra })

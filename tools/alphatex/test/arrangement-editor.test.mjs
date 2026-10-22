@@ -4,7 +4,6 @@ import { importPhraseDocument } from '../phrase-arrangement.mjs'
 import { newEditor, editorCommand } from '../sequencer-editor.mjs'
 import { practiceEnabled } from '../arrangement-practice.mjs'
 import { liveMidiPlan } from '../live-midi.mjs'
-import { calibrationSelection } from '../audio-calibration.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter, once } from 'node:events'
@@ -13,7 +12,7 @@ import { mkdtemp, readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash, randomUUID } from 'node:crypto'
-import { pickerFooter, selectionLabel } from '../instruments.mjs'
+import { pickerFooter } from '../instruments.mjs'
 import { emitKeypressEvents } from 'node:readline'
 import { newArrangement, editArrangement, arrangementSchedule } from '../arrangement.mjs'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from '../arrangement-playback.mjs'
@@ -97,9 +96,9 @@ async function controller(options={}){
     }
     async terminate(){observed.terminated=true}
   }
-  const substitutes={ StatusReader,process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
-    observeTransport(value){observed.transport=value},
-    defaultStateDirectory:()=>'/synthetic-state',pickerFooter,selectionLabel,
+  const substitutes={ StatusReader,Worker:OwnedWorker,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
+    defaultStateDirectory:()=>'/synthetic-state',pickerFooter,
+    startSoundArrangement(){throw new Error('Unexpected sound arrangement')},
     InstrumentPicker:class {
       constructor(callbacks){this.callbacks=callbacks;this.view=null;observed.pickers.push(this)}
       async open(){this.view={kind:'presets',title:'Instrument',cursor:0};this.callbacks.notify()}
@@ -115,7 +114,7 @@ async function controller(options={}){
       return {promise,cancel(){entry.cancelled++}}
     },
     practiceEnabled, emitKeypressEvents(){},safeText:String,recordingEpoch,recordingCorrectionContext,recordingCorrectionCapture,calibrationMilliseconds,calibrationResidual,validateCalibrationCapture,
-    liveMidiPlan, calibrationSelection, midiDestinations:async()=>[],
+    liveMidiPlan, midiDestinations:async()=>[],
     captureFluidSound(path){
       let finish,reject; const promise=new Promise((yes,no)=>{finish=yes;reject=no})
       const entry={path,finish,reject,cancels:0};observed.soundSelections.push(entry)
@@ -155,14 +154,6 @@ async function controller(options={}){
       observed.captures.push(entry)
       return{completion,stop(){entry.stops++}}
     },
-    openSequencer(options){
-      let finish;const result=new Promise(resolve=>{finish=resolve})
-      observed.phrases.push({options,finish});return result
-    },
-    openUmpEditor(options){
-      let finish;const result=new Promise(resolve=>{finish=resolve})
-      observed.umpEditors.push({options,finish});return result
-    },
     viewSession(options){
       let finish
       const completion=new Promise(resolve=>{finish=resolve})
@@ -182,7 +173,19 @@ async function controller(options={}){
     saveProject:async()=>{throw new Error('Unexpected unverified recovery')},
     saveArrangement:async(path,project,revision,extra)=>{observed.recovered.push({path,project,revision,...extra})},
   }
-  const {viewArrangement}=await loadSubstituted(new URL('../arrangement-tui.mjs',import.meta.url),substitutes,{rewrite:source=>source
+  // Names the view uses without importing them, or that the rewrites below add.
+  const globals={ process,
+    observeTransport(value){observed.transport=value},
+    openSequencer(options){
+      let finish;const result=new Promise(resolve=>{finish=resolve})
+      observed.phrases.push({options,finish});return result
+    },
+    openUmpEditor(options){
+      let finish;const result=new Promise(resolve=>{finish=resolve})
+      observed.umpEditors.push({options,finish});return result
+    },
+  }
+  const {viewArrangement}=await loadSubstituted(new URL('../arrangement-tui.mjs',import.meta.url),substitutes,{globals,rewrite:source=>source
     .replace('function draw() {','function draw() { observeTransport(transport);')
     .replace("new URL('./arrangement-worker.mjs', import.meta.url)","new URL('file:///worker')")
     .replace("await import('./sequencer-tui.mjs')",'await Promise.resolve({viewSequencer:openSequencer})')

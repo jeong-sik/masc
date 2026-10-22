@@ -16,7 +16,7 @@ async function scenario(paired, defaultOutput = false) {
  process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:80,rows:24,write(){}})
  const timeline={duration:1,channels:0,midi:new Map(),manifest:{state:'recorded',input:{name:'Synthetic'}}}
  const abort=new AbortController()
- const substitutes = { StatusReader,process,join,resolve,tmpdir,randomUUID,safeText:String,emitKeypressEvents(){},
+ const substitutes = { StatusReader,join,resolve,tmpdir,randomUUID,safeText:String,emitKeypressEvents(){},
   mkdtemp:async()=>'/private-owned-play',mkdir:async()=>{},rm:async path=>observed.removed.push(path),
   devices:async()=>({audio:[],midi:[]}),midiDestinations:async()=>[],readCapture:async()=>timeline,
   CaptureTimeline:class{},waveform(){throw Error('No waveform expected')},exportMidiClips(){throw Error('No export expected')},record(){throw Error('No recording expected')},spawn(){throw Error('Selected output must use native playback')},
@@ -30,7 +30,7 @@ async function scenario(paired, defaultOutput = false) {
    observed.child=child;return handle
   }
  }
- const { viewSession } = await loadSubstituted(new URL('../music-session.mjs', import.meta.url), substitutes)
+ const { viewSession } = await loadSubstituted(new URL('../music-session.mjs', import.meta.url), substitutes, { globals: { process } })
  const output=defaultOutput?undefined:'selected-audio'
  const done=viewSession({directory:'/original-take',output,...(paired?{midiOutput:'123'}:{}),signal:abort.signal})
  try {

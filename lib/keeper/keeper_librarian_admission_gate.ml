@@ -128,7 +128,8 @@ let valid_prefix authority input transcript =
   | Ok result -> Ok (Some result)
   | Error (Gate.Missing_evaluation index) when index = List.length transcript.evaluations -> Ok None
   | Error (Gate.Incomplete_evaluation index) when index + 1 = List.length transcript.evaluations -> Ok None
-  | Error error -> Error (Gate.replay_error_to_string error)
+  | Error ((Gate.Invalid_evidence _ | Incomplete_evaluation _ | Missing_evaluation _
+      | Extra_evaluations _) as error) -> Error (Gate.replay_error_to_string error)
 let transcript_step previous next =
   let* () = require (Option.is_none previous.aborted) "An aborted gate cannot continue" in
   let rec transition left right = match left, right with
@@ -296,7 +297,8 @@ let resume ~store ~owner ~capture ~record ~live_authority =
           ~new_claims:restored.input.new_claims ~superseding:restored.input.superseding
           ~absorbed:restored.input.absorbed () with
         | Error (Gate.Missing_evaluation _ | Incomplete_evaluation _) -> Ok (Pending !current)
-        | Error error -> Error (Gate.replay_error_to_string error)
+        | Error ((Gate.Invalid_evidence _ | Extra_evaluations _) as error) ->
+          Error (Gate.replay_error_to_string error)
         | Ok result ->
           let* confirmed = match restore_result restored.authority restored.input (!transcript).evaluations with
             | Ok result -> Ok result | Error error -> Error (Gate.replay_error_to_string error) in

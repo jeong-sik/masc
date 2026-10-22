@@ -23,7 +23,7 @@ let option decode = function `Null -> Ok None | json -> let+ value=decode json i
 let canonical = Lane_addon_action.canonical
 let same a b = let* a=canonical a in let+ b=canonical b in Yojson.Safe.equal a b
 let equal a b detail = let* same=same a b in require same detail
-let owner_error = Result.map_error Owner.error_to_string
+let owner_error result = Result.map_error Owner.error_to_string result
 let update_error = Result.map_error Owner.update_error_to_string
 let rec ordered (json:Yojson.Safe.t) : Yojson.Safe.t = match json with
   | `Assoc fields -> `Assoc (List.sort (fun (a,_) (b,_) -> String.compare a b)
@@ -184,7 +184,9 @@ let check_size ~store ~owner ~inventory ~(parent:part) ~restore_gate source =
       let+ ()=require (Gate.failure_kind result=Some Gate.Input_capacity_exceeded)
         "Original gate did not refuse input capacity" in Gate.run_result_to_yojson result
     | (Exact_source _ | Gate_source _),
-      (Exact.Call_ended (Answered _ | Invalid_output _ | Input_refused _ | Output_limit_reached _)
+      (Exact.Call_ended (Answered _ | Invalid_output _
+          | Input_refused (Input_capacity | Context_overflow | Invalid_request | Request_body_refused)
+          | Output_limit_reached _)
        | Exact.Call_refused _) -> Error "Original execution does not prove the requested size-only subdivision"
   in
   let proof=`Assoc ["source",source_json source;"request_digest",`String (Exact.digest request);

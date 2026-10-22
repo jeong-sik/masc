@@ -4,7 +4,7 @@ type request = { route : Browser_selection.preference; tab_id : int;
 let ( let* ) = Result.bind
 let parse = function
   | `Assoc fields ->
-    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"; "width"; "height"] in
+    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"; "width"; "height"; "value"] in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in
@@ -56,6 +56,9 @@ let parse = function
       let keys = match List.assoc_opt "action" fields with
         | Some (`String "set_viewport") -> keys
         | _ -> "width" :: "height" :: keys in
+      let keys = match List.assoc_opt "action" fields with
+        | Some (`String "select_option") -> keys
+        | _ -> "value" :: keys in
       if List.exists (fun key -> List.mem_assoc key fields) keys
       then Error "arguments do not match the selected interaction action" else Ok () in
     let required key = match List.assoc_opt key fields with
@@ -176,6 +179,12 @@ let parse = function
              | Some target -> Ok (Browser_lane.Fill_node {target;text})
              | None -> let* selector = selector () in Ok (Browser_lane.Fill {selector;text}))
          | _ -> Error "fill requires string text (empty text clears the input)")
+      | Some (`String "select_option") ->
+        let* () = excludes ["text"; "documentId"; "nodeId"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
+        let* selector = selector () in
+        (match List.assoc_opt "value" fields with
+         | Some (`String value) -> Ok (Browser_lane.Select_option {selector;value})
+         | _ -> Error "select_option requires the string value of one option (an empty value selects the option whose value is empty)")
       | Some (`String "scroll") ->
         let* () = excludes ["selector"; "text"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"] in
         let* x = integer "x" in let* y = integer "y" in Ok (Browser_lane.Scroll {x; y})
@@ -396,7 +405,7 @@ let script = {js|function interactInPage(args) {
       throw new Error("scroll_coordinates_must_be_integers");
     effectStarted = true;
     window.scrollBy({left: args.x, top: args.y, behavior: "instant"});
-  } else if (args.action === "click" || args.action === "fill") {
+  } else if (args.action === "click" || args.action === "fill" || args.action === "select_option") {
     let element;
     if (args.nodeId !== undefined || args.documentId !== undefined) {
       if (args.selector !== undefined || typeof args.nodeId !== "string" || typeof args.documentId !== "string")
@@ -421,6 +430,23 @@ let script = {js|function interactInPage(args) {
       if (typeof element.click !== "function") throw new Error("element_not_clickable");
     effectStarted = true;
       element.click();
+    } else if (args.action === "select_option") {
+      if (!(element instanceof HTMLSelectElement)) throw new Error("element_is_not_a_select");
+      if (element.multiple) throw new Error("multiple_select_is_unsupported");
+      if (typeof args.value !== "string") throw new Error("option_value_required");
+      const matches = Array.from(element.options).filter(option => option.value === args.value);
+      if (matches.length !== 1) throw new Error(matches.length === 0 ? "option_not_found" : "option_is_ambiguous");
+      if (matches[0].matches(":disabled")) throw new Error("option_disabled");
+      const previousIndex = element.selectedIndex;
+    effectStarted = true;
+      element.selectedIndex = matches[0].index;
+      if (element.value !== args.value) {
+        element.selectedIndex = previousIndex;
+        throw new Error("select_rejected_value");
+      }
+      element.dispatchEvent(new Event("input", {bubbles: true}));
+      element.dispatchEvent(new Event("change", {bubbles: true}));
+      if (element.value !== args.value) throw new Error("select_changed_during_events");
     } else {
       if (typeof args.text !== "string") throw new Error("fill_text_required");
       const input = element instanceof HTMLInputElement;
@@ -607,7 +633,7 @@ let resolve_pointer_action action = function
        Ok (Browser_lane.Click_at {point;viewport;button=Browser_lane.Pointer.Primary})
      | Browser_lane.Drag_to {via;duration_ms;_} -> let* from = point "from" in let* to_ = point "to" in
        Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
-     | Browser_lane.Activate_tab | Browser_lane.Fill _
+     | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
      | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
      | Browser_lane.Tap_at _ | Browser_lane.Swipe _

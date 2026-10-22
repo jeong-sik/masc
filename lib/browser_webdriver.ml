@@ -465,7 +465,7 @@ let rec execute_unlocked t = function
           let* url = string_field "url" resolved in
           Ok (Some url,action)
         | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
-        | Browser_lane.Activate_tab | Browser_lane.Fill _
+        | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
         | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
         | Browser_lane.Tap_at _ | Browser_lane.Swipe _
         | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
@@ -512,7 +512,7 @@ let rec execute_unlocked t = function
             | Browser_lane.Swipe {to_;via;duration_ms;_} -> Browser_lane.Pointer.Swipe {via;destination=to_;duration_ms}
             | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
-            | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+            | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Select_option _
             | Browser_lane.Scroll _ | Browser_lane.Follow_link _
             | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Browser_lane.Pointer.Click Browser_lane.Pointer.Primary in
           let actions = `Assoc ["actions", Browser_lane.Pointer.input_sources
@@ -527,7 +527,7 @@ let rec execute_unlocked t = function
                 call t session `POST "/actions" (Some actions), Ok ()
             | Browser_lane.Double_click _ | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
-            | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+            | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Select_option _
             | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Drag _
             | Browser_lane.Tap_at _ | Browser_lane.Swipe _
             | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> let released = ref None in
@@ -548,7 +548,7 @@ let rec execute_unlocked t = function
            | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before) ::
                ("action",`String action_name) :: fields))
            | _ -> Error (Protocol "invalid pointer receipt")))
-        | Browser_lane.Activate_tab | Browser_lane.Fill _
+        | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
         | Browser_lane.Scroll _ | Browser_lane.Follow_link _
         | Browser_lane.Fill_node _ -> script t session (Browser_scene_script.runtime ^ Browser_interaction.script) [args]
       in
@@ -696,7 +696,7 @@ let execute t verb =
     | Browser_lane.Page_interact
         { action =
             ( Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
-            | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Scroll _
+            | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Scroll _
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Hover_at _ | Browser_lane.Click_at _
             | Browser_lane.Tap_at _ | Browser_lane.Swipe _

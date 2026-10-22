@@ -154,6 +154,19 @@ let test_touch_table () =
   check bool "the extension has no touch" false (reaches (Cap.Connected Lane.Web_extension));
   check bool "Safari has no touch" false (reaches Cap.Safari_unavailable)
 
+let test_select_option_table () =
+  let invocation backend = match Cap.support backend Cap.Select_option with
+    | Cap.Available invocation | Cap.Conditional {invocation; _} -> Some (invocation.Cap.tool, invocation.Cap.action)
+    | Cap.Unsupported _ -> None in
+  List.iter (fun (label,backend) ->
+    check bool (label ^ " selects through BrowserInteract") true
+      (invocation backend = Some (Cap.Interact, Some "select_option")))
+    ["live BiDi",Cap.Connected Lane.Webdriver_bidi;"the extension",Cap.Connected Lane.Web_extension;
+     "Stagehand",Cap.Owned_chromium];
+  check bool "the owned Firefox keeps BrowserAct select" true
+    (invocation Cap.Owned_gecko = Some (Cap.Act, Some "select"));
+  check bool "Safari has no select" true (invocation Cap.Safari_unavailable = None)
+
 let test_list_windows_table () =
   let reaches backend = match Cap.support backend Cap.List_windows with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
@@ -171,4 +184,5 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "viewport resize is claimed only where a size can be set" `Quick test_resize_viewport_table;
   test_case "history and close are claimed on every backend that acts on tabs" `Quick test_tab_history_and_close_table;
   test_case "touch is claimed only where a touch pointer is sent" `Quick test_touch_table;
+  test_case "select_option is claimed where the shared script runs" `Quick test_select_option_table;
   test_case "window listing is claimed only where tabs name their window" `Quick test_list_windows_table]]

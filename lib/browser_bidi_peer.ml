@@ -468,7 +468,7 @@ let dispatch ?actor ?request_id t ~verb args =
           let* url = pre (string "url" resolved) in
           Ok (Some url,action)
         | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
-        | Browser_lane.Activate_tab | Browser_lane.Fill _
+        | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
         | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
         | Browser_lane.Tap_at _ | Browser_lane.Swipe _
         | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
@@ -489,7 +489,7 @@ let dispatch ?actor ?request_id t ~verb args =
       | Browser_lane.Tap_at {point;viewport} -> pointer t context args ~viewport ~start:point Tap_pointer
       | Browser_lane.Swipe {from;to_;viewport;via;duration_ms} -> pointer t context args ~viewport ~start:from (Swipe_pointer {destination=to_;via;duration_ms})
       | Browser_lane.Drag {from;to_;viewport;via;duration_ms} -> pointer t context args ~viewport ~start:from (Drag_pointer {destination=to_;via;duration_ms})
-      | Browser_lane.Fill _ | Fill_node _ | Scroll _ | Follow_link _ ->
+      | Browser_lane.Fill _ | Browser_lane.Select_option _ | Fill_node _ | Scroll _ | Follow_link _ ->
         (match script t context Browser_interaction.script args with
         | Error e -> Error (Outcome_unknown e)
         | Ok result -> (match field "interactionFailure" result with

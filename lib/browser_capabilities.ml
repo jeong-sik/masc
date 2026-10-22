@@ -159,8 +159,14 @@ let support backend operation = match backend with
           [observed;"Requires extension 0.8.0+, exact clientId/tabId, expectedUrl and factor 0.3–5. Uses measured browser zoom, never CSS scaling.";
            "Only automatic zoom mode is supported; per-origin scope may also affect and persist for same-origin tabs. Re-read the scene/screenshot afterward."]
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
-    | Select_option -> gecko_only backend (invoke ~action:"select" Act)
-        [observed;"Requires one observed native select and exact option value."]
+    | Select_option -> (match backend with
+      | Owned_gecko -> Conditional {invocation=invoke ~action:"select" Act;
+          constraints=[observed;"Requires one observed native select and exact option value."]}
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_chromium ->
+          conditional ~action:"select_option" Interact
+            [observed;"Pass the selector of one single-choice select and the exact value of one enabled option; a multiple select, a missing, repeated or disabled option is refused before any effect.";
+             "Sets the option and emits input and change; this is not a trusted click on the list."]
+      | Safari_unavailable -> missing)
     | Read_frames -> gecko_only backend (invoke ~mode:"frames" Read)
         [observed;"Explicit tabId; framePath consists of observed outer-to-inner frame selectors."]
     | Frame_interaction -> gecko_only backend (invoke Act)

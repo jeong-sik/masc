@@ -116,7 +116,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                 { action =
                     ( Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
                     | Browser_lane.Activate_tab | Browser_lane.Click _
-                    | Browser_lane.Fill _ | Browser_lane.Scroll _
+                    | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Scroll _
                     | Browser_lane.Hover _ | Browser_lane.Drag_to _
                     | Browser_lane.Hover_at _ | Browser_lane.Click_at _
                     | Browser_lane.Tap_at _ | Browser_lane.Swipe _

@@ -38,6 +38,7 @@ let viewport_side_min_px = 100
 let viewport_side_max_px = 4096
 
 type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
+  | Select_option of { selector : string; value : string }
   | Set_zoom of { factor : float }
   | Set_viewport of viewport_size
   | Double_click of pointer_target
@@ -124,6 +125,7 @@ let interaction_verb = function
   | Activate_tab -> "activate_tab"
   | Set_zoom _ -> "set_zoom"
   | Set_viewport _ -> "set_viewport"
+  | Select_option _ -> "select_option"
   | Double_click _ -> "double_click"
   | Double_click_at _ -> "double_click_at"
   | Type_text _ -> "type_text"
@@ -184,6 +186,7 @@ let interaction_args ~tab_id ~expected_url action =
         "viewport", Pointer.viewport_to_json viewport] @ drag_fields via duration_ms
     | Click selector -> [verb; "selector", `String selector]
     | Fill {selector; text} -> [verb; "selector", `String selector; "text", `String text]
+    | Select_option {selector; value} -> [verb; "selector", `String selector; "value", `String value]
     | Follow_link target -> verb :: node_fields target
     | Click_node target -> verb :: node_fields target
     | Fill_node {target;text} -> verb :: ("text",`String text) :: node_fields target
@@ -342,7 +345,7 @@ let live_capability_of_interaction = function
   | Set_viewport _ -> Viewport_resize
   | Double_click _ | Double_click_at _ -> Trusted_double_click
   | Type_text _ | Press_key _ -> Trusted_keyboard
-  | Click _ | Fill _ | Scroll _ | Follow_link _ | Click_node _ | Fill_node _ -> Dom_interaction
+  | Click _ | Fill _ | Select_option _ | Scroll _ | Follow_link _ | Click_node _ | Fill_node _ -> Dom_interaction
   | Click_at {button = Pointer.Primary; _} -> Point_click
   | Click_at {button = Pointer.Middle | Pointer.Secondary; _} -> Trusted_button_click
   | Scroll_at _ -> Point_scroll

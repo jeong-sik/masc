@@ -923,7 +923,7 @@ function interactInPage(args) {
       throw new Error("scroll_coordinates_must_be_integers");
     effectStarted = true;
     window.scrollBy({left: args.x, top: args.y, behavior: "instant"});
-  } else if (args.action === "click" || args.action === "fill") {
+  } else if (args.action === "click" || args.action === "fill" || args.action === "select_option") {
     let element;
     if (args.nodeId !== undefined || args.documentId !== undefined) {
       if (args.selector !== undefined || typeof args.nodeId !== "string" || typeof args.documentId !== "string")
@@ -948,6 +948,23 @@ function interactInPage(args) {
       if (typeof element.click !== "function") throw new Error("element_not_clickable");
     effectStarted = true;
       element.click();
+    } else if (args.action === "select_option") {
+      if (!(element instanceof HTMLSelectElement)) throw new Error("element_is_not_a_select");
+      if (element.multiple) throw new Error("multiple_select_is_unsupported");
+      if (typeof args.value !== "string") throw new Error("option_value_required");
+      const matches = Array.from(element.options).filter(option => option.value === args.value);
+      if (matches.length !== 1) throw new Error(matches.length === 0 ? "option_not_found" : "option_is_ambiguous");
+      if (matches[0].matches(":disabled")) throw new Error("option_disabled");
+      const previousIndex = element.selectedIndex;
+    effectStarted = true;
+      element.selectedIndex = matches[0].index;
+      if (element.value !== args.value) {
+        element.selectedIndex = previousIndex;
+        throw new Error("select_rejected_value");
+      }
+      element.dispatchEvent(new Event("input", {bubbles: true}));
+      element.dispatchEvent(new Event("change", {bubbles: true}));
+      if (element.value !== args.value) throw new Error("select_changed_during_events");
     } else {
       if (typeof args.text !== "string") throw new Error("fill_text_required");
       const input = element instanceof HTMLInputElement;
@@ -1003,7 +1020,7 @@ async function pageInteract(args, deadlineMs, signal) {
   // A later executeScript rejection can lose a result after a page effect.
   try {
     if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
-    if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at'].includes(args.action)) throw new Error("unknown_interaction_action");
+    if (!['click', 'follow_link', 'fill', 'select_option', 'scroll', 'click_at', 'scroll_at'].includes(args.action)) throw new Error("unknown_interaction_action");
     const tab = await browser.tabs.get(args.tabId);
     signal?.throwIfAborted();
     if (args.expectedUrl !== undefined && tab.url !== args.expectedUrl) throw new Error('page_url_changed');

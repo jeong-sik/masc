@@ -7224,7 +7224,7 @@ module Browser_lane_view = struct
                                       , Viewport_pointer
                                           { action =
                                               Browser_lane.(
-                                                Activate_tab | Click _ | Fill _
+                                                Activate_tab | Click _ | Fill _ | Select_option _
                                                 | Set_zoom _ | Set_viewport _ | Double_click _ | Double_click_at _
                                                 | Type_text _ | Press_key _
                                                 | Hover _ | Drag_to _

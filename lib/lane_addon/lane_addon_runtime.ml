@@ -1777,12 +1777,14 @@ type tool_request_destination = {
   installation_id : string; package_id : string; tool : string;
   source_revision : string; configuration_revision : string;
 }
-let capture_tool_request_owner ~config ~access ~reserved ~(export : tool_export) ~scope ~request_id ~capture =
+let with_tool_request_destination ~config ~access ~reserved ~(export : tool_export) ~publish =
   with_tool_call_owner (fun () ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m = match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
-    Eio.Mutex.use_rw ~protect:true m.action_mutex (fun () ->
+    Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+    Eio.Mutex.use_ro m.action_mutex (fun () ->
+    Eio.Cancel.protect (fun () ->
       (* Acquiring the serializer can yield. Inspect authority only afterwards. *)
       let snapshot = Lane_addon_tool_export.isolate ~reserved (live_exports m access) in
       let* () = if List.exists (fun (current : tool_export) ->
@@ -1792,29 +1794,40 @@ let capture_tool_request_owner ~config ~access ~reserved ~(export : tool_export)
         | Some ({configuration=Some owner;connection=Some connection;_} as e)
           when Lane_addon_tool_export.equal_owner connection.export_owner export.owner -> Ok (e,owner)
         | _ -> Error (Unavailable "New captured work requires its configured live installation") in
-      let* declaration = match m.configuration_status with
+      let* directory = match m.configuration_status with
         | None -> Error (Unavailable "Add-on configuration has not been observed")
-        | Some reading ->
-          (match List.find_opt (fun (d : Lane_addon_config.declaration) ->
-              d.id=owner.id && d.source_path=owner.source_path && d.revision=owner.revision
-              && d.enabled && d.package=e.package) reading.snapshot.declarations with
-           | Some declaration -> Ok declaration
-           | None -> Error (Unavailable "Add-on declaration no longer matches the admitted installation")) in
+        | Some reading -> Ok reading.directory in
+      let snapshot = offload (fun () -> Lane_addon_config.load ~directory) in
+      let* () = if snapshot.complete then Ok ()
+        else Error (Unavailable "New work requires a complete fresh Add-on declaration reading") in
+      let* declaration = match List.find_opt (fun (d : Lane_addon_config.declaration) ->
+          d.id=owner.id && d.source_path=owner.source_path && d.revision=owner.revision
+          && d.enabled && d.package=e.package) snapshot.declarations with
+        | Some declaration -> Ok declaration
+        | None -> Error (Unavailable "Fresh Add-on declaration no longer permits the configured installation") in
+      let current=Lane_addon_tool_export.isolate ~reserved (live_exports m access) in
+      let* ()=if List.exists (fun (candidate : tool_export) ->
+          Lane_addon_tool_export.equal_owner candidate.owner export.owner && candidate.tool=export.tool) current.exports
+        then Ok () else Error (Unavailable "Add-on export ended during declaration confirmation") in
       let destination = {
         installation_id=Lane_addon_tool_request_owner.installation_id
           (Lane_addon_tool_request_owner.Configuration owner.id);
         package_id=e.package.id;tool=export.tool.name;
         source_revision=declaration.source_revision;configuration_revision=owner.revision} in
-      let* value, request = capture destination |> Result.map_error (fun detail ->
-        Host_refusal (Lane_addon_call_context.Rejected detail)) in
-      let* () = offload (fun () -> Lane_addon_tool_request_owner.retain ~store:m.store ~scope ~request_id
-          ~installation_id:destination.installation_id ~package_id:destination.package_id
-          ~tool:destination.tool ~request)
-        |> Result.map_error (function
-          | Lane_addon_tool_request_owner.Store_unavailable detail -> Unavailable detail
-          | (Binding_conflict | Invalid_identity _ | Invalid_request _) as error ->
-            Host_refusal (Lane_addon_call_context.Rejected (Lane_addon_tool_request_owner.error_to_string error))) in
-      Ok value))
+      publish destination))))
+let capture_tool_request_owner ~config ~access ~reserved ~export ~scope ~request_id ~capture =
+  with_tool_request_destination ~config ~access ~reserved ~export ~publish:(fun destination ->
+    let* value,request = capture destination |> Result.map_error (fun detail ->
+      Host_refusal (Lane_addon_call_context.Rejected detail)) in
+    let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let* () = offload (fun () -> Lane_addon_tool_request_owner.retain ~store ~scope ~request_id
+      ~installation_id:destination.installation_id ~package_id:destination.package_id
+      ~tool:destination.tool ~request)
+      |> Result.map_error (function
+        | Lane_addon_tool_request_owner.Store_unavailable detail -> Unavailable detail
+        | (Binding_conflict | Invalid_identity _ | Invalid_request _) as error ->
+          Host_refusal (Lane_addon_call_context.Rejected (Lane_addon_tool_request_owner.error_to_string error))) in
+    Ok value)
 
 let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
   with_tool_call_owner (fun () ->

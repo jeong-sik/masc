@@ -1,8 +1,8 @@
 (** The [\[browser\]] table of [runtime.toml]. No process is started and no
     file is read while parsing.
 
-    [automation]: [driver] is the geckodriver executable the MASC server starts
-    and stops for itself; [binary] is the browser geckodriver is asked to
+    [automation]: [driver] is the geckodriver executable the attached browser
+    Add-on owns; [binary] is the browser geckodriver is asked to
     launch. An explicit binary is never replaced by an implicitly discovered
     Firefox executable.
 
@@ -10,10 +10,10 @@
     [chrome] is the Chromium-family executable, [extension] the unpacked
     Stagehand extension directory, and [profile] an operator-owned profile
     directory kept between sessions; without it each session starts from an
-    empty profile the server owns.
+    empty profile the Add-on owns.
 
     [live_bidi] ([\[browser.live.bidi\]], RFC-browser-keeper-firefox §3.1):
-    the Keeper Firefox the MASC server starts with its BiDi host. [firefox]
+    the Keeper Firefox the browser Add-on starts with its own BiDi peer. [firefox]
     is the Firefox executable, [profile] the operator-owned profile it opens,
     which keeps the operator's logins, and [port] its
     [--remote-debugging-port]. Both paths are required; [port] defaults to

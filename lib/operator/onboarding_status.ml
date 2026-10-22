@@ -255,11 +255,14 @@ let keeper_checks ~sandbox base_path =
    record has nothing to say about one. A running host is satisfied only
    where the observed server lists its client: that is where hover and drag
    are served. *)
-let browser_bidi_host_check host =
+let browser_bidi_host_check (host:Browser_bidi_host_status.observation) =
   let report condition =
     [check Browser_bidi_host condition (Browser_bidi_host_status.message host)
        [Inspect_configuration]]
   in
+  match host.keeper with
+  | Browser_bidi_host_status.Addon_managed _ -> report Needs_verification
+  | Lane_off | Not_configured | Not_known ->
   match Browser_bidi_host_status.verdict host with
   | Browser_bidi_host_status.Host_absent -> []
   | Browser_bidi_host_status.Host_serving -> report Satisfied

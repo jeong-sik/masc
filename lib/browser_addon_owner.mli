@@ -10,6 +10,9 @@ val dispatch : t -> Browser_addon_wire.request -> Browser_addon_wire.reply
     clients/targets, never while waiting for browser input or a poll result. *)
 val snapshot : t -> Yojson.Safe.t
 val incarnation : t -> string
+val is_retired : t -> bool
+(** Admission observation only. It grants neither a new poll nor process cleanup
+    authority; an owned resource still waits for its original cleanup request. *)
 val attach_models : t -> Browser_addon_models.t -> (unit, string) result
 val models_enabled : t -> bool
 val model_output : t -> name:string -> Lane_addon_types.exact_output option
@@ -34,6 +37,11 @@ val attach_stagehand : t -> models:bool ->
     cleanups and waits for both before answering. Each attached cleanup runs once;
     concurrent or repeated Retire requests observe the same result. An error or
     exception from either cleanup prevents a successful retirement receipt. *)
+val attach_live : t -> client_id:Browser_lane.client_id ->
+  cleanup:(unit -> (unit, string) result) -> (unit, string) result
+(** Bind cleanup of an already registered exact live BiDi client to this owner.
+    Retire revokes its input before joining the original peer and child. Existing
+    extension clients grant no browser-process ownership. *)
 val revoke : t -> unit
 (** First retire admission, then wake pending work and retire the owner's client
     IDs. Interrupted issued work has an unknown outcome and is never replayed. *)

@@ -340,14 +340,15 @@ let refusal_body_window_sec = 1.
 
 (* A code is lower-case letters, digits and underscores. Anything else in
    that field is prose or data, which this host's diagnostics do not carry. *)
+let is_refusal_code code =
+  code <> "" && String.length code <= refusal_code_limit
+  && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) code
+
 let refusal_code body =
   match Eio.Buf_read.take_all (Eio.Buf_read.of_flow body ~max_size:refusal_body_limit) |> parse_json with
   | Ok (`Assoc fields) ->
       (match List.assoc_opt "error" fields with
-       | Some (`String code)
-         when code <> "" && String.length code <= refusal_code_limit
-              && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) code ->
-           Some code
+       | Some (`String code) when is_refusal_code code -> Some code
        | Some _ | None -> None)
   | Ok _ | Error _ -> None
   (* The status is the server's answer already. A body that cannot be read

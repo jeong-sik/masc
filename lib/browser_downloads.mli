@@ -18,10 +18,12 @@ val interrupt : t -> string -> unit
 val for_context : t -> string -> download list
 val to_json : verify:(string -> (string * int, string) result) -> download -> Yojson.Safe.t
 
-(** A session-owned service. [read] remains available after interruption so
+(** A session-owned service. [console] reads the tab's console entries ({!Browser_console}) from the
+    same event stream. [read] remains available after interruption so
     callers can inspect the last evidence; [check] refuses further actions. *)
 type connection = {
   read : context:string -> (Yojson.Safe.t, string) result;
+  console : context:string -> (Yojson.Safe.t, string) result;
   check : unit -> (unit, string) result;
   close : unit -> unit;
 }

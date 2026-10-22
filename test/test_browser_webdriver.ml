@@ -6,6 +6,7 @@ module Driver = Masc.Browser_webdriver
 module Lane = Browser_lane
 let start_downloads ~session_id:_ ~websocket_url:_ =
   Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
+    console=(fun ~context:_ -> Ok (`Assoc ["entries",`List [];"dropped",`Int 0]));
     check=(fun () -> Ok ());close=(fun () -> ())}
 
 let test_session_lifecycle () =
@@ -477,6 +478,40 @@ let test_touch_sends_a_touch_pointer_and_releases_it () =
     check (list string) "each touch action sends a touch pointer" ["touch";"touch"] !pointer_types;
     check int "each pressed touch is released" 2 !releases)
 
+let test_console_read_uses_the_tabs_context () =
+  Eio_main.run (fun _ ->
+    let request ~method_ ~path ~body:_ = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET, "/session/owned/window" -> Ok (`String "tab")
+      | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/execute/sync" -> Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture"])
+      | _ -> fail ("unexpected console request: " ^ path) in
+    let asked = ref [] in
+    let start_downloads ~session_id:_ ~websocket_url:_ =
+      Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
+        console=(fun ~context -> asked := context :: !asked;
+          Ok (`Assoc ["entries",`List [`Assoc ["text",`String "hello"]];"dropped",`Int 0]));
+        check=(fun () -> Ok ());close=(fun () -> ())} in
+    let driver = Driver.create ~start_downloads ~request () in
+    (match Driver.execute driver (Lane.Page_console {tab_id=1}) with
+     | Lane.Refused _ -> () | _ -> fail "a closed session must refuse a console read");
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    (match Driver.execute driver (Lane.Page_console {tab_id=1}) with
+     | Lane.Answered (`Assoc fields) ->
+       (match List.assoc_opt "data" fields with
+        | Some (`Assoc data) ->
+          check bool "the receipt names the tab" true (List.assoc_opt "tabId" data = Some (`Int 1));
+          check bool "the entries come through" true (List.mem_assoc "entries" data)
+        | _ -> fail "the console answer has no data")
+     | _ -> fail "the console read was not answered");
+    check (list string) "the read used the tab's context" ["tab"] !asked;
+    (match Driver.execute driver (Lane.Page_console {tab_id=99}) with
+     | Lane.Refused _ -> () | _ -> fail "an unknown tab must be refused");
+    check (list string) "an unknown tab asks nothing" ["tab"] !asked)
+
 let test_pointer_guard_failure_rejects_before_effect () =
   Eio_main.run (fun _ ->
     let actions = ref 0 in
@@ -674,4 +709,5 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "shutdown uses a live cleanup transport" `Quick test_shutdown_transport_lifetime;
   test_case "explicit Zen binary never falls back" `Quick test_selected_binary;
   test_case "touch sends a touch pointer and releases it" `Quick test_touch_sends_a_touch_pointer_and_releases_it;
+  test_case "console read uses the tab's context" `Quick test_console_read_uses_the_tabs_context;
   test_case "browser configuration" `Quick test_browser_configuration ]]

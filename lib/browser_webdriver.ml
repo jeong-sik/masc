@@ -360,6 +360,16 @@ let rec execute_unlocked t = function
        | None -> Error (Protocol "unknown tab id; refresh the tab list")
        | Some (context, _) ->
          Result.map_error (fun detail -> Protocol detail) (downloads.read ~context))
+  | Browser_lane.Page_console {tab_id=id} ->
+    (match t.session with
+     | None -> Error (Protocol "Firefox session is closed")
+     | Some session ->
+       let* events = Result.map_error (fun detail -> Protocol detail) session.downloads in
+       match List.find_opt (fun (_, known) -> known = id) session.download_contexts with
+       | None -> Error (Protocol "unknown tab id; refresh the tab list")
+       | Some (context, _) ->
+         let* data = Result.map_error (fun detail -> Protocol detail) (events.console ~context) in
+         Ok (match data with `Assoc fields -> `Assoc (("tabId",`Int id)::fields) | other -> other))
   | Browser_lane.Page_goto { url; tab_id } ->
     let* () = absolute_http_url url in
     let* session = session t in
@@ -643,7 +653,7 @@ let execute t verb =
   | Browser_lane.Session_open _ | Browser_lane.Session_close
   | Browser_lane.Session_status | Browser_lane.Tabs_list
   | Browser_lane.Page_read _ | Browser_lane.Page_document _
-  | Browser_lane.Page_downloads _ | Browser_lane.Page_capture _
+  | Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | Browser_lane.Page_capture _
   | Browser_lane.Page_scene _ | Browser_lane.Page_goto _
   | Browser_lane.Page_elements _ | Browser_lane.Page_act _
   | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
@@ -664,7 +674,7 @@ let execute t verb =
        | Error error, Not_started -> Browser_lane.Rejected_before_effect (error_message error)
        | Error error, Started -> Browser_lane.Refused (error_message error))
     | Browser_lane.Tabs_list | Browser_lane.Page_read _ | Browser_lane.Page_document _
-    | Browser_lane.Page_downloads _ | Browser_lane.Page_capture _ | Browser_lane.Page_scene _
+    | Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | Browser_lane.Page_capture _ | Browser_lane.Page_scene _
     | Browser_lane.Page_interact
         { action =
             ( Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
@@ -690,7 +700,7 @@ let execute t verb =
                 | _ -> Browser_lane.Refused message)
            | (Browser_lane.Page_interact _, Some (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
            | (Browser_lane.Page_interact _, None)
-           | ((Browser_lane.Tabs_list | (Browser_lane.Session_close | (Browser_lane.Session_status | (Browser_lane.Page_read _ | (Browser_lane.Page_document _ | (Browser_lane.Page_downloads _ | (Browser_lane.Page_capture _ | (Browser_lane.Page_scene _ | (Browser_lane.Session_open _ | (Browser_lane.Page_goto _ | (Browser_lane.Page_elements _ | (Browser_lane.Page_act _ | (Browser_lane.Page_context _ | (Browser_lane.Page_instruct _ | (Browser_lane.Page_locate _ | Browser_lane.Page_extract _))))))))))))))), _) -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data]))
+           | ((Browser_lane.Tabs_list | (Browser_lane.Session_close | (Browser_lane.Session_status | (Browser_lane.Page_read _ | (Browser_lane.Page_document _ | (Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | (Browser_lane.Page_capture _ | (Browser_lane.Page_scene _ | (Browser_lane.Session_open _ | (Browser_lane.Page_goto _ | (Browser_lane.Page_elements _ | (Browser_lane.Page_act _ | (Browser_lane.Page_context _ | (Browser_lane.Page_instruct _ | (Browser_lane.Page_locate _ | Browser_lane.Page_extract _))))))))))))))), _) -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data]))
       | Ok data -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
       | Error error -> Browser_lane.Refused (error_message error))
 

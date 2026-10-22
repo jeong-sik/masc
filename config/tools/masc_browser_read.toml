@@ -33,9 +33,9 @@ description = "Optional advanced browser override. Omit only for initial discove
 [[params]]
 name = "mode"
 type = "string"
-enum = ["text", "elements", "scene", "regions", "screenshot", "frames", "dialog", "downloads"]
+enum = ["text", "elements", "scene", "regions", "screenshot", "frames", "dialog", "downloads", "console"]
 default = "text"
-description = "text: page text; elements: controls; scene: viewport content/geometry and documentId/nodeId (explicit tabId); regions: landmarks for scoped reads. Geometry does not prove occlusion. Optional sourceContext is a dev-source hint: verify checkout/SHA-256 before edits. screenshot: viewport PNG (explicit tabId). frames: iframe selectors. dialog/downloads: automation, explicit tabId; reads pending prompt or pending/completed/canceled/interrupted files."
+description = "text: page text; elements: controls; scene: viewport content/geometry and documentId/nodeId (explicit tabId); regions: landmarks for scoped reads. Geometry does not prove occlusion. Optional sourceContext is a dev-source hint: verify checkout/SHA-256 before edits. screenshot: viewport PNG (explicit tabId). frames: iframe selectors. dialog/downloads: automation, explicit tabId; reads pending prompt or pending/completed/canceled/interrupted files. console: owned Firefox (automation) only, explicit tabId; the tab's console messages and uncaught errors since the session opened, oldest first, at most 200 kept (dropped says how many older ones were not), each text cut at 4000 bytes (textCut). The text is whatever the page printed."
 
 [[params]]
 name = "framePath"

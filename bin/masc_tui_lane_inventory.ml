@@ -33,6 +33,8 @@ let browser_activity_label = function
 let browser_reading_label observed = function
   | Browser_observed value -> observed value
   | Browser_addon_absent -> "no browser Add-on"
+  | Browser_addon_off -> "browser Add-on switched off"
+  | Browser_addon_not_running -> "browser Add-on declared on, not running"
   | Browser_addon_unavailable detail -> "browser Add-on unavailable: " ^ detail
 let machine_activity_label = function
   | Machine_enabled -> "on"
@@ -98,7 +100,8 @@ let row_standing (row : row) = match row.state with
       else Standing.Ready
   | Browser_clients (Browser_disabled, Browser_observed connected) ->
       if connected > 0 then Standing.Changing else Standing.Off
-  | Browser_clients (Browser_disabled, (Browser_addon_absent | Browser_addon_unavailable _))
+  | Browser_clients (Browser_disabled,
+      (Browser_addon_absent | Browser_addon_off | Browser_addon_not_running | Browser_addon_unavailable _))
   | Browser_executor (Browser_disabled, _) -> Standing.Off
   | Browser_clients (Browser_unobserved, _) | Browser_executor (Browser_unobserved, _) -> Standing.Unobserved
   | Browser_clients (Browser_enabled, Browser_observed connected) ->
@@ -106,9 +109,15 @@ let row_standing (row : row) = match row.state with
   | Browser_executor (Browser_enabled, Browser_observed registered) ->
       if registered then Standing.Ready else Standing.Waiting
   (* A lane switched on that has no browser Add-on to serve it needs one set
-     up; one whose Add-on cannot be read is failing. *)
+     up; one whose Add-on is switched off is off; one whose Add-on is declared
+     on and not running waits for it; one whose Add-on cannot be read is
+     failing. *)
   | Browser_clients (Browser_enabled, Browser_addon_absent)
   | Browser_executor (Browser_enabled, Browser_addon_absent) -> Standing.Not_set_up
+  | Browser_clients (Browser_enabled, Browser_addon_off)
+  | Browser_executor (Browser_enabled, Browser_addon_off) -> Standing.Off
+  | Browser_clients (Browser_enabled, Browser_addon_not_running)
+  | Browser_executor (Browser_enabled, Browser_addon_not_running) -> Standing.Waiting
   | Browser_clients (Browser_enabled, Browser_addon_unavailable _)
   | Browser_executor (Browser_enabled, Browser_addon_unavailable _) -> Standing.Failing
   | Machine_state (Machine_disabled, Running) -> Standing.Changing

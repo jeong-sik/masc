@@ -31,7 +31,10 @@ type machine_publication = No_screen | Stable | Running | Publication_unavailabl
     worker, so these rows read its cached observation. *)
 type 'a browser_reading =
   | Browser_observed of 'a
-  | Browser_addon_absent
+  | Browser_addon_absent  (** No browser Add-on is declared. *)
+  | Browser_addon_off  (** A browser Add-on is declared and switched off. *)
+  | Browser_addon_not_running
+      (** One is declared on and the runtime runs no installation of it. *)
   | Browser_addon_unavailable of string
 type state =
   | Exact_state of Server_standalone_lane_projection.lane_configuration
@@ -56,7 +59,8 @@ val snapshot : config:Workspace.config -> t
 val to_json : t -> Yojson.Safe.t
 module For_testing : sig
   val machine_publication : (Lane_addon_runtime.export_observation option, string) result -> machine_publication
-  val browser_reading : (Lane_addon_runtime.export_observation option, string) result ->
+  val browser_reading : declarations:Lane_addon_config.declaration list ->
+    (Lane_addon_runtime.export_observation option, string) result ->
     Browser_addon_observation.published browser_reading
   val browser_state : activity:Browser_lane.activity -> Browser_addon_observation.published browser_reading ->
     Browser_lane.Lane_name.t -> state

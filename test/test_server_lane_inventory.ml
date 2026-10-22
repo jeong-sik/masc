@@ -411,7 +411,7 @@ let browser_rows_read_the_addon_observation () =
   let snapshot : Addon.export_observation = {instance_id="browser-worker";observation_seq=2;
     max_bytes=4096;refreshing=false;output} in
   let state reading lane = Inventory.For_testing.browser_state ~activity:Browser_lane.Enabled reading lane in
-  let observed = Inventory.For_testing.browser_reading (Ok (Some snapshot)) in
+  let observed = Inventory.For_testing.browser_reading ~declarations:[] (Ok (Some snapshot)) in
   check bool "the live row counts the clients the Add-on published" true
     (state observed Browser_lane.Lane_name.Live = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_observed 2));
   check bool "the automation row reads its registration from the Add-on" true
@@ -419,11 +419,41 @@ let browser_rows_read_the_addon_observation () =
   check bool "the Stagehand row reads its registration from the Add-on" true
     (state observed Browser_lane.Lane_name.Stagehand = Inventory.Browser_executor (Browser_lane.Enabled, Inventory.Browser_observed false));
   check bool "no browser Add-on is not zero connected clients" true
-    (state (Inventory.For_testing.browser_reading (Ok None)) Browser_lane.Lane_name.Live
+    (state (Inventory.For_testing.browser_reading ~declarations:[] (Ok None)) Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_addon_absent));
   check bool "a failed browser Add-on carries its reason" true
-    (state (Inventory.For_testing.browser_reading (Error "cleanup incomplete")) Browser_lane.Lane_name.Live
+    (state (Inventory.For_testing.browser_reading ~declarations:[] (Error "cleanup incomplete")) Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_addon_unavailable "cleanup incomplete"))
+
+(* With no observation, the declarations tell an Add-on nobody declared from
+   one switched off and one declared on that is not running. A declaration
+   of another kind of package is not a browser Add-on. *)
+let browser_absence_reads_the_declarations () = with_fixture (fun _env _sw _config root directory ->
+  let browser = Filename.concat root "browser.toml" in
+  write browser {|id = "browser"
+revision = "1"
+title = "Browser"
+runtime = "host_process"
+service = "browser"
+command = ["masc-browser-addon-worker"]
+contributions = ["observe"]
+[resources]
+max_reply_bytes = 4096
+|};
+  let observer = package root in
+  let path = Filename.concat directory "work.toml" in
+  let read text =
+    write path text;
+    let loaded = Config.load ~directory in
+    if loaded.issues <> [] then
+      fail (String.concat "; " (List.map (fun (issue : Config.issue) -> issue.message) loaded.issues));
+    Inventory.For_testing.browser_reading ~declarations:loaded.declarations (Ok None) in
+  check bool "an MCP tools package is not a browser Add-on" true
+    (read (declaration observer "observer") = Inventory.Browser_addon_absent);
+  check bool "a browser Add-on switched off reads as off" true
+    (read ("enabled = false\n" ^ declaration browser "browser-work") = Inventory.Browser_addon_off);
+  check bool "a browser Add-on declared on with no observation is not running" true
+    (read (declaration browser "browser-work") = Inventory.Browser_addon_not_running))
 
 let browser_activity_snapshot () = with_fixture (fun _env sw config root _directory ->
   let previous = Runtime.For_testing.snapshot () in
@@ -452,7 +482,8 @@ enabled=%b
     match Runtime.init_default ~config_path:path with Ok () -> () | Error detail -> fail detail in
   load true;
   let result = Eio.Fiber.fork_promise ~sw (fun () -> Inventory.snapshot ~config |> Inventory.to_json) in
-  (* The snapshot captured its configuration before this publication. *)
+  (* The snapshot captured its configuration, then suspended to read the
+     declarations, so this publication lands while it is reading. *)
   Eio.Fiber.yield ();
   load false;
   let json = match Eio.Promise.await result with Ok value -> value | Error exn -> raise exn in
@@ -468,6 +499,7 @@ let () = run "operator lane inventory" ["read boundaries",[
   test_case "machine publication reads worker observations" `Quick machine_publication_reads_worker_observation;
   test_case "machine activity and publication serialize independently" `Quick machine_wire_preserves_both_readings;
   test_case "Browser activity captures one configuration" `Quick browser_activity_snapshot;
+  test_case "Browser absence reads the declarations" `Quick browser_absence_reads_the_declarations;
   test_case "browser rows read the Add-on observation" `Quick browser_rows_read_the_addon_observation;
   test_case "invalid explicit root remains unobserved" `Quick invalid_config_root;
   test_case "retained mismatched incarnation is a per-record issue" `Quick mismatched_retained_incarnation;

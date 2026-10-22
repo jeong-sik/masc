@@ -83,6 +83,8 @@ describe('common Lane inventory wire', () => {
       return parseLaneInventory(raw).rows.find(item => item.id === 'browser/live')?.state
     }
     expect(read({ kind: 'absent' })).toEqual({ kind: 'browser_clients', activity: 'on', addon: { kind: 'absent' } })
+    expect(read({ kind: 'off' })).toEqual({ kind: 'browser_clients', activity: 'on', addon: { kind: 'off' } })
+    expect(read({ kind: 'not_running' })).toEqual({ kind: 'browser_clients', activity: 'on', addon: { kind: 'not_running' } })
     expect(read({ kind: 'unavailable', detail: 'worker failed' }))
       .toEqual({ kind: 'browser_clients', activity: 'on', addon: { kind: 'unavailable', detail: 'worker failed' } })
     expect(() => read({ kind: 'maybe' })).toThrow()

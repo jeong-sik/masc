@@ -19,8 +19,14 @@ const machineActivityText = { on: 'New execution and input enabled', off: 'Off �
   unobserved: 'Activity configuration unavailable' }
 const machinePublicationText = { no_screen: 'No screen observed', stable: 'Stable screen published',
   running: 'Machine running', unavailable: 'Worker observation unavailable' } as const
-function browserAddonText(addon: { kind: 'absent' } | { kind: 'unavailable'; detail: string }): string {
-  return addon.kind === 'absent' ? 'No browser Add-on' : `Browser Add-on unavailable · ${addon.detail}`
+function browserAddonText(
+  addon: { kind: 'absent' | 'off' | 'not_running' } | { kind: 'unavailable'; detail: string }): string {
+  switch (addon.kind) {
+    case 'absent': return 'No browser Add-on'
+    case 'off': return 'Browser Add-on switched off'
+    case 'not_running': return 'Browser Add-on declared on, not running'
+    case 'unavailable': return `Browser Add-on unavailable · ${addon.detail}`
+  }
 }
 function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
   const state = row.state

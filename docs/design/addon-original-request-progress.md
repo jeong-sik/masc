@@ -12,6 +12,15 @@ evidence. None allows another dispatch. A verified late original answer may add
 a judgment after those observations without deleting them. Refusal distinguishes
 the before-dispatch boundary from an original execution's refusal.
 
+An explicit worker capacity reply immediately after a newly published admission
+intent records `Admission_declined` and `Admission_wait`. It proves no admission
+for that RPC; a later pass may read first and publish another admission intent
+for the **same** original ID/input. This exception cannot follow pending,
+unknown or absence observations, and it cannot replace an uncertain admission.
+An acknowledged old intent still grants no new RPC. The added seventh Store
+scenario covers this distinction; the historical six-scenario receipt below
+remains bound to its original source.
+
 The host records a judgment before a commit intent binds it to the complete
 before-state and expected after-state. After an uncertain commit, a fresh exact
 before-state observation can record a retry; an exact after-state observation

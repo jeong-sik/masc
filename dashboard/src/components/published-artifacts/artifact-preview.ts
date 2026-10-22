@@ -9,19 +9,19 @@ type Preview = { key: string; kind: 'ready'; document: ArtifactDocument }
 
 // Mounted only by an explicit preview action. Inventory refresh never reads
 // every body or executes the reports' scripts in the background.
-export function ArtifactPreview({ artifact, authRevision }: {
-  artifact: PublishedArtifact; authRevision: number
+export function ArtifactPreview({ artifact, authRevision, isCurrent }: {
+  artifact: PublishedArtifact; authRevision: number; isCurrent: () => boolean
 }) {
-  const key = JSON.stringify([authRevision, artifact.id, artifact.revision])
+  const key = JSON.stringify([authRevision, artifact.id, artifact.revision, artifact.body._blob.sha256])
   const [result, setResult] = useState<Preview | null>(null)
   useEffect(() => {
     const controller = new AbortController()
     void fetchPublishedArtifact(artifact.id, String(artifact.revision), controller.signal).then(document => {
-      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) {
+      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision && isCurrent()) {
         setResult({ key, kind: 'ready', document })
       }
     }, error => {
-      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) {
+      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision && isCurrent()) {
         setResult({ key, kind: 'error', message: error instanceof Error ? error.message : '미리보기를 불러오지 못했습니다.' })
       }
     })

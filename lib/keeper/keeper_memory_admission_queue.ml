@@ -60,6 +60,41 @@ let candidate_of_json = function
     {sequence; request_id; fact}
   | _ -> wire_here Expected_object
 
+let candidate_rows_of_json ~field ~last_sequence rows =
+  let rec decode previous seen index = function
+    | [] -> Ok []
+    | json :: rest ->
+      let* row = wire_at_element field index (candidate_of_json json) in
+      let* () =
+        if row.sequence <= previous || row.sequence > last_sequence
+        then wire_fail [Wire_field field; Wire_index index] Not_ascending
+        else if Set_util.StringSet.mem row.request_id seen
+        then wire_fail [Wire_field field; Wire_index index] (Duplicate_entry row.request_id)
+        else Ok () in
+      let+ rest = decode row.sequence (Set_util.StringSet.add row.request_id seen) (index+1) rest in
+      row :: rest in
+  decode 0 Set_util.StringSet.empty 0 rows
+
+let batch_to_json (batch : batch) =
+  `Assoc ["generation", `String batch.generation;
+          "candidates", `List (List.map candidate_to_json batch.rows)]
+
+let batch_of_json ~expected_candidate_ids json =
+  let decode = function
+    | `Assoc fields ->
+      let* () = exact_field_names_result ["generation"; "candidates"] fields in
+      let* generation = canonical_string "generation" fields in
+      let* rows = wire_list_field "candidates" fields in
+      let* () = match rows with
+        | [] -> wire_fail [Wire_field "candidates"] Empty_list
+        | _ :: _ -> Ok () in
+      let+ rows = candidate_rows_of_json ~field:"candidates" ~last_sequence:max_int rows in
+      {generation; rows}
+    | _ -> wire_here Expected_object in
+  let* batch = decode json |> Result.map_error wire_error_to_string in
+  if candidate_ids batch = expected_candidate_ids then Ok batch
+  else Error "restored admission batch differs from its original candidate identities and payloads"
+
 let state_of_json = function
   | `Assoc fields ->
     let* () = exact_field_names_result ["generation"; "last_sequence"; "pending"] fields in
@@ -67,19 +102,7 @@ let state_of_json = function
     let* last_sequence = wire_int_field "last_sequence" fields in
     let* () = if last_sequence < 0 then wire_fail [Wire_field "last_sequence"] Negative else Ok () in
     let* rows = wire_list_field "pending" fields in
-    let rec decode previous seen index = function
-      | [] -> Ok []
-      | json :: rest ->
-        let* row = wire_at_element "pending" index (candidate_of_json json) in
-        let* () =
-          if row.sequence <= previous || row.sequence > last_sequence
-          then wire_fail [Wire_field "pending"; Wire_index index] Not_ascending
-          else if Set_util.StringSet.mem row.request_id seen
-          then wire_fail [Wire_field "pending"; Wire_index index] (Duplicate_entry row.request_id)
-          else Ok () in
-        let+ rest = decode row.sequence (Set_util.StringSet.add row.request_id seen) (index+1) rest in
-        row :: rest in
-    let+ pending = decode 0 Set_util.StringSet.empty 0 rows in
+    let+ pending = candidate_rows_of_json ~field:"pending" ~last_sequence rows in
     { generation; last_sequence; pending = List.rev pending }
   | _ -> wire_here Expected_object
 

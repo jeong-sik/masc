@@ -794,8 +794,141 @@ let test_size_with_a_same_failure_is_deferred_whole () =
     ; "no capacity refusal defers", false, false, "defer"
     ; "a quota without a capacity refusal defers", false, true, "defer" ]
 
+let restored_original original json =
+  Queue.batch_of_json ~expected_candidate_ids:(Queue.candidate_ids original) json |> require
+
+let test_restored_sparse_batch_commits_originals_and_preserves_tail () = with_store (fun keepers_dir ->
+  List.iter (fun id -> ignore (append keepers_dir id ("original " ^ id))) ["a";"b";"c"];
+  let middle = List.filter (fun (id : Current.explicit_candidate_id) -> id.request_id = "b")
+      (Queue.candidate_ids (batch keepers_dir)) in
+  ignore (commit keepers_dir middle [fact "original b"]);
+  acknowledge keepers_dir;
+  let original = batch keepers_dir in
+  let capture_path = Filename.concat keepers_dir "original-batch.json" in
+  Fs_compat.save_file_atomic_strict capture_path
+    (Yojson.Safe.to_string (Queue.batch_to_json original)) |> require;
+  ignore (append keepers_dir "d" "new tail");
+  let queue_path = Queue.path ~keepers_dir ~keeper_id:"keeper" in
+  let before = Fs_compat.load_file queue_path in
+  let restored = restored_original original (Yojson.Safe.from_file capture_path) in
+  check (list int) "sparse original positions are not compacted" [1;3]
+    (List.map (fun (row : Queue.candidate) -> row.sequence) (Queue.candidates restored));
+  check string "restore neither rewrites nor acknowledges queue" before
+    (Fs_compat.load_file queue_path);
+  ignore (commit keepers_dir (Queue.candidate_ids restored)
+    (List.map (fun (row : Queue.candidate) -> row.fact) (Queue.candidates restored)));
+  (* The process lost its ACK after Memory commit. Restoring the same input is
+     not enough to consume anything; the real receipt recovery does that. *)
+  check (list string) "commit leaves the queue pending before ACK" ["a";"c";"d"]
+    (candidate_names (batch keepers_dir));
+  acknowledge keepers_dir;
+  check (list string) "only the later tail survives original receipt ACK" ["d"]
+    (candidate_names (batch keepers_dir));
+  acknowledge keepers_dir;
+  check (list string) "a repeated ACK cannot consume the later tail" ["d"]
+    (candidate_names (batch keepers_dir));
+  let memory = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require in
+  check (list string) "all original facts remain in real Memory" ["original a";"original b";"original c"]
+    (match memory with None -> [] | Some memory ->
+      List.sort String.compare (List.map (fun (f : Types.fact) -> f.claim) memory.facts)))
+
+let test_restored_partitions_keep_disjoint_receipts () = with_store (fun keepers_dir ->
+  List.iter (fun id -> ignore (append keepers_dir id ("original " ^ id))) ["a";"b";"c";"d"];
+  let original = batch keepers_dir in
+  let restored = restored_original original (Queue.batch_to_json original) in
+  let left, right = match Queue.split restored with
+    | Some pair -> pair | None -> fail "complete original batch did not split" in
+  let left = restored_original left (Queue.batch_to_json left) in
+  let right = restored_original right (Queue.batch_to_json right) in
+  check bool "restored children concatenate to original receipt identities" true
+    (Queue.candidate_ids left @ Queue.candidate_ids right = Queue.candidate_ids original);
+  ignore (commit keepers_dir (Queue.candidate_ids right) []);
+  acknowledge keepers_dir;
+  check (list string) "right commit leaves the original left pending" ["a";"b"]
+    (candidate_names (batch keepers_dir));
+  ignore (append keepers_dir "e" "new tail");
+  ignore (commit keepers_dir (Queue.candidate_ids left) []);
+  acknowledge keepers_dir;
+  check (list string) "left original ACK preserves appended tail" ["e"]
+    (candidate_names (batch keepers_dir)))
+
+let test_batch_restore_rejects_changed_identity_or_provenance () = with_store (fun keepers_dir ->
+  ignore (append keepers_dir "a" "original fact");
+  ignore (append keepers_dir "b" "second fact");
+  let original = batch keepers_dir in
+  let ids = Queue.candidate_ids original in
+  let altered transform = List.map transform ids in
+  List.iter (fun (label, expected_candidate_ids) ->
+    match Queue.batch_of_json ~expected_candidate_ids (Queue.batch_to_json original) with
+    | Error _ -> () | Ok _ -> fail ("accepted " ^ label))
+    ["different generation", altered (fun id -> {id with queue_generation="another-generation"});
+     "different request", altered (fun id -> {id with request_id=id.request_id ^ "-other"});
+     "different sequence", altered (fun id -> {id with sequence=id.sequence + 10});
+     "different payload", altered (fun id -> {id with input_sha256=String.make 64 '0'});
+     "missing candidate", List.tl ids;
+     "duplicated candidate", ids @ ids;
+     "reordered originals", List.rev ids;
+     "empty original identity set", []];
+  let json = Queue.batch_to_json original in
+  let changed = match json with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key = "candidates" then key, (match value with
+          | `List (`Assoc row :: rest) ->
+            let row = List.map (fun (key,value) ->
+              if key = "fact" then key, Types.fact_to_json
+                {(fact "original fact") with origin={kind=Types.Authored; trace_id="another-origin"}}
+              else key,value) row in
+            `List (`Assoc row :: rest)
+          | _ -> fail "bad test original") else key,value) fields)
+    | _ -> fail "bad test envelope" in
+  (match Queue.batch_of_json ~expected_candidate_ids:ids changed with
+   | Error _ -> () | Ok _ -> fail "same claim with changed provenance was accepted");
+  check (list string) "refused restoration leaves real queue intact" ["a";"b"]
+    (candidate_names (batch keepers_dir)))
+
+let test_batch_restore_rejects_malformed_complete_input () = with_store (fun keepers_dir ->
+  ignore (append keepers_dir "a" "original fact");
+  ignore (append keepers_dir "b" "second fact");
+  let original = batch keepers_dir in
+  let expected_candidate_ids = Queue.candidate_ids original in
+  let generation = (List.hd expected_candidate_ids).Current.queue_generation in
+  let rows = match Queue.batch_to_json original with
+    | `Assoc fields -> (match List.assoc "candidates" fields with
+      | `List rows -> rows | _ -> fail "bad test candidates")
+    | _ -> fail "bad test envelope" in
+  let envelope rows = `Assoc ["generation", `String generation; "candidates", `List rows] in
+  let change_first key value = match rows with
+    | `Assoc fields :: rest -> `Assoc ((key,value) :: List.remove_assoc key fields) :: rest
+    | _ -> fail "bad test first candidate" in
+  let cases =
+    ["missing envelope field", `Assoc ["generation", `String generation];
+     "unknown envelope field", `Assoc ["generation", `String generation;
+       "candidates", `List rows; "authority", `Bool true];
+     "duplicate envelope field", `Assoc ["generation", `String generation;
+       "generation", `String generation; "candidates", `List rows];
+     "blank generation", `Assoc ["generation", `String " "; "candidates", `List rows];
+     "empty batch", envelope [];
+     "reversed candidates", envelope (List.rev rows);
+     "zero sequence", envelope (change_first "sequence" (`Int 0));
+     "negative sequence", envelope (change_first "sequence" (`Int (-1)));
+     "noninteger sequence", envelope (change_first "sequence" (`Float 1.));
+     "duplicate request", envelope (change_first "request_id" (`String "b"));
+     "blank request", envelope (change_first "request_id" (`String " a "));
+     "unknown candidate field", envelope (change_first "authority" (`Bool true));
+     "malformed full fact", envelope (change_first "fact" (`Assoc []))] in
+  let before = Fs_compat.load_file (Queue.path ~keepers_dir ~keeper_id:"keeper") in
+  List.iter (fun (label,json) ->
+    match Queue.batch_of_json ~expected_candidate_ids json with
+    | Error _ -> () | Ok _ -> fail ("accepted " ^ label)) cases;
+  check string "malformed captured input rewrites no pending byte" before
+    (Fs_compat.load_file (Queue.path ~keepers_dir ~keeper_id:"keeper")))
+
 let () = run "durable explicit admission queue"
   ["storage boundaries", [
+    test_case "restored sparse originals commit and ACK without consuming new tail" `Quick test_restored_sparse_batch_commits_originals_and_preserves_tail;
+    test_case "restored whole-input partitions keep disjoint receipts" `Quick test_restored_partitions_keep_disjoint_receipts;
+    test_case "restore rejects changed original identities and fact provenance" `Quick test_batch_restore_rejects_changed_identity_or_provenance;
+    test_case "restore refuses malformed complete candidate input" `Quick test_batch_restore_rejects_malformed_complete_input;
     test_case "concurrently consumed tail is left to its own acknowledgement" `Quick test_concurrently_consumed_tail_is_left_to_its_acknowledgement;
     test_case "concurrent receipt loss leaves remaining input" `Quick test_concurrent_receipt_loss_leaves_remaining_input;
     test_case "concurrent acknowledgement preserves deferred input" `Quick test_concurrent_acknowledgement_preserves_deferred_input;

@@ -16,6 +16,11 @@ let with_binding ~host ~port ~expected ~proof load =
   Eio.Fiber.with_binding workspace_read_key
     {wr_host=host;wr_port=port;wr_expected=expected;wr_proof=proof} load
 
+let without_binding load =
+  match Fs_compat.execution_context () with
+  | Fs_compat.Non_eio -> load ()
+  | Eio_fiber -> Eio.Fiber.without_binding workspace_read_key load
+
 let current_workspace_read () =
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> None

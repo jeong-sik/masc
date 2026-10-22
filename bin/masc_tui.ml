@@ -1761,7 +1761,11 @@ let check_workspace_request ?schedule_form_action ?refresh_ticket
   else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
   else
     let reading_authority = state.workspace_read_authority in
-    let reading = Masc_tui_loader.load_server_identity ~host ~port in
+    (* Health observes the endpoint identity; the comparison below decides
+       whether this request still owns it. A payload's admission proof must
+       neither require a health receipt nor erase a foreign observation. *)
+    let reading = Masc_tui_workspace_read.without_binding (fun () ->
+      Masc_tui_loader.load_server_identity ~host ~port) in
     if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
     else if reading_authority != state.workspace_read_authority || not (server_authority_ready state)
     then Error "Workspace identity is unconfirmed"

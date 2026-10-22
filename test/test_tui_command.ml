@@ -56,6 +56,7 @@ let describe = function
   | Command.Images_invalid_index -> "images-invalid-index"
   | Command.Open_artifacts -> "open-artifacts"
   | Command.Open_music -> "open-music"
+  | Command.Open_music_midi -> "open-music-midi"
   | Command.Music_invalid_arguments -> "music-invalid-arguments"
   | Command.Open_metrics -> "open-metrics"
   | Command.Account_login client -> "account-login:" ^ client

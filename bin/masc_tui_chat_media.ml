@@ -227,3 +227,11 @@ let newest_playable media =
     | Voice voice -> playable_voice voice
     | Image _ | Svg _ | Mermaid _ -> None)
 ;;
+
+let newest_midi media =
+  List.rev media |> List.find_map (function
+    | Attach attachment ->
+        Option.bind (playable_attach attachment) (fun source ->
+          match source.kind with `Midi -> Some source | `Audio -> None)
+    | Voice _ | Image _ | Svg _ | Mermaid _ -> None)
+;;

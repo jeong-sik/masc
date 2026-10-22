@@ -1784,7 +1784,15 @@ opens a result. Esc cancels an in-progress search, restoring its previous query
 and selection; Ctrl-U clears the query. Refresh and editor return retain the
 query. In normal browsing, Esc clears an active query before leaving the library.
 `q` returns from an editor to the library and from the library
-to MASC. The phrase editor's first audio Space opens instrument/preset selection;
+to MASC. In Keeper chat, `/music midi` opens the newest readable MIDI attachment
+in the phrase editor, even when a newer voice or audio message follows it. The
+source is prepared from its original bytes before terminal handoff; leaving
+that conversation, replacing the request or entering another key, paste or mouse
+gesture retires its pending open. Already buffered input, a paste still arriving
+or an incomplete terminal/UTF-8 sequence also keeps the terminal
+in chat; run `/music midi` again when ready to enter the editor. The
+original attachment stays unchanged, and saved projects use the workspace's
+music project directory. The phrase editor's first audio Space opens instrument/preset selection;
 `i` changes it. Install or update the helper with `scripts/install-alphatex.sh`.
 
 In the music library, phrase and arrangement editors, and recording/take screen,

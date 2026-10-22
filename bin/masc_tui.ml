@@ -11086,23 +11086,34 @@ let prepare_listen_media ~host ~port (media : Masc_tui_chat_media.playable) =
     Masc_tui_attachment_action.prepare ~fetch:(fun ~sha256:_ -> Ok bytes) attachment
     |> Result.map_error Masc_tui_attachment_action.describe_outcome)
 
-let listen_newest_media state ~mailbox =
+let listen_newest_media ?(destination=Listen_player) state ~mailbox =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
-  match state.msg_target_keeper_name,
-        Masc_tui_chat_media.newest_playable (conversation_media state) with
+  let media = match destination with
+    | Listen_player -> Masc_tui_chat_media.newest_playable (conversation_media state)
+    | Listen_music_editor -> Masc_tui_chat_media.newest_midi (conversation_media state) in
+  let command = match destination with
+    | Listen_player -> "/listen" | Listen_music_editor -> "/music midi" in
+  match state.msg_target_keeper_name, media with
   | None, _ | Some _, None ->
-      notice ~kind:Notice_reply "/listen: no audio or MIDI attachment in this conversation"
+      notice ~kind:Notice_reply (command ^ ": no readable "
+        ^ (match destination with Listen_player -> "audio or MIDI" | Listen_music_editor -> "MIDI")
+        ^ " attachment in this conversation")
   | Some keeper, Some media ->
       if not (server_authority_ready state) then
-        notice ~kind:Notice_failure "/listen: waiting for confirmed workspace identity"
+        notice ~kind:Notice_failure (command ^ ": waiting for confirmed workspace identity")
       else begin
-        let request = begin_chat_listen state ~keeper media in
+        let request = begin_chat_listen ~destination state ~keeper media in
         let host = server_peer_host and port = state.port in
-        notice ~kind:Notice_reply ("/listen: preparing " ^ media.name);
+        notice ~kind:Notice_reply (command ^ ": preparing " ^ media.name);
         launch_workspace_json_read state ~mailbox
           ~deliver:(fun result -> Listen_prepared (request, result))
           (fun () -> prepare_listen_media ~host ~port request.lr_media)
       end
+
+let withdraw_pending_music_editor state =
+  withdraw_chat_music_editor state |> Option.iter (fun request ->
+    chat_notice state ~keeper_name:(Some request.lr_keeper) ~kind:Notice_reply
+      "/music midi: opening cancelled by newer input; run /music midi again when ready")
 
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
@@ -11480,6 +11491,13 @@ let score_terminal_handoff :
 
 let music_terminal_handoff : (unit -> (unit, string) result) option ref = ref None
 
+let music_midi_terminal_handoff : (path:string -> (unit, string) result) option ref = ref None
+
+let open_music_midi ~path =
+  match !music_midi_terminal_handoff with
+  | None -> Error "MIDI editor requires an active terminal session"
+  | Some launch -> launch ~path
+
 let open_music () =
   match !music_terminal_handoff with
   | None -> Error "Music workbench requires an active terminal session"
@@ -11513,7 +11531,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Attach_image_ref_missing_value | Preset_list | Preset_save _ | Preset_save_missing_name
       | Preset_restore _ | Preset_restore_missing_name | Preset_show _ | Preset_show_missing_name
       | Preset_delete _ | Preset_delete_missing_name | Listen
-      | Open_artifacts | Open_music | Music_invalid_arguments | Open_score _ | Score_invalid_index
+      | Open_artifacts | Open_music | Open_music_midi | Music_invalid_arguments | Open_score _ | Score_invalid_index
       | Open_images _ | List_images | Images_invalid_index | Unknown _ -> true
   then
     notice ~kind:Notice_failure
@@ -11828,6 +11846,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.runtime_param_edit <- None;
       state.runtime_params_notice <- None;
       goto_surface state ~mailbox Config
+  | Masc_tui_command.Open_music_midi ->
+      Masc_tui_message_input.clear state.msg_input;
+      listen_newest_media ~destination:Listen_music_editor state ~mailbox
   | Masc_tui_command.Listen ->
       Masc_tui_message_input.clear state.msg_input;
       listen_newest_media state ~mailbox
@@ -11840,7 +11861,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.List_images ->
       list_conversation_images state
   | Masc_tui_command.Music_invalid_arguments ->
-      notice ~kind:Notice_failure "Use /music; choose a project or take in the workbench"
+      notice ~kind:Notice_failure "Use /music for the library, or /music midi to edit the newest MIDI attachment"
   | Masc_tui_command.Open_artifacts ->
       Masc_tui_message_input.clear state.msg_input;
       state.resource_day <- None;
@@ -17419,7 +17440,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Play_invites | Masc_tui_command.Play_link _
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
-       | Masc_tui_command.Listen
+       | Masc_tui_command.Listen | Masc_tui_command.Open_music_midi
        | Masc_tui_command.Open_images _ | Masc_tui_command.List_images | Masc_tui_command.Images_invalid_index
        | Masc_tui_command.Open_score _ | Masc_tui_command.Score_invalid_index
        | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
@@ -20378,15 +20399,28 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
   | Listen_prepared (request, result) ->
+      if input_pending () then withdraw_pending_music_editor state;
       if take_chat_listen state request then begin
         let notice = chat_notice state ~keeper_name:(Some request.lr_keeper) in
         match result with
-        | Error detail -> notice ~kind:Notice_failure ("/listen: " ^ detail)
+        | Error detail ->
+            let command = match request.lr_destination with
+              | Listen_player -> "/listen" | Listen_music_editor -> "/music midi" in
+            notice ~kind:Notice_failure (command ^ ": " ^ detail)
         | Ok prepared ->
-            let outcome = Masc_tui_attachment_action.perform prepared
-              ~midi_soundfont:!boot_midi_soundfont in
-            notice ~kind:Notice_reply
-              ("/listen: " ^ Masc_tui_attachment_action.describe_outcome outcome)
+            match request.lr_destination with
+            | Listen_player ->
+                let outcome = Masc_tui_attachment_action.perform prepared
+                  ~midi_soundfont:!boot_midi_soundfont in
+                notice ~kind:Notice_reply
+                  ("/listen: " ^ Masc_tui_attachment_action.describe_outcome outcome)
+            | Listen_music_editor ->
+                (match Masc_tui_attachment_action.midi_path prepared with
+                 | None -> notice ~kind:Notice_failure "/music midi: prepared source is not MIDI"
+                 | Some path ->
+                     match open_music_midi ~path with
+                     | Ok () -> notice ~kind:Notice_reply "/music midi: returned from the MIDI editor"
+                     | Error detail -> notice ~kind:Notice_failure ("/music midi: " ^ detail))
       end
   | Sent_image_ready { generation; view; keeper_name; name; skill_reference; result } ->
       let owned = match state.sent_image_read with
@@ -23035,6 +23069,12 @@ let main
     Masc_tui_score.launch_music ~restore:restore_music_terminal ~reenter:reenter_music_terminal
       ~project_root:(Filename.concat root "projects") ~session_root:(Filename.concat root "sessions")
       ~soundfont:!boot_midi_soundfont);
+  music_midi_terminal_handoff := Some (fun ~path ->
+    let root = Filename.concat
+      (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "music" in
+    Masc_tui_score.launch_midi ~restore:restore_music_terminal ~reenter:reenter_music_terminal
+      ~project_root:(Filename.concat root "projects") ~session_root:(Filename.concat root "sessions")
+      ~soundfont:!boot_midi_soundfont ~path);
   score_terminal_handoff := Some (fun ~sources ~index ->
     match !active_graphics_protocol, !image_cell_pixels with
     | Masc_tui_graphics.Kitty_protocol, Some ((width, height) as cell_pixels)
@@ -24544,6 +24584,11 @@ and is loaded on demand through keeper_skill.
       let drain_deadline_ns =
         Int64.add (Mtime_clock.elapsed_ns ()) async_drain_budget_ns
       in
+      let retire_music_editor_for_input () =
+        if Option.is_some interrupted_paste || input_reader_has_started_input input_reader then
+          withdraw_pending_music_editor state
+      in
+      retire_music_editor_for_input ();
       if
         drain_async_messages ~delivery_round:async_delivery_round ~deadline_ns:drain_deadline_ns
           ~input_pending:(fun () -> input_reader_has_ready_input input_reader) state ~base_path
@@ -24711,7 +24756,8 @@ and is loaded on demand through keeper_skill.
          refresh its metadata, but cannot jump over the next gesture/draft. *)
       (match input with
        | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
-           state.keeper_creation_focus <- None
+           state.keeper_creation_focus <- None;
+           withdraw_pending_music_editor state
        | Some (Graphics_reply _) | None -> ());
       Option.iter
         (fun _ ->
@@ -33470,6 +33516,7 @@ and is loaded on demand through keeper_skill.
       (* Shares the pass deadline computed before the pre-input drain: when the
          pass budget is spent this applies nothing and the mailbox waits for
          the next pass. *)
+      retire_music_editor_for_input ();
       if
         drain_async_messages ~delivery_round:async_delivery_round ~deadline_ns:drain_deadline_ns
           ~input_pending:(fun () -> input_reader_has_ready_input input_reader) state ~base_path

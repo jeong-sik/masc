@@ -70,6 +70,10 @@ val prepare :
     cache file under its full digest, and parse MIDI metadata.
     Run outside the input loop. Failure never starts a process. *)
 
+val midi_path : prepared -> string option
+(** Frozen cached MIDI source, available only after preparation. Does not
+    fetch or launch; the caller must still admit the original request owner. *)
+
 val perform : prepared -> midi_soundfont:string option -> outcome
 (** Start the prepared action only after the caller admits its original owner.
     Does not fetch, write or parse attachment bytes. *)

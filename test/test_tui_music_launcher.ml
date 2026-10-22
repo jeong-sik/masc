@@ -43,6 +43,23 @@ let test_requests () = fixture (fun ~script ~receipt ->
     check bool "exit status remains an outcome" (code = 0) (Result.is_ok result)
   ) [0; 7])
 
+let test_midi_requests () = fixture (fun ~script ~receipt ->
+  List.iter (fun code ->
+    script code;
+    let restored = ref 0 and reentered = ref 0 in
+    let path = "/cache/한 곡;$(unchanged).mid" in
+    let result = Masc_tui_score.launch_midi ~project_root:"/a project"
+      ~session_root:"/owned takes" ~soundfont:(Some "/sound files/bass.sf2") ~path
+      ~restore:(fun () -> incr restored) ~reenter:(fun () -> incr reentered) in
+    check (list string) "frozen source and workspace directories are child arguments"
+      ["--midi-file"; path; "--project-root"; "/a project";
+       "--session-root"; "/owned takes"; "--soundfont"; "/sound files/bass.sf2"]
+      (read_arguments receipt);
+    check int "terminal handed over once" 1 !restored;
+    check int "terminal restored after child" 1 !reentered;
+    check bool "child failure is retained" (code = 0) (Result.is_ok result)
+  ) [0; 7])
+
 let test_missing_helper () = fixture (fun ~script:_ ~receipt:_ ->
   let touched = ref false in
   let result = Masc_tui_score.launch_music ~project_root:"/projects" ~session_root:"/takes"
@@ -62,12 +79,15 @@ let test_restore_failure () = fixture (fun ~script ~receipt ->
 
 let test_command () =
   check bool "music is a local command" true (Masc_tui_command.parse "/music" = Masc_tui_command.Open_music);
+  check bool "explicit chat MIDI is a local editing action" true
+    (Masc_tui_command.parse "/music midi" = Masc_tui_command.Open_music_midi);
   List.iter (fun text -> check bool "extra input is refused" true
     (Masc_tui_command.parse text = Masc_tui_command.Music_invalid_arguments))
-    ["/music song.json"; "/music\nretain this text"]
+    ["/music song.json"; "/music\nretain this text"; "/music midi\nretain this text"; "/music midi other"]
 
 let () = run "music terminal handoff"
   ["requests and ownership", [test_case "child argv and exit outcomes" `Quick test_requests;
+    test_case "MIDI source and child ownership" `Quick test_midi_requests;
     test_case "missing helper retains parent ownership" `Quick test_missing_helper;
     test_case "partial handoff failure restores terminal" `Quick test_restore_failure;
     test_case "entry never becomes Keeper text" `Quick test_command]]

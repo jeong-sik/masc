@@ -8161,10 +8161,13 @@ type lane_nested_read =
   | Lane_subscriptions_read
   | Lane_declaration_read of { path : string; edit : bool }
 
+type listen_destination = Listen_player | Listen_music_editor
+
 type listen_request = {
   lr_ticket : unit ref;
   lr_keeper : string;
   lr_media : Masc_tui_chat_media.playable;
+  lr_destination : listen_destination;
 }
 
 type state = {
@@ -12475,13 +12478,22 @@ let retarget_message (state : state) target =
    end);
   state.msg_target_keeper_name <- target
 
-let begin_chat_listen state ~keeper media =
-  let request = {lr_ticket=ref (); lr_keeper=keeper; lr_media=media} in
+let begin_chat_listen ?(destination=Listen_player) state ~keeper media =
+  let request = {lr_ticket=ref (); lr_keeper=keeper; lr_media=media; lr_destination=destination} in
   state.listen_request <- Some request;
   request
 
 let reconcile_chat_listen state =
   if not (view_is_chat state.view) then state.listen_request <- None
+
+(* A new gesture retains the terminal for the current conversation. Ordinary
+   playback does not take terminal focus and keeps its original ownership. *)
+let withdraw_chat_music_editor state =
+  match state.listen_request with
+  | Some ({lr_destination=Listen_music_editor; _} as request) ->
+      state.listen_request <- None;
+      Some request
+  | Some {lr_destination=Listen_player; _} | None -> None
 
 let take_chat_listen state request =
   match state.listen_request with

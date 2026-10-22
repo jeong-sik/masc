@@ -41,6 +41,15 @@ let launch_music ~restore ~reenter ~project_root ~session_root ~soundfont =
         @ (match soundfont with Some path -> ["--soundfont"; path] | None -> []) in
       run_child ~restore ~reenter executable args
 
+let launch_midi ~restore ~reenter ~project_root ~session_root ~soundfont ~path =
+  match program () with
+  | None -> Error "masc-alphatex is not installed; run scripts/install-alphatex.sh"
+  | Some executable ->
+      let args = ["--midi-file"; path; "--project-root"; project_root;
+                  "--session-root"; session_root]
+        @ (match soundfont with Some path -> ["--soundfont"; path] | None -> []) in
+      run_child ~restore ~reenter executable args
+
 let launch ~restore ~reenter ~sources ~index ~cell_pixels:(cell_width, cell_height)
     ~soundfont =
   match program () with

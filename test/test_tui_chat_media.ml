@@ -112,6 +112,18 @@ let test_midi_is_playable () =
     (Some { name = "take1.MID"; kind = `Midi
           ; source = `Server_path "/api/v1/media/aaa" })
 
+let test_newest_midi_for_editing () =
+  let media = [attach_media ~src:"/api/v1/media/first" "one.mid";
+    attach_media ~src:"/api/v1/media/second" "two.MIDI";
+    voice_media ~src:"/api/v1/media/voice" ();
+    attach_media ~src:"/api/v1/media/audio" "later.wav";
+    attach_media ~src:"https://example.com/untrusted.mid" "outside.mid"] in
+  check (option playable_testable) "newer audio and external URLs cannot replace the MIDI source"
+    (Some {name="two.MIDI"; kind=`Midi; source=`Server_path "/api/v1/media/second"})
+    (Media.newest_midi media);
+  check (option playable_testable) "audio-only conversation cannot supply an editor source"
+    None (Media.newest_midi [voice_media ~src:"/api/v1/media/voice" ()])
+
 let test_unplayable_blocks_are_skipped () =
   check_playable "images and plain files are skipped, the older audio still plays"
     [ attach_media ~src:"/api/v1/media/aaa" "riff.mp3"
@@ -217,6 +229,7 @@ let () = run "TUI retained output and playback" [ "history", [
   "playable", [
   test_case "the newest audio wins" `Quick test_newest_audio_wins;
   test_case "midi is playable" `Quick test_midi_is_playable;
+  test_case "MIDI editor chooses its original media kind" `Quick test_newest_midi_for_editing;
   test_case "unplayable blocks are skipped" `Quick test_unplayable_blocks_are_skipped;
   test_case "block data preferred over src" `Quick test_block_data_preferred_over_src;
   test_case "voice is audio with a resolvable src" `Quick

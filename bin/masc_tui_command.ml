@@ -24,6 +24,7 @@ type t =
   | Images_invalid_index
   | Open_artifacts
   | Open_music
+  | Open_music_midi
   | Music_invalid_arguments
   | Listen
   | Open_metrics
@@ -249,8 +250,8 @@ let catalog =
     }
   ; { word = "music"
     ; aliases = []
-    ; args = ""
-    ; summary = "open phrases, arrangements and recorded takes in this terminal"
+    ; args = "[midi]"
+    ; summary = "open the music library, or edit the newest chat MIDI and choose its instrument"
     }
   ; { word = "score"
     ; aliases = []
@@ -441,6 +442,7 @@ let parse text =
     | "metrics", _ | "telemetry", _ -> Open_metrics
     | "listen", _ -> Listen
     | "music", "" when body = "" -> Open_music
+    | "music", "midi" when body = "" -> Open_music_midi
     | "music", _ -> Music_invalid_arguments
     | "score", "" -> Open_score 1
     | "score", index ->

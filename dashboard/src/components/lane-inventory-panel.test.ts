@@ -16,6 +16,41 @@ function workspace(root: string) {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 beforeEach(() => { invalidateExecutionSnapshotGeneration(epoch, 0); generation = 0; workspace('/fixture/default') })
 describe('operator Lane inventory', () => {
+  it('shows original installation model routes while the package is off and no worker is present', async () => {
+    const row = {
+      id: 'declaration//fixture/curator.toml', label: 'Curator installation', purpose: 'Curator',
+      selection: { kind: 'declaration', source_path: '/fixture/curator.toml' },
+      state: { kind: 'package', instances: [], declaration: { kind: 'valid', enabled: false,
+        installation_id: 'custom-curator', run_id: 'scope-not-observation', package_id: 'workspace-curator',
+        title: 'Curator', source_revision: 'source', desired_revision: 'desired', application: { kind: 'inactive' },
+        exact_outputs: [
+          { output: 'classification', source: 'declared', configuration: { kind: 'configured',
+            admitted_slots: ['http.first'], cli_slots: ['cli.fallback'], declared_slots: ['http.first', 'refused'],
+            declared_cli_slots: ['cli.fallback'], dropped_slots: ['refused'], admission_error: 'runtime refused' } },
+          { output: 'briefing', source: 'declared', configuration: { kind: 'unavailable', detail: 'registry unavailable' } },
+          { output: 'removed-output', source: 'table_only', configuration: { kind: 'off',
+            declared_slots: ['retained'], declared_cli_slots: [] } },
+        ] } },
+    }
+    api.fetchLaneInventory.mockResolvedValue(parseLaneInventory({ ...fixture, rows: [...fixture.rows, row] }))
+    const screen = render(html`<${LaneInventoryPanel} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect Curator installation' }))
+    const routes = within(screen.getByRole('region', { name: 'Exact-output model routes' }))
+    expect(routes.getByText('custom-curator')).toBeTruthy()
+    const classification = within(routes.getByRole('region', { name: 'Model route for classification' }))
+    for (const text of ['Admitted HTTP: http.first', 'CLI fallbacks: cli.fallback',
+      'Declared HTTP: http.first → refused', 'Declared CLI: cli.fallback', 'Dropped HTTP: refused', 'runtime refused']) {
+      expect(classification.getByText(text)).toBeTruthy()
+    }
+    expect(routes.getByRole('region', { name: 'Model route for briefing' }).textContent)
+      .toContain('unavailable: registry unavailable')
+    const removed = routes.getByRole('region', { name: 'Model route for removed-output' })
+    expect(removed.textContent).toContain('Table only')
+    expect(removed.textContent).toContain('Model route off')
+    expect(routes.getByRole('link', { name: 'Open Runtime configuration' }).getAttribute('href')).toContain('view=config')
+    expect(within(screen.getByRole('region', { name: 'Details for Curator installation' }))
+      .getByText('Configured off · Off · worker cleanup confirmed')).toBeTruthy()
+  })
   it.each([
     [{ kind: 'inactive' }, 'Off · worker cleanup confirmed'],
     [{ kind: 'cleaning' }, 'Worker cleanup pending'],
@@ -27,7 +62,7 @@ describe('operator Lane inventory', () => {
       selection: { kind: 'declaration', source_path: '/fixture/off.toml' },
       state: { kind: 'package', instances: [], declaration: { kind: 'valid', enabled: false,
         installation_id: 'off', run_id: 'world', package_id: 'observer', title: 'Observer',
-        source_revision: 'file-bytes', desired_revision: 'desired', application } },
+        source_revision: 'file-bytes', desired_revision: 'desired', exact_outputs: [], application } },
     }
     api.fetchLaneInventory.mockResolvedValue(parseLaneInventory({ ...fixture, rows: [...fixture.rows, row] }))
     const screen = render(html`<${LaneInventoryPanel} />`)

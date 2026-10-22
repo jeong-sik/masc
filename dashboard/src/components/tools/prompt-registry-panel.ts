@@ -113,7 +113,7 @@ function WorkspaceCuratorRuntimeContract({ prompt, onOpen }: {
         <div class="min-w-0">
           <h3 class="m-0 text-sm font-semibold">공유 메모리 합성 · Workspace Curator</h3>
           <p class="my-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">
-            여러 Keeper의 변경된 기억을 공유 원장에 분류합니다. <code>workspace_curator_exact</code>가 크기를 제한한 변경 묶음을 하나의 user message로 받습니다.
+            여러 Keeper의 변경된 기억을 공유 원장에 분류합니다. Workspace Curator Addon이 host가 보존한 변경 묶음을 하나의 user message로 받습니다.
           </p>
         </div>
         ${prompt
@@ -127,11 +127,14 @@ function WorkspaceCuratorRuntimeContract({ prompt, onOpen }: {
       ` : null}
       <div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">
         <p class="my-1"><code>workspace_memory_changes</code>: 새 사실과 다른 Keeper의 가까운 사실, 관련 원장 항목만 전달합니다. 현재 사실 전체는 모델에 보내지 않습니다.</p>
-        <p class="my-1">레인을 설정하면 기억 변경·서버 시작 시 원장과 현재 스토어를 비교하고, 바뀐 사실이 없으면 모델을 호출하지 않습니다.
+        <p class="my-1">Curator Addon을 연결하면 기억 변경·서버 시작 시 원장과 현재 스토어를 비교하고, 바뀐 사실이 없으면 모델을 호출하지 않습니다.
           한 실행은 한 묶음만 처리합니다. 이 화면에서 저장·해제하면 활성 curator에 재확인을 요청하며, 진행 중인 실행 다음에 변경 내용을 사용합니다.
-          모델은 <code class="break-all">runtime.exact_output_lanes.workspace_curator_exact.slots</code>에서 지정합니다.</p>
+          모델은 실제 설치 ID의 <code class="break-all">${'runtime.addon_exact_lanes.<installation-id>.classification'}</code>과
+          <code class="break-all">${'runtime.addon_exact_lanes.<installation-id>.briefing'}</code>에서 각각 지정합니다.
+          All Lanes의 설치 상세에서 선언된 출력과 실제 모델 후보·설정 오류를 확인합니다.</p>
         <p class="my-1">결과는 의미 검증 전 분류 원장입니다. Keeper는 <code>keeper_workspace_memory_read</code>로 현재 원장과 출처 상태를 확인합니다.</p>
-        <p class="my-1">실행별 실제 입력과 선택된 실행 대상(slot)은 Internal Agents → Workspace Curator에서 확인합니다.</p>
+        <p class="my-1">실행별 실제 입력과 선택된 실행 대상(slot)은 Internal Agents → Workspace Curator의
+          <code>workspace_curator_exact</code> 보존 이력에서 확인합니다. 이 관측 ID는 모델 설정 경로가 아닙니다.</p>
       </div>
     </section>
   `

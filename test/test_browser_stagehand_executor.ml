@@ -475,6 +475,41 @@ let test_hover_effect_boundary () =
     (List.length (List.filter (function Wire.Page_hover _ -> true | _ -> false) fake.sent))
 ;;
 
+let test_select_option () =
+  let tabs = Executor.Tabs.create () and fake = fake [ shop () ] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  let expected_url = Some "http://127.0.0.1:1/shop" in
+  let action = Lane.Select_option {selector="#plan";value="pro"} in
+  fake.sent <- [];
+  fake.evaluated <- Some
+    (`Assoc
+       [ "action", `String "select_option"
+       ; "urlBefore", `String "http://127.0.0.1:1/shop"
+       ; "url", `String "http://127.0.0.1:1/shop"
+       ; "title", `String "Shop"
+       ; "scrollX", `Int 0
+       ; "scrollY", `Int 0
+       ]);
+  let receipt = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action })) in
+  (match fake.sent with
+   | [ Wire.Page_evaluate { expression; _ } ] ->
+     let args = Lane.interaction_args ~tab_id:0 ~expected_url action in
+     check string "select_option sends the shared interaction script with its selector and value"
+       (Executor.evaluate_expression ~runtime:Executor.Scene_runtime ~body:Masc.Browser_interaction.script ~args)
+       expression;
+     check bool "the arguments carry the option value" true
+       (Yojson.Safe.Util.(member "value" args |> to_string) = "pro"
+        && Yojson.Safe.Util.(member "action" args |> to_string) = "select_option")
+   | _ -> fail "select_option must be exactly one page.evaluate");
+  check string "the receipt keeps the action" "select_option" Yojson.Safe.Util.(member "action" receipt |> to_string);
+  fake.evaluated <- Some (`Assoc ["interactionFailure", `Assoc ["message", `String "option_not_found"; "effectStarted", `Bool false]]);
+  (match Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action }) with
+   | Lane.Rejected_before_effect message ->
+     check string "a page-script refusal is rejected before any effect, with its reason" "option_not_found" message
+   | Lane.Answered _ | Lane.Lane_absent | Lane.Timed_out | Lane.Refused _ ->
+     fail "a page-script refusal with effectStarted false must be rejected before effect")
+;;
+
 let test_interactions () =
   let tabs = Executor.Tabs.create () and fake = fake [ shop () ] ~active:(Some "P2") in
   ignore (listed tabs fake);
@@ -830,6 +865,7 @@ let () =
       test_case "scripts and native pointer input" `Quick test_interactions;
       test_case "hover uses official runtime wire without a model" `Quick test_hover_wire;
       test_case "observed targets resolve into native hover and drag" `Quick test_semantic_pointer_input;
+      test_case "select_option evaluates the shared script" `Quick test_select_option;
       test_case "hover failure boundaries never replay input" `Quick test_hover_effect_boundary;
       test_case "attributed feedback cannot alter authoritative input" `Quick test_actor_feedback_outcomes ];
     "refusals", [ test_case "browser zoom requires extension" `Quick test_zoom_requires_extension;

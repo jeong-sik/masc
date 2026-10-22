@@ -1674,16 +1674,15 @@ let fold_captured_entries_result channel ~path ~from ~until ~init ~f =
       | Ok length ->
         let value = ref acc in
         let next_boundary = ref boundary in
-        (* Copy complete spans rather than calling [Buffer.add_char] for
-           every byte. Only [length] bytes were read: [Bytes.create] leaves
-           the rest unspecified, including possible newline bytes. *)
+        (* Search only bytes returned by [input], then copy each span at
+           once instead of inserting its bytes individually. *)
+        let rec newline_at index =
+          if index >= length || Bytes.get chunk index = '\n' then index
+          else newline_at (index + 1)
+        in
         let rec consume start =
           if start < length then begin
-            let index =
-              match Bytes.index_from chunk start '\n' with
-              | index -> min index length
-              | exception Not_found -> length
-            in
+            let index = newline_at start in
             if index < length then begin
               let line =
                 if Buffer.length fragment = 0 then

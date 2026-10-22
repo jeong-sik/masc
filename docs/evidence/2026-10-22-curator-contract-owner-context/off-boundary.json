@@ -1,0 +1,55 @@
+{
+  "at": "2026-10-22T04:37:07.083835+00:00",
+  "source": "cb2eeb1d271a0a436e34133e58ceda0c9a7b6efd",
+  "originals": [
+    {
+      "id": "01a161e4-2a50-7000-965e-934e89c4a2cb",
+      "events": [
+        "observer_registration_intended",
+        "observer_registration_recorded",
+        "dispatch_intended",
+        "waiting",
+        "judgment_retained",
+        "commit_intended"
+      ]
+    },
+    {
+      "id": "01a161e3-eff3-7000-a4b8-aa8ef80fe89c",
+      "events": [
+        "observer_registration_intended",
+        "observer_registration_recorded",
+        "dispatch_intended",
+        "waiting",
+        "judgment_retained",
+        "commit_intended",
+        "commit_observed",
+        "observer_completion_intended",
+        "observer_completion_recorded"
+      ]
+    }
+  ],
+  "running_owned_container_count": 0,
+  "current_sha256": "619fa8737bed6d1b38e0d7e903a9fd1562f4ef6aedcae5b9fc60e19207151c85",
+  "briefing": {
+    "schema": "workspace.memory.briefing.v1",
+    "published": null,
+    "building": {
+      "target": [
+        {
+          "id": "claim:claim-c884a063ed8a35ffc12ffd466e1eba82a491b15407d0450d09dc398cf437b426",
+          "sha256": "888fcd0ebb370c6e83679274ce08e8b6a14c15f1d1339afbb59fb53b9a82daa2"
+        }
+      ],
+      "remaining": [
+        {
+          "id": "claim:claim-c884a063ed8a35ffc12ffd466e1eba82a491b15407d0450d09dc398cf437b426",
+          "kind": "claim",
+          "text": "Curator authority boundary. The Workspace Curator Addon computes classification and briefing, while the MASC host retains durable fact intake, original request identity, memory ledger commits, observer acknowledgements, and effect authority. Disabling the installation must preserve pending original work for reattachment."
+        }
+      ],
+      "text": null,
+      "contract": "c4a46f8670b805f0945f8dd397f20fcfa38b015902ba9d7f4e6904f8d84f16ac"
+    }
+  },
+  "ledger_sha256": "8edc07756d82376abafee490fca5801f2f7a7f5e6254c599a421bc1714f3097d"
+}

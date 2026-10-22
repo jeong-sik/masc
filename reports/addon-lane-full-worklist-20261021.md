@@ -671,3 +671,11 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - 같은 native1196 private host에서 Dashboard가 On→Off→On을 저장했다. 첫 incarnation `01a161d1-adf6-7000-a5bb-d068f198269c` → Off inventory inactive·실행 Docker0개 → 새 incarnation `01a161d4-4188-7000-b79c-17a3edec7769`의 새 Docker1개를 직접 확인했다. 같은 owned state volume과 current Memory 바이트가 보존됐다.
 - 실제 Dashboard PNG와 native TUI 셀에는 두 incarnation·실제 모델 연결이 보인다. provider credential의 env/file이 worker에 없고 package/state 외 mount가 없는 것도 직접 검사했다. 이 관측은 worker 수명과 이미 admitted된 입력 보존의 증거이며 아직 분류·브리핑 원래 domain receipt의 증거가 아니다.
 - 수리 [#45030](https://github.com/jeong-sik/masc/pull/45030)의 source `cb2eeb1d271a0a436e34133e58ceda0c9a7b6efd`에 선택5suite run39721673539와 native run39721677397을 요청했다. 실행 성공은 아직 미확인이다. 원래54개 완료 기준은 유지한다.
+
+
+## E02 guarded live-contract eligibility and original provider progress · 2026-10-22
+
+- Exact cb2 선택 run39721673539는5suite38건 중30 PASS이며 production owner15건 중0/1/2/3/6/7/11/12가 Briefing Committing 상태와 `Eio_guard.Non_eio_mutex_context(0)`로 실패했다. 새 idle2건과 captured renderer9건은 실제 PASS다. matching native39721677397은 서버/TUI/key generator와 application·TUI29건 실제 PASS지만 owner 성공을 뜻하지 않는다.
+- 같은 private workspace를 cb2 native 서버·TUI와 clean cb2 Dashboard로 정상 재시작했다. 실제 기존 Memory 입력에서 GLM classification original `01a161e3-eff3-7000-a4b8-aa8ef80fe89c`의 ledger commit·observer completion ACK까지 확인했다. Briefing original `01a161e4-2a50-7000-965e-934e89c4a2cb`는 실제 provider 답변과 commit intent를 보존했지만 domain publish 전 같은 guard 오류로 멈췄다. 실제 On→Off 뒤 Docker0과 원래2요청·Memory 바이트 보존을 확인했으며 결과를 주입하지 않았다.
+- 후속 source는 settlement와 successor의 live contract 조회를 매 필요한 eligibility검사의 원래 Eio fiber로 옮기고 disk worker에는 불변 값만 전달한다. 이미 적용된 after-state의 원래 확인과 분류의 불필요한 prompt 조회 생략을 유지한다. 실제 registry 변경 뒤 recovery·frontier 검사를 추가하고 원래 guard·30초·assertion을 유지했다. 새 수리의 compiled 실행·원래 briefing Off 복구·다음 On/실제 새 작업·통합/운영 설치는 아직 미완료다.
+- [실제 실행과 남은 경계](../docs/evidence/2026-10-22-curator-contract-owner-context/README.md)를 보존한다. 원래 A01–H06의54개 항목명·완료 기준은 바꾸지 않았다.

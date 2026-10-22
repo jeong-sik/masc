@@ -54,6 +54,9 @@ val settle : config:Workspace.config -> request_id:string -> (commit_result, err
     Conflicts never overwrite current state. Classification rechecks readable
     selected facts and vanished ledger members; briefing rechecks current ledger
     sources and prompt contract, preserving additions and partial publication.
+    Each needed Briefing eligibility check resolves its current contract on the
+    caller Eio fiber before offloading disk reads with that immutable value.
+    Classification and an already applied after-state do not resolve a prompt.
     No worker, model, observer completion, successor or scheduler runs here. *)
 type successor_result = Indivisible of Lane_addon_tool_request_owner.retained
   | Successor_waiting of Lane_addon_tool_request_owner.retained
@@ -65,6 +68,8 @@ val successor_is_current : config:Workspace.config -> capture:Workspace_memory_e
     frontier: fresh live semantic destination, readable selected sources and
     matching current captured Ledger or prepared Briefing state/contract.
     A known mismatch is false; unavailable authority/domain reads remain Error.
+    Briefing contract resolution runs on the caller fiber only after destination
+    and prepared-state checks match; no live resolver runs in a system thread.
     This neither publishes nor grants a successor. The serialized caller must
     still invoke [narrow], which checks fresh admission before a new intention. *)
 val narrow : config:Workspace.config -> request_id:string -> (successor_result, error) Stdlib.result
@@ -132,7 +137,10 @@ module For_testing : sig
     save:(Workspace_memory_execution_capture.expected_commit -> (unit, string) Stdlib.result) ->
     (commit_result, error) Stdlib.result
   (** Same real journal, restore, domain load, freshness and recovery. Only the
-      effective briefing contract and domain save edge are supplied. Faults at
+      effective briefing contract and domain save edge are supplied. The contract
+      callback runs on the caller fiber at each required Briefing eligibility
+      check, including recovery; it is not called for Classification or an
+      already applied domain after-state. The save edge remains offloaded. Faults at
       this edge are not evidence of an actual filesystem failure stage. *)
   val narrow : store:Lane_addon_store.t -> base_path:string -> request_id:string ->
     (successor_result, error) Stdlib.result

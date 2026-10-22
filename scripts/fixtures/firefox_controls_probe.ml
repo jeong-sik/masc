@@ -127,7 +127,7 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let frame_path = [outer;inner] in
     let frame_input action = success (interact_in first ~frame_path action) in
     check "nested cross-origin frame controls are readable"
-      (context first frame_path `Elements |> member "elements" |> Yojson.Safe.Util.to_list |> List.length = 2);
+      (context first frame_path (`Elements None) |> member "elements" |> Yojson.Safe.Util.to_list |> List.length = 2);
     check "nested fill executed" (member "tabId" (frame_input (Browser_lane.Fill {selector="#nested-input";text="프레임 입력"})) = `Int first);
     check "nested click executed" (member "tabId" (frame_input (Browser_lane.Click "#nested-apply")) = `Int first);
     check "nested frame contains submitted input" (contains (context first frame_path (`Text 1000) |> member "text" |> string) "프레임 입력");

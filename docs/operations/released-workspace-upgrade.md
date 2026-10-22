@@ -418,7 +418,12 @@ The plan freezes its candidate bytes. It keeps only System messages when request
 and resets the existing repetition history generation while preserving the ledger
 frontier. An equal-turn canonical with different nonhistory state is ambiguous and
 is refused; two `pending=None` fields and equal turn counters cannot prove which
-context is current. A verified earlier partial history clear can be reconciled by
+context is current. Loading a Keeper working context derives its Session
+`message_count`; an absent value or the exact count of that checkpoint's own
+messages is history metadata for this comparison. An inconsistent value is
+refused, and other context/working-context differences are still checked. The
+cleared payload stores its new count before retention and input publication.
+A verified earlier partial history clear can be reconciled by
 a fresh explicit operator action. A missing or undecodable canonical can be rebuilt
 from the observed nonwaiting retained input. Genuinely fresh absent/superseded state
 keeps the no-payload behavior; genuinely fresh undecodable state is removed under

@@ -10,6 +10,7 @@ let require_ok = function
 
 let with_keeper
       ?(save_checkpoint = true)
+      ?(prior_input_unavailable = false)
       ?(official_owner_epoch = Keeper_official_client_session_store.process_epoch ())
       ~paused
       ~install_owner
@@ -57,6 +58,21 @@ max-context = 4096
     "[keeper]\ninstructions = \"Clear admission fixture\"\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
   Keeper_meta_store.replace_snapshot config meta |> require_ok;
   ignore (Keeper_registry.register_offline ~base_path meta.name meta);
+  if prior_input_unavailable then begin
+    (* Establish the actual unavailable prior-history basis before an Owner
+       opens its journal; never rewrite a live writer or input capability. *)
+    let module Store = Keeper_chat_operation_store in
+    let path = Store.path_for_keeper ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_name:meta.name in
+    let store = Store.open_or_create ~path
+      |> Result.map_error Store.error_to_string |> require_ok in
+    Store.close store |> Result.map_error Store.error_to_string |> require_ok;
+    let db = Sqlite3.db_open ~mode:`NO_CREATE path in
+    Fun.protect ~finally:(fun () ->
+      check bool "close prior-history fixture" true (Sqlite3.db_close db)) (fun () ->
+      check bool "record unavailable prior history" true
+        (Sqlite3.exec db "UPDATE input_history SET basis='prior_unavailable' WHERE singleton=1" = Sqlite3.Rc.OK))
+  end;
   let owner_stop = ref None in
   let start_owner () =
     let installed,resolve_installed = Eio.Promise.create () in
@@ -461,7 +477,14 @@ let test_clear_refuses_an_os_read_failure () =
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ~restart:_ ->
   let path = checkpoint_path config meta in
   let original = Fs_compat.load_file path in
-  let result = with_mode path 0o000 clear in
+  let result = with_mode path 0o000 (fun () ->
+    (match Keeper_checkpoint_store.load_agent_core_exact_snapshot
+        ~session_dir:(session_dir_of config meta)
+        ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) with
+     | Error (Keeper_checkpoint_store.Ref_read_failed (Read_failed {cause=Os_error Unix.EACCES;_})) -> ()
+     | Error error -> fail (Keeper_checkpoint_store.checkpoint_ref_load_error_to_string error)
+     | Ok _ -> fail "unreadable canonical produced an exact snapshot");
+    clear ()) in
   check_refused result;
   check bool "the refusal names an OS read failure" true
     (String.starts_with ~prefix:"os_error"
@@ -595,6 +618,9 @@ let test_owned_clear_survives_owner_restart () =
     |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string |> require_ok in
   check bool "canonical and input name the same cleared bytes" true
     (Keeper_checkpoint_ref.equal after (Keeper_checkpoint_store.exact_snapshot_reference canonical));
+  check bool "clear persists its new derived message count" true
+    (Agent_core.Context.get_scoped (Keeper_checkpoint_store.exact_snapshot_checkpoint canonical).context
+      Session "message_count" = Some (`Int 0));
   check_next_prepare ~config ~meta ~session load;
   restart ();
   check bool "input ownership survives actual Owner reinstall" true
@@ -706,6 +732,32 @@ let test_clear_refuses_same_turn_nonhistory_regression () =
   check bool "latest input side effect survives" true
     (Agent_core.Context.get retained.context "input-side-effect"=Some (`String "new owned value"))
 
+let test_clear_refuses_inconsistent_derived_count () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
+  let session,original = input_source ~config ~meta load in
+  let context = Agent_core.Context.copy original.context in
+  Agent_core.Context.set_scoped context Session "message_count" (`Int (List.length original.messages + 1));
+  publish_input ~config ~meta ~session {original with Agent_core.Checkpoint.context};
+  let before = observed_input ~config ~meta in
+  check_refused (clear ());
+  check bool "invalid derived state preserves official session" true (Option.is_some (official_session ()));
+  check bool "invalid derived state preserves the owned payload" true
+    (Keeper_checkpoint_ref.equal before (observed_input ~config ~meta))
+
+let test_clear_refuses_unavailable_prior_input () =
+  with_keeper ~prior_input_unavailable:true ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ~restart:_ ->
+  let path = checkpoint_path config meta in
+  let before = Fs_compat.load_file path in
+  check_refused (clear ());
+  check bool "prior-input refusal preserves official session" true (Option.is_some (official_session ()));
+  check string "prior-input refusal preserves canonical history" before (Fs_compat.load_file path);
+  check bool "unavailable prior input never becomes unobserved" true
+    ((Keeper_owner_registry.input_checkpoint ~base_path:config.base_path ~keeper_name:meta.name
+      ~trace_id:meta.runtime.trace_id |> Result.map_error Keeper_owner_registry.command_error_to_string |> require_ok)
+      = Keeper_chat_operation_store.Prior_input_unavailable)
+
 let test_partial_clear_requires_fresh_maintenance_authority () =
   with_keeper ~paused:false ~install_owner:true
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
@@ -733,10 +785,18 @@ let test_partial_clear_requires_fresh_maintenance_authority () =
        |> Result.map_error Keeper_owner_registry.command_error_to_string |> require_ok in
      (match Keeper_owner_registry.commit_history_clear ~base_path:config.base_path ~keeper_name:meta.name
        ~writer:fresh ~receipt:(Option.get !old_receipt) with
-      | Error _ -> () | Ok () -> fail "a fresh authority accepted another authority's receipt");
+      | Error (Keeper_owner_registry.Command_rejected (Keeper_owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input detail))) ->
+         check string "fresh authority rejects the original receipt"
+           "history clear receipt no longer belongs to its original maintenance child and trace" detail
+       | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+       | Ok () -> fail "a fresh authority accepted another authority's receipt");
      match Keeper_owner_registry.commit_history_clear ~base_path:config.base_path ~keeper_name:meta.name
        ~writer:(Option.get !old_writer) ~receipt:(Option.get !old_receipt) with
-     | Error _ -> () | Ok () -> fail "another maintenance child reused the old clear authority") with
+     | Error (Keeper_owner_registry.Command_rejected (Keeper_owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input detail))) ->
+        check string "another maintenance child cannot reuse the old authority"
+          "history clear receipt no longer belongs to its original maintenance child and trace" detail
+      | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+      | Ok () -> fail "another maintenance child reused the old clear authority") with
    | Ok (`Ran ()) -> () | Ok (`Busy _) -> fail "second maintenance was busy"
    | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
   let result=clear () in
@@ -823,6 +883,8 @@ let () =
                ; test_case "marker failure preserves confirmed input clear" `Quick test_clear_marker_write_failure_keeps_confirmed_input
                ; test_case "restart marker repairs a torn tail" `Quick test_clear_marker_repairs_torn_tail
                ; test_case "same-turn nonhistory ambiguity refuses before effects" `Quick test_clear_refuses_same_turn_nonhistory_regression
+               ; test_case "inconsistent derived message count refuses before effects" `Quick test_clear_refuses_inconsistent_derived_count
+               ; test_case "unavailable prior input refuses before official-session effects" `Quick test_clear_refuses_unavailable_prior_input
                ; test_case "partial clear requires fresh original maintenance authority" `Quick test_partial_clear_requires_fresh_maintenance_authority
                ; test_case "owned clear resumes before and after Owner restart" `Quick test_owned_clear_survives_owner_restart
                ; test_case "owned clear recovers missing canonical" `Quick (test_owned_clear_recovers_canonical ~corrupt:false)

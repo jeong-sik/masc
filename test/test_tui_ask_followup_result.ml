@@ -1098,9 +1098,16 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
       Fun.protect ~finally:(fun () -> close_in channel) @@ fun () ->
       In_channel.input_lines channel |> List.map (fun line -> Log.Ring.entry_of_json (Yojson.Safe.from_string line))) in
   let member key json=Yojson.Safe.Util.member key json in
+  (* The ring also carries plain-text lines (Log.log with no [~details]); their
+     decoded [sl_details] is [`Null], and [Yojson.Safe.Util.member] raises on a
+     non-object. Predicates over decoded entries must skip them. *)
+  let has_event event (entry : Masc.Tui_decode.system_log_entry) =
+    match entry.sl_details with
+    | `Assoc _ -> member "event" entry.sl_details=`String event
+    | _ -> false in
   let originals=[completed;failed;unstarted] in
   let selected (entry : Masc.Tui_decode.system_log_entry) =
-    member "event" entry.sl_details=`String "tui_ask_followup" in
+    has_event "tui_ask_followup" entry in
   let observed=List.filter selected decoded.sys_entries in
   check bool "actual exported structured observations exist" true (observed<>[]);
   List.iter (fun (entry : Masc.Tui_decode.system_log_entry) ->
@@ -1155,10 +1162,9 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
   check bool "actual original read completes despite capture failure" true (result=Some (Ok ()));
   let local_after_failure=Masc_tui_system_logs.client_snapshot ~limit:(Log.Ring.bounds ()).total ~min_level:None |> require in
   let capture_entry=List.find_opt (fun entry ->
-    let details=entry.Masc.Tui_decode.sl_details in
-    member "event" details=`String "tui_ask_followup"
-    && member "request" details=`Int (Ui.Snapshot_read.request_id capture_failed_read.afr_request)
-    && member "origin" details=Origin.to_json capture_failed_read.afr_origin)
+    has_event "tui_ask_followup" entry
+    && member "request" entry.sl_details=`Int (Ui.Snapshot_read.request_id capture_failed_read.afr_request)
+    && member "origin" entry.sl_details=Origin.to_json capture_failed_read.afr_origin)
     local_after_failure.sys_entries in
   check bool "local decoder retains original failed receipt without filesystem text in Info" true
     (match capture_entry with None -> false | Some entry ->
@@ -1166,10 +1172,9 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
        receipt=Masc_tui_observation_store.admission_capture_to_json capture_failed_read.afr_admission_capture
        && member "state" receipt=`String "failed" && member "error" receipt=`Null);
   let failure_entry=List.find_opt (fun entry ->
-    let details=entry.Masc.Tui_decode.sl_details in
-    member "event" details=`String "tui_ask_followup_admission_failed"
-    && member "request" details=`Int (Ui.Snapshot_read.request_id capture_failed_read.afr_request)
-    && member "origin" details=Masc_tui_observation_origin.to_json capture_failed_read.afr_origin)
+    has_event "tui_ask_followup_admission_failed" entry
+    && member "request" entry.sl_details=`Int (Ui.Snapshot_read.request_id capture_failed_read.afr_request)
+    && member "origin" entry.sl_details=Masc_tui_observation_origin.to_json capture_failed_read.afr_origin)
     local_after_failure.sys_entries in
   (match failure_entry with
    | None -> fail "actual capture failure missing from local decoded Logs source"

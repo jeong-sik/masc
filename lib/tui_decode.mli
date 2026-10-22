@@ -1274,11 +1274,16 @@ type keeper_turn_row = {
 }
 
 type keeper_current_activity =
+  | Keeper_activity_idle
+      (** No turn is running. *)
   | Keeper_activity_waiting
+      (** A turn is waiting for the provider's response. *)
   | Keeper_activity_running
   | Keeper_activity_streaming
   | Keeper_activity_tool
   | Keeper_activity_preparing
+  | Keeper_activity_attempt_failed
+      (** The turn is still open after a provider attempt failed. *)
   | Keeper_activity_unknown
 
 type keeper_failure_status = {

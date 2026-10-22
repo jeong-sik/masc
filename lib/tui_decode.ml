@@ -4500,11 +4500,13 @@ type keeper_turn_row = {
 }
 
 type keeper_current_activity =
+  | Keeper_activity_idle
   | Keeper_activity_waiting
   | Keeper_activity_running
   | Keeper_activity_streaming
   | Keeper_activity_tool
   | Keeper_activity_preparing
+  | Keeper_activity_attempt_failed
   | Keeper_activity_unknown
 
 type keeper_failure_status = {
@@ -4513,7 +4515,7 @@ type keeper_failure_status = {
 }
 
 let keeper_current_activity_of_turn = function
-  | Keeper_turn_idle -> Keeper_activity_waiting
+  | Keeper_turn_idle -> Keeper_activity_idle
   | Keeper_turn_unavailable _ -> Keeper_activity_unknown
   | Keeper_turn_running {preview=Some {ktp_activity=Some activity;_};_} ->
       (match activity with
@@ -4521,7 +4523,7 @@ let keeper_current_activity_of_turn = function
        | Keeper_turn_preview.Receiving_response -> Keeper_activity_streaming
        | Keeper_turn_preview.Tool_observed -> Keeper_activity_tool
        | Keeper_turn_preview.Preparing -> Keeper_activity_preparing
-       | Keeper_turn_preview.Failed -> Keeper_activity_running)
+       | Keeper_turn_preview.Failed -> Keeper_activity_attempt_failed)
   | Keeper_turn_running _ -> Keeper_activity_running
 
 let keeper_failure_status_of_readings ~health ~turn ~runtime =

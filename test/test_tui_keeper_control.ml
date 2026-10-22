@@ -66,14 +66,30 @@ let failure cause at_unix : Decode.keeper_failure =
 let test_failing_status_projection () =
   let failed = failure Decode.Keeper_failure_provider (Some 18.) in
   let row = runtime ~health:(health "failing") ~last_failure:(Some failed) "analyst" in
-  let waiting = Decode.keeper_failure_status_of_readings
+  let idle = Decode.keeper_failure_status_of_readings
       ~health:(Some row.kr_health) ~turn:(Some Decode.Keeper_turn_idle) ~runtime:(Some row) in
-  (match waiting with
+  (match idle with
    | Some status ->
-       Alcotest.(check bool) "no turn means waiting" true
-         (status.kfs_current_activity = Decode.Keeper_activity_waiting);
+       Alcotest.(check bool) "no turn means idle" true
+         (status.kfs_current_activity = Decode.Keeper_activity_idle);
        Alcotest.(check bool) "keeps the typed failure" true
          (status.kfs_last_failure = Some failed)
+   | None -> Alcotest.fail "failing health must produce a status projection");
+  let waiting = Decode.keeper_failure_status_of_readings
+      ~health:(Some row.kr_health)
+      ~turn:(Some (running_turn Masc.Keeper_turn_preview.Awaiting_response))
+      ~runtime:(Some row) in
+  (match waiting with
+   | Some status -> Alcotest.(check bool) "a turn awaiting the provider is waiting, not idle" true
+       (status.kfs_current_activity = Decode.Keeper_activity_waiting)
+   | None -> Alcotest.fail "failing health must produce a status projection");
+  let attempt_failed = Decode.keeper_failure_status_of_readings
+      ~health:(Some row.kr_health)
+      ~turn:(Some (running_turn Masc.Keeper_turn_preview.Failed))
+      ~runtime:(Some row) in
+  (match attempt_failed with
+   | Some status -> Alcotest.(check bool) "a failed attempt in an open turn is not running" true
+       (status.kfs_current_activity = Decode.Keeper_activity_attempt_failed)
    | None -> Alcotest.fail "failing health must produce a status projection");
   let streaming = Decode.keeper_failure_status_of_readings
       ~health:(Some row.kr_health)

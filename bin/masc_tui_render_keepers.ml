@@ -90,11 +90,13 @@ let keeper_failure_cause_word = function
   | Keeper_failure_operator_interrupt -> "operator interrupt"
 
 let keeper_current_activity_word = function
+  | Keeper_activity_idle -> "idle"
   | Keeper_activity_waiting -> "waiting"
   | Keeper_activity_running -> "running"
   | Keeper_activity_streaming -> "streaming"
   | Keeper_activity_tool -> "tool"
   | Keeper_activity_preparing -> "preparing"
+  | Keeper_activity_attempt_failed -> "attempt failed"
   | Keeper_activity_unknown -> "unknown"
 
 let keeper_failure_context ~now status =

@@ -39,7 +39,7 @@ let failure_name = function
   | Peer.Exited {code; _} -> Printf.sprintf "exited %d" code
   | Peer.Signaled signal -> "signaled " ^ Process_eio.signal_name signal
   | Peer.Timed_out -> "timed out" | Peer.Output_exceeded -> "output exceeded"
-  | Peer.Unstarted _ -> "unstarted"
+  | Peer.Unobserved _ -> "unobserved" | Peer.Unstarted _ -> "unstarted"
 
 let test_a_run_answers_both_streams_or_why_not () =
   Eio_main.run (fun env ->
@@ -64,7 +64,8 @@ let test_a_run_answers_both_streams_or_why_not () =
       (run (Printf.sprintf "head -c %d /dev/zero" (Peer.output_limit_bytes + 1)));
     let started = Eio.Time.now clock in
     failed "a run past its window" "timed out" (run ~timeout_s:0.3 "sleep 30");
-    check bool "stopped within the stop grace" true (Eio.Time.now clock -. started < 10.);
+    (* The window and the stop grace (2 s), not the run's own 30 s. *)
+    check bool "stopped within its window and the stop grace" true (Eio.Time.now clock -. started < 3.);
     (match Ego.run_command ~env ~timeout_s:5. ~stdin:"" ~command:"/nonexistent/ego-browser" [] with
      | Error (Peer.Unstarted _) -> ()
      | Ok _ | Error _ -> fail "a missing command started"))
@@ -72,7 +73,7 @@ let test_a_run_answers_both_streams_or_why_not () =
 (* ego-browser as the worker runs it: [--version], and [nodejs] with one
    fixed script on stdin, answered by the step its first line names. *)
 let ego = {|#!/usr/bin/env python3
-import json,pathlib,sys
+import json,pathlib,sys,time
 root=pathlib.Path(__file__).resolve().parent
 mode=(root/'mode').read_text()
 if sys.argv[1:]==['--version']:
@@ -100,6 +101,10 @@ elif step=='page.capture':
     # What a capture stopped part way leaves behind.
     (path.parent/'ego-capture-51-99.png').write_bytes(b'left')
     answer({'label':'p1','path':str(path),'before':{'answer':state},'after':{'answer':state}})
+elif step=='page.read':
+    # late: done after the caller stopped waiting; retire: still running when the worker retires.
+    time.sleep({'late':2.5,'retire':30}.get(mode,0))
+    answer({'label':'p1','answer':{'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','text':'hi','chars':2,'truncated':False})}})
 elif step=='space.finish':answer(None)
 else:answer(error='unexpected step '+step)
 |}
@@ -116,6 +121,10 @@ let scenario mode =
     let command = Filename.concat root "ego-browser" in
     write command ego; Unix.chmod command 0o700;
     write (Filename.concat root "mode") mode;
+    (* The connection's screenshot directory is made here, so what is left
+       of it after the run can be seen. *)
+    let temporary = Filename.concat root "tmp" in
+    Unix.mkdir temporary 0o700; Filename.set_temp_dir_name temporary;
     let entered = ref false in
     Eio_main.run (fun env ->
       Time_compat.set_clock (Eio.Stdenv.clock env);
@@ -128,10 +137,33 @@ let scenario mode =
         check string "transport" "ego_task_space" (B.live_transport_to_string client.transport);
         check string "ego lite's version" "0.6.0.16" client.version;
         check string "Chromium's version" "154.0.8037.44" client.engine_version;
-        let issue verb = dispatch (W.Issue {route=B.Live_route (Some client.client_id);verb;
-          actor=Some "keeper/live-fixture";timeout_sec=B.default_timeout_sec;only_if_idle=false}) in
+        let issue ?(timeout_sec=B.default_timeout_sec) verb = dispatch (W.Issue {route=B.Live_route (Some client.client_id);verb;
+          actor=Some "keeper/live-fixture";timeout_sec;only_if_idle=false}) in
+        let tab_list = answered (issue B.Tabs_list) in
         check string "the tab list" {|{"ok":true,"data":[{"id":1,"index":0,"url":"https://fixture.test/","title":"Fixture","active":true}]}|}
-          (Yojson.Safe.to_string (answered (issue B.Tabs_list)));
+          (Yojson.Safe.to_string tab_list);
+        let finished () = List.mem "space.finish" (lines (Filename.concat root "steps")) in
+        let clock = Eio.Stdenv.clock env in
+        if mode = "late" then (
+          check bool "the caller stops waiting for a slow read" true
+            (match issue ~timeout_sec:1. (B.Page_read {tab_id=Some 1;max_chars=None}) with
+             | W.Issue_result (Ok B.Timed_out) -> true
+             | W.Issue_result (Ok (B.Answered _ | Lane_absent | Refused _ | Rejected_before_effect _) | Error _)
+             | Snapshot_result _ | Model_reply _ | Download_reply _ | Poll_result _ | Receipt | Service_refusal _ -> false);
+          check string "its late result does not end the connection" (Yojson.Safe.to_string tab_list)
+            (Yojson.Safe.to_string (answered (issue B.Tabs_list)));
+          check bool "retirement" true (dispatch W.Retire = W.Receipt);
+          check bool "retirement answers after the space ended" true (finished ()))
+        else if mode = "retire" then Eio.Switch.run (fun sw ->
+          let reading = Eio.Fiber.fork_promise ~sw (fun () ->
+            issue ~timeout_sec:5. (B.Page_read {tab_id=Some 1;max_chars=None})) in
+          Eio.Time.sleep clock 0.5;
+          let started = Eio.Time.now clock in
+          check bool "retirement stops a running read" true (dispatch W.Retire = W.Receipt);
+          check bool "within the stop grace and the space's end" true (Eio.Time.now clock -. started < 10.);
+          check bool "retirement answers after the space ended" true (finished ());
+          ignore (Eio.Promise.await_exn reading))
+        else (
         let shot = answered (issue (B.Page_capture {tab_id=1})) in
         check string "the screenshot" (Base64.encode_string "\137PNG\r\n\026\nfixture")
           Yojson.Safe.Util.(shot |> member "data" |> member "data" |> to_string);
@@ -141,12 +173,13 @@ let scenario mode =
            | W.Issue_result (Ok _ | Error _) | Snapshot_result _ | Model_reply _ | Download_reply _
            | Poll_result _ | Receipt | Service_refusal _ -> false);
         check bool "retirement ends the task space" true (dispatch W.Retire = W.Receipt);
-        check bool "no client is left" true (B.connected_clients () = []) in
+        check bool "retirement answers after the space ended" true (finished ());
+        check bool "no client is left" true (B.connected_clients () = [])) in
       let failure = try Ego.run ~env ~owner {command; space="masc"} work; None with
         | Invalid_argument detail | Sys_error detail -> Some detail in
       (match mode, failure with
-       | "normal", None -> ()
-       | "normal", Some detail -> failf "the connection failed: %s" detail
+       | ("normal" | "late" | "retire"), None -> ()
+       | ("normal" | "late" | "retire"), Some detail -> failf "the connection failed: %s" detail
        | ("no-version" | "in-use"), Some detail ->
          check bool "says why" true
            (String_util.contains_substring detail (if mode = "in-use" then "EGO_TASK_SPACE_NAME_IN_USE" else "not signed in"))
@@ -154,12 +187,19 @@ let scenario mode =
        | _, Some detail -> failf "%s: %s" mode detail);
       check bool "owner input is fenced at the end" true (Owner.is_retired owner));
     let steps = lines (Filename.concat root "steps") in
+    check (array string) "nothing is left of the screenshot directory" [||] (Sys.readdir temporary);
     match mode with
     | "normal" ->
       check bool "caller work ran" true !entered;
       check (list string) "steps" ["space.open"; "tabs.list"; "page.capture"; "space.finish"] steps;
       check bool "the screenshot directory is removed, with what a stopped capture left" false
         (Sys.file_exists (read (Filename.concat root "captures")))
+    | "late" ->
+      check bool "caller work ran" true !entered;
+      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"; "tabs.list"; "space.finish"] steps
+    | "retire" ->
+      check bool "caller work ran" true !entered;
+      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"; "space.finish"] steps
     | "no-version" ->
       check bool "caller work never ran" false !entered;
       check (list string) "no script ran" [] steps
@@ -182,5 +222,7 @@ let () =
       test_case "the table names a command and a space" `Quick test_the_table_names_a_command_and_a_space;
       test_case "a run answers both streams, or why not" `Quick test_a_run_answers_both_streams_or_why_not;
       test_case "the worker serves the space until retirement" `Quick (child "normal");
+      test_case "a result delivered after the caller stopped waiting does not end the connection" `Quick (child "late");
+      test_case "retirement stops a running command and ends the space" `Quick (child "retire");
       test_case "an ego that names no version fails the start" `Quick (child "no-version");
       test_case "a space the operator holds fails the start" `Quick (child "in-use") ] ]

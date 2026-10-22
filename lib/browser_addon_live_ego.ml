@@ -6,17 +6,19 @@ let ( let* ) = Result.bind
 let arguments (configuration : Browser_configuration.live_ego) =
   ["--live-ego-command";configuration.command;"--live-ego-space";configuration.space]
 
-(* A stopped run gets TERM, then KILL after this long, with its process group. *)
+(* A stopped run gets TERM, then KILL after this long, with its process
+   group. The foreground manager waits this long even when the run ends at
+   once, so stopping a run costs it. *)
 let stop_grace_s = 2.
 (* ego-browser --version answers without starting the browser. *)
 let version_timeout_s = 10.
 (* Every command this connection serves is a read, which the server waits
-   Browser_lane.default_timeout_sec for. A run is stopped this much earlier,
-   so the worker can still deliver that it was stopped: a result the server
-   no longer waits for is refused, and a refused delivery ends the
-   connection, as on the BiDi connection. *)
+   Browser_lane.default_timeout_sec for, counted from when it was issued. A
+   run is given that less the stop grace and this margin, so a stopped run's
+   failure usually still arrives in time. One that does not is refused:
+   see [serve]. *)
 let delivery_margin_s = 2.
-let command_timeout_s = B.default_timeout_sec -. delivery_margin_s
+let command_timeout_s = B.default_timeout_sec -. stop_grace_s -. delivery_margin_s
 let read_chunk_bytes = 65_536
 
 let run_command ~env ~timeout_s ~stdin ~command arguments =
@@ -36,15 +38,19 @@ let run_command ~env ~timeout_s ~stdin ~command arguments =
         | read when Buffer.length output + read > Peer.output_limit_bytes -> `Exceeded
         | read -> Buffer.add_string output (Cstruct.to_string ~len:read chunk); drain ()
         | exception End_of_file -> `Drained in
-      (* A run that exits before it read its whole script is answered by its exit status. *)
+      (* A run that exits before it read its whole script is answered by
+         its exit status. Once the script is written the output decides, so
+         a run past the output limit is stopped even while it does not read. *)
       let feed () =
         (try Eio.Flow.copy_string stdin input_write with Eio.Io _ -> ());
-        Eio.Flow.close input_write in
+        Eio.Flow.close input_write;
+        Eio.Fiber.await_cancel () in
       (* Leaving the switch stops a run that is still going, with its group. *)
       match Eio.Time.with_timeout clock timeout_s (fun () ->
-        match Eio.Fiber.pair feed drain with
-        | (), `Exceeded -> Ok None
-        | (), `Drained -> Ok (Some (Eio.Process.await process))) with
+        Eio.Fiber.first feed (fun () -> match drain () with
+          | `Exceeded -> Ok None
+          | `Drained -> Ok (Some (Eio.Process.await process)))) with
+      | exception (Eio.Io _ | Unix.Unix_error _ as exn) -> Error (Peer.Unobserved (Printexc.to_string exn))
       | Error `Timeout -> Error Peer.Timed_out
       | Ok None -> Error Peer.Output_exceeded
       | Ok (Some (`Exited 0)) -> Ok (Buffer.contents output)
@@ -109,7 +115,14 @@ let run ~env ~owner (configuration : Browser_configuration.live_ego) work =
               let result =
                 let* verb, args, _actor = Live.decode command |> Result.map_error (fun detail -> Live.Before_effect detail) in
                 Peer.dispatch peer ~verb args in
-              Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Live.payload result) in
+              (* A refused delivery loses this one result. The server stopped
+                 waiting for it, and its caller was told the outcome is
+                 unknown; a connection that is gone fails the next poll. *)
+              (match Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Live.payload result) with
+               | Ok () -> ()
+               | Error detail ->
+                 Log.Server.warn "browser Add-on ego result of command %s was not delivered: %s" command.id detail);
+              Ok () in
           if Browser_addon_owner.is_retired owner then Ok () else serve () in
         Eio.Fiber.first serve (fun () -> Eio.Promise.await stopping; Ok ()) in
     Browser_addon_owner.disconnect_live owner client_id;
@@ -121,12 +134,17 @@ let run ~env ~owner (configuration : Browser_configuration.live_ego) work =
   let connect () =
     let* version, engine_version = version ~env ~command in
     let* directory = capture_directory () in
-    let served = serve_space directory ~version ~engine_version in
-    let removed = remove_capture_directory directory in
-    match served, removed with
-    | Error detail, (Ok () | Error _) -> Error detail
-    | Ok (), Error detail -> Error ("the ego screenshot directory was not removed: " ^ detail)
-    | Ok (), Ok () -> Ok () in
+    let removed () = Eio.Cancel.protect (fun () -> remove_capture_directory directory)
+      |> Result.map_error (fun detail -> "the ego screenshot directory was not removed: " ^ detail) in
+    match serve_space directory ~version ~engine_version with
+    | exception exn ->
+      (match removed () with Ok () -> () | Error detail -> Log.Server.warn "browser Add-on %s" detail);
+      raise exn
+    | served ->
+      match served, removed () with
+      | Error detail, Error removal -> Error (detail ^ "; " ^ removal)
+      | Error detail, Ok () | Ok (), Error detail -> Error detail
+      | Ok (), Ok () -> Ok () in
   Eio.Switch.run (fun lifetime ->
     Eio.Fiber.fork ~sw:lifetime (fun () ->
       let outcome = match connect () with

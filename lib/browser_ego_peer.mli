@@ -11,12 +11,14 @@
     it. [Timed_out]: it did not end within the runner's window and was
     stopped, so whatever it started in the browser may still be going on.
     [Output_exceeded]: it wrote more than {!output_limit_bytes} and was
-    stopped. [Unstarted]: it never ran. *)
+    stopped. [Unobserved]: it started, and reading its output or its end
+    failed. [Unstarted]: it never ran. *)
 type run_failure =
   | Exited of { code : int; output : string }
   | Signaled of int
   | Timed_out
   | Output_exceeded
+  | Unobserved of string
   | Unstarted of string
 
 (** The most a runner keeps of one run's output: the one answer line of the

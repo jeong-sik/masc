@@ -5,7 +5,7 @@ let obj fields = `Assoc fields
 let str value = `String value
 
 type run_failure = Exited of { code : int; output : string } | Signaled of int | Timed_out | Output_exceeded
-  | Unstarted of string
+  | Unobserved of string | Unstarted of string
 type runner = string -> (string, run_failure) result
 
 (* The same answers as the BiDi connection: what a page script reads on one
@@ -44,6 +44,7 @@ let run_failure_message = function
   | Signaled signal -> "ego-browser nodejs was ended by " ^ Process_eio.signal_name signal
   | Timed_out -> "ego-browser nodejs did not finish in time and was stopped"
   | Output_exceeded -> Printf.sprintf "ego-browser nodejs wrote more than %d bytes and was stopped" output_limit_bytes
+  | Unobserved detail -> "ego-browser nodejs ran and its output or its end could not be read: " ^ detail
   | Unstarted detail -> "ego-browser nodejs did not start: " ^ detail
 
 let result_marker = "masc-ego-result "

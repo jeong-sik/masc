@@ -50,3 +50,11 @@ also pass. This selected scope is distinct from full regression, a measured
 historical syscall race and actual provider/UI/installed runtime behavior.
 Native Stack44994 was externally merged into the Candle branch, whose whole
 tree equals this executed candidate; main integration is not established.
+
+After that recorded integration, another session restacked the upstream Candle
+branch onto `73c099621ccdbf376edba4fc3fd4ba5e4a37d55f`. Its134-file base delta
+includes other execution/tool interfaces and test declarations. The evidence-only
+PR was rebased with `gh stack rebase`; its six-file documentation delta was
+identical before the qualification note was added. The226-case receipt still
+certifies47b9 and the historical first integration65727, not the later whole
+Candle combination or this documentation head. No new execution is inferred.

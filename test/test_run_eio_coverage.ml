@@ -143,7 +143,7 @@ let test_update_plan () =
   match Run_eio.update_plan config ~task_id:"task-plan-001" ~content:"# New Plan\n- Step 1\n- Step 2" with
   | Ok run ->
       check bool "plan updated" true (String.length run.plan > 0)
-  | Error e -> failf "update_plan failed: %s" e
+  | Error e -> failf "update_plan failed: %s" (Run_eio.error_to_string e)
 
 (* ============================================================
    Eio IO Tests: get / list

@@ -3,4 +3,5 @@
 (test
  (name test_repo_skills_readable)
  (modules test_repo_skills_readable)
- (libraries alcotest masc masc.skill_reference masc.skill_snapshot masc.skill_snapshot_service))
+ (libraries alcotest masc masc.agent_core masc.config_dir_resolver masc.skill_config
+  masc.skill_reference masc.skill_snapshot masc.skill_snapshot_service))

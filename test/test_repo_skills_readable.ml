@@ -83,7 +83,12 @@ let publish root =
   let workspace =
     match Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:root with
     | Ok workspace -> workspace
-    | Error _ -> fail ("repository root is not a canonical workspace: " ^ root)
+    | Error error ->
+      fail
+        (Printf.sprintf
+           "repository root %s is not a canonical workspace: %s"
+           root
+           (Config_dir_resolver.canonical_base_path_error_to_string error))
   in
   let read_config () =
     { Skill_catalog_snapshot_service.path = Filename.concat root "runtime.toml"
@@ -95,25 +100,42 @@ let publish root =
   | Workspace_retired -> fail "repository workspace was retired during publication"
 ;;
 
+let rejection_reason_to_string = function
+  | Skill_catalog_snapshot.Document_rejected diagnostics ->
+    String.concat "; " (List.map Agent_core.Skill_document.diagnostic_to_string diagnostics)
+  | Skill_catalog_snapshot.Document_unreadable { path; detail } -> Printf.sprintf "unreadable %s: %s" path detail
+  | Skill_catalog_snapshot.Exact_identity_duplicate { first_directory } ->
+    "same identity as " ^ first_directory
+  | Skill_catalog_snapshot.Invalid_package_id error -> Skill_reference.package_id_error_to_string error
+;;
+
+(* Why the snapshot itself left a directory out: a Skill rejected or unread
+   before projection is only a missing name in the catalog. *)
+let snapshot_context snapshot =
+  let rejected =
+    Skill_catalog_snapshot.rejections snapshot
+    |> List.filter_map (fun (rejection : Skill_catalog_snapshot.rejection) ->
+      if String.equal (Skill_source_config.source_id_to_string rejection.source_id) source_id
+      then
+        Some
+          (Printf.sprintf
+             "%s: %s"
+             rejection.directory
+             (rejection_reason_to_string rejection.reason))
+      else None)
+  in
+  Printf.sprintf
+    "config %s; snapshot rejections [%s]"
+    (Skill_catalog_snapshot.config_state_to_string (Skill_catalog_snapshot.config_state snapshot))
+    (String.concat " | " rejected)
+;;
+
 let test_every_repository_skill_reaches_keepers () =
   let root = source_root () in
   let expected = repository_skill_directories root in
   check bool "the repository ships Skills" true (expected <> []);
-  let catalog, diagnostics = Keeper_skill_catalog.of_snapshot (publish root) in
-  let refused =
-    List.filter_map
-      (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
-         if from_this_source diagnostic.identity
-         then
-           Some
-             (Printf.sprintf
-                "%s: %s"
-                (Skill_reference.identity_package_id_to_string diagnostic.identity)
-                (Keeper_skill_catalog.error_to_string diagnostic.error))
-         else None)
-      diagnostics
-  in
-  check (list string) "no repository Skill is refused by the catalog" [] refused;
+  let snapshot = publish root in
+  let catalog, diagnostics = Keeper_skill_catalog.of_snapshot snapshot in
   let projected =
     Keeper_skill_catalog.skills catalog
     |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
@@ -123,7 +145,28 @@ let test_every_repository_skill_reaches_keepers () =
       | Some _ | None -> None)
     |> List.sort String.compare
   in
-  check (list string) "every repository Skill directory is offered" expected projected
+  (* A diagnostic counts as a refusal only when its Skill is missing from the
+     catalog: an advisory or a frozen fallback leaves the Skill offered. *)
+  let refused =
+    List.filter_map
+      (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
+         let package = Skill_reference.identity_package_id_to_string diagnostic.identity in
+         if from_this_source diagnostic.identity && not (List.mem package projected)
+         then
+           Some
+             (Printf.sprintf
+                "%s: %s"
+                package
+                (Keeper_skill_catalog.error_to_string diagnostic.error))
+         else None)
+      diagnostics
+  in
+  check (list string) "no repository Skill is refused by the catalog" [] refused;
+  check
+    (list string)
+    ("every repository Skill directory is offered; " ^ snapshot_context snapshot)
+    expected
+    projected
 ;;
 
 let () =

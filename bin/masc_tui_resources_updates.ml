@@ -2,7 +2,9 @@
 open Masc_tui_types
 module Catalog = Masc_tui_resource_catalog
 
-let reconcile state =
+type reconciliation = Inventory_updated | Filter_changed
+
+let reconcile reason state =
   let rows = Option.value (visible_resources state) ~default:[] in
   let open_key = match state.resource_pending_key,
       state.resource_content_error, state.resource_content with
@@ -17,6 +19,19 @@ let reconcile state =
   | None ->
     state.resources_cursor <- max 0 (min state.resources_cursor (List.length rows - 1));
     if Option.is_some open_key then begin
+      (match reason, open_key with
+       | Inventory_updated, Some (Catalog.Report_revision report)
+         when state.resources_reports_complete
+           && not (List.exists (fun entry -> Catalog.owns_key entry
+             (Catalog.Report_revision report))
+             (Option.value state.resources_list ~default:[])) ->
+           let prior = match state.resource_content_error with
+             | Some (key, prior) when Catalog.equal_key key (Catalog.Report_revision report) ->
+               Some prior
+             | Some _ | None -> None in
+           state.resource_inventory_notice <- Some (report, prior)
+       | (Inventory_updated | Filter_changed),
+           (Some (Catalog.Mcp_uri _ | Catalog.Report_revision _) | None) -> ());
       state.resource_pending_key <- None;
       state.resource_read_owner <- None;
       state.resource_revision_history <- [];
@@ -46,7 +61,7 @@ let listed state ~owner result =
     state.resources_list <- Some rows;
     state.resources_reports_complete <- reports_complete;
     state.resources_error <- (match notes with [] -> None | _ -> Some (String.concat " · " notes));
-    reconcile state
+    reconcile Inventory_updated state
   | Error detail ->
     state.resources_reports_complete <- false;
     state.resources_error <- Some detail
@@ -74,11 +89,12 @@ let check_changed state request = match state.artifact_check_pending with
   | Some _ | None -> false
 
 let select_scope state scope =
+  state.resource_inventory_notice <- None;
   state.resource_scope <- scope;
   state.resources_cursor <- 0;
   state.search <- None;
   state.search_last <- "";
-  reconcile state
+  reconcile Filter_changed state
 
 let toggle_today state ~now =
   state.resource_day <- (match state.resource_day with

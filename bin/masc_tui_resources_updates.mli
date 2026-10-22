@@ -13,7 +13,10 @@ val listed :
   unit
 (** Keep the open resource selected across a new listing, including a fixed
     report revision when its report is still listed. If it is absent, clamp the
-    cursor and clear the reading that no longer has a listed resource. A failed
+    cursor and clear the reading that no longer has a listed resource. A report
+    missing from a successful complete inventory leaves an explicit notice,
+    including its previous read error, until another read or filter selection.
+    Filtering alone does not claim server-side removal. A failed
     listing retains the previous inventory and records its error. Partial inventory and per-report diagnostics stay visible in the status line.
     Only the current pending owner may apply success or failure, once. *)
 

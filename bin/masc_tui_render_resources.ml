@@ -11,7 +11,7 @@ let entry_rows = 3
 let save_prompt_height state = if Option.is_some state.resource_save_prompt then 3 else 0
 
 let list_viewport state ~rows =
-  let status = Option.is_some state.resources_error
+  let status = Option.is_some (resource_inventory_status state)
     || Option.is_some (resources_empty_note (visible_resources state)) in
   let budget = max 0 (pane_surface_content_height ~rows - save_prompt_height state - 1
     - (if status then 1 else 0)) in
@@ -71,7 +71,7 @@ let render_resources (state : state) =
     (* The status line spends one of the budgeted rows, not an extra one:
        an extra row pushed the pane past its height and the frame's last
        casualty was the footer. *)
-    (      match state.resources_error with
+    (      match resource_inventory_status state with
       | Some detail ->
           framed_line pane_buf pane_cols
             ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);

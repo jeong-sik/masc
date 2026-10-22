@@ -183,6 +183,50 @@ let pinned_refresh () =
   check bool "withdrawal clears body and history" true
     (state.resource_content=None && state.resource_revision_history=[] && state.resource_read_owner=None)
 
+let missing_report_observation () =
+  let selected = entry (revision markdown) in
+  let key = Catalog.key selected and selected_report = report selected in
+  let state = state () in
+  let owner = ref () in
+  state.resources_list <- Some [selected];
+  state.resource_content <- Some (key, []);
+  state.resource_content_error <- Some (key, "body read refused");
+  state.resource_pending_key <- Some key;
+  state.resource_read_owner <- Some owner;
+  listed state (Ok {Catalog.entries=[];notes=[];reports_complete=true});
+  check bool "complete inventory retains original report and failed read" true
+    (state.resource_inventory_notice=Some (selected_report, Some "body read refused"));
+  check bool "missing report retires pending body ownership" true
+    (state.resource_pending_key=None && state.resource_read_owner=None
+      && state.resource_content=None);
+  Updates.read_done state ~request:{Catalog.key;owner}
+    (Ok (Catalog.mcp_reading []));
+  check bool "late read cannot hide missing inventory evidence" true
+    (state.resource_inventory_notice=Some (selected_report, Some "body read refused")
+      && state.resource_content=None);
+  listed state (Ok {Catalog.entries=[];notes=[];reports_complete=true});
+  check bool "later successful refresh does not silently erase the notice" true
+    (state.resource_inventory_notice=Some (selected_report, Some "body read refused"));
+  listed state (Error "inventory read refused");
+  check bool "inventory error and absence remain separate observations" true
+    (state.resources_error=Some "inventory read refused"
+      && state.resource_inventory_notice=Some (selected_report, Some "body read refused"));
+  Masc_tui_types.retain_resource_read state ~key;
+  check bool "explicit new reading retires the old absence observation" true
+    (state.resource_inventory_notice=None)
+
+let incomplete_inventory_not_absence () =
+  let selected = entry (revision markdown) in
+  let state = state () in
+  state.resources_list <- Some [selected];
+  state.resource_content <- Some (Catalog.key selected, []);
+  listed state (Ok {Catalog.entries=[];notes=["reports could not be read"];
+    reports_complete=false});
+  check bool "incomplete report source does not prove disappearance" true
+    (state.resource_inventory_notice=None);
+  check bool "partial source failure remains observable" true
+    (Option.is_some state.resources_error)
+
 let superseded_same_key () =
   let _, _, _, current, reading = history () in
   let state = state () in
@@ -231,6 +275,8 @@ let filtered_selection () =
   Updates.select_scope state Catalog.Html_reports;
   check bool "hidden read loses ownership" true
     (state.resource_pending_key=None && state.resource_read_owner=None);
+  check bool "a user filter change does not claim server inventory absence" true
+    (state.resource_inventory_notice=None);
   Updates.read_done state ~request:{Catalog.key=Catalog.key doc;owner}
     (Ok (Catalog.mcp_reading []));
   check bool "hidden late response cannot restore content" true (state.resource_content=None);
@@ -327,6 +373,8 @@ let () = run "published report resources" ["report reading",[
   test_case "separate read authority" `Quick transport_identity;
   test_case "exact neighboring revision requests" `Quick revision_requests;
   test_case "pinned refresh and withdrawal" `Quick pinned_refresh;
+  test_case "missing report keeps inventory and read evidence" `Quick missing_report_observation;
+  test_case "incomplete inventory cannot prove report absence" `Quick incomplete_inventory_not_absence;
   test_case "same key new request ownership" `Quick superseded_same_key;
   test_case "navigation after a refused revision" `Quick failed_revision_navigation;
   test_case "filtered selection and detached reads" `Quick filtered_selection;

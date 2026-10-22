@@ -8561,6 +8561,9 @@ type state = {
   mutable voice_wizard_requests: int;
   mutable resources_list: Masc_tui_resource_catalog.t list option;
   mutable resources_error: string option;
+  (* A successful complete report inventory no longer contains an open report.
+     Retained separately from the next refresh's source diagnostics. *)
+  mutable resource_inventory_notice: (Masc_tui_resource_catalog.report * string option) option;
   mutable resources_reports_complete: bool;
   mutable resources_list_owner: unit ref option;
   mutable artifact_checks: (unit, Masc_tui_artifact_checks.inventory) Masc_tui_fetched.t;
@@ -11029,6 +11032,17 @@ let visible_resources state =
   Option.map (Masc_tui_resource_catalog.select ~scope:state.resource_scope
     ~day:state.resource_day) state.resources_list
 
+let resource_inventory_status state =
+  let notice = Option.map (fun (report, prior) ->
+    let detail = Printf.sprintf
+      "Previously opened report %s (revision %d) was absent from a completed inventory observation; access or publication may have changed."
+      report.Masc_tui_resource_catalog.id report.revision.revision in
+    match prior with None -> detail | Some prior -> detail ^ " Previous read: " ^ prior)
+    state.resource_inventory_notice in
+  match List.filter_map Fun.id [state.resources_error; notice] with
+  | [] -> None
+  | details -> Some (String.concat " · " details)
+
 let resource_check_status state report =
   if Option.is_some state.artifact_check_pending then
     Masc_tui_artifact_checks.Unknown "saving confirmation; a fresh query is required"
@@ -11049,6 +11063,7 @@ let resource_content_cols state ~cols =
   if resource_split state ~cols then cols - Masc_tui_roster_pane.pane_cols else cols
 
 let retain_resource_read state ~key =
+  state.resource_inventory_notice <- None;
   let same_resource = match state.resource_content with
     | Some (current, _) -> Masc_tui_resource_catalog.equal_key current key
     | None -> false in
@@ -15472,6 +15487,7 @@ let create_state
   voice_wizard_requests = 0;
   resources_list = None;
   resources_error = None;
+  resource_inventory_notice = None;
   resources_reports_complete = false;
   resources_list_owner = None;
   artifact_checks = Masc_tui_fetched.initial;

@@ -1,5 +1,7 @@
-(** MCP resource and published report requests. [launch] is the caller's workspace request boundary:
-    it checks endpoint identity, owns cancellation and stamps completion. [check]
+(** MCP resource and published report requests. [launch] is the caller's workspace
+    JSON read boundary: it captures the expected root before dispatch, owns
+    cancellation and stamps completion. Report GETs use [get_json] under that
+    binding and require the server's admission receipt, including cache reuse. [check]
     rechecks the same captured authority after obtaining an MCP session. The
     list combines independent sources with their failure diagnostics. Reports
     use the token-bound admin API with a fixed revision and verified original body.

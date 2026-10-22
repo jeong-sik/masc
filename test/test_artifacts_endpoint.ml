@@ -1,9 +1,5 @@
-(** Tests for the dashboard artifact lookup helpers.
-
-    The HTTP routing surface is integration-tested elsewhere; this file
-    pins the pure helpers in [Server_routes_http_routes_artifacts]:
-    sha256 validation and the JSON envelope shape returned for hit /
-    miss cases. *)
+(** Artifact lookup helpers and actual HTTP routing, including operator
+    authorization, workspace admission, and exact binary responses. *)
 
 module A = Server_routes_http_routes_artifacts
 module B = Tool_blob_store
@@ -157,6 +153,29 @@ let status_of_response response =
   | _ -> Alcotest.failf "could not parse response status: %S" response
 ;;
 
+let headers_and_body response =
+  match Astring.String.cut ~sep:"\r\n\r\n" response with
+  | None -> Alcotest.fail "HTTP response has no header terminator"
+  | Some (head, body) ->
+    let lines = String.split_on_char '\n' head in
+    let headers = match lines with
+      | [] -> Alcotest.fail "HTTP response has no status line"
+      | _status :: fields ->
+        List.map (fun field ->
+          match Astring.String.cut ~sep:":" field with
+          | Some (name, value) -> String.lowercase_ascii name, String.trim value
+          | None -> Alcotest.failf "invalid HTTP header: %S" field) fields
+        |> Httpun.Headers.of_list
+    in
+    headers, body
+;;
+
+let check_workspace_receipt expected response =
+  let headers, _ = headers_and_body response in
+  Alcotest.(check (list string)) "workspace admission receipt" expected
+    (Httpun.Headers.get_multi headers "x-masc-workspace-read")
+;;
+
 let test_artifact_route_enforces_admin_token () =
   with_temp_base_path (fun base_path ->
     let auth_config =
@@ -185,8 +204,8 @@ let test_artifact_route_enforces_admin_token () =
     Fun.protect
       ~finally:(fun () -> Server_auth.For_testing.restore_server_state @@ saved_state)
       (fun () ->
-         Server_auth.For_testing.restore_server_state @@
-           Some (Masc.Mcp_server.For_testing.create_state ~base_path);
+         let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+         Server_auth.For_testing.restore_server_state (Some state);
          let router = A.add_routes (Http.Router.create ()) in
          let path = "/api/v1/artifacts/" ^ sha256 in
          let anonymous = dispatch router (http_request ~path ()) in
@@ -219,6 +238,52 @@ let test_artifact_route_enforces_admin_token () =
            (Astring.String.is_infix ~affix:binary admin_raw);
          Alcotest.(check bool) "raw response is a download" true
            (Astring.String.is_infix ~affix:"application/octet-stream" admin_raw);
+         check_workspace_receipt [] admin_raw;
+         let encode = Uri.pct_encode ~component:`Query_value in
+         let base = Unix.realpath base_path in
+         let root = Unix.realpath
+           (Masc.Workspace.masc_dir (Masc.Mcp_server.workspace_config state)) in
+         let bound_path = raw_path ^ "?expected_base_path=" ^ encode base
+           ^ "&expected_masc_root=" ^ encode root in
+         let matched = dispatch router (http_request ~path:bound_path ~token:admin ()) in
+         Alcotest.(check int) "matched raw read succeeds" 200 (status_of_response matched);
+         check_workspace_receipt ["matched-v1"] matched;
+         let headers, body = headers_and_body matched in
+         Alcotest.(check string) "matched read preserves the entire binary body" binary body;
+         List.iter (fun (name, value) ->
+           Alcotest.(check (option string)) name (Some value)
+             (Httpun.Headers.get headers name))
+           [ "content-type", "application/octet-stream"
+           ; "content-length", string_of_int (String.length binary)
+           ; "cache-control", "no-store"
+           ; "x-content-type-options", "nosniff"
+           ; "content-disposition", "attachment; filename=artifact-" ^ binary_sha ^ ".bin"
+           ];
+         List.iter (fun (token, expected_status) ->
+           let refused = dispatch router (http_request ~path:bound_path ?token ()) in
+           Alcotest.(check int) "bound read still requires Admin" expected_status
+             (status_of_response refused);
+           check_workspace_receipt [] refused)
+           [ None, 401; Some worker, 403 ];
+         List.iter (fun (query, expected_status) ->
+           let response = dispatch router
+             (http_request ~path:(raw_path ^ "?" ^ query) ~token:admin ()) in
+           Alcotest.(check int) "invalid workspace cannot read bytes" expected_status
+             (status_of_response response);
+           check_workspace_receipt [] response;
+           let _, body = headers_and_body response in
+           Alcotest.(check bool) "refusal excludes artifact body" false
+             (Astring.String.is_infix ~affix:binary body))
+           [ "expected_base_path=" ^ encode (base ^ "-foreign")
+               ^ "&expected_masc_root=" ^ encode root, 409
+           ; "expected_base_path=" ^ encode base, 400
+           ; "expected_base_path=" ^ encode base
+               ^ "&expected_masc_root=" ^ encode root
+               ^ "&expected_masc_root=" ^ encode root, 400
+           ];
+         let unbound_again = dispatch router (http_request ~path:raw_path ~token:admin ()) in
+         Alcotest.(check int) "later unbound read succeeds" 200 (status_of_response unbound_again);
+         check_workspace_receipt [] unbound_again;
          let source = Filename.concat base_path "oversized.bin" in
          let fd = Unix.openfile source [ Unix.O_CREAT; Unix.O_WRONLY ] 0o600 in
          Fun.protect

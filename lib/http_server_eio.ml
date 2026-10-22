@@ -209,6 +209,7 @@ module Response = struct
       body
 
   let bytes ?(status = `OK) ?(headers = []) ~content_type body reqd =
+    let headers = scoped_headers () @ headers in
     safe_respond_with_string reqd
       (response ~after_headers:headers ~content_type status body)
       body

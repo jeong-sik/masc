@@ -80,12 +80,17 @@ echo "deploy preflight refuses runtime.toml before stopping prod"
 # binary, with the same refusing helper.
 cp "$ROOT_DIR/scripts/install-local-build.sh" \
     "$FIXTURE_DIR/repo/scripts/install-local-build.sh"
-touch \
-    "$FIXTURE_DIR/repo/_build/default/bin/masc_tui.exe" \
+# The install asks for the three browser Add-on programs unless it is told
+# --no-browser-addon, and this case means to reach the runtime.toml check.
+INSTALL_BINARIES=(
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_tui.exe"
     "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_host.exe"
-chmod +x \
-    "$FIXTURE_DIR/repo/_build/default/bin/masc_tui.exe" \
-    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_host.exe"
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_native_addon_launcher.exe"
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_addon_worker.exe"
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_process_owner.exe"
+)
+touch "${INSTALL_BINARIES[@]}"
+chmod +x "${INSTALL_BINARIES[@]}"
 
 INSTALL_ERR="$FIXTURE_DIR/install-local-build.err"
 if bash "$FIXTURE_DIR/repo/scripts/install-local-build.sh" \
@@ -168,6 +173,21 @@ then
 fi
 
 echo "deploy preflight accepts a declared browser Add-on"
+
+# A caller that writes the declaration itself after this check (the local
+# install) names that, and the check does not refuse the declaration the caller
+# is about to write.
+write_helper refuse
+if ! MASC_DEPLOYMENT_PREFLIGHT_HELPER="$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe" \
+    bash "$GATE" --base-path "$FIXTURE_DIR/runtime" --runtime-config-only --browser-addon-declared-by-caller \
+    >/dev/null 2>"$BROWSER_ERR"
+then
+    echo "expected a caller that declares the Add-on itself to pass the before-the-stop pass" >&2
+    cat "$BROWSER_ERR" >&2
+    exit 1
+fi
+
+echo "deploy preflight leaves the declaration to a caller that writes it"
 
 # A helper built before the check has no such command. The gate says so rather
 # than reading cmdliner's usage error as a refusal of the workspace.

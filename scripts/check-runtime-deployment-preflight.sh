@@ -5,6 +5,7 @@
 #   scripts/check-runtime-deployment-preflight.sh --base-path /path/to/workspace
 #   scripts/check-runtime-deployment-preflight.sh --base-path /path/to/new-workspace --allow-empty-workspace
 #   scripts/check-runtime-deployment-preflight.sh --base-path /path/to/workspace --runtime-config-only
+#   scripts/check-runtime-deployment-preflight.sh --base-path /path/to/workspace --runtime-config-only --browser-addon-declared-by-caller
 
 set -euo pipefail
 
@@ -12,6 +13,10 @@ BASE_PATH="${MASC_BASE_PATH:-$(pwd)}"
 ALLOW_EMPTY_WORKSPACE=0
 RUNTIME_ABSENT_BEFORE_LEASE=0
 RUNTIME_CONFIG_ONLY=0
+# Set by a caller that writes the browser Add-on declaration itself after this
+# check (scripts/install-local-build.sh), so the check would refuse the first
+# install on a workspace that has none yet.
+BROWSER_ADDON_DECLARED_BY_CALLER=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PREFLIGHT_HELPER="${MASC_DEPLOYMENT_PREFLIGHT_HELPER:-}"
@@ -66,6 +71,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --runtime-config-only)
       RUNTIME_CONFIG_ONLY=1
+      shift
+      ;;
+    --browser-addon-declared-by-caller)
+      BROWSER_ADDON_DECLARED_BY_CALLER=1
       shift
       ;;
     --runtime-absent-before-lease)
@@ -308,7 +317,9 @@ if [[ "$RUNTIME_CONFIG_ONLY" -eq 1 ]]; then
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
     || fail "base path is not an exact directory: $BASE_PATH"
   check_runtime_config "$RUNTIME_CONFIG_NEXT_BEFORE_STOP"
-  check_browser_addon
+  if [[ "$BROWSER_ADDON_DECLARED_BY_CALLER" -eq 0 ]]; then
+    check_browser_addon
+  fi
   printf '[runtime-deployment-preflight] OK: base_path=%s runtime_config_only=1%s\n' \
     "$BASE_PATH" "$(helper_identity)"
   exit 0

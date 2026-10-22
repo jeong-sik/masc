@@ -971,9 +971,10 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertIn(f"validate-stores --base-path {base}", helper_calls(build))
             self.assertFalse(prefix.exists(), "a build that cannot read the stored state was installed")
 
-    # A workspace with a browser lane host and no browser Add-on declaration is
+    # An install that leaves the declaration as it is (--no-browser-addon) onto a
+    # workspace with a browser lane host and no browser Add-on declaration is
     # refused before anything is replaced: its host polls would all get 503.
-    def test_a_browser_host_without_its_addon_declaration_installs_nothing(self):
+    def test_a_browser_host_without_its_addon_declaration_installs_nothing_when_the_install_declares_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             build = root / "build"
@@ -984,13 +985,34 @@ class LocalBuildInstall(unittest.TestCase):
             base = workspace(root)
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
                                      "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
-                                     "--base-path", str(base)],
+                                     "--base-path", str(base), "--no-browser-addon"],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("browser Add-on fixture verdict", result.stderr)
             self.assertIn("nothing was stopped or installed", result.stderr)
             self.assertIn(f"validate-browser-addon --base-path {base}", helper_calls(build))
             self.assertFalse(prefix.exists(), "a workspace without its browser Add-on declaration was installed")
+
+    # The same workspace installs when this install declares the Add-on right
+    # after the swap: the first install on a workspace has no declaration yet.
+    def test_an_install_that_declares_the_addon_is_not_refused_for_the_declaration_it_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            fake_masc(build / "main_eio.exe")
+            preflight_helper(build, browser_addon_exit=1)
+            prefix = root / "prefix"
+            base = workspace(root)
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(base)],
+                                    env=unnamed_env(root), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn(f"validate-browser-addon --base-path {base}", helper_calls(build))
+            self.assertEqual(addon_calls(prefix),
+                             [["browser-lane-setup", "--mode", "addon", "--base-path", str(base)]])
 
     # The stored state is read after runtime.toml passes and before anything
     # is replaced; a readable state lets the install go ahead.

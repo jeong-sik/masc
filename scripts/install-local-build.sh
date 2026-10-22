@@ -269,10 +269,19 @@ PY
       fi
       if [ "$workspace_kind" = directory ]; then
         echo "install-local-build: checking runtime.toml of $workspace_root (workspace from $workspace_source)"
+        # The browser Add-on declaration is written after the swap below, so a
+        # workspace that has none yet is not a refusal for an install that
+        # declares it. --no-browser-addon leaves the declaration as it is, and
+        # then the gate checks it.
+        preflight_addon_args=()
+        if [ "$browser_addon" = true ]; then
+          preflight_addon_args=(--browser-addon-declared-by-caller)
+        fi
         MASC_DEPLOYMENT_PREFLIGHT_HELPER="$preflight_helper" \
           "$repo/scripts/check-runtime-deployment-preflight.sh" \
           --base-path "$workspace_root" \
-          --runtime-config-only
+          --runtime-config-only \
+          ${preflight_addon_args[@]+"${preflight_addon_args[@]}"}
         # Boot reads only the stores it refuses on; a Preflight_only store is
         # read before a start by the deploy preflight alone (RFC
         # every-durable-store-has-one-boot-policy). This install read

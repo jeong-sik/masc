@@ -650,13 +650,16 @@ input is sent. A
 `secondary` click opens whatever the page binds to the context menu; observe the
 page afterwards, the receipt does not say what it did.
 
-`back`, `forward` and `reload` act on the named top-level tab through
-`browsingContext.traverseHistory` (delta -1 or 1) and `browsingContext.reload`
-(waiting for the document). Firefox's refusal, such as no earlier history entry,
-is a refusal before any effect. `close_tab` sends `browsingContext.close` with
-`promptUnload: false`, and only for a tab this connection opened with
-`open_tab`; a tab the operator opened is refused before any browser call,
-because it holds pages and unsaved state this host never saw.
+`back`, `forward`, `reload` and `close_tab` act on a top-level tab only if this
+connection opened it with `open_tab`. A tab the operator opened is refused before
+any browser call: it holds pages and unsaved state this host never saw, and these
+actions carry no `expectedUrl` that says which page the caller observed. The
+commands are `browsingContext.traverseHistory` (delta -1 or 1),
+`browsingContext.reload` (waiting for the document) and `browsingContext.close`
+with `promptUnload: false`. Firefox's error codes `no such history entry`,
+`invalid argument` and `no such frame` mean nothing happened. Any other error is
+a result that is not known: a reload or a history step that lands on an error
+page is answered with an error after the tab moved.
 
 `set_viewport` resizes the tab's page viewport, not the browser window. A live
 BiDi connection sends `browsingContext.setViewport` with the size, or with

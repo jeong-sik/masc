@@ -309,19 +309,24 @@ let keyboard t context args ~sources ~name =
   match after with
   | `Assoc fields -> Ok (obj (("action",str name)::("urlBefore",str old_url)::fields))
   | _ -> Error (Outcome_unknown "invalid post-keyboard observation")
-(* Back, forward and reload act on the tab the caller named. Closing is limited to the tabs this connection
-   opened: a tab the operator opened holds pages and unsaved state this host never saw. A refusal Firefox
-   sent means nothing happened; a command that went out and got no answer may have. *)
+(* All four act only on tabs this connection opened: a tab the operator opened holds pages and unsaved state
+   this host never saw, and these actions carry no expectedUrl to say which page the caller observed. Of
+   Firefox's refusals, only [codes_before_acting] mean nothing happened. A reload or a history step waits for
+   the document, and one that lands on an error page is answered with an error after the tab moved, so any
+   other error, like a command that got no answer, is [Outcome_unknown]. *)
+let codes_before_acting = ["no such history entry"; "invalid argument"; "no such frame"]
 let tab_action t ~tab_id interaction =
   let ask method_ params = match t.ask method_ params with
     | Ok result -> Ok result
-    | Error (Rejected (Other_error _) | Unsent _ as refusal) ->
+    | Error (Unsent _ as refusal) -> Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
+    | Error (Rejected (Other_error code) as refusal) when List.mem code codes_before_acting ->
       Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
-    | Error (Rejected (Session_not_created | Invalid_session_id) | Unanswered _ as refusal) ->
+    | Error (Rejected (Other_error _ | Session_not_created | Invalid_session_id) | Unanswered _ as refusal) ->
       Error (Outcome_unknown (method_ ^ ": " ^ refusal_message refusal ^ "; inspect the tab before repeating")) in
   let* () = match interaction with
-    | Browser_lane.Action.Close_tab when not (List.mem tab_id t.opened) ->
-      Error (Before_effect "close_tab on a connected browser closes only tabs this connection opened")
+    | (Browser_lane.Action.Close_tab | Browser_lane.Action.Back | Browser_lane.Action.Forward
+      | Browser_lane.Action.Reload) when not (List.mem tab_id t.opened) ->
+      Error (Before_effect "a connected browser's back, forward, reload and close_tab act only on tabs this connection opened")
     | Browser_lane.Action.Close_tab | Browser_lane.Action.Back | Browser_lane.Action.Forward
     | Browser_lane.Action.Reload | Browser_lane.Action.Click _ | Browser_lane.Action.Fill _
     | Browser_lane.Action.Press _ | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _

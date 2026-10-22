@@ -99,3 +99,13 @@
   masc.skill_snapshot masc.skill_snapshot_service masc.skill_reference
   masc.lane_addon_call_context masc.tool_types masc.agent_core exact_output_fixture cohttp
   eio eio_main eio.unix yojson unix mirage-crypto-rng.unix))
+
+; Actual external extension/native messaging/production HTTP ingress and queues.
+(executable
+ (name browser_addon_webextension_probe)
+ (modules browser_addon_webextension_probe)
+ (libraries masc masc.server masc.browser_lane masc.browser_configuration masc.time_compat
+  masc.fs_compat masc.config masc.runtime masc.masc_eio_context masc.workspace_connection
+  masc.multimodal masc.skill_snapshot masc.skill_snapshot_service
+  masc.lane_addon_call_context masc.tool_types exact_output_fixture
+  httpun-eio httpun gluten eio eio_main eio.unix yojson unix mirage-crypto-rng.unix))

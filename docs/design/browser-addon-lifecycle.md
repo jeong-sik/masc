@@ -417,8 +417,8 @@ receipts remain distinct from successful contract validation.
    consumer fixture exercises accepted, changed-document, changed-meaning,
    invented-reference, cancelled and retired requests using a scripted
    WebDriver transport. These definitions are not executed browser/model proof.
-   The real Gecko consumer probe below still needs an actual execution result;
-   Gecko persistent-profile admission remains separate. Scoped transfer brokers
+   The real Gecko consumer execution is recorded below; Gecko persistent-profile
+   admission remains separate. Scoped transfer brokers
    and Chrome/extension/shared-model
    integration evidence is recorded under [Completion evidence](#completion-evidence);
    it does not establish external-provider quality or personal-site behavior.
@@ -601,6 +601,29 @@ Source review and actual selected execution remain separate.
 
 ## Completion evidence
 
+### External WebExtension lifecycle probe
+
+`browser_addon_webextension_probe` and
+`scripts/probe-browser-addon-webextension.py` exercise the real embedded
+extension, matching native host, authenticated production HTTP routes and the
+Addon command queues. The driver owns a separate Firefox session solely for
+fixture setup and cleanup. Before loading the unchanged extension, it points
+both process-local native-manifest directory keys at the fixture installation.
+It refuses a native lookup cache that is already initialized. It changes no
+HOME, user/global manifest, native lookup function or extension implementation.
+This follows [Mozilla's own native messaging fixture](https://github.com/mozilla-firefox/firefox/blob/main/toolkit/components/extensions/test/xpcshell/head_native_messaging.js).
+
+All content operations use public Addon tools with the observed client/tab and
+document/node identities: read, scene, fill, DOM click, scroll, browser zoom and
+scoped screenshot. The fixture witnesses the filled value and exactly one click.
+Trusted hover is explicitly refused; this transport does not claim BiDi input
+parity. Confirmed worker retirement must preserve the externally owned Firefox;
+reattachment must obtain a new worker and actual native-host client identity,
+refuse the old host/client and read the original tab without replaying input.
+The harness separately deletes its original WebDriver session and checks the
+browser ended. Setup, hashes, tool receipts, lifecycle and PNG evidence are
+retained. This new probe has not yet been compiled or executed.
+
 ### Real Gecko locate and transfer probe
 
 `browser_addon_gecko_transfer_probe` selects the package's `locate` Exact Output
@@ -612,7 +635,11 @@ observed geometry and the separate model explanation. The probe checks exactly
 one model request and no upload/download before continuing its original transfer
 and cleanup scenario. Requests, responses and the selected output are retained.
 The provider is scripted; this does not measure a real model's response quality.
-This probe extension has not yet been compiled or executed.
+[Run39522964504](https://github.com/jeong-sik/masc/actions/runs/39522964504)
+compiled source `4f43c20bf9237616b75ff00bead7bf5d2dfb8c44` and passed 26/26
+steps on isolated Firefox 158.0.1: one scripted provider request, 18 tool receipts,
+one upload/download each, confirmed worker/session cleanup and retained artifacts.
+Source/workflow identities and all four native executable hashes were verified.
 
 [Real Chrome run 39497965428](https://github.com/jeong-sik/masc/actions/runs/39497965428)
 passed 42/42 recorded steps in each of private and persistent modes. Its source

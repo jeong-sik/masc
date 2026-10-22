@@ -1306,7 +1306,8 @@ let run ~sw ~read_browser_document backend m e =
                       let* sources = backend.acquire ~access:e.source_access ~store:m.store ~package:e.package ~binding:e.binding
                         ~resolve_machine_output:(resolve_machine_output m ~consumer_id:e.instance_id)
                         ~resolve_lane_output:(resolve_lane_output m ~access:e.source_access ~visibility:e.visibility ~run_id:e.run_id)
-                        ~read_browser_document:(read_browser_document ~access:e.source_access) in
+                        ~read_browser_document:(read_browser_document ~access:e.source_access
+                          ~visibility:e.visibility) in
                       if e.stopping then Ok () else
                       let* fingerprint = match e.package.refresh_policy with
                         | Source_changes -> Lane_addon_sources.refresh_fingerprint e.refresh_interest sources
@@ -1886,11 +1887,28 @@ let call_browser_service ~config ~access ~service ~command =
    browser Add-on this installation may read. The answer and every refusal
    become the consuming worker's input, which can reach Keepers, so an unready
    installation is named by its caller rendering, never the operator's. *)
-let read_browser_document m ~access ~route ~tab_id =
+(* Which browser Add-on a [browser_document] source reads. As with
+   [lane_output], the consumer's output must not reach more readers than the
+   browser it reads, so a browser narrower than the consumer is no candidate. *)
+type 'service document_service =
+  | Document_service of 'service
+  | No_browser_service
+  | Browser_narrower_than_consumer
+  | Several_browser_services
+let choose_document_service ~visibility candidates =
+  match List.filter_map (fun (service, producer) ->
+      if visibility_covers visibility producer then Some service else None) candidates with
+  | [service] -> Document_service service
+  | _ :: _ :: _ -> Several_browser_services
+  | [] -> (match candidates with [] -> No_browser_service | _ :: _ -> Browser_narrower_than_consumer)
+let read_browser_document m ~access ~visibility ~route ~tab_id =
   with_tool_call_owner (fun () ->
     let reading=browser_reading (live_reading m access) in
-    match reading.services with
-    | [service] ->
+    let candidates=List.filter_map (fun (service:browser_service) ->
+      Hashtbl.find_opt m.entries service.instance_id
+      |> Option.map (fun (browser:entry) -> service, browser.visibility)) reading.services in
+    match choose_document_service ~visibility candidates with
+    | Document_service service ->
         (* The existing transport deadline; the worker never creates a
            session, selects another document or waits for a primary action. *)
         let command=Browser_addon_wire.Issue {route;verb=Browser_lane.Page_document {tab_id};
@@ -1912,11 +1930,14 @@ let read_browser_document m ~access ~route ~tab_id =
              Log.Misc.warn "Lane Add-on browser document read got no usable answer from browser Add-on %s: %s"
                service.instance_id detail;
              Error "the browser Add-on gave no usable answer to the document read")
-    | [] ->
+    | No_browser_service ->
         (match Lane_addon_unready.summary reading.unready with
          | Some summary -> Error summary
          | None -> Error "no browser Add-on is attached")
-    | _ :: _ :: _ -> Error "more than one browser Add-on is attached, so the document source cannot choose one")
+    | Browser_narrower_than_consumer ->
+        Error "the attached browser Add-on is visible to fewer readers than this installation's output, so its document is not read"
+    | Several_browser_services ->
+        Error "more than one browser Add-on is attached, so the document source cannot choose one")
 
 let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) ~scope ~request_id ~request =
   with_tool_call_owner (fun () ->
@@ -4028,6 +4049,13 @@ let installation_questions ~config =
         Ok ((declaration_id, rows) :: acc)) ids (Ok [])))
 
 module For_testing = struct
+  type nonrec visibility = visibility = Shared | Operator_only | Keeper_only of string
+  type nonrec 'service document_service = 'service document_service =
+    | Document_service of 'service
+    | No_browser_service
+    | Browser_narrower_than_consumer
+    | Several_browser_services
+  let choose_document_service = choose_document_service
   let with_tool_change_handler handler f =
     let previous= !tool_change_handler in
     tool_change_handler:=handler;

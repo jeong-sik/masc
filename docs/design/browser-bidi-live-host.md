@@ -650,6 +650,16 @@ input is sent. A
 `secondary` click opens whatever the page binds to the context menu; observe the
 page afterwards, the receipt does not say what it did.
 
+`set_viewport` resizes the tab's page viewport, not the browser window. A live
+BiDi connection sends `browsingContext.setViewport` with the size, or with
+`viewport: null` when no size is given, which gives the browser's own size back.
+Firefox 158 reports the new `innerWidth` and `innerHeight` right after the
+command (probed 2026-10-22), and it accepts widths of 0 and 100000 without an
+error, so the lane bounds each side to 100 to 4096 CSS pixels itself. The
+override stays on the tab until it is cleared. Firefox 158 keeps it after the session ends (probed 2026-10-22: a new session read the old size), so the peer gives each tab it sized its own size back when it ends the session. A host that dies without ending its session leaves the size on the tab. Stagehand sends
+`page.set_viewport_size` and has no call that restores the size; the owned
+Firefox driver and the WebExtension refuse the action before any effect.
+
 `type_text` sends Unicode text into the currently focused editable control.
 `press_key` sends one named key or Unicode scalar, optionally with explicit
 `Control`, `Meta`, `Alt`, and `Shift` modifiers. Both require the observed

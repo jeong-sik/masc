@@ -46,17 +46,26 @@ type session_failure = Session_refused of string | Session_failed of string
 let session_failure_message = function Session_refused why | Session_failed why -> why
 type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   session_end : unit -> (unit,session_end_failure) result; mutable session_may_exist : bool;
-  mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option;
+  mutable contexts : (string * int) list; mutable next_tab : int;
+  (* The contexts this connection gave a viewport size. Firefox keeps that size after the session ends
+     (probed 2026-10-22, Firefox 158), so ending the session gives each of them its own size back. *)
+  mutable sized : string list; mutable version : string option;
   mutable profile : string option; mutable process_id : int option }
 let create ~session_end ~command =
-  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;version=None;profile=None;process_id=None}
+  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;sized=[];version=None;profile=None;process_id=None}
 let command t method_ params = Result.map_error (fun refusal -> method_ ^ ": " ^ refusal_message refusal) (t.ask method_ params)
 (* Firefox keeps a session whose socket closed and takes one session at a
    time, so one left behind refuses every later connection until that Firefox
    is restarted. Ending it closes no tab and leaves the browser running. *)
 let end_session t =
   if not t.session_may_exist then Ok ()
-  else let* () = t.session_end () in t.session_may_exist <- false; Ok ()
+  else begin
+    (* Best effort: a tab that is gone, or a command that gets no answer, must not keep the session open. *)
+    List.iter (fun context ->
+      ignore (t.ask "browsingContext.setViewport" (obj ["context",str context;"viewport",`Null]))) t.sized;
+    t.sized <- [];
+    let* () = t.session_end () in t.session_may_exist <- false; Ok ()
+  end
 let metadata t =
   (* Firefox may hold a session from the moment it is asked for one, whether
      or not its answer arrives. There is none when it refused, and none when
@@ -297,6 +306,24 @@ let keyboard t context args ~sources ~name =
   match after with
   | `Assoc fields -> Ok (obj (("action",str name)::("urlBefore",str old_url)::fields))
   | _ -> Error (Outcome_unknown "invalid post-keyboard observation")
+(* The override stays on the tab until a later [Browser_default] clears it, so a refusal before the
+   command leaves the viewport as it was. *)
+let set_viewport t context args size =
+  let before result = Result.map_error (fun e -> Before_effect e) result in
+  let unknown result = Result.map_error (fun e -> Outcome_unknown e) result in
+  let* observed = before (script t context Browser_interaction.url_guard_script args) in
+  let viewport = match size with
+    | Browser_lane.Fit {width;height} -> obj ["width",`Int width;"height",`Int height]
+    | Browser_lane.Browser_default -> `Null in
+  let* _ = unknown (command t "browsingContext.setViewport" (obj ["context",str context;"viewport",viewport])) in
+  t.sized <- (match size with
+    | Browser_lane.Fit _ -> if List.mem context t.sized then t.sized else context :: t.sized
+    | Browser_lane.Browser_default -> List.filter (fun sized -> not (String.equal sized context)) t.sized);
+  let* after = unknown (script t context Browser_interaction.viewport_receipt_script (obj [])) in
+  let* old_url = unknown (string "url" observed) in
+  match after with
+  | `Assoc fields -> Ok (obj (("action",str "set_viewport")::("urlBefore",str old_url)::fields))
+  | _ -> Error (Outcome_unknown "invalid post-resize observation")
 let dispatch ?actor ?request_id t ~verb args =
   let pre r = Result.map_error (fun e -> Before_effect e) r in
   let on_tab use =
@@ -375,7 +402,7 @@ let dispatch ?actor ?request_id t ~verb args =
           let* action = pre (Browser_interaction.resolve_pointer_action request.action resolved) in
           let* url = pre (string "url" resolved) in
           Ok (Some url,action)
-        | Browser_lane.Set_zoom _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
+        | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
         | Browser_lane.Activate_tab | Browser_lane.Fill _
         | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
         | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
@@ -402,6 +429,7 @@ let dispatch ?actor ?request_id t ~verb args =
               (match field "effectStarted" failure with Some (`Bool false)->Error (Before_effect message)
                | _ -> Error (Outcome_unknown message))
             | None -> Ok result))
+      | Browser_lane.Set_viewport size -> set_viewport t context args size
       | Browser_lane.Set_zoom _ -> Error (Before_effect "set_zoom requires a connected WebExtension browser")
       | Browser_lane.Activate_tab -> Error (Before_effect "unsupported BiDi interaction") in
       let receipt = match receipt with

@@ -73,7 +73,7 @@ let call fake request =
        Ok (`Assoc [ "page", `Assoc [ "page_id", `String page_id; "url", `String url ]; "response", `Null ])
      | Wire.Act _ | Wire.Observe _ | Wire.Extract _ ->
        Ok (`Assoc [ "data", `Assoc [ "success", `Bool true ]; "metadata", `Assoc [ "cache", `Assoc [] ] ])
-     | Wire.Page_hover _ | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _
+     | Wire.Page_hover _ | Wire.Page_set_viewport_size _ | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _
      | Wire.Page_double_click _ | Wire.Page_type _ | Wire.Page_key_press _ -> Ok (`Assoc [ "ok", `Bool true ])
      | Wire.Close -> failf "the executor sent %s" (Wire.method_name request))
 ;;
@@ -529,6 +529,18 @@ let test_interactions () =
     check bool "the requested button reaches the runtime's click" true
       (List.exists (function Wire.Page_click { button = sent; _ } -> sent = button | _ -> false) fake.sent))
     [ Lane.Pointer.Middle; Lane.Pointer.Secondary ];
+  fake.evaluated <- None;
+  fake.sent <- [];
+  ignore (served (Executor.execute ~tabs ~call:(call fake)
+    (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Set_viewport (Lane.Fit { width = 800; height = 600 }) })));
+  check bool "the size reaches the runtime's set_viewport_size" true
+    (List.exists (function Wire.Page_set_viewport_size { width = 800; height = 600; _ } -> true | _ -> false) fake.sent);
+  fake.sent <- [];
+  check bool "restoring the browser's own size is refused before effect" true
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+      (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Set_viewport Lane.Browser_default })));
+  check bool "and nothing was sent to resize" true
+    (List.for_all (function Wire.Page_set_viewport_size _ -> false | _ -> true) fake.sent);
   fake.evaluated <- Some (`Assoc [ "url", `String "http://127.0.0.1:1/shop"; "title", `Int 1 ]);
   fake.sent <- [];
   check bool "a malformed receipt after native input is refused" true

@@ -365,6 +365,51 @@ sources=[]
      | Ok () | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "a stale worker handle retained authority");
     check int "binding never invokes a worker tool" 0 !calls)
 
+let test_capture_factory_uses_actual_live_declaration_before_any_rpc () =
+  let tool=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "queue_question";
+    "inputSchema",`Assoc ["type",`String "object"]]) |> unwrap in
+  let calls=ref 0 in
+  let invoke _=incr calls;Ok (Mcp_protocol.Mcp_types.tool_result_of_text "unused") in
+  let manifest=manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n" in
+  with_installation ~manifest ~exported_tool:(tool,invoke) (fun clock config _worker _state _root ->
+    let access=Lane_addon_sources.Operator_configuration in
+    let current ()=match Runtime.tool_exports ~config ~access ~reserved:[] |> unwrap with
+      | [export] -> Some export | _ -> None in
+    await clock (fun () -> Option.is_some (current ()));
+    let export=Option.get (current ()) in
+    let source=Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
+    let declaration=Lane_addon_config.load_file ~path:source |> unwrap in
+    let capture (destination : Runtime.tool_request_destination) =
+      let json=`Assoc ["installation",`String destination.installation_id;
+        "package",`String destination.package_id;"tool",`String destination.tool;
+        "source_revision",`String destination.source_revision;
+        "configuration_revision",`String destination.configuration_revision] in Ok (json,json) in
+    let captured=match Runtime.capture_tool_request_owner ~config ~access ~reserved:[] ~export
+      ~scope:"trusted-capture" ~request_id:"original" ~capture with
+      | Ok json -> json | Error _ -> fail "live configured capture was refused" in
+    check string "source bytes come from the actual declaration" declaration.source_revision (text "source_revision" captured);
+    check string "configuration comes from the admitted payload" declaration.revision (text "configuration_revision" captured);
+    check string "configured logical identity uses the original codec"
+      (Lane_addon_tool_request_owner.installation_id (Lane_addon_tool_request_owner.Configuration declaration.id))
+      (text "installation" captured);
+    let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    (match Lane_addon_tool_request_owner.load ~store ~scope:"trusted-capture" ~request_id:"original" with
+     | Ok (Some record) -> check bool "factory output is durably retained before return" true (Yojson.Safe.equal record.request captured)
+     | Ok None | Error _ -> fail "capture returned before retaining its original request");
+    let forbidden _=fail "stale or conflicting export called the capture factory" in
+    (match Runtime.capture_tool_request_owner ~config ~access ~reserved:["queue_question"] ~export
+       ~scope:"trusted-capture" ~request_id:"collision" ~capture:forbidden with
+     | Error (Runtime.Unavailable _) -> ()
+     | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "reserved name admitted capture");
+    write source ("enabled=false\n" ^ In_channel.with_open_bin source In_channel.input_all);
+    ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> unwrap);
+    await clock (fun () -> current ()=None);
+    (match Runtime.capture_tool_request_owner ~config ~access ~reserved:[] ~export
+       ~scope:"trusted-capture" ~request_id:"off" ~capture:forbidden with
+     | Error (Runtime.Unavailable _) -> ()
+     | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "Off export admitted capture");
+    check int "capture and refusal perform no worker RPC" 0 !calls)
+
 let test_a_request_that_is_not_final_waits_for_the_next_event () =
   with_installation ~listing:[ exact "r2" ] ~mode:Off (fun clock config worker state  _root->
     await clock (fun () -> cycles config >= 1);
@@ -1223,6 +1268,8 @@ let () =
         ; test_case "retirement cancels exact before worker cleanup finishes" `Quick test_retirement_cancels_exact_before_worker_cleanup_finishes
         ; test_case "original tool destination survives replacement and reattachment" `Quick
             test_original_tool_destination_survives_replacement_and_reattachment
+        ; test_case "capture uses actual live provenance before RPC" `Quick
+            test_capture_factory_uses_actual_live_declaration_before_any_rpc
         ; test_case "a request that is not final waits for the next event" `Quick
             test_a_request_that_is_not_final_waits_for_the_next_event
         ; test_case "a request listed again after delivery ends the cycle" `Quick

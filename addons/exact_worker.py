@@ -42,11 +42,6 @@ HOST_RESULT = closed({"request_id": TEXT, "result": OBJECT})
 CONTROL = closed({"tool": TEXT, "arguments": OBJECT, "caller": OBJECT})
 # The typed result for a request this worker could never list to the host.
 REQUEST_BODY_REFUSED = {"status": "input_refused", "kind": "request_body_refused"}
-# The longest host line this worker reads, in declared frames. What the host
-# measures stays within one frame (a classification submit, a delivered result,
-# observation sources), and the JSON-RPC envelope around it is far smaller than
-# a frame. A longer line is read no further.
-HOST_LINE_FRAMES = 2
 
 
 @dataclass(frozen=True)
@@ -390,27 +385,13 @@ def tools(contract: Contract) -> list[dict]:
     ]
 
 
-def read_host_line(stream, limit: int) -> bytes | None:
-    """The next line, newline included, if it has at most limit bytes; b"" at
-    the end of input. A longer line gives None after only limit + 1 of its
-    bytes were read."""
-    line = stream.readline(limit + 1)
-    return None if len(line) > limit else line
-
-
 def serve(here: Path, contract: Contract) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--state", type=Path, required=True)
     options = parser.parse_args()
     manifest = tomllib.loads((here / "lane.toml").read_text(encoding="utf-8"))
     worker = Worker(options.state, manifest["resources"]["max_reply_bytes"], contract)
-    line_limit = HOST_LINE_FRAMES * worker.max_reply_bytes
-    while (line := read_host_line(sys.stdin.buffer, line_limit)) != b"":
-        if line is None:
-            # The JSON-RPC id is inside the unread line, and the host waits only
-            # for a reply carrying it. Ending the connection is the answer the
-            # host sees; reading on would hold the whole line.
-            raise SystemExit(f"host line exceeds {line_limit} bytes; the worker reads no further")
+    for line in sys.stdin.buffer:
         request_id = None
         try:
             rpc = object_value(decode(line.decode("utf-8")), "JSON-RPC")

@@ -2,17 +2,14 @@
 from __future__ import annotations
 
 import importlib.util
-import io
 import json
 import os
 from pathlib import Path
 import shutil
 import stat
-import subprocess
 import sys
 import tempfile
 import tomllib
-import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -243,21 +240,36 @@ class CuratorWorker(unittest.TestCase):
             self.assertEqual(narrowed.invoke({"kind": "read", "request_id": original["request_id"]},
                                              {"kind": "operator"}), pending)
 
-    def test_a_host_line_longer_than_the_limit_is_never_held_whole(self):
-        limit = 1 << 20
-        stream = io.BytesIO(b"x" * (32 * limit) + b"\n" + b"{}\n")
-        tracemalloc.start()
-        try:
-            line = exact_worker.read_host_line(stream, limit)
-            _, peak = tracemalloc.get_traced_memory()
-        finally:
-            tracemalloc.stop()
-        self.assertIsNone(line)
-        self.assertEqual(stream.tell(), limit + 1)
-        self.assertLess(peak, 2 * limit)
-        within = io.BytesIO(b"x" * (limit - 1) + b"\n")
-        self.assertEqual(exact_worker.read_host_line(within, limit), b"x" * (limit - 1) + b"\n")
-        self.assertEqual(exact_worker.read_host_line(within, limit), b"")
+    def test_a_changed_or_misplaced_refusal_record_is_never_read_or_listed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.module().CONTRACT
+            small, large = request("original-small"), {**request("original-large"), "system": "x" * 4096}
+            envelope = {"jsonrpc": "2.0", "id": 2 ** 53,
+                        "result": exact_worker.tool_result({"requests": [contract.host_request(small)]})}
+            frame = len((exact_worker.encode_output(envelope) + "\n").encode("utf-8"))
+            worker = exact_worker.Worker(Path(directory), frame, contract)
+            worker.invoke({"kind": "submit", "request": large}, {"kind": "operator"})
+            kept = worker.store.path(large["request_id"])
+            original = kept.read_text()
+            record = json.loads(original)
+            changes = {"digest in capitals": {**record, "digest": record["digest"].upper()},
+                       "another result": {**record, "result": {"status": "outcome_unknown"}},
+                       "an extra field": {**record, "extra": True},
+                       "no digest": {key: value for key, value in record.items() if key != "digest"}}
+            for name, changed in changes.items():
+                with self.subTest(change=name):
+                    kept.write_text(json.dumps(changed))
+                    reopened = exact_worker.Worker(Path(directory), frame, contract)
+                    with self.assertRaises(exact_worker.InvalidInput):
+                        reopened.invoke({"kind": "read", "request_id": large["request_id"]}, {"kind": "operator"})
+                    with self.assertRaises(exact_worker.InvalidInput):
+                        reopened.host_requests({})
+                    kept.write_text(original)
+            # The same refusal stored under another request's name.
+            misplaced = worker.store.path("original-other")
+            misplaced.write_text(original)
+            with self.assertRaises(exact_worker.InvalidInput):
+                exact_worker.Worker(Path(directory), frame, contract).host_requests({})
 
     def test_a_submit_over_one_frame_gets_the_typed_refusal_through_the_real_worker(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -268,23 +280,6 @@ class CuratorWorker(unittest.TestCase):
                        "result": exact_worker.REQUEST_BODY_REFUSED}
             self.assertEqual([self.output(reply) for reply in replies[:2]], [refused, refused])
             self.assertEqual(self.output(replies[2])["requests"], [])
-
-    def test_a_line_over_two_frames_ends_the_worker_without_a_reply_or_a_record(self):
-        with tempfile.TemporaryDirectory() as directory:
-            state = Path(directory) / "state"
-            state.mkdir()
-            large = {**request("original-large"), "system": "x" * (exact_worker.HOST_LINE_FRAMES * FRAME)}
-            operations = [{"method": "initialize", "params": {}}, submit(large), {"method": "ping"}]
-            source = Path(directory) / "input.jsonl"
-            source.write_text("".join(json.dumps({"jsonrpc": "2.0", "id": i, **operation}) + "\n"
-                                      for i, operation in enumerate(operations, 1)), encoding="utf-8")
-            with source.open("rb") as stdin:
-                completed = subprocess.run([sys.executable, str(SERVER), "--state", str(state)], stdin=stdin,
-                                           capture_output=True, timeout=10, check=False)
-            self.assertNotEqual(completed.returncode, 0)
-            self.assertNotEqual(completed.stderr, b"")
-            self.assertEqual([json.loads(line)["id"] for line in completed.stdout.splitlines()], [1])
-            self.assertEqual(list((state / "workspace-curator").iterdir()), [])
 
     def test_shared_import_works_in_the_packaged_mount_layout(self):
         with tempfile.TemporaryDirectory() as directory:

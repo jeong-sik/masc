@@ -89,7 +89,7 @@ export function ArtifactReader({ doc, fixedRevision, checkState, authRevision, o
             </select>
           </label>
         </div>
-        <${ArtifactCheckControl} key=${JSON.stringify([authRevision,artifact.id,artifact.revision,artifact.body.sha256])}
+        <${ArtifactCheckControl} key=${JSON.stringify([authRevision,artifact.id,artifact.revision,artifact.body._blob.sha256])}
           artifact=${artifact} state=${checkState} authRevision=${authRevision} onChanged=${onCheckChanged} />
         <p role="status" class="m-0 text-xs">${copyFeedback}</p>
         <details class="text-xs text-[var(--color-fg-secondary)]">

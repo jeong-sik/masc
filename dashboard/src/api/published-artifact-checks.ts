@@ -29,7 +29,7 @@ function validateCheck(check: ArtifactCheck): void {
 export function resolveArtifactCheck(artifact: PublishedArtifact, listing: ArtifactCheckList): ArtifactCheckState {
   if (listing.diagnostics.length) return { kind: 'unknown', message: '일부 확인 기록을 읽지 못했습니다.' }
   const check = listing.checks.find(check => check.id === artifact.id && check.revision === artifact.revision)
-  if (check && check.body_sha256 !== artifact.body.sha256) {
+  if (check && check.body_sha256 !== artifact.body._blob.sha256) {
     return { kind: 'unknown', message: '확인 기록의 본문과 문서가 다릅니다.' }
   }
   return { kind: 'known', check: check ?? null }
@@ -49,12 +49,12 @@ export async function fetchArtifactChecks(signal?: AbortSignal): Promise<Artifac
 
 export async function setArtifactCheck(artifact: PublishedArtifact, previous: ArtifactCheck | null, checked: boolean): Promise<ArtifactCheck> {
   const response = Schema.decodeUnknownSync(ChangeSchema)(await post<unknown>('/api/v1/published-artifact-checks', {
-    id: artifact.id, revision: artifact.revision, body_sha256: artifact.body.sha256,
+    id: artifact.id, revision: artifact.revision, body_sha256: artifact.body._blob.sha256,
     expected_change_id: previous?.change_id ?? null, checked,
   }))
   const check = response.check
   validateCheck(check)
-  if (check.id !== artifact.id || check.revision !== artifact.revision || check.body_sha256 !== artifact.body.sha256
+  if (check.id !== artifact.id || check.revision !== artifact.revision || check.body_sha256 !== artifact.body._blob.sha256
     || check.checked !== checked || check.change_id === previous?.change_id) {
     throw new Error('요청한 문서 버전의 확인 결과와 응답이 다릅니다. 확인 상태를 다시 조회해 주세요.')
   }

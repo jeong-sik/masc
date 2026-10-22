@@ -30,7 +30,7 @@ const firstId = `artifact-${'a'.repeat(32)}`
 const secondId = `artifact-${'b'.repeat(32)}`
 const first = { id: firstId, revision: 2, title: '주간 조사 보고서', summary: '표와 근거를 정리했습니다.',
   format: 'markdown', author: 'researcher', created_at: '2026-10-19T01:00:00Z', task_id: 'task-42', goal_id: null,
-  body: { sha256: 'a'.repeat(64) },
+  body: { _blob: { sha256: 'a'.repeat(64), bytes: 20, mime: 'text/markdown', preview: '보고서 원문' } },
   url: `/dashboard/#/workspace?section=artifacts&artifact=${firstId}` }
 const second = { ...first, id: secondId, title: '동작하는 차트', summary: 'HTML 결과물', author: 'designer', format: 'html' }
 const old = { ...first, revision: 1, title: '조사 초안' }
@@ -56,7 +56,7 @@ afterEach(cleanup)
 describe('artifact library user flow', () => {
   it('confirms only an explicit exact-version action and shares the returned CAS identity when unchecking', async () => {
     const fallback = vi.mocked(get).getMockImplementation()!
-    const prior = { id: firstId, revision: 1, body_sha256: first.body.sha256, checked: true,
+    const prior = { id: firstId, revision: 1, body_sha256: first.body._blob.sha256, checked: true,
       change_id: `check-${'b'.repeat(32)}`, changed_by: 'previous-human', changed_at: '2026-10-19T01:00:00Z' }
     let checks = [prior]
     vi.mocked(get).mockImplementation(async (path, options) => path === '/api/v1/published-artifact-checks'
@@ -80,13 +80,13 @@ describe('artifact library user flow', () => {
     expect(await reader.findByRole('button', { name: '✓ 확인함' })).toBeTruthy()
     expect(await view.findByText('오늘 미확인 0개')).toBeTruthy()
     expect(vi.mocked(post)).toHaveBeenLastCalledWith('/api/v1/published-artifact-checks', {
-      id: firstId, revision: 2, body_sha256: first.body.sha256, checked: true, expected_change_id: null,
+      id: firstId, revision: 2, body_sha256: first.body._blob.sha256, checked: true, expected_change_id: null,
     })
     fireEvent.click(reader.getByRole('button', { name: '✓ 확인함' }))
     expect(await reader.findByRole('button', { name: '○ 미확인' })).toBeTruthy()
     expect(await view.findByText('오늘 미확인 1개')).toBeTruthy()
     expect(vi.mocked(post)).toHaveBeenLastCalledWith('/api/v1/published-artifact-checks', {
-      id: firstId, revision: 2, body_sha256: first.body.sha256, checked: false, expected_change_id: `check-${'c'.repeat(32)}`,
+      id: firstId, revision: 2, body_sha256: first.body._blob.sha256, checked: false, expected_change_id: `check-${'c'.repeat(32)}`,
     })
     expect(checks.find(check => check.revision === 1)?.checked).toBe(true)
   })
@@ -119,7 +119,7 @@ describe('artifact library user flow', () => {
     const replacement = within(view.getByRole('dialog'))
     const before = vi.mocked(get).mock.calls.filter(([path]) => path === '/api/v1/published-artifact-checks').length
     await act(async () => {
-      finish?.({ check: { id: firstId, revision: 2, body_sha256: first.body.sha256, checked: true,
+      finish?.({ check: { id: firstId, revision: 2, body_sha256: first.body._blob.sha256, checked: true,
         change_id: `check-${'e'.repeat(32)}`, changed_by: 'old-auth', changed_at: '2026-10-19T01:00:00Z' } })
     })
     expect(replacement.queryByText(/저장했습니다/)).toBeNull()
@@ -129,7 +129,7 @@ describe('artifact library user flow', () => {
 
   it('rereads a conflicting shared confirmation without retrying the mutation', async () => {
     const fallback = vi.mocked(get).getMockImplementation()!
-    const check = { id: firstId, revision: 2, body_sha256: first.body.sha256, checked: true,
+    const check = { id: firstId, revision: 2, body_sha256: first.body._blob.sha256, checked: true,
       change_id: `check-${'f'.repeat(32)}`, changed_by: 'another-client', changed_at: '2026-10-19T01:00:00Z' }
     let changed = false
     vi.mocked(get).mockImplementation(async (path, options) => path === '/api/v1/published-artifact-checks'

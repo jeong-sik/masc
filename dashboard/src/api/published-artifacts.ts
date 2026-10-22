@@ -3,7 +3,7 @@ import { get } from './core'
 
 const revisionFields = {
   revision: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
-  body: Schema.Struct({ sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)) }),
+  body: Schema.Struct({ _blob: Schema.Struct({ sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)) }) }),
   title: Schema.String, summary: Schema.String,
   format: Schema.Literal('markdown', 'html'),
   author: Schema.String, created_at: Schema.String,

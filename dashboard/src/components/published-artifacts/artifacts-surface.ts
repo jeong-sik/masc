@@ -146,7 +146,7 @@ export function ArtifactsSurface() {
                     <span class="mt-2 block text-xs text-[var(--color-fg-muted)]">${a.author} · ${new Date(a.created_at).toLocaleString()}</span>
                   </button>
                   <div class="border-t border-[var(--color-border-default)] px-4 py-2">
-                    <${ArtifactCheckControl} key=${JSON.stringify([authRevision,a.id,a.revision,a.body.sha256])}
+                    <${ArtifactCheckControl} key=${JSON.stringify([authRevision,a.id,a.revision,a.body._blob.sha256])}
                       artifact=${a} state=${checkState(a)} authRevision=${authRevision} onChanged=${checkChanged} />
                   </div>
                   ${a.format === 'html' ? html`

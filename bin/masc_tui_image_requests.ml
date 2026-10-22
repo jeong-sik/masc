@@ -24,10 +24,12 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_colors source =
     Eio_guard.run_in_systhread ~label:"tui-output-image-decode" (fun () ->
       Result.bind (Masc_tui_image_preview.decode_payload data) prepare)
   | Generated (Masc_tui_image_preview.Inline_svg svg) ->
-    Eio_guard.run_in_systhread ~label:"tui-output-svg-convert" (fun () -> prepare svg)
+    Eio_guard.run_in_systhread ~label:"tui-output-svg-convert" (fun () ->
+      Masc_tui_pele.render ~format:Svg ~cache_dir:(cache_dir ()) ~max_width:diagram_width
+        ~colors:diagram_colors svg)
   | Generated (Masc_tui_image_preview.Inline_mermaid source) ->
     Eio_guard.run_in_systhread ~label:"tui-pele-render" (fun () ->
-      Masc_tui_pele.render ~cache_dir:(cache_dir ()) ~max_width:diagram_width
+      Masc_tui_pele.render ~format:Mermaid ~cache_dir:(cache_dir ()) ~max_width:diagram_width
         ~colors:diagram_colors source)
   | Generated (Masc_tui_image_preview.Remote_uri url) ->
     Eio_guard.run_in_systhread ~label:"tui-output-image-download" (fun () ->

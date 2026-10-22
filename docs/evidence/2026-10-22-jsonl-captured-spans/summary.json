@@ -1,41 +1,59 @@
 {
   "large_utf8": {
     "before": {
-      "cpu_ms": 40.593000000000046,
-      "wall_ms": 40.753960609436035,
+      "cpu_ms": 31.771499999999953,
+      "wall_ms": 31.921982765197754,
       "allocated_bytes": 25693496.0
     },
-    "after": {
-      "cpu_ms": 31.466499999999954,
-      "wall_ms": 31.517505645751953,
+    "previous": {
+      "cpu_ms": 24.80450000000006,
+      "wall_ms": 24.99997615814209,
       "allocated_bytes": 25636112.0
     },
-    "cpu_change_percent": -22.482940408445007
+    "after": {
+      "cpu_ms": 24.47300000000002,
+      "wall_ms": 24.59251880645752,
+      "allocated_bytes": 25639280.0
+    },
+    "cpu_change_vs_original_pct": -22.971845836677353,
+    "cpu_change_vs_previous_pct": -1.33645104718918
   },
   "one_kib": {
     "before": {
-      "cpu_ms": 44.437999999999946,
-      "wall_ms": 44.54183578491211,
+      "cpu_ms": 34.297499999999985,
+      "wall_ms": 34.3555212020874,
       "allocated_bytes": 23613696.0
     },
-    "after": {
-      "cpu_ms": 36.14950000000002,
-      "wall_ms": 36.19396686553955,
+    "previous": {
+      "cpu_ms": 27.84400000000001,
+      "wall_ms": 27.889013290405273,
       "allocated_bytes": 23620824.0
     },
-    "cpu_change_percent": -18.651829515279573
+    "after": {
+      "cpu_ms": 27.367000000000033,
+      "wall_ms": 27.4050235748291,
+      "allocated_bytes": 23623896.0
+    },
+    "cpu_change_vs_original_pct": -20.207012172898764,
+    "cpu_change_vs_previous_pct": -1.713115931618936
   },
   "short": {
     "before": {
-      "cpu_ms": 11.412999999999993,
-      "wall_ms": 11.421561241149902,
+      "cpu_ms": 8.9225,
+      "wall_ms": 8.936405181884766,
       "allocated_bytes": 33200912.0
     },
-    "after": {
-      "cpu_ms": 11.31750000000001,
-      "wall_ms": 11.327505111694336,
+    "previous": {
+      "cpu_ms": 8.791999999999994,
+      "wall_ms": 8.800983428955078,
       "allocated_bytes": 33201752.0
     },
-    "cpu_change_percent": -0.8367650924383074
+    "after": {
+      "cpu_ms": 8.379500000000005,
+      "wall_ms": 8.413553237915039,
+      "allocated_bytes": 33202088.0
+    },
+    "cpu_change_vs_original_pct": -6.085738302045318,
+    "cpu_change_vs_previous_pct": -4.691765241128176
   }
 }

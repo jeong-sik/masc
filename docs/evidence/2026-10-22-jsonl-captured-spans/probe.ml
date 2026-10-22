@@ -56,7 +56,7 @@ let fold_captured_entries_result channel ~path ~from ~until ~init ~f =
 
 
 end;;
-module After = struct
+module Previous = struct
 type read_operation = Read_file
 type read_error = Io_error of {operation:read_operation;path:string;detail:string}
 type recent_entry = Parsed of Yojson.Safe.t | Malformed_json of {path:string;line_number:int option;detail:string}
@@ -134,6 +134,83 @@ let fold_captured_entries_result channel ~path ~from ~until ~init ~f =
 
 
 end;;
+module After = struct
+type read_operation = Read_file
+type read_error = Io_error of {operation:read_operation;path:string;detail:string}
+type recent_entry = Parsed of Yojson.Safe.t | Malformed_json of {path:string;line_number:int option;detail:string}
+let recent_entry_of_line ~path ?line_number line =
+  match Yojson.Safe.from_string line with
+  | json -> Parsed json
+  | exception Yojson.Json_error detail ->
+    Malformed_json { path; line_number; detail }
+;;
+
+let appended_read_changed path =
+  Io_error { operation = Read_file; path;
+             detail = "dated files changed during incremental read" }
+;;
+
+let fold_captured_entries_result channel ~path ~from ~until ~init ~f =
+  let rec drive acc boundary position fragment =
+    if position >= until then Ok (acc, boundary)
+    else
+      let chunk = Bytes.create (min 65536 (until - position)) in
+      let read =
+        match input channel chunk 0 (Bytes.length chunk) with
+        | 0 -> Error (appended_read_changed path)
+        | length -> Ok length
+        | exception Sys_error detail ->
+          Error (Io_error { operation = Read_file; path; detail })
+      in
+      match read with
+      | Error _ as error -> error
+      | Ok length ->
+        let value = ref acc in
+        let next_boundary = ref boundary in
+        (* Search only bytes returned by [input], then copy each span at
+           once instead of inserting its bytes individually. *)
+        let rec newline_at index =
+          if index >= length || Bytes.get chunk index = '\n' then index
+          else newline_at (index + 1)
+        in
+        let rec consume start =
+          if start < length then begin
+            let index = newline_at start in
+            if index < length then begin
+              let line =
+                if Buffer.length fragment = 0 then
+                  Bytes.sub_string chunk start (index - start)
+                else begin
+                  Buffer.add_subbytes fragment chunk start (index - start);
+                  let line = Buffer.contents fragment in
+                  Buffer.clear fragment;
+                  line
+                end
+              in
+              next_boundary := position + index + 1;
+              if String.trim line <> "" then
+                value := f !value (recent_entry_of_line ~path line);
+              consume (index + 1)
+            end else
+              Buffer.add_subbytes fragment chunk start (length - start)
+          end
+        in
+        consume 0;
+        drive !value !next_boundary (position + length) fragment
+  in
+  let seek =
+    match seek_in channel from with
+    | () -> Ok ()
+    | exception Sys_error detail ->
+      Error (Io_error { operation = Read_file; path; detail })
+  in
+  match seek with
+  | Error _ as error -> error
+  | Ok () -> drive init from from (Buffer.create 256)
+;;
+
+
+end;;
 
 let path = Filename.temp_file "masc-jsonl-span" ".jsonl";;
 let put text = Out_channel.with_open_bin path (fun ch -> output_string ch text);;
@@ -170,14 +247,18 @@ let counts_before n = In_channel.with_open_bin path (fun ch ->
  match Before.fold_captured_entries_result ch ~path ~from:0 ~until:n ~init:0 ~f:(fun k _ -> k+1) with Ok(k,_) -> k | Error _ -> failwith "before read");;
 let counts_after n = In_channel.with_open_bin path (fun ch ->
  match After.fold_captured_entries_result ch ~path ~from:0 ~until:n ~init:0 ~f:(fun k _ -> k+1) with Ok(k,_) -> k | Error _ -> failwith "after read");;
+let counts_previous n = In_channel.with_open_bin path (fun ch ->
+ match Previous.fold_captured_entries_result ch ~path ~from:0 ~until:n ~init:0 ~f:(fun k _ -> k+1) with Ok(k,_) -> k | Error _ -> failwith "previous read");;
 let samples=ref [];;
 List.iter (fun (name,row,count) ->
  let text=String.concat "" (List.init count (fun _ -> row)) in put text;
  for round=0 to 5 do
   let run lane f = let sample=measure lane (fun () -> f (String.length text)) in
    samples := (`Assoc ["fixture",`String name;"bytes",`Int (String.length text);"round",`Int round;"sample",sample])::!samples in
-  if round mod 2=0 then (run "before" counts_before;run "after" counts_after)
-  else (run "after" counts_after;run "before" counts_before)
+  match round mod 3 with
+  | 0 -> run "before" counts_before; run "previous" counts_previous; run "after" counts_after
+  | 1 -> run "previous" counts_previous; run "after" counts_after; run "before" counts_before
+  | _ -> run "after" counts_after; run "before" counts_before; run "previous" counts_previous
  done)
  ["short", "{\"i\":1}\n",50000;
   "one_kib",Yojson.Safe.to_string (`Assoc ["text",`String(String.make 1000 'x')]) ^ "\n",4096;

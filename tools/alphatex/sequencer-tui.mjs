@@ -227,15 +227,18 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           : [{ tick: 0, numerator: project.meter[0], denominator: project.meter[1] }])
       } catch (error) { meterProblem = error.message }
     }
-    // The cursor is shown exactly, as commands take it; a moving playhead is rounded.
+    // The cursor is shown exactly, as commands take it. A moving playhead is
+    // cut down to a hundredth of a beat first, so it never reads one ahead.
     const position = (tick, rounded = false) => {
+      if (rounded) tick = Math.floor(tick * 100 / per) * per / 100
       const beats = `${rounded ? beatText(tick / per) : tick / per} ${axis.label}`
       if (!meters) return meterProblem ? `${beats} (bars unavailable: ${meterProblem})` : beats
       const { bar, beat } = barAt(tick, meters, per)
       return `bar ${bar} beat ${beatText(beat)} · ${beats}`
     }
     const playing = ['playing', 'paused'].includes(transport.kind)
-    const playhead = playing ? playTick() : null
+    const playTime = playing ? playTick() : null
+    const playhead = Number.isFinite(playTime) ? playTime : null
     const state = stepInput?.kind === 'practice-input' ? 'practicing' : transport.kind
     const statusLine = [...(stepInput ? [[`${stepInput.kind === 'practice-input' ? 'MIDI practice' : 'MIDI step'} · ${stepHeld} held · `, []]] : []),
       [status.text, status.failed ? [bold, red] : []]]
@@ -320,8 +323,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         `${event.id === editor.selectedExpressionID ? '>' : ' '} ${event.id} · ${event.tick / per} ${axis.label} · port ${event.port} ch ${event.channel + 1} · ${event.kind}${event.controller === undefined ? '' : ' ' + event.controller}${event.pitch === undefined ? '' : ' ' + Note.fromMidi(event.pitch)} · ${event.value}`, cursorRow(event.id === editor.selectedExpressionID)]])
       if (!events.length) lines.push('No expression events in this track/channel. :channel CH then :cc CTRL VALUE AT inserts one.')
     } else {
-      // While a transport plays or pauses, the window follows the playhead.
-      const span = editor.step * cols, first = Math.floor((playhead ?? editor.tick) / span) * span
+      // While a transport plays, the window follows the playhead, held to the
+      // last cell through a release tail. Paused or stopped, it follows the cursor.
+      const anchor = transport.kind === 'playing' && playhead !== null ? Math.min(playhead, project.length - 1) : editor.tick
+      const span = editor.step * cols, first = Math.floor(anchor / span) * span
       const playColumn = playhead === null ? null : Math.floor((playhead - first) / editor.step)
       const barStart = tick => meters ? isBarStart(tick, meters, per) : tick % per === 0
       const beatStart = tick => meters ? Number.isInteger(barAt(tick, meters, per).beat) : false

@@ -1390,6 +1390,11 @@ let test_record_with_unreadable_owner_holds_every_declaration () =
       check (list string) (label ^ ": no declaration starts beside it") [] (starts state);
       check bool (label ^ ": the refusal is a configuration issue of the declaration") true
         (issues_of "observer" result <> []);
+      let held_instance = text "instance_id" (fixture_record "producer-a.json") in
+      check bool (label ^ ": the refusal names the record that holds it") true
+        (List.exists (fun issue ->
+           String_util.contains_substring (text "message" issue) ("instance " ^ held_instance))
+           (issues_of "observer" result));
       check string (label ^ ": the declaration's application is unknown") "unknown"
         (application config "observer" |> text "kind");
       remove_seeded_files config;

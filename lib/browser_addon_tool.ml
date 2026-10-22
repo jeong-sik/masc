@@ -13,7 +13,7 @@ let input_schema = object_schema ~required:["command"] [
   "requiredActions",`Assoc ["type",`String "array";"items",enum
     (List.map Browser_capabilities.operation_name Browser_capabilities.operations)];
   "command",object_schema ~required:["verb";"args"] [
-    "verb",enum ["tabs.list";"page.read";"page.downloads";"page.console";"page.capture";
+    "verb",enum ["tabs.list";"page.read";"page.downloads";"page.console";"page.network";"page.capture";
       "page.scene";"page.interact";"session.open";"session.close";"session.status";
       "page.goto";"page.elements";"page.act";"page.context";"page.instruct";"page.locate";"page.extract"];
     "args",object_schema ~open_fields:true ~required:[] []]]
@@ -54,10 +54,10 @@ let parse json =
     | Some value -> Browser_capabilities.parse_required_actions value in
   let* ()=match verb,required_actions with
     | (B.Tabs_list|Session_open _),_ -> Ok ()
-    | (Page_read _|Page_document _|Page_downloads _ | Page_console _|Page_capture _|Page_scene _|Page_interact _
+    | (Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _|Page_capture _|Page_scene _|Page_interact _
       |Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _
       |Page_instruct _|Page_locate _|Page_extract _),[] -> Ok ()
-    | (Page_read _|Page_document _|Page_downloads _ | Page_console _|Page_capture _|Page_scene _|Page_interact _
+    | (Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _|Page_capture _|Page_scene _|Page_interact _
       |Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _
       |Page_instruct _|Page_locate _|Page_extract _),_::_ ->
         Error "requiredActions applies only to initial tab discovery or session open" in
@@ -65,7 +65,7 @@ let parse json =
     | Browser_selection.Exact (B.Live_route None),B.Page_act (B.Action.Open_tab _) ->
         Error "live open_tab requires an explicit observed clientId"
     | (Automatic|Exact (Live_route _|Automation_route|Stagehand_route)),
-      (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _|Page_capture _|Page_scene _|Page_interact _
+      (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _|Page_capture _|Page_scene _|Page_interact _
       |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (B.Action.Open_tab _|On_tab _)|Page_context _
       |Page_instruct _|Page_locate _|Page_extract _) -> Ok () in
   let* upload_id=match List.assoc_opt "uploadId" fields with
@@ -77,18 +77,18 @@ let command arguments = parse arguments |> Result.map (fun (_,verb,_,_) -> verb)
 let bound = function
   | B.Page_read {tab_id;_}|Page_elements {tab_id} -> Option.is_some tab_id
   | Page_act (B.Action.Open_tab _) | Tabs_list | Session_open _ | Session_status -> false
-  | Page_document _|Page_downloads _ | Page_console _|Page_capture _|Page_scene _|Page_interact _|Session_close
+  | Page_document _|Page_downloads _ | Page_console _ | Page_network _|Page_capture _|Page_scene _|Page_interact _|Session_close
   | Page_goto _|Page_act (B.Action.On_tab _)|Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> true
 let transferable verb upload_id = match verb,upload_id with
   | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),Some _ -> Ok ()
   | Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),None ->
       Error "upload requires a private host snapshot grant; no command was dispatched"
-  | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _|Page_capture _|Page_scene _|Page_interact _
+  | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _|Page_capture _|Page_scene _|Page_interact _
   | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
   | Page_act (B.Action.Open_tab _)
   | Page_act (B.Action.On_tab {interaction=(Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog);_})
   | Page_context _|Page_instruct _|Page_locate _|Page_extract _),None -> Ok ()
-  | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _|Page_capture _|Page_scene _|Page_interact _
+  | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _|Page_capture _|Page_scene _|Page_interact _
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Open_tab _
       |On_tab {interaction=Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
     |Page_context _|Page_instruct _|Page_locate _|Page_extract _),Some _ -> Error "uploadId applies only to an upload command"

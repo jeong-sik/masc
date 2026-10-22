@@ -60,6 +60,7 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
   let stopped, stopped_u = Eio.Promise.create () in
   let model = Browser_downloads.create () in
   let console = Browser_console.create () in
+  let network = Browser_network.create () in
   let failure = ref None in
   let pending = Hashtbl.create 4 in
   let disconnect reason =
@@ -104,6 +105,8 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
                    let* method_ = string "method" json in
                    (match field "params" json with
                     | Some params when method_ = Browser_console.subscribed_method -> Ok (Browser_console.event console params)
+                    | Some params when List.mem method_ Browser_network.subscribed_methods ->
+                      Ok (Browser_network.event network ~method_ params)
                     | Some params -> Browser_downloads.event model ~method_ params
                     | None -> Error "BiDi event lacks params")
                  | Some (`String ("success" | "error" as kind)) ->
@@ -144,7 +147,8 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
              | Error `Timeout ->
                disconnect ("BiDi command timed out: " ^ method_); Error ("BiDi command timed out: " ^ method_)) in
         let* _ = command "session.subscribe" (`Assoc ["events",`List (List.map (fun name -> `String name)
-          (Browser_console.subscribed_method :: List.map snd Browser_downloads.subscribed_methods))]) in
+          ((Browser_console.subscribed_method :: Browser_network.subscribed_methods)
+           @ List.map snd Browser_downloads.subscribed_methods))]) in
         let* tree = command "browsingContext.getTree" (`Assoc []) in
         let* () = Browser_downloads.add_tree model tree in
         let directory = Eio_unix.run_in_systhread (fun () ->
@@ -180,14 +184,16 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
             "observation",`String (if state = None then "connected" else "interrupted");
             "reason",(match state with None -> `Null | Some reason -> `String reason)]) in
         (* Like [read], this stays readable after the stream is interrupted, and says so. *)
-        let read_console ~context =
+        let with_observation json =
           let state = !failure in
-          match Browser_console.to_json console ~context with
+          match json with
           | `Assoc fields ->
             Ok (`Assoc (fields @ ["observation",`String (if state = None then "connected" else "interrupted");
               "reason",(match state with None -> `Null | Some reason -> `String reason)]))
           | other -> Ok other in
-        Ok Browser_downloads.{read;console=read_console;check;close=(fun () -> disconnect "Firefox session closed")} in
+        let read_console ~context = with_observation (Browser_console.to_json console ~context) in
+        let read_network ~context = with_observation (Browser_network.to_json network ~context) in
+        Ok Browser_downloads.{read;console=read_console;network=read_network;check;close=(fun () -> disconnect "Firefox session closed")} in
       let result =
         try setup () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn

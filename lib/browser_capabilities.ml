@@ -199,7 +199,10 @@ let support backend operation = match backend with
     | Read_console -> gecko_only backend (invoke ~mode:"console" Read)
         [observed;"Messages and uncaught errors since the session opened, for one tab, oldest first. At most 200 are kept and the reply says how many older ones were dropped; each text is cut at 4000 bytes and says so. Entries Firefox gave no tab for, and events that were not what BiDi documents, are counted in the reply and do not end the session.";
          "The text is whatever the page printed, and a page can print anything."]
-    | Read_clipboard | Write_clipboard | Read_network | Intercept_network
+    | Read_network -> gecko_only backend (invoke ~mode:"network" Read)
+        [observed;"Requests since the session opened, for one tab, oldest first; at most 200 are kept and the reply says how many older ones were dropped.";
+         "Each row has method, address, state, and status, mimeType and bytesReceived once it completed. Header values, cookies and bodies are never returned, only header names; the address keeps its path and replaces every query value with REDACTED. A path can still carry a token."]
+    | Read_clipboard | Write_clipboard | Intercept_network
     | Read_storage | Write_storage -> missing
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations
 let operation_name = function

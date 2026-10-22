@@ -299,7 +299,7 @@ let issue_on_server_lane ?(required_actions=[]) ~tool_name ~start_time args ~ver
     let bound = match verb with
       | Browser_lane.Session_close | Browser_lane.Page_goto _ -> true
       | Browser_lane.Session_open _ | Browser_lane.Session_status | Browser_lane.Tabs_list
-      | Browser_lane.Page_read _ | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_console _
+      | Browser_lane.Page_read _ | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | Browser_lane.Page_network _
       | Browser_lane.Page_capture _ | Browser_lane.Page_scene _ | Browser_lane.Page_interact _
       | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _
       | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
@@ -358,7 +358,7 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
    reads take the page as a whole; [frames] and [dialog] read the automation
    lane's page context. The tool schema's enum names the same values. *)
 type top_level_read =
-  [ `Text | `Elements | `Scene | `Regions | `Screenshot | `Downloads | `Console ]
+  [ `Text | `Elements | `Scene | `Regions | `Screenshot | `Downloads | `Console | `Network ]
 [@@deriving enumerate]
 
 type read_mode = [ top_level_read | `Frames | `Dialog ] [@@deriving enumerate]
@@ -371,6 +371,7 @@ let read_mode_to_string : read_mode -> string = function
   | `Screenshot -> "screenshot"
   | `Downloads -> "downloads"
   | `Console -> "console"
+  | `Network -> "network"
   | `Frames -> "frames"
   | `Dialog -> "dialog"
 ;;
@@ -421,7 +422,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
     | Ok mode ->
     let top_document_view = match mode with
       | `Scene | `Regions -> frame_path = []
-      | `Text | `Elements | `Screenshot | `Downloads | `Console | `Frames | `Dialog -> false in
+      | `Text | `Elements | `Screenshot | `Downloads | `Console | `Network | `Frames | `Dialog -> false in
     let scope_present = match args with `Assoc fields -> List.mem_assoc "scope" fields | _ -> false in
     let destination_guard_present = match args with `Assoc fields -> (List.mem_assoc "expectedUrl" fields || List.mem_assoc "navigationSource" fields) | _ -> false in
     if destination_guard_present && not top_document_view then
@@ -439,7 +440,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
             | `Text -> Ok (`Text (get_int args "maxChars" Browser_page_script.default_text_chars))
             | `Elements -> Ok `Elements | `Frames -> Ok `Frames
             | `Dialog when frame_path = [] -> Ok `Dialog
-            | `Dialog | `Scene | `Regions | `Screenshot | `Downloads | `Console ->
+            | `Dialog | `Scene | `Regions | `Screenshot | `Downloads | `Console | `Network ->
               Error "framePath supports text, elements and frames; dialogs belong to the top-level tab" in
           match mode with
           | Error detail -> make_input_err ~tool_name ~start_time detail
@@ -516,6 +517,11 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
       else (match get_int_opt args "tabId" with
         | Some tab_id when tab_id >= 0 -> read_top_level (Browser_lane.Page_console {tab_id})
         | _ -> make_input_err ~tool_name ~start_time "console reads require an observed nonnegative tabId")
+    | `Network ->
+      if not automation then make_input_err ~tool_name ~start_time "network reads require automation"
+      else (match get_int_opt args "tabId" with
+        | Some tab_id when tab_id >= 0 -> read_top_level (Browser_lane.Page_network {tab_id})
+        | _ -> make_input_err ~tool_name ~start_time "network reads require an observed nonnegative tabId")
     | `Screenshot ->
       (match keeper_name, get_int_opt args "tabId" with
        | None, _ -> make_workflow_err ~tool_name ~start_time "screenshot requires an owning Keeper"
@@ -538,7 +544,7 @@ let retain_read_result ~base_path ~tool_name ~start_time args result =
   let retained = match read_mode_of_args args with
     | Ok `Scene -> Browser_observation.retain ~base_path ~view:Browser_lane.Content result
     | Ok `Regions -> Browser_observation.retain ~base_path ~view:Browser_lane.Regions result
-    | Ok (`Text | `Elements | `Screenshot | `Downloads | `Console | `Frames | `Dialog) | Error _ -> Ok result in
+    | Ok (`Text | `Elements | `Screenshot | `Downloads | `Console | `Network | `Frames | `Dialog) | Error _ -> Ok result in
   match retained with
   | Ok result -> result
   | Error detail ->

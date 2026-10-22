@@ -146,9 +146,12 @@ live 인증 화면을 연결 오류 때문에 automation이나 별도 API·수�
 
 첫 BrowserTabs에 `requiredActions: ["hover", "type_text"]`를 주면 해당 기능을
 모두 구현한 연결/열린 브라우저를 찾는다. HTML5 드롭은 `html5_drop`, 프레임과
-다운로드는 `read_frames`, `list_downloads`, 콘솔은 `read_console`, 실제 브라우저 확대는 `page_zoom`이다.
+다운로드는 `read_frames`, `list_downloads`, 콘솔은 `read_console`, 네트워크는 `read_network`, 실제 브라우저 확대는 `page_zoom`이다.
 `read_console`은 자동화 Firefox만 되고 `BrowserRead mode=console`로 읽는다. 세션이 열린 뒤 그 탭이 찍은 메시지와
 잡히지 않은 오류를 오래된 것부터 주고, 최대 200개만 남긴다(`dropped`가 밀려난 수). 글자는 페이지가 찍은 그대로다.
+`read_network`도 자동화 Firefox만 되고 `mode=network`로 읽는다. 요청마다 method, 주소, 상태(pending·completed·failed)와
+응답 코드·mimeType·받은 바이트를 주고, 헤더는 이름만 준다. 헤더 값·쿠키·본문은 읽지 않고, 주소의 쿼리 값은 REDACTED로 바뀐다.
+경로에 토큰이 들어 있는 사이트는 경로까지는 가리지 못한다.
 작업 세션을 새로 열 때만 BrowserSession `action: "open"`에도 같은 배열을 쓴다.
 선택 과정은 브라우저를 열거나 탭을 이동하지 않는다. 불가능한 조합은 입력 전
 `required_browser_actions_unavailable`와 후보별 `missingActions`로 거절한다.

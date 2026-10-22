@@ -316,7 +316,7 @@ let guarded work =
 let is_sentence = function
   | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ -> true
   | Browser_lane.Session_open _ | Browser_lane.Session_close | Browser_lane.Session_status
-  | Browser_lane.Tabs_list | Browser_lane.Page_read _ | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_console _
+  | Browser_lane.Tabs_list | Browser_lane.Page_read _ | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | Browser_lane.Page_network _
   | Browser_lane.Page_capture _ | Browser_lane.Page_scene _ | Browser_lane.Page_interact _ | Browser_lane.Page_goto _
   | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _ -> false
 ;;
@@ -365,7 +365,7 @@ let serve t { verb; actor; reply; caller_left } =
     run_to_the_end (fun () -> open_session t ~headless:(Option.value headless ~default:true))
   | Browser_lane.Session_close -> run_to_the_end (fun () -> close_session t)
   | Browser_lane.Session_status -> run_to_the_end (fun () -> status t)
-  | Browser_lane.Tabs_list | Browser_lane.Page_read _ | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_console _
+  | Browser_lane.Tabs_list | Browser_lane.Page_read _ | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | Browser_lane.Page_network _
   | Browser_lane.Page_capture _ | Browser_lane.Page_scene _ | Browser_lane.Page_interact _ | Browser_lane.Page_goto _
   | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
   | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->

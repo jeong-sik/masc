@@ -7,6 +7,7 @@ module Lane = Browser_lane
 let start_downloads ~session_id:_ ~websocket_url:_ =
   Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
     console=(fun ~context:_ -> Ok (`Assoc ["entries",`List [];"dropped",`Int 0]));
+    network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
     check=(fun () -> Ok ());close=(fun () -> ())}
 
 let test_session_lifecycle () =

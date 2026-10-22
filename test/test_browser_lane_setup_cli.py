@@ -173,6 +173,26 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue((base / ".masc/config/lane-addons/browser.toml").is_file())
 
+    def test_no_addon_leaves_the_addon_alone(self):
+        root = self.scratch()
+        base = workspace(root)
+        result = masc(root, "--mode", "host", "--binary", str(HOST), "--base-path", str(base),
+                      "--no-addon")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((lane(base) / "host/masc-browser-host").is_file(), "the host is installed")
+        self.assertFalse((base / ".masc/config/lane-addons").exists(), "nothing is declared")
+        self.assertFalse((base / ".masc/packages").exists(), "no package is written")
+
+    def test_no_addon_with_the_addon_mode_or_alone_is_refused(self):
+        root = self.scratch()
+        base = workspace(root)
+        for arguments in (("--mode", "addon", "--no-addon"), ("--no-addon",)):
+            with self.subTest(arguments=arguments):
+                result = masc(root, *arguments, "--base-path", str(base))
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertFalse((base / ".masc/config/lane-addons").exists())
+                self.assertFalse((base / ".masc/packages").exists())
+
     # --mode host: the host and the launcher, for a browser attached by hand and
     # for bringing an installed lane's host up to date.
     def test_host_installs_the_host_and_the_launcher_and_nothing_else(self):

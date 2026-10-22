@@ -17,7 +17,8 @@
     [.masc/packages/browser] and declares it when the workspace has no
     declaration of it ({!Masc.Browser_addon_setup}). Every other mode does the
     same after its host step, but there a refusal of that step is reported and
-    the mode's own steps go on; only [--mode addon] fails on it.
+    the mode's own steps go on; only [--mode addon] fails on it. [--no-addon]
+    skips the step for the other modes and contradicts [--mode addon].
 
     An option that the chosen modes do not use is refused, not ignored. *)
 
@@ -32,6 +33,7 @@ val run
   :  base_path:string
   -> runtime_config_path:string
   -> modes:mode list
+  -> no_addon:bool
   -> binary:string option
   -> token_file:string option
   -> manifest_dir:string option

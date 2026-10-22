@@ -2383,6 +2383,17 @@ let browser_lane_setup_cmd =
              binary key), an absolute path. Written only when named: geckodriver finds \
              Firefox itself.")
   in
+  let no_addon =
+    Arg.(
+      value
+      & flag
+      & info
+          [ "no-addon" ]
+          ~doc:
+            "Leave the browser Add-on package and its declaration as they are. Every \
+             mode but addon otherwise writes the package and declares it when the \
+             workspace has none.")
+  in
   Cmd.v
     (Cmd.info
        "browser-lane-setup"
@@ -2403,7 +2414,8 @@ let browser_lane_setup_cmd =
               Add-on package this masc carries to .masc/packages/browser and, when the \
               workspace has no declaration of it, creates browser.toml in its Lane \
               directory. An existing declaration is left as it is. The server attaches the \
-              Add-on when it starts and on its maintenance pass."
+              Add-on when it starts and on its maintenance pass. Outside --mode addon a \
+              refusal of that step is reported and the mode goes on; --no-addon skips it."
          ; `P
              "--mode automation writes the geckodriver of the lane that opens a fresh \
               profile per session ([browser.automation], or the keys where they already \
@@ -2415,18 +2427,19 @@ let browser_lane_setup_cmd =
               is named. The server reads the table when it starts."
          ])
     Term.(
-      const (fun base_path modes binary token_file manifest_dir host_name firefox profile port
-                  geckodriver browser ->
+      const (fun base_path modes no_addon binary token_file manifest_dir host_name firefox
+                  profile port geckodriver browser ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
         Masc_cli_browser_lane_setup.run
           ~base_path
           (* The file the server and masc doctor read: it honors MASC_CONFIG_DIR,
              which the helper the other setup commands use does not. *)
           ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
-          ~modes ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile ~port
-          ~geckodriver ~browser)
+          ~modes ~no_addon ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile
+          ~port ~geckodriver ~browser)
       $ base_path
       $ modes
+      $ no_addon
       $ binary
       $ token_file
       $ manifest_dir

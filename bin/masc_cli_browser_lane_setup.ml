@@ -253,12 +253,20 @@ let print_addon (installed : Addon_setup.installed) =
        beside masc; the server looks for them the same way.\n"
       (String.concat ", " missing)
 
-(* With --mode addon the browser Add-on step's refusal is the command's. With
-   any other mode it is reported and that mode's own steps go on, so a Lane
-   directory problem never stops a host refresh or a table write. *)
-let addon_refusal ~required error =
+(* Whether this command runs the browser Add-on step, and what its refusal
+   means. --mode addon requires it: a refusal is the command's. Every other
+   mode offers it: a refusal is reported and that mode's own steps go on, so
+   a Lane directory problem never stops a host refresh or a table write.
+   --no-addon skips it. *)
+type addon_choice = Require_addon | Offer_addon | Skip_addon
+
+type 'a addon_step = Not_run | Reported of string | Done of 'a
+
+let addon_refusal choice error =
   let message = Addon_setup.error_message error in
-  if required then Error message else Ok (Error message)
+  match choice with
+  | Require_addon -> Error message
+  | Offer_addon | Skip_addon -> Ok (Reported message)
 
 let print_addon_skipped message =
   prerr_endline ("The browser Add-on was not set up: " ^ message)
@@ -277,6 +285,7 @@ let install
       ~base_path
       ~runtime_config_path
       ~modes
+      ~addon_choice
       ~binary
       ~token_file
       ~manifest_dir
@@ -290,12 +299,14 @@ let install
   (* Every refusal of the modes' own steps comes before the first write. The
      browser Add-on step refuses what it can there too, and the rest after it
      wrote its package ({!Addon_setup.apply}); see [addon_refusal]. *)
-  let required = List.mem Addon modes in
   let planned =
     let* addon =
-      match Addon_setup.plan ~base_path with
-      | Ok plan -> Ok (Ok plan)
-      | Error error -> addon_refusal ~required error
+      match addon_choice with
+      | Skip_addon -> Ok Not_run
+      | Require_addon | Offer_addon ->
+        (match Addon_setup.plan ~base_path with
+         | Ok plan -> Ok (Done plan)
+         | Error error -> addon_refusal addon_choice error)
     in
     let* extension = extension_route ~modes ~manifest_dir ~host_name in
     let* bidi = bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port in
@@ -321,11 +332,12 @@ let install
       Result.bind installed (fun installed ->
         let* addon =
           match addon with
-          | Error message -> Ok (Error message)
-          | Ok plan ->
+          | Not_run -> Ok Not_run
+          | Reported message -> Ok (Reported message)
+          | Done plan ->
             (match Addon_setup.apply plan with
-             | Ok applied -> Ok (Ok applied)
-             | Error error -> addon_refusal ~required error)
+             | Ok applied -> Ok (Done applied)
+             | Error error -> addon_refusal addon_choice error)
         in
         Ok (installed, addon))
     in
@@ -333,10 +345,12 @@ let install
      | Error message -> refuse message
      | Ok (installed, addon) ->
        Option.iter (print_installed ~base_path) installed;
-       if Option.is_some installed then print_endline "";
        (match addon with
-        | Ok applied -> print_addon applied
-        | Error message -> print_addon_skipped message);
+        | Not_run -> ()
+        | Reported message -> print_addon_skipped message
+        | Done applied ->
+          if Option.is_some installed then print_endline "";
+          print_addon applied);
        let tabled =
          match bidi with
          | None -> Ok None
@@ -400,6 +414,7 @@ let run
       ~base_path
       ~runtime_config_path
       ~modes:requested
+      ~no_addon
       ~binary
       ~token_file
       ~manifest_dir
@@ -423,17 +438,24 @@ let run
       ; "--port", Option.is_some port, [ Bidi ]
       ; "--geckodriver", Option.is_some geckodriver, [ Automation ]
       ; "--browser", Option.is_some browser, [ Automation ]
+      ; "--no-addon", no_addon, [ Extension; Bidi; Host; Automation ]
       ]
   with
   | Some message -> refuse message
   | None ->
     (match modes with
      | [] -> show ~base_path
+     | _ :: _ when List.mem Addon modes && no_addon ->
+       refuse "--no-addon contradicts --mode addon."
      | _ :: _ ->
        install
          ~base_path
          ~runtime_config_path
          ~modes
+         ~addon_choice:
+           (if List.mem Addon modes then Require_addon
+            else if no_addon then Skip_addon
+            else Offer_addon)
          ~binary
          ~token_file
          ~manifest_dir

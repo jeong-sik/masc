@@ -2546,7 +2546,7 @@ let gate_references_of_operations ~config ~keeper_name =
   with
   | Error error -> Error (Keeper_chat_operation_store.error_to_string error)
   | Ok Keeper_chat_operation_store.Missing_store -> Ok []
-  | Ok (Keeper_chat_operation_store.Stored_operations { semantic_executions; chat_operations = _ }) ->
+  | Ok (Keeper_chat_operation_store.Stored_operations { semantic_executions; chat_operations = _; input_checkpoints = _ }) ->
     Ok (List.concat_map Keeper_semantic_execution.gate_approval_ids semantic_executions)
 ;;
 

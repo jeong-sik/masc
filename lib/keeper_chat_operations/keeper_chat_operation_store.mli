@@ -36,7 +36,7 @@ val path_for_keeper : keepers_runtime_dir:string -> keeper_name:string -> string
 
 type outstanding_snapshot =
   | Missing_store
-  | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list }
+  | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list; input_checkpoints : Keeper_checkpoint_ref.t list }
 
 type durable_snapshot =
   | Missing_durable_store
@@ -44,17 +44,16 @@ type durable_snapshot =
       { chat_operations : Operation.t list
       ; batch_member_inputs : Yojson.Safe.t list
       ; semantic_executions : Semantic.t list
+      ; input_checkpoints : Keeper_checkpoint_ref.t list
       }
 
 val inspect_outstanding : path:string -> (outstanding_snapshot, error) result
-(** Read-only schema/integrity checked snapshot of queued and running operations.
-    Exactly validated v1 chat-only stores are readable without migration; v2
-    inspection also includes every nonterminal semantic execution and terminal
-    executions retaining an unacknowledged native-call receipt. Those receipts
-    still own retained checkpoint references and must survive lifecycle cleanup.
-    Never creates, initializes, or recovers a store. Missing files remain distinct
-    from a validated empty queue. Callers authorizing lifecycle changes must
-    exclude the sole writer and its creation for the whole enclosing commit. *)
+(** Read-only current-schema/integrity checked snapshot of queued/running
+    operations, semantic executions owning retained checkpoints, and every
+    trace's current input checkpoint. A checkpoint whose pending_input is None
+    is still ownership evidence. Never creates, upgrades or recovers a store.
+    Missing files remain distinct from a validated empty queue. Mutation callers
+    must exclude the sole writer and creation for the whole enclosing commit. *)
 
 val inspect_durable_records : path:string -> (durable_snapshot, error) result
 (** Read-only schema/integrity checked snapshot of every durable record in the
@@ -67,6 +66,24 @@ val inspect_pending_inputs : path:string -> (Operation.t list option, error) res
 (** Read-only, schema-checked transaction over queued/running inputs only.
     Does not scan terminal history or run a whole-database integrity audit.
     [None] means no database, distinct from an empty validated snapshot. *)
+
+type input_checkpoint_update =
+  | Input_checkpoint_updated
+  | Input_checkpoint_source_changed of Keeper_checkpoint_ref.t option
+
+val input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
+  (Keeper_checkpoint_ref.t option, error) result
+(** None means no input observation was installed for this trace. Some points
+    to the exact retained payload, including a consumed pending_input=None.
+    Neither state alone grants current Owner or dispatch authority. *)
+
+val update_input_checkpoint : t -> observed:Keeper_checkpoint_ref.t option ->
+  checkpoint:Keeper_checkpoint_ref.t -> (input_checkpoint_update, error) result
+(** Owner-serialized predecessor CAS for the trace in checkpoint. The caller
+    retains and validates the exact payload first. A stale predecessor returns
+    the actual reference without writing. Uncertain commit remains an error;
+    reread the actual relation to reconcile it, never blindly retry.
+    This relation survives immutable operation/semantic terminal settlement. *)
 
 val open_or_create : path:string -> (t, error) result
 val open_existing : path:string -> (t, error) result
@@ -81,7 +98,7 @@ val take_released_checkpoints : t -> released_checkpoint list
 (** Hand over, once, the retained checkpoints that committed transactions on
     this handle released, oldest commit first. A transaction releases a
     reference one of its semantic writes stopped naming when, after all its
-    writes, no execution {!inspect_outstanding} would select still names that
+    writes, no execution or input owner {!inspect_outstanding} would select still names that
     sha256; it computes this before its COMMIT and publishes it only when the
     COMMIT returns success. A failed or uncertain commit releases nothing.
     The caller removes the files; nothing here touches the filesystem. *)
@@ -190,6 +207,18 @@ val update_direct_native_call : t -> now:float -> operation_id:Operation.Operati
   execution_digest:string -> Keeper_native_call.change -> (unit, error) result
 (** Owner-serialized native-call identity and checkpoint CAS. Every change
     verifies the current direct-operation execution digest. *)
+val update_direct_input_checkpoint : t -> now:float ->
+  operation_id:Operation.Operation_id.t -> execution_digest:string ->
+  call_id:string -> observed:Keeper_checkpoint_ref.t ->
+  observed_input:Keeper_checkpoint_ref.t option -> checkpoint:Keeper_checkpoint_ref.t ->
+  (input_checkpoint_update, error) result
+(** Atomically advance the active direct native call and the trace's input
+    owner. A stale input predecessor leaves both unchanged. The native-call
+    identity, operation digest and phase retain their existing validation.
+    An uncertain commit remains Error even if it installed both references.
+    Reread native and input ownership together before reconciling; semantic
+    readback alone is not confirmation and blind retry is not permitted. *)
+
 val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result
 val resume_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->

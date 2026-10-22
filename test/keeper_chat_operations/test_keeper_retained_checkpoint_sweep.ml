@@ -183,10 +183,30 @@ let test_missing_directories_are_an_empty_sweep () = with_root (fun root ->
   check int "nothing live" 0 report.live_references;
   check int "nothing removed" 0 report.removed)
 
+let test_input_owner_retains_only_current_checkpoint_after_restart () = with_root (fun root ->
+  let previous = checkpoint "input-before-consumption" in
+  let consumed = checkpoint "input-consumed" in
+  with_open (keeper_store root "input-owner") (fun store ->
+    let update observed checkpoint = match Store.update_input_checkpoint store ~observed ~checkpoint |> store_ok with
+      | Store.Input_checkpoint_updated -> ()
+      | Input_checkpoint_source_changed _ -> fail "fixture input owner changed" in
+    update None previous;
+    update (Some previous) consumed);
+  let old_file = retained root ~session:["sweep-trace"] previous in
+  let current_file = retained root ~session:["sweep-trace"] consumed in
+  write old_file "previous";
+  write current_file "consumed";
+  let report = sweep root in
+  check int "input owner survives without any active semantic execution" 1 report.live_references;
+  check bool "current consumed evidence survives restart sweep" true (Sys.file_exists current_file);
+  check bool "superseded input checkpoint is removed" false (Sys.file_exists old_file))
+
 let () =
   run "keeper_retained_checkpoint_sweep"
     [ ( "sweep"
-      , [ test_case "removes only what no unsettled execution names" `Quick
+      , [ test_case "input checkpoint owner survives restart sweep" `Quick
+        test_input_owner_retains_only_current_checkpoint_after_restart;
+      test_case "removes only what no unsettled execution names" `Quick
             test_removes_only_what_no_unsettled_execution_names
         ; test_case "a gate wait keeps its checkpoint" `Quick test_a_gate_wait_keeps_its_checkpoint
         ; test_case "symlinked keeper directories are read" `Quick

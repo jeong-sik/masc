@@ -225,7 +225,7 @@ let test_readonly_inventory_includes_every_unsettled_phase () =
     let before = raw_file path in
     (match Store.inspect_outstanding ~path |> store_ok with
      | Missing_store -> fail "durable journal looked absent"
-     | Stored_operations {chat_operations; semantic_executions} ->
+     | Stored_operations {chat_operations; semantic_executions; input_checkpoints = _} ->
        check int "every unfinished direct chat remains visible" 5 (List.length chat_operations);
        check (list string) "all semantic nonterminal phases are visible"
          (List.sort String.compare (List.map (fun id -> Yojson.Safe.to_string (Scope.to_json id))
@@ -243,109 +243,35 @@ let test_corrupt_semantic_frame_refuses_unsafe_inspection () =
      | Error _ -> () | Ok _ -> fail "corrupt owned execution was treated as absent");
     check string "corrupt execution evidence is retained" before (raw_file path))
 
-(* Construct an exact v1 journal from the unchanged chat schema, keeping real
-   submitted rows/digests. Only v2's added objects and metadata are removed. *)
-let make_v1 path =
-  let first_id = Chat.Operation_id.of_string "v1-first" |> string_ok in
-  let second_id = Chat.Operation_id.of_string "v1-second" |> string_ok in
-  with_open path (fun store ->
-    List.iter (fun id ->
-      let _admitted = Store.submit store ~now:5. ~operation_id:id
-        ~source:(`Assoc ["kind", `String "fixture"])
-        ~input:(`Assoc ["message", `String "preserve me"]) |> store_ok in ()) [first_id; second_id];
-    let _cancelled = Store.cancel_queued store ~now:6. ~operation_id:first_id |> store_ok in
-    (* A valid queued edit changes execution_digest but intentionally retains
-       admission_digest from the original submission. Migration must accept it. *)
-    let _edited = Store.edit_queued store ~operation_id:second_id
-      ~input:(`Assoc ["message", `String "legitimate queued edit"]) |> store_ok in ());
-  with_db path (fun db ->
-    let sequence = scalar db "SELECT next_sequence FROM metadata WHERE singleton=1" in
-    sql db "BEGIN IMMEDIATE";
-    List.iter (sql db)
-      [ "DROP TRIGGER batch_members_update_immutable";
-        "DROP TRIGGER batch_members_delete_immutable";
-        "DROP TABLE operation_batch_members";
-        "DROP TRIGGER semantic_terminal_update_immutable";
-        "DROP TRIGGER semantic_terminal_delete_immutable";
-        "DROP INDEX semantic_single_running";
-        "DROP TABLE semantic_executions";
-        "DROP TABLE metadata";
-        "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v1'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT" ];
-    sql db ("INSERT INTO metadata VALUES (1, 'masc.keeper_chat_operations.v1', " ^ sequence ^ ")");
-    sql db "PRAGMA user_version=1";
-    sql db "COMMIT";
-    check string "v1 fixture contains only its six declared schema objects" "6"
-      (scalar db "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'");
-    check string "v1 fixture has no later batch membership table" "0"
-      (scalar db "SELECT count(*) FROM sqlite_master WHERE name='operation_batch_members'"));
-  first_id, second_id
-let chat_snapshot path = with_db path (fun db -> rows db "SELECT * FROM operations ORDER BY sequence")
-let version path = with_db path (fun db -> scalar db "PRAGMA user_version")
-let sequence path = with_db path (fun db -> scalar db "SELECT next_sequence FROM metadata WHERE singleton=1")
-let semantic_table_count path = with_db path (fun db -> scalar db "SELECT count(*) FROM sqlite_master WHERE name='semantic_executions'")
-
-let test_readonly_v1_does_not_require_migration () =
+let test_prior_generation_is_preserved () =
   with_path (fun path ->
-    let _terminal, pending = make_v1 path in
+    with_open path (fun store -> submit store ~now:5. "prior-journal" (`Assoc []));
+    with_db path (fun db ->
+      let next = scalar db "SELECT next_sequence FROM metadata WHERE singleton=1" in
+      sql db "BEGIN IMMEDIATE";
+      sql db "DROP TABLE input_checkpoints";
+      sql db "DROP TABLE metadata";
+      sql db "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v2'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT";
+      sql db ("INSERT INTO metadata VALUES (1, 'masc.keeper_chat_operations.v2', " ^ next ^ ")");
+      sql db "PRAGMA user_version=2";
+      sql db "COMMIT");
     let before = raw_file path in
-    (match Store.inspect_outstanding ~path |> store_ok with
-     | Stored_operations {chat_operations=[chat]; semantic_executions=[]} ->
-       check string "v1 pending owner is visible" (Chat.Operation_id.to_string pending) (Chat.Operation_id.to_string chat.operation_id)
-     | _ -> fail "validated v1 journal was not inspected without migration");
-    check string "read-only v1 inspection is byte preserving" before (raw_file path);
-    check string "reader leaves version alone" "1" (version path);
-    check string "reader creates no semantic table" "0" (semantic_table_count path))
-
-let test_v1_upgrade_preserves_chat_rows_and_sequence () =
-  with_path (fun path ->
-    let first, second = make_v1 path in
-    let before_rows = chat_snapshot path and before_sequence = sequence path in
-    with_open path (fun store ->
-      check string "upgrade writes current schema version" "2" (version path);
-      check bool "all chat row values survive migration" true (before_rows = chat_snapshot path);
-      check string "next chat sequence is preserved" before_sequence (sequence path);
-      List.iter (fun id -> check bool "old identity remains queryable" true (Option.is_some (Store.get store id |> store_ok))) [first;second];
-      let new_id = Chat.Operation_id.of_string "after-upgrade" |> string_ok in
-      let admitted = Store.submit store ~now:7. ~operation_id:new_id ~source:(`Assoc []) ~input:(`Assoc []) |> store_ok in
-      let operation = match admitted with Accepted op -> op | Existing _ -> fail "new chat unexpectedly existed" in
-      check int64 "next chat submission preserves sequence allocation" (Int64.of_string before_sequence) operation.sequence;
-      let _semantic = prepare store 1 [source 1] in ()))
-
-let test_v1_upgrade_faults_are_atomic () =
-  List.iter (fun fault -> with_path (fun path ->
-    let _ids = make_v1 path in
-    let before = chat_snapshot path and next = sequence path in
-    Store.For_testing.fail_next_commit fault;
+    (match Store.inspect_outstanding ~path with Error _ -> () | Ok _ -> fail "prior generation was admitted");
     (match Store.open_or_create ~path with
      | Error _ -> ()
-     | Ok store -> Store.close store |> store_ok; fail "injected migration failure was hidden");
-    check bool "migration failure never loses chat rows" true (before = chat_snapshot path);
-    check string "migration failure preserves sequence" next (sequence path);
-    (match fault with
-     | Store.For_testing.Fail_before_commit ->
-       check string "failed migration keeps old version" "1" (version path);
-       check string "failed migration leaves no partial new table" "0" (semantic_table_count path)
-     | Fail_after_commit ->
-       check string "uncertain migration may be durably current" "2" (version path);
-       check string "uncertain migration committed complete schema" "1" (semantic_table_count path));
-    with_open path (fun _store -> check bool "reopen still retains exact chat rows" true (before = chat_snapshot path))))
-    Store.For_testing.[Fail_before_commit; Fail_after_commit]
+     | Ok store -> Store.close store |> store_ok; fail "ordinary open changed a prior generation");
+    check string "prior generation and original rows retain exact bytes" before (raw_file path))
 
-let test_bad_v1_rows_or_unknown_schema_are_preserved () =
-  List.iter (fun mutation -> with_path (fun path ->
-    let _ids = make_v1 path in
-    with_db path (fun db -> sql db mutation);
+let test_missing_input_owner_table_is_not_reinitialized () =
+  with_path (fun path ->
+    with_open path (fun store -> submit store ~now:5. "owned-evidence" (`Assoc []));
+    with_db path (fun db -> sql db "DROP TABLE input_checkpoints");
     let before = raw_file path in
-    (match Store.inspect_outstanding ~path with Error _ -> () | Ok _ -> fail "invalid journal passed readonly inspection");
+    (match Store.inspect_outstanding ~path with Error _ -> () | Ok _ -> fail "missing authority looked unobserved");
     (match Store.open_or_create ~path with
-     | Error _ -> () | Ok store -> Store.close store |> store_ok; fail "invalid journal was migrated");
-    check string "refused journal retains exact bytes" before (raw_file path);
-    check string "refusal creates no semantic table" "0" (semantic_table_count path)))
-    [ "UPDATE operations SET input_json='{' WHERE state='queued'";
-      "UPDATE operations SET input_json='{\"message\":\"tampered valid JSON\"}' WHERE state='queued'";
-      "UPDATE operations SET state='running', started_at=-1 WHERE state='queued'";
-      "UPDATE operations SET state='failed', started_at=1, completed_at=-1, input_json=NULL, failure_kind='Turn_exception', failure_detail='fixture' WHERE state='queued'";
-      "PRAGMA user_version=99" ]
+     | Error _ -> ()
+     | Ok store -> Store.close store |> store_ok; fail "missing owner table was recreated");
+    check string "missing owner evidence is preserved for recovery" before (raw_file path))
 
 let test_corrupt_database_bytes_are_not_reinitialized () =
   with_path (fun path ->
@@ -524,8 +450,6 @@ let () =
         test_case "a Gate record that names a session scope is refused" `Quick test_gate_record_with_a_session_scope_is_refused;
         test_case "terminal index cannot conceal pending evidence" `Quick test_corrupt_terminal_index_cannot_hide_outstanding_execution ];
       "schema", [
-        test_case "readonly exact v1 requires no migration" `Quick test_readonly_v1_does_not_require_migration;
-        test_case "v1 migration preserves all chat rows and sequence" `Quick test_v1_upgrade_preserves_chat_rows_and_sequence;
-        test_case "v1 migration commit faults are atomic" `Quick test_v1_upgrade_faults_are_atomic;
-        test_case "bad v1 rows and unknown schemas remain intact" `Quick test_bad_v1_rows_or_unknown_schema_are_preserved;
+        test_case "prior generation is refused without changing rows" `Quick test_prior_generation_is_preserved;
+        test_case "missing input authority is never recreated" `Quick test_missing_input_owner_table_is_not_reinitialized;
         test_case "corrupt raw database remains intact" `Quick test_corrupt_database_bytes_are_not_reinitialized ] ]

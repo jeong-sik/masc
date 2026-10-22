@@ -68,3 +68,21 @@ criterion and authority identity. Existing `version` values are write counters,
 not schema versions. An old proof cannot acquire those identities by inferring
 them from its title, time or current Goal. Such stores remain explicit manual
 repair cases in setup preflight; this module neither resets nor rewrites them.
+
+## Input ownership journal generation
+
+The input-wait Owner journal uses `masc.keeper_chat_operations.v3` and SQLite
+`user_version=3`. Its `input_checkpoints` table is mandatory even before a trace
+has an input observation. A missing table is damaged authority, not an empty
+input history; ordinary open and read-only inspection do not create it again.
+The same rule preserves consumed-input evidence after native call retirement.
+
+Earlier journal generations are refused without rewriting rows, sequence, or
+checkpoint evidence. This configuration-upgrade tool does not prepare those
+journals. There is no automatic reset or conversion to an unobserved input
+state. A rollout must explicitly prepare and verify its journals while the
+server is stopped before installing this generation; otherwise the Owner can
+remain unavailable. Retaining pending operations and terminal outcomes is part
+of that preparation. No live data preparation or restart is implied by a source
+change or passing fixture. The response endpoint and producer wiring are separate
+implementation layers; the journal table alone does not make a wait actionable.

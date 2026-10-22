@@ -82,7 +82,7 @@ let test_schema_identity_and_budget () =
   check
     (list (pair string int))
     "strict tables"
-    [ "metadata", 3; "operations", 13; "semantic_executions", 4; "operation_batch_members", 5 ]
+    [ "metadata", 3; "operations", 13; "semantic_executions", 4; "operation_batch_members", 5; "input_checkpoints", 3 ]
     Store.For_testing.table_column_counts;
   store_ok (Store.close store);
   let db = Sqlite3.db_open ~mode:`READONLY path in
@@ -100,7 +100,7 @@ let test_schema_identity_and_budget () =
        check
          string
          "schema identity"
-         "masc.keeper_chat_operations.v2"
+         "masc.keeper_chat_operations.v3"
          (text "SELECT schema FROM metadata WHERE singleton = 1");
        check
          int64

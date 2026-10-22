@@ -388,7 +388,136 @@ let test_the_release_selection_matches_the_sweep () =
     check int "the gate wait, the receipt kept by the restart and the suspension" 3
       (List.length selected))
 
-let () = run "native-call-owner-store" ["recovery", [
+let input_updated = function
+  | Store.Input_checkpoint_updated -> ()
+  | Store.Input_checkpoint_source_changed _ -> fail "input checkpoint source unexpectedly changed"
+let current_input store = Store.input_checkpoint store
+  ~trace_id:(Keeper_id.Trace_id.of_string "native-trace" |> value) |> ok
+let check_input label expected store =
+  check bool label true (Option.equal Keeper_checkpoint_ref.equal expected (current_input store))
+let advance_input store operation ~observed ~observed_input checkpoint =
+  Store.update_direct_input_checkpoint store ~now:4. ~operation_id
+    ~execution_digest:operation.Operation.execution_digest ~call_id ~observed ~observed_input ~checkpoint
+
+let test_input_owner_survives_retirement_and_reopen () = with_store @@ fun path store operation ->
+  bind store operation (make_call operation);
+  advance_input store operation ~observed:(checkpoint 1) ~observed_input:None (checkpoint 2)
+    |> ok |> input_updated;
+  terminal store operation Agent.Retire;
+  ignore (Store.succeed_running store ~now:5. ~operation_id ~outcome_ref:"input-pause-receipt" |> ok);
+  let terminal_row = Store.get store operation_id |> ok in
+  check_input "input owner remains after native retirement" (Some (checkpoint 2)) store;
+  check bool "native call is retired" true (Native.equal_state Native.No_native_call (read store));
+  (match Store.inspect_outstanding ~path |> ok with
+   | Store.Stored_operations {input_checkpoints=[reference]; semantic_executions=[]; chat_operations=[]} ->
+     check bool "settled input still keeps its exact checkpoint live" true
+       (Keeper_checkpoint_ref.equal reference (checkpoint 2))
+   | Store.Stored_operations _ | Missing_store -> fail "input lifetime was coupled to operation settlement");
+  with_reopened path store @@ fun reopened ->
+  check_input "input ownership survives restart" (Some (checkpoint 2)) reopened;
+  Store.update_input_checkpoint reopened ~observed:(Some (checkpoint 2)) ~checkpoint:(checkpoint 3)
+    |> ok |> input_updated;
+  check_input "consumption can advance after terminal operation" (Some (checkpoint 3)) reopened;
+  check bool "input update never changes immutable terminal result" true
+    (terminal_row = (Store.get reopened operation_id |> ok));
+  match Store.update_input_checkpoint reopened ~observed:(Some (checkpoint 2)) ~checkpoint:(checkpoint 4) |> ok with
+  | Store.Input_checkpoint_source_changed (Some current) ->
+    check bool "stale input cannot resurrect after a new observation" true
+      (Keeper_checkpoint_ref.equal current (checkpoint 3))
+  | Input_checkpoint_updated | Input_checkpoint_source_changed None -> fail "stale input was admitted"
+
+let test_input_and_native_checkpoint_commit_atomically () = with_store @@ fun _path store operation ->
+  bind store operation (make_call operation);
+  let advance () = advance_input store operation ~observed:(checkpoint 1) ~observed_input:None (checkpoint 2) in
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_before_commit;
+  rejected "precommit failure was hidden" (advance ());
+  check_input "failed commit installs no input owner" None store;
+  (match read store with Native.Active call ->
+    check bool "failed commit does not advance native checkpoint" true
+      (Keeper_checkpoint_ref.equal call.checkpoint (checkpoint 1))
+   | No_native_call | Terminal_unacknowledged _ -> fail "native authority was lost");
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+  (match advance () with
+   | Error (Store.Store_unavailable _) -> ()
+   | Ok _ | Error _ -> fail "uncertain input commit was not retained as a storage error");
+  check_input "uncertain commit can have installed actual input owner" (Some (checkpoint 2)) store;
+  (match read store with Native.Active call ->
+    check bool "native ref and input owner advance together" true
+      (Keeper_checkpoint_ref.equal call.checkpoint (checkpoint 2))
+   | No_native_call | Terminal_unacknowledged _ -> fail "native authority was lost");
+  check int "uncertain transaction releases no files" 0 (List.length (Store.take_released_checkpoints store));
+  (match advance_input store operation ~observed:(checkpoint 2) ~observed_input:None (checkpoint 3) |> ok with
+   | Store.Input_checkpoint_source_changed (Some actual) ->
+     check bool "stale producer gets actual input owner" true (Keeper_checkpoint_ref.equal actual (checkpoint 2))
+   | Input_checkpoint_updated | Input_checkpoint_source_changed None -> fail "stale input source was accepted");
+  check_input "stale producer leaves input ref unchanged" (Some (checkpoint 2)) store;
+  (match read store with Native.Active call ->
+    check bool "stale input predecessor leaves native ref unchanged" true
+      (Keeper_checkpoint_ref.equal call.checkpoint (checkpoint 2))
+   | No_native_call | Terminal_unacknowledged _ -> fail "native authority was lost")
+
+let test_input_retention_shares_native_liveness () = with_store @@ fun _path store operation ->
+  bind store operation (make_call operation);
+  Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
+  commit store operation (Native.Checkpoint {call_id;observed=checkpoint 1;checkpoint=checkpoint 2});
+  terminal store operation Agent.Retire;
+  ignore (Store.succeed_running store ~now:5. ~operation_id ~outcome_ref:"settled" |> ok);
+  let released = Store.take_released_checkpoints store
+    |> List.map Store.released_reference in
+  check bool "terminal native checkpoint is released" true
+    (List.exists (Keeper_checkpoint_ref.equal (checkpoint 2)) released);
+  check bool "input owner protects a retired native seed" false
+    (List.exists (Keeper_checkpoint_ref.equal (checkpoint 1)) released);
+  Store.update_input_checkpoint store ~observed:(Some (checkpoint 1)) ~checkpoint:(checkpoint 3)
+    |> ok |> input_updated;
+  let released = Store.take_released_checkpoints store |> List.map Store.released_reference in
+  check bool "superseded input ref releases after confirmed commit" true
+    (List.exists (Keeper_checkpoint_ref.equal (checkpoint 1)) released)
+
+let test_input_writes_on_closed_store_are_typed () = with_store @@ fun _path store operation ->
+  bind store operation (make_call operation);
+  ignore (Store.close store |> ok);
+  let closed label = function
+    | Error (Store.Store_unavailable detail) ->
+      check string label "database handle is closed" detail
+    | Ok _ | Error _ -> fail (label ^ ": closed handle was not refused") in
+  closed "native update" (Store.update_direct_native_call store ~now:4. ~operation_id
+    ~execution_digest:operation.Operation.execution_digest
+    (Native.Checkpoint {call_id;observed=checkpoint 1;checkpoint=checkpoint 2}));
+  closed "autonomous input update"
+    (Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 2));
+  closed "atomic direct input update"
+    (advance_input store operation ~observed:(checkpoint 1) ~observed_input:None (checkpoint 2))
+
+let test_input_identity_is_not_an_ordinal () = with_store @@ fun _path store _operation ->
+  let first = checkpoint_of_bytes ~turn_count:4 40 in
+  let same_turn = checkpoint_of_bytes ~turn_count:4 41 in
+  Store.update_input_checkpoint store ~observed:None ~checkpoint:first |> ok |> input_updated;
+  Store.update_input_checkpoint store ~observed:(Some first) ~checkpoint:same_turn |> ok |> input_updated;
+  (match Store.update_input_checkpoint store ~observed:(Some first) ~checkpoint:(checkpoint 5) |> ok with
+   | Store.Input_checkpoint_source_changed (Some actual) ->
+     check bool "same turn replacement is detected by exact bytes" true
+       (Keeper_checkpoint_ref.equal actual same_turn)
+   | Input_checkpoint_updated | Input_checkpoint_source_changed None -> fail "ordinal was substituted for identity");
+  let foreign = Keeper_checkpoint_ref.create
+    ~trace_id:(Keeper_id.Trace_id.of_string "other-input-trace" |> value)
+    ~turn_count:4 ~canonical_checkpoint_bytes:"foreign input"
+    |> function Ok reference -> reference | Error _ -> fail "foreign trace fixture" in
+  rejected "a previous trace authorized a new trace"
+    (Store.update_input_checkpoint store ~observed:(Some same_turn) ~checkpoint:foreign);
+  check bool "cross-trace refusal creates no foreign input owner" true
+    ((Store.input_checkpoint store ~trace_id:foreign.trace_id |> ok) = None);
+  rejected "input owner moved behind its source turn"
+    (Store.update_input_checkpoint store ~observed:(Some same_turn) ~checkpoint:(checkpoint 3));
+  check_input "identity refusals preserve actual current owner" (Some same_turn) store
+
+let () = run "native-call-owner-store" ["input ownership", [
+  test_case "closed stores refuse each input writer with a typed error" `Quick test_input_writes_on_closed_store_are_typed;
+  test_case "same turn bytes, trace and source turn are exact" `Quick test_input_identity_is_not_an_ordinal;
+  test_case "input owner survives retirement and reopen" `Quick test_input_owner_survives_retirement_and_reopen;
+  test_case "input and native checkpoint commit atomically" `Quick test_input_and_native_checkpoint_commit_atomically;
+  test_case "input owner shares native retained liveness" `Quick test_input_retention_shares_native_liveness];
+  "recovery", [
   test_case "active restart preserves exact admission" `Quick test_active_restart_preserves_seed_and_exact_identity;
   test_case "terminal restart retains incomplete receipt without dispatch" `Quick test_terminal_restart_never_dispatches;
   test_case "unknown effect survives settlement and rejects retry" `Quick test_unknown_effect_survives_failure_and_rejects_retry;

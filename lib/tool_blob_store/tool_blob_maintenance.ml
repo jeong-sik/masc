@@ -304,7 +304,7 @@ let references_in_chat_operation_store ~ownership_root path =
             { path; reason = "durable source disappeared during scan" })
      | Ok
          (Keeper_chat_operation_store.Stored_durable_records
-           { chat_operations; batch_member_inputs; semantic_executions }) ->
+           { chat_operations; batch_member_inputs; semantic_executions; input_checkpoints = _ }) ->
        let fold_json result json =
          Result.bind result (fun references ->
            references_in_json ~path ~line:1 references json)

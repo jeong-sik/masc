@@ -56,7 +56,7 @@ let path_for_keeper ~keepers_runtime_dir ~keeper_name =
 
 type outstanding_snapshot =
   | Missing_store
-  | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list }
+  | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list; input_checkpoints : Keeper_checkpoint_ref.t list }
 
 type durable_snapshot =
   | Missing_durable_store
@@ -64,17 +64,14 @@ type durable_snapshot =
       { chat_operations : Operation.t list
       ; batch_member_inputs : Yojson.Safe.t list
       ; semantic_executions : Semantic.t list
+      ; input_checkpoints : Keeper_checkpoint_ref.t list
       }
-let database_schema = "masc.keeper_chat_operations.v2"
+let database_schema = "masc.keeper_chat_operations.v3"
 let database_application_id = 0x4d4b4f50L
-let database_user_version = 2L
-
-let legacy_metadata_table_sql =
-  "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v1'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT"
-;;
+let database_user_version = 3L
 
 let metadata_table_sql =
-  "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v2'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT"
+  "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v3'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT"
 ;;
 
 let semantic_table_sql =
@@ -124,23 +121,16 @@ let terminal_delete_trigger_sql =
   "CREATE TRIGGER operations_terminal_delete_immutable BEFORE DELETE ON operations WHEN OLD.state IN ('succeeded', 'failed', 'cancelled') BEGIN SELECT RAISE(ABORT, 'terminal operation is immutable'); END"
 ;;
 
-let legacy_schema_objects =
+let chat_schema_objects =
   [ "index", "operations_single_running", operations_single_running_index_sql
   ; "index", "operations_state_sequence", operations_state_sequence_index_sql
-  ; "table", "metadata", legacy_metadata_table_sql
+  ; "table", "metadata", metadata_table_sql
   ; "table", "operations", operations_table_sql
   ; "trigger", "operations_terminal_delete_immutable", terminal_delete_trigger_sql
   ; "trigger", "operations_terminal_update_immutable", terminal_update_trigger_sql
   ]
 ;;
 
-let base_schema_objects =
-  (List.map (fun (kind, name, sql) ->
-     kind, name, (if name = "metadata" then metadata_table_sql else sql)) legacy_schema_objects
-   @ semantic_schema_objects)
-  |> List.sort (fun (left_kind, left_name, _) (right_kind, right_name, _) ->
-       compare (left_kind, left_name) (right_kind, right_name))
-;;
 let batch_table_sql =
   "CREATE TABLE operation_batch_members (operation_id TEXT PRIMARY KEY REFERENCES operations(operation_id), execution_id TEXT NOT NULL REFERENCES operations(operation_id), position INTEGER NOT NULL CHECK (position >= 0), admitted_digest TEXT NOT NULL CHECK (length(admitted_digest) = 64), admitted_input_json TEXT, UNIQUE(execution_id, position)) STRICT"
 ;;
@@ -148,8 +138,14 @@ let batch_schema_objects =
   [ "table", "operation_batch_members", batch_table_sql
   ; "trigger", "batch_members_update_immutable", "CREATE TRIGGER batch_members_update_immutable BEFORE UPDATE ON operation_batch_members WHEN NEW.operation_id <> OLD.operation_id OR NEW.execution_id <> OLD.execution_id OR NEW.position <> OLD.position OR NEW.admitted_digest <> OLD.admitted_digest OR OLD.admitted_input_json IS NULL OR NEW.admitted_input_json IS NOT NULL OR NOT EXISTS (SELECT 1 FROM operations WHERE operation_id = OLD.execution_id AND state IN ('succeeded', 'failed', 'cancelled')) BEGIN SELECT RAISE(ABORT, 'batch membership is immutable'); END"
   ; "trigger", "batch_members_delete_immutable", "CREATE TRIGGER batch_members_delete_immutable BEFORE DELETE ON operation_batch_members BEGIN SELECT RAISE(ABORT, 'batch membership is immutable'); END" ]
-let expected_schema_objects = List.sort compare (base_schema_objects @ batch_schema_objects)
-let table_column_counts = [ "metadata", 3; "operations", 13; "semantic_executions", 4; "operation_batch_members", 5 ]
+let input_checkpoint_table_sql =
+  "CREATE TABLE input_checkpoints (trace_id TEXT PRIMARY KEY, turn_count INTEGER NOT NULL CHECK (turn_count >= 0), sha256 TEXT NOT NULL CHECK (length(sha256) = 64)) STRICT"
+let expected_schema_objects =
+  List.sort compare (chat_schema_objects @ semantic_schema_objects @ batch_schema_objects
+    @ ["table", "input_checkpoints", input_checkpoint_table_sql])
+let table_column_counts =
+  [ "metadata", 3; "operations", 13; "semantic_executions", 4
+  ; "operation_batch_members", 5; "input_checkpoints", 3 ]
 
 type commit_fault =
   | Fail_before_commit
@@ -660,11 +656,14 @@ let initialize_schema db =
   let* () = exec db ~operation:"create terminal update trigger" terminal_update_trigger_sql in
   let* () = exec db ~operation:"create terminal delete trigger" terminal_delete_trigger_sql in
   let* () = initialize_semantic_schema db in
+  let* () = List.fold_left (fun result (_, name, sql) ->
+    let* () = result in exec db ~operation:("create " ^ name) sql) (Ok ()) batch_schema_objects in
+  let* () = exec db ~operation:"create input checkpoint ownership" input_checkpoint_table_sql in
   let* () =
     exec
       db
       ~operation:"initialize operation sequence"
-      "INSERT INTO metadata(singleton, schema, next_sequence) VALUES (1, 'masc.keeper_chat_operations.v2', 0)"
+      "INSERT INTO metadata(singleton, schema, next_sequence) VALUES (1, 'masc.keeper_chat_operations.v3', 0)"
   in
   let* () =
     exec
@@ -688,44 +687,12 @@ let validate_schema_with ~version ~schema_identity ~objects db =
     if schema <> schema_identity then Error (Integrity_error "operation store schema identity mismatch")
     else
       let* observed = read_schema_objects db in
-      if observed = objects || (objects = expected_schema_objects && observed = base_schema_objects) then Ok ()
+      if observed = objects then Ok ()
       else Error (Integrity_error "operation store schema objects do not exactly match")
 ;;
 let validate_schema db =
   validate_schema_with ~version:database_user_version ~schema_identity:database_schema
     ~objects:expected_schema_objects db
-;;
-
-let upgrade_validated_v1_unlocked db =
-    let* () = validate_schema_with ~version:1L
-      ~schema_identity:"masc.keeper_chat_operations.v1" ~objects:legacy_schema_objects db in
-    let* integrity = single_text db ~operation:"validate v1 integrity" "PRAGMA quick_check" in
-    let* () = if integrity = "ok" then Ok () else Error (Integrity_error integrity) in
-    let* () = with_statement db ~operation:"validate every v1 operation"
-      ("SELECT " ^ select_columns ^ " FROM operations") (fun stmt ->
-        let rec loop () =
-          let rc = Sqlite3.step stmt in
-          if rc = Sqlite3.Rc.DONE then Ok ()
-          else if rc = Sqlite3.Rc.ROW then let* _ = decode_operation stmt in loop ()
-          else Error (Store_unavailable (sqlite_error db "validate v1 operation" rc))
-        in loop ()) in
-    let* next_sequence = single_int64 db ~operation:"preserve v1 sequence" "SELECT next_sequence FROM metadata WHERE singleton = 1" in
-    let* max_sequence = single_int64 db ~operation:"validate v1 sequence" "SELECT COALESCE(MAX(sequence), -1) FROM operations" in
-    let* () = if next_sequence > max_sequence then Ok () else Error (Integrity_error "v1 next_sequence does not follow stored operations") in
-    let* () = exec db ~operation:"replace validated metadata contract" "DROP TABLE metadata" in
-    let* () = exec db ~operation:"create v2 metadata contract" metadata_table_sql in
-    let* () = with_statement db ~operation:"preserve operation sequence"
-      "INSERT INTO metadata(singleton, schema, next_sequence) VALUES (1, 'masc.keeper_chat_operations.v2', ?)"
-      (fun stmt -> let* () = bind_int64 db stmt ~operation:"bind preserved sequence" 1 next_sequence in
-        expect_done db stmt ~operation:"write preserved sequence") in
-    let* () = initialize_semantic_schema db in
-    let* () = exec db ~operation:"advance operation schema version" "PRAGMA user_version=2" in
-    validate_schema db
-;;
-
-let ensure_current_schema db =
-  let* version = single_int64 db ~operation:"read schema upgrade version" "PRAGMA user_version" in
-  if version = 1L then upgrade_validated_v1_unlocked db else validate_schema db
 ;;
 
 let configure db =
@@ -763,11 +730,7 @@ let validate_open_candidate db =
     let* version = single_int64 db ~operation:"inspect empty schema version" "PRAGMA user_version" in
     if application_id = 0L && version = 0L then Ok ()
     else Error (Integrity_error "empty database has a foreign or damaged identity")
-  else
-    let* version = single_int64 db ~operation:"inspect candidate version" "PRAGMA user_version" in
-    if version = 1L then validate_schema_with ~version:1L
-      ~schema_identity:"masc.keeper_chat_operations.v1" ~objects:legacy_schema_objects db
-    else validate_schema db
+  else validate_schema db
 ;;
 
 let open_or_create ~path =
@@ -777,22 +740,17 @@ let open_or_create ~path =
     ignore (close_db db : bool);
     Error error
   in
-  let initialize_or_upgrade () =
+  let initialize_or_validate () =
     (* Reject unknown/corrupt contracts before changing journaling pragmas. *)
     let* () = validate_open_candidate db in
     let* () = configure db in
     let* () = exec db ~operation:"begin operation schema transaction" "BEGIN IMMEDIATE" in
     let body () =
       (* Recheck after acquiring the writer lock; another opener may already
-         have initialized or migrated the candidate observed above. *)
+         have initialized the candidate observed above. *)
       let* () = validate_open_candidate db in
       let* count = single_int64 db ~operation:"read locked schema" "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'" in
-      let* () = if count = 0L then initialize_schema db else ensure_current_schema db in
-      let* observed = read_schema_objects db in
-      let* () = if observed = base_schema_objects then
-        List.fold_left (fun result (_, _, sql) -> let* () = result in
-          exec db ~operation:"create batch membership contract" sql) (Ok ()) batch_schema_objects
-        else Ok () in
+      let* () = if count = 0L then initialize_schema db else validate_schema db in
       let* () = validate_schema db in
       commit db
     in
@@ -800,7 +758,7 @@ let open_or_create ~path =
     | Ok () -> Ok ()
     | Error _ as error -> rollback db; error
   in
-  match initialize_or_upgrade () with
+  match initialize_or_validate () with
   | Ok () -> Ok { db; path; closed = Atomic.make false; dropped = Atomic.make []; released = Atomic.make [] }
   | Error error -> fail error
 ;;
@@ -885,6 +843,46 @@ let semantic_rows db ~active_only =
     ~keep:(fun execution -> not (active_only && Semantic.is_terminal execution))
 ;;
 
+let decode_input_checkpoint stmt =
+  let* trace_id = Keeper_id.Trace_id.of_string (Sqlite3.column_text stmt 0)
+    |> Result.map_error (fun detail -> Integrity_error ("input checkpoint trace: " ^ detail)) in
+  let turn_count = Sqlite3.column_int64 stmt 1 in
+  if turn_count < 0L || turn_count > Int64.of_int max_int then
+    Error (Integrity_error "input checkpoint turn is outside the host integer range")
+  else Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count:(Int64.to_int turn_count)
+    ~sha256:(Sqlite3.column_text stmt 2)
+    |> Result.map_error (function
+      | Keeper_checkpoint_ref.Negative_turn_count turn ->
+        Integrity_error (Printf.sprintf "input checkpoint trace %s has negative turn %d"
+          (Keeper_id.Trace_id.to_string trace_id) turn)
+      | Keeper_checkpoint_ref.Invalid_sha256 digest ->
+        Integrity_error (Printf.sprintf "input checkpoint trace %s has invalid SHA-256 %S"
+          (Keeper_id.Trace_id.to_string trace_id) digest))
+
+let input_checkpoint_with_db db ~trace_id =
+  with_statement db ~operation:"read current input checkpoint"
+    "SELECT trace_id, turn_count, sha256 FROM input_checkpoints WHERE trace_id = ?" (fun stmt ->
+      let* () = bind_text db stmt ~operation:"bind input checkpoint trace" 1
+        (Keeper_id.Trace_id.to_string trace_id) in
+      let rc = Sqlite3.step stmt in
+      if rc = Sqlite3.Rc.DONE then Ok None
+      else if rc = Sqlite3.Rc.ROW then
+        let* reference = decode_input_checkpoint stmt in
+        let* () = expect_done db stmt ~operation:"finish input checkpoint lookup" in
+        Ok (Some reference)
+      else Error (Store_unavailable (sqlite_error db "read input checkpoint" rc)))
+
+let input_checkpoint_rows db =
+  with_statement db ~operation:"inspect input checkpoints"
+    "SELECT trace_id, turn_count, sha256 FROM input_checkpoints ORDER BY trace_id" (fun stmt ->
+      let rec read acc =
+        let rc = Sqlite3.step stmt in
+        if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+        else if rc = Sqlite3.Rc.ROW then
+          let* reference = decode_input_checkpoint stmt in read (reference::acc)
+        else Error (Store_unavailable (sqlite_error db "inspect input checkpoints" rc))
+      in read [])
+
 (* Executions whose checkpoint references keep retained files alive: every
    nonterminal execution, and a settled one that still holds a native-call
    receipt. The startup sweep's inspection and a native-call commit's release
@@ -930,7 +928,8 @@ let released_by_transaction store =
   | [] -> Ok []
   | dropped ->
     let* rows = owning_semantic_rows store.db in
-    let live = List.concat_map Semantic.checkpoint_references rows
+    let* input_checkpoints = input_checkpoint_rows store.db in
+    let live = input_checkpoints @ List.concat_map Semantic.checkpoint_references rows
       |> List.map (fun (reference : Keeper_checkpoint_ref.t) -> reference.sha256) in
     let same_file (left : Keeper_checkpoint_ref.t) (right : Keeper_checkpoint_ref.t) =
       String.equal left.sha256 right.sha256 in
@@ -964,6 +963,51 @@ let with_transaction store f =
   in_transaction store ~begin_operation:"begin operation transaction" ~store_error:Fun.id f
 ;;
 
+type input_checkpoint_update =
+  | Input_checkpoint_updated
+  | Input_checkpoint_source_changed of Keeper_checkpoint_ref.t option
+
+let input_checkpoint store ~trace_id =
+  let* () = ensure_open store in
+  input_checkpoint_with_db store.db ~trace_id
+
+let install_input_checkpoint_with_db store ~previous checkpoint =
+  let* () = with_statement store.db ~operation:"install input checkpoint"
+    "INSERT INTO input_checkpoints(trace_id, turn_count, sha256) VALUES (?, ?, ?) ON CONFLICT(trace_id) DO UPDATE SET turn_count=excluded.turn_count, sha256=excluded.sha256" (fun stmt ->
+      let* () = bind_text store.db stmt ~operation:"bind input trace" 1
+        (Keeper_id.Trace_id.to_string checkpoint.Keeper_checkpoint_ref.trace_id) in
+      let* () = bind_int64 store.db stmt ~operation:"bind input turn" 2
+        (Int64.of_int checkpoint.turn_count) in
+      let* () = bind_text store.db stmt ~operation:"bind input digest" 3 checkpoint.sha256 in
+      expect_done store.db stmt ~operation:"install input checkpoint") in
+  match previous with
+  | None -> Ok ()
+  | Some reference when Keeper_checkpoint_ref.equal reference checkpoint -> Ok ()
+  | Some reference ->
+    (* This non-yielding append belongs to the serialized write transaction,
+       like [record_dropped]. Atomic storage does not grant concurrent writers. *)
+    Atomic.set store.dropped (Atomic.get store.dropped @ [reference]);
+    Ok ()
+
+let check_input_predecessor ~observed ~checkpoint =
+  match observed with
+  | Some previous when not (Keeper_id.Trace_id.equal previous.Keeper_checkpoint_ref.trace_id
+        checkpoint.Keeper_checkpoint_ref.trace_id) ->
+    Error (Invalid_input "input checkpoint predecessor belongs to another trace")
+  | Some previous when checkpoint.Keeper_checkpoint_ref.turn_count < previous.Keeper_checkpoint_ref.turn_count ->
+    Error (Invalid_input "input checkpoint turn regressed")
+  | Some _ | None -> Ok ()
+
+let update_input_checkpoint store ~observed ~checkpoint =
+  let* () = ensure_open store in
+  let* () = check_input_predecessor ~observed ~checkpoint in
+  with_transaction store (fun () ->
+    let* previous = input_checkpoint_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
+    if not (Option.equal Keeper_checkpoint_ref.equal observed previous) then
+      Ok (Input_checkpoint_source_changed previous)
+    else let* () = install_input_checkpoint_with_db store ~previous checkpoint in
+      Ok Input_checkpoint_updated)
+
 type released_checkpoint = Keeper_checkpoint_ref.t
 let take_released_checkpoints store = Atomic.exchange store.released []
 let released_reference (released : released_checkpoint) = released
@@ -995,21 +1039,12 @@ let read_batch_member_inputs db =
 let inspect_store_with ~scope ~path =
   let inspect db =
     let* () = exec db ~operation:"begin read-only inspection" "BEGIN" in
-    let* version = single_int64 db ~operation:"read inspection schema version" "PRAGMA user_version" in
-    let* chat_only =
-      if version = 1L then
-        let* () = validate_schema_with ~version:1L
-          ~schema_identity:"masc.keeper_chat_operations.v1" ~objects:legacy_schema_objects db in
-        Ok true
-      else let* () = validate_schema db in Ok false
-    in
+    let* () = validate_schema db in
     let* () = match scope with
       | Pending_inputs -> Ok ()
       | Outstanding_integrity_audit | All_durable_records ->
         let* integrity = single_text db ~operation:"check operation store integrity" "PRAGMA quick_check" in
         if String.equal integrity "ok" then Ok () else Error (Integrity_error integrity) in
-    let* objects = read_schema_objects db in
-    let has_batches = List.exists (fun (_, name, _) -> name = "operation_batch_members") objects in
     let* chat_operations =
       with_statement db ~operation:"inspect durable operations"
         ("SELECT " ^ select_columns ^ " FROM operations"
@@ -1021,7 +1056,7 @@ let inspect_store_with ~scope ~path =
             if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
             else if rc = Sqlite3.Rc.ROW then
               let* operation = decode_operation stmt in
-              let* operation = if has_batches then project_batch_with_db db operation else Ok operation in
+              let* operation = project_batch_with_db db operation in
               let keep = match scope with
                 | All_durable_records -> true
                 | Outstanding_integrity_audit | Pending_inputs -> not (Operation.is_terminal operation.state) in
@@ -1031,21 +1066,19 @@ let inspect_store_with ~scope ~path =
     in
     let* batch_member_inputs =
       match scope with
-      | All_durable_records when has_batches -> read_batch_member_inputs db
-      | All_durable_records | Outstanding_integrity_audit | Pending_inputs -> Ok []
+      | All_durable_records -> read_batch_member_inputs db
+      | Outstanding_integrity_audit | Pending_inputs -> Ok []
     in
-    (* An exactly validated v1 schema cannot contain semantic records.
-       Ownerless stores remain inspectable without a write or migration. *)
-    let* semantic_executions =
-      match scope with
+    let* semantic_executions = match scope with
       | Pending_inputs -> Ok []
-      | All_durable_records ->
-        if chat_only then Ok [] else semantic_rows db ~active_only:false
-      | Outstanding_integrity_audit -> if chat_only then Ok [] else
-        let* rows = semantic_rows db ~active_only:false in
+      | All_durable_records -> semantic_rows db ~active_only:false
+      | Outstanding_integrity_audit -> let* rows = semantic_rows db ~active_only:false in
         Ok (List.filter owns_checkpoint_references rows) in
+    let* input_checkpoints = match scope with
+      | Pending_inputs -> Ok []
+      | All_durable_records | Outstanding_integrity_audit -> input_checkpoint_rows db in
     let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
-    Ok (Some (chat_operations, batch_member_inputs, semantic_executions))
+    Ok (Some (chat_operations, batch_member_inputs, semantic_executions, input_checkpoints))
   in
   let inspect_existing () =
     match Sqlite3.db_open ~mode:`READONLY path with
@@ -1078,21 +1111,21 @@ let inspect_store_with ~scope ~path =
 let inspect_outstanding ~path =
   inspect_store_with ~scope:Outstanding_integrity_audit ~path |> Result.map (function
     | None -> Missing_store
-    | Some (chat_operations, _batch_member_inputs, semantic_executions) ->
-      Stored_operations { chat_operations; semantic_executions })
+    | Some (chat_operations, _batch_member_inputs, semantic_executions, input_checkpoints) ->
+      Stored_operations { chat_operations; semantic_executions; input_checkpoints })
 ;;
 
 let inspect_durable_records ~path =
   inspect_store_with ~scope:All_durable_records ~path |> Result.map (function
     | None -> Missing_durable_store
-    | Some (chat_operations, batch_member_inputs, semantic_executions) ->
-      Stored_durable_records { chat_operations; batch_member_inputs; semantic_executions })
+    | Some (chat_operations, batch_member_inputs, semantic_executions, input_checkpoints) ->
+      Stored_durable_records { chat_operations; batch_member_inputs; semantic_executions; input_checkpoints })
 ;;
 
 let inspect_pending_inputs ~path =
   inspect_store_with ~scope:Pending_inputs ~path |> Result.map (function
     | None -> None
-    | Some (chat_operations, _, _) -> Some chat_operations)
+    | Some (chat_operations, _, _, _) -> Some chat_operations)
 ;;
 
 
@@ -2319,10 +2352,7 @@ let direct_native_call store ~operation_id =
   let* execution = direct_execution_with_db store.db operation in
   Ok (match execution with None -> Keeper_native_call.No_native_call | Some execution -> execution.native_call)
 
-let update_direct_native_call store ~now ~operation_id ~execution_digest change =
-  let* () = ensure_open store in
-  let expected_commit = ref None in
-  let result = with_transaction store (fun () ->
+let apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest change =
     let* operation = operation_or_unknown store.db operation_id in
     let* () = if operation.execution_digest = execution_digest then Ok ()
       else Error (Invalid_input "native call operation digest changed") in
@@ -2351,12 +2381,37 @@ let update_direct_native_call store ~now ~operation_id ~execution_digest change 
           | Semantic.Native_call_unsettled -> Native_call_unsettled
           | (Semantic.Invalid_record _ | Semantic.Revision_exhausted) as error ->
             Integrity_error (Semantic.error_to_string error)) in
-      expected_commit := Some (next, ());
-      match current with
-      | None -> insert_semantic store.db next
-      | Some expected when Semantic.to_json expected = Semantic.to_json next -> Ok ()
-      | Some expected -> update_semantic store ~expected next) in
+      let* () = match current with
+        | None -> insert_semantic store.db next
+        | Some expected when Semantic.to_json expected = Semantic.to_json next -> Ok ()
+        | Some expected -> update_semantic store ~expected next in
+      Ok next
+
+let update_direct_native_call store ~now ~operation_id ~execution_digest change =
+  let* () = ensure_open store in
+  let expected_commit = ref None in
+  let result = with_transaction store (fun () ->
+    let* next = apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest change in
+    expected_commit := Some (next, ()); Ok ()) in
   confirm_semantic_transition store expected_commit result
+
+let update_direct_input_checkpoint store ~now ~operation_id ~execution_digest
+    ~call_id ~observed ~observed_input ~checkpoint =
+  let* () = ensure_open store in
+  (* Unlike the legacy native-only update, an uncertain commit stays Error.
+     Semantic readback alone cannot certify the input-owner relation. The
+     caller must reread both authorities before reconciling; its old input CAS
+     cannot replay an installed transition, and no files are released. *)
+  let* () = check_input_predecessor ~observed:observed_input ~checkpoint in
+  with_transaction store (fun () ->
+    let* previous = input_checkpoint_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
+    if not (Option.equal Keeper_checkpoint_ref.equal observed_input previous) then
+      Ok (Input_checkpoint_source_changed previous)
+    else
+      let* _next = apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest
+        (Keeper_native_call.Checkpoint {call_id; observed; checkpoint}) in
+      let* () = install_input_checkpoint_with_db store ~previous checkpoint in
+      Ok Input_checkpoint_updated)
 
 let resolve_direct_gate store ~now ~operation_id ~resolution =
   let* () = ensure_open store in

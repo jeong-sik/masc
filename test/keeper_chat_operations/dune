@@ -1,3 +1,8 @@
+; Assertion failures deliberately use catch-all patterns for unexpected variants.
+; Keep the production warning policy strict; use the test-directory convention.
+(env
+ (_ (flags (:standard -w -4-69))))
+
 (test
  (name test_keeper_native_call_store)
  (modules test_keeper_native_call_store)

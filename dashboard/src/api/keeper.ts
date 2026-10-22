@@ -1032,13 +1032,10 @@ export async function operateKeeperEventQueue(
 export async function fetchKeeperChatHistory(
   name: string,
 ): Promise<KeeperChatHistoryMessage[]> {
-  // P1 silent-failure fix: previously HTTP non-2xx and network/parse
-  // errors both mapped to `return []`, leaving the caller unable to
-  // distinguish "no chat history yet" from "fetch failed."  Now both
-  // throw, and the caller (hydrateKeeperChatHistory in
-  // keeper-actions.ts) is responsible for surfacing the failure to
-  // the operator.  Per-item safeParse drift remains
-  // tolerant — only network / HTTP / shape errors throw.
+  // A successful aggregate is a fully decoded observation. Dropping invalid
+  // rows would let hydration and operation reconciliation certify an incomplete
+  // transcript. Match the direct-page contract: reject the read on row failure;
+  // callers retain prior/preview observations and own retry/error reporting.
   const { response: resp, data } = await fetchJsonWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/chat/history`,
     { headers: jsonHeaders() },
@@ -1051,9 +1048,13 @@ export async function fetchKeeperChatHistory(
     throw new Error('fetchKeeperChatHistory: response is not an array')
   }
   const { safeParseKeeperChatHistoryMessage } = await import('./schemas/keeper-chat-history')
-  return data
-    .map(safeParseKeeperChatHistoryMessage)
-    .filter((m): m is KeeperChatHistoryMessage => m !== null)
+  return data.map((row, index) => {
+    const message = safeParseKeeperChatHistoryMessage(row)
+    if (message === null) {
+      throw new Error(`fetchKeeperChatHistory: invalid history row at index ${index}`)
+    }
+    return message
+  })
 }
 
 export interface KeeperChatHistoryPage {

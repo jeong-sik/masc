@@ -66,6 +66,12 @@ malformed rows. The read-only diagnostic is:
 GET /api/v1/dashboard/exact-lane-run-retention
 ```
 
+The returned `registry_filename` and `payload_dirname` identify the generation
+compiled into this process. A v7 server observes only its v7 registry/root;
+this endpoint does not replay an older v6 store or classify that older root's
+retained bytes. Pair the response with the server identity rather than assuming
+it covers a historical installation or every payload directory on disk.
+
 It uses the existing token-bound **Admin** permission and GET read quota. As with
 other workspace-bound reads, supply exactly one `expected_base_path` and one
 `expected_masc_root` query value to bind the response to the intended workspace.
@@ -103,7 +109,9 @@ preceded its failure. Other entries continue. These counts describe syscall
 acknowledgements, not fsync/power-loss durability or physical space reclaimed.
 An empty listed root completes with zero counts; an absent root does not invent a
 zero-removal receipt. Root lookup/listing and later removals are not an atomic
-filesystem snapshot and retain the existing path-based sweep authority.
+filesystem snapshot and retain the existing path-based sweep authority. This
+observation change does not establish symlink confinement; that deletion boundary
+requires a separate repair and controlled filesystem evidence.
 
 `compaction.status` is always `unobserved`: EOF and sweep completion do not prove
 compaction succeeded. `failure_log` identifies the original Keeper warning

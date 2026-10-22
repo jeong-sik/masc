@@ -66,6 +66,22 @@ let call name arguments = `Assoc ["method",`String "tools/call";
   "params",`Assoc ["name",`String name;"arguments",arguments]]
 let admitted arguments = call "lane_call" (`Assoc ["tool",`String Binding.tool;
   "arguments",arguments;"caller",`Assoc ["kind",`String "operator"]])
+(* One actual worker process: initialize, then [operation]. *)
+let worker_rpc ~(package : Lane_addon_types.package) ~worker_state operation =
+  let messages=[`Assoc ["method",`String "initialize";"params",`Assoc []];operation] in
+  let input=List.mapi (fun index operation ->
+    Yojson.Safe.to_string (`Assoc (["jsonrpc",`String "2.0";"id",`Int (index+1)] @ Json.to_assoc operation)))
+    messages |> String.concat "\n" in
+  let status,stdout,stderr=Process_eio.run_argv_with_stdin_and_status_split ~stdin_content:(input ^ "\n")
+    ["python3";Filename.concat package.directory "server.py";"--state";worker_state] in
+  (match status with
+   | Unix.WEXITED 0 -> ()
+   | Unix.WEXITED code -> failf "worker exited %d: %s" code stderr
+   | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> failf "worker signal %d" signal);
+  check string "worker protocol has no stderr diagnostics" "" stderr;
+  match String.split_on_char '\n' stdout |> List.filter (fun line -> line<>"") |> List.map Yojson.Safe.from_string with
+  | [_;reply] -> member "result" reply
+  | _ -> fail "initialization and original worker request each need one reply"
 
 let scenario domain () =
   let base_path=Filename.temp_dir "curator-addon-contract-" "" in
@@ -83,21 +99,7 @@ let scenario domain () =
       let package=Lane_addon_manifest.load ~path:"../addons/workspace-curator/lane.toml"
         |> Result.map_error Lane_addon_manifest.error_to_string |> get in
       let worker_state=Filename.concat base_path "worker-state" in Unix.mkdir worker_state 0o700;
-      let rpc operation =
-        let messages=[`Assoc ["method",`String "initialize";"params",`Assoc []];operation] in
-        let input=List.mapi (fun index operation ->
-          Yojson.Safe.to_string (`Assoc (["jsonrpc",`String "2.0";"id",`Int (index+1)] @ Json.to_assoc operation)))
-          messages |> String.concat "\n" in
-        let status,stdout,stderr=Process_eio.run_argv_with_stdin_and_status_split ~stdin_content:(input ^ "\n")
-          ["python3";Filename.concat package.directory "server.py";"--state";worker_state] in
-        (match status with
-         | Unix.WEXITED 0 -> ()
-         | Unix.WEXITED code -> failf "worker exited %d: %s" code stderr
-         | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> failf "worker signal %d" signal);
-        check string "worker protocol has no stderr diagnostics" "" stderr;
-        match String.split_on_char '\n' stdout |> List.filter (fun line -> line<>"") |> List.map Yojson.Safe.from_string with
-        | [_;reply] -> member "result" reply
-        | _ -> fail "initialization and original worker request each need one reply" in
+      let rpc=worker_rpc ~package ~worker_state in
       let tool=rpc (`Assoc ["method",`String "tools/list"]) |> member "tools" |> Json.to_list
         |> List.map (fun json -> Mcp_protocol.Mcp_types.tool_of_yojson json |> get)
         |> List.find (fun (tool : Mcp_protocol.Mcp_types.tool) -> tool.name=Binding.tool) in
@@ -345,6 +347,84 @@ let test_classification_is_measured_as_the_submit_it_sends () =
     check bool "a submit one byte over the frame is refused" true
       (Result.is_error (Binding.check_frame ~max_reply_bytes:(sent-1) capture)))
 
+(* The host measures this classification's submit within the declared frame
+   and admits it. The actual worker must list each request it keeps in a reply
+   that adds an envelope, so it refuses this one with the typed result. *)
+let test_a_submit_the_worker_cannot_list_is_a_typed_refusal_the_host_narrows () =
+  let base_path=Filename.temp_dir "curator-addon-boundary-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Masc_test_deps.init_eio_clock env;
+    Process_eio.init ~cwd_default:(Eio.Stdenv.cwd env) ~proc_mgr:(Eio.Stdenv.process_mgr env)
+      ~clock:(Eio.Stdenv.clock env);
+    Fun.protect ~finally:(fun () -> Process_eio.reset_for_testing ();Fs_compat.clear_fs ()) (fun () ->
+    let package=Lane_addon_manifest.load ~path:"../addons/workspace-curator/lane.toml"
+      |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+    let frame=Lane_addon_types.max_reply_bytes package in
+    let worker_state=Filename.concat base_path "worker-state" in Unix.mkdir worker_state 0o700;
+    let rpc=worker_rpc ~package ~worker_state in
+    let tool=rpc (`Assoc ["method",`String "tools/list"]) |> member "tools" |> Json.to_list
+      |> List.map (fun json -> Mcp_protocol.Mcp_types.tool_of_yojson json |> get)
+      |> List.find (fun (tool : Mcp_protocol.Mcp_types.tool) -> tool.name=Binding.tool) in
+    let hooks=Hooks.prepare ~hooks:package.tool_hooks tool |> get in
+    let call_worker ~arguments =
+      ignore (get (Hooks.before_call hooks arguments));
+      let reply=rpc (admitted arguments) |> Mcp_protocol.Mcp_types.tool_result_of_yojson |> get in
+      ignore (get (Hooks.after_call hooks reply)); Ok reply in
+    let prompt=resolution "Classify this original batch: {{workspace_memory_changes}}" in
+    let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
+      prompt ["workspace_memory_changes",Yojson.Safe.to_string input] in
+    let request_id=Capture.Request_id.fresh () in
+    let batch length=
+      let pending=List.map (fun fill ->
+          let claim=String.make length fill in
+          ({fact=Ledger.Ordinary {keeper_id="writer";claim_sha256=Store.digest claim};claim} : Ledger.pending_fact))
+          ['x';'y'] in
+      match Request.prepare ~neighbor_limit:0 ~render ~ledger:Ledger.empty ~current:pending ~pending
+          ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0)
+        |> Result.map_error Request.error_to_string |> get with
+      | Some batch -> batch | None -> fail "expected a classification batch" in
+    let bytes length=get (Binding.classification_submit_bytes ~request_id (batch length)) in
+    (* Each claim byte is one submit byte, so two claims this long leave the
+       submit at the frame or one byte under it. *)
+    let length=1 + ((frame - bytes 1) / 2) in
+    let workspace=get (Capture.observe_workspace ~base_path) in
+    let destination : Capture.destination = {
+      installation_id=Owner.installation_id (Owner.Configuration "curator");
+      package_id=Binding.package_id;tool=Binding.tool;
+      source_revision="actual-contract-fixture";configuration_revision="original-selection"} in
+    let original=get (Capture.classification ~request_id ~workspace ~destination ~prompt ~ledger:Ledger.empty
+        ~batch:(batch length)) in
+    check bool "the submit reaches the frame" true (bytes length >= frame - 1);
+    check bool "and the host frame check admits it" true
+      (Result.is_ok (Binding.check_frame ~max_reply_bytes:frame original));
+    let store=Store.create ~root:(Filename.concat base_path "host-store") in
+    let original_id=Capture.Request_id.to_string request_id in
+    owned (Owner.retain ~store ~scope:Capture.scope ~request_id:original_id
+      ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
+      ~request:(Capture.to_json original));
+    let refused=Exact.Call_final (Exact.Input_refused Exact.Request_body_refused) in
+    (match Consumer.For_testing.resume ~store ~base_path ~request_id:original_id ~call:call_worker
+           |> Result.map_error Consumer.error_to_string |> get with
+     | Consumer.Terminal (Exact.Call_final (Exact.Input_refused Exact.Request_body_refused),_) -> ()
+     | Consumer.Terminal _ | Consumer.Awaiting _ | Consumer.Judgment _ | Consumer.Commit_pending _
+     | Consumer.Settled _ -> fail "the worker's frame refusal did not reach the host as a typed terminal");
+    let read=rpc (admitted (`Assoc ["kind",`String "read";"request_id",`String original_id]))
+      |> member "structuredContent" in
+    check bool "a restarted worker reads the same refusal" true
+      (member "state" read=`String "finished"
+       && Yojson.Safe.equal (member "result" read) (Exact.final_to_json refused));
+    check bool "the refused request is never listed" true
+      (rpc (call "lane_host_requests" (`Assoc [])) |> member "structuredContent" |> member "requests"=`List []);
+    match Capture.narrow ~request_id:(Capture.Request_id.fresh ()) ~final:refused original with
+    | Ok (Some child) ->
+      (match Capture.work child with
+       | Capture.Classification {batch;_} ->
+         check int "the host narrows to the oldest fact" 1 (List.length batch.selected)
+       | Capture.Briefing _ -> fail "a classification narrowed into a briefing")
+    | Ok None | Error _ -> fail "a typed frame refusal must let the host narrow the batch")))
+
 let () = run "Workspace Curator actual worker and common Exact contract" ["original requests",[
   test_case "classification survives worker restart and full semantic HTTP acceptance" `Quick (scenario Classification);
   test_case "briefing retains its original partial pass across worker and host reads" `Quick (scenario Briefing);
@@ -357,4 +437,6 @@ let () = run "Workspace Curator actual worker and common Exact contract" ["origi
   test_case "equal pending unknown and absent observations do not grow original history" `Quick
     test_repeated_observation_retains_original_history_without_another_fact;
   test_case "classification is measured as the submit it sends and refused over the frame" `Quick
-    test_classification_is_measured_as_the_submit_it_sends]]
+    test_classification_is_measured_as_the_submit_it_sends;
+  test_case "a submit the worker cannot list is a typed refusal the host narrows" `Quick
+    test_a_submit_the_worker_cannot_list_is_a_typed_refusal_the_host_narrows]]

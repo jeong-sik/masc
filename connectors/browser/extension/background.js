@@ -662,9 +662,24 @@ const inScope = el => {
 };
 const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'))
   .filter(el => scope === null || inScope(el));
+// A selector path stops at the nearest element, the control itself included,
+// whose id no other element in the document carries. Without one it runs from
+// the root element. Either way it names exactly one element.
+const idAnchors = new Map();
+const idAnchor = node => {
+  const id = node.id;
+  if (typeof id !== 'string' || id === '') return null;
+  if (!idAnchors.has(id)) {
+    const anchor = '#' + CSS.escape(id);
+    idAnchors.set(id, document.querySelectorAll(anchor).length === 1 ? anchor : null);
+  }
+  return idAnchors.get(id);
+};
 function selector(el) {
   const parts=[];
   for (let node=el; node && node.nodeType===1; node=node.parentElement) {
+    const anchor=idAnchor(node);
+    if (anchor !== null) { parts.unshift(anchor); break; }
     const tag=node.localName;
     const siblings=node.parentElement ? Array.from(node.parentElement.children).filter(s=>s.localName===tag) : [node];
     parts.unshift(tag+':nth-of-type('+(siblings.indexOf(node)+1)+')');

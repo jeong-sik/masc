@@ -240,3 +240,30 @@ test('an invalid within is refused, never read as the whole page', async () => {
   await assert.rejects(runExtension(context, { within: 'nav((' }), /invalid_css_selector/);
   await assert.rejects(runExtension(context, { within: '' }), /invalid_within/);
 });
+
+// The page's CSS engine answers which elements an id selects. The fixture
+// lists them; CSS.escape is the identity for the plain ids used here.
+function ids(context, byId) {
+  const controls = context.document.querySelectorAll();
+  context.CSS = { escape: id => id };
+  context.document.querySelectorAll = selector =>
+    selector.startsWith('#') ? (byId[selector.slice(1)] ?? []) : controls;
+}
+
+test('a selector starts at the nearest id no other element carries', async () => {
+  const { context, text } = fixture();
+  const body = text.parentElement;
+  const [first, second, third] = body.children;
+  body.id = 'form';
+  first.id = 'twice';
+  second.id = 'agree';
+  third.id = 'twice';
+  ids(context, { form: [body], agree: [second], twice: [first, third] });
+  const native = runNative(context);
+  const { tabId, ...extension } = await runExtension(context);
+  assert.deepEqual(extension, native, 'both readers anchor the same way');
+  assert.equal(native.elements[0].selector, '#form > input:nth-of-type(1)', 'a shared id is not an anchor');
+  assert.equal(native.elements[1].selector, '#agree', 'a control with its own unique id needs no path');
+  assert.equal(native.elements[2].selector, '#form > input:nth-of-type(3)');
+  assert.equal(new Set(native.elements.map(item => item.selector)).size, 8);
+});

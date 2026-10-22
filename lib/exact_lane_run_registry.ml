@@ -5,28 +5,25 @@ type lane =
   | Workspace_curator
   | Candle_appraiser
 
-let standalone_lane = function
-  | Librarian -> Standalone_lane.Librarian
-  | Hitl_auto_judge -> Standalone_lane.Hitl_auto_judge
-  | Board_attention -> Standalone_lane.Board_attention
-  | Workspace_curator -> Standalone_lane.Workspace_curator
-  | Candle_appraiser -> Standalone_lane.Candle_appraiser
+let run_lane = function
+  | Librarian -> Lane_run_identity.Librarian
+  | Hitl_auto_judge -> Lane_run_identity.Hitl_auto_judge
+  | Board_attention -> Lane_run_identity.Board_attention
+  | Workspace_curator -> Lane_run_identity.Workspace_curator
+  | Candle_appraiser -> Lane_run_identity.Candle_appraiser
 ;;
 
-(* The one place this registry decides which lanes it records. Verifier reviews
-   have their own Task and Goal registries. Browser Stagehand requests do not
-   yet create retained lane runs, so neither is admitted here on replay. *)
-let lane_of_standalone = function
-  | Standalone_lane.Librarian -> Some Librarian
-  | Standalone_lane.Hitl_auto_judge -> Some Hitl_auto_judge
-  | Standalone_lane.Board_attention -> Some Board_attention
-  | Standalone_lane.Workspace_curator -> Some Workspace_curator
-  | Standalone_lane.Candle_appraiser -> Some Candle_appraiser
-  | Standalone_lane.Verifier -> None
-  | Standalone_lane.Browser_stagehand -> None
+let lane_of_run_lane = function
+  | Lane_run_identity.Librarian -> Some Librarian
+  | Lane_run_identity.Hitl_auto_judge -> Some Hitl_auto_judge
+  | Lane_run_identity.Board_attention -> Some Board_attention
+  | Lane_run_identity.Workspace_curator -> Some Workspace_curator
+  | Lane_run_identity.Candle_appraiser -> Some Candle_appraiser
+  | Lane_run_identity.Verifier | Lane_run_identity.Browser_stagehand -> None
 ;;
 
-let lane_id lane = Standalone_lane.to_id (standalone_lane lane)
+let lane_of_standalone lane = lane_of_run_lane (Standalone_lane.run_identity lane)
+let lane_id lane = Lane_run_identity.to_id (run_lane lane)
 
 type outcome =
   | Succeeded
@@ -217,10 +214,10 @@ type run =
   }
 
 let lane_of_key key =
-  match Standalone_lane.of_id key with
+  match Lane_run_identity.of_id key with
   | None -> Error (Printf.sprintf "unknown exact lane %S" key)
   | Some standalone ->
-    (match lane_of_standalone standalone with
+    (match lane_of_run_lane standalone with
      | Some lane -> Ok lane
      | None ->
        Error

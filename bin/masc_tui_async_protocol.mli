@@ -387,7 +387,7 @@ type async_msg =
   (* Keyed by the lane / run they answer for: an answer that lands after the
      operator left the list or the run is not this view's answer. *)
   | Lane_runs_loaded of
-      Standalone_lane.t * int * (float * string) option *
+      Lane_run_identity.t * int * (float * string) option *
       (Masc.Tui_decode.lane_run_page, string) result
   | Lane_run_detail_loaded of
       string * int * (Masc.Tui_decode.lane_run_detail, string) result

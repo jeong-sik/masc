@@ -1713,7 +1713,7 @@ let fetch_measurement_artifact ~host ~port ~sha256 =
           Error ("Measurement artifact response is not JSON: " ^ detail)))
 
 (** One server-filtered page, with the exact continuation cursor retained. *)
-let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : Standalone_lane.t) () :
+let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : Lane_run_identity.t) () :
     (Masc.Tui_decode.lane_run_page, string) result =
   let open Result.Syntax in
   let cursor = match before with
@@ -1725,7 +1725,7 @@ let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : Standalone_l
     Printf.sprintf
       "/api/v1/dashboard/exact-lane-runs?limit=%d&lane=%s%s"
       lane_run_list_limit
-      (percent_encode_path_segment (Standalone_lane.to_id lane)) cursor
+      (percent_encode_path_segment (Lane_run_identity.to_id lane)) cursor
   in
   let* listing = get_json ~host ~port ~path in
   Masc.Tui_decode.decode_lane_run_page ~lane listing

@@ -57,7 +57,7 @@ type observation_id =
 
 type observed_run =
   { observation_id : observation_id
-  ; lane : Standalone_lane.t
+  ; lane : Lane_run_identity.t
   ; started_at : float
   ; status : observed_status
   }
@@ -154,9 +154,9 @@ let retained_run_id = function
 
 let retained_run_lane = function
   | Exact_run run ->
-    Standalone_lane.to_id (Exact_lane_run_registry.standalone_lane run.Exact_lane_run_registry.lane)
+    Exact_lane_run_registry.lane_id run.Exact_lane_run_registry.lane
   | Task_verification_run _ | Goal_verification_run _ ->
-    Standalone_lane.to_id Standalone_lane.Verifier
+    Lane_run_identity.to_id Lane_run_identity.Verifier
 ;;
 
 let retained_run_started_at = function
@@ -165,10 +165,7 @@ let retained_run_started_at = function
   | Goal_verification_run run -> run.Goal_verification_run_registry.started_at
 ;;
 
-let known_lane lane_id =
-  List.exists
-    (fun (spec : lane_spec) -> String.equal (Standalone_lane.to_id spec.lane) lane_id)
-    lane_specs
+let known_lane lane_id = Option.is_some (Lane_run_identity.of_id lane_id)
 ;;
 
 let selected_slot_field = function
@@ -186,7 +183,7 @@ let task_verification_summary_fields (run : Verification_run_registry.run) =
   in
   [ "run_id", `String run.verification_id
   ; "run_kind", `String "task_verification"
-  ; "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier)
+  ; "lane", `String (Lane_run_identity.to_id Lane_run_identity.Verifier)
   ; "subject_id", `String run.task_id
   ; "actor", `String run.authority_actor
   ; "started_at", `Float run.started_at
@@ -205,7 +202,7 @@ let goal_verification_summary_fields (run : Goal_verification_run_registry.run) 
   in
   [ "run_id", `String run.run_id
   ; "run_kind", `String "goal_verification"
-  ; "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier)
+  ; "lane", `String (Lane_run_identity.to_id Lane_run_identity.Verifier)
   ; "subject_id", `String run.goal_id
   ; "actor", `String run.authority_actor
   ; "started_at", `Float run.started_at
@@ -522,7 +519,7 @@ let observed_exact_run (run : Exact_lane_run_registry.run) =
         }
   in
   { observation_id = Exact_id run.run_id
-  ; lane = Exact_lane_run_registry.standalone_lane run.lane; started_at = run.started_at; status }
+  ; lane = Exact_lane_run_registry.run_lane run.lane; started_at = run.started_at; status }
 ;;
 
 (* Success for this lane means A VERDICT WAS PRODUCED. [Not_reviewed] is
@@ -552,7 +549,7 @@ let observed_verification_run (run : Verification_run_registry.run) =
         }
   in
   { observation_id = Task_verification_id run.verification_id
-  ; lane = Standalone_lane.Verifier; started_at = run.started_at; status }
+  ; lane = Lane_run_identity.Verifier; started_at = run.started_at; status }
 ;;
 
 let terminal_of_goal_verification_outcome ~evaluated_verdict = function
@@ -580,7 +577,7 @@ let observed_goal_verification_run (run : Goal_verification_run_registry.run) =
         }
   in
   { observation_id = Goal_verification_id run.run_id
-  ; lane = Standalone_lane.Verifier; started_at = run.started_at; status }
+  ; lane = Lane_run_identity.Verifier; started_at = run.started_at; status }
 ;;
 
 let p50 values =
@@ -665,7 +662,7 @@ let lane_json
   =
   let runs =
     List.filter
-      (fun (run : observed_run) -> run.lane = spec.lane)
+      (fun (run : observed_run) -> Lane_run_identity.equal run.lane (Standalone_lane.run_identity spec.lane))
       all_runs
   in
   let running_count =

@@ -3371,6 +3371,13 @@ let required_standalone_lane_field json field =
           TUI; check that both run the same version)"
          field id)
 
+let required_run_lane_field json field =
+  let* id = required_string_field json field in
+  match Lane_run_identity.of_id id with
+  | Some lane -> Ok lane
+  | None -> Error (Printf.sprintf "%s: unknown retained lane %s" field id)
+;;
+
 let decode_standalone_lane json =
   let* sl_lane = required_standalone_lane_field json "lane_id" in
   let* sl_label = required_string_field json "label" in
@@ -5464,7 +5471,7 @@ let decode_librarian_run_page json =
   let* rows =
     decode_list "runs"
       (fun run ->
-         let* lane = required_standalone_lane_field run "lane" in
+         let* lane = required_run_lane_field run "lane" in
          let* run_id = required_string_field run "run_id" in
          Ok (lane, run_id))
       runs
@@ -5473,13 +5480,13 @@ let decode_librarian_run_page json =
     List.find_map
       (fun (lane, run_id) ->
          match lane with
-         | Standalone_lane.Librarian -> Some run_id
-         | Standalone_lane.Hitl_auto_judge
-         | Standalone_lane.Board_attention
-         | Standalone_lane.Workspace_curator
-         | Standalone_lane.Candle_appraiser
-         | Standalone_lane.Verifier
-         | Standalone_lane.Browser_stagehand -> None)
+         | Lane_run_identity.Librarian -> Some run_id
+         | Lane_run_identity.Hitl_auto_judge
+         | Lane_run_identity.Board_attention
+         | Lane_run_identity.Workspace_curator
+         | Lane_run_identity.Candle_appraiser
+         | Lane_run_identity.Verifier
+         | Lane_run_identity.Browser_stagehand -> None)
       rows
   in
   let* lrp_next =
@@ -5718,15 +5725,15 @@ let decode_lane_run_skill_evidence run =
   | other -> Error (Printf.sprintf "unknown lane run Skill evidence state %S" other)
 ;;
 
-let decode_lane_run_gate_judgment ~(lane : Standalone_lane.t) ~status ~output =
+let decode_lane_run_gate_judgment ~(lane : Lane_run_identity.t) ~status ~output =
   match lane with
-  | Standalone_lane.Librarian
-  | Standalone_lane.Board_attention
-  | Standalone_lane.Workspace_curator
-  | Standalone_lane.Candle_appraiser
-  | Standalone_lane.Verifier
-  | Standalone_lane.Browser_stagehand -> Ok Lane_run_not_gate_judgment
-  | Standalone_lane.Hitl_auto_judge ->
+  | Lane_run_identity.Librarian
+  | Lane_run_identity.Board_attention
+  | Lane_run_identity.Workspace_curator
+  | Lane_run_identity.Candle_appraiser
+  | Lane_run_identity.Verifier
+  | Lane_run_identity.Browser_stagehand -> Ok Lane_run_not_gate_judgment
+  | Lane_run_identity.Hitl_auto_judge ->
     let decode_advisory output =
       let* judgment = required_string_field output "judgment" in
       match
@@ -5781,7 +5788,7 @@ type lane_run_failure =
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
-  ; lrs_lane : Standalone_lane.t
+  ; lrs_lane : Lane_run_identity.t
   ; lrs_subject_id : string option
   ; lrs_actor : string
   ; lrs_started_at : float
@@ -6055,7 +6062,7 @@ let decode_librarian_preflight output =
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
-  ; lrd_lane : Standalone_lane.t
+  ; lrd_lane : Lane_run_identity.t
   ; lrd_subject_id : string option
   ; lrd_actor : string
   ; lrd_started_at : float
@@ -6078,7 +6085,7 @@ type lane_run_detail =
 let decode_lane_run_summary json =
   let* lrs_run_id = required_string_field json "run_id" in
   let* lrs_run_kind = optional_string_field json "run_kind" in
-  let* lrs_lane = required_standalone_lane_field json "lane" in
+  let* lrs_lane = required_run_lane_field json "lane" in
   let* lrs_subject_id = optional_string_field json "subject_id" in
   let* lrs_actor = required_string_field json "actor" in
   let* lrs_started_at = Json_util.require_float json "started_at" in
@@ -6154,7 +6161,7 @@ let decode_lane_run_page ~lane json =
     | Some _ | None -> Ok () in
   let* runs = decode_list "runs" decode_lane_run_summary runs_json in
   let lrpg_runs =
-    List.filter (fun run -> Standalone_lane.equal run.lrs_lane lane) runs
+    List.filter (fun run -> Lane_run_identity.equal run.lrs_lane lane) runs
   in
   let* lrpg_next =
     if not has_more
@@ -6218,8 +6225,8 @@ let decode_lane_run_detail json =
     | Lane_run_succeeded -> Ok true
     | (Lane_run_completion_persistence_failed
       | Lane_run_completion_durability_unknown)
-      when summary.lrs_lane = Standalone_lane.Board_attention
-           || summary.lrs_lane = Standalone_lane.Librarian ->
+      when summary.lrs_lane = Lane_run_identity.Board_attention
+           || summary.lrs_lane = Lane_run_identity.Librarian ->
       (* The run's intended outcome, read with the same decoder as its
          status. Only a run that meant to succeed, fail or be cancelled
          reaches this record; any other word is a producer the reader does
@@ -6250,13 +6257,13 @@ let decode_lane_run_detail json =
     (* The answer-source rule below is about the Board-attention lane. *)
     let is_board_attention =
       match summary.lrs_lane with
-      | Standalone_lane.Board_attention -> true
-      | Standalone_lane.Librarian
-      | Standalone_lane.Hitl_auto_judge
-      | Standalone_lane.Workspace_curator
-      | Standalone_lane.Candle_appraiser
-      | Standalone_lane.Verifier
-      | Standalone_lane.Browser_stagehand ->
+      | Lane_run_identity.Board_attention -> true
+      | Lane_run_identity.Librarian
+      | Lane_run_identity.Hitl_auto_judge
+      | Lane_run_identity.Workspace_curator
+      | Lane_run_identity.Candle_appraiser
+      | Lane_run_identity.Verifier
+      | Lane_run_identity.Browser_stagehand ->
         false
     in
     match is_board_attention, answer_succeeded, lrd_output with
@@ -6291,11 +6298,11 @@ let decode_lane_run_detail json =
       ~output:lrd_output
   in
   let* lrd_librarian_preflight = match summary.lrs_lane, lrd_output with
-    | Standalone_lane.Librarian, Some output -> decode_librarian_preflight output
-    | (Standalone_lane.Librarian, _) | (Standalone_lane.Hitl_auto_judge, _)
-    | (Standalone_lane.Board_attention, _) | (Standalone_lane.Workspace_curator, _)
-    | (Standalone_lane.Verifier, _) | (Standalone_lane.Browser_stagehand, _)
-    | (Standalone_lane.Candle_appraiser, _) -> Ok None
+    | Lane_run_identity.Librarian, Some output -> decode_librarian_preflight output
+    | (Lane_run_identity.Librarian, _) | (Lane_run_identity.Hitl_auto_judge, _)
+    | (Lane_run_identity.Board_attention, _) | (Lane_run_identity.Workspace_curator, _)
+    | (Lane_run_identity.Verifier, _) | (Lane_run_identity.Browser_stagehand, _)
+    | (Lane_run_identity.Candle_appraiser, _) -> Ok None
   in
   let* () = match lrd_librarian_preflight, answer_succeeded with
     | Some {lp_generation_path = Generation_not_entered; _}, true ->
@@ -6394,18 +6401,18 @@ let decode_lane_run_detail json =
     (* Every lane is named so a judging lane added later has to say whether an
        unread output means its judgment is unavailable. *)
     match summary.lrs_lane with
-    | Standalone_lane.Hitl_auto_judge ->
+    | Lane_run_identity.Hitl_auto_judge ->
       (match lrd_output_availability with
        | Some (Exact_lane_run_registry.Not_loaded
               | Exact_lane_run_registry.Unavailable _) ->
          Ok Lane_run_gate_judgment_unavailable
        | Some Exact_lane_run_registry.Available | None -> decode_judgment ())
-    | Standalone_lane.Librarian
-    | Standalone_lane.Board_attention
-    | Standalone_lane.Workspace_curator
-    | Standalone_lane.Candle_appraiser
-    | Standalone_lane.Verifier
-    | Standalone_lane.Browser_stagehand -> decode_judgment ()
+    | Lane_run_identity.Librarian
+    | Lane_run_identity.Board_attention
+    | Lane_run_identity.Workspace_curator
+    | Lane_run_identity.Candle_appraiser
+    | Lane_run_identity.Verifier
+    | Lane_run_identity.Browser_stagehand -> decode_judgment ()
   in
   Ok
     { lrd_run_id = summary.lrs_run_id

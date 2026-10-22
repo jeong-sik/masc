@@ -631,6 +631,12 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - 외부 세션이 Stack44994의 네 층 #44989/#44993/#45002/#45005를 01:44:44–48Z에 실제 Candle 브랜치로 병합했다. top merge65727f4998ee9a0152d38b977d53ca2cfa95f2ca의 전체 tree가 실행47b9와 동일함을 직접 확인했다. 이 세션은 병합 요청을 하지 않았으며 #45005의 당시 reviews API는 빈 배열이다. 독립 source/response PASS를 정식 승인으로 바꾸어 말하지 않는다. main 포함·운영 설치는 증명되지 않았다.
 - 아직 남은 Curator builtin route/config와 두 UI 연결 정리, permanent restart audit, 실제 provider·두 UI·설치 및 원래 A01–H06 전체 요구를 유지한다. 이번226건은 전체 회귀나 전체 E02/G03 완료가 아니다. 원래54개 항목명·완료 기준을 바꾸지 않았다.
 
+## E02/G03 현재 설정과 보존 이력의 타입 분리 · 2026-10-22
+
+- `Lane_run_identity`는 원래 작업의 관측 ID와 label만 소유한다. 현재 builtin 모델 설정은 `Standalone_lane`, 둘의 연결은 current route → retained identity 단방향이다. Exact registry replay·HTTP history filter·TUI list/detail와 비동기 응답의 타입을 관측 identity로 바꿨다. Verifier/Stagehand를 Exact registry에 허용하지 않는다.
+- 실제 파일에 저장한 Curator 관측을 재열고 server page/detail→TUI decoder로 읽는 기존 시나리오를 확장했다. 원래 run ID와 측정/미측정 duration을 보존한다. 파싱·독립 소스 검토와 새 compiled 실행을 구분하며 과거226건을 새 타입 변경의 성공 증거로 이월하지 않는다.
+- [설계와 후속 경계](../docs/design/lane-retained-observation-identity.md): 이 선행 layer에는 builtin Curator 설정/행을 유지한다. 실제 Addon 모델 projection과 두 UI의 원래 관측 진입을 연결한 뒤 제거해야 한다. Addon 설정 scope의 run ID와 Owner 요청의 원본 관측 ID를 이름으로 합성하지 않는다. 원래 A01–H06의54개 항목명·완료 기준과 실제 provider·UI·설치 요구는 유지한다.
+
 
 ## 실행 증거와 이후 상위 재배치의 분리 · 2026-10-22
 

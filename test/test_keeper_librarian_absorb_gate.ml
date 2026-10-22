@@ -615,7 +615,7 @@ let run_runtime_evidence () =
         let describe (run : Runs.run) =
           Printf.sprintf "%s actor=%S lane=%s status=%s"
             run.run_id run.actor
-            (Standalone_lane.to_id (Runs.standalone_lane run.lane))
+            (Runs.lane_id run.lane)
             (Runs.status_label run.status) in
         Alcotest.failf
           "expected one actual Librarian pass; matching=%d global_identity=%b rows=[%s]"

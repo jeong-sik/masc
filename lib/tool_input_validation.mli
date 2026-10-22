@@ -9,7 +9,12 @@
     range/length bounds, and arguments that did not arrive. Underscore-prefixed
     protocol markers are stripped before validation. *)
 
-(** Register input validation as a Tool_dispatch pre-hook.
+(** Register input validation as a Tool_dispatch pre-hook. A resolved external
+    export supplies its own schema and retains all argument names and open-object
+    semantics; registered host tools retain their protocol-marker normalization.
+    External checks cover the shared conservative subset, not full schema
+    applicators/references; telemetry records [external_schema_subset]. The
+    worker remains responsible for its full schema and execution validation.
     Must be called after all tool schemas are registered (server init). *)
 val register_pre_hook : unit -> unit
 

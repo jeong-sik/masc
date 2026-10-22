@@ -978,7 +978,7 @@ let test_shared_node_schema_preserves_call_shapes () =
     "value", `Assoc ["query", `String "docker"]] in
   let check_shape expected fields =
     let args = `Assoc (base @ fields) in
-    let checked = Tool_input_contract.check_arguments
+    let checked = Tool_input_contract.check_arguments ~contract:Tool_input_contract.Host_tool
       ~schema:(Some schema) ~name:"composition node" ~args in
     check bool "shared definitions retain exact node alternatives"
       expected (Result.is_ok checked) in

@@ -1166,6 +1166,9 @@ let handle_request
                               ~log_mcp_exn:Mcp_server_eio_helpers.log_mcp_exn in
                             Option.iter (fun observe -> observe caller) on_caller_resolved;
                             let _ = state in
+                            Tool_dispatch.guarded_external_dispatch
+                              ~name ~schema:export.tool.input_schema ~args:arguments
+                              ~handler:(fun ~name ~args:arguments ->
                             let start_time = Tool_timing.start () in
                             match Machine_addon_host.call ~principal ~config ~access ~reserved ~export ~arguments with
                             | Ok result ->
@@ -1189,7 +1192,7 @@ let handle_request
                                   ~effect_disposition:Tool_result.Proven_pre_effect detail
                             | Error (Lane_addon_runtime.Outcome_unknown detail) ->
                                 Tool_result.make_err ~tool_name:name ~start_time
-                                  ~class_:Tool_result.Runtime_failure detail in
+                                  ~class_:Tool_result.Runtime_failure detail) () in
                           Mcp_server_eio_call_tool.handle_call_tool_eio
                             ~execute_tool_eio:execute ~maybe_emit_resource_notifications
                             ~broadcast_tools_list_changed ~wire_result:(fun () -> !wire_result)

@@ -37,7 +37,8 @@ type pre_hook_action =
   | Reject of Tool_result.result   (** Short-circuit with error result *)
 
 (** Pre-hook: receives tool name and args before handler runs. *)
-type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
+type pre_hook =
+  schema:Yojson.Safe.t option -> name:string -> args:Yojson.Safe.t -> pre_hook_action
 
 (** Observer called after dispatch finalization.
 
@@ -136,19 +137,19 @@ let surface_of_tool_name name =
 (** Run pre-hooks in order, threading coerced args through the chain.
     First [Reject] wins (short-circuit). [Proceed] replaces args for
     subsequent hooks and the final handler. *)
-let run_pre_hook_chain hooks ~name ~args =
+let run_pre_hook_chain hooks ~schema ~name ~args =
   let rec go current_args = function
     | [] -> (None, current_args)
     | hook :: rest ->
-      (match hook ~name ~args:current_args with
+      (match hook ~schema ~name ~args:current_args with
        | Reject result -> (Some result, current_args)
        | Proceed new_args -> go new_args rest
        | Pass -> go current_args rest)
   in
   go args hooks
 
-let run_pre_hooks ~name ~args =
-  run_pre_hook_chain (Atomic.get hook_snapshot).pre_hooks ~name ~args
+let run_pre_hooks ~schema ~name ~args =
+  run_pre_hook_chain (Atomic.get hook_snapshot).pre_hooks ~schema ~name ~args
 
 (** Run observers in order against the typed dispatch outcome.
     Each hook is invoked for its side-effects; mutation of the
@@ -174,23 +175,21 @@ let run_dispatch_observers outcome result =
       2. pre-hook chain                (reject / coerce-args)
       3. registry lookup + handler     (handler exception capture)
       4. observer fan-out              ([run_dispatch_observers]) *)
-let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result option =
+let dispatch_with_handler ~name ~schema ~surface ~args handler =
   let hooks = Atomic.get hook_snapshot in
-  let handlers = Atomic.get handler_registry in
   let result, _outcome =
     (* Injected telemetry span wrapper (default identity). The composition
        root registers [Tool_telemetry.with_span] so this lib stays free of
        the Otel/Otel_metric_store stack. *)
     hooks.span_wrapper
-      ~tool_name:token.name
-      ~surface:(surface_of_tool_name token.name)
+      ~tool_name:name
+      ~surface
       (fun _trace_id_thunk ->
-      let name = token.name in
       let r =
-        match run_pre_hook_chain hooks.pre_hooks ~name ~args with
+        match run_pre_hook_chain hooks.pre_hooks ~schema ~name ~args with
         | (Some _ as blocked, _) -> blocked
         | (None, coerced_args) ->
-          (match By_name.find_opt name handlers with
+          (match handler with
            | Some handler ->
              let start_time = Tool_timing.start () in
              (try Some (handler ~name ~args:coerced_args)
@@ -207,6 +206,25 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
       r, Dispatch_outcome.to_string typed_outcome)
   in
   result
+;;
+
+let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result option =
+  let name = token.name in
+  let handler = By_name.find_opt name (Atomic.get handler_registry) in
+  dispatch_with_handler ~name ~schema:None ~surface:(surface_of_tool_name name)
+    ~args handler
+;;
+
+let guarded_external_dispatch ~name ~schema ~args ~handler () =
+  let start_time = Tool_timing.start () in
+  match dispatch_with_handler ~name ~schema:(Some schema) ~surface:"mcp" ~args
+          (Some handler) with
+  | Some result -> result
+  | None ->
+      (* An injected span wrapper must preserve a present result. Do not retry
+         the external effect if a broken wrapper violated that contract. *)
+      Tool_result.make_err ~tool_name:name ~start_time ~class_:Tool_result.Runtime_failure
+        "External dispatch did not retain its result"
 ;;
 
 (** Number of registered tool names. *)

@@ -191,7 +191,7 @@ let create ~base_path () =
               Option.map (fun schema -> tool, schema) (List.assoc_opt tool schemas)) with
           | None -> Error "Unknown exported machine tool"
           | Some (tool, (schema : Masc_domain.tool_schema)) ->
-              match Tool_input_contract.check_arguments ~schema:(Some schema.input_schema)
+              match Tool_input_contract.check_arguments ~contract:Tool_input_contract.Host_tool ~schema:(Some schema.input_schema)
                   ~name:schema.name ~args:call.arguments with
               | Error error -> Ok (response (Tool_input_contract.rejection_result error))
               | Ok (arguments, _) -> Ok (invoke ~base_path ~principal:call.principal

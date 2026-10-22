@@ -92,7 +92,7 @@ let run_registered_hook ?schema ~tool_name ~(args : Yojson.Safe.t) () =
      Tool_dispatch.register_module_tag ~schemas:[schema_def] ~tag:Mod_misc
    | None -> ());
   Tool_input_validation.register_pre_hook ();
-  Tool_dispatch.run_pre_hooks ~name:tool_name ~args
+  Tool_dispatch.run_pre_hooks ~schema:None ~name:tool_name ~args
 
 (* ================================================================ *)
 (* Test: required field validation                                   *)
@@ -2545,7 +2545,7 @@ let test_composition_run_exclusive_inputs () =
   let recipe = "recipe", recipe in
   let check label expected fields =
     let args = `Assoc fields in
-    match Tool_input_contract.check_arguments ~schema:(Some schema)
+    match Tool_input_contract.check_arguments ~contract:Tool_input_contract.Host_tool ~schema:(Some schema)
         ~name:Keeper_composition_draft.run_tool_name ~args with
     | Ok (forwarded, _) ->
         Alcotest.(check bool) label true expected;
@@ -2569,7 +2569,7 @@ let test_negated_required_group_is_a_conjunction () =
         "not", `Assoc ["required", `List [`String "a"; `String "b"]]]]] in
   List.iter (fun (names, expected) ->
     let args = `Assoc (List.map (fun name -> name, `String "present") names) in
-    let result = Tool_input_contract.check_arguments ~schema:(Some schema)
+    let result = Tool_input_contract.check_arguments ~contract:Tool_input_contract.Host_tool ~schema:(Some schema)
         ~name:"negated-field-group" ~args in
     Alcotest.(check bool) "not(required a,b) forbids their conjunction"
       expected (Result.is_ok result))
@@ -2580,6 +2580,95 @@ let test_negated_required_group_is_a_conjunction () =
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
+
+let test_external_export_dispatch ~valid =
+  Tool_dispatch.clear_hooks ();
+  Fun.protect ~finally:Tool_dispatch.clear_hooks (fun () ->
+      let name = "audit_external_export" in
+      let schema =
+        `Assoc [ "type", `String "object";
+                 "properties", `Assoc [ "count", `Assoc [ "type", `String "integer" ]; "_count", `Assoc [ "type", `String "integer" ] ];
+                 "required", `List [ `String "count"; `String "_count" ];
+                 "additionalProperties", `Bool false ]
+      in
+      Alcotest.(check bool) "external schema is not registered globally" true
+        (Option.is_none (Tool_dispatch.lookup_schema name));
+      Tool_input_validation.register_pre_hook ();
+      let handled = ref 0 and observed = ref 0 and rewritten = ref false in
+      Tool_dispatch.register_pre_hook (fun ~schema:observed_schema ~name:_ ~args ->
+          Alcotest.(check bool) "pre-hook gets the resolved export schema" true
+            (observed_schema = Some schema);
+          rewritten := true;
+          Alcotest.(check bool) "hook receives normalized input" true
+            (args = `Assoc [ "count", `Int 2; "_count", `Int 4 ]);
+          Tool_dispatch.Proceed (`Assoc [ "count", `Int 3; "_count", `Int 4 ]));
+      Tool_dispatch.register_dispatch_observer (fun _outcome result ->
+          incr observed;
+          match result with
+          | Some result ->
+              Alcotest.(check bool) "observer gets the actual result" valid
+                (Tool_result.is_success result)
+          | None -> Alcotest.fail "resolved export must settle with a result");
+      let count = if valid then `Int 2 else `String "invalid" in
+      let result = Tool_dispatch.guarded_external_dispatch ~name ~schema
+          ~args:(`Assoc [ "count", count; "_count", `Int 4 ])
+          ~handler:(fun ~name ~args ->
+              incr handled;
+              Alcotest.(check bool) "handler receives the hook's rewritten arguments" true
+                (args = `Assoc [ "count", `Int 3; "_count", `Int 4 ]);
+              Tool_result.make_ok ~tool_name:name ~start_time:(Tool_timing.start ())
+                ~data:args ()) ()
+      in
+      Alcotest.(check bool) "validity determines execution result" valid
+        (Tool_result.is_success result);
+      Alcotest.(check int) "handler executes only valid input, once"
+        (if valid then 1 else 0) !handled;
+      Alcotest.(check bool) "validation short-circuits subsequent hooks" valid !rewritten;
+      Alcotest.(check int) "result observed exactly once" 1 !observed)
+
+let test_external_export_object_contracts () =
+  let object_schema fields = `Assoc (("type", `String "object") :: fields) in
+  let value = `Assoc [ "_count", `Int 2 ] in
+  List.iter (fun (label, schema, args, expected) ->
+      Tool_dispatch.clear_hooks ();
+      Fun.protect ~finally:Tool_dispatch.clear_hooks (fun () ->
+          Tool_input_validation.register_pre_hook ();
+          let invoked = ref false in
+          let result = Tool_dispatch.guarded_external_dispatch ~name:"external_object"
+              ~schema ~args ~handler:(fun ~name ~args:forwarded ->
+                  invoked := true;
+                  Alcotest.(check bool) "external argument object is preserved" true
+                    (Yojson.Safe.equal args forwarded);
+                  Tool_result.make_ok ~tool_name:name ~start_time:(Tool_timing.start ())
+                    ~data:forwarded ()) ()
+          in
+          Alcotest.(check bool) label expected (Tool_result.is_success result);
+          Alcotest.(check bool) "only schema-accepted arguments invoke the export" expected !invoked))
+    [ "pattern properties remain worker-owned", object_schema [ "patternProperties", `Assoc [ "^_", `Assoc [ "type", `String "integer" ] ]; "additionalProperties", `Bool false ], value, true;
+      "open object", object_schema [ "additionalProperties", `Bool true ], value, true;
+      "empty properties open object", object_schema [ "properties", `Assoc [] ], value, true;
+      "required key without a declared property", object_schema [ "required", `List [ `String "_count" ] ], value, true;
+      "optional underscore property", object_schema [ "properties", `Assoc [ "_count", `Assoc [ "type", `String "integer" ] ] ], value, true;
+      "closed object rejects unknown fields", object_schema [ "additionalProperties", `Bool false ], value, false;
+      "closed object accepts empty input", object_schema [ "additionalProperties", `Bool false ], `Assoc [], true;
+      "object schema rejects scalar input", object_schema [], `String "not an object", false ]
+
+let test_external_export_alternatives_are_not_host_presence_forms () =
+  let string_enum value = `Assoc [ "enum", `List [ `String value ] ] in
+  let branch value = `Assoc [ "required", `List [ `String "x" ];
+      "properties", `Assoc [ "x", string_enum value ] ] in
+  let schema = `Assoc [ "type", `String "object";
+      "properties", `Assoc [ "x", `Assoc [ "type", `String "string" ] ];
+      "oneOf", `List [ branch "a"; branch "b" ] ] in
+  let args = `Assoc [ "x", `String "a" ] in
+  match Tool_input_contract.check_arguments ~contract:Tool_input_contract.External_export
+      ~schema:(Some schema) ~name:"external_alternatives" ~args with
+  | Ok (forwarded, Tool_input_contract.Accepted_external_subset) ->
+      Alcotest.(check bool) "valid external alternative remains worker-owned" true
+        (Yojson.Safe.equal forwarded args)
+  | Ok (_, (Tool_input_contract.Accepted_empty_schema | Accepted_valid | Accepted_normalized)) ->
+      Alcotest.fail "external subset coverage must remain explicit"
+  | Error rejection -> Alcotest.fail rejection.Tool_input_contract.message
 
 let () =
   Alcotest.run "Tool_input_validation (AGENT_CORE delegation)" [
@@ -2744,6 +2833,16 @@ let () =
         test_registered_hook_goal_list_rejects_status_filter;
       Alcotest.test_case "a required enum blank is refused by name" `Quick
         test_validate_names_the_enum_a_required_blank_missed;
+    ]);
+    ("external_export_boundary", [
+      Alcotest.test_case "external alternatives do not use host presence inference" `Quick
+        test_external_export_alternatives_are_not_host_presence_forms;
+      Alcotest.test_case "external argument names and open-object contracts are preserved" `Quick
+        test_external_export_object_contracts;
+      Alcotest.test_case "resolved schema validates and normalizes before invocation" `Quick
+        (fun () -> test_external_export_dispatch ~valid:true);
+      Alcotest.test_case "invalid export input is rejected and observed without invocation" `Quick
+        (fun () -> test_external_export_dispatch ~valid:false);
     ]);
     ("typed_tool_contract_harness", [
       Alcotest.test_case "rejects invalid typed call corpus" `Quick

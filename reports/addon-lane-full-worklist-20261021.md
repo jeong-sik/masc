@@ -558,3 +558,8 @@ production642의 [선택 실행39694880442](https://github.com/jeong-sik/masc/ac
 보존하지 않아 원인을 확정하지 않았다. timeout 상향/skip/terminal 주입으로 덮지 않는다.
 raw fixture 수정8ccc의 [선택 실행39697203989](https://github.com/jeong-sik/masc/actions/runs/39697203989)를
 요청했으며 이 기록은 실행 성공을 주장하지 않는다. 원래 A01–H06의 54개 이름·완료 기준은 유지한다.
+
+후속 [#44989](https://github.com/jeong-sik/masc/pull/44989) 작성 중 기존 Stack44922의19개 PR이
+외부에서 `fix/candle-derive-observation-20261022`에 병합된 사실을 REST로 확인했다.
+실제 대상3630add의 전체 tree는 이전8ccc와 동일하다. gh stack rebase의 conflict resolution에서
+이미 병합된 prefix를 제외하고 새 읽기 경계만 다시 올렸다. main 통합·운영 설치를 뜻하지 않는다.

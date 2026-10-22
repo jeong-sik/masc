@@ -494,7 +494,7 @@ let test_offline_runtime_save_converges_by_write_stage () =
        let config_b =
          transaction_runtime_toml
            ~runtime_name:"alternate"
-           ~lane_id:"workspace_curator_exact"
+           ~lane_id:"browser_stagehand_exact"
        in
        require_registry_unpublished "offline baseline";
        (match Runtime.save_config_text ~runtime_config_path:path config_a with
@@ -576,7 +576,7 @@ let test_runtime_after_rename_converges_state () =
        let config_b =
          transaction_runtime_toml
            ~runtime_name:"alternate"
-           ~lane_id:"workspace_curator_exact"
+           ~lane_id:"browser_stagehand_exact"
        in
        (match Registry.publish ~lanes:(transaction_lanes "librarian_exact") snapshot with
         | Ok _ -> ()
@@ -630,6 +630,6 @@ let test_runtime_after_rename_converges_state () =
          (not (baseline == converged));
        require_transaction_lane
          "after-rename registry converges to B"
-         ~lane_id:"workspace_curator_exact"
+         ~lane_id:"browser_stagehand_exact"
          converged)
 ;;

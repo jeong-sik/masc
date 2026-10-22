@@ -18,10 +18,10 @@ through the directional mapping. Original run IDs, input/output bytes, duration
 availability, provenance, and ownership do not change. History reads never need
 to resolve a current model route.
 
-This separation precedes Curator builtin retirement. The builtin Curator route
-and overview row are still present in this layer. Removing them requires the
-actual Addon model projection and an accessible original-observation history
-entry in both UIs. An Addon's configuration scope `run_id` is not the Curator
+Curator has no current builtin configuration route or overview row. Actual
+Addon model projection and independent history entry points in both UIs precede
+this removal. Per-installation `classification` and `briefing` outputs provide
+model configuration, while the original Curator history remains addressable. An Addon's configuration scope `run_id` is not the Curator
 Owner request's observation `run_id`; a UI must not infer one from the other.
 
 The focused real-file scenario reopens persisted Curator records and passes

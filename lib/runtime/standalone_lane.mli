@@ -13,7 +13,6 @@ type t =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
-  | Workspace_curator
   | Verifier
   | Browser_stagehand
   | Candle_appraiser

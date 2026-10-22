@@ -558,7 +558,6 @@ type exact_lane = Standalone_lane.t =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
-  | Workspace_curator
   | Verifier
   | Browser_stagehand
       (** Answers the Stagehand extension's [llm.generate] for the browser
@@ -1257,11 +1256,8 @@ val admits :
 val capability_of_runtime : t -> runtime_capability
 val capability_of_runtime_id : string -> runtime_capability option
 
-val curator_min_window_tokens : int
-
 val requirement_of_exact_lane :
   ?schema:Yojson.Safe.t ->
-  ?min_window_tokens:int ->
   exact_lane ->
   lane_requirement
 

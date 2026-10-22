@@ -180,7 +180,7 @@ const richConfig = {
 function laneSnapshot(slots = ['runpod_mtp.qwen', 'openai.gpt'], cliSlots = ['codex_subscription.luna']) {
   return { lanes: [
     'board_attention_exact', 'hitl_auto_judge', 'librarian_exact',
-    'workspace_curator_exact', 'verifier_exact', 'browser_stagehand_exact', 'candle_appraiser',
+    'verifier_exact', 'browser_stagehand_exact', 'candle_appraiser',
   ].map(laneId => ({
     laneId,
     label: laneId,
@@ -1174,12 +1174,12 @@ describe('RuntimeTomlEditor', () => {
     render(html`<${RuntimeTomlEditor} />`, container)
     await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-lanes"]')).not.toBeNull())
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-lanes"]') as HTMLButtonElement)
-    await waitFor(() => expect(container.querySelector('[aria-label="workspace_curator_exact 추가할 runtime"]')).not.toBeNull())
-    const select = container.querySelector('[aria-label="workspace_curator_exact 추가할 runtime"]') as HTMLSelectElement
+    await waitFor(() => expect(container.querySelector('[aria-label="browser_stagehand_exact 추가할 runtime"]')).not.toBeNull())
+    const select = container.querySelector('[aria-label="browser_stagehand_exact 추가할 runtime"]') as HTMLSelectElement
     fireEvent.change(select, { target: { value: 'next.client' } })
-    fireEvent.click(container.querySelector('[data-testid="exact-lane-workspace_curator_exact"] button[aria-label="workspace_curator_exact 후보 추가"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="exact-lane-browser_stagehand_exact"] button[aria-label="browser_stagehand_exact 후보 추가"]') as HTMLButtonElement)
     await waitFor(() => expect(apiMocks.patchRuntimeExactSlot)
-      .toHaveBeenCalledWith('workspace_curator_exact', 'append', 'next.client', undefined, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
+      .toHaveBeenCalledWith('browser_stagehand_exact', 'append', 'next.client', undefined, expect.objectContaining({ beforeDispatch: expect.any(Function) })))
     expect(container.textContent).toContain('CLI tail is not supported')
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })

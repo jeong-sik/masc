@@ -41,7 +41,6 @@ type exact_lane = Standalone_lane.t =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
-  | Workspace_curator
   | Verifier
   | Browser_stagehand
   | Candle_appraiser
@@ -3193,7 +3192,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Verifier, Ok () -> slots, cli_slots
           | Verifier, Error _ ->
             judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
-          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator | Browser_stagehand | Candle_appraiser), _ ->
+          | (Librarian | Hitl_auto_judge | Board_attention | Browser_stagehand | Candle_appraiser), _ ->
             slots, cli_slots
         in
         let next =
@@ -3209,12 +3208,11 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
                 in
                 Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
             next
-            (* Shared-memory curation, the browser-specific Stagehand model and
-               Candle appraisal are explicitly configured, not enabled by
-               provisioning a general-purpose runtime. *)
+            (* The browser-specific Stagehand model and Candle appraisal are
+               explicitly configured, not enabled by provisioning a general-purpose runtime. *)
             (List.filter
                (function
-                 | Workspace_curator | Browser_stagehand | Candle_appraiser -> false
+                 | Browser_stagehand | Candle_appraiser -> false
                  | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
                Standalone_lane.all)
         in
@@ -3620,25 +3618,12 @@ let capability_of_runtime_id (runtime_id : string) : runtime_capability option =
 
 let default_exact_schema : Yojson.Safe.t = `Assoc [ "type", `String "object" ]
 
-(* Minimum context window budget for Workspace_curator: covers the curator
-   system prompt, output schema instruction, and at least one singleton fact +
-   ledger neighbor snapshot before batch narrowing. *)
-let curator_min_window_tokens = 4096
-
 let requirement_of_exact_lane
     ?(schema = default_exact_schema)
-    ?(min_window_tokens = curator_min_window_tokens)
     (lane : exact_lane)
   : lane_requirement
   =
   match lane with
-  | Workspace_curator ->
-    { window = Known_at_least { min_tokens = min_window_tokens }
-    ; overflow = Reject_before_truncation
-    ; verdict = Json_syntax { schema }
-    ; tool_free = false
-    ; fresh_invocation = true
-    }
   | Verifier ->
     { window = Unbounded_or_unknown
     ; overflow = Truncation_acceptable

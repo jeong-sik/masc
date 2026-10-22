@@ -54,9 +54,19 @@ operator choice. Configurability is not added speculatively.
 4. `[runtime.lanes]` and `[runtime.exact_output_lanes]` — ordered candidate lists of `<provider>.<model>` bindings for general turns and structured exact-output system tasks;
 5. `[runtime.assignments]` — maps a Keeper name (or `default`) to a declared lane id or single `<provider>.<model>` binding.
 
-The six exact-output lanes are:
-- **Required when active**: `hitl_auto_judge`, `board_attention_exact`, `librarian_exact`, `workspace_curator_exact`, `verifier_exact`;
-- **Optional**: `skill_router_exact` (used only when model-routed skill selection is enabled).
+The configurable builtin exact-output routes are `librarian_exact`,
+`hitl_auto_judge`, `board_attention_exact`, `verifier_exact`,
+`browser_stagehand_exact` and `candle_appraiser`. Board Attention and HITL are
+Required; the other builtin routes are Optional according to
+`Standalone_lane.obligation`.
+
+Workspace Curator selects models per installed Addon, using
+`[runtime.addon_exact_lanes.<installation-id>.classification]` and
+`[runtime.addon_exact_lanes.<installation-id>.briefing]`. Each output independently
+declares ordered `slots` and `cli_slots`; the installation's actual ID selects
+these tables. `workspace_curator_exact` is a retained observation identity, not
+a builtin model configuration route. Dashboard and TUI retained history remain
+readable without a current builtin row or a configured Addon.
 
 A Keeper assignment (`[runtime.assignments]`, or a lane id in
 `[runtime.lanes]`) names a routing id, not a binding. `resolve_assignment`

@@ -185,7 +185,6 @@ let writable_lane = function
   | Standalone_lane.Librarian
   | Standalone_lane.Hitl_auto_judge
   | Standalone_lane.Board_attention -> true
-  | Standalone_lane.Workspace_curator
   | Standalone_lane.Candle_appraiser
   | Standalone_lane.Verifier
   | Standalone_lane.Browser_stagehand -> false

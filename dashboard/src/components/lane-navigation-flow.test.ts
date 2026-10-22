@@ -55,7 +55,7 @@ beforeEach(() => {
   api.fetchStandaloneLanes.mockResolvedValue({ schema: 'masc.standalone_llm_lanes.v2', generatedAt: 'now',
     observedAtUnix: 1, observationOnly: true, exactRunProjectionCount: 0, exactRunSourceTotal: 0,
     exactRunProjectionTruncated: false, lanes: [] })
-  replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }, true))
+  replaceRoute('monitoring', laneTargetParams({ kind: 'run_history', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }))
 })
 afterEach(() => {
   cleanup(); replaceRoute('overview', {}); vi.clearAllMocks()
@@ -279,7 +279,7 @@ it('shows all Lane runs when leaving a target with the Show all action', async (
   render(html`<${InternalAgentsMonitor} />`)
   const filters = within(screen.getByRole('group', { name: 'Internal agent filters' }))
   fireEvent.click(await filters.findByRole('button', { name: 'Fusion 0' }))
-  replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }, true))
+  replaceRoute('monitoring', laneTargetParams({ kind: 'run_history', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }))
   await screen.findByRole('button', { name: /succeeded Workspace Curator/ })
   fireEvent.click(screen.getByRole('button', { name: 'Show all Lane runs' }))
   await waitFor(() => expect(route.value.params.lane_target).toBeUndefined())

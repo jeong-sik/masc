@@ -232,12 +232,23 @@ val owned_inventory_root_stat : owned_inventory_root -> Unix.stats
     Valid only within its callback. This is not a fresh permission check or
     effect authority; the enclosing scope must return successfully before its
     observation is used outside the callback. *)
+
+type owned_relative_path
+(** An entry below a held root, named by its components from that root. The
+    held root is canonical ([owned_inventory_root_path]), so an absolute path
+    spelled from the requested root would not compare equal to it when an
+    ancestor is a symbolic link (macOS [/var] is [/private/var]). *)
+val owned_relative_path : string list -> (owned_relative_path, string) result
+(** Refuses an empty list and a component that is empty, ["."], [".."] or
+    contains a directory separator. *)
+val owned_relative_path_to_string : owned_relative_path -> string
+
 val owned_inventory_entry_kind
-  : owned_inventory_root -> string
+  : owned_inventory_root -> owned_relative_path
   -> (Unix.file_kind, owned_regular_file_read_error) result
 
 val with_owned_inventory_regular_file
-  : owner_uid:int -> owned_inventory_root -> string
+  : owner_uid:int -> owned_inventory_root -> owned_relative_path
   -> (file:Unix.file_descr -> parent:Unix.file_descr -> stat:Unix.stats -> 'a)
   -> ('a, owned_regular_file_read_error) result
 (** Existing regular file and its actual parent through the same no-follow
@@ -255,7 +266,7 @@ type owned_regular_file_range_digest =
 
 (** Hash a regular file opened relative to the held root descriptor. *)
 val owned_inventory_entry_digest
-  : owned_inventory_root -> string
+  : owned_inventory_root -> owned_relative_path
   -> (owned_regular_file_range_digest, owned_regular_file_read_error) result
 
 val load_owned_regular_file_range_with_sha256

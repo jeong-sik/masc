@@ -555,7 +555,8 @@ let with_tool_request_owner_scope ~sync_parent t ~scope fn =
     Eio.Fiber.check (); result
 let read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name =
   let path = Filename.concat (Fs_compat.owned_inventory_root_path held) name in
-  let* result = Fs_compat.with_owned_inventory_regular_file ~owner_uid held path
+  let* relative = Fs_compat.owned_relative_path [name] in
+  let* result = Fs_compat.with_owned_inventory_regular_file ~owner_uid held relative
     (fun ~file ~parent ~stat -> protect (fun () ->
       let* bytes = record_bytes file stat.Unix.st_size in
       let* bytes = settle_verified_record ~sync_file ~sync_parent path file stat bytes parent in

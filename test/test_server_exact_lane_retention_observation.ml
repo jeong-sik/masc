@@ -68,10 +68,29 @@ let test_completed_sweep_and_snapshot_scope () =
     (completed |> member "completed_retained_per_lane" |> to_int)
 ;;
 
+let test_scope_failure_preserves_counts_without_inventing_entry_failures () =
+  let json = project
+      (Run_registry_core.Replayed
+         { lines_read = 2; malformed_lines = 0; dropped_running = 0; reached_end = true })
+      (Exact.Sweep_scope_failed
+         { examined_root_entries = 2; unlinked_entries = 3
+         ; removed_run_directories = 1; failed_root_entries = 0 }) in
+  let open Yojson.Safe.Util in
+  let sweep = member "payload_sweep" json in
+  check string "root resource failure is separate" "scope_failure"
+    (member "status" sweep |> to_string);
+  check int "successful effects before scope failure remain" 3
+    (member "unlinked_entries" sweep |> to_int);
+  check int "root resource failure is not a failed entry" 0
+    (member "failed_root_entries" sweep |> to_int)
+;;
+
 let () =
   run "exact lane startup retention projection"
     [ "observation",
-      [ test_case "replay and partial effects preserve independent units" `Quick
+      [ test_case "scope failure preserves effects without inventing failed entries" `Quick
+          test_scope_failure_preserves_counts_without_inventing_entry_failures
+      ; test_case "replay and partial effects preserve independent units" `Quick
           test_replay_metadata_and_partial_effects_are_preserved
       ; test_case "no-effect states do not invent removal counts" `Quick
           test_no_effect_states_do_not_invent_counts

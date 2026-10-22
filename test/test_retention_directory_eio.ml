@@ -21,7 +21,12 @@ let test_cancel_closes_owned_scope () =
   Fun.protect ~finally:(fun () -> Unix.close other) (fun () ->
     Alcotest.check_raises "cancelled scope cannot access a later descriptor"
       (Invalid_argument "expired retention directory")
-      (fun () -> ignore (Directory.names directory : string list)))
+      (fun () -> ignore (Directory.names directory : string list));
+    List.iter (fun operation ->
+      Alcotest.check_raises "cancelled scope cannot perform checked removals"
+        (Invalid_argument "expired retention directory")
+        (fun () -> ignore (operation directory "absent" : bool)))
+      [Directory.unlink_entry; Directory.remove_empty_child_checked])
 
 let () = Alcotest.run "retention cancellation"
   ["owned scope", [Alcotest.test_case "cancellation expires bound handle" `Quick test_cancel_closes_owned_scope]]

@@ -22,9 +22,9 @@ that a later payload is retained or eligible for removal.
 Counts describe actual successful operations, not bytes or estimated reclaim:
 
 - `examined_root_entries`: entries in the root listing visited by the sweep.
-- `unlinked_entries`: successful `Sys.remove` calls, including symlinks or other
+- `unlinked_entries`: successful leaf unlink calls, including symlinks or other
   non-directory entries; not a regular-file count.
-- `removed_run_directories`: successful `Unix.rmdir` calls, separately.
+- `removed_run_directories`: successful empty-directory removal calls, separately.
 - `failed_root_entries`: root entries whose sweep failed, once per entry.
   Successful unlinks before a later failure remain counted. Other root entries
   continue to be visited. The result is partial when this count is nonzero.
@@ -43,3 +43,10 @@ unavailable roots, partial failure, immutable observations, and refusal after
 malformed/torn replay. These fixture sources have **not been executed**. Parsing
 is not type/linkage proof. No local Dune, runtime cleanup, lease, deployment,
 restart, live diagnostic request, or filesystem inventory was performed here.
+
+The subsequent payload-boundary layer replaces pathname deletion with the
+existing no-follow directory capability, and adds `Sweep_scope_failed` to
+preserve a completed traversal's counts if root-scope settlement fails. That
+failure is separate from failed root-entry counts. The original first-layer
+source checks are not execution evidence for the later protection layer; see
+[its separate evidence](../2026-10-22-exact-payload-nofollow/README.md).

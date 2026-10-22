@@ -3,6 +3,10 @@
     stay on the caller's fiber (and can retain its Eio store mutex).
     No directory component or file target is followed through a symbolic link. *)
 type t
+(** Scopes expire and close handles on return, exception and cancellation. A
+    close failure after a returned callback propagates as its original I/O
+    exception. If callback failure/cancellation and close failure coincide, the
+    callback exception is re-raised and the close failure is reported on stderr. *)
 
 type io = { run : 'a. (unit -> 'a) -> 'a }
 (** Operation runner, inline by default. The Fs_compat facade runs blocking
@@ -32,6 +36,18 @@ val remove_regular_file : ?older_than:float -> t -> string -> bool
     Directory opening/enumeration errors still propagate. POSIX has no atomic inode/mtime-conditional
     unlink: a concurrent leaf replacement can remove that replacement entry
     inside the owned parent, but never a symlink's target. *)
+
+val unlink_entry : t -> string -> bool
+(** Unlink one immediate non-directory entry relative to the held parent,
+    without following a symbolic link. [true] acknowledges a successful unlink;
+    [false] means [ENOENT]. Other errors propagate, including directories.
+    No age/type eligibility is inferred. No atomic inode-conditional unlink or
+    fsync durability is claimed. *)
+
+val remove_empty_child_checked : t -> string -> bool
+(** Checked [unlinkat(AT_REMOVEDIR)] relative to the held parent. [true]
+    acknowledges an actual removal; [false] means [ENOENT]; all other errors
+    propagate. A replacement link is never followed. *)
 
 val remove_empty_child : t -> string -> unit
 (** Best-effort [unlinkat(AT_REMOVEDIR)]; never follows a replacement link. *)

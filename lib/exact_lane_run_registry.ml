@@ -515,6 +515,7 @@ type payload_sweep_status =
   | Root_absent
   | Root_unavailable
   | Swept of payload_sweep_counts
+  | Sweep_scope_failed of payload_sweep_counts
 
 type startup_observation =
   { replay : Run_registry_core.replay_status
@@ -693,40 +694,61 @@ let full_run_of_entry failed_completions (entry : Store.entry) =
 
 module String_set = Set.Make (String)
 
-(* A run's payload files leave with the run: when retention evicts it from the
-   store, or when a replay that read the whole log finds a directory no
-   retained row names. Every entry of the directory goes, including a temporary
-   file a crashed write left behind. A removal that fails is logged and the
-   directory stays; nothing reads it. *)
-let remove_files_in ~dir ~keep ~on_unlink =
-  Array.iter
-    (fun name ->
-       if not (String_set.mem name keep)
-       then (
-         Sys.remove (Filename.concat dir name);
-         on_unlink ()))
-    (Sys.readdir dir)
+module Payload_directory = Fs_compat.Retention_directory
+
+(* The registry path already names its admitted log parent. Resolve aliases
+   only in that parent; never realpath the payload root or a run directory.
+   The existing capability then binds every physical component with no-follow
+   openat and keeps those descriptors for the complete callback. *)
+let with_payload_root ~log_path f =
+  let parent =
+    Eio_guard.run_in_systhread ~label:"exact-lane-payload-parent" (fun () ->
+      Unix.realpath (Filename.dirname log_path))
+  in
+  Payload_directory.with_root (Filename.concat parent payload_dirname) f
 ;;
 
-let remove_payload_dir ~log_path ~run_id ~on_unlink ~on_directory_removed =
-  let dir = payload_run_dir ~log_path ~run_id in
+let remove_files_in directory ~keep ~on_unlink =
+  Payload_directory.names directory
+  |> List.iter (fun name ->
+    if not (String_set.mem name keep) && Payload_directory.unlink_entry directory name
+    then on_unlink ())
+;;
+
+let warn_payload_removal ~run_id exn =
+  Log.Keeper.warn
+    "exact_lane_run_registry: could not remove payload files of %s: %s"
+    run_id
+    (Printexc.to_string exn)
+;;
+
+let remove_payload_directory ~parent ~directory ~log_path ~run_id
+      ~on_unlink ~on_directory_removed =
   try
-    Eio_guard.run_in_systhread ~label:"exact-lane-payload-remove" (fun () ->
-      match Unix.stat dir with
-      | _ ->
-        remove_files_in ~dir ~keep:String_set.empty ~on_unlink;
-        Unix.rmdir dir;
-        on_directory_removed ()
-      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
-    Keeper_fs.invalidate_dir dir;
+    remove_files_in directory ~keep:String_set.empty ~on_unlink;
+    if Payload_directory.remove_empty_child_checked parent run_id
+    then on_directory_removed ();
+    Keeper_fs.invalidate_dir (payload_run_dir ~log_path ~run_id);
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | (Sys_error _ | Unix.Unix_error _) as exn ->
-    Log.Keeper.warn
-      "exact_lane_run_registry: could not remove payload files of %s: %s"
-      run_id
-      (Printexc.to_string exn);
+    warn_payload_removal ~run_id exn;
+    Error ()
+;;
+
+let remove_payload_dir ~log_path ~run_id ~on_unlink ~on_directory_removed =
+  try
+    match with_payload_root ~log_path (fun parent ->
+      Payload_directory.with_child parent run_id (fun directory ->
+        remove_payload_directory ~parent ~directory ~log_path ~run_id
+          ~on_unlink ~on_directory_removed)) with
+    | None | Some None -> Ok ()
+    | Some (Some result) -> result
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Sys_error _ | Unix.Unix_error _) as exn ->
+    warn_payload_removal ~run_id exn;
     Error ()
 ;;
 
@@ -770,36 +792,40 @@ let referenced_leaves (entry : Store.entry) =
    names. *)
 let sweep_payload_dirs t ~log_path =
   let root = Filename.concat (Filename.dirname log_path) payload_dirname in
-  let sweep names =
+  let sweep parent =
+    let names = Payload_directory.names parent in
     let referenced = Hashtbl.create 1024 in
     List.iter
       (fun (entry : Store.entry) -> Hashtbl.replace referenced entry.id (referenced_leaves entry))
       (Store.list_entries t.store);
     (* These counters belong only to this synchronous startup sweep. Increment
-       after each successful effect, inside its joined systhread, so a later
-       failure cannot erase earlier successful removals. *)
+       immediately after each joined operation acknowledges its successful
+       effect, so a later failure cannot erase earlier successful removals. *)
     let unlinked_entries = ref 0 in
     let removed_run_directories = ref 0 in
     let failed_root_entries = ref 0 in
     let on_unlink () = incr unlinked_entries in
     let on_directory_removed () = incr removed_run_directories in
     let sweep_entry name =
-      let path = Filename.concat root name in
-      match Hashtbl.find_opt referenced name, Sys.is_directory path with
-      | None, true ->
-        remove_payload_dir ~log_path ~run_id:name ~on_unlink ~on_directory_removed
-      | Some keep, true ->
-        (* A retained run keeps the files its row names; a superseded
-           registration of the same id and a torn temporary file go. *)
-        Eio_guard.run_in_systhread ~label:"exact-lane-payload-remove" (fun () ->
-          remove_files_in ~dir:path ~keep ~on_unlink);
-        Ok ()
-      | (None | Some _), false ->
-        Sys.remove path;
-        on_unlink ();
+      match Payload_directory.with_child parent name (fun directory ->
+        match Hashtbl.find_opt referenced name with
+        | None ->
+          remove_payload_directory ~parent ~directory ~log_path ~run_id:name
+            ~on_unlink ~on_directory_removed
+        | Some keep ->
+          (* Only the original retained digest names survive. A leaf link is
+             either retained by that name or unlinked through the held parent;
+             its target is never opened for cleanup. *)
+          remove_files_in directory ~keep ~on_unlink;
+          Ok ()) with
+      | Some result -> result
+      | None ->
+        (* Non-directory entries, including directory links, cannot be opened
+           by with_child. Unlink only this name, never a link target. *)
+        if Payload_directory.unlink_entry parent name then on_unlink ();
         Ok ()
     in
-    Array.iter
+    List.iter
       (fun name ->
          match sweep_entry name with
          | Ok () -> ()
@@ -813,32 +839,30 @@ let sweep_payload_dirs t ~log_path =
              root
              (Printexc.to_string exn))
       names;
-    Swept
-      { examined_root_entries = Array.length names
-      ; unlinked_entries = !unlinked_entries
-      ; removed_run_directories = !removed_run_directories
-      ; failed_root_entries = !failed_root_entries
-      }
+    { examined_root_entries = List.length names
+    ; unlinked_entries = !unlinked_entries
+    ; removed_run_directories = !removed_run_directories
+    ; failed_root_entries = !failed_root_entries
+    }
   in
   match Store.replay_status t.store with
   | Run_registry_core.Replayed { reached_end = true; malformed_lines = 0; _ } ->
-    (* [Sys.file_exists] hides permission errors as false. Distinguish actual
-       absence from an unavailable root without inventing a cleanup policy. *)
-    (match
-       Eio_guard.run_in_systhread ~label:"exact-lane-payload-list" (fun () ->
-         match Unix.stat root with
-         | _ -> Some (Sys.readdir root)
-         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None)
-     with
+    let completed = ref None in
+    (match with_payload_root ~log_path (fun parent ->
+       let counts = sweep parent in
+       completed := Some counts;
+       counts) with
      | None -> Root_absent
-     | Some names -> sweep names
+     | Some counts -> Swept counts
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception ((Sys_error _ | Unix.Unix_error _) as exn) ->
        Log.Keeper.warn
          "exact_lane_run_registry: could not list payload entries under %s: %s"
          root
          (Printexc.to_string exn);
-       Root_unavailable)
+       (match !completed with
+        | None -> Root_unavailable
+        | Some counts -> Sweep_scope_failed counts))
   | Run_registry_core.Replayed _ | Run_registry_core.Log_absent | Run_registry_core.Not_replayed
     -> Replay_not_trusted
 ;;

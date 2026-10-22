@@ -9,6 +9,10 @@ external directory_names : Unix.file_descr -> string list
   = "caml_masc_owned_directory_names"
 external remove_regular : Unix.file_descr -> string -> float option -> bool
   = "caml_masc_retention_remove_regular"
+external unlink_entry_at : Unix.file_descr -> string -> bool
+  = "caml_masc_retention_unlink_entry"
+external remove_empty_checked : Unix.file_descr -> string -> bool
+  = "caml_masc_retention_remove_empty_checked"
 external remove_empty : Unix.file_descr -> string -> unit
   = "caml_masc_retention_remove_empty"
 
@@ -23,9 +27,20 @@ let leaf name =
 
 let scope io path fd f =
   let directory = { fd; active = true; io; path } in
-  Fun.protect
-    ~finally:(fun () -> directory.active <- false; Unix.close fd)
-    (fun () -> f directory)
+  let close () = directory.active <- false; Unix.close fd in
+  match f directory with
+  | result -> close (); result
+  | exception exn ->
+    let bt = Printexc.get_raw_backtrace () in
+    (* A release error must not erase callback cancellation. A normal-return
+       close error stays an original I/O exception for the owning observer. *)
+    (try close () with
+     | (Sys_error _ | Unix.Unix_error _) as cleanup ->
+       (try Printf.eprintf
+              "[retention] close(%S) after %s failed: %s\n%!"
+              path (Printexc.to_string exn) (Printexc.to_string cleanup)
+        with Sys_error _ | Unix.Unix_error _ -> ()));
+    Printexc.raise_with_backtrace exn bt
 
 let with_child directory name f =
   leaf name;
@@ -79,6 +94,14 @@ let remove_regular_file ?older_than directory name =
            operation (Filename.concat directory.path name) (Unix.error_message error)
      with Sys_error _ | Unix.Unix_error _ -> ());
     false
+
+let unlink_entry directory name =
+  leaf name;
+  directory.io.run (fun () -> unlink_entry_at (descriptor directory) name)
+
+let remove_empty_child_checked directory name =
+  leaf name;
+  directory.io.run (fun () -> remove_empty_checked (descriptor directory) name)
 
 let remove_empty_child directory name =
   leaf name;

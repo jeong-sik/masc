@@ -167,9 +167,9 @@ type payload_sweep_counts =
   ; removed_run_directories : int
   ; failed_root_entries : int
   }
-(** [unlinked_entries] counts successful [Sys.remove] calls, including non-directory
+(** [unlinked_entries] counts successful descriptor-relative unlinks, including non-directory
     entries and symlinks; it is not a byte or regular-file count.
-    [removed_run_directories] counts successful [Unix.rmdir] calls separately.
+    [removed_run_directories] counts successful descriptor-relative directory removals separately.
     A failed root entry is counted once, including a partially removed directory;
     successful effects before its failure remain in the other counters. *)
 
@@ -179,11 +179,14 @@ type payload_sweep_status =
   | Root_absent
   | Root_unavailable
   | Swept of payload_sweep_counts
+  | Sweep_scope_failed of payload_sweep_counts
 (** [Replay_not_trusted] means the existing replay gate refused cleanup.
     [Root_absent] means the root lookup observed [ENOENT]; [Root_unavailable]
     means lookup or listing failed and the existing warning identifies it.
     [Swept] visited the listed root entries; nonzero [failed_root_entries] means
-    partial failure, not a successful complete cleanup. *)
+    partial failure, not a successful complete cleanup. [Sweep_scope_failed]
+    preserves the completed traversal's counts if root-scope settlement fails;
+    this is a root resource failure, not another failed root entry. *)
 
 type startup_observation =
   { replay : Run_registry_core.replay_status
@@ -199,6 +202,10 @@ val startup_observation : t -> startup_observation
 
 val create : ?path:string -> unit -> t
 val replay : string -> t
+(** Startup sweep binds the payload root and run directories through no-follow
+    descriptors. Unreferenced leaf links are unlinked, never traversed. The
+    existing typed replay gate and retained digest names remain authoritative.
+    This per-pass binding is not a boot lease or atomic inode-conditional unlink. *)
 
 val register_running
   :  t

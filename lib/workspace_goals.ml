@@ -262,9 +262,11 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
   | Error err -> validation_error_result ~tool_name ~start_time [ err ]
   | Ok priority ->
     let id = get_string_opt args "id" in
-    let title = get_string_opt args "title" in
-    let metric = get_string_opt args "metric" in
-    let target_value = get_string_opt args "target_value" in
+    (* Explicit empty criterion fields are input, not omission. The store
+       validates the merged condition under its authoritative write lock. *)
+    let title = Safe_ops.json_string_opt "title" args in
+    let metric = Safe_ops.json_string_opt "metric" args in
+    let target_value = Safe_ops.json_string_opt "target_value" args in
     let due_date = get_string_opt args "due_date" in
     (match
           Goal_store.upsert_goal_with_events

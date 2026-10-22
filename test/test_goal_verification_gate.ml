@@ -2,8 +2,8 @@
     completion gate.
 
     B1: creation without a declared success condition ([metric] +
-    [target_value]) is a typed rejection; updates of an existing row are not
-    gated.
+    [target_value]) is a typed rejection. Partial updates retain omitted
+    fields, and changed effective criteria must remain non-blank.
 
     Ledger: verdict commits round-trip through the file store, the decoders
     are strict (unknown fields / unknown variants are decode errors), a store
@@ -210,7 +210,7 @@ let test_create_with_a_success_condition_succeeds () =
   check string "created" "created" (json_state body [ "action" ])
 ;;
 
-let test_update_is_not_gated_by_b1 () =
+let test_partial_update_preserves_success_condition () =
   with_workspace
   @@ fun config ->
   let goal, _ =
@@ -225,14 +225,16 @@ let test_update_is_not_gated_by_b1 () =
     | Ok payload -> payload
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
-  (* B1 gates creation only: updating an existing row without re-stating the
-     success condition is metadata maintenance, not a new declaration. *)
+  (* A partial rename uses the stored metric and target when checking the
+     changed effective criterion. No re-declaration is required. *)
   match
     Goal_store.upsert_goal config ~id:goal.id ~title:"Renamed" ()
   with
-  | Ok (_, `updated _) -> ()
+  | Ok (updated, `updated _) ->
+    check (option string) "metric retained" goal.metric updated.metric;
+    check (option string) "target retained" goal.target_value updated.target_value
   | Ok (_, `created) -> fail "an existing id must update, not create"
-  | Error error -> fail ("ungated update rejected: " ^ Goal_store.write_error_to_string error)
+  | Error error -> fail ("partial update rejected: " ^ Goal_store.write_error_to_string error)
 ;;
 
 let test_undecodable_goal_store_reports_corruption_not_b1 () =
@@ -1093,6 +1095,35 @@ let test_request_complete_enters_verifying_with_proof_pending () =
   (match (ledger_record config goal_id).completion with
    | Goal_verification.Proof_pending _ -> ()
    | _ -> fail "ledger must hold the durable proof request")
+;;
+
+let test_blank_public_criterion_edits_preserve_pending_proof () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Keep pending proof" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let proof_before = proof_identity config goal_id in
+  let primary = Goal_store.goals_path config in
+  let proof_path = Goal_verification.verifications_path config in
+  let ledger = Filename.concat (Filename.dirname primary) "goal_events.jsonl" in
+  let paths = [primary; primary ^ ".last-good"; proof_path;
+    proof_path ^ ".last-good"; ledger] in
+  let snapshots = List.map (fun path -> path, Fs_compat.load_file path) paths in
+  List.iter (fun field ->
+    List.iter (fun blank ->
+      let rejected = must_fail "blank public criterion edit"
+          (dispatch ctx ~name:"masc_goal_upsert"
+            ["id", `String goal_id; field, `String blank]) in
+      check string "typed validation error" "validation_error"
+        (json_state rejected ["error_code"]);
+      List.iter (fun (path, bytes) ->
+        check string ("refusal preserves " ^ Filename.basename path) bytes
+          (Fs_compat.load_file path)) snapshots;
+      check bool "bound request and criterion are unchanged" true
+        (proof_before = proof_identity config goal_id);
+      check string "goal remains verifying" "verifying" (stored_phase config goal_id))
+      [""; " \t\n"])
+    ["title"; "metric"; "target_value"]
 ;;
 
 (* (b) Public callers cannot self-verify. Only the typed verifier boundary can
@@ -2014,8 +2045,10 @@ let () =
             test_create_requires_a_success_condition
         ; test_case "creation with a success condition succeeds" `Quick
             test_create_with_a_success_condition_succeeds
-        ; test_case "update is not gated by B1" `Quick
-            test_update_is_not_gated_by_b1
+        ; test_case "blank public edits preserve pending proof and audit" `Quick
+            test_blank_public_criterion_edits_preserve_pending_proof
+        ; test_case "partial update preserves stored success condition" `Quick
+            test_partial_update_preserves_success_condition
         ; test_case "undecodable goal store reports corruption, not B1" `Quick
             test_undecodable_goal_store_reports_corruption_not_b1
         ] )

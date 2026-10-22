@@ -30,8 +30,9 @@ let schema_of_name name : tool_schema =
    schema-level [required] on masc_goal_upsert: the one tool serves both create
    and update, and JSON Schema [required] is unconditional, so declaring it
    would reject every metadata update of an existing goal. The create/update
-   split is only decidable against the store, so the handler enforces it on the
-   creation branch (Goal_store.upsert_goal, inside the write lock). *)
+   split and merged criterion are only decidable against the store. Goal_store
+   checks creation and changed effective criteria inside the write lock;
+   omitted fields retain their stored values. *)
 (* One schema per Tool_name.Goal_name constructor. Spelling the three names
    here again let a constructor be routable (Tool_workspace.goal_handler) and
    never advertised; now a new one either brings its config/tools file or

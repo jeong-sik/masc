@@ -569,7 +569,7 @@ let test_metadata_edit_survives_event_recording_failure () =
       | Some result -> parse_json_result result
       | None -> fail (name ^ " not handled") in
     (* Creation refuses a goal born overdue, so the overdue fixture is created
-       reachable and backdated by update, which stays ungated. *)
+       reachable and backdated by update; existing due dates may be overdue. *)
     let created = call "masc_goal_upsert"
         [ "title", `String "Overdue shared Goal"; "metric", `String "artifacts"
         ; "target_value", `String "1"; "due_date", `String "2026-09-23" ] in

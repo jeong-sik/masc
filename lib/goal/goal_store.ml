@@ -662,6 +662,14 @@ let goal_with_fields ~now ?title ?metric ?target_value ?due_date ?priority
   in
   updated, criterion_changed
 
+let validate_changed_criterion (goal : goal) : (unit, write_error) result =
+  if blank_opt (Some goal.title) || blank_opt goal.metric
+     || blank_opt goal.target_value then
+    Error (Rejected
+      "a changed goal criterion requires non-blank title, metric and target_value; \
+       omitted fields retain their stored values")
+  else Ok ()
+
 let goal_with_new_criterion ~criterion_revision (goal : goal) =
   { goal with criterion_revision; phase = Goal_phase.criterion_changed goal.phase;
     last_review_note = None; last_review_at = None }
@@ -706,6 +714,9 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
                 let updated, criterion_changed =
                   goal_with_fields ~now ?title ?metric ?target_value ?due_date
                     ?priority existing in
+                let* () =
+                  if criterion_changed then validate_changed_criterion updated
+                  else Ok () in
                 let updated =
                   if criterion_changed then
                     let criterion_revision = Random_id.hex ~bytes:16 in
@@ -714,8 +725,8 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
                 Ok (updated, `updated existing)
             | None ->
                 (* Creation gates run after the authoritative read under the
-                   write lock. Existing rows may be backdated or edited without
-                   re-declaring their creation-time success condition. *)
+                   write lock. Updates may be backdated and omit unchanged
+                   condition fields; changed criteria are checked above. *)
                 let* title =
                   match title with
                   | Some title when String.trim title <> "" -> Ok title

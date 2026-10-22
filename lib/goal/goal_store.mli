@@ -322,14 +322,22 @@ val upsert_goal :
       whenever the upsert creates a new row — including an explicit
       previously-unknown [id]. The create/update split is decided inside the
       write lock on the freshly decoded state, so an undecodable store is
-      {!Store_unavailable}, never this one. Updating an existing row is not
-      gated.
+      {!Store_unavailable}, never this one.
+    - An actual change to an existing row's [title], [metric] or
+      [target_value] requires all three effective fields to be non-blank.
+      Omitted fields retain their stored values. The merged criterion is
+      checked inside the write lock before minting its revision or writing
+      events. This is an input invariant, not semantic feasibility admission.
+      Unchanged historical criteria do not prevent priority/due-date updates
+      or lifecycle operations; a criterion edit must repair the whole
+      effective condition. Rejection preserves the store, proof identity and
+      pending events.
     - Creation input check: a new row needs a
       non-blank [title] on every create path (an explicit unknown [id]
       without one no longer defaults to "Untitled goal"), and a [due_date]
       already past is refused — a goal born overdue is unreachable by
       construction. The date is a UTC calendar day and falls due at 23:59:59
-      UTC, independent of the operator's time zone. Updates are not gated:
+      UTC, independent of the operator's time zone. Updates may be overdue:
       an existing goal's due date passing is ordinary life. *)
 
 (** Run a dependent mutation while all referenced Goals exist in the primary

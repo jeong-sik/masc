@@ -164,8 +164,15 @@ let test_turn_surface_drops_terminal_goals () =
     (summary_title_opt "goal-executing" summaries)
 ;;
 
+let contains_in haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
 (* #45028. The held task marks the Goals its link names and never removes the
-   others. An unreadable link registry marks the rows unknown, not unlinked. *)
+   others. A link registry unreadable in both copies marks the rows unknown,
+   not unlinked. *)
 let test_held_task_marks_its_goals_without_hiding_others () =
   with_workspace @@ fun config ->
   seed_all_phases config;
@@ -212,7 +219,11 @@ let test_held_task_marks_its_goals_without_hiding_others () =
   let other = world (current_task_of "task-other") in
   check bool "a task with no link marks nothing" false (contains_in other yours);
   check bool "and hides nothing" true (contains_in other "### Active Goals (2)");
-  Fs_compat.save_file (Workspace_goal_index.goal_task_links_path config) "unreadable";
+  let links_path = Workspace_goal_index.goal_task_links_path config in
+  Fs_compat.save_file links_path "unreadable";
+  check bool "a broken primary is read through its recovery copy" true
+    (contains_in (row_of (world (current_task_of "task-linked")) "goal-verifying") yours);
+  Fs_compat.save_file (links_path ^ ".last-good") "unreadable";
   let unreadable = world (current_task_of "task-linked") in
   check bool "unreadable links never claim yours" false (contains_in unreadable yours);
   check bool "they mark every open goal unknown" true
@@ -272,12 +283,6 @@ let rendered_world_state config =
       ()
   in
   world_state
-;;
-
-let contains_in haystack needle =
-  let n = String.length needle and h = String.length haystack in
-  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
-  n = 0 || go 0
 ;;
 
 let test_no_goal_is_offered_as_work_to_pick_up () =

@@ -182,19 +182,21 @@ let format_own_recent_actions_turn ~current_task_id (turn : Keeper_own_recent_ac
 ;;
 
 
-(* Whether this turn's held task is linked to a goal. [Held_task_link_unreadable]
-   is a held task whose goal-task link registry could not be read: the answer is
-   unknown, so the row says so instead of reading as unlinked. *)
+(* Whether the task that admitted this turn is linked to a goal.
+   [Held_task_link_unreadable] is a held task whose goal-task link registry and
+   its recovery copy could not be read: the answer is unknown, so the row says
+   so instead of reading as unlinked. *)
 type held_task_link =
   | Served_by_held_task
   | Not_served_by_held_task
   | Held_task_link_unreadable
 
-(* What the prompt knows about one active goal. [phase] is [None] only when the
-   id does not resolve in the store (a dangling assignment — kept visible, per
-   [active_goal_summaries]). RFC-0387 stage 2 carries the phase so a [Verifying]
-   goal is annotated rather than reading as ordinary open work — the gate must
-   not make the goal disappear from the keeper's view (review P0-1). *)
+(* What the prompt knows about one active goal. [phase] and [criterion] are
+   options for a caller that states a summary directly;
+   [active_goal_summaries] always fills both from the store. RFC-0387 stage 2
+   carries the phase so a [Verifying] goal is annotated rather than reading as
+   ordinary open work — the gate must not make the goal disappear from the
+   keeper's view (review P0-1). *)
 type goal_summary =
   { summary_goal_id : string
   ; summary_title : string
@@ -1052,9 +1054,11 @@ let effective_instructions
 
    A Goal is shared intent and names no keeper, so every turn carries the same
    list whether or not the keeper holds a task, and whichever task it holds.
-   The keeper chooses which Goal its work advances. The held task only marks
-   the Goals its link registry entry names, and an unreadable registry marks
-   every row as unknown rather than as unlinked. *)
+   The keeper chooses which Goal its work advances. The task that admitted
+   this turn only marks the Goals its link registry entry names. The registry
+   is read the way the other keeper surfaces read it (recovery copy included),
+   and only when there is a held task and an open Goal; when neither copy
+   reads, every row is marked unknown rather than unlinked. *)
 let active_goal_summaries
       ~(config : Workspace.config)
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
@@ -1069,39 +1073,44 @@ let active_goal_summaries
       Some (Keeper_id.Task_id.to_string task_id)
     | Keeper_world_observation_inputs.No_current_task -> None
   in
-  let held_task_link =
-    match held_task_id with
-    | None -> fun _goal_id -> Not_served_by_held_task
-    | Some task_id ->
-      (match Workspace_goal_index.read_goal_task_links_authoritative_r config with
-       | Ok links ->
-         fun goal_id ->
-           if List.exists
-                (fun (linked_goal, tasks) ->
-                   String.equal linked_goal goal_id && List.mem task_id tasks)
-                links
-           then Served_by_held_task
-           else Not_served_by_held_task
-       | Error detail ->
-         Log.Keeper.warn
-           "active goals: goal-task links unreadable for held task %s: %s"
-           task_id detail;
-         fun _goal_id -> Held_task_link_unreadable)
-  in
-  Result.map (List.filter_map
-    (fun (goal : Goal_store.goal) ->
-       if Goal_phase.admits_self_directed_progress goal.phase
-       then
-         Some
-           { summary_goal_id = goal.id
-           ; summary_title = goal.title
-           ; summary_phase = Some goal.phase
-           ; summary_criterion = Some (Goal_store.criterion_of_goal goal)
-           ; summary_review_note = goal.last_review_note
-           ; summary_held_task_link = held_task_link goal.id
-           }
-       else None)
-    ) (Goal_store.list_goals_result config ())
+  Result.map
+    (fun goals ->
+       let open_goals =
+         List.filter
+           (fun (goal : Goal_store.goal) ->
+              Goal_phase.admits_self_directed_progress goal.phase)
+           goals
+       in
+       let held_task_link =
+         match held_task_id, open_goals with
+         | None, _ | Some _, [] -> fun _goal_id -> Not_served_by_held_task
+         | Some task_id, _ :: _ ->
+           (match Workspace_goal_index.read_goal_task_links_r config with
+            | Ok links ->
+              fun goal_id ->
+                if List.exists
+                     (fun (linked_goal, tasks) ->
+                        String.equal linked_goal goal_id && List.mem task_id tasks)
+                     links
+                then Served_by_held_task
+                else Not_served_by_held_task
+            | Error detail ->
+              Log.Keeper.warn
+                "active goals: goal-task links unreadable for held task %s: %s"
+                task_id detail;
+              fun _goal_id -> Held_task_link_unreadable)
+       in
+       List.map
+         (fun (goal : Goal_store.goal) ->
+            { summary_goal_id = goal.id
+            ; summary_title = goal.title
+            ; summary_phase = Some goal.phase
+            ; summary_criterion = Some (Goal_store.criterion_of_goal goal)
+            ; summary_review_note = goal.last_review_note
+            ; summary_held_task_link = held_task_link goal.id
+            })
+         open_goals)
+    (Goal_store.list_goals_result config ())
 ;;
 
 (* RFC-0444 §2.3 row 6: the one projection of an unreadable goal store onto

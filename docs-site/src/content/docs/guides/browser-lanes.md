@@ -27,15 +27,24 @@ supports every action. Safari is not a backend in this package.
 
 ## Install the browser Addon
 
-Prepare the installed `masc-browser-addon-worker`, `masc-native-addon-launcher`,
-and `masc-browser-process-owner` executables on the server's PATH. Use the
-bundled package manifest at its actual location. In the active config root's
-`lane-addons/browser-work.toml`, save:
+`scripts/install-local-build.sh` installs `masc-browser-addon-worker`,
+`masc-native-addon-launcher` and `masc-browser-process-owner` beside masc, then
+runs `masc browser-lane-setup --mode addon` for the workspace. Every other
+`browser-lane-setup` mode does the same step. It writes the package masc carries
+to `<base-path>/.masc/packages/browser/` and, when the workspace has no
+declaration of it, saves `lane-addons/browser.toml` in the active config root.
+An existing declaration of the package is left as it is. Keep the install
+prefix on the server's PATH. `--no-browser-addon` (installer) and `--no-addon`
+(setup) leave the Add-on out; without it no browser route works.
+
+To choose hooks or model outputs, add them to that `browser.toml`; setup never
+rewrites an existing declaration:
 
 ```toml
-id = "browser-work"
-run_id = "browser-work"
-manifest_path = "/absolute/path/to/masc/addons/browser/lane.toml"
+id = "browser"
+enabled = true
+run_id = "browser"
+manifest_path = "/absolute/path/to/workspace/.masc/packages/browser/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
 exact_outputs = ["locate", "stagehand"]
 
@@ -69,8 +78,8 @@ Non-model actions remain available where the backend supports them.
 
 Selecting an output does not configure a model provider. Configure existing
 model slots separately in `runtime.toml` under
-`runtime.addon_exact_lanes.browser-work.locate` and/or
-`runtime.addon_exact_lanes.browser-work.stagehand`. Model availability and
+`runtime.addon_exact_lanes.browser.locate` and/or
+`runtime.addon_exact_lanes.browser.stagehand`. Model availability and
 consumer inventory are separate observations. A missing or unavailable route
 uses the shared Exact Output waiting/cancellation policy; it does not authorize
 a different browser or input replay.

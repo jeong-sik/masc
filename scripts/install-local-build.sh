@@ -55,22 +55,25 @@
 # Usage: scripts/install-local-build.sh [--prefix DIR] [--manifest-dir DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
 #                                       [--keep-build] [--no-guest-shim]
-#                                       [--with-browser-addon]
-#   --prefix        where masc, masc-tui, masc-browser-host and the deployment
-#                   preflight pair go (default ~/.local/bin)
+#                                       [--no-browser-addon]
+#   --prefix        where masc, masc-tui, masc-browser-host, the browser Add-on
+#                   programs and the deployment preflight pair go (default
+#                   ~/.local/bin)
 #   --manifest-dir  Firefox native messaging manifests (default: the per-user directory)
 #   --skip-build    install what --build-dir already holds
-#   --build-dir     directory holding main_eio.exe, masc_tui.exe, masc_browser_host.exe
-#                   and deployment_preflight_helper.exe (default <repo>/_build/default/bin)
+#   --build-dir     directory holding main_eio.exe, masc_tui.exe, masc_browser_host.exe,
+#                   masc_native_addon_launcher.exe, masc_browser_addon_worker.exe,
+#                   masc_browser_process_owner.exe and deployment_preflight_helper.exe
+#                   (default <repo>/_build/default/bin)
 #   --base-path     workspace whose runtime.toml the new build must accept, and
 #                   whose browser lane host is brought up to this build when no
 #                   manifest covers it
 #                   (default: the one masc would use -- MASC_BASE_PATH, a current
 #                   directory holding .masc/config, then the recorded default)
 #   --keep-build    retain build artifacts after a successful default build/install
-#   --with-browser-addon also build/install the native Addon launcher, browser
-#                   worker and browser process owner into the same prefix;
-#                   package assets remain in this checkout
+#   --no-browser-addon do not build or install the browser Add-on programs, and
+#                   leave the workspace's browser Add-on package and declaration
+#                   as they are. Without the Add-on no browser route works.
 #   --no-guest-shim leave the workspace's guest exec shim as it is
 set -euo pipefail
 
@@ -80,11 +83,15 @@ build_dir="$repo/_build/default/bin"
 skip_build=false
 keep_build=false
 guest_shim=true
-browser_addon=false
+# Every browser route and every native browser host's polls run in the browser
+# Add-on, so its programs are installed with masc, from the same build, unless
+# --no-browser-addon says the workspace needs no browser.
+browser_addon=true
 browser_addon_programs=(masc_native_addon_launcher masc_browser_addon_worker masc_browser_process_owner)
 custom_build_dir=false
 base_path=""
 workspace_root=""
+workspace_kind=""
 install_args=("$@")
 case "$(uname -s)" in
   Darwin) manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts" ;;
@@ -99,7 +106,7 @@ while [ $# -gt 0 ]; do
     --build-dir) build_dir=${2:?--build-dir needs a directory}; custom_build_dir=true; shift 2 ;;
     --keep-build) keep_build=true; shift ;;
     --no-guest-shim) guest_shim=false; shift ;;
-    --with-browser-addon) browser_addon=true; shift ;;
+    --no-browser-addon) browser_addon=false; shift ;;
     --skip-build) skip_build=true; shift ;;
     --base-path) base_path=${2:?--base-path needs a directory}; shift 2 ;;
     -h|--help) sed -n '/^# Usage:/,/^set -euo pipefail/p' "$0" | sed '$d'; exit 0 ;;
@@ -144,12 +151,12 @@ if [ "$skip_build" = false ]; then
   (cd "$repo" && scripts/dune-local.sh build --root "$repo" "${build_targets[@]}")
 fi
 
-# Validate optional program inputs before preflight, guest-shim replacement or
-# any installed binary changes. --skip-build needs the same complete inputs.
+# Validate the browser Add-on programs before preflight, guest-shim replacement
+# or any installed binary changes. --skip-build needs the same complete inputs.
 if [ "$browser_addon" = true ]; then
   for program in "${browser_addon_programs[@]}"; do
     if [ ! -f "$build_dir/$program.exe" ] || [ ! -x "$build_dir/$program.exe" ]; then
-      echo "install-local-build: browser Addon requires executable $build_dir/$program.exe; nothing installed" >&2
+      echo "install-local-build: the browser Add-on needs executable $build_dir/$program.exe; nothing installed (--no-browser-addon skips it)" >&2
       exit 1
     fi
   done
@@ -434,13 +441,50 @@ if [ "$browser_addon" = true ]; then
   for program in "${browser_addon_programs[@]}"; do
     install -m 755 "$build_dir/$program.exe" "$prefix/${program//_/-}"
   done
-  echo "installed browser Addon programs into $prefix; package: $repo/addons/browser/lane.toml"
+else
+  # Programs an earlier install left would now run beside a masc of another
+  # build. They are named, not removed: removing installed files is the
+  # operator's call.
+  for program in "${browser_addon_programs[@]}"; do
+    if [ -e "$prefix/${program//_/-}" ]; then
+      echo "install-local-build: WARN $prefix/${program//_/-} is from an earlier install, not from this build; remove it, or install without --no-browser-addon" >&2
+    fi
+  done
 fi
 install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deployment-preflight-helper"
 install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"
-echo "installed masc, masc-tui, masc-browser-host, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight into $prefix"
+if [ "$browser_addon" = true ]; then
+  echo "installed masc, masc-tui, masc-browser-host, masc-native-addon-launcher, masc-browser-addon-worker, masc-browser-process-owner, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight into $prefix"
+else
+  echo "installed masc, masc-tui, masc-browser-host, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight into $prefix (no browser Add-on)"
+fi
 
-python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" "$workspace_root" <<'PY'
+# The masc just installed writes the browser Add-on package it carries into
+# the workspace and declares it when the workspace has none, so the server
+# attaches a package of this build. An existing declaration is left as it is
+# and reported. A workspace that does not exist yet is not created here, and
+# one without a config root yet (setup exits 3) is left for the first server
+# start to create it. A failure is reported after the browser hosts below are
+# refreshed, so one workspace's Lane directory never leaves every host on the
+# old build.
+addon_failed=false
+addon_no_config_root_status=3
+if [ "$browser_addon" = false ]; then
+  echo "install-local-build: the browser Add-on is left as it is (--no-browser-addon)"
+elif [ "$workspace_kind" = directory ]; then
+  addon_status=0
+  "$prefix/masc" browser-lane-setup --mode addon --base-path "$workspace_root" || addon_status=$?
+  if [ "$addon_status" -eq "$addon_no_config_root_status" ]; then
+    echo "install-local-build: the browser Add-on is not declared yet: $workspace_root has no config root; the first server start writes one, then run masc browser-lane-setup --mode addon --base-path $workspace_root"
+  elif [ "$addon_status" -ne 0 ]; then
+    addon_failed=true
+  fi
+else
+  echo "install-local-build: the browser Add-on is not declared: workspace $workspace_root does not exist yet; run masc browser-lane-setup --mode addon --base-path $workspace_root once it does"
+fi
+
+refresh_failed=false
+if ! python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" "$workspace_root" "$browser_addon" <<'PY'
 import fcntl
 import filecmp
 import json
@@ -456,6 +500,9 @@ masc, binary, manifest_dir = sys.argv[1], sys.argv[2], Path(sys.argv[3])
 # and normalizes the path as every masc command does; a path this shell was
 # merely given is not the one masc would write to.
 workspace = Path(sys.argv[4])
+# --no-browser-addon reaches the host refresh too: setup would otherwise
+# declare the Add-on the operator left out.
+addon_choice = [] if sys.argv[5] == "true" else ["--no-addon"]
 launcher_suffix = Path(".masc/browser-lane/host/launch")
 
 registered = []
@@ -563,7 +610,8 @@ def refresh(name, base, declared_path):
     previous = registration.read_text() if registration.is_file() else None
     result = subprocess.run(
         [masc, "browser-lane-setup", "--mode", "extension", "--binary", binary,
-         "--base-path", str(base), "--host-name", name, "--manifest-dir", str(manifest_dir)],
+         "--base-path", str(base), "--host-name", name, "--manifest-dir", str(manifest_dir),
+         *addon_choice],
         stdout=subprocess.DEVNULL)
     if result.returncode != 0:
         return f"masc browser-lane-setup exited {result.returncode}"
@@ -589,7 +637,8 @@ def refresh(name, base, declared_path):
 # elsewhere leaves this copy as it was and is reported.
 def refresh_host(base):
     result = subprocess.run(
-        [masc, "browser-lane-setup", "--mode", "host", "--binary", binary, "--base-path", str(base)],
+        [masc, "browser-lane-setup", "--mode", "host", "--binary", binary, "--base-path", str(base),
+         *addon_choice],
         stdout=subprocess.DEVNULL)
     if result.returncode != 0:
         return f"masc browser-lane-setup exited {result.returncode}"
@@ -644,6 +693,16 @@ if failures:
         print(f"install-local-build: could not refresh {failure}", file=sys.stderr)
     sys.exit(1)
 PY
+then
+  refresh_failed=true
+fi
+
+if [ "$addon_failed" = true ]; then
+  echo "install-local-build: the browser Add-on of $workspace_root is not set up; the programs above are installed" >&2
+fi
+if [ "$addon_failed" = true ] || [ "$refresh_failed" = true ]; then
+  exit 1
+fi
 
 # Installed binaries and browser hosts now hold their own copies. Clean only
 # the default output this invocation built, never externally supplied input.

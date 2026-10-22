@@ -80,12 +80,15 @@ observation sampling은 해당 호스트 계약을 연결하기 전까지 거절
 
 ## 도구 Hook 선택
 
-Browser native 패키지를 소스에서 설치할 때는 저장소에서 opam 환경과 의존성을
-준비한 뒤 `bash scripts/install-local-build.sh --with-browser-addon`을 실행한다.
-선택한 prefix를 서버 프로세스의 `PATH`에 포함하고, 패키지 파일이 남아 있는 실제
-checkout의 `addons/browser/lane.toml`을 선언에서 가리킨다. 실행 파일 설치와 Addon
-선언·backend 활성화는 별도 단계다. 이 옵션은 소스 설치 경로이며 release 다운로드에
-실행 파일을 추가하지 않는다. 자세한 절차는 [Browser 패키지 안내](../../addons/browser/README.md)를 따른다.
+Browser 패키지는 `bash scripts/install-local-build.sh` 한 번으로 설치된다. 이 스크립트는
+Add-on 실행 파일 3개(`masc-native-addon-launcher`, `masc-browser-addon-worker`,
+`masc-browser-process-owner`)를 masc와 같은 prefix에 설치한다. 그리고 새로 설치한 masc로
+`masc browser-lane-setup --mode addon`을 실행한다. 이 명령은 masc 바이너리에 들어 있는
+패키지를 `.masc/packages/browser`에 쓰고, 이 패키지의 선언이 없으면 `browser.toml`을 만든다.
+이미 있는 선언은 바꾸지 않는다. Add-on이 필요 없으면 `--no-browser-addon`을 준다. 그러면 실행
+파일을 빌드·설치하지 않고 선언도 그대로 두며, 브라우저 경로는 동작하지 않는다. 선택한 prefix를
+서버 프로세스의 `PATH`에 포함한다. release
+다운로드에는 이 실행 파일이 없다. 자세한 내용은 [Browser 패키지 안내](../../addons/browser/README.md)를 따른다.
 
 패키지의 `[world.tools]`에 `hooks = ["validate_input", "validate_output"]`을
 선언하면 도구 호출 전 입력과 호출 후 성공 응답을 각각 검증한다. 설치 TOML의
@@ -169,14 +172,14 @@ Chrome의 `stagehand` 소비자도 `runtime.addon_exact_lanes.<설치 ID>.stageh
 
 ### Browser의 독립 선택
 
-Browser 설치의 `manifest_path`를 실제 `addons/browser/lane.toml`로 연결한 뒤 다음
-두 배열을 독립적으로 고른다. 경로는 설치 TOML 기준이며, 이 예제의 경로도 실제 설치
-위치에 맞춰 바꾼다.
+`browser-lane-setup`이 만든 `browser.toml`에 다음 두 배열을 독립적으로 더한다.
+`manifest_path`는 setup이 쓴 값을 그대로 둔다.
 
 ```toml
-id = "browser-work"
-run_id = "browser-work"
-manifest_path = "../packages/browser/lane.toml"
+id = "browser"
+enabled = true
+run_id = "browser"
+manifest_path = "/absolute/path/to/workspace/.masc/packages/browser/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
 exact_outputs = ["locate", "stagehand"]
 

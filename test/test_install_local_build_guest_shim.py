@@ -126,7 +126,7 @@ class GuestShim(unittest.TestCase):
                     old_server = local_build.executable(prefix / "masc", "old-server")
                     old_worker = local_build.executable(prefix / "masc-browser-addon-worker", "old-worker")
                     before = {p: p.read_bytes() for p in (shim, sidecar, old_server, old_worker)}
-                    result = install(root, build, release_base(root), base, "--with-browser-addon")
+                    result = install(root, build, release_base(root), base)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(str(bad), result.stderr)
                     for path, content in before.items():

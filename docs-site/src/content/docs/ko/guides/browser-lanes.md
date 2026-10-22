@@ -23,14 +23,23 @@ transport는 지원 기능을 설명하며, 서로 다른 설치 체계는 아�
 
 ## 브라우저 Addon 설치
 
-서버 PATH에 설치된 `masc-browser-addon-worker`, `masc-native-addon-launcher`,
-`masc-browser-process-owner` 실행 파일을 준비합니다. 번들 패키지 manifest의 실제 위치를
-사용해 활성 설정 루트의 `lane-addons/browser-work.toml`을 저장합니다.
+`scripts/install-local-build.sh`가 `masc-browser-addon-worker`, `masc-native-addon-launcher`,
+`masc-browser-process-owner`를 masc 옆에 설치합니다. 그다음 workspace에 대해
+`masc browser-lane-setup --mode addon`을 실행합니다. `browser-lane-setup`의 다른 모드도 같은
+일을 합니다. 이 명령은 masc에 들어 있는 패키지를 `<base-path>/.masc/packages/browser/`에 씁니다.
+workspace에 이 패키지의 선언이 없으면 활성 설정 루트에 `lane-addons/browser.toml`을 저장합니다.
+이미 있는 선언은 그대로 둡니다. 설치 prefix를 서버 PATH에 포함합니다. Add-on이 필요 없으면
+설치 스크립트에는 `--no-browser-addon`, setup에는 `--no-addon`을 줍니다. 그러면 브라우저 경로는
+동작하지 않습니다.
+
+Hook이나 모델 출력을 고르려면 그 `browser.toml`에 더합니다. setup은 이미 있는 선언을 다시
+쓰지 않습니다.
 
 ```toml
-id = "browser-work"
-run_id = "browser-work"
-manifest_path = "/absolute/path/to/masc/addons/browser/lane.toml"
+id = "browser"
+enabled = true
+run_id = "browser"
+manifest_path = "/absolute/path/to/workspace/.masc/packages/browser/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
 exact_outputs = ["locate", "stagehand"]
 
@@ -61,8 +70,8 @@ incarnation·브라우저 `clientId`는 서로 다른 identity입니다.
 유지됩니다. backend가 지원하는 비모델 동작은 계속 사용할 수 있습니다.
 
 출력을 선택하는 것과 모델 provider 설정은 별개입니다. `runtime.toml`의
-`runtime.addon_exact_lanes.browser-work.locate` 및/또는
-`runtime.addon_exact_lanes.browser-work.stagehand`에 기존 모델 slot을 따로 설정합니다.
+`runtime.addon_exact_lanes.browser.locate` 및/또는
+`runtime.addon_exact_lanes.browser.stagehand`에 기존 모델 slot을 따로 설정합니다.
 모델 준비와 소비자 inventory는 별도로 확인합니다. route가 없거나 사용할 수 없으면
 공통 Exact Output 대기·취소 정책을 따르며, 다른 브라우저 선택이나 입력 재실행을 허가하지 않습니다.
 

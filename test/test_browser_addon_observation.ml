@@ -34,6 +34,16 @@ let published_reads_back () =
   check int "both connected clients read back" 2 (List.length published.clients);
   check bool "the automation backend reads as registered" true published.automation.registered;
   check bool "the Stagehand backend reads as not registered" false published.stagehand.registered
+(* The runtime keeps an observation with its row renamed under the
+   installation (Lane_addon_runtime.namespace); the reader must find it. *)
+let namespaced_row_reads_back () =
+  let output=ok (Observation.of_snapshot ~observed_at:1.
+    (serving [client "01a16363-ef67-7000-ad62-05bcd0320d99" "firefox"])) in
+  let cached={output with rows=List.map (fun (row:Types.row) ->
+    {row with id="browser-work/7/" ^ row.id;lane_id="browser-work/" ^ row.lane_id}) output.rows} in
+  let published=ok (Observation.read cached) in
+  check int "the renamed row still reads back its client" 1 (List.length published.clients);
+  check bool "the renamed row still reads back the registration" true published.automation.registered
 let retired_is_not_connected () =
   let output=ok (Observation.of_snapshot ~observed_at:1.
     (`Assoc ["state",`String "retired";"clients",`List [];
@@ -46,6 +56,7 @@ let duplicate_client () =
     (Result.is_error (Observation.decode_snapshot (serving [client id "firefox"; client id "firefox"])))
 let ()=run "browser addon observation" ["publication",[
   test_case "published snapshot reads back" `Quick published_reads_back;
+  test_case "namespaced row reads back" `Quick namespaced_row_reads_back;
   test_case "retired worker is not connected" `Quick retired_is_not_connected;
   test_case "duplicate client refused" `Quick duplicate_client;
   test_case "live and retained observations agree" `Quick roundtrip;

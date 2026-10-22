@@ -1,13 +1,9 @@
 let ( let* ) = Result.bind
 
-(* The one row [of_snapshot] writes. [read] looks for the same id, so the
-   writer and the reader cannot name different rows. *)
-let row_id = "browser"
-
 let of_snapshot ~observed_at = function
   | `Assoc fields ->
       let output={Lane_addon_types.rows=[{
-      id=row_id;lane_id="browser/connections";kind=Value;
+      id="browser";lane_id="browser/connections";kind=Value;
       title="Browser worker";observed_at;subject_id="browser";
       clock=None;actor=None;fields;evidence=[];related_ids=[]}];coverage=[]} in
       (* Keep the same row checks as MCP observation decoding, including
@@ -41,6 +37,9 @@ let decode_snapshot = function
        | (None|Some _),(None|Some _),(None|Some _) -> Error "browser inventory is unavailable")
   | _ -> Error "browser inventory is unavailable"
 
+(* The runtime stores an observation with every row id and lane id prefixed
+   by its instance and sequence (Lane_addon_runtime.namespace), so the one row
+   [of_snapshot] wrote is found by its shape, not by its id. *)
 let read (output : Lane_addon_types.output) = match output.rows with
-  | [ row ] when String.equal row.id row_id -> decode_snapshot (`Assoc row.fields)
-  | [] | _::_ -> Error "the browser observation does not hold the browser worker row"
+  | [ row ] -> decode_snapshot (`Assoc row.fields)
+  | [] | _::_::_ -> Error "the browser observation does not hold exactly the browser worker row"

@@ -27,6 +27,8 @@ let hook_contract () =
   check bool "command fields stay closed" true
     (Result.is_error (Hooks.before_call hooks (`Assoc ["command",`Assoc [
       "verb",`String "tabs.list";"args",`Assoc [];"other",`Bool true]])));
+  ignore (ok (Hooks.before_call hooks (`Assoc ["requiredActions",`List [`String "hover"];
+    "command",B.verb_json B.Tabs_list])));
   check bool "open args still require an object" true
     (Result.is_error (Hooks.before_call hooks (`Assoc ["command",`Assoc [
       "verb",`String "page.read";"args",`List []]])));
@@ -62,6 +64,13 @@ let scenario () = Eio_main.run (fun env ->
     registered ();
     let anonymous=Tool.invoke ~owner ~principal:Context.Anonymous (arguments hover) in
     check (option bool) "direct model call cannot impersonate host" (Some true) anonymous.is_error;
+    let unnamed_tab=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester")
+      (`Assoc ["lane",`String "live";"command",B.verb_json (B.Page_act (B.Action.Open_tab "https://example.org/"))]) in
+    check (option bool) "explicit live open-tab must name its observed client" (Some true) unnamed_tab.is_error;
+    let unsupported=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester")
+      (`Assoc ["lane",`String "live";"clientId",`String (B.client_id_to_string client_id);
+        "requiredActions",`List [`String "touch"];"command",B.verb_json B.Tabs_list]) in
+    check (option bool) "explicit client also checks required capabilities before dispatch" (Some true) unsupported.is_error;
     let pending=Eio.Fiber.fork_promise ~sw (fun () ->
       Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") (arguments hover)) in
     let issued=match Eio.Promise.await_exn poll with

@@ -124,7 +124,10 @@ let current_controller ~config =
            | Some `Null -> Ok None
            | _ -> Error "worker controller observation is malformed")
        | _ -> Error "worker controller observation is unavailable")
-  | Ok _ | Error _ -> Error "worker controller observation failed"
+  | Ok result -> Error (Agent_core.Mcp.text_of_tool_result result)
+  | Error (Lane_addon_runtime.Unavailable message | Lane_addon_runtime.Outcome_unknown message
+      | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message
+        | Activity_disabled message | Activity_unobserved message)) -> Error message
 
 let list_json ~config =
   match Play_invite.list ~base_path:config.Workspace.base_path ~now:(Time_compat.now ()) with

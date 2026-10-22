@@ -312,6 +312,44 @@ let test_a_failed_installation_is_read_as_unready () = with_fixture (fun env _ c
     ((unwrap (Runtime.tool_export_reading ~config
       ~access:Lane_addon_sources.Unauthenticated ~reserved:[])).unready = []))
 
+(* A failed DOS installation may still hold the controller in its state, so a
+   release is not reported as done, and a shared call names the installation. *)
+let test_a_failed_dos_installation_is_named_and_not_released () = with_fixture (fun env _ config dir _ ->
+  let clock = Eio.Stdenv.clock env in
+  let pass = Machine_controller_contract.(dos_tool_name Dos_pass) in
+  let id = attach_exporting config dir "start-error" [pass] in
+  await_phase clock config id "failed";
+  let unready = match (unwrap (Runtime.tool_export_reading ~config
+      ~access:Lane_addon_sources.Unauthenticated ~reserved:[])).unready with
+    | [unready] -> unready
+    | [] | _ :: _ :: _ -> fail "exactly the failed installation must be unready" in
+  (match Machine_addon_host.call_shared ~principal:(Lane_addon_call_context.Host_actor "operator")
+      ~config ~name:pass ~arguments:(`Assoc []) with
+   | Error (Runtime.Unavailable detail) ->
+       check string "a shared call names the failed installation" (Lane_addon_unready.message unready) detail
+   | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) ->
+       fail "a shared call to a failed installation must be unavailable");
+  let events = Machine_addon_host.dos_event_batch ~author:"operator" in
+  let released = Fun.protect ~finally:(fun () -> Machine_addon_events.ready events) (fun () ->
+    Machine_addon_host.release_shared_controller ~events ~config ~holder:"seat" ~by:"operator"
+      ~reason:Machine_controller_contract.No_credential) in
+  Machine_addon_events.drain ();
+  (match released with
+   | Error (Runtime.Unavailable detail) ->
+       check string "the release names the failed installation" (Lane_addon_unready.message unready) detail
+   | Ok None | Ok (Some _) -> fail "a failed DOS installation must not report a released controller"
+   | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) ->
+       fail "a release refused before any call is unavailable");
+  detach config id;
+  await_phase clock config id "detached";
+  let events = Machine_addon_host.dos_event_batch ~author:"operator" in
+  let released = Fun.protect ~finally:(fun () -> Machine_addon_events.ready events) (fun () ->
+    Machine_addon_host.release_shared_controller ~events ~config ~holder:"seat" ~by:"operator"
+      ~reason:Machine_controller_contract.No_credential) in
+  Machine_addon_events.drain ();
+  check bool "with no installation there is nothing to release" true
+    (match released with Ok None -> true | Ok (Some _) | Error _ -> false))
+
 (* A Detach that arrives while the start is still running must wait for the
    cleanup the start's failure leaves behind. The start's state turns Failed
    while its worker is still being torn down, and the Detach, woken at that
@@ -2064,6 +2102,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "startup and cleanup failures stay local" `Quick test_start_and_cleanup_failures_remain_optional;
   test_case "a failed installation is read as unready with its failure" `Quick
     test_a_failed_installation_is_read_as_unready;
+  test_case "a failed DOS installation is named and not released" `Quick
+    test_a_failed_dos_installation_is_named_and_not_released;
   test_case "a cleanup that is cut short can run again" `Quick test_a_cleanup_that_is_cut_short_can_run_again;
   test_case "Detach waits for a start that fails under it" `Quick test_detach_waits_for_a_start_that_fails_under_it;
   test_case "evidence remains optional and durable across detach" `Quick test_evidence_is_optional_retained_and_delivery_is_only_acceptance;

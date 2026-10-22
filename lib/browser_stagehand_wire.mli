@@ -109,6 +109,7 @@ type call =
   | Page_screenshot of { page_id : string }
   | Page_evaluate of { page_id : string; expression : string }
   | Page_hover of { page_id : string; x : float; y : float }
+  | Page_set_viewport_size of { page_id : string; width : int; height : int }
   | Page_click of { page_id : string; x : float; y : float; button : Browser_lane.Pointer.button }
   | Page_double_click of { page_id : string; x : float; y : float }
   | Page_type of { page_id : string; text : string }

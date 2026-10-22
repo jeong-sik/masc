@@ -847,6 +847,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | Trusted_drag -> interact (Drag {from=point;to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0})
       | Trusted_double_click -> interact (Double_click_at {point;viewport})
       | Trusted_button_click -> interact (Click_at {point;viewport;button=Pointer.Secondary})
+      | Viewport_resize -> interact (Set_viewport (Fit {width=800;height=600}))
       | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
       | Browser_zoom -> interact (Set_zoom {factor=1.5})
       | Tab_activation -> interact Activate_tab
@@ -868,7 +869,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | "browsingContext.create" -> Ok (obj ["context",`String "created"])
       | "browsingContext.navigate" -> Ok `Null
       | "browsingContext.captureScreenshot" -> Ok (obj ["data",`String "png"])
-      | "input.performActions" | "input.releaseActions" -> Ok `Null
+      | "input.performActions" | "input.releaseActions" | "browsingContext.setViewport" -> Ok `Null
       | other -> failf "unexpected protocol command: %s" other in
     let peer = peer_of command in
     List.iter (fun capability ->
@@ -896,6 +897,28 @@ let test_peer_serves_what_the_lane_table_says () =
       | Error (Peer.Before_effect detail), true | Error (Peer.Outcome_unknown detail | Peer.Partial_failure {message=detail;_}), _ ->
         failf "the peer did not serve %s (%s), which the lane table says BiDi does" name detail)
       Lane.all_of_live_capability)
+let test_set_viewport_sends_the_size_or_clears_it () =
+  let sent = ref [] in
+  let peer = peer_of (fun method_ args ->
+    match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";"title",`String "fixture";
+        "innerWidth",`Int 800;"innerHeight",`Int 600;"devicePixelRatio",`Float 1.]))
+    | "browsingContext.setViewport" -> sent := args :: !sent; Ok `Null
+    | other -> failf "unexpected protocol command: %s" other) in
+  let dispatch size = Peer.dispatch peer ~verb:Peer.Page_interact
+    (Browser_lane.interaction_args ~tab_id:1 ~expected_url:(Some "https://example.test/") (Browser_lane.Set_viewport size)) in
+  (match dispatch (Browser_lane.Fit {width=800;height=600}) with
+   | Ok receipt ->
+     check string "the receipt names the action" "set_viewport" Yojson.Safe.Util.(receipt |> member "action" |> to_string);
+     check int "the receipt reads the size the page now has" 800 Yojson.Safe.Util.(receipt |> member "innerWidth" |> to_int)
+   | Error _ -> fail "a size inside the bounds was refused");
+  (match dispatch Browser_lane.Browser_default with Ok _ -> () | Error _ -> fail "restoring the browser's size was refused");
+  match List.rev_map (fun args -> Yojson.Safe.Util.member "viewport" args) !sent with
+  | [size; cleared] ->
+    check string "the size reaches BiDi in CSS pixels" {|{"width":800,"height":600}|} (Yojson.Safe.to_string size);
+    check bool "no size clears the override with null" true (cleared = `Null)
+  | other -> failf "expected two setViewport commands, saw %d" (List.length other)
 (* Firefox's error codes are read once where the answer arrives. The two
    this host acts on are their own cases; any other is kept as Firefox wrote
    it, and every code is written back as it was read. *)
@@ -1038,7 +1061,8 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "close frame ends a pending command" `Quick test_peer_close_frame_ends_a_pending_command;
     test_case "malformed JSON ends a pending command" `Quick test_malformed_json_ends_a_pending_command;
     test_case "invalid websocket frame reaches the error path" `Quick test_invalid_websocket_frame_ends_a_pending_command];
-  "effect",[test_case "open tab preserves existing context" `Quick test_open_tab_preserves_existing_context;
+  "effect",[test_case "set_viewport sends the size, or null to restore it" `Quick test_set_viewport_sends_the_size_or_clears_it;
+    test_case "open tab preserves existing context" `Quick test_open_tab_preserves_existing_context;
     test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
     test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;
     test_case "semantic clicks use trusted native input" `Quick test_semantic_click_uses_native_input;

@@ -4,7 +4,7 @@ type request = { route : Browser_selection.preference; tab_id : int;
 let ( let* ) = Result.bind
 let parse = function
   | `Assoc fields ->
-    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"] in
+    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"; "width"; "height"] in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in
@@ -53,6 +53,9 @@ let parse = function
       let keys = match List.assoc_opt "action" fields with
         | Some (`String "click_at") -> keys
         | _ -> "button" :: keys in
+      let keys = match List.assoc_opt "action" fields with
+        | Some (`String "set_viewport") -> keys
+        | _ -> "width" :: "height" :: keys in
       if List.exists (fun key -> List.mem_assoc key fields) keys
       then Error "arguments do not match the selected interaction action" else Ok () in
     let required key = match List.assoc_opt key fields with
@@ -76,6 +79,21 @@ let parse = function
         | Some _ -> Error "durationMs must be a nonnegative JavaScript-safe integer" in
       Ok (via,duration_ms) in
     let* action = match List.assoc_opt "action" fields with
+      | Some (`String "set_viewport") ->
+        let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"point";"from";"to";"viewport"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "set_viewport requires expectedUrl" in
+        let side key =
+          let* value = integer key in
+          if value >= Browser_lane.viewport_side_min_px && value <= Browser_lane.viewport_side_max_px then Ok value
+          else Error (Printf.sprintf "%s must be between %d and %d" key
+            Browser_lane.viewport_side_min_px Browser_lane.viewport_side_max_px) in
+        (match List.mem_assoc "width" fields, List.mem_assoc "height" fields with
+         | false, false -> Ok (Browser_lane.Set_viewport Browser_lane.Browser_default)
+         | true, true ->
+           let* width = side "width" in
+           let* height = side "height" in
+           Ok (Browser_lane.Set_viewport (Browser_lane.Fit {width;height}))
+         | true, false | false, true -> Error "set_viewport takes width and height together, or neither to restore the browser's size")
       | Some (`String "set_zoom") ->
         let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "set_zoom requires expectedUrl" in
@@ -195,7 +213,7 @@ let parse = function
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           let* via,duration_ms = drag_options () in
           Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
-      | _ -> Error "action must be set_zoom, activate_tab, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
+      | _ -> Error "action must be set_zoom, set_viewport, activate_tab, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
     Ok { route = base.route; tab_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
@@ -450,6 +468,16 @@ if (args.action === 'type_text') {
 return {url:location.href,title:document.title,scrollX,scrollY};
 |js}
 
+(* The guard of an action that acts on the tab and no pointer or focus. *)
+let url_guard_script = {js|
+const args = arguments[0];
+if (args.expectedUrl !== location.href) throw new Error('page_url_changed');
+return {url:location.href,title:document.title,scrollX,scrollY};
+|js}
+
+(* What a viewport resize reports once the browser has taken it. *)
+let viewport_receipt_script = "return {url:location.href,title:document.title,innerWidth,innerHeight,devicePixelRatio};"
+
 (* What a pointer action reports once the browser has taken it. *)
 let pointer_receipt_script = "return {url:location.href,title:document.title,scrollX,scrollY};"
 
@@ -566,7 +594,7 @@ let resolve_pointer_action action = function
      | Browser_lane.Drag_to {via;duration_ms;_} -> let* from = point "from" in let* to_ = point "to" in
        Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
      | Browser_lane.Activate_tab | Browser_lane.Fill _
-     | Browser_lane.Set_zoom _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
+     | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
      | Browser_lane.Fill_node _ -> Error "semantic pointer action required")

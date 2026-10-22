@@ -284,7 +284,7 @@ let page t ~began ~actor verb =
             | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages
             | Wire.Context_active_page | Wire.Context_new_page
             | Wire.Page_close _ | Wire.Page_reload _ | Wire.Page_go_back _ | Wire.Page_go_forward _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _
-            | Wire.Page_hover _ | Wire.Page_click _ | Wire.Page_double_click _ | Wire.Page_scroll _
+            | Wire.Page_hover _ | Wire.Page_set_viewport_size _ | Wire.Page_click _ | Wire.Page_double_click _ | Wire.Page_scroll _
             | Wire.Page_drag_and_drop _ -> false in
           if keyboard then keyboard_pending := true;
           let result = t.call opened.session request in

@@ -159,6 +159,7 @@ type call =
   | Page_screenshot of { page_id : string }
   | Page_evaluate of { page_id : string; expression : string }
   | Page_hover of { page_id : string; x : float; y : float }
+  | Page_set_viewport_size of { page_id : string; width : int; height : int }
   | Page_click of { page_id : string; x : float; y : float; button : Browser_lane.Pointer.button }
   | Page_double_click of { page_id : string; x : float; y : float }
   | Page_type of { page_id : string; text : string }
@@ -182,6 +183,7 @@ let method_name = function
   | Page_screenshot _ -> "page.screenshot"
   | Page_evaluate _ -> "page.evaluate"
   | Page_hover _ -> "page.hover"
+  | Page_set_viewport_size _ -> "page.set_viewport_size"
   | Page_click _ -> "page.click"
   | Page_double_click _ -> "page.click"
   | Page_type _ -> "page.type"
@@ -204,7 +206,7 @@ let sentence_timeout_of_call = function
   | Act { timeout; _ } | Observe { timeout; _ } | Extract { timeout; _ } -> Some timeout
   | Close | Context_pages | Context_active_page | Context_new_page
   | Page_close _ | Page_reload _ | Page_go_back _ | Page_go_forward _ | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
-  | Page_hover _ | Page_scroll _ | Page_drag_and_drop _ | Page_double_click _ | Page_type _ | Page_key_press _ -> None
+  | Page_hover _ | Page_set_viewport_size _ | Page_scroll _ | Page_drag_and_drop _ | Page_double_click _ | Page_type _ | Page_key_press _ -> None
 ;;
 
 let call_params = function
@@ -220,6 +222,8 @@ let call_params = function
   | Page_screenshot { page_id } -> `Assoc (page page_id)
   | Page_evaluate { page_id; expression } -> `Assoc (page page_id @ [ "expression", `String expression ])
   | Page_hover { page_id; x; y } -> `Assoc (page page_id @ [ "x", `Float x; "y", `Float y ])
+  | Page_set_viewport_size { page_id; width; height } ->
+    `Assoc (page page_id @ [ "width", `Int width; "height", `Int height ])
   | Page_click { page_id; x; y; button } ->
     `Assoc (page page_id @ [ "x", `Float x; "y", `Float y ] @ click_button_options button)
   | Page_double_click { page_id; x; y } ->
@@ -240,7 +244,7 @@ let uses_model = function
   | Act _ | Observe _ | Extract _ -> true
   | Close | Context_pages | Context_active_page | Context_new_page
   | Page_close _ | Page_reload _ | Page_go_back _ | Page_go_forward _ | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
-  | Page_hover _ | Page_scroll _ | Page_drag_and_drop _ | Page_double_click _ | Page_type _ | Page_key_press _ -> false
+  | Page_hover _ | Page_set_viewport_size _ | Page_scroll _ | Page_drag_and_drop _ | Page_double_click _ | Page_type _ | Page_key_press _ -> false
 ;;
 
 let jsonrpc = "jsonrpc", `String "2.0"

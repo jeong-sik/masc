@@ -34,6 +34,8 @@ let available ?action ?mode tool = Available (invoke ?action ?mode tool)
 let conditional ?action ?mode tool constraints =
   Conditional {invocation=invoke ?action ?mode tool;constraints}
 let missing = Unsupported "No public browser tool implements this operation."
+let viewport_bounds = Printf.sprintf "width and height are CSS pixels between %d and %d, given together"
+  Browser_lane.viewport_side_min_px Browser_lane.viewport_side_max_px
 let observed = "Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome."
 let target = "Use one freshly observed selector or documentId/nodeId; the target must be visible and unobstructed."
 let geometry = "Use the current documentId and viewport geometry; stale URL/document/viewport is refused."
@@ -158,7 +160,17 @@ let support backend operation = match backend with
       | Owned_chromium -> conditional ~action:"act" Instruct
           [observed;"Model-mediated sentence action; not a substitute for guaranteed native keyboard, double-click or zoom support. observe/extract are separate read actions."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Safari_unavailable -> missing)
-    | Pointer_down | Pointer_up | Resize_viewport | Touch
+    | Resize_viewport -> (match backend with
+      | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"set_viewport" Interact
+          [observed;"Requires exact clientId/tabId and expectedUrl; " ^ viewport_bounds ^ ". With neither, the browser's own size returns.";
+           "The size is an override on that tab until it is restored; read the screenshot or scene again afterward. This is the page viewport, not the browser window."]
+      | Owned_chromium -> conditional ~action:"set_viewport" Interact
+          [observed;"Requires expectedUrl; " ^ viewport_bounds ^ ". Stagehand has no call that restores the browser's own size, so this session keeps the override until it closes.";
+           "Read the screenshot or scene again afterward. This is the page viewport, not the browser window."]
+      | Owned_gecko -> Unsupported "The owned Firefox driver sets no viewport; use a live BiDi connection or Stagehand."
+      | Connected Browser_lane.Web_extension -> Unsupported "WebExtension cannot set the page viewport; the selected tab must not be silently moved to another browser."
+      | Safari_unavailable -> missing)
+    | Pointer_down | Pointer_up | Touch
     | Read_clipboard | Write_clipboard | Read_network | Intercept_network | Read_console
     | Read_storage | Write_storage -> missing
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations

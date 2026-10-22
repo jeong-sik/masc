@@ -219,6 +219,36 @@ let test_click_button_wire_numbers () =
   check (list int) "primary presses and releases button 0" [0;0] (numbers Browser_lane.Pointer.Primary);
   check (list int) "middle presses and releases button 1" [1;1] (numbers Browser_lane.Pointer.Middle);
   check (list int) "secondary presses and releases button 2" [2;2] (numbers Browser_lane.Pointer.Secondary)
+let test_set_viewport () =
+  let url = ["expectedUrl",`String "https://example.org"] in
+  let size_of extra = match (parsed (fields "set_viewport" @ url @ extra)).action with
+    | Browser_lane.Set_viewport size -> size
+    | _ -> fail "set_viewport parsed as another action" in
+  check bool "width and height together fit the viewport" true
+    (size_of ["width",`Int 800;"height",`Int 600] = Browser_lane.Fit {width=800;height=600});
+  check bool "neither restores the browser's size" true (size_of [] = Browser_lane.Browser_default);
+  let min = Browser_lane.viewport_side_min_px and max = Browser_lane.viewport_side_max_px in
+  check bool "both edges of the bounds are accepted" true
+    (size_of ["width",`Int min;"height",`Int max] = Browser_lane.Fit {width=min;height=max});
+  List.iter (fun (label,extra) ->
+    check bool label true (Result.is_error (Interaction.parse (`Assoc (fields "set_viewport" @ url @ extra)))))
+    ["width alone",["width",`Int 800];"height alone",["height",`Int 600];
+     "width under the bound",["width",`Int (min-1);"height",`Int 600];
+     "height over the bound",["width",`Int 800;"height",`Int (max+1)];
+     "a float width",["width",`Float 800.5;"height",`Int 600];
+     "a string height",["width",`Int 800;"height",`String "600"];
+     "a zero width",["width",`Int 0;"height",`Int 600]];
+  check bool "the observed URL is required" true
+    (Result.is_error (Interaction.parse (`Assoc (fields "set_viewport"))));
+  check bool "width is refused on an action that has no size" true
+    (Result.is_error (Interaction.parse (`Assoc (fields "scroll" @ ["x",`Int 0;"y",`Int 10;"width",`Int 800]))));
+  let request = parsed (fields "set_viewport" @ url @ ["width",`Int 800;"height",`Int 600]) in
+  let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
+  check bool "the size survives the wire round trip" true
+    ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
+  check bool "the lane asks for the viewport capability" true
+    (Browser_lane.live_capability (Browser_lane.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;
+      action=request.action}) = Some Browser_lane.Viewport_resize)
 let () = run "browser interaction" ["typed boundary", [
   test_case "browser zoom boundary" `Quick test_browser_zoom_boundary;
   test_case "native keyboard and double click parser" `Quick test_native_keyboard_parser;
@@ -226,6 +256,7 @@ let () = run "browser interaction" ["typed boundary", [
   test_case "drag path and timing contract" `Quick test_drag_options;
   test_case "explicit live tab activation" `Quick test_activate_tab;
   test_case "screenshot pointer actions" `Quick test_pointer_actions;
+  test_case "set_viewport takes both sides in bounds or neither" `Quick test_set_viewport;
   test_case "click button parses and round trips" `Quick test_click_button;
   test_case "click button picks the live capability" `Quick test_click_button_capability;
   test_case "click button uses the WebDriver button numbers" `Quick test_click_button_wire_numbers;

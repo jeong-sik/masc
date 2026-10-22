@@ -1,6 +1,6 @@
 name = "masc_browser_interact"
 description = """
-Click, fill, scroll, hover, drag, follow a link, activate a browser tab, or set actual browser zoom. set_zoom requires an exact WebExtension client/tab, expectedUrl and factor 0.3–5. It measures the resulting zoomFactor and zoomScope; Firefox per-origin zoom can affect same-site tabs. Read scene/screenshot geometry again afterward. hover/drag_to accept observed elements (selector or scene reference) without guessing screenshot coordinates. They resolve visible, unobstructed targets in the current viewport; scroll and re-read offscreen targets first. hover_at (no click) and drag move a trusted pointer. automation, Stagehand Chromium and live webdriver_bidi serve these actions; Stagehand supports custom drag paths but requires durationMs=0. activate_tab is live-only, on a web_extension connection (>=0.6.0): it verifies active=true without window focus or navigation. A live request its connection cannot serve is refused before input as live_transport_unsupported; servingClients are the connected browsers that can. List that connection's tabs first: tab IDs are per connection.
+Click, fill, scroll, hover, drag, follow a link, activate a browser tab, set the page viewport size, or set actual browser zoom. set_viewport takes width and height together in CSS pixels (100–4096) on a live BiDi connection or Stagehand; on a live BiDi connection, giving neither restores the browser's own size. Read scene/screenshot geometry again afterward. set_zoom requires an exact WebExtension client/tab, expectedUrl and factor 0.3–5. It measures the resulting zoomFactor and zoomScope; Firefox per-origin zoom can affect same-site tabs. Read scene/screenshot geometry again afterward. hover/drag_to accept observed elements (selector or scene reference) without guessing screenshot coordinates. They resolve visible, unobstructed targets in the current viewport; scroll and re-read offscreen targets first. hover_at (no click) and drag move a trusted pointer. automation, Stagehand Chromium and live webdriver_bidi serve these actions; Stagehand supports custom drag paths but requires durationMs=0. activate_tab is live-only, on a web_extension connection (>=0.6.0): it verifies active=true without window focus or navigation. A live request its connection cannot serve is refused before input as live_transport_unsupported; servingClients are the connected browsers that can. List that connection's tabs first: tab IDs are per connection.
 The tab is explicit; no arbitrary JavaScript. drag/drag_to issue trusted pointer input; a receipt does not prove the application accepted a drop. HTML5 DataTransfer/drop is not guaranteed by Firefox and has no synthetic fallback. Read again after success or failure before retrying: page handlers can change external state. click/fill require one visible inspected element. On automation, Stagehand Chromium and live webdriver_bidi, click resolves an unobstructed selector or scene node and sends native pointerDown/pointerUp, supporting trusted pointerdown/mousedown menus; disabled and aria-disabled targets are refused. Click captures the current URL when expectedUrl is omitted, then checks it before input. WebExtension retains DOM click. fill targets text inputs/textarea and sends input/change without Enter or submit. scroll_at scrolls the pane under the point. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
@@ -25,13 +25,13 @@ minimum = 0
 [[params]]
 name = "expectedUrl"
 type = "string"
-description = "Observed URL guard; required for explicit pointer actions, hover/drag_to, follow_link and activate_tab. Required also for double_click/type_text/press_key/set_zoom. Semantic click may omit it; the native backend captures and guards the resolved page URL."
+description = "Observed URL guard; required for explicit pointer actions, hover/drag_to, follow_link and activate_tab. Required also for double_click/type_text/press_key/set_zoom/set_viewport. Semantic click may omit it; the native backend captures and guards the resolved page URL."
 
 [[params]]
 name = "action"
 type = "string"
 required = true
-enum = ["set_zoom", "activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
+enum = ["set_zoom", "set_viewport", "activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
 
 [[params]]
 name = "selector"
@@ -249,6 +249,20 @@ name = "modifiers"
 type = "array"
 items = { type = "string", enum = ["Control", "Meta", "Alt", "Shift"] }
 description = "press_key: explicit distinct modifiers, e.g. [Meta] with key a selects all on macOS; [Control] on other systems. Native keys and double clicks require Stagehand, automation, or live webdriver_bidi. WebExtension does not serve native keyboard actions. set_zoom is a separate WebExtension-only action."
+
+[[params]]
+name = "width"
+type = "integer"
+minimum = 100
+maximum = 4096
+description = "set_viewport only: viewport width in CSS pixels, given together with height. Omit both on a live BiDi connection to restore the browser's own size."
+
+[[params]]
+name = "height"
+type = "integer"
+minimum = 100
+maximum = 4096
+description = "set_viewport only: viewport height in CSS pixels, given together with width."
 
 [[params]]
 name = "factor"

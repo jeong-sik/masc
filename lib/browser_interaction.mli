@@ -26,3 +26,10 @@ val pointer_target_script : string
 val resolve_pointer_action : Browser_lane.interaction -> Yojson.Safe.t ->
   (Browser_lane.interaction, string) result
 (** Decode one pre-input semantic resolution into native pointer input. *)
+
+(** Read-only URL guard for an action that moves no pointer and no focus. *)
+val url_guard_script : string
+
+(** What a viewport resize reports once the browser has taken it: url, title,
+    inner size and device pixel ratio. *)
+val viewport_receipt_script : string

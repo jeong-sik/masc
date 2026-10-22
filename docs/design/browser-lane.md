@@ -78,6 +78,7 @@ checking rendered application state, and gathering evidence across tabs.
 | `hover_at` | normalized `point`, captured `viewport`, and `expectedUrl`; moves the trusted pointer without clicking | live BiDi or automation |
 | `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y`; `click_at` also takes `button` (`primary` by default, `middle`, `secondary`) | live or automation; a `middle` or `secondary` click needs live BiDi, automation or Stagehand |
 | `drag` | normalized `from`/`to` and captured `viewport`; trusted pointer press, move and release | live BiDi or automation |
+| `set_viewport` | `expectedUrl`, and `width`/`height` in CSS pixels (100 to 4096) given together; live BiDi with neither restores the browser's own size | live BiDi or Stagehand |
 | `activate_tab` | the selected live `clientId`/`tabId` | live WebExtension only |
 
 `BrowserRead mode=scene` supplies document-scoped node references and visible
@@ -111,6 +112,7 @@ build their rejection from it.
 | `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes |
 | `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer |
 | `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | no | yes |
+| `viewport_resize` | `set_viewport` | no | yes |
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel |
 | `trusted_hover` | `hover`, `hover_at` | no | yes |
 | `trusted_drag` | `drag_to`, `drag` | no | yes |

@@ -29,8 +29,17 @@ type node_ref = { document_id : string; node_id : string }
 type scene_view = Content | Regions
 type pointer_target = Selector of string | Scene_node of node_ref
 
+(* A CSS-pixel size the browser's viewport is forced to, or the browser's own size again. *)
+type viewport_size = Fit of { width : int; height : int } | Browser_default
+
+(* The bounds of a requested viewport side, in CSS pixels. Firefox 158 accepts 0 and 100000 without
+   an error (probed 2026-10-22), so these are this lane's policy, not the browser's limit. *)
+let viewport_side_min_px = 100
+let viewport_side_max_px = 4096
+
 type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
   | Set_zoom of { factor : float }
+  | Set_viewport of viewport_size
   | Double_click of pointer_target
   | Double_click_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Type_text of { document_id : string; text : string }
@@ -106,6 +115,7 @@ let verb_to_string = function
 let interaction_verb = function
   | Activate_tab -> "activate_tab"
   | Set_zoom _ -> "set_zoom"
+  | Set_viewport _ -> "set_viewport"
   | Double_click _ -> "double_click"
   | Double_click_at _ -> "double_click_at"
   | Type_text _ -> "type_text"
@@ -134,6 +144,8 @@ let interaction_args ~tab_id ~expected_url action =
   let fields = match action with
     | Activate_tab -> [verb]
     | Set_zoom {factor} -> [verb;"factor",`Float factor]
+    | Set_viewport Browser_default -> [verb]
+    | Set_viewport (Fit {width;height}) -> [verb;"width",`Int width;"height",`Int height]
     | Double_click target -> verb :: target_fields target
     | Double_click_at {point;viewport} -> [verb;
         "point",Pointer.point_to_json point;"viewport",Pointer.viewport_to_json viewport]
@@ -265,6 +277,7 @@ type live_capability =
   | Trusted_button_click
   | Trusted_keyboard
   | Browser_zoom
+  | Viewport_resize
   | Tab_activation
   | Tab_creation
 [@@deriving enumerate]
@@ -285,6 +298,7 @@ let live_capability_to_wire = function
   | Trusted_button_click -> "trusted_button_click"
   | Trusted_keyboard -> "trusted_keyboard"
   | Browser_zoom -> "browser_zoom"
+  | Viewport_resize -> "viewport_resize"
   | Tab_activation -> "tab_activation"
   | Tab_creation -> "tab_creation"
 ;;
@@ -298,6 +312,7 @@ let live_capability_of_wire raw =
 let live_capability_of_interaction = function
   | Activate_tab -> Tab_activation
   | Set_zoom _ -> Browser_zoom
+  | Set_viewport _ -> Viewport_resize
   | Double_click _ | Double_click_at _ -> Trusted_double_click
   | Type_text _ | Press_key _ -> Trusted_keyboard
   | Click _ | Fill _ | Scroll _ | Follow_link _ | Click_node _ | Fill_node _ -> Dom_interaction
@@ -436,9 +451,9 @@ let live_transport_serves transport capability =
       | Scene_read | Dom_interaction | Point_click | Point_scroll ) ) -> true
   | Web_extension, (Tab_activation | Browser_zoom) -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click
-                    | Trusted_keyboard | Tab_creation) -> false
+                    | Trusted_keyboard | Tab_creation | Viewport_resize) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click
-                    | Trusted_keyboard | Tab_creation) -> true
+                    | Trusted_keyboard | Tab_creation | Viewport_resize) -> true
   | Webdriver_bidi, (Tab_activation | Browser_zoom) -> false
 ;;
 

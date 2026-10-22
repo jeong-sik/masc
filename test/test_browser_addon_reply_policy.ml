@@ -62,9 +62,7 @@ let policy_at_the_actual_tool_boundary () =
              fail (label ^ ": expected the original typed answer or timeout"));
         if not answered then
           check bool (label ^ ": timeout keeps the original effect uncertainty") true
-            (snd (Lane_addon_tool_result.failure result) =
-              (if B.verb_is_read verb then Tool_result.Proven_pre_effect
-               else Tool_result.Effect_outcome_unknown))
+            (snd (Lane_addon_tool_result.failure result) = Tool_result.Effect_outcome_unknown)
       in
       let open_session = B.Session_open {headless=Some true} in
       let goto = B.Page_goto {url="https://example.test/";tab_id=Some 7} in

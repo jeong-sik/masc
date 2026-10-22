@@ -5,7 +5,8 @@ val images :
   mime_type:string option -> Masc_tui_mcp.resource_content list ->
   (int * Masc_tui_image_preview.preview) list
 (** Original one-based content-part numbers and image candidates in response
-    order. HTML text parts expose inert embedded base64 images and explicit
+    order. HTML text parts expose inert embedded base64 images, parsed inline
+    SVG roots, and explicit
     unavailability for external/unsupported images. Several images can belong
     to the same original part. Does not decode bytes, read paths, fetch URIs
     or run converters. *)

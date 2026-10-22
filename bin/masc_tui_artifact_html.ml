@@ -1,6 +1,9 @@
 module Html = Markup_document
 
-type image_source = Embedded_base64 of string | Unavailable of string
+type image_source =
+  | Embedded_base64 of string
+  | Embedded_svg of string
+  | Unavailable of string
 type image = { label : string; source : image_source }
 type cell = { text : string; heading : bool }
 type block =
@@ -16,7 +19,7 @@ type t = { blocks : block list; images : image list }
 
 (* Parse element names once; all reading paths share the same block/inline
    boundary, including text extracted from table cells and preformatted nodes. *)
-type element = Suppressed | Inline | Link | Break | Picture | Graphic
+type element = Suppressed | Inline | Link | Break | Picture | Svg | Graphic
   | Heading_element of int | Preformatted_element | List_element | Table_element | Block
 
 let element = function
@@ -25,7 +28,8 @@ let element = function
   | "a" -> Link
   | "br" -> Break
   | "img" -> Picture
-  | "svg" | "canvas" -> Graphic
+  | "svg" -> Svg
+  | "canvas" -> Graphic
   | "h1" -> Heading_element 1 | "h2" -> Heading_element 2
   | "h3" -> Heading_element 3 | "h4" -> Heading_element 4
   | "h5" -> Heading_element 5 | "h6" -> Heading_element 6
@@ -37,8 +41,9 @@ let element = function
   | "span" | "strong" | "sub" | "sup" | "time" | "u" | "var" | "wbr" -> Inline
   | _ -> Block
 
-let hidden attributes = List.mem_assoc "hidden" attributes
-  || List.assoc_opt "aria-hidden" attributes = Some "true"
+let attribute key attributes = List.assoc_opt ("", key) attributes
+let hidden attributes = List.mem_assoc ("", "hidden") attributes
+  || attribute "aria-hidden" attributes = Some "true"
 
 let rec text = function
   | Html.Text value -> value
@@ -47,11 +52,11 @@ let rec text = function
     else match element name with
       | Suppressed -> ""
       | Break -> "\n"
-      | Picture -> Option.value (List.assoc_opt "alt" attributes) ~default:"Image"
+      | Picture -> Option.value (attribute "alt" attributes) ~default:"Image"
       | Link -> String.concat "" (List.map text children)
-        ^ (match List.assoc_opt "href" attributes with Some href -> " (" ^ href ^ ")" | None -> "")
+        ^ (match attribute "href" attributes with Some href -> " (" ^ href ^ ")" | None -> "")
       | Inline -> String.concat "" (List.map text children)
-      | Graphic | Heading_element _ | Preformatted_element | List_element
+      | Svg | Graphic | Heading_element _ | Preformatted_element | List_element
       | Table_element | Block -> "\n" ^ String.concat "" (List.map text children) ^ "\n"
 
 let words value =
@@ -64,10 +69,10 @@ let words value =
   Buffer.contents out
 
 let image attributes =
-  let label = match List.assoc_opt "alt" attributes with
+  let label = match attribute "alt" attributes with
     | Some value when String.trim value <> "" -> words value
     | Some _ | None -> "Image" in
-  let source = match List.assoc_opt "src" attributes with
+  let source = match attribute "src" attributes with
     | None -> Unavailable "image has no source"
     | Some raw ->
       let uri = String.trim raw in
@@ -85,6 +90,11 @@ let image attributes =
           | _ -> Unavailable "only base64 image data is available in the terminal")
        | None -> Unavailable "external image; use the original web report") in
   {label;source}
+
+let svg_image node =
+  {label="SVG";source=(match Html.to_xml node with
+    | Ok source -> Embedded_svg source
+    | Error detail -> Unavailable ("SVG serialization failed: " ^ detail))}
 
 let rec table_parts nodes =
   List.concat_map (function
@@ -119,9 +129,9 @@ let rec flow depth nodes =
         | Link ->
           List.iter (walk depth) children;
           Option.iter (fun href -> Buffer.add_string buffer (" (" ^ href ^ ")"))
-            (List.assoc_opt "href" attributes)
+            (attribute "href" attributes)
         | Break -> Buffer.add_char buffer ' '
-        | (Picture | Graphic | Heading_element _ | Preformatted_element
+        | (Picture | Svg | Graphic | Heading_element _ | Preformatted_element
           | List_element | Table_element | Block) as kind ->
           flush ();
           let nested = match kind with
@@ -129,6 +139,7 @@ let rec flow depth nodes =
             | Preformatted_element ->
               [Preformatted (String.concat "" (List.map text children))]
             | Picture -> [Image (image attributes)]
+            | Svg -> [Image (svg_image node)]
             | Graphic -> [Image {label="Graphic";
                 source=Unavailable "inline graphic markup; use source or the web report"}]
             | List_element ->
@@ -163,10 +174,11 @@ let rec flow depth nodes =
 let rec collect_images nodes =
   List.concat_map (function
     | Html.Text _ -> []
-    | Element {name;attributes;children;_} ->
+    | (Element {name;attributes;children;_} as node) ->
       if element name = Suppressed || hidden attributes then []
       else match element name with
         | Picture -> [image attributes]
+        | Svg -> [svg_image node]
         | Graphic -> [{label="Graphic";
             source=Unavailable "inline graphic markup; use source or the web report"}]
         | Suppressed -> []

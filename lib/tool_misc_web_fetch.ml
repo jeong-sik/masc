@@ -281,7 +281,7 @@ let rec render_markdown_node = function
     (match element.name with
      | "a" ->
        let label = Tool_misc_web_search.clean_search_text content in
-       (match List.assoc_opt "href" element.attributes with
+       (match List.assoc_opt ("", "href") element.attributes with
         | Some href when valid_url href && not (String.equal label "") ->
           Printf.sprintf "[%s](%s)" label href
         | _ -> label)

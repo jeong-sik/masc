@@ -264,6 +264,7 @@ let completed_media_and_tools entry () =
   let accum = Keeper_stream_tool_accum.create () in
   let bridge = ref (Keeper_chat_agent_core_stream_bridge.empty_state ()) in
   let media = ref [] in
+  let protocol_errors = ref [] in
   let on_event event =
     Keeper_stream_tool_accum.on_event accum event;
     let translated = Keeper_chat_agent_core_stream_bridge.translate
@@ -274,8 +275,8 @@ let completed_media_and_tools entry () =
     List.iter (function
       | Keeper_chat_events.Agent_core_media_delta { media_ref; _ } ->
         media := media_ref :: !media
-      | Keeper_chat_events.Agent_core_stream_protocol_error _ ->
-        fail "completed response must preserve the real Keeper stream contract"
+      | Keeper_chat_events.Agent_core_stream_protocol_error error ->
+        protocol_errors := error :: !protocol_errors
       | _ -> ()) translated.chat_events in
   let collections = ref 0 in
   let hooks = { Agent_core.Hooks.empty with after_turn = Some (function
@@ -321,6 +322,8 @@ let completed_media_and_tools entry () =
     | Ok completed -> completed
     | Error error -> fail (Agent_core.Error.to_string error) in
   check int "one admitted effect executes" 1 !executions;
+  check int "completed response preserves the Keeper stream contract" 0
+    (List.length !protocol_errors);
   check int "both provider responses reach collection" 2 !collections;
   check int "tool loop completes with two provider responses" 2 !replies;
   check string "terminal response survives" answer

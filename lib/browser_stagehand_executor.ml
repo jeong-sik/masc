@@ -449,13 +449,8 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
     pointer ~call ~tab_id ~page_id ~args ~name
       (Wire.Page_hover {page_id;x=viewport_x viewport point;y=viewport_y viewport point})
   | Browser_lane.Click_at { point; viewport; button } ->
-    (match button with
-     | Browser_lane.Pointer.Middle | Browser_lane.Pointer.Secondary ->
-       Error (Browser_lane.Rejected_before_effect
-         "Stagehand cannot click with the middle or secondary button; use automation or a live BiDi connection")
-     | Browser_lane.Pointer.Primary ->
-       pointer ~call ~tab_id ~page_id ~args ~name
-         (Wire.Page_click { page_id; x = viewport_x viewport point; y = viewport_y viewport point }))
+    pointer ~call ~tab_id ~page_id ~args ~name
+      (Wire.Page_click { page_id; x = viewport_x viewport point; y = viewport_y viewport point; button })
   | Browser_lane.Scroll_at { point; viewport; x; y } ->
     pointer ~call ~tab_id ~page_id ~args ~name
       (Wire.Page_scroll

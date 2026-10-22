@@ -22,6 +22,12 @@ let test_native_protocol () =
   let cases = [
     Wire.Page_double_click {page_id="P";x=12.;y=34.}, "page.click",
       {|{"page_id":"P","x":12.0,"y":34.0,"options":{"click_count":2}}|};
+    Wire.Page_click {page_id="P";x=12.;y=34.;button=Browser_lane.Pointer.Primary}, "page.click",
+      {|{"page_id":"P","x":12.0,"y":34.0}|};
+    Wire.Page_click {page_id="P";x=12.;y=34.;button=Browser_lane.Pointer.Middle}, "page.click",
+      {|{"page_id":"P","x":12.0,"y":34.0,"options":{"button":"middle"}}|};
+    Wire.Page_click {page_id="P";x=12.;y=34.;button=Browser_lane.Pointer.Secondary}, "page.click",
+      {|{"page_id":"P","x":12.0,"y":34.0,"options":{"button":"right"}}|};
     Wire.Page_type {page_id="P";text="한글🙂"}, "page.type", {|{"page_id":"P","text":"한글🙂"}|};
     Wire.Page_key_press {page_id="P";key=chord "a" ["Meta";"Shift"]}, "page.key_press",
       {|{"page_id":"P","key":"Meta+Shift+a"}|};

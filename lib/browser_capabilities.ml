@@ -114,7 +114,11 @@ let support backend operation = match backend with
           [observed;geometry;
            "Pass button \"secondary\" (right) or \"middle\". Only click_at takes a button; selector and node targets do not.";
            "Native pointer input at the observed point; a context menu or application behavior must be observed afterward."]
-      | Owned_chromium -> Unsupported "The Stagehand runtime is not known to take a click button."
+      | Owned_chromium -> conditional ~action:"click_at" Interact
+          [observed;geometry;
+           "Pass button \"secondary\" (right) or \"middle\". Only click_at takes a button; selector and node targets do not.";
+           "Stagehand's page.click takes the button as a native Chromium mouse event; no real-Chromium run of it has been recorded yet.";
+           "A context menu or application behavior must be observed afterward."]
       | Connected Browser_lane.Web_extension -> Unsupported
           "WebExtension clicks through the DOM and cannot press the middle or secondary button; the selected tab must not be silently moved to another browser."
       | Safari_unavailable -> missing)

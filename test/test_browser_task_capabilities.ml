@@ -112,8 +112,7 @@ let test_button_click_table () =
     check bool (Cap.operation_name operation ^ " on live BiDi") true
       (reaches (Cap.Connected Lane.Webdriver_bidi) operation);
     check bool (Cap.operation_name operation ^ " on owned Gecko") true (reaches Cap.Owned_gecko operation);
-    check bool (Cap.operation_name operation ^ " is not claimed for Stagehand") false
-      (reaches Cap.Owned_chromium operation);
+    check bool (Cap.operation_name operation ^ " on Stagehand") true (reaches Cap.Owned_chromium operation);
     check bool (Cap.operation_name operation ^ " is not claimed for the extension") false
       (reaches (Cap.Connected Lane.Web_extension) operation);
     check bool (Cap.operation_name operation ^ " is not claimed for Safari") false
@@ -130,4 +129,4 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "zoom, impossible requirements and immutable explicit owners" `Quick test_zoom_and_impossible;
   test_case "session opening and parse/binding pre-effect refusal" `Quick test_open_and_boundary;
   test_case "selected model consumer is required before discovery and open" `Quick test_model_selection;
-  test_case "right and middle click are claimed only where the button is pressed" `Quick test_button_click_table]]
+  test_case "right and middle click are claimed only where a button is pressed" `Quick test_button_click_table]]

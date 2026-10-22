@@ -642,8 +642,11 @@ visibility, disabled-control, document, viewport, and URL guards as native click
 
 `click_at` takes an optional `button`: `primary` (the default), `middle` or
 `secondary`. WebDriver and BiDi press and release the matching pointer button
-(0, 1 or 2) at the observed point. Stagehand and the WebExtension refuse a
-non-primary button before any input is sent, because neither can press it. A
+(0, 1 or 2) at the observed point. Stagehand sends `page.click` with
+`options.button` set to `middle` or `right`; the pinned 4.1.0 runtime accepts
+those values, but no real-Chromium run of it has been recorded. The
+WebExtension clicks through the DOM and refuses a non-primary button before any
+input is sent. A
 `secondary` click opens whatever the page binds to the context menu; observe the
 page afterwards, the receipt does not say what it did.
 

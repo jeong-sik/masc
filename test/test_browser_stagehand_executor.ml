@@ -406,7 +406,7 @@ let test_semantic_pointer_input () =
     check string "native semantic click retains the requested action" "click" Yojson.Safe.Util.(member "action" clicked |> to_string);
     match List.rev fake.sent with
     | [Wire.Page_evaluate _;Wire.Page_evaluate {expression;_};
-       Wire.Page_click {page_id="P2";x=400.;y=150.};Wire.Page_evaluate _] ->
+       Wire.Page_click {page_id="P2";x=400.;y=150.;button=Lane.Pointer.Primary};Wire.Page_evaluate _] ->
       check string "click binds the resolver's URL and viewport before native input"
         (Executor.evaluate_expression ~runtime:Executor.Scene_runtime
           ~body:Masc.Browser_interaction.pointer_guard_script
@@ -517,10 +517,18 @@ let test_interactions () =
       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } }))
   in
   (match List.rev fake.sent with
-   | [ Wire.Page_evaluate _; Wire.Page_click { page_id = "P2"; x = 400.; y = 150. }; Wire.Page_evaluate _ ] -> ()
+   | [ Wire.Page_evaluate _; Wire.Page_click { page_id = "P2"; x = 400.; y = 150.; button = Lane.Pointer.Primary }; Wire.Page_evaluate _ ] -> ()
    | sent -> failf "guard, native click at the viewport point, receipt; sent %s"
                (String.concat ", " (List.map Wire.method_name sent)));
   check string "the receipt names the action" "click_at" Yojson.Safe.Util.(member "action" clicked |> to_string);
+  List.iter (fun button ->
+    fake.evaluated <- None;
+    fake.sent <- [];
+    ignore (served (Executor.execute ~tabs ~call:(call fake)
+      (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button } })));
+    check bool "the requested button reaches the runtime's click" true
+      (List.exists (function Wire.Page_click { button = sent; _ } -> sent = button | _ -> false) fake.sent))
+    [ Lane.Pointer.Middle; Lane.Pointer.Secondary ];
   fake.evaluated <- Some (`Assoc [ "url", `String "http://127.0.0.1:1/shop"; "title", `Int 1 ]);
   fake.sent <- [];
   check bool "a malformed receipt after native input is refused" true

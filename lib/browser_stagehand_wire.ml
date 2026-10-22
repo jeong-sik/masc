@@ -159,7 +159,7 @@ type call =
   | Page_screenshot of { page_id : string }
   | Page_evaluate of { page_id : string; expression : string }
   | Page_hover of { page_id : string; x : float; y : float }
-  | Page_click of { page_id : string; x : float; y : float }
+  | Page_click of { page_id : string; x : float; y : float; button : Browser_lane.Pointer.button }
   | Page_double_click of { page_id : string; x : float; y : float }
   | Page_type of { page_id : string; text : string }
   | Page_key_press of { page_id : string; key : Browser_lane.Keyboard.t }
@@ -192,6 +192,12 @@ let method_name = function
 
 let optional key = function None -> [] | Some value -> [ key, value ]
 let page page_id = [ "page_id", `String page_id ]
+(* The runtime's [page.click] option [button] is "left", "right" or "middle". A primary click sends no
+   option, so its request stays what it was before buttons existed. *)
+let click_button_options = function
+  | Browser_lane.Pointer.Primary -> []
+  | Browser_lane.Pointer.Middle -> [ "options", `Assoc [ "button", `String "middle" ] ]
+  | Browser_lane.Pointer.Secondary -> [ "options", `Assoc [ "button", `String "right" ] ]
 let sentence_options timeout = [ "options", `Assoc [ "timeout", `Int (timeout_ms timeout) ] ]
 
 let sentence_timeout_of_call = function
@@ -214,7 +220,8 @@ let call_params = function
   | Page_screenshot { page_id } -> `Assoc (page page_id)
   | Page_evaluate { page_id; expression } -> `Assoc (page page_id @ [ "expression", `String expression ])
   | Page_hover { page_id; x; y } -> `Assoc (page page_id @ [ "x", `Float x; "y", `Float y ])
-  | Page_click { page_id; x; y } -> `Assoc (page page_id @ [ "x", `Float x; "y", `Float y ])
+  | Page_click { page_id; x; y; button } ->
+    `Assoc (page page_id @ [ "x", `Float x; "y", `Float y ] @ click_button_options button)
   | Page_double_click { page_id; x; y } ->
     `Assoc (page page_id @ [ "x", `Float x; "y", `Float y; "options", `Assoc ["click_count", `Int 2] ])
   | Page_type {page_id;text} -> `Assoc (page page_id @ ["text", `String text])

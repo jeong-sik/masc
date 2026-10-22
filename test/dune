@@ -5553,7 +5553,8 @@
 (test
  (name test_keeper_journal_preparation)
  (modules test_keeper_journal_preparation)
- (libraries masc masc.server masc.masc_core masc.keeper_chat_operations fs_compat alcotest unix sqlite3 yojson digestif eio))
+ (libraries masc masc.server masc.masc_core masc.keeper_chat_operations masc.agent_core
+  masc.keeper_registry masc.keeper_checkpoint_ref masc_test_deps fs_compat alcotest unix sqlite3 yojson digestif eio))
 (test
  (name test_keeper_declared_roster)
  (modules test_keeper_declared_roster)

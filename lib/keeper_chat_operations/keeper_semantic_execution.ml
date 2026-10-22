@@ -238,9 +238,7 @@ let gate_binding_retained (binding : gate_binding) =
    | Prepared_agent_core {reference; _} -> [reference]
    | Prepared_official_client _ -> [])
   @ (match binding.unconfirmed_wait with Some waiting -> gate_wait_retained waiting | None -> [])
-let checkpoint_references execution =
-  Keeper_native_call.checkpoint_references execution.native_call @
-  match execution.phase with
+let phase_checkpoints execution = match execution.phase with
   | Preparing | Ready | Running | Settled _ -> []
   | Resuming_runtime_retry retry -> [retry.checkpoint]
   | Resuming_gate (waiting, _) -> gate_wait_retained waiting
@@ -252,6 +250,13 @@ let checkpoint_references execution =
      | Runtime_retry retry -> [retry.checkpoint]
      | Gate_wait {waiting; _} -> gate_wait_retained waiting
      | Gate_binding binding -> gate_binding_retained binding)
+let checkpoint_references execution =
+  Keeper_native_call.checkpoint_references execution.native_call @ phase_checkpoints execution
+let continuation_checkpoints execution =
+  let native = match execution.native_call with
+    | Keeper_native_call.No_native_call -> []
+    | Active call | Terminal_unacknowledged (call,_) -> [call.checkpoint] in
+  native @ phase_checkpoints execution
 (* Approval ids an unsettled execution may still read from the Gate store: a
    wait observes its obligations, a binding observes its approval ids, and a
    resuming wait still carries the obligation it resumed with, and an

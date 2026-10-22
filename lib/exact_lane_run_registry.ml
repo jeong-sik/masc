@@ -928,6 +928,231 @@ type run_page =
   ; has_more : bool
   }
 
+type original_completion = {
+  outcome:outcome; elapsed_s:float option; output:Yojson.Safe.t;
+  selected_slot:string option; usage:usage option;
+}
+type reconciliation_error =
+  | Invalid_original of string
+  | Original_registration_conflict
+  | Original_completion_conflict
+  | Failed_completion_conflict
+  | Reconciliation_unavailable of string
+  | Reconciliation_persistence_failed of persistence_failure
+let reconciliation_error_to_string = function
+  | Invalid_original detail | Reconciliation_unavailable detail -> detail
+  | Original_registration_conflict -> "The original exact registration conflicts with current history"
+  | Original_completion_conflict -> "A genuine producer terminal conflicts with the original receipt"
+  | Failed_completion_conflict -> "A different failed completion remains unresolved"
+  | Reconciliation_persistence_failed failure -> failure.detail
+
+(* This validation is independent of any Addon/domain codec. The registry must
+   not publish nonstandard numbers or duplicate object keys from any caller. *)
+let rec validate_original_json = function
+  | `Assoc fields ->
+    let ( let* )=Result.bind in
+    let* ()=Run_registry_core.Json.exact_fields ~required:(List.map fst fields) fields in
+    List.fold_left (fun result (_,value) -> let* ()=result in validate_original_json value) (Ok ()) fields
+  | `List values ->
+    List.fold_left (fun result value -> Result.bind result (fun () -> validate_original_json value)) (Ok ()) values
+  | `Float value when not (Float.is_finite value) -> Error "Original JSON contains a non-finite number"
+  | `Intlit value ->
+    (try match Yojson.Safe.from_string value with
+     | `Int _ | `Intlit _ -> Ok ()
+     | `Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _ -> Error "Invalid original JSON integer"
+     with Yojson.Json_error detail -> Error detail)
+  | `Null | `Bool _ | `Int _ | `Float _ | `String _ -> Ok ()
+let original_json_equal a b=
+  (* JSON integer literals may decode to [Int] on disk even when a caller
+     supplied [Intlit]. Compare their actual serialized JSON values. *)
+  let decoded value=Yojson.Safe.from_string (Yojson.Safe.to_string value) |> Yojson.Safe.sort in
+  Yojson.Safe.equal (decoded a) (decoded b)
+
+(* Only called in the reconciliation's blocking file transaction. Both fsyncs
+   use the very descriptors validated by the no-follow owned-root scope. *)
+let confirmed_payload ~log_path ~run_id kind ~value ~source =
+  let ( let* )=Result.bind in
+  match source with
+  | In_row -> let* ()=validate_original_json value in Ok value
+  | In_file {bytes;sha256} ->
+    let root=Filename.dirname log_path in
+    let path=payload_path ~log_path ~run_id kind ~sha256 in
+    let confirmed=Fs_compat.with_owned_inventory_root root (fun held ->
+      let* value=Fs_compat.with_owned_inventory_regular_file ~owner_uid:(Unix.geteuid ()) held path
+        (fun ~file ~parent ~stat ->
+          if stat.Unix.st_size<>bytes then Error "Original payload size changed" else
+          let buffer=Bytes.create bytes in
+          let rec read offset=if offset=bytes then Ok () else
+            match Unix.read file buffer offset (bytes-offset) with
+            | 0 -> Error "Original payload shrank during verification"
+            | count -> read (offset+count)
+            | exception Unix.Unix_error (Unix.EINTR,_,_) -> read offset in
+          let* ()=read 0 in
+          let text=Bytes.to_string buffer in
+          if not (String.equal Digestif.SHA256.(to_hex (digest_string text)) sha256) then
+            Error "Original payload digest changed" else
+          let* value=try Ok (Yojson.Safe.from_string text) with Yojson.Json_error detail -> Error detail in
+          let* ()=validate_original_json value in
+          Unix.fsync file;Unix.fsync parent;
+          (* The log transaction has synced the log directory. Settle the
+             intermediate payload root as well; the enclosing owned file/root
+             scopes revalidate its original no-follow chain after this call. *)
+          Keeper_fs_durable_directory.fsync_directory
+            (Filename.dirname (payload_run_dir ~log_path ~run_id));
+          ignore (Unix.lseek file 0 Unix.SEEK_SET : int);
+          let* ()=read 0 in
+          if not (String.equal text (Bytes.to_string buffer)) then Error "Original payload changed during sync"
+          else Ok value) in
+      Ok value) in
+    (match confirmed with
+     | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
+     | Ok value -> value)
+
+let rec current_source_error = function
+  | Store.Volatile_store -> "A volatile registry cannot confirm a durable receipt"
+  | Not_initialized -> "Registry startup authority has not been established"
+  | Incomplete_startup _ -> "Registry startup history was incomplete or malformed"
+  | Non_regular_history _ -> "Registry history is not a regular file"
+  | Invalid_history detail | Read_failed detail -> detail
+  | Incomplete_history -> "Registry history has an incomplete tail"
+  | Snapshot_changed -> "Registry history changed while being read"
+  | Read_cleanup_failed {primary;detail} ->
+    (match primary with None -> detail | Some error -> current_source_error error ^ "; " ^ detail)
+
+type reconciliation_refusal =
+  | Original_refusal of reconciliation_error
+  | Prepare_payload of payload_kind
+
+let reconcile_original t ~run_id ~lane ~actor ~started_at ~input ~completion =
+  let ( let* )=Result.bind in
+  let invalid value=Result.map_error (fun detail -> Invalid_original detail) value in
+  let* ()=if run_id_is_a_segment run_id && Float.is_finite started_at && started_at>=0.
+      && String.trim actor<>"" then Ok () else Error (Invalid_original "Invalid original run identity/time/actor") in
+  let Exact_input original_input=input in
+  let* ()=invalid (validate_original_json original_input) in
+  let* ()=match completion with
+    | None -> Ok ()
+    | Some c ->
+      let* ()=match c.elapsed_s with
+        | Some elapsed when not (Float.is_finite elapsed) || elapsed<0. -> Error (Invalid_original "Invalid original duration")
+        | None | Some _ -> Ok () in
+      let* ()=match c.selected_slot with
+        | Some slot when String.trim slot="" -> Error (Invalid_original "Invalid original slot")
+        | None | Some _ -> Ok () in
+      let* ()=invalid (validate_original_json c.output) in
+      (match c.usage with None -> Ok () | Some usage -> invalid
+        (usage_of_yojson (usage_to_yojson usage) |> Result.map (fun _ -> ()))) in
+  let same_completion (actual:Payload.completion) (expected:original_completion)=
+    actual.origin=Producer && actual.outcome=expected.outcome && actual.elapsed_s=expected.elapsed_s
+    && actual.selected_slot=expected.selected_slot && actual.usage=expected.usage
+    && original_json_equal actual.output expected.output in
+  match Cross_context_mutex.with_durable_lock t.observation_mutex (fun () ->
+    let before=Atomic.get t.projection in
+    let prepared_input=ref None and prepared_output=ref None in
+    let unavailable value=Result.map_error (fun detail -> Original_refusal (Reconciliation_unavailable detail)) value in
+    let decide current=
+      let* ()=match List.assoc_opt run_id (Atomic.get t.failed_completions) with
+        | None -> Ok ()
+        | Some failed ->
+          (match completion with
+           | Some expected when failed.intended_outcome=expected.outcome && failed.elapsed_s=expected.elapsed_s
+               && failed.selected_slot=expected.selected_slot && failed.usage=expected.usage
+               && original_json_equal failed.output expected.output -> Ok ()
+           | None | Some _ -> Error (Original_refusal Failed_completion_conflict)) in
+      let* current=match current,t.path with
+        | None,_ -> Ok None
+        | Some entry,None -> Ok (Some entry)
+        | Some (entry:Store.entry),Some log_path ->
+          let Exact_input value=entry.registration.input in
+          let* value=unavailable (confirmed_payload ~log_path ~run_id Input_payload
+            ~value ~source:entry.registration.input_source) in
+          let registration={entry.registration with input=Exact_input value} in
+          let* status=match entry.status with
+            | Store.Running -> Ok Store.Running
+            | Completed c ->
+              let* output=unavailable (confirmed_payload ~log_path ~run_id Output_payload
+                ~value:c.output ~source:c.output_source) in
+              Ok (Store.Completed {c with output}) in
+          Ok (Some {entry with registration;status}) in
+      let* ()=match current with
+        | None -> Ok ()
+        | Some entry ->
+          let Exact_input actual_input=entry.registration.input in
+          if entry.started_at=started_at && entry.registration.lane=lane && entry.registration.actor=actor
+            && original_json_equal actual_input original_input then Ok ()
+          else Error (Original_refusal Original_registration_conflict) in
+      let write kind value=
+        let prepared=match kind with Input_payload -> !prepared_input | Output_payload -> !prepared_output in
+        match prepared,t.path with
+        | None,_ -> Error (Prepare_payload kind)
+        | Some _,None -> Error (Original_refusal (Reconciliation_unavailable "A volatile registry cannot publish original receipts"))
+        | Some source,Some log_path ->
+          let* actual=unavailable (confirmed_payload ~log_path ~run_id kind ~value ~source) in
+          if original_json_equal actual value then Ok source
+          else Error (Original_refusal (Reconciliation_unavailable "Prepared original payload changed")) in
+      let publish_completion (c:original_completion)=
+        let* output_source=write Output_payload c.output in
+        Ok {Payload.outcome=c.outcome;origin=Producer;elapsed_s=c.elapsed_s;output=c.output;
+          output_source;selected_slot=c.selected_slot;usage=c.usage} in
+      match current,completion with
+      | None,completion ->
+        let* input_source=write Input_payload original_input in
+        let* completion=match completion with None -> Ok None
+          | Some c -> Result.map Option.some (publish_completion c) in
+        Ok (Store.Register_original {started_at;registration={Payload.lane;actor;input;input_source};completion},())
+      | Some _,None -> Ok (Store.Confirm_current,())
+      | Some {status=Store.Running;_},Some c ->
+        let* completion=publish_completion c in Ok (Store.Complete_original completion,())
+      | Some {status=Store.Completed actual;_},Some expected ->
+        if same_completion actual expected then Ok (Store.Confirm_current,()) else
+        match actual.origin with
+        | Producer -> Error (Original_refusal Original_completion_conflict)
+        | Restart_replay -> let* completion=publish_completion expected in
+          Ok (Store.Complete_original completion,()) in
+    (* Payload directory preparation may wait on another Eio preparation. It
+       runs on the caller under the observation lock, never inside the blocking
+       log callback. Each typed request fills one immutable payload slot. The
+       next transaction freshly validates the entire log and those exact bytes;
+       a changed original refuses instead of inheriting the earlier decision. *)
+    let rec reconcile ()=
+      match Store.reconcile_current t.store ~id:run_id ~decide with
+      | Error (Store.Decision_refused (Prepare_payload kind)) ->
+        let value=match kind,completion with
+          | Input_payload,_ -> Ok original_input
+          | Output_payload,Some c -> Ok c.output
+          | Output_payload,None -> Error "Original output requires an actual completion" in
+        (match value,t.path with
+         | Error detail,_ -> Error (Store.Invalid_change detail)
+         | Ok _,None -> Error (Store.Decision_refused (Original_refusal
+             (Reconciliation_unavailable "A volatile registry cannot publish original receipts")))
+         | Ok value,Some log_path ->
+           match write_payload ~log_path ~run_id kind value with
+           | Error detail -> Error (Store.Decision_refused (Original_refusal (Reconciliation_unavailable detail)))
+           | Ok source ->
+             (match kind with Input_payload -> prepared_input:=Some source | Output_payload -> prepared_output:=Some source);
+             reconcile ())
+      | Ok value -> Ok value
+      | Error ((Store.Current_source_unavailable _ | Invalid_change _ | Publication_failed _
+          | Decision_refused (Original_refusal _)) as error) -> Error error in
+    match reconcile () with
+    | Error (Store.Decision_refused (Original_refusal error)) -> Error error
+    | Error (Store.Decision_refused (Prepare_payload _)) ->
+      Error (Reconciliation_unavailable "Original payload preparation did not settle")
+    | Error (Current_source_unavailable error) -> Error (Reconciliation_unavailable (current_source_error error))
+    | Error (Invalid_change detail) -> Error (Invalid_original detail)
+    | Error (Publication_failed failure) ->
+      let state=match failure.state with Run_registry_core.Not_persisted -> Not_persisted
+        | Durability_unknown -> Durability_unknown in
+      Error (Reconciliation_persistence_failed {detail=failure.detail;state})
+    | Ok () ->
+      remove_failed_completion t run_id;publish_projection t;
+      Ok (before<>Atomic.get t.projection)) with
+  | Ok changed -> if changed then notify_changed (); Ok ()
+  | Error error -> Error error
+  | exception ((Sys_error _ | Unix.Unix_error _) as exn) ->
+    Error (Reconciliation_persistence_failed {detail=Printexc.to_string exn;state=Durability_unknown})
+;;
+
 let list_runs t = Atomic.get t.projection
 
 (* Newest first, ties broken by run_id, so a page boundary is a total order and

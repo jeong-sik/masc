@@ -218,6 +218,43 @@ module Make (Payload : Payload) : sig
       A later register resets an earlier completion. Running/missing ids return
       [Ok None]; malformed rows, partial tails and I/O failures return [Error].
       Reads only the durable log, retaining one requested entry in memory. *)
+
+  type reconciliation_change =
+    | Confirm_current
+    | Register_original of {
+        started_at : float;
+        registration : Payload.registration;
+        completion : Payload.completion option;
+      }
+    | Complete_original of Payload.completion
+
+  type 'error reconciliation_error =
+    | Current_source_unavailable of current_read_error
+    | Decision_refused of 'error
+    | Invalid_change of string
+    | Publication_failed of persistence_failure
+
+  val reconcile_current :
+    t -> id:string ->
+    decide:(entry option -> (reconciliation_change * 'a, 'error) result) ->
+    ('a, 'error reconciliation_error) result
+  (** Strictly parse the complete current history, decide, and confirm/append
+      under the mutation mutex and the same exclusive data-file/path lock used
+      by all writers. Refuse every malformed/orphan row or incomplete tail before
+      calling [decide]. No repair, compaction or restart synthesis occurs.
+      [Register_original] requires actual absence; [Complete_original] requires
+      an actual registration. The caller owns payload equality/provenance policy.
+      [Confirm_current] requires an actual entry and fsyncs it without appending.
+      The callback runs in a blocking worker: local blocking payload validation
+      is allowed, Eio effects or registry re-entry are not. Cancellation propagates.
+
+      Confirmed full disk state is adopted into the ordinary shed projection,
+      including retention, only after the durable transaction succeeds. Success
+      confirms historical publication even if that retention immediately evicts
+      the entry. It grants neither domain effects nor perpetual retention.
+      This transaction uses the existing complete-byte updater and temporarily
+      retains the complete log string; it is not a streamed-read optimization.
+      Startup authority restrictions match [read_current_from_log]. *)
   val cut_replay_log : execute:bool -> string -> cut_report
   (** Rewrites [path] from the state a replay of it produces. A hard-cut field
       leaves rows that can never decode again; [replay] declines to compact

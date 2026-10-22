@@ -1,0 +1,107 @@
+{
+  "run_id": 39705408417,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39705408417",
+  "head": "042b1361931d43cf3768e6ee6bb0673911c91590",
+  "status": "completed",
+  "conclusion": "failure",
+  "suites": [
+    {
+      "target": "test_exact_lane_original_reconciliation",
+      "actual_cases": 12,
+      "passed": 12,
+      "failed": 0,
+      "conclusion": "success"
+    },
+    {
+      "target": "test_run_registry_current_disk",
+      "actual_cases": 13,
+      "passed": 13,
+      "failed": 0,
+      "conclusion": "success"
+    },
+    {
+      "target": "test_workspace_curator_addon_commit",
+      "actual_cases": 61,
+      "passed": 61,
+      "failed": 0,
+      "conclusion": "success"
+    },
+    {
+      "target": "test_workspace_memory_curator_lane",
+      "actual_cases": 12,
+      "passed": 11,
+      "failed": 1,
+      "conclusion": "failure"
+    },
+    {
+      "target": "test_exact_lane_run_registry",
+      "actual_cases": 37,
+      "passed": 37,
+      "failed": 0,
+      "conclusion": "success"
+    },
+    {
+      "target": "test_fusion_run_registry_persist",
+      "actual_cases": 14,
+      "passed": 14,
+      "failed": 0,
+      "conclusion": "success"
+    },
+    {
+      "target": "test_run_registry_concurrent_mutation",
+      "actual_cases": 6,
+      "passed": 6,
+      "failed": 0,
+      "conclusion": "success"
+    }
+  ],
+  "total_actual_cases": 155,
+  "total_passed": 154,
+  "total_failed": 1,
+  "raw_log_sha256": "4c5311a946168ff3437879ab7b01d3e134179b054344faf1a088b26b8ac01420",
+  "source_sha256": {
+    "lib/fs_compat/fs_compat.ml": "387898dea218f3bc337ae0961252e693c9c4c3ab9aef7b12956d3261f40b98db",
+    "lib/fs_compat/fs_compat.mli": "c5321dba9dde4b3c490bba24b9285964826b05b653429bb38eddbe6840b28eb1",
+    "lib/run_registry_core/run_registry_core.ml": "61c1d1a25afb34bf9bbb53a81a4b67c03437adb264acb37480d0fd289e902b89",
+    "lib/run_registry_core/run_registry_core.mli": "c7f74a116ecd3881f5842c101bc0f10332218da3ba87706f3a3f70f63810a431",
+    "lib/exact_lane_run_registry.ml": "5ab2c2de0649cbe9e750d583b5add59b22092fe7a9b9de9be2c02ac014157da0",
+    "lib/exact_lane_run_registry.mli": "e4fb2661258755bdbbee7f7949746ebfa1240a697d4bfe0e69fa8229faa0f6b2",
+    "lib/server/server_workspace_memory_addon.ml": "dbf8809f382e52cd85cf0d8ebd3985a0c87bbd793bf6d1099318870ecb0f2100",
+    "lib/server/server_workspace_memory_curator.ml": "1193b212c598b62ec5c11556a9cc338366eef9a80fb573c20d9ad80b05737a9c",
+    "lib/server/server_workspace_memory_curator.mli": "838952d2289588d53211f972bab0502675101df3a709853c5cd4adbcac205e80",
+    "lib/lane_addon/lane_addon_store.ml": "03ed15112af14ca142928c1ceb503ff50c7a9d9f7183b0248ccbfe22ce855001",
+    "lib/server/server_workspace_memory_addon_validation.ml": "7a9ee9ffdc7e148b6f835df35b2d5151a629351a34583dbceec88685c95908fa",
+    "test/test_exact_lane_original_reconciliation.ml": "b1aaa88f6828be591db09419e1f022072cd04ebc9ec8fc68574ddfd4f607ea12",
+    "test/test_run_registry_current_disk.ml": "324c7ca806a7d4515bea40e662f2730941a6f9d84034b809aadd8ce2414f81d3",
+    "test/test_workspace_curator_addon_commit.ml": "c628b70fbc35dfd7a5f797c23858394adb98f34ec005df63aa1e34bb120e335a",
+    "test/test_workspace_memory_curator_lane.ml": "d249207da7907610efccfdf405ed0e1ecc56867391ae07236541218f6426c80b",
+    ".github/workflows/test.yml": "d42fa403248a85c314dc2dbedfd26b1d216ab24121eb86a654614fac8d387691",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci-run-test-suite.sh": "36fdc226b32081d0b4a8e0e05bd5e76cf17a237657b56abb3f5955a281242733"
+  },
+  "request": {
+    "workflow": "test.yml",
+    "minimal": true,
+    "eio_backend": "posix",
+    "TARGET_SUITES": "test_exact_lane_original_reconciliation,test_run_registry_current_disk,test_workspace_curator_addon_commit,test_workspace_memory_curator_lane,test_exact_lane_run_registry,test_fusion_run_registry_persist,test_run_registry_concurrent_mutation"
+  },
+  "failure": {
+    "target": "test_workspace_memory_curator_lane",
+    "case": "accepted retained host terminal commits Off",
+    "stage": "Before Off while awaiting original retained host Exact terminal",
+    "observed": {
+      "retained_exact": "absent",
+      "http_posts": 0,
+      "provider_callback_error": null,
+      "host_issue": "exact_record_failed",
+      "source_failure": "original Owner read inspect_descriptor rejected st_nlink <> 1; message: owned record has multiple hard links"
+    },
+    "cause_limit": "The count was not recorded. This message also covers nlink=0 after concurrent rename. Source shows original progress atomic replacement may overlap strict host authorizer read; no syscall-level race reproduction claimed."
+  },
+  "limits": [
+    "Entire selected run FAILED; six wholly passing suites contain143 cases and the production suite passed11 of12.",
+    "Does not execute the subsequent discovery-retry repair.",
+    "Actual production fixture substitutes container launch/cleanup and uses Python/MCP+loopback HTTP; not actual provider/Docker/browser/UI/install proof.",
+    "No full regression or four-executable build proof."
+  ]
+}

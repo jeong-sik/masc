@@ -579,6 +579,73 @@ let test_typed_observer_intents_follow_original_commit_without_runtime ()=with_w
 let replace_field key value = function
   | `Assoc fields -> `Assoc (List.map (fun (name,old) -> name,if name=key then value else old) fields)
   | _ -> fail "expected an object"
+module Runs = Exact_lane_run_registry
+let registry_at base_path =
+  let path=Filename.concat base_path Runs.storage_filename in
+  path,Runs.replay path
+let delivery base_path store registry (record:Owner.retained) ~now =
+  Consumer.For_testing.deliver_observation ~store ~base_path ~registry ~request_id:record.request_id ~now
+let acknowledged = function Receipt.Acknowledged _ -> true | Pending _ | Unobserved -> false
+let test_actual_observer_delivery_and_ack_retry ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original fact delivered to the real registry"] in
+  let finished=retain store capture output |> fun record -> settle ~save:(save base_path) base_path store record
+    |> accepted |> committed in
+  let prepared=prepare_observation base_path store finished ~now:(fun () -> 21.) in
+  let completion=observed_completion prepared in
+  let path,registry=registry_at base_path in
+  (* Real registry publication with the original Owner still pending models the
+     durable boundary before a lost ACK; it does not inject a filesystem fault. *)
+  Runs.reconcile_original registry ~run_id:prepared.registration.run_id ~lane:Runs.Workspace_curator
+    ~actor:prepared.registration.actor ~started_at:prepared.registration.receipt.observed_at
+    ~input:(Runs.Exact_input prepared.registration.input)
+    ~completion:(Some {Runs.outcome=Runs.Succeeded;elapsed_s=None;selected_slot=completion.selected_slot;
+      usage=None;output=Receipt.to_json completion.receipt})
+    |> Result.map_error Runs.reconciliation_error_to_string |> get;
+  let restarted=Runs.replay path in
+  let bytes=Fs_compat.load_file path and stat=Unix.stat path in
+  let delivered=delivery base_path store restarted prepared.original ~now:never_clock |> accepted in
+  let observer=Progress.observer delivered.original.progress in
+  check bool "registration ACK is durable" true (acknowledged observer.registration);
+  check bool "completion ACK is durable after registration" true (acknowledged observer.completion);
+  check string "lost ACK retry never appends another lifecycle" bytes (Fs_compat.load_file path);
+  check int "lost ACK retry preserves log inode" stat.st_ino (Unix.stat path).st_ino;
+  check int "delivery never repeats a domain save" 1
+    (List.length (Ledger.dispositions (get (Ledger.load ~base_path))));
+  let journal=Fs_compat.load_file (owner_file store delivered.original) in
+  Unix.unlink path;
+  let no_authority=Runs.create () in
+  ignore (delivery base_path store no_authority delivered.original ~now:never_clock |> accepted);
+  check bool "already ACKed work never recreates evicted history" false (Sys.file_exists path);
+  check string "already ACKed work keeps original journal bytes" journal
+    (Fs_compat.load_file (owner_file store delivered.original)))
+let test_registration_delivery_does_not_invent_completion ()=with_workspace (fun base_path store ->
+  let capture,_output=classification base_path ["Active original without a terminal"] in
+  let original=retain_capture store capture in
+  let path,registry=registry_at base_path in
+  let delivered=delivery base_path store registry original ~now:(fun () -> 31.) |> accepted in
+  let observer=Progress.observer delivered.original.progress in
+  check bool "start is ACKed without primary execution" true (acknowledged observer.registration);
+  check bool "no terminal is fabricated" true (observer.completion=Receipt.Unobserved);
+  check bool "primary stays Captured" true (Progress.phase delivered.original.progress=Progress.Captured);
+  let bytes=Fs_compat.load_file path in
+  ignore (delivery base_path store registry delivered.original ~now:never_clock |> accepted);
+  check string "ACKed active original is not re-registered" bytes (Fs_compat.load_file path))
+let test_failed_registry_keeps_original_pending ()=with_workspace (fun base_path store ->
+  let capture,_output=classification base_path ["Unavailable registry preserves original intention"] in
+  let original=retain_capture store capture in
+  let prepared=prepare_observation base_path store original ~now:(fun () -> 41.) in
+  let path=owner_file store prepared.original in
+  let bytes=Fs_compat.load_file path in
+  (match delivery base_path store (Runs.create ()) prepared.original ~now:never_clock with
+   | Error (Consumer.Unavailable _) -> ()
+   | Error (Rejected _ | Uncertain _) | Ok _ -> fail "volatile registry must refuse durable acknowledgement");
+  check string "registry failure preserves immutable pending original" bytes (Fs_compat.load_file path);
+  let log_path,registry=registry_at base_path in
+  let delivered=delivery base_path store registry prepared.original ~now:never_clock |> accepted in
+  check bool "later exact retry acknowledges original" true
+    (acknowledged (Progress.observer delivered.original.progress).registration);
+  check bool "later retry uses the actual file-backed registry" true (Sys.file_exists log_path))
+
 let test_typed_observer_rejects_semantically_forged_receipt terminal ()=with_workspace (fun base_path store ->
   let capture,output=classification base_path ["Original observation cannot be relabelled"] in
   let finished=settle ~save:(save base_path) base_path store (retain store capture output) |> accepted |> committed in
@@ -879,6 +946,9 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "invalid host original refuses without worker fallback" `Quick test_bad_original_host_record_cannot_fall_back_to_a_worker;
   test_case "observed original still requires complete domain validation" `Quick test_observed_host_answer_still_requires_full_domain_validation;
   test_case "original installation kind and canonical identity" `Quick test_installation_identity_is_canonical_and_kind_bound;
+  test_case "actual registry publication survives lost ACK and historical eviction" `Quick test_actual_observer_delivery_and_ack_retry;
+  test_case "actual registration ACK does not invent a terminal" `Quick test_registration_delivery_does_not_invent_completion;
+  test_case "unavailable registry preserves pending original and permits exact retry" `Quick test_failed_registry_keeps_original_pending;
   test_case "typed observer follows actual original commit without Runtime" `Quick test_typed_observer_intents_follow_original_commit_without_runtime;
   test_case "generic valid registration cannot relabel original observer" `Quick (test_typed_observer_rejects_semantically_forged_receipt false);
   test_case "generic valid completion cannot replace original provider" `Quick (test_typed_observer_rejects_semantically_forged_receipt true);

@@ -1,5 +1,6 @@
 import { newProject, validateProject, editProject, beats, pitch, PPQ, harmonyAt } from './sequencer-project.mjs'
-import { sourceEditor, sourceSelected, sourceAction, sourceCommand, sourceHarmony, sourceMeterAt } from './midi-source-editor.mjs'
+import { sourceEditor, sourceSelected, sourceAction, sourceCommand, sourceHarmony, sourceMeterAt, sourceMeters } from './midi-source-editor.mjs'
+import { meterSegments, barSpan } from './meter-bars.mjs'
 import { validateSound } from './project-sound.mjs'
 import { noteSelectionCommand, retainNoteSelection, selectedNotes, moveSelectedNotes } from './note-selection.mjs'
 export { selectedNotes } from './note-selection.mjs'
@@ -30,6 +31,58 @@ function apply(editor, edit) {
   const project = editProject(editor.project, editor.project.tracks[editor.track].id, edit)
   return { ...editor, project, undo: [...editor.undo, editor.project], redo: [] }
 }
+// The bar map of the phrase meter or the imported time-signature map; SMPTE
+// frame documents have no bars (null).
+export function editorMeters(editor) {
+  if (editor.project.kind !== 'midi-source') {
+    const [numerator, denominator] = editor.project.meter
+    return meterSegments([{ tick: 0, numerator, denominator }])
+  }
+  if (editor.info.timing.kind === 'smpte') return null
+  return meterSegments(sourceMeters(editor).map(({ tick, numerator, denominator }) => ({ tick, numerator, denominator }))
+    .sort((a, b) => a.tick - b.tick))
+}
+
+// { starts the loop at the bar under the cursor, } ends it after that bar.
+// A side placed across the other moves the other to the same bar, so the
+// loop becomes that one bar instead of an error.
+function setLocator(editor, side) {
+  const meters = editorMeters(editor)
+  if (!meters) throw new Error('SMPTE frames have no bars; use :loop START END')
+  if (editor.project.kind === 'midi-source' && !editor.performance) throw new Error('Choose a MIDI pattern first')
+  const limit = editor.project.kind === 'midi-source' ? editor.performance.ticks : editor.project.length
+  if (limit <= 0) throw new Error('This performance has no ticks to loop')
+  // An imported cursor can rest on the end tick itself; its bar is the last one.
+  const bar = barSpan(Math.min(editor.tick, limit - 1), meters, editorAxis(editor).per), end = Math.min(bar.end, limit)
+  const current = editorView(editor).loop
+  const loop = side === 'left'
+    ? { start: bar.start, end: current.end > bar.start ? current.end : end }
+    : { start: current.start < end ? current.start : bar.start, end }
+  if (editor.project.kind === 'midi-source') return { ...editor, sourceLoop: loop, view: { ...editor.view, loop } }
+  return apply(editor, { kind: 'loop', ...loop })
+}
+
+// Phrase length in whole bars of the phrase meter: { delta } rounds a partial
+// last bar first, { bars } sets the count. Notes and a loop end that the new
+// length would cut are refused, naming the bar.
+function changeBars(editor, { delta, bars }) {
+  if (editor.project.kind === 'midi-source') throw new Error('Imported MIDI keeps the length of its performance')
+  const [numerator, denominator] = editor.project.meter, barTicks = numerator * PPQ * 4 / denominator
+  if (!Number.isInteger(barTicks)) throw new Error('This meter has no whole-tick bar')
+  const now = editor.project.length / barTicks
+  const count = bars ?? (delta > 0 ? Math.floor(now) + delta : Math.ceil(now) + delta)
+  if (!Number.isSafeInteger(count) || count < 1) throw new Error('A phrase needs at least one bar')
+  const length = count * barTicks, { loop } = editor.project
+  if (editor.project.tracks.some(track => track.notes.some(note => note.start + note.duration > length))) {
+    throw new Error(`A note reaches past bar ${count}; remove or shorten it first`)
+  }
+  if (loop.start >= length || (loop.end !== editor.project.length && loop.end > length)) {
+    throw new Error(`The loop reaches past bar ${count}; move it with { and } first`)
+  }
+  const next = apply(editor, { kind: 'length', value: length })
+  return { ...next, tick: Math.min(next.tick, length - 1) }
+}
+
 export function editorAction(editor, action) {
   const selection = selectedNotes(editor)
   let next
@@ -38,6 +91,8 @@ export function editorAction(editor, action) {
     // Typed raw-tick keyboard movement must not round-trip through decimal beats.
     next = moveSelectedNotes(editor, action.ticks ?? 0, action.pitches ?? 0)
   } else if (selection.length && action.kind === 'toggle-note') throw new Error('Clear the note selection before inserting or toggling one note')
+  else if (action.kind === 'locator') next = setLocator(editor, action.side)
+  else if (action.kind === 'bars') next = changeBars(editor, action)
   else next = act(editor, action)
   return retainNoteSelection(editor, next, { history: ['undo', 'redo'].includes(action.kind) })
 }
@@ -126,6 +181,10 @@ export function editorCommand(editor, line) {
   if (effect) return { editor, effect }
   const [command, ...args] = line.trim().split(/\s+/)
   if (command === 'soundfont-fluid') return { editor, effect: { kind: 'soundfont-fluid', ...(args.length ? { path: args.join(' ') } : {}) } }
+  if (command === 'bars') {
+    if (args.length !== 1) throw new Error('Use :bars COUNT')
+    return { editor: editorAction(editor, { kind: 'bars', bars: Number(args[0]) }) }
+  }
   const selected = noteSelectionCommand(editor, command, args)
   const result = selected === undefined ? runCommand(editor, line) : { editor: selected }
   return { ...result, editor: retainNoteSelection(editor, result.editor, { history: ['undo', 'redo'].includes(command) }) }

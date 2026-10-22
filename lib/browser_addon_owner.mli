@@ -10,6 +10,12 @@ val dispatch : t -> Browser_addon_wire.request -> Browser_addon_wire.reply
     clients/targets, never while waiting for browser input or a poll result. *)
 val snapshot : t -> Yojson.Safe.t
 val incarnation : t -> string
+val attach_models : t -> Browser_addon_models.t -> (unit, string) result
+val models_enabled : t -> bool
+val generate : t -> Lane_addon_exact.request ->
+  (Browser_addon_models.outcome, Browser_addon_models.error) result
+(** An original browser command owns the waiting scope. Cancellation withdraws
+    its model request. Never hold the admission lock while waiting. *)
 val attach_automation : t -> execute:(Browser_lane.verb -> Browser_lane.answer) ->
   session:(unit -> Browser_lane.session_observation) ->
   document:(tab_id:int -> Browser_lane.answer) ->

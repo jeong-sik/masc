@@ -3185,7 +3185,7 @@
  (modules masc_browser_addon_worker)
  (public_name masc-browser-addon-worker)
  (package masc)
- (libraries masc masc.time_compat mcp_protocol.eio eio eio_main))
+ (libraries masc masc.time_compat masc.fs_compat mcp_protocol.eio yojson eio eio.unix eio_main))
 
 (library
  (name masc_tui_code_draft)

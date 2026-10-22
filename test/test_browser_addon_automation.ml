@@ -29,7 +29,7 @@ let scenario ~cancel_receipt () = Eio_main.run (fun env ->
   let executable=Filename.temp_file "browser-owned-driver-" ".py" in
   Out_channel.with_open_bin executable (fun out -> output_string out driver);Unix.chmod executable 0o700;
   let instance_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
-  let context=ok (Socket.context ~instance_id ~automation:(Some {Browser_configuration.driver=executable;binary=None})) in
+  let context=ok (Socket.context ~instance_id ~models:None ~automation:(Some {Browser_configuration.driver=executable;binary=None})) in
   let admission=lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
   let resource=ok (Socket.acquire ~admission ~directory:slot) in
   let directory=Filename.dirname (Socket.socket_path resource) in
@@ -51,7 +51,7 @@ let scenario ~cancel_receipt () = Eio_main.run (fun env ->
         verb=B.Session_status;actor=Some "fixture";timeout_sec=2.;only_if_idle=false}} in
       check bool "command reaches owned driver client" true (match reply with
         | W.Issue_result (Ok (B.Answered (`Assoc fields))) -> List.assoc_opt "ok" fields=Some (`Bool true)
-        | Issue_result _|Snapshot_result _|Poll_result _|Receipt|Service_refusal _ -> false);
+        | Issue_result _|Snapshot_result _|Model_reply _|Poll_result _|Receipt|Service_refusal _ -> false);
       check bool "private retirement joins backend cleanup" true
         (Owner.dispatch owner {W.incarnation=instance_id;command=W.Retire}=W.Receipt) in
     if not cancel_receipt then Masc.Browser_addon_automation.run ~env ~owner ~directory work

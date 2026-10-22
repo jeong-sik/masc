@@ -1206,8 +1206,8 @@ let complete_stream_http
         e
       | Ok (Ok resp) ->
         let latency_ms = latency_ms_int latency_counter in
-        (* Ollama injection: usage from the done chunk wins over the
-         zeroed accumulator. *)
+        (* Ollama done-chunk usage overrides the accumulated report; without a
+           done-chunk report, retain the response's reported usage or absence. *)
         let resp =
           match config.kind with
           | Provider_config.Ollama ->

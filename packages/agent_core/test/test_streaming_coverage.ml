@@ -39,13 +39,8 @@ let fail_unexpected_stream_error err =
   Alcotest.fail ("unexpected SSE error: " ^ stream_error_to_string err)
 ;;
 
-let check_zero_usage = function
-  | Some u ->
-    check_int "input" 0 u.input_tokens;
-    check_int "output" 0 u.output_tokens;
-    check_int "cache_creation" 0 u.cache_creation_input_tokens;
-    check_int "cache_read" 0 u.cache_read_input_tokens
-  | None -> Alcotest.fail "expected zero usage"
+let check_unreported_usage usage =
+  Alcotest.(check bool) "no usage measurement was reported" true (Option.is_none usage)
 ;;
 
 (** Unwrap finalize result or fail the test. *)
@@ -75,7 +70,7 @@ let test_empty_acc_finalize () =
   check_string "empty id" "" resp.id;
   check_string "empty model" "" resp.model;
   Alcotest.(check int) "no content" 0 (List.length resp.content);
-  check_zero_usage resp.usage
+  check_unreported_usage resp.usage
 ;;
 
 (* ── accumulate_event: MessageStart ─────────────────────────────── *)
@@ -112,7 +107,7 @@ let test_acc_message_start_no_usage () =
     (MessageStart { id = "msg_2"; model = "test"; usage = None });
   let resp = finalize_ok acc in
   check_string "id" "msg_2" resp.id;
-  check_zero_usage resp.usage
+  check_unreported_usage resp.usage
 ;;
 
 (* ── accumulate_event: ContentBlockStart ────────────────────────── *)
@@ -289,7 +284,7 @@ let test_acc_message_delta_none_usage () =
     acc
     (MessageDelta { stop_reason = Some EndTurn; usage = None });
   let resp = finalize_ok acc in
-  check_zero_usage resp.usage
+  check_unreported_usage resp.usage
 ;;
 
 (* ── accumulate_event: ignored events ───────────────────────────── *)
@@ -532,10 +527,10 @@ let test_finalize_registered_type_without_buffer () =
 
 (* ── finalize: usage thresholds ─────────────────────────────────── *)
 
-let test_finalize_usage_all_zero () =
+let test_finalize_unreported_usage () =
   let acc = Streaming.create_stream_acc () in
   let resp = finalize_ok acc in
-  check_zero_usage resp.usage
+  check_unreported_usage resp.usage
 ;;
 
 let test_finalize_usage_only_cache_creation () =
@@ -1005,7 +1000,7 @@ let () =
             "registered type without buffer"
             `Quick
             test_finalize_registered_type_without_buffer
-        ; Alcotest.test_case "usage all zero" `Quick test_finalize_usage_all_zero
+        ; Alcotest.test_case "usage unreported" `Quick test_finalize_unreported_usage
         ; Alcotest.test_case
             "usage only cache_creation"
             `Quick

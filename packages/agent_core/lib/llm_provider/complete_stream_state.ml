@@ -50,14 +50,6 @@ type block =
         (** Text bytes the block held when the reasoning repeat rule last ran. *)
   }
 
-type usage =
-  { input_tokens : int
-  ; output_tokens : int
-  ; cache_creation : int
-  ; cache_read : int
-  ; cost_usd : float option
-  }
-
 type completion =
   | Awaiting_stop
   | Terminal_without_stop_reason
@@ -77,7 +69,7 @@ type t =
   ; model : string
   ; message_started : bool
   ; message_start : (string * string * Types.api_usage option) option
-  ; usage : usage
+  ; usage : Types.delta_usage option
   ; completion : completion
   ; message_lifecycle : message_lifecycle
   ; disposition : disposition
@@ -90,16 +82,12 @@ type receipt =
   | Completed of Types.api_response
   | Failed of Types.stream_error
 
-let empty_usage =
-  { input_tokens = 0; output_tokens = 0; cache_creation = 0; cache_read = 0; cost_usd = None }
-;;
-
 let empty =
   { id = ""
   ; model = ""
   ; message_started = false
   ; message_start = None
-  ; usage = empty_usage
+  ; usage = None
   ; completion = Awaiting_stop
   ; message_lifecycle = Accepting_content
   ; disposition = Natural
@@ -355,27 +343,48 @@ let update_block index f state =
   { state with blocks = Blocks.add index (f block) state.blocks }
 ;;
 
-let usage_from_message_start (wire : Types.api_usage) =
-  { input_tokens = wire.input_tokens
-  ; output_tokens = wire.output_tokens
-  ; cache_creation = wire.cache_creation_input_tokens
-  ; cache_read = wire.cache_read_input_tokens
-  ; cost_usd = wire.cost_usd
-  }
-;;
-
 (* Delta counters are wire-cumulative running totals (#28903): a reported
    field replaces the seeded value, an unreported field keeps it. Nothing is
    ever added — addition double-counts whenever the final delta repeats a
    counter the start event already carried. *)
 let overlay_delta_usage current (delta : Types.delta_usage) =
-  { input_tokens = Option.value delta.input_tokens ~default:current.input_tokens
-  ; output_tokens = Option.value delta.output_tokens ~default:current.output_tokens
-  ; cache_creation =
-      Option.value delta.cache_creation_input_tokens ~default:current.cache_creation
-  ; cache_read =
-      Option.value delta.cache_read_input_tokens ~default:current.cache_read
-  ; cost_usd = (match delta.cost_usd with Some _ as cost -> cost | None -> current.cost_usd)
+  if
+    Option.is_none delta.input_tokens
+    && Option.is_none delta.output_tokens
+    && Option.is_none delta.cache_creation_input_tokens
+    && Option.is_none delta.cache_read_input_tokens
+    && Option.is_none delta.cost_usd
+  then current
+  else
+    match current with
+    | None -> Some delta
+    | Some (previous : Types.delta_usage) ->
+      let reported_or_previous reported previous =
+        match reported with Some _ -> reported | None -> previous
+      in
+      let merged : Types.delta_usage =
+        { input_tokens = reported_or_previous delta.input_tokens previous.input_tokens
+        ; output_tokens = reported_or_previous delta.output_tokens previous.output_tokens
+        ; cache_creation_input_tokens =
+            reported_or_previous
+              delta.cache_creation_input_tokens previous.cache_creation_input_tokens
+        ; cache_read_input_tokens =
+            reported_or_previous delta.cache_read_input_tokens previous.cache_read_input_tokens
+        ; cost_usd = reported_or_previous delta.cost_usd previous.cost_usd
+        }
+      in
+      Some merged
+;;
+
+(* Terminal api_usage still has integer counters. Keep that existing partial
+   report limitation at this boundary rather than seeding the stream with a
+   fabricated measurement. The optional-counter API migration must remove it. *)
+let terminal_usage (usage : Types.delta_usage) : Types.api_usage =
+  { input_tokens = Option.value usage.input_tokens ~default:0
+  ; output_tokens = Option.value usage.output_tokens ~default:0
+  ; cache_creation_input_tokens = Option.value usage.cache_creation_input_tokens ~default:0
+  ; cache_read_input_tokens = Option.value usage.cache_read_input_tokens ~default:0
+  ; cost_usd = usage.cost_usd
   }
 ;;
 
@@ -719,7 +728,7 @@ let transition_open state = function
       let usage =
         match usage with
         | None -> state.usage
-        | Some wire -> usage_from_message_start wire
+        | Some wire -> Some (Types.delta_usage_of_api_usage wire)
       in
       { state with
         id
@@ -735,12 +744,9 @@ let transition_open state = function
     then
       (* A repeated prelude for the same provider message does not reset block
          assembly. Block-level replay ambiguity is handled at its own header. *)
-      let usage =
-        match usage with
-        | None -> state.usage
-        | Some wire -> usage_from_message_start wire
-      in
-      { state with usage }
+      (* Its original usage is already seeded. Replaying the prelude after a
+         newer cumulative delta must not overwrite that newer observation. *)
+      state
     else
       capture_failure
         (Types.Stream_parse_failed
@@ -1398,14 +1404,7 @@ let finalize_completed state stop_reason =
     ; model = state.model
     ; stop_reason
     ; content
-    ; usage =
-        Some
-          { input_tokens = state.usage.input_tokens
-          ; output_tokens = state.usage.output_tokens
-          ; cache_creation_input_tokens = state.usage.cache_creation
-          ; cache_read_input_tokens = state.usage.cache_read
-          ; cost_usd = state.usage.cost_usd
-          }
+    ; usage = Option.map terminal_usage state.usage
     ; telemetry = Option.map (fun response_replay ->
         {Types.default_inference_telemetry with response_replay=Some response_replay}) response_replay
     }

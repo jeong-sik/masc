@@ -57,5 +57,11 @@ val has_failed : t -> bool
 val failure : t -> Types.stream_error option
 
 (** Resolve the accumulated state into one typed terminal receipt. Missing
-    stop semantics and malformed content remain distinct failures. *)
+    stop semantics and malformed content remain distinct failures.
+
+    Response [usage] is [None] when no usage field was observed in the input
+    events. Explicit
+    counter or cost zero is an observation; an all-[None] delta is not.
+    This does not restore per-field absence already lost by a parser or by
+    the integer fields of {!Types.api_usage}. *)
 val finalize : t -> receipt

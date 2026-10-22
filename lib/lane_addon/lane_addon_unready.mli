@@ -41,6 +41,3 @@ val declaring : name:string -> t list -> t list
 
 val summary : t list -> string option
 (** [None] for no installation; otherwise every {!message}, joined. *)
-
-val operator_summary : t list -> string option
-(** [None] for no installation; otherwise every {!operator_message}, joined. *)

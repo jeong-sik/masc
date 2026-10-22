@@ -336,8 +336,6 @@ let test_a_failed_installation_is_read_as_unready () = with_fixture (fun env _ c
     ((unwrap (Runtime.tool_export_reading ~config
       ~access:Lane_addon_sources.Unauthenticated ~reserved:[])).unready = []))
 
-(* A failed DOS installation may still hold the controller in its state, so a
-   release is not reported as done, and a shared call names the installation. *)
 (* A caller learns which installation failed, never the host facts of why:
    its text is the same whatever the failure. The operator's text renders the
    lifecycle failure, so two failures read apart there. *)
@@ -358,6 +356,8 @@ let test_a_failure_is_explained_only_to_the_operator () =
     (String.equal (Runtime.export_refusal_operator_message (refusal exited))
        (Runtime.export_refusal_operator_message (refusal unconfirmed)))
 
+(* A failed DOS installation may still hold the controller in its state, so a
+   release is not reported as done, and a shared call names the installation. *)
 let test_a_failed_dos_installation_is_named_and_not_released () = with_fixture (fun env _ config dir _ ->
   let clock = Eio.Stdenv.clock env in
   let pass = Machine_controller_contract.(dos_tool_name Dos_pass) in

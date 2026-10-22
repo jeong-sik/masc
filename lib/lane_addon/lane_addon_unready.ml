@@ -23,8 +23,6 @@ let operator_message =
 
 let declaring ~name unready = List.filter (fun t -> List.mem name t.declared_tools) unready
 
-let joined render = function
+let summary = function
   | [] -> None
-  | unready -> Some (String.concat "; " (List.map render unready))
-let summary = joined message
-let operator_summary = joined operator_message
+  | unready -> Some (String.concat "; " (List.map message unready))

@@ -18,16 +18,18 @@ type decoder =
   | Cleanup_descriptor
   | Action_receipt
   | Exact_record
+  | Tool_request_inventory
   | Tool_request_owner
 
 let decoder_name = function
   | Json -> "Yojson.Safe.from_string"
-  | Retained_binding -> "Lane_addon_runtime.parse_retained_binding"
-  | Inventory_record -> "Lane_addon_runtime.inventory_record_json"
+  | Retained_binding -> "Lane_addon_runtime.check_retained_binding"
+  | Inventory_record -> "Lane_addon_runtime.check_inventory_record"
   | Native_lease -> "Native_addon_lease.inspect"
-  | Cleanup_descriptor -> "Browser_addon_socket.decode_cleanup_context"
+  | Cleanup_descriptor -> "Browser_addon_socket.check_retained"
   | Action_receipt -> "Lane_addon_action.of_json"
   | Exact_record -> "Lane_addon_exact.check_retained_record"
+  | Tool_request_inventory -> "Lane_addon_store.tool_request_owner_entry"
   | Tool_request_owner -> "Lane_addon_tool_request_owner.check_published"
 
 type refusal =
@@ -52,8 +54,9 @@ let name = function
 let on_refusal = function
   | Store.Bindings ->
     "the Lane Add-on inventory lists the record as an issue, and a declaration \
-     the record names (any declaration, when its owner cannot be read) fails to \
-     apply while the record is there"
+     the record names (every declaration, when its owner cannot be read) fails \
+     to apply while the record is there; a detached record that names its \
+     declaration is not refused, because nothing waits on it"
   | Native_claims ->
     "the host cannot confirm the cleanup of the instance the slot holds, so that \
      installation stays failed and refuses every new start (#45106)"
@@ -98,8 +101,6 @@ let exists path =
   | exception Unix.Unix_error _ -> false
   | _ -> true
 
-let json_files names = List.filter (fun name -> Filename.check_suffix name ".json") names
-
 let empty = { rows = 0; refusals = [] }
 
 let counted report = { report with rows = report.rows + 1 }
@@ -127,21 +128,46 @@ let read_record report ~path decode =
 
 let decoded decoder result = Result.map_error (fun detail -> decoder, detail) result
 
+(* What the store's reader does with one name in a record directory. *)
+type entry =
+  | Record
+  | Skipped
+  | Refused of decoder * string
+
+(* Bindings, action receipts and Exact requests: only [.json] names are
+   records, and their readers read nothing else in the directory. *)
+let json_entry name = if Filename.check_suffix name ".json" then Record else Skipped
+
+(* Discovery reads a whole scope and fails it on an entry it does not know. *)
+let tool_request_owner_entry name =
+  match Lane_addon_store.tool_request_owner_entry name with
+  | Lane_addon_store.Record_entry -> Record
+  | Staged_entry -> Skipped
+  | Unknown_entry -> Refused (Tool_request_inventory, "unknown entry in original request namespace")
+
+let read_entries report ~dir ~entry decode names =
+  List.fold_left
+    (fun report name ->
+       let path = Filename.concat dir name in
+       match entry name with
+       | Skipped -> report
+       | Refused (decoder, detail) -> refused report { path; decoder; detail; aside = [ path ] }
+       | Record -> read_record report ~path (decode ~name ~path))
+    report
+    names
+
 let scan_bindings root =
   let dir = Filename.concat root Lane_addon_store.bindings_directory in
   let* names = entries dir in
   Ok
-    (List.fold_left
-       (fun report name ->
-          let path = Filename.concat dir name in
-          read_record report ~path (fun json ->
-            let* () = decoded Retained_binding (Lane_addon_runtime.parse_retained_binding_json json) in
-            decoded Inventory_record (Lane_addon_runtime.inventory_record_json ~path json)))
-       empty
-       (json_files names))
+    (read_entries empty ~dir ~entry:json_entry
+       (fun ~name:_ ~path json ->
+          let* () = decoded Retained_binding (Lane_addon_runtime.check_retained_binding json) in
+          decoded Inventory_record (Lane_addon_runtime.check_inventory_record ~path json))
+       names)
 
 (* Records grouped one directory deep: [<store>/<digest>/<digest>.json]. *)
-let scan_grouped root directory decode =
+let scan_grouped root directory ~entry decode =
   let dir = Filename.concat root directory in
   let* groups = entries dir in
   List.fold_left
@@ -152,15 +178,22 @@ let scan_grouped root directory decode =
        then Ok report
        else
          let* names = entries group_dir in
-         Ok
-           (List.fold_left
-              (fun report name ->
-                 read_record report ~path:(Filename.concat group_dir name)
-                   (decode ~group ~name))
-              report
-              (json_files names)))
+         Ok (read_entries report ~dir:group_dir ~entry (decode ~group) names))
     (Ok empty)
     groups
+
+(* The runtime loads a receipt by its key and refuses one that names another
+   request. *)
+let check_action ~group ~name json =
+  let* receipt = Lane_addon_action.of_json json in
+  let key =
+    Lane_addon_store.action_path
+      ~instance_id:receipt.Lane_addon_action.instance_id
+      ~request_id:receipt.request_id
+  in
+  if String.equal key (Filename.concat Lane_addon_store.actions_directory (Filename.concat group name))
+  then Ok ()
+  else Error "retained receipt belongs to a different request"
 
 (* The binding and observations of the instance a native claim holds go aside
    with the slot: recovering #45106 moved all three, and a binding left behind
@@ -170,6 +203,11 @@ let instance_records root instance =
   |> List.map (Filename.concat root)
   |> List.filter exists
 
+(* The host reads an installation slot and, through the cleanup descriptor of
+   the instance it holds, that instance's Chrome and live BiDi child slots. A
+   child slot of an earlier instance is never read again, so it is not read
+   here either: refusing it would stop every later deploy over a file nothing
+   uses. *)
 let scan_native_claims root =
   let dir = Filename.concat root Lane_addon_runtime.native_claims_directory in
   let* names = entries dir in
@@ -177,31 +215,38 @@ let scan_native_claims root =
     (List.fold_left
        (fun report name ->
           let slot_dir = Filename.concat dir name in
+          let aside instance =
+            slot_dir :: Option.fold ~none:[] ~some:(instance_records root) instance
+          in
           match Lane_addon_runtime.native_claim_slot_of_name name with
-          | None -> report
-          | Some slot ->
+          | None | Some (Lane_addon_runtime.Chrome_child_slot | Live_bidi_child_slot) -> report
+          | Some Installation_slot ->
             (match Native_addon_lease.inspect ~directory:slot_dir with
-             | Error detail ->
-               refused report { path = slot_dir; decoder = Native_lease; detail; aside = [ slot_dir ] }
+             | Error (lease : Native_addon_lease.inspection_error) ->
+               refused
+                 report
+                 { path = slot_dir
+                 ; decoder = Native_lease
+                 ; detail = lease.refusal
+                 ; aside = aside lease.refused_instance
+                 }
              | Ok None -> counted report
              | Ok (Some recorded) ->
-               (match slot with
-                | Lane_addon_runtime.Chrome_child_slot | Live_bidi_child_slot -> counted report
-                | Installation_slot ->
-                  (match
-                     Browser_addon_socket.decode_cleanup_context
-                       ~instance_id:recorded.Native_addon_lease.instance
-                       recorded.context
-                   with
-                   | Ok () -> counted report
-                   | Error detail ->
-                     refused
-                       report
-                       { path = Filename.concat slot_dir recorded.history
-                       ; decoder = Cleanup_descriptor
-                       ; detail
-                       ; aside = slot_dir :: instance_records root recorded.instance
-                       }))))
+               (match
+                  Browser_addon_socket.check_retained
+                    ~instance_id:recorded.Native_addon_lease.instance
+                    ~slot:slot_dir
+                    recorded.context
+                with
+                | Ok () -> counted report
+                | Error detail ->
+                  refused
+                    report
+                    { path = Filename.concat slot_dir recorded.history
+                    ; decoder = Cleanup_descriptor
+                    ; detail
+                    ; aside = aside (Some recorded.instance)
+                    })))
        empty
        names)
 
@@ -212,14 +257,17 @@ let scan store ~base_path =
     | Store.Bindings -> scan_bindings root
     | Native_claims -> scan_native_claims root
     | Actions ->
-      scan_grouped root Lane_addon_store.actions_directory (fun ~group:_ ~name:_ json ->
-        Lane_addon_action.of_json json |> Result.map ignore |> decoded Action_receipt)
+      scan_grouped root Lane_addon_store.actions_directory ~entry:json_entry
+        (fun ~group ~name ~path:_ json -> check_action ~group ~name json |> decoded Action_receipt)
     | Exact_requests ->
-      scan_grouped root Lane_addon_store.exact_requests_directory (fun ~group:_ ~name:_ json ->
-        Lane_addon_exact.check_retained_record json |> decoded Exact_record)
+      scan_grouped root Lane_addon_store.exact_requests_directory ~entry:json_entry
+        (fun ~group:_ ~name:_ ~path:_ json ->
+           Lane_addon_exact.check_retained_record json |> decoded Exact_record)
     | Tool_request_owners ->
-      scan_grouped root Lane_addon_store.tool_request_owners_directory (fun ~group ~name json ->
-        Lane_addon_tool_request_owner.check_published ~directory_name:group ~file_name:name json
-        |> decoded Tool_request_owner)
+      scan_grouped root Lane_addon_store.tool_request_owners_directory
+        ~entry:tool_request_owner_entry
+        (fun ~group ~name ~path:_ json ->
+           Lane_addon_tool_request_owner.check_published ~directory_name:group ~file_name:name json
+           |> decoded Tool_request_owner)
   in
   Result.map finish report

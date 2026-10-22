@@ -21,6 +21,11 @@ val verify_browser : admission:Native_addon_lease.t ->
     child. On refusal close only this CDP connection. Never signals a PID from
     a CDP reply or uses a matching command line as ownership. The caller still
     owns its original process manager and resource cleanup. *)
+val check_retained_child : configuration -> incarnation:string -> directory:string -> (unit, string) result
+(** Read the child claim {!settle} recovers, without its gate lock, fence or any
+    write: the slot through [Native_addon_lease.inspect], and its cleanup
+    descriptor compared with the one this allocation recomputes. A missing
+    slot is [Ok]. *)
 val settle : configuration -> incarnation:string -> directory:string -> (unit, string) result
 (** Blocking recovery of this allocation's original child claim. Retire first,
     request termination by its kernel lease, and require Settled. A successful

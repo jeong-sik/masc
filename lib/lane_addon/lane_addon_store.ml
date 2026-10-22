@@ -569,6 +569,11 @@ let load_tool_request_owner t ~scope ~request_id =
       else read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
         |> Result.map Option.some) in
   Ok (Option.join result)
+type namespace_entry = Record_entry | Staged_entry | Unknown_entry
+let tool_request_owner_entry name =
+  if Fs_compat.is_atomic_orphan_name name then Staged_entry
+  else if Filename.check_suffix name ".json" then Record_entry
+  else Unknown_entry
 let tool_request_owner_inventory_with ~after_listing ~sync_file ~sync_parent t ~scope =
   let* result = with_tool_request_owner_scope ~sync_parent t ~scope
     (fun ~owner_uid held names ->
@@ -576,9 +581,11 @@ let tool_request_owner_inventory_with ~after_listing ~sync_file ~sync_parent t ~
       let rec read records = function
         | [] -> Ok (List.rev records)
         | name :: rest ->
-          if Fs_compat.is_atomic_orphan_name name then read records rest
-          else if not (Filename.check_suffix name ".json") then Error "unknown entry in original request namespace"
-          else let* json = read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name in
+          match tool_request_owner_entry name with
+          | Staged_entry -> read records rest
+          | Unknown_entry -> Error "unknown entry in original request namespace"
+          | Record_entry ->
+            let* json = read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name in
             read ((name,json) :: records) rest in
       read [] names) in
   Ok (match result with None -> [] | Some records -> records)
@@ -709,6 +716,12 @@ type binding_reading = { readable : Yojson.Safe.t list; unreadable : unreadable_
    lacks an instance id or sequence, or sits beside a misnamed observation
    file is listed in [unreadable] and never hides its siblings. Only a
    directory that cannot be listed or synced fails the whole reading. *)
+let binding_sequence = function
+  | `Assoc fields ->
+      (match List.assoc_opt "instance_id" fields, List.assoc_opt "observation_seq" fields with
+       | Some (`String instance_id), Some (`Int sequence) when sequence >= 0 -> Ok (instance_id, sequence, fields)
+       | _ -> Error "invalid retained binding sequence")
+  | _ -> Error "invalid retained binding"
 let read_bindings t =
   let directory = Filename.concat t.root bindings_directory in
   let* names = protect (fun () ->
@@ -726,16 +739,15 @@ let read_bindings t =
     | Ok (Some bytes) ->
         (match Yojson.Safe.from_string bytes with
          | exception Yojson.Json_error detail -> unreadable detail
-         | `Assoc fields as json ->
-             (match List.assoc_opt "instance_id" fields, List.assoc_opt "observation_seq" fields with
-              | Some (`String instance_id), Some (`Int sequence) when sequence >= 0 ->
+         | json ->
+             (match binding_sequence json with
+              | Ok (instance_id, sequence, fields) ->
                   (match highwater t instance_id with
                    | Ok retained ->
                        Some (Ok (`Assoc (("observation_seq", `Int (max sequence retained)) ::
                          List.remove_assoc "observation_seq" fields)))
                    | Error detail -> unreadable ~contents:json detail)
-              | _ -> unreadable ~contents:json "invalid retained binding sequence")
-         | json -> unreadable ~contents:json "invalid retained binding") in
+              | Error detail -> unreadable ~contents:json detail)) in
   let reading = List.fold_left (fun reading name ->
     if not (Filename.check_suffix name ".json") then reading
     else match read name with

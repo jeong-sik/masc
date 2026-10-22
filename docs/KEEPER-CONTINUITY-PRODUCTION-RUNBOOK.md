@@ -103,7 +103,10 @@ an old-shape file later and keep refusing it (#45106: an installation stayed
 with the decoder that refused it and one `fresh state:` line: stop the server,
 move the listed paths aside, then start the new build. For a native claim the
 list is the slot directory together with the binding and observations of the
-instance it holds. The preflight only reads; it never moves these files.
+instance it holds. The preflight refuses only what the runtime refuses: a
+detached binding that names its declaration is kept as evidence and passes, and
+a Chrome or live BiDi child slot is read through the installation that holds
+it. The preflight only reads; it never moves these files.
 
 ## Containment and Rollback
 

@@ -439,9 +439,21 @@ let parse_retained_binding = function
                  | Ok _, Ok _ -> Ok { binding_fields = fields; read_visibility; binding_owner })))
   | _ -> Error { fault_instance = None; fault_owner = Owner_unreadable; fault_fields = [];
       fault_reason = Record_invalid "expected an object" }
-let parse_retained_binding_json json =
-  parse_retained_binding json |> Result.map ignore
-  |> Result.map_error (fun fault -> retained_fault_message fault.fault_reason)
+(* The reads [read_retained_bindings] makes of one record (the store's sequence
+   read, then [parse_retained_binding]), judged the way configuration
+   application judges a fault: a record that names its declaration and is
+   detached holds nothing anyone waits on, so it is kept as evidence and refuses
+   nothing. *)
+let check_retained_binding json =
+  let fault = match Lane_addon_store.binding_sequence json, json with
+    | Error detail, `Assoc fields -> Some (fault_of_fields fields (Record_invalid detail))
+    | Error detail, _ -> Some { fault_instance = None; fault_owner = Owner_unreadable; fault_fields = [];
+        fault_reason = Record_invalid detail }
+    | Ok _, _ -> Result.fold ~ok:(fun _ -> None) ~error:Option.some (parse_retained_binding json) in
+  match fault with
+  | None -> Ok ()
+  | Some fault when owner_is_terminal fault.fault_owner fault.fault_fields -> Ok ()
+  | Some fault -> Error (retained_fault_message fault.fault_reason)
 let fault_of_unreadable (unreadable : Lane_addon_store.unreadable_binding) =
   let located = unreadable.path ^ ": " ^ unreadable.detail in
   let unattributed reason = { fault_instance = None; fault_owner = Owner_unreadable;
@@ -2017,9 +2029,11 @@ let retained_inventory_instance ~recovering path json : (inventory_instance, ret
         Lifecycle.Failed (Lifecycle.failed Lifecycle.Previous_process) in
   Ok {instance_id;incarnation;run_id;package_id;title;package_revision;
       configuration;presence=Retained;phase=Lifecycle.project state}
-let inventory_record_json ~path json =
-  retained_inventory_instance ~recovering:(fun _ -> false) (Some path) json
-  |> Result.map ignore |> Result.map_error retained_fault_message
+let check_inventory_record ~path json =
+  match retained_inventory_instance ~recovering:(fun _ -> false) (Some path) json, json with
+  | Ok _, _ -> Ok ()
+  | Error _, `Assoc fields when owner_is_terminal (owner_of_fields fields) fields -> Ok ()
+  | Error reason, _ -> Error (retained_fault_message reason)
 let inventory_at_root ~root =
   let stored = offload (fun () -> Lane_addon_store.binding_inventory ~root) in
   let manager = Hashtbl.find_opt managers root in

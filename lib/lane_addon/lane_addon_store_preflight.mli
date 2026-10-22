@@ -29,28 +29,35 @@ end
 (** The runtime reader that refused a record. *)
 type decoder =
   | Json  (** The file is not JSON. *)
-  | Retained_binding  (** {!Lane_addon_runtime.parse_retained_binding_json} *)
-  | Inventory_record  (** {!Lane_addon_runtime.inventory_record_json} *)
+  | Retained_binding  (** {!Lane_addon_runtime.check_retained_binding} *)
+  | Inventory_record  (** {!Lane_addon_runtime.check_inventory_record} *)
   | Native_lease  (** {!Native_addon_lease.inspect} *)
-  | Cleanup_descriptor  (** {!Browser_addon_socket.decode_cleanup_context} *)
-  | Action_receipt  (** {!Lane_addon_action.of_json} *)
+  | Cleanup_descriptor  (** {!Browser_addon_socket.check_retained} *)
+  | Action_receipt
+      (** {!Lane_addon_action.of_json}, and the receipt's own ids against the
+          key it is stored under. *)
   | Exact_record  (** {!Lane_addon_exact.check_retained_record} *)
+  | Tool_request_inventory  (** {!Lane_addon_store.tool_request_owner_entry} *)
   | Tool_request_owner  (** {!Lane_addon_tool_request_owner.check_published} *)
 
 val decoder_name : decoder -> string
 
 type refusal =
-  { path : string  (** The refused file, or the slot directory. *)
+  { path : string
+        (** The refused file; the slot directory when the lease refused a
+            native claim. *)
   ; decoder : decoder
   ; detail : string  (** The decoder's own message. *)
   ; aside : string list
-        (** What the operator moves aside with the server stopped, the refused
-            file first. A native claim also names the binding and observations
-            of the instance it holds, which recovering #45106 needed. *)
+        (** What the operator moves aside with the server stopped. For a record
+            it is that file. For a native claim it is the slot directory, then
+            the binding and observations of the instance the slot names, when
+            that could be read and they exist; recovering #45106 moved all
+            three. *)
   }
 
 type report =
-  { rows : int  (** Files (slots, for native claims) read. *)
+  { rows : int  (** Files (installation slots, for native claims) read. *)
   ; refusals : refusal list  (** In path order. *)
   }
 

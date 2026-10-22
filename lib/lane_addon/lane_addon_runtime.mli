@@ -221,13 +221,18 @@ type retained_fault_reason =
   | Source_access_invalid
   | Record_invalid of string
 val retained_fault_message : retained_fault_reason -> string
-val parse_retained_binding_json : Yojson.Safe.t -> (unit, string) result
-(** [parse_retained_binding], the decoder configuration application, Inspect
-    and restart recovery apply to one retained binding record. Reads and writes
+val check_retained_binding : Yojson.Safe.t -> (unit, string) result
+(** The reads configuration application, Inspect and restart recovery make of
+    one retained binding record (its instance id and sequence, then
+    [parse_retained_binding]), judged as they judge a fault: [Error] is a fault
+    that holds a declaration or a reader back. A record that names its
+    declaration and is detached is [Ok] even when it does not parse, because
+    nothing waits on it and its fields stay evidence. Reads and writes
     nothing. *)
-val inventory_record_json : path:string -> Yojson.Safe.t -> (unit, string) result
+val check_inventory_record : path:string -> Yojson.Safe.t -> (unit, string) result
 (** The record decoder {!inventory} applies to the retained binding file at
-    [path], including its filename identity. Reads and writes nothing. *)
+    [path], including its filename identity, with the same exemption for a
+    detached record that names its declaration. Reads and writes nothing. *)
 val native_claims_directory : string
 (** The directory below the Lane Add-on store root that holds the native claim
     slots. *)

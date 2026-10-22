@@ -201,44 +201,80 @@ let expect_refusals store ~base_path ~rows expected =
     (List.map snd (by_path expected) = List.map snd actual);
   report.P.refusals
 
-let unchanged path f =
-  let before = read path in
+(* Every path below [root] with its bytes: the check must create, change and
+   remove nothing, including the gate, lease and owner files of a slot. *)
+let rec tree path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+    (path, "directory")
+    :: (Sys.readdir path |> Array.to_list |> List.sort String.compare
+        |> List.concat_map (fun name -> tree (Filename.concat path name)))
+  | Unix.S_REG -> [path, read path]
+  | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> [path, "other"]
+
+let unchanged root f =
+  let before = tree root in
   let result = f () in
-  check string ("the check leaves " ^ path ^ " as it was") before (read path);
+  check (list (pair string string)) "the check leaves the store as it was" before (tree root);
   result
 
-let binding ~id ~current =
+type binding_shape =
+  | Current
+  | Detached_history
+      (** The 116 records a live workspace held on 2026-10-22: detached, naming
+          their declaration, without the execution authority fields. *)
+  | September  (** #44651: no lifecycle and no read authority. *)
+
+let binding ~id shape =
   let common =
     [ "instance_id", `String id; "incarnation", `String id; "run_id", `String "dos-counter"
     ; "addon_id", `String "dos-world"; "title", `String "DOS"; "revision", `String "1"
-    ; "observation_seq", `Int 0; "configuration", `Null ] in
+    ; "observation_seq", `Int 0 ] in
+  let owner =
+    `Assoc ["id", `String "dos-counter"; "source_path", `String "/declarations/dos-counter.toml"
+           ; "revision", `String "1"] in
+  let readers =
+    [ "visibility", `Assoc ["kind", `String "shared"]
+    ; "source_access", Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated ] in
+  let lifecycle state = "lifecycle", Lane_addon_lifecycle.state_to_json state in
   `Assoc
-    (if current
-     then
+    (match shape with
+     | Current ->
        common
-       @ [ "lifecycle",
-           Lane_addon_lifecycle.state_to_json
+       @ [ "configuration", `Null
+         ; lifecycle
              (Lane_addon_lifecycle.Failed
                 (Lane_addon_lifecycle.failed Lane_addon_lifecycle.Previous_process))
-         ; "execution_authority", `Null; "resource", `Null
-         ; "visibility", `Assoc ["kind", `String "shared"]
-         ; "source_access", Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated ]
-     (* The September shape of #44651: no lifecycle and no read authority. *)
-     else common @ ["phase", `String "failed"; "container_id", `Null])
+         ; "execution_authority", `Null; "resource", `Null ]
+       @ readers
+     | Detached_history ->
+       common
+       @ ["configuration", owner; lifecycle (Lane_addon_lifecycle.Detached Lane_addon_lifecycle.Never_created)]
+       @ readers
+     | September -> common @ ["configuration", owner; "phase", `String "failed"; "container_id", `Null])
 
 let test_lane_addon_bindings () = with_lane_store (fun base root ->
   let path id = Filename.concat root (Lane_addon_store.binding_path id) in
-  put (path "current") (binding ~id:"current" ~current:true);
-  put (path "september") (binding ~id:"september" ~current:false);
-  let refusals = unchanged (path "september") (fun () ->
-    expect_refusals P.Store.Bindings ~base_path:base ~rows:2
+  put (path "current") (binding ~id:"current" Current);
+  put (path "history") (binding ~id:"history" Detached_history);
+  put (path "september") (binding ~id:"september" September);
+  let refusals = unchanged root (fun () ->
+    expect_refusals P.Store.Bindings ~base_path:base ~rows:3
       [path "september", P.Retained_binding]) in
   check (list (list string)) "the binding alone goes aside" [[path "september"]]
     (List.map (fun (r : P.refusal) -> r.aside) refusals))
 
 let test_lane_addon_native_claims () = with_lane_store (fun base root ->
-  let slot name = Filename.concat (Filename.concat root Lane_addon_runtime.native_claims_directory) name in
+  let claims = Filename.concat root Lane_addon_runtime.native_claims_directory in
+  Fs_compat.mkdir_p claims;
+  let slot name =
+    let directory = Filename.concat claims name in
+    Unix.mkdir directory 0o700;
+    directory in
+  (* A slot as the lease leaves it: gate, lease, owner receipt, intent and the
+     admitted instance's history. *)
   let reserve directory ~instance ~context ~version =
+    List.iter (fun name -> write (Filename.concat directory name) "") ["gate"; "lease"; "owner.json"];
     put (Filename.concat directory "intent.json")
       (`Assoc ["instance_id", `String instance; "state", `String "admitted"]);
     let history = Filename.concat directory ("instance-" ^ Lane_addon_store.digest instance ^ ".json") in
@@ -251,32 +287,39 @@ let test_lane_addon_native_claims () = with_lane_store (fun base root ->
             ~live_bidi:None ~models:None with
     | Ok json -> json
     | Error detail -> fail detail in
-  let current = "01a162a0-f0f5-7000-a6c5-012f6785ec2f" in
-  let old = "01a162a0-f0f5-7000-a6c5-012f6785ec30" in
-  ignore (reserve (slot (Lane_addon_store.digest "browser-work")) ~instance:current
-            ~context:(descriptor current) ~version:(Some 2));
-  (* A child slot holds the descriptor its parent compares; the host never
-     reads it as a socket descriptor. *)
-  ignore (reserve (slot ("browser-" ^ Lane_addon_store.digest current)) ~instance:current
-            ~context:(`Assoc ["kind", `String "browser_addon_chrome"]) ~version:(Some 2));
-  (* The #45106 record: written before #44364 with only kind and directory. *)
-  let old_slot = slot (Lane_addon_store.digest "browser-old") in
-  let old_directory = match descriptor old with
+  let directory_of descriptor = match descriptor with
     | `Assoc fields -> List.assoc "directory" fields
     | _ -> fail "socket descriptor is not an object" in
+  let current = "01a162a0-f0f5-7000-a6c5-012f6785ec2f" in
+  let old = "01a162a0-f0f5-7000-a6c5-012f6785ec30" in
+  let earlier = "01a162a0-f0f5-7000-a6c5-012f6785ec31" in
+  let current_slot = slot (Lane_addon_store.digest "browser-work") in
+  ignore (reserve current_slot ~instance:current ~context:(descriptor current) ~version:(Some 2));
+  (* The socket acquisition record cleanup reads beside the history. *)
+  put (Filename.concat current_slot ("browser-" ^ Lane_addon_store.digest current ^ ".json"))
+    (`Assoc ["state", `String "acquired"; "incarnation", `String current
+            ; "directory", directory_of (descriptor current); "device", `Int 1; "inode", `Int 2]);
+  (* The Chrome child slot of an instance the installation no longer holds is
+     never read again, even in a shape this build does not read. *)
+  ignore (reserve (slot ("browser-" ^ Lane_addon_store.digest earlier)) ~instance:earlier
+            ~context:(`Assoc ["kind", `String "browser_addon_chrome"]) ~version:None);
+  (* The #45106 record: written before #44364 with only kind and directory. *)
+  let old_slot = slot (Lane_addon_store.digest "browser-old") in
   let old_history = reserve old_slot ~instance:old
-      ~context:(`Assoc ["kind", `String "browser_socket"; "directory", old_directory])
+      ~context:(`Assoc ["kind", `String "browser_socket"; "directory", directory_of (descriptor old)])
       ~version:(Some 2) in
   let old_binding = Filename.concat root (Lane_addon_store.binding_path old) in
-  put old_binding (binding ~id:old ~current:true);
+  put old_binding (binding ~id:old Current);
   let unversioned = slot (Lane_addon_store.digest "mcp-tools") in
   ignore (reserve unversioned ~instance:"tools" ~context:`Null ~version:None);
-  let refusals = unchanged old_history (fun () ->
-    expect_refusals P.Store.Native_claims ~base_path:base ~rows:4
+  let tools_binding = Filename.concat root (Lane_addon_store.binding_path "tools") in
+  put tools_binding (binding ~id:"tools" Current);
+  let refusals = unchanged root (fun () ->
+    expect_refusals P.Store.Native_claims ~base_path:base ~rows:3
       [old_history, P.Cleanup_descriptor; unversioned, P.Native_lease]) in
-  check bool "the slot goes aside with the binding of the instance it holds" true
-    (List.exists (fun (r : P.refusal) -> r.aside = [old_slot; old_binding]) refusals);
-  check bool "the old binding is read, not moved" true (Sys.file_exists old_binding))
+  check (list (list string)) "each slot goes aside with the binding of the instance it names"
+    (List.sort compare [[old_slot; old_binding]; [unversioned; tools_binding]])
+    (List.sort compare (List.map (fun (r : P.refusal) -> r.aside) refusals)))
 
 let receipt ~instance_id ~request_id ~executor =
   let action = `Assoc ["press", `String "start"] in
@@ -304,9 +347,12 @@ let test_lane_addon_actions () = with_lane_store (fun base root ->
   (* Before #44214 the executor was a string. *)
   put (path "string-executor")
     (receipt ~instance_id:"instance" ~request_id:"string-executor" ~executor:(`String "docker"));
-  ignore (unchanged (path "string-executor") (fun () ->
-    expect_refusals P.Store.Actions ~base_path:base ~rows:2
-      [path "string-executor", P.Action_receipt])))
+  (* The runtime reads a receipt by its key; one stored under another key is
+     refused there. *)
+  put (path "misfiled") (receipt ~instance_id:"instance" ~request_id:"elsewhere" ~executor:`Null);
+  ignore (unchanged root (fun () ->
+    expect_refusals P.Store.Actions ~base_path:base ~rows:3
+      [path "string-executor", P.Action_receipt; path "misfiled", P.Action_receipt])))
 
 let exact_record ~declaration_id ~request_id ~messages =
   let request =
@@ -327,7 +373,7 @@ let test_lane_addon_exact_requests () = with_lane_store (fun base root ->
   (* Before #44407 a message was a bare string. *)
   put (path "string-messages")
     (exact_record ~declaration_id:"quiz" ~request_id:"string-messages" ~messages:[`String "hello"]);
-  ignore (unchanged (path "string-messages") (fun () ->
+  ignore (unchanged root (fun () ->
     expect_refusals P.Store.Exact_requests ~base_path:base ~rows:2
       [path "string-messages", P.Exact_record])))
 
@@ -346,15 +392,19 @@ let test_lane_addon_tool_request_owners () = with_lane_store (fun base root ->
   (* #44911 moved the record to schema v2. *)
   put (path "v1")
     (tool_request_owner ~scope:"scope" ~request_id:"v1" ~schema:"lane.addon.tool-request-owner.v1");
-  ignore (unchanged (path "v1") (fun () ->
-    expect_refusals P.Store.Tool_request_owners ~base_path:base ~rows:2
-      [path "v1", P.Tool_request_owner])))
+  (* Discovery fails the whole scope on an entry it does not know. *)
+  let stray = Filename.concat (Filename.dirname (path "current")) "notes.txt" in
+  write stray "operator notes";
+  ignore (unchanged root (fun () ->
+    expect_refusals P.Store.Tool_request_owners ~base_path:base ~rows:3
+      [path "v1", P.Tool_request_owner; stray, P.Tool_request_inventory])))
+
 
 (* The deploy gate itself: a refused Lane Add-on record stops validate-stores. *)
 let test_lane_addon_record_refuses_deploy exe () = with_lane_store (fun base root ->
   let path = grouped root Lane_addon_store.actions_directory ~group:"instance" ~id:"string-executor" in
   put path (receipt ~instance_id:"instance" ~request_id:"string-executor" ~executor:(`String "docker"));
-  let status, output = unchanged path (fun () -> invoke exe base) in
+  let status, output = unchanged root (fun () -> invoke exe base) in
   check bool ("an undecodable Lane Add-on record refuses deployment: " ^ output) true
     (status <> Unix.WEXITED 0);
   check bool ("the refusal names the file: " ^ output) true

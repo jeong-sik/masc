@@ -72,12 +72,13 @@ let intent_of_json = function
       | _ -> Error (State_invalid "invalid native admission intent"))
   | _ -> Error (State_invalid "invalid native admission intent")
 let read_intent slot = parse slot.intent intent_of_json
-let read_owner slot = parse slot.owner (function
+let owner_of_json = function
   | `Assoc fields -> (match sorted fields with
       | ["instance_id",`String instance_id;"pid",`Int pid;"started",`String started]
         when String.trim instance_id<>"" && pid>1 && String.trim started<>"" -> Ok {instance_id;pid;started}
       | _ -> Error (State_invalid "invalid native process receipt"))
-  | _ -> Error (State_invalid "invalid native process receipt"))
+  | _ -> Error (State_invalid "invalid native process receipt")
+let read_owner slot = parse slot.owner owner_of_json
 let write_metadata slot name value =
   replace_private_file slot.directory name (Yojson.Safe.to_string value)
 let write_intent slot instance state = write_metadata slot "intent.json"
@@ -284,49 +285,81 @@ let recover_preparation ~directory:path =
       | [] | _::_::_ -> Error (Invalid_claim "native preparation requires one installation slot")))
 let cleanup_context t = with_slots t.directories (existing_context t)
 type recorded = { instance : string; history : string; context : Yojson.Safe.t option }
+type inspection_error = { refusal : string; refused_instance : string option }
 (* The bytes of one slot file, [None] when it does not exist. *)
 let peek path =
   match Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC] 0 with
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None
   | fd -> Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Ok (Some (read fd)))
-(* The decoders [reopen], [current] and [recover_preparation] apply, without the
+(* The reads [reopen], [current] and [recover_preparation] make, without the
    gate, the coordinator, fsync or [create]: a deploy check reads the slots of a
    server that may still be running and must never wait on or change them.
    Intents and histories are replaced by rename, so each read sees one whole
-   version of its file. *)
+   version. The owner receipt is written in place once, by the launcher before
+   it execs, so a read during that write can refuse once; a second run reads it
+   whole. *)
 let inspect ~directory =
-  let failed name error = Filename.concat directory name ^ ": " ^ error_to_string error in
-  let decode ?missing name decoder = protect (fun () ->
-    let* bytes = peek (Filename.concat directory name) in
-    match bytes, missing with
-    | None, None -> Ok None
-    | None, Some error -> Error error
-    | Some bytes, (None | Some _) -> decode_bytes decoder bytes) |> Result.map_error (failed name) in
+  let path name = Filename.concat directory name in
+  let refuse ?instance name error =
+    Error { refusal = path name ^ ": " ^ error_to_string error; refused_instance = instance } in
+  let decode ?missing ?instance name decoder =
+    match protect (fun () ->
+      let* bytes = peek (path name) in
+      match bytes, missing with
+      | None, None -> Ok None
+      | None, Some error -> Error error
+      | Some bytes, (None | Some _) -> decode_bytes decoder bytes) with
+    | Ok value -> Ok value
+    | Error error -> refuse ?instance name error in
   let history instance =
     let name = history_name instance in
-    let* history = decode name (history_of_json instance)
+    let* history = decode ~instance name (history_of_json instance)
         ~missing:(State_invalid "native instance history is missing") in
-    let* history = present_history history |> Result.map_error (failed name) in
-    Ok {instance; history=name; context=history.cleanup_context} in
+    match history with
+    | None -> refuse ~instance name (State_invalid "native instance history is empty")
+    | Some history -> Ok (history, {instance; history=name; context=history.cleanup_context}) in
   let* intent = decode "intent.json" intent_of_json in
-  match intent with
-  | Some (Admitted instance | Retired instance) -> history instance |> Result.map Option.some
+  let current = match intent with
+    | Some (Admitted instance | Retired instance) -> Some instance
+    | None -> None in
+  let* owner = decode ?instance:current "owner.json" owner_of_json in
+  match current with
+  | Some instance ->
+      (* [with_slots] opens every slot file and creates none of them here. *)
+      let* () = List.fold_left (fun result name ->
+        let* () = result in
+        match Unix.lstat (path name) with
+        | _ -> Ok ()
+        | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
+            refuse ~instance name (State_invalid "native slot file is missing")
+        | exception Unix.Unix_error (code,_,_) ->
+            refuse ~instance name (Io_failure (Unix.error_message code))) (Ok ()) slot_files in
+      let* _, recorded = history instance in
+      Ok (Some recorded)
   | None ->
-      let* names = protect (fun () -> Ok (Sys.readdir directory))
-        |> Result.map_error (fun error -> directory ^ ": " ^ error_to_string error) in
-      let* histories = Array.fold_left (fun result name ->
-        let* histories = result in
-        if List.mem name slot_files || temporary_metadata name then Ok histories
-        else
-          let* instance = decode name (history_instance name) in
-          match instance with
-          | None -> Error (failed name (State_invalid "native preparation history is empty"))
-          | Some instance -> let* recorded = history instance in Ok (recorded::histories))
-        (Ok []) names in
-      match histories with
-      | [] -> Ok None
-      | [recorded] -> Ok (Some recorded)
-      | _::_::_ -> Error (directory ^ ": unpublished native reservations disagree")
+      match owner with
+      | Some _ -> refuse "intent.json" (State_invalid "current native intent is missing")
+      | None ->
+          let* names = match protect (fun () -> Ok (Sys.readdir directory)) with
+            | Ok names -> Ok names
+            | Error error -> Error { refusal = directory ^ ": " ^ error_to_string error; refused_instance = None } in
+          let* histories = Array.fold_left (fun result name ->
+            let* histories = result in
+            if List.mem name slot_files || temporary_metadata name then Ok histories
+            else
+              let* instance = decode name (history_instance name) in
+              match instance with
+              | None -> refuse name (State_invalid "native preparation history is empty")
+              | Some instance -> let* found = history instance in Ok (found::histories))
+            (Ok []) names in
+          match histories with
+          | [] -> Ok None
+          | [{state=Consumed;_}, recorded] ->
+              refuse ~instance:recorded.instance recorded.history
+                (State_invalid "native preparation was already consumed")
+          | [{state=(Reserved | Revoked);_}, recorded] -> Ok (Some recorded)
+          | _::_::_ ->
+              Error { refusal = directory ^ ": unpublished native reservations disagree"; refused_instance = None }
 let retire t = with_slots t.directories (fun slots ->
   let* () = traverse (fun slot -> check_current t slot |> Result.map ignore) slots in
   let* () = traverse (fun slot -> with_history slot t.instance_id (fun fd ->

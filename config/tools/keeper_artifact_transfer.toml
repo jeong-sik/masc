@@ -19,7 +19,50 @@ required = true
 [[params]]
 name = "artifact"
 type = "object"
-description = "Exact artifact object from export, required for materialize."
+description = "Required for materialize: copy structured_content.artifact from the export result manifest, without the outer artifact key or the manifest reference itself. Preserve blob._blob.preview, including an empty string."
+additional_properties = false
+
+[[params.params]]
+name = "blob"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.params.params]]
+name = "_blob"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.params.params.params]]
+name = "sha256"
+type = "string"
+required = true
+
+[[params.params.params.params]]
+name = "bytes"
+type = "integer"
+required = true
+
+[[params.params.params.params]]
+name = "mime"
+type = "string"
+required = true
+
+[[params.params.params.params]]
+name = "preview"
+type = "string"
+required = true
+
+[[params.params]]
+name = "filename"
+type = "string"
+required = true
+
+[[params.params]]
+name = "purpose"
+type = "string"
+required = true
 
 [[params]]
 name = "purpose"

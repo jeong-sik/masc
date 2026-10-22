@@ -38,7 +38,50 @@ description = "The request the receiving Keeper reads: goal, scope, inputs, expe
 [[params]]
 name = "artifacts"
 type = "array"
-description = "Exact exported artifact objects from keeper_artifact_transfer. The receiver can materialize these bytes in its own sandbox."
+description = "Copy each structured_content.artifact from keeper_artifact_transfer's export result manifest, without the outer artifact key or the manifest reference itself. Preserve blob._blob.preview, including an empty string. The receiver can materialize these bytes in its own sandbox."
 
 [params.items]
 type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "blob"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.items.params.params]]
+name = "_blob"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.items.params.params.params]]
+name = "sha256"
+type = "string"
+required = true
+
+[[params.items.params.params.params]]
+name = "bytes"
+type = "integer"
+required = true
+
+[[params.items.params.params.params]]
+name = "mime"
+type = "string"
+required = true
+
+[[params.items.params.params.params]]
+name = "preview"
+type = "string"
+required = true
+
+[[params.items.params]]
+name = "filename"
+type = "string"
+required = true
+
+[[params.items.params]]
+name = "purpose"
+type = "string"
+required = true

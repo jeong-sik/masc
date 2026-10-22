@@ -240,15 +240,17 @@ let request_of_json json =
   let* artifacts = match List.assoc_opt "artifacts" fields with
     | None -> Ok []
     | Some (`List items) ->
-      let rec parse = function
+      let rec parse index = function
         | [] -> Ok []
         | item :: rest ->
           (match Keeper_peer_artifact_ref.of_json item with
            | Ok reference ->
-             let* rest = parse rest in Ok (reference :: rest)
-           | Error _ ->
-             Error (Invalid_wire_value {field="artifacts"; expected="exported artifact references"})) in
-      parse items
+             let* rest = parse (index + 1) rest in Ok (reference :: rest)
+           | Error detail ->
+             Error (Invalid_wire_value
+               { field = Printf.sprintf "artifacts[%d]" index
+               ; expected = "exported artifact reference: " ^ detail })) in
+      parse 0 items
     | Some _ -> Error (Invalid_wire_value {field="artifacts"; expected="array"}) in
   if String.equal prompt "" then Error Empty_prompt else Ok { target; prompt; artifacts }
 ;;

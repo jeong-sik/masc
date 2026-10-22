@@ -1159,7 +1159,7 @@ let test_activation_brings_the_observed_tab_forward () =
     | other -> failf "unexpected protocol command: %s" other) in
   ignore (Peer.dispatch peer ~verb:Peer.Tabs_list (obj []));
   let activate expected = Peer.dispatch peer ~verb:Peer.Page_interact
-    (Browser_lane.interaction_args ~tab_id:1 ~expected_url:(Some expected) Browser_lane.Activate_tab) in
+    (Browser_lane.interaction_args ~tab_id:1 ~frame_path:[] ~expected_url:(Some expected) Browser_lane.Activate_tab) in
   (match activate "https://example.test/" with
    | Ok receipt ->
      check bool "the receipt names the action and the page in front" true

@@ -444,7 +444,8 @@ let retain ~store ~owner ~capture ~parent ~proposal ~request_id ~authority ~pred
         | Some result,Progress.Rejected {stage=Progress.Execution;_}
           when Option.is_some (Gate.failure_detail ~absorbed:restored.input.absorbed result) -> Ok ()
         | (None | Some _),(Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-          | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _) ->
+          | Commit_unknown _ | Finished _ | Conflicted _
+          | Rejected {stage=(Before_dispatch | Execution);_} | Subdividing _ | Subdivided _) ->
           Error "A gate retry requires an original completed unsuccessful refusal" in
       let successor:Progress.successor={request_id;request} in
       let* () = validate_successor_request ~store ~owner ~capture ~prior successor in

@@ -277,8 +277,9 @@ let test_roundtrip_preserves_usage () =
           ; total_cache_creation_input_tokens = 10
           ; total_cache_read_input_tokens = 20
           ; api_calls = 3
+          ; missing_usage_responses = 1
           ; estimated_cost_usd = 0.0
-          ; pricing_gap = None
+          ; pricing_gap = Some Types.Usage_not_reported
           }
       }
     in
@@ -288,7 +289,8 @@ let test_roundtrip_preserves_usage () =
     | Ok loaded ->
       Alcotest.(check int) "input_tokens" 100 loaded.usage.total_input_tokens;
       Alcotest.(check int) "output_tokens" 200 loaded.usage.total_output_tokens;
-      Alcotest.(check int) "api_calls" 3 loaded.usage.api_calls)
+      Alcotest.(check int) "api_calls" 3 loaded.usage.api_calls;
+      Alcotest.(check int) "missing usage persisted" 1 loaded.usage.missing_usage_responses)
 ;;
 
 let test_roundtrip_preserves_tools () =

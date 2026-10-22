@@ -876,7 +876,7 @@ status: reference
   응답을 Answer로 확정하거나 Declined·Timeout으로 닫는다. 대기가 없으면 `None`이고,
   답이 정본 요청이 아니면 `No_pending_request`·`Request_not_current`로 거절하며 현재
   대기와 메시지를 바꾸지 않는다. `Timeout`은 벽시계 만료가 아니라 명시적 확정이다.
-  대기 소유는 checkpoint에 함께 실려(`Checkpoint_types.checkpoint_version` = 12)
+  대기 소유는 checkpoint에 함께 실려(`Checkpoint_types.checkpoint_version` = 13)
   복원·복제 뒤에도 유지된다.
   - 이름 경계: **Ask**는 Keeper가 운영자에게 남기는 durable 질문 묶음(`masc_ask`)이고,
     이 대기는 한 Agent 실행 안에서 입력을 기다리는 상태다. agent 이름이나 질문 문구는

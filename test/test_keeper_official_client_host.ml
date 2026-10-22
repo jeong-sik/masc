@@ -2224,7 +2224,12 @@ let approval_tool ~active ?tool_approval ~executions () =
     { Agent_core.Hooks.empty with
       pre_tool_use =
         Some
-          (fun _ ->
+          (fun event ->
+            (match event with
+             | Agent_core.Hooks.PreToolUse {usage; _} ->
+               check bool "official host has no aggregate observation" true
+                 (Option.is_none usage)
+             | _ -> fail "expected pre-tool hook");
             Agent_core.Hooks.ElicitToolApproval
               { question = "run the effect?"; because = "policy: effectful tool" })
     }

@@ -1102,7 +1102,7 @@ let execute_scheduled_tool
            { invocation
            ; tool_name = name
            ; input
-           ; accumulated_cost_usd = usage.Types.estimated_cost_usd
+           ; usage = Some usage
            })
     in
     let settlement =

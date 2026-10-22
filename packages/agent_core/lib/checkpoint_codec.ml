@@ -3,6 +3,7 @@ open Checkpoint_types
 open Result_syntax
 
 let checkpoint_version = Checkpoint_types.checkpoint_version
+let checkpoint_context = Printf.sprintf "Checkpoint v%d" checkpoint_version
 
 let reasoning_effort_option_to_json = function
   | Some effort -> `String (Llm_provider.Reasoning_effort.to_string effort)
@@ -64,6 +65,7 @@ let validate_exact_object_fields ~scope ~expected = function
 ;;
 
 let pricing_gap_to_json = function
+  | Usage_not_reported -> `Assoc [ "kind", `String "usage_not_reported" ]
   | Model_identity_unavailable -> `Assoc [ "kind", `String "model_identity_unavailable" ]
   | Pricing_unavailable model_id ->
     `Assoc [ "kind", `String "pricing_unavailable"; "model_id", `String model_id ]
@@ -73,6 +75,8 @@ let pricing_gap_of_json json =
   let open Yojson.Safe.Util in
   match json with
   | `Null -> Ok None
+  | `Assoc [ ("kind", `String "usage_not_reported") ] ->
+    Ok (Some Usage_not_reported)
   | `Assoc [ ("kind", `String "model_identity_unavailable") ] ->
     Ok (Some Model_identity_unavailable)
   | `Assoc fields ->
@@ -99,6 +103,7 @@ let usage_to_json u =
     ; "total_cache_creation_input_tokens", `Int u.total_cache_creation_input_tokens
     ; "total_cache_read_input_tokens", `Int u.total_cache_read_input_tokens
     ; "api_calls", `Int u.api_calls
+    ; "missing_usage_responses", `Int u.missing_usage_responses
     ; "estimated_cost_usd", `Float u.estimated_cost_usd
     ; ( "pricing_gap"
       , match u.pricing_gap with
@@ -111,20 +116,7 @@ let usage_of_json json =
   let open Yojson.Safe.Util in
   match json with
   | `Assoc _ ->
-    let* () =
-      validate_exact_object_fields
-        ~scope:"Checkpoint.usage"
-        ~expected:
-          [ "total_input_tokens"
-          ; "total_output_tokens"
-          ; "total_cache_creation_input_tokens"
-          ; "total_cache_read_input_tokens"
-          ; "api_calls"
-          ; "estimated_cost_usd"
-          ; "pricing_gap"
-          ]
-        json
-    in
+    let* () = Checkpoint_contract.validate_current_usage json in
     (try
        let* pricing_gap = json |> member "pricing_gap" |> pricing_gap_of_json in
        Ok
@@ -135,6 +127,7 @@ let usage_of_json json =
          ; total_cache_read_input_tokens =
              json |> member "total_cache_read_input_tokens" |> to_int
          ; api_calls = json |> member "api_calls" |> to_int
+         ; missing_usage_responses = json |> member "missing_usage_responses" |> to_int
          ; estimated_cost_usd = json |> member "estimated_cost_usd" |> to_float
          ; pricing_gap
          }
@@ -645,7 +638,7 @@ let decode_current_json json =
 
 let checkpoint_json_result cp =
   let json = checkpoint_json_with_messages cp (List.map message_to_json cp.messages) in
-  let* () = validate_checkpoint_json ~context:"Checkpoint v12" json in
+  let* () = validate_checkpoint_json ~context:checkpoint_context json in
   let+ _ = decode_current_json json in
   json
 ;;
@@ -666,7 +659,7 @@ let to_json_result = checkpoint_json_result
    refusal is not a payload problem, so the caller keeps the original
    error instead of retrying. *)
 let encodable_json json =
-  match Execution_json.validate ~context:"Checkpoint v12 drop" json with
+  match Execution_json.validate ~context:(checkpoint_context ^ " drop") json with
   | Ok () -> true
   | Error _ -> false
 ;;
@@ -1082,7 +1075,7 @@ let decode_written_bytes ~decode bytes =
 ;;
 
 (* The passes [checkpoint_json_result] runs over the whole checkpoint,
-   restricted to one message: encode, [Execution_json.validate], the v12
+   restricted to one message: encode, [Execution_json.validate], the current
    message contract, and a decode. None of them reads past the message's own
    subtree ([Checkpoint_contract.validate_messages] maps
    [validate_message] over the array; [Execution_json.validate] checks keys and
@@ -1091,7 +1084,7 @@ let decode_written_bytes ~decode bytes =
    [decode_current_json]. *)
 let validated_message_encoding ~message_index message =
   let json = message_to_json message in
-  let* () = validate_checkpoint_json ~context:"Checkpoint v12" json in
+  let* () = validate_checkpoint_json ~context:checkpoint_context json in
   let* _ = Checkpoint_contract.validate_message message_index json in
   let bytes = Yojson.Safe.to_string json in
   let+ decoded = decode_written_bytes ~decode:message_of_json bytes in
@@ -1106,7 +1099,7 @@ let validated_fields_around_messages cp =
   let header =
     `Assoc (before_messages @ ((messages_field, `List []) :: after_messages))
   in
-  let* () = validate_checkpoint_json ~context:"Checkpoint v12" header in
+  let* () = validate_checkpoint_json ~context:checkpoint_context header in
   let+ decoded_header =
     decode_written_bytes ~decode:decode_current_json (Yojson.Safe.to_string header)
   in
@@ -1217,7 +1210,7 @@ let rec same_printed_json (left : Yojson.Safe.t) (right : Yojson.Safe.t) =
 let held_read_message ~message_index message json =
   match
     let encoded = message_to_json message in
-    let* () = validate_checkpoint_json ~context:"Checkpoint v12" encoded in
+    let* () = validate_checkpoint_json ~context:checkpoint_context encoded in
     let+ _ = Checkpoint_contract.validate_message message_index encoded in
     encoded
   with

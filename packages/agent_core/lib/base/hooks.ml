@@ -119,7 +119,7 @@ type hook_event =
       { invocation : Tool_contract.Invocation.t
       ; tool_name : string
       ; input : Yojson.Safe.t
-      ; accumulated_cost_usd : float
+      ; usage : Types.usage_stats option
       }
   | PostToolUse of
       { invocation : Tool_contract.Invocation.t

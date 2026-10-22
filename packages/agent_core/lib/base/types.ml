@@ -142,20 +142,20 @@ let default_config ~model =
 ;;
 
 type pricing_gap =
+  | Usage_not_reported
   | Model_identity_unavailable
   | Pricing_unavailable of string
 [@@deriving show]
 
-(** Usage tracking accumulated across provider calls. Per-response usage stays
-    in [Llm_provider.Types.api_usage]. [pricing_gap] records why the observed
-    cost is incomplete without inventing a model identifier. Cost is telemetry
-    only and never gates execution. *)
+(** Processed-response subtotals. Payload presence is distinct from per-field
+    provenance; see the public contract for the remaining integer-API limit. *)
 type usage_stats =
   { total_input_tokens : int
   ; total_output_tokens : int
   ; total_cache_creation_input_tokens : int
   ; total_cache_read_input_tokens : int
   ; api_calls : int
+  ; missing_usage_responses : int
   ; estimated_cost_usd : float
   ; pricing_gap : pricing_gap option
   }
@@ -167,6 +167,7 @@ let empty_usage =
   ; total_cache_creation_input_tokens = 0
   ; total_cache_read_input_tokens = 0
   ; api_calls = 0
+  ; missing_usage_responses = 0
   ; estimated_cost_usd = 0.0
   ; pricing_gap = None
   }
@@ -180,8 +181,20 @@ let add_usage stats (u : api_usage) =
   ; total_cache_read_input_tokens =
       stats.total_cache_read_input_tokens + u.cache_read_input_tokens
   ; api_calls = stats.api_calls + 1
+  ; missing_usage_responses = stats.missing_usage_responses
   ; estimated_cost_usd = stats.estimated_cost_usd
   ; pricing_gap = stats.pricing_gap
+  }
+;;
+
+let add_missing_usage stats =
+  { stats with
+    api_calls = stats.api_calls + 1
+  ; missing_usage_responses = stats.missing_usage_responses + 1
+  ; pricing_gap =
+      (match stats.pricing_gap with
+       | None -> Some Usage_not_reported
+       | Some _ as gap -> gap)
   }
 ;;
 

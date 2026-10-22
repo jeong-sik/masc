@@ -869,7 +869,7 @@ let test_official_receipts_hold_and_key_by_call_id () =
       ~schedule:{planned_index=0; batch_index=0; batch_size=1;
                  execution_mode=Agent_core.Tool_contract.Serial} in
   let pre invocation = invoke hooks.pre_tool_use (Agent_core.Hooks.PreToolUse {
-      invocation; tool_name="Read"; input=`Assoc []; accumulated_cost_usd=0. }) in
+      invocation; tool_name="Read"; input=`Assoc []; usage=None }) in
   let commit invocation execution_id =
     Join.record ~invocation ~execution_id;
     invoke hooks.post_tool_use (Agent_core.Hooks.PostToolUse {
@@ -978,7 +978,7 @@ let test_codex_receipts_reach_live_and_cancelled_history () =
         start index;
         let invocation = invocation index in
         invoke hooks.pre_tool_use (Agent_core.Hooks.PreToolUse {
-          invocation; tool_name="Read"; input=`Assoc []; accumulated_cost_usd=0. });
+          invocation; tool_name="Read"; input=`Assoc []; usage=None });
         invoke hooks.post_tool_use (Agent_core.Hooks.PostToolUse {
           invocation; tool_name="Read"; input=`Assoc []; output;
           result_bytes=7; duration_ms=1. });
@@ -1009,7 +1009,7 @@ let test_codex_receipts_reach_live_and_cancelled_history () =
       start 3;
       let rejected = invocation 3 in
       invoke hooks.pre_tool_use (Agent_core.Hooks.PreToolUse {
-        invocation=rejected; tool_name="Read"; input=`Assoc []; accumulated_cost_usd=0. });
+        invocation=rejected; tool_name="Read"; input=`Assoc []; usage=None });
       invoke hooks.post_tool_use_failure (Agent_core.Hooks.PostToolUseFailure {
         invocation=rejected; tool_name="Read"; input=`Assoc [];
         stage=Agent_core.Hooks.Validation_before_execution;
@@ -1618,7 +1618,7 @@ let test_codex_cancelled_hooks_only_report_committed_rows () =
               | Some callback -> ignore (callback event)
               | None -> fail "Codex hook missing" in
             invoke hooks.pre_tool_use (Agent_core.Hooks.PreToolUse {
-              invocation; tool_name="Read"; input=`Assoc []; accumulated_cost_usd=0. });
+              invocation; tool_name="Read"; input=`Assoc []; usage=None });
             (match (if validation then
                invoke hooks.post_tool_use_failure (Agent_core.Hooks.PostToolUseFailure {
                  invocation; tool_name="Read"; input=`Assoc [];
@@ -1717,7 +1717,7 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
          (match hooks.pre_tool_use with
           | Some hook -> ignore (hook (Agent_core.Hooks.PreToolUse {
               invocation; tool_name="keeper_lane_status"; input=`Assoc [];
-              accumulated_cost_usd=0. }))
+              usage=None }))
           | None -> fail "Codex pre-hook missing");
          Agent_core.Hooks.PostToolUse
            { invocation

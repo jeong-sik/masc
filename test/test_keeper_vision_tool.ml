@@ -2524,7 +2524,7 @@ let test_native_image_admission () =
       ~completion:Continue_after_success in
   let event tool_name = Agent_core.Hooks.PreToolUse
       {invocation; tool_name; input=`Assoc ["artifact", `String "opaque"];
-       accumulated_cost_usd=0.} in
+       usage=None} in
   let admitted = Masc.Keeper_image_read.admission_hook ~accepts_image_input:true in
   let rejected = Masc.Keeper_image_read.admission_hook ~accepts_image_input:false in
   assert (admitted (event "keeper_image_read") = Agent_core.Hooks.Continue);

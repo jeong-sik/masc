@@ -66,20 +66,27 @@ type agent_config =
 val default_config : model:model -> agent_config
 
 type pricing_gap =
+  | Usage_not_reported
   | Model_identity_unavailable
   | Pricing_unavailable of string
 [@@deriving show]
 
-(** Usage tracking accumulated across provider calls. Per-response usage stays
-    in {!Llm_provider.Types.api_usage}. [pricing_gap] records why the observed
-    cost is incomplete without inventing a model identifier. Cost is telemetry
-    only and never gates execution. *)
+(** Subtotals over processed provider responses, not all dispatched attempts.
+    Per-response usage stays in {!Llm_provider.Types.api_usage}.
+    [missing_usage_responses] counts responses with no usage payload. Those
+    responses advance [api_calls] without adding fabricated zero measurements.
+    A zero missing count establishes payload coverage only: the legacy integer
+    per-response counters still cannot establish per-field reporting provenance.
+    [pricing_gap] retains the first cost gap; inspect the independent missing
+    count too, since later absent payloads can coexist with a pricing gap.
+    Amounts are telemetry subtotals, not complete bills or execution gates. *)
 type usage_stats =
   { total_input_tokens : int
   ; total_output_tokens : int
   ; total_cache_creation_input_tokens : int
   ; total_cache_read_input_tokens : int
   ; api_calls : int
+  ; missing_usage_responses : int
   ; estimated_cost_usd : float
   ; pricing_gap : pricing_gap option
   }
@@ -87,6 +94,10 @@ type usage_stats =
 
 val empty_usage : usage_stats
 val add_usage : usage_stats -> api_usage -> usage_stats
+val add_missing_usage : usage_stats -> usage_stats
+(** Record one processed response with no usage payload, preserving all known
+    subtotals and prior pricing diagnostics. Empty aggregation has zero calls
+    and zero missing payloads; one missing response is an incomplete zero. *)
 
 (** Agent state *)
 type agent_state =

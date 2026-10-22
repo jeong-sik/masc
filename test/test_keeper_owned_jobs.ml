@@ -5403,7 +5403,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
   handoff observation;
   let before_actions = action_count () in
   let intent = invocation ~turn:2 "intent-without-execution" in
-  ignore (action_hook (Agent_core.Hooks.PreToolUse {invocation=intent;tool_name="fixture_follow_on";input=`Assoc [];accumulated_cost_usd=0.}));
+  ignore (action_hook (Agent_core.Hooks.PreToolUse {invocation=intent;tool_name="fixture_follow_on";input=`Assoc [];usage=None}));
   check int "pre-dispatch intent is not an executed action fact" before_actions (action_count ());
   let actual = execute_action ~turn:2 ~id:"follow-on-reused-id" success_tool in
   check int "real SDK handler result attaches to original child" (before_actions+1) (action_count ());

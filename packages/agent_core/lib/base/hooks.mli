@@ -90,7 +90,10 @@ type hook_event =
         (** Exact run-scoped model-tool occurrence. @since 0.216.0 *)
       ; tool_name : string
       ; input : Yojson.Safe.t
-      ; accumulated_cost_usd : float
+      ; usage : Types.usage_stats option
+        (** [Some] is the current aggregate, including missing payloads and
+            pricing gaps. [None] means this host has no aggregate observation;
+            it must not manufacture a known zero cost. *)
       }
   | PostToolUse of
       { invocation : Tool_contract.Invocation.t

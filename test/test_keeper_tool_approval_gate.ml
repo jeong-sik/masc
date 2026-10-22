@@ -23,7 +23,7 @@ let pre_tool_use_event ~tool_name ~input =
     { invocation = invocation ~tool_use_id:"call-1"
     ; tool_name
     ; input
-    ; accumulated_cost_usd = 0.0
+    ; usage = None
     }
 
 let decision_to_string : Agent_core.Hooks.hook_decision -> string = function

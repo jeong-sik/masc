@@ -2484,6 +2484,14 @@ let fault_is_terminal fault = owner_is_terminal fault.fault_owner fault.fault_fi
 let blocking_faults ~id ~source_path faults =
   List.filter (fun fault -> owner_concerns ~id ~source_path fault.fault_owner
     && not (fault_is_terminal fault)) faults
+(* What a refusal says about one record: why it cannot be read and, when the
+   record names it, its instance id. Without this the operator sees only a
+   count and has to read every file of the store to find the one. *)
+let blocking_fault_detail fault =
+  let reason = retained_fault_message fault.fault_reason in
+  match fault.fault_instance with
+  | Some instance -> Printf.sprintf "instance %s: %s" instance reason
+  | None -> reason
 let terminal_fault_records ~id ~source_path faults =
   List.filter_map (fun fault ->
     if owner_concerns ~id ~source_path fault.fault_owner && fault_is_terminal fault
@@ -3548,8 +3556,9 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
            match d.enabled, own_faults d with
            | true, (_ :: _ as unreadable) ->
                add_issue ~id:d.id d.source_path
-                 (Printf.sprintf "Not applied while %d retained bindings that may belong to this declaration cannot be read"
-                    (List.length unreadable))
+                 (Printf.sprintf "Not applied while %d retained bindings that may belong to this declaration cannot be read: %s"
+                    (List.length unreadable)
+                    (String.concat "; " (List.map blocking_fault_detail unreadable)))
            | false, (_ :: _) ->
                (* A disabled declaration with an unreadable record that may
                   belong to it leaves its privacy owner untouched: the

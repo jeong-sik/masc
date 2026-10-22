@@ -107,7 +107,9 @@ let settle c ~incarnation ~directory =
    A configured operator profile never enters this private tree. *)
 let rec remove_profile path =
   let info=Unix.lstat path in
-  if info.Unix.st_uid<>Unix.geteuid () then Error "Chrome profile contains another owner's resource"
+  if info.Unix.st_uid<>Unix.geteuid () then
+    Error (Printf.sprintf "Chrome profile entry %s must be owned by uid %d; it is owned by uid %d"
+      path (Unix.geteuid ()) info.st_uid)
   else match info.st_kind with
   | Unix.S_DIR ->
     let* ()=Array.fold_left (fun result name -> let* ()=result in
@@ -115,8 +117,10 @@ let rec remove_profile path =
     Unix.rmdir path;Ok ()
   | Unix.S_LNK -> Unix.unlink path;Ok ()
   | Unix.S_REG when info.st_nlink=1 -> Unix.unlink path;Ok ()
-  | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
-    Error "Chrome profile contains an unconfirmed resource"
+  | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK as kind ->
+    Error (Printf.sprintf
+      "Chrome profile entry %s must be a directory, a symbolic link or a regular file with exactly one link; it is a %s with %d links"
+      path (Requirement.kind_name kind) info.st_nlink)
 let profiles directory = Filename.concat directory "chromium-profiles"
 let profiles_label = "Chrome private profiles directory"
 let cleanup c ~incarnation ~directory = protect (fun () ->

@@ -34,10 +34,12 @@ let source path = protect (fun () ->
   let fd=Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC;Unix.O_NONBLOCK] 0 in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
     let info=Unix.fstat fd in
-    if info.st_dev<>before.st_dev || info.st_ino<>before.st_ino || info.st_kind<>Unix.S_REG
-      || info.st_uid<>before.st_uid || info.st_nlink<>1 || info.st_perm<>0o600
-    then Error "upload source identity changed"
-    else if info.st_size>Lease.max_file_bytes then Error "upload source exceeds the per-file resource bound"
+    (* [before] passed the same requirement, so both are owned by the effective uid. *)
+    let* ()=Requirement.check ~label:"opened upload source" Requirement.private_file ~path info in
+    let* ()=if info.st_dev=before.st_dev && info.st_ino=before.st_ino then Ok ()
+      else Error (Requirement.replaced ~label:"opened upload source" ~path
+        ~expected:(Requirement.identity before) ~observed:(Requirement.identity info)) in
+    if info.st_size>Lease.max_file_bytes then Error "upload source exceeds the per-file resource bound"
     else
       let bytes=Bytes.create info.st_size in
       let rec read offset =

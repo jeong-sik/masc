@@ -1,9 +1,12 @@
+type owner = Effective_user | Real_user
 type mode = Exact of int | Clear of int | Any_mode
 type links = Exactly_one | Any_count
-type t = { kind : Unix.file_kind; mode : mode; links : links }
+type t = { kind : Unix.file_kind; owner : owner; mode : mode; links : links }
 
-let private_directory = { kind = Unix.S_DIR; mode = Exact 0o700; links = Any_count }
-let private_file = { kind = Unix.S_REG; mode = Exact 0o600; links = Exactly_one }
+let private_directory =
+  { kind = Unix.S_DIR; owner = Effective_user; mode = Exact 0o700; links = Any_count }
+let private_file =
+  { kind = Unix.S_REG; owner = Effective_user; mode = Exact 0o600; links = Exactly_one }
 
 let kind_name = function
   | Unix.S_REG -> "regular file"
@@ -39,8 +42,12 @@ let found_links requirement count = match requirement.links with
   | Exactly_one -> if count = 1 then " and 1 link" else Printf.sprintf " and %d links" count
   | Any_count -> ""
 
+let owner_uid = function
+  | Effective_user -> Unix.geteuid ()
+  | Real_user -> Unix.getuid ()
+
 let check ~label requirement ~path (stats : Unix.stats) =
-  let uid = Unix.geteuid () in
+  let uid = owner_uid requirement.owner in
   if stats.st_kind = requirement.kind && stats.st_uid = uid
      && mode_holds requirement.mode stats.st_perm
      && links_hold requirement.links stats.st_nlink

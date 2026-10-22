@@ -117,33 +117,33 @@ let with_download_snapshot t (descriptor:Browser_addon_downloads.descriptor) con
     let* ()=directory ~label:"browser allocation directory" allocation ~device:t.device ~inode:t.inode in
     directory ~label:"browser download snapshot directory" root
       ~device:descriptor.root_device ~inode:descriptor.root_inode in
-  let valid (info:Unix.stats) = info.st_kind=Unix.S_REG && info.st_uid=Unix.geteuid ()
-    && info.st_perm=0o600 && info.st_nlink=1 && info.st_dev=descriptor.device
-    && info.st_ino=descriptor.inode && info.st_size=descriptor.bytes in
   let* path=Browser_addon_downloads.snapshot_path ~directory:allocation ~snapshot_id:descriptor.snapshot_id in
+  let valid label info = Browser_addon_downloads.snapshot_matches ~label ~path descriptor info in
   let* ()=roots () in
-  if not (valid (Unix.lstat path)) then Error "download snapshot identity changed" else
+  let* ()=valid "download snapshot" (Unix.lstat path) in
   let source=Unix.openfile path [Unix.O_RDONLY;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0 in
   Fun.protect ~finally:(fun () -> Unix.close source) (fun () ->
-    if not (valid (Unix.fstat source)) then Error "opened download snapshot identity changed" else
+    let* ()=valid "opened download snapshot" (Unix.fstat source) in
     let* ()=roots () in
     let* value=consume source in
     let* ()=roots () in
-    if not (valid (Unix.fstat source)) || not (valid (Unix.lstat path)) then
-      Error "download snapshot changed during import" else Ok value))
+    let* ()=valid "opened download snapshot after import" (Unix.fstat source) in
+    let* ()=valid "download snapshot after import" (Unix.lstat path) in
+    Ok value))
 let socket_directory_label = "browser socket directory"
 let private_root root info =
   let* ()=Requirement.check ~label:socket_directory_label Requirement.private_directory ~path:root info in
   Requirement.canonical ~label:socket_directory_label root
-let socket_record = {Requirement.kind=Unix.S_REG;mode=Any_mode;links=Exactly_one}
+let socket_record = {Requirement.kind=Unix.S_REG;owner=Effective_user;mode=Any_mode;links=Exactly_one}
+let owned_directory = {Requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Any_mode;links=Any_count}
 (* Only empty directory trees may be removed. Files, links and uncertain
    acquisitions are retained for the original incarnation; never recursive rm. *)
 let rec empty_tree path =
   match Unix.lstat path with
-  | info when info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid () ->
+  | info ->
+      let* ()=Requirement.check ~label:"owned browser profile or download entry" owned_directory ~path info in
       let* ()=Array.fold_left (fun acc name -> let* ()=acc in empty_tree (Filename.concat path name)) (Ok ()) (Sys.readdir path) in
       Unix.rmdir path;Ok ()
-  | _ -> Error "owned browser still has profile or download contents"
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
 let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi ~confirmed ~confirm =
   let read name =
@@ -202,14 +202,15 @@ let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi 
   let* ()=confirm () in
   List.fold_left (fun acc name -> let* ()=acc in
     let path=Filename.concat root name in
-    match (Unix.lstat path).Unix.st_kind with
+    let info=Unix.lstat path in
+    match info.Unix.st_kind with
     | Unix.S_SOCK when name="s" -> Unix.unlink path;Ok ()
     | Unix.S_REG when List.mem name ["automation.json";"automation-closed.json";"webdriver.log";"models.json";"stagehand.json";"chromium.log";"live-bidi.json";"live-firefox.log"] ->
-        let info=Unix.lstat path in
-        if info.st_uid=Unix.geteuid () && info.st_nlink=1 then (Unix.unlink path;Ok ())
-        else Error "owned browser file identity is unknown"
-    | Unix.S_DIR|Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK ->
-        Error "browser directory contains an unexpected resource") (Ok ())
+        let* ()=Requirement.check ~label:"owned browser file" socket_record ~path info in
+        Unix.unlink path;Ok ()
+    | Unix.S_DIR|Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK as kind ->
+        Error (Printf.sprintf "browser socket directory entry %s is an unexpected %s"
+          path (Requirement.kind_name kind))) (Ok ())
     (Sys.readdir root |> Array.to_list)
 (* The socket acquisition record [cleanup] reads in the installation slot. *)
 let acquisition ~instance_id ~root ~file ~directory =

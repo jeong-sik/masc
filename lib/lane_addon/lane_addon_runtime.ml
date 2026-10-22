@@ -1380,7 +1380,7 @@ let native_recover ~store ~installation_id ~instance_id =
   let* () = native_settled claim in
   Ok (Lifecycle.Native_released {installation_id;instance_id})
 let native_claim_root_requirement =
-  {Resource_requirement.kind=Unix.S_DIR;mode=Clear 0o077;links=Any_count}
+  {Resource_requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Clear 0o077;links=Any_count}
 let prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_live_instance =
   let* () = offload (fun () ->
     try

@@ -15,6 +15,10 @@ type claim = Snapshot of descriptor | Published of Yojson.Safe.t
 val claim_to_json : claim -> Yojson.Safe.t
 val claim_of_json : Yojson.Safe.t -> (claim, string) result
 val snapshot_path : directory:string -> snapshot_id:string -> (string, string) result
+val snapshot_matches : label:string -> path:string -> descriptor -> Unix.stats -> (unit, string) result
+(** Decide that [stats] of [path] is the private regular file the descriptor
+    names: owner, mode 0600, one link, its device and inode, and its size. A
+    refusal names what does not match. *)
 (** Derive [directory/download-snapshots/<canonical UUID>.bin]. The host must
     independently pin its original allocation and verify the claimed descriptor
     before importing; a worker response never supplies a pathname. *)

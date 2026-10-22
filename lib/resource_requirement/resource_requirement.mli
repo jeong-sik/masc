@@ -2,8 +2,11 @@
 
     A refusal names what the path is for (the caller's [label]), the path,
     what was found and what is required, so an operator can fix the path
-    without reading the code. The required owner is always the effective uid
-    of the checking process. Nothing here changes a file. *)
+    without reading the code. Nothing here changes a file. *)
+
+type owner =
+  | Effective_user  (** The owner is the process's effective uid. *)
+  | Real_user  (** The owner is the process's real uid. *)
 
 type mode =
   | Exact of int  (** The permission bits equal this value. *)
@@ -12,13 +15,17 @@ type mode =
 
 type links = Exactly_one | Any_count
 
-type t = { kind : Unix.file_kind; mode : mode; links : links }
+type t = { kind : Unix.file_kind; owner : owner; mode : mode; links : links }
 
 val private_directory : t
-(** A directory with mode 0700. *)
+(** A directory owned by the effective uid with mode 0700. *)
 
 val private_file : t
-(** A regular file with mode 0600 and exactly one link. *)
+(** A regular file owned by the effective uid with mode 0600 and exactly one
+    link. *)
+
+val kind_name : Unix.file_kind -> string
+(** "directory", "regular file", "symbolic link" and so on. *)
 
 val check : label:string -> t -> path:string -> Unix.stats -> (unit, string) result
 (** Decide [stats], read from [path] by [lstat] or [fstat]. A refusal reads,

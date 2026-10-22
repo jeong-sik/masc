@@ -87,6 +87,14 @@ let snapshots_label = "download snapshot directory"
 let private_directory ~label path =
   let* info=Requirement.lstat ~label Requirement.private_directory path in
   let* ()=Requirement.canonical ~label path in Ok info
+let snapshot_matches ~label ~path descriptor (info:Unix.stats) =
+  let* ()=Requirement.check ~label Requirement.private_file ~path info in
+  let observed=Requirement.identity info in
+  let* ()=if observed.Requirement.device=descriptor.device && observed.inode=descriptor.inode then Ok ()
+    else Error (Requirement.replaced ~label ~path
+      ~expected:{Requirement.device=descriptor.device;inode=descriptor.inode} ~observed) in
+  if info.st_size=descriptor.bytes then Ok ()
+  else Error (Printf.sprintf "%s %s must have %d bytes; it has %d" label path descriptor.bytes info.st_size)
 let check t =
   let* allocation=private_directory ~label:allocation_label t.directory in
   let* root=private_directory ~label:snapshots_label t.root in
@@ -108,8 +116,9 @@ let close_pins snapshots = List.fold_left (fun result snapshot ->
   let closed=close_pin snapshot in
   match result,closed with Error detail,_ | Ok (),Error detail -> Error detail
     | Ok (),Ok () -> Ok ()) (Ok ()) snapshots
-let source_parent = {Requirement.kind=Unix.S_DIR;mode=Clear 0o022;links=Any_count}
-let source_file = {Requirement.kind=Unix.S_REG;mode=Any_mode;links=Exactly_one}
+let source_parent = {Requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Clear 0o022;links=Any_count}
+let source_file = {Requirement.kind=Unix.S_REG;owner=Effective_user;mode=Any_mode;links=Exactly_one}
+let owned_directory = {Requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Any_mode;links=Any_count}
 let source_parents t path =
   let downloads=Filename.concat t.directory "downloads" in
   let rec collect current acc =
@@ -132,7 +141,7 @@ let write_all fd buffer count =
   loop 0
 let copy t path id = io (fun () ->
   let* ()=check t in
-  let* ()=if Unix.realpath path=path then Ok () else Error "download source must be canonical" in
+  let* ()=Requirement.canonical ~label:"download source" path in
   let* parents=source_parents t path in
   let before=Unix.lstat path in
   let* ()=Requirement.check ~label:"download source" source_file ~path before in
@@ -250,10 +259,10 @@ let release t ~id ~actor ~route ~verb = locked t (fun () ->
 let revoke t = locked t (fun () -> t.serving<-false)
 let rec empty_downloads path =
   match Unix.lstat path with
-  | stat when stat.Unix.st_kind=Unix.S_DIR && stat.st_uid=Unix.geteuid () ->
+  | stat ->
+      let* ()=Requirement.check ~label:"session downloads entry" owned_directory ~path stat in
       Array.fold_left (fun result name -> let* ()=result in
         empty_downloads (Filename.concat path name)) (Ok ()) (Sys.readdir path)
-  | _ -> Error "session downloads contain an unpublished or unknown resource"
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
 let original_digest fd bytes =
   ignore (Unix.lseek fd 0 Unix.SEEK_SET);
@@ -329,10 +338,9 @@ let retire t retirement =
       let* ()=remove_original t snapshot in
       let* path=snapshot_path ~directory:t.directory ~snapshot_id:snapshot.descriptor.snapshot_id in
       match Unix.lstat path with
-      | stat when stat.Unix.st_dev=snapshot.descriptor.device && stat.st_ino=snapshot.descriptor.inode
-          && stat.st_kind=Unix.S_REG && stat.st_size=snapshot.descriptor.bytes
-          && stat.st_uid=Unix.geteuid () && stat.st_perm=0o600 && stat.st_nlink=1 -> Unix.unlink path;Ok ()
-      | _ -> Error "download snapshot identity changed"
+      | stat ->
+          let* ()=snapshot_matches ~label:"download snapshot" ~path snapshot.descriptor stat in
+          Unix.unlink path;Ok ()
       | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok () in
     (* One snapshot's failure must not skip the rest: attempt each snapshot and
        report the failures once, leaving only failed items behind. *)

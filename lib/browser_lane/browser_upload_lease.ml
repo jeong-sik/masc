@@ -47,6 +47,8 @@ let pending ~paths = locked (fun () ->
 type staging_root = {path:string;device:int;inode:int}
 let root_mutex = Mutex.create ()
 let staging_root = ref None
+let staging_anchor =
+  {Resource_requirement.kind=Unix.S_DIR;owner=Real_user;mode=Exact 0o700;links=Any_count}
 let default_root () =
   Mutex.lock root_mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock root_mutex) (fun () ->
@@ -66,9 +68,14 @@ let default_root () =
           with Unix.Unix_error _|Sys_error _ -> ());
         root in
     let current=Unix.lstat root.path in
-    if current.st_kind<>Unix.S_DIR || current.st_dev<>root.device || current.st_ino<>root.inode
-      || current.st_uid<>Unix.getuid () || current.st_perm<>0o700
-    then raise (Sys_error "upload staging anchor identity changed");
+    let label="upload staging anchor" in
+    (match Resource_requirement.check ~label staging_anchor ~path:root.path current with
+     | Ok () -> ()
+     | Error detail -> raise (Sys_error detail));
+    let observed=Resource_requirement.identity current in
+    if observed.Resource_requirement.device<>root.device || observed.inode<>root.inode then
+      raise (Sys_error (Resource_requirement.replaced ~label ~path:root.path
+        ~expected:{Resource_requirement.device=root.device;inode=root.inode} ~observed));
     root.path)
 
 let prepare_files ?temp_dir ~files () =

@@ -4,6 +4,6 @@
  (name browser_lane)
  (public_name masc.browser_lane)
  (libraries eio yojson uuidm unix masc.fs_compat masc.monotonic_deadline masc.time_compat
-  masc.watched_work)
+  masc.watched_work masc.resource_requirement)
  (preprocess
   (pps ppx_enumerate)))

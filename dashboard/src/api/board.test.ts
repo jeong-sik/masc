@@ -10,6 +10,7 @@ import {
   fetchBoardKarmaLedger,
   fetchBoardPost,
   fetchBoardReactionState,
+  fetchFusionRunEvidence,
   normalizeBoardContextInferenceSubmission,
   normalizeBoardKarmaLedger,
   normalizeBoardAttachments,
@@ -33,6 +34,35 @@ afterEach(() => {
 // ================================================================
 // board title helpers (existing)
 // ================================================================
+
+describe('Fusion evidence observation', () => {
+  async function observe(evidence: unknown) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ evidence }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })))
+    return fetchFusionRunEvidence('run/exact')
+  }
+
+  it.each(['pending', 'absent'] as const)('preserves %s independently of lifecycle', async status => {
+    await expect(observe({ status, post: null })).resolves.toEqual({ status })
+  })
+
+  it('keeps exact run origin with a recorded post', async () => {
+    const result = await observe({ status: 'recorded', post: {
+      id: 'evidence-post', author: 'keeper', content: 'evidence',
+      origin: { source: 'fusion', fusion_run_id: 'run/exact' },
+    } })
+    expect(result).toMatchObject({ status: 'recorded', post: { id: 'evidence-post' } })
+  })
+
+  it.each([
+    null, {}, { status: 'unknown', post: null }, { status: 'recorded', post: null },
+    { status: 'pending', post: { id: 'inconsistent' } },
+    { status: 'recorded', post: { id: 'wrong-run', author: 'keeper', origin: { source: 'fusion', fusion_run_id: 'other' } } },
+  ])('rejects malformed or inconsistent observations: %j', async evidence => {
+    await expect(observe(evidence)).rejects.toThrow('Malformed Fusion run evidence')
+  })
+})
 
 describe('board title helpers', () => {
   it('strips markdown headings from derived titles', () => {

@@ -1276,6 +1276,7 @@ function FusionRegistryDetail({ record }: { record: FusionRunRecord }) {
   const status = registryToRunStatus(record.status)
   const tone = fusionRunStatusTone(record.status)
   const keeper = record.keeper || 'system'
+  const evidence = fusionEvidenceRequests.value.get(record.runId)
   return html`
     <div class="fus-run-scroll" data-testid="fusion-registry-detail">
       <div class="fus-run-head">
@@ -1303,7 +1304,21 @@ function FusionRegistryDetail({ record }: { record: FusionRunRecord }) {
             ? html`<span class="fus-rdot run"></span>심의 진행 중 — 패널·심판 상세는 fusion sink가 typed Fusion origin을 가진 보드 포스트를 기록한 뒤 이 자리에 나타납니다.`
             : record.status === 'failed'
               ? html`실패로 종료됨.${record.failureCode ? html` <span class="mono">${record.failureCode}</span>` : null}${record.error ? html` · ${record.error}` : null}`
-              : '완료됨 — 보드 sink 기록을 기다리는 중입니다.'}
+              : '완료됨.'}
+        </div>
+        <div class="fus-judge-wait" role=${evidence?.status === 'failed' ? 'alert' : 'status'}>
+          ${evidence?.status === 'failed'
+            ? html`증거 조회 실패: ${evidence.error}`
+            : evidence?.status === 'absent'
+              ? '이 실행의 보드 증거가 기록되지 않았습니다.'
+              : evidence?.status === 'pending'
+                ? '보드 증거가 기록되기를 기다리고 있습니다.'
+                : evidence?.status === 'recorded'
+                  ? '보드 증거를 불러왔습니다.'
+                  : '보드 증거를 조회 중입니다.'}
+          ${evidence && evidence.status !== 'loading' && evidence.status !== 'recorded'
+            ? html`<button type="button" onClick=${() => { void loadFusionRunEvidence(record.runId, { retry: true }) }}>증거 다시 조회</button>`
+            : null}
         </div>
       </div>
     </div>

@@ -1140,17 +1140,27 @@ export async function fetchBoardReactionsBatch(
     (`posts_by_run_id`, RFC-0233 §7) and answers this route from it, so the
     lookup costs the same whatever the board has done since.
 
-    `null` for a run the registry does not retain, and for one that has not
-    written its post yet -- a deliberation still running has no evidence, and
-    saying so is not the same as failing to find it. */
-export async function fetchFusionRunEvidencePost(postRunId: string): Promise<BoardPost | null> {
-  return timeBoardRequest('fusion_evidence', () => runRequest('fetchFusionRunEvidencePost', async () => {
+    Preserve the server's evidence status independently of run lifecycle.
+    Missing/malformed responses fail the read; they do not prove absence. */
+export type FusionRunEvidence =
+  | { status: 'recorded'; post: BoardPost }
+  | { status: 'pending' | 'absent' }
+
+export async function fetchFusionRunEvidence(runId: string): Promise<FusionRunEvidence> {
+  return timeBoardRequest('fusion_evidence', () => runRequest('fetchFusionRunEvidence', async () => {
     const raw = await get<Record<string, unknown>>(
-      `/api/v1/dashboard/fusion-runs/${encodeURIComponent(postRunId)}`,
+      `/api/v1/dashboard/fusion-runs/${encodeURIComponent(runId)}`,
     )
     const evidence = isRecord(raw.evidence) ? raw.evidence : null
-    if (!evidence) return null
-    return normalizeBoardPost(evidence.post)
+    if (evidence?.status === 'recorded') {
+      const post = normalizeBoardPost(evidence.post)
+      if (post !== null && post.origin?.source === 'fusion'
+        && post.origin.fusion_run_id === runId) return { status: 'recorded', post }
+    } else if ((evidence?.status === 'pending' || evidence?.status === 'absent')
+      && evidence.post === null) {
+      return { status: evidence.status }
+    }
+    throw new Error('Malformed Fusion run evidence')
   }))
 }
 

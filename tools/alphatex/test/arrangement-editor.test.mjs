@@ -209,6 +209,36 @@ test('controller serializes import with admitted clip edits and saves final deci
   assert.notEqual(saved.title,'Too late');assert.equal(view.process.stdin.isRaw,false);assert.equal(view.observed.terminated,true)
 })
 
+test('WAV export snapshots original project and stop retires progress and late completion without changing the document', async () => {
+  let editor=editorAPI.arrangementImported(editorAPI.arrangementEditor(),imported(newArrangement()))
+  editor=editorAPI.arrangementCommand(editor,'place asset-1 0').editor
+  assert.equal(editorAPI.arrangementCommand(editor,'wave /music/My  mix.wav').effect.path,'/music/My  mix.wav')
+  assert.throws(()=>editorAPI.arrangementCommand(editor,'wave'))
+  const view=await controller({project:editor.project})
+  view.command('wave /music/My  mix.wav');await flush()
+  const job=view.observed.requests.find(job=>job.kind==='export-wave')
+  assert.deepEqual(job.project,editor.project);assert.equal(job.path,'/music/My  mix.wav')
+  assert.equal(view.observed.players.length,0)
+  view.command('stop');await flush()
+  assert.ok(view.observed.requests.some(request=>request.kind==='cancel'&&request.request===job.id))
+  view.worker.emit('message',{kind:'progress',id:job.id,progress:{kind:'vst-render',completed:99,total:99}})
+  view.worker.emit('message',{id:job.id,ok:true,result:{path:job.path,frames:44100,sampleRate:44100,channels:1,peak:.5}})
+  await flush();view.key('q');await view.done
+  assert.deepEqual(view.observed.saved.at(-1).project,editor.project)
+})
+
+test('closing during export waits for the original worker settlement before removing its preparation tree', async () => {
+  const view=await controller()
+  view.command('wave /music/mix.wav');await flush()
+  const job=view.observed.requests.find(job=>job.kind==='export-wave')
+  view.key('q');await flush()
+  assert.equal(view.observed.terminated,false);assert.deepEqual(view.observed.removed,[])
+  assert.ok(view.observed.requests.some(request=>request.kind==='cancel'&&request.request===job.id))
+  view.worker.emit('message',{id:job.id,ok:false,cancelled:true,error:'cancelled'})
+  await view.done
+  assert.equal(view.observed.terminated,true);assert.ok(view.observed.removed.includes('/owned-recovery'))
+})
+
 test('close cancels an active import, waits for its cleanup, drains admitted edits and rejects late adoption',async()=>{
   const view=await controller()
   view.command('import-wave /music/take.wav');await flush()

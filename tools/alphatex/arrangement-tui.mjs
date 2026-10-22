@@ -63,6 +63,7 @@ const help = [
   ':asset asset-1    :select region-1    :cursor 4    :grid 0.25',
   ':tempo 120    :meter 3 4    :title Experiment    :mute    :solo',
   ':save    :save-as /path/song.json    :undo    :redo',
+  ':wave /path/song.wav exports the complete arrangement once, without practice clicks or playback looping; :stop cancels',
   'Arrows: cursor/regions; Shift+Left/Right: move region; Tab: lane; a: asset',
   'Enter: place selected asset; d: duplicate at cursor; x/Delete: remove',
   'Captured asset: Enter opens source; :place adds its region.',
@@ -115,7 +116,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   let calibration = null
   let calibrationInspection = null, recordingInspection = null
   const discovery = new AbortController()
-  let pickerAsset = null, pendingSound = null
+  let pickerAsset = null, pendingSound = null, exporting = null
   const soundJobs = new Set()
   function cancelSound() { pendingSound?.capture.cancel(); pendingSound = null }
   const picker = new InstrumentPicker({ directory: stateDirectory, notify: draw,
@@ -349,6 +350,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (preparing?.kind === 'sound' || preparing?.kind === 'sound-selection') preparing.handle.cancel()
     else if (preparing?.kind === 'worker' && !workerFailure) worker.postMessage({ kind: 'cancel', request: preparing.id })
     preparing = null
+    if (exporting !== null && !workerFailure) worker.postMessage({ kind: 'cancel', request: exporting.id })
+    exporting = null
     transport.handle?.stop()
     transport = { kind: 'stopped' }
     status = 'Playback stopped'
@@ -386,6 +389,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   function play(audioOnly = false) {
     if (!accepting) return
+    if (exporting !== null) stop()
     if (transport.kind === 'playing') { transportPending = true; transport.handle.pause(); return }
     if (transport.kind === 'paused') { transportPending = true; transport.handle.resume(); return }
     if (transport.kind === 'preparing' || transport.kind === 'starting') { stop(); return }
@@ -656,6 +660,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   async function save(target = path) {
     target = resolve(target)
+    if (target !== path && exporting !== null) stop()
     const project = editor.project, nextRoot = dirname(target)
     const retained = new Map()
     if (nextRoot !== sourceRoot) for (const document of [project, ...editor.undo, ...editor.redo]) {
@@ -855,6 +860,32 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         stop(); route = selectArrangementRoute(route, value); status = 'Playback outputs selected'; break
       case 'save': await save(); break
       case 'save-as': if (accepting) await save(value.path); break
+      case 'export-wave': {
+        if (!accepting) return
+        stop()
+        const owned = { id: null, project: editor.project, projectPath: path }
+        exporting = owned
+        status = 'Exporting complete arrangement as float WAV…'
+        const active = () => accepting && exporting === owned && editor.project === owned.project && path === owned.projectPath
+        const pending = request({ ...value, project: owned.project, sourceRoot, directory }, id => { owned.id = id }, progress => {
+          if (!active()) return
+          switch (progress.kind) {
+            case 'wave-snapshot': status = 'Snapshotting WAV export sources…'; break
+            case 'vst-projection': status = 'Projecting WAV export instruments…'; break
+            case 'vst-render': status = `Exporting VST instances ${progress.completed}/${progress.total} complete`; break
+            case 'vst-mix': status = 'Mixing VST export sources…'; break
+            case 'wave-mix': status = 'Mixing complete arrangement for export…'; break
+            default: return
+          }
+          draw()
+        }).then(result => {
+          if (active()) status = `Exported ${result.path} · ${result.frames} frames / ${result.sampleRate} Hz / ${result.channels} channels${result.peak > 1 ? ' · peak above 0 dBFS; float samples retained' : ''}`
+        }, error => { if (active()) status = error.message }).finally(() => {
+          if (exporting === owned) exporting = null
+          preparations.delete(pending); draw()
+        })
+        preparations.add(pending); draw(); break
+      }
       case 'import-wave': case 'import-midi': case 'import-take': case 'import-practice': {
         if (!accepting) return
         status = 'Importing source…'; draw()

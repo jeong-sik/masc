@@ -337,8 +337,11 @@ export function arrangementCommand(editor, line) {
       return { editor, effect: { kind: command, asset: args[0], port, destination: args[2] } }
     }
     case 'output': case 'mixed-output': if (!tail) throw new Error('Choose an output UID'); return { editor, effect: { kind: command, path: tail } }
-    case 'export': case 'wave':
-      throw new Error('Arrangement export and overdub are not connected yet')
+    case 'wave':
+      if (!tail) throw new Error('Use :wave /path/arrangement.wav')
+      return { editor, effect: { kind: 'export-wave', path: tail } }
+    case 'export':
+      throw new Error('Arrangement MIDI export is not connected; use :wave FILE for audio')
     case 'asset': {
       count(1)
       if (!editor.project.assets.some(asset => asset.id === args[0])) throw new Error('Unknown arrangement asset')

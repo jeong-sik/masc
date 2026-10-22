@@ -112,7 +112,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | --- | --- | --- | --- |
 | E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | exact866의8-suite126건·generic observer cf7의52건·typed observer28b5의4-suite65건 실제 PASS. 실제 eligibility conflict wrapper 수리를 af699에 반영하고 독립 소스 재검토 PASS, 새 선택39686436649 4-suite68건 실제 PASS. production 재시작 전 complete forest 검증·기존 child intent local 복구 #44974의4af20 4-suite76건 실제 PASS, 최종641 정식 소스 승인. public owner 전환·fresh Runtime admission·실제 Python/MCP/Exact loopback fixture 소스 후속 중. 같은 commit_plan을 settlement/관측에서 재사용하고 unknown timing/extended usage는 부재로 보존. 새 production compiled 실행·registry reconcile/delivery·실제 provider/두 UI/설치는 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
-| E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
+| E03 | Librarian 실행의 Addon 경계 검토·추출 | 현재 소스 경계 감사: 첫 실제 단위는 pending 후보 판단의 persistent worker+원래 host resume/settle/ACK. absorption 권한·Background admission·whole-walk 실패 증거의 공통 포트 간극을 명시; 추출 구현·실행은 미완료 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | 조사·설계, Required | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
 | E06 | Verifier 실행의 Addon 경계 검토·추출 | 조사·설계 | 증거 검증과 Goal/Task 최종 전이를 분리하고 위조·이전 실행 증거 오적용 없이 재개 |
@@ -679,3 +679,10 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - 같은 private workspace를 cb2 native 서버·TUI와 clean cb2 Dashboard로 정상 재시작했다. 실제 기존 Memory 입력에서 GLM classification original `01a161e3-eff3-7000-a4b8-aa8ef80fe89c`의 ledger commit·observer completion ACK까지 확인했다. Briefing original `01a161e4-2a50-7000-965e-934e89c4a2cb`는 실제 provider 답변과 commit intent를 보존했지만 domain publish 전 같은 guard 오류로 멈췄다. 실제 On→Off 뒤 Docker0과 원래2요청·Memory 바이트 보존을 확인했으며 결과를 주입하지 않았다.
 - 후속 source는 settlement와 successor의 live contract 조회를 매 필요한 eligibility검사의 원래 Eio fiber로 옮기고 disk worker에는 불변 값만 전달한다. 이미 적용된 after-state의 원래 확인과 분류의 불필요한 prompt 조회 생략을 유지한다. 실제 registry 변경 뒤 recovery·frontier 검사를 추가하고 원래 guard·30초·assertion을 유지했다. 새 수리의 compiled 실행·원래 briefing Off 복구·다음 On/실제 새 작업·통합/운영 설치는 아직 미완료다.
 - [실제 실행과 남은 경계](../docs/evidence/2026-10-22-curator-contract-owner-context/README.md)를 보존한다. 원래 A01–H06의54개 항목명·완료 기준은 바꾸지 않았다.
+
+
+## E03 Librarian 실행 수명과 host authority의 현재 경계 · 2026-10-22
+
+- source db31의 MLI·실제 caller를 읽고 [Librarian Addon 구현 경계](../docs/design/librarian-addon-execution.md)를 구체화했다. `infer_memory_step`은 저장만 하지 않을 뿐 실제 absorption judge를 호출하므로 worker wrapper로 옮기지 않는다. 첫 구현 단위는 기존 Memory lane에서 pending 후보의 원래 capture→persistent worker→raw proposal→host absorption/locked disposition→receipt 확인/ACK까지 연결하는 것이다.
+- builtin Background와 common Addon Standard의 admission 차이, 실제 API-only exhausted walk의 typed 증거 부재, gate observation과 authoritative recovery의 차이를 확인했다. 단순 aggregate refusal·worker gate JSON으로 기억 소비/lineage 권한을 만들지 않는다.
+- 이는 구현 전 경계와 검증 계획이며 pending 후보 단위만으로 E03 전체를 완료하지 않는다. 원래 checkpoint/official/continuity/message-floor/absorption/Memory lineage와 실제 Keeper 기억 연속성 기준을 모두 유지한다. A01–H06의 원래54개 항목명·완료 기준은 바꾸지 않았다.

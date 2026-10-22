@@ -499,9 +499,11 @@ let narrow ~config ~request_id =
     |> Result.map_error runtime_error in
   narrow_with ~admit ~store ~base_path:config.Workspace.base_path ~request_id
 type original = {capture:Capture.t;record:Owner.retained}
-let discover_with ~store ~base_path =
+let discover_observed_with ~store ~base_path ~after_inventory =
   let scan () = Eio_unix.run_in_systhread (fun () ->
-    let* records = Owner.discover ~store ~scope:Capture.scope |> owned in
+    let inventory = Owner.discover ~store ~scope:Capture.scope in
+    after_inventory ();
+    let* records = inventory |> owned in
     let* workspace = Capture.observe_workspace ~base_path
       |> Result.map_error (fun detail -> Unavailable detail) in
     Ok (workspace,records)) in
@@ -527,19 +529,28 @@ let discover_with ~store ~base_path =
           | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _
           | Progress.Rejected _ -> Error (Rejected "Original successor intent changed during recovery") in
       recover rest in
-  let* () = recover pending in
-  let* workspace,records = scan () in
-  let* pending = Eio_unix.run_in_systhread (fun () ->
-    Capture.recoverable_successors ~workspace records) |> rejected in
-  let* () = match pending with
-    | [] -> Ok ()
-    | _::_ -> Error (Uncertain "Original successor discovery changed during recovery") in
+  let* workspace,records = match pending with
+    | [] ->
+      (* No recovery changed this pass's validated forest. This observation
+         cannot authorize effects: resume/settle/narrow still reload the owner. *)
+      Ok (workspace,records)
+    | _::_ ->
+      let* () = recover pending in
+      let* workspace,records = scan () in
+      let* pending = Eio_unix.run_in_systhread (fun () ->
+        Capture.recoverable_successors ~workspace records) |> rejected in
+      let* () = match pending with
+        | [] -> Ok ()
+        | _::_ -> Error (Uncertain "Original successor discovery changed during recovery") in
+      Ok (workspace,records) in
   let rec restore_all acc = function
     | [] -> Ok (List.rev acc)
     | record::rest ->
       let* capture = restore ~store ~workspace record in
       restore_all ({capture;record}::acc) rest in
   restore_all [] records
+let discover_with ~store ~base_path =
+  discover_observed_with ~store ~base_path ~after_inventory:(fun () -> ())
 let discover ~config =
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   discover_with ~store ~base_path:config.Workspace.base_path
@@ -645,4 +656,5 @@ module For_testing = struct
   let deliver_observation=deliver_observation_with
   let prepare_observation=prepare_observation_with
   let discover=discover_with
+  let discover_observed=discover_observed_with
 end

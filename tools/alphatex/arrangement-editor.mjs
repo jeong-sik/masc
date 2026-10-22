@@ -341,7 +341,8 @@ export function arrangementCommand(editor, line) {
       if (!tail) throw new Error('Use :wave /path/arrangement.wav')
       return { editor, effect: { kind: 'export-wave', path: tail } }
     case 'export':
-      throw new Error('Arrangement MIDI export is not connected; use :wave FILE for audio')
+      if (!tail) throw new Error('Use :export /path/arrangement.mid')
+      return { editor, effect: { kind: 'export-midi', path: tail } }
     case 'asset': {
       count(1)
       if (!editor.project.assets.some(asset => asset.id === args[0])) throw new Error('Unknown arrangement asset')

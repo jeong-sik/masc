@@ -7,6 +7,7 @@ import { newArrangement, editArrangement } from '../arrangement.mjs'
 import { arrangementEditor, arrangementImported, arrangementCommand } from '../arrangement-editor.mjs'
 import { arrangementWaveProject, exportArrangementWave } from '../arrangement-export.mjs'
 import { attachRecordedTake } from '../arrangement-recording.mjs'
+import { arrangementMidiProject } from '../arrangement-midi-export.mjs'
 
 const asset = { id: 'wave', name: 'Recorded', kind: 'wave', file: `assets/${'a'.repeat(64)}.wav`, sha256: 'a'.repeat(64),
   metadata: { encoding: 'pcm', channels: 1, sampleRate: 44100, bitsPerSample: 16, validBits: 16, blockAlign: 2, frames: 4 } }
@@ -88,9 +89,11 @@ test('captured MIDI is refused until its audio component is explicitly selected;
     { duration: 20, clock: { kind: 'mach-host-time', anchor: String(origin), position: 0, numer: 125, denom: 3 } }).project
   const before = structuredClone(paired)
   assert.throws(() => arrangementWaveProject(paired), /Captured MIDI/)
+  assert.throws(() => arrangementMidiProject(paired), /Captured UMP/)
   const split = editArrangement(paired, { kind: 'capture-split', id: paired.clips[0].id })
   const midi = split.clips.find(clip => clip.component === 'midi')
   const audio = editArrangement(split, { kind: 'lane-mute', id: midi.lane })
   assert.ok(arrangementWaveProject(audio))
+  assert.ok(arrangementMidiProject(audio))
   assert.deepEqual(paired, before)
 })

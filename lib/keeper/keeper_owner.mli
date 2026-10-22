@@ -392,6 +392,16 @@ val restart_interrupted_operations : t -> Chat_operation.t list
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
 val direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_native_call.state, error) result
 
+type current_input_checkpoint =
+  { trace_id : Keeper_id.Trace_id.t
+  ; session_root : string
+  ; observation : Keeper_chat_operation_store.input_checkpoint_observation }
+val current_input_checkpoint : t -> (current_input_checkpoint, error) result
+(** Capture this Owner's current trace, original workspace root and durable
+    input relation in one mailbox read. This immutable observation is not
+    response, continuation or filesystem mutation authority. Missing metadata
+    and store failure remain errors; canonical files are not a fallback. *)
+
 type history_clear_writer
 val begin_history_clear : t -> (history_clear_writer, error) result
 (** Capture a fresh clear authority in the current inherited Maintenance child,

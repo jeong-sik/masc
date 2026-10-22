@@ -175,6 +175,10 @@ val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:K
     with [Owner_stopping]. *)
 val direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   (Keeper_native_call.state, command_error) result
+val current_input_checkpoint : base_path:string -> keeper_name:string ->
+  (Keeper_owner.current_input_checkpoint, command_error) result
+(** Read the original Owner's current trace/root/input tuple, including while
+    draining. This lookup does not create an Owner or grant response admission. *)
 val begin_history_clear : base_path:string -> keeper_name:string ->
   (Keeper_owner.history_clear_writer, command_error) result
 val commit_history_clear : base_path:string -> keeper_name:string ->

@@ -178,6 +178,11 @@ type child_completion =
       }
       -> child_completion
 
+type current_input_checkpoint =
+  { trace_id : Keeper_id.Trace_id.t
+  ; session_root : string
+  ; observation : Chat_operation_store.input_checkpoint_observation }
+
 type history_clear_writer =
   { clear_child : Keeper_interrupt_token.t
   ; clear_authority : Keeper_history_clear.authority }
@@ -213,6 +218,7 @@ type _ command =
   | Direct_checkpoint : Operation_id.t ->
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
   | Direct_native_call : Operation_id.t -> (Keeper_native_call.state, error) result command
+  | Current_input_checkpoint : (current_input_checkpoint, error) result command
   | Input_checkpoint : Keeper_id.Trace_id.t -> (Chat_operation_store.input_checkpoint_observation, error) result command
   | Begin_history_clear : Keeper_interrupt_token.t -> (history_clear_writer, error) result command
   | Commit_history_clear : history_clear_writer * Keeper_history_clear.receipt -> (unit, error) result command
@@ -614,7 +620,7 @@ let answer : type response. response command -> answer = function
   | Has_newer_original_queued _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
   | Direct_native_call _ -> In_its_drain_step
-  | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _
+  | Current_input_checkpoint | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _
   | Begin_history_clear _ | Commit_history_clear _ -> In_its_drain_step
   | Update_direct_native_call _ | Bind_retired_input_cut _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
@@ -1793,6 +1799,17 @@ let start
             Chat_operation_store.direct_native_call t.operation_store ~operation_id) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Current_input_checkpoint, resolve) ->
+          let response = match (Keeper_owner_reducer.projection state).meta with
+            | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+                "current input observation requires Keeper metadata"))
+            | Some meta ->
+              run_operation_read t ~label:"observe current Keeper input" (fun () ->
+                Chat_operation_store.input_checkpoint t.operation_store ~trace_id:meta.runtime.trace_id)
+              |> Result.map (fun observation -> {trace_id=meta.runtime.trace_id;
+                   session_root=t.session_root;observation}) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Input_checkpoint trace_id, resolve) ->
           let response = run_operation_read t ~label:"read input checkpoint owner" (fun () ->
             Chat_operation_store.input_checkpoint t.operation_store ~trace_id) in
@@ -2580,6 +2597,7 @@ let input_child_request t writer change =
     request t (Advance_input_checkpoint (writer, change))
   | Some _ | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
       "input publication caller does not own the captured child"))
+let current_input_checkpoint t = request t Current_input_checkpoint
 let begin_history_clear t =
   match Keeper_turn_preview_owner.current () with
   | Some caller -> request t (Begin_history_clear caller)

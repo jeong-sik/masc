@@ -833,128 +833,253 @@ let test_checkpoint_inventory_projects_missing_current () =
     (json |> member "current_error" = `Null)
 ;;
 
-let with_input_wait_inventory f =
+let with_input_wait_inventory ?(install_owner=true) ?(prior_unavailable=false) f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   with_temp_dir @@ fun dir ->
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let module Store = Keeper_checkpoint_store in
+  let ok = function Ok value -> value | Error detail -> fail detail in
   let state = Mcp_server.For_testing.create_state ~base_path:dir in
   let config = Mcp_server.workspace_config state in
   let keeper_name = "input-observation" in
   let trace_id = "trace-input-observation" in
-  Keeper_meta_store.replace_snapshot config
-    (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
-  |> Result.map_error (fun detail -> fail detail) |> Result.get_ok;
-  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
-  let canonical = Keeper_checkpoint_store.agent_core_checkpoint_path
-      ~session_dir ~session_id:trace_id in
+  let meta = make_checkpoint_inventory_meta ~name:keeper_name ~trace_id in
+  let meta = {meta with Keeper_meta_contract.activation_mode=Keeper_activation_mode.Manual} in
+  Keeper_meta_store.replace_snapshot config meta |> ok;
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:dir in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.save_file (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+    "[keeper]\ninstructions = \"Input observation fixture\"\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
+  if prior_unavailable then begin
+    let module Journal = Keeper_chat_operation_store in
+    let path=Journal.path_for_keeper ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config) ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let journal=Journal.open_or_create ~path |> Result.map_error Journal.error_to_string |> ok in
+    Journal.close journal |> Result.map_error Journal.error_to_string |> ok;
+    let db=Sqlite3.db_open ~mode:`NO_CREATE path in
+    Fun.protect ~finally:(fun () -> check bool "close prior input fixture" true (Sqlite3.db_close db)) (fun () ->
+      check bool "establish actual unavailable prior history" true
+        (Sqlite3.exec db "UPDATE input_history SET basis='prior_unavailable' WHERE singleton=1"=Sqlite3.Rc.OK))
+  end;
+  let owner_stop=ref None in
+  let start_owner () =
+    let installed,resolve_installed=Eio.Promise.create () in
+    let stop,resolve_stop=Eio.Promise.create () in
+    let ended,resolve_ended=Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Fun.protect ~finally:(fun () -> Eio.Promise.resolve resolve_ended ()) (fun () ->
+        Eio.Switch.run (fun owner_sw ->
+          let result=Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:None
+            ~on_turn_slot_released:None config in
+          Eio.Promise.resolve resolve_installed result;
+          Eio.Promise.await stop)));
+    match Eio.Promise.await installed with
+    | Ok _ -> owner_stop:=Some (resolve_stop,ended)
+    | Error error -> fail (Keeper_owner_registry.install_error_to_string error) in
+  let stop_owner () = match !owner_stop with
+    | None -> ()
+    | Some (resolve_stop,ended) ->
+      owner_stop:=None; Eio.Promise.resolve resolve_stop (); Eio.Promise.await ended in
+  let drain () =
+    match Keeper_owner_registry.begin_stopping_all ~base_path:dir with
+     | Ok results -> List.iter (fun result -> ignore (result |> Result.map_error Keeper_owner.error_to_string |> ok)) results
+     | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error) in
+  let restart () = drain ();stop_owner ();start_owner () in
+  if install_owner then start_owner ();
+  let session_dir=Keeper_types_support.keeper_session_dir config trace_id in
+  let canonical=Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  let current=ref None in
+  let reference () = match Keeper_owner_registry.input_checkpoint ~base_path:dir ~keeper_name ~trace_id:meta.runtime.trace_id
+      |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok with
+    | Keeper_chat_operation_store.Input_observed reference -> reference
+    | Input_unobserved | Prior_input_unavailable -> fail "fixture has no owned input" in
+  let publish checkpoint =
+    let result=Keeper_owner_registry.run_autonomous_if_idle ~base_path:dir ~keeper_name (fun () ->
+      let producer=Keeper_input_checkpoint_producer.prepare ~base_path:dir ~keeper_name ~session_dir
+        ~trace_id:meta.runtime.trace_id ~source:!current
+        |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> ok in
+      ignore (Keeper_input_checkpoint_producer.publish_autonomous producer checkpoint
+        |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> ok)) in
+    (match result with
+     | Ok (`Ran ()) -> current:=Some checkpoint
+     | Ok (`Busy _ | `Interrupted) -> fail "fixture input publisher did not run"
+     | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+    reference () in
+  let consume pending =
+    let expected_source_ref=reference () in
+    let source=Store.load_retained_exact_snapshot ~session_dir ~reference:expected_source_ref
+      |> function Ok source -> source | Error _ -> fail "fixture retained source unavailable" in
+    match Keeper_input_wait_response.prepare ~net:(Eio.Stdenv.net env) ~expected_source_ref ~source ~pending
+        ~response:Agent_core.Hooks.Declined with
+    | Ok response -> Keeper_input_wait_response.checkpoint response
+    | Error _ -> fail "actual Agent input response was refused" in
   let read () =
-    let status, body = get_checkpoint_inventory state ~keeper_name in
+    let status,body=get_checkpoint_inventory state ~keeper_name in
     check int "checkpoint GET succeeds" 200 status;
-    Yojson.Safe.Util.member "input_wait_observation" body
-  in
-  f ~trace_id ~session_dir ~canonical ~read
+    Yojson.Safe.Util.member "input_wait_observation" body in
+  let save checkpoint = match Store.save_agent_core_classified ~history_retained:2 ~session_dir checkpoint with
+    | Ok (Store.Saved _) -> () | Ok (Store.Stale_noop _) -> fail "canonical fixture was stale"
+    | Error detail -> fail detail in
+  let change_trace trace_id =
+    let runtime={meta.runtime with trace_id=Keeper_id.Trace_id.of_string trace_id |> ok} in
+    Keeper_meta_store.replace_snapshot config {meta with runtime} |> ok in
+  Fun.protect ~finally:stop_owner (fun () ->
+    f ~trace_id ~session_dir ~canonical ~read ~save ~publish ~consume ~reference ~restart ~change_trace ~drain)
 ;;
 
 let inventory_pending ~run_id ~request_id ~question =
   Agent_core.Agent_input_request.
     { run_id
     ; request =
-        { request_id; participant_name = Some "operator"; question
-        ; schema = Some (`Assoc [ "type", `String "object" ])
-        ; timeout_s = None; created_at = 10.0
-        }
+        { request_id; participant_name=Some "operator"; question
+        ; schema=Some (`Assoc ["type",`String "object"])
+        ; timeout_s=None; created_at=10.0 }
     }
 ;;
 
 let replace_inventory_checkpoint_bytes path bytes =
   match Fs_compat.save_file_atomic path bytes with
-  | Ok () -> ()
-  | Error detail -> fail ("checkpoint fixture replacement failed: " ^ detail)
+  | Ok () -> () | Error detail -> fail ("checkpoint fixture replacement failed: " ^ detail)
+;;
+
+let check_owned_inventory ~status ~pending ~reference observed =
+  let open Yojson.Safe.Util in
+  check string "host observation schema" "masc.keeper.input-wait.observation.v2" (observed |> member "schema" |> to_string);
+  check string "authoritative input source" "retained_input_owner" (observed |> member "source" |> to_string);
+  check string "owned input status" status (observed |> member "status" |> to_string);
+  check bool "pending reflects owned bytes" true (observed |> member "pending_input"=pending);
+  check bool "owned read has no error" true (observed |> member "error"=`Null);
+  let actual=observed |> member "checkpoint_ref" in
+  check string "owned trace" (Keeper_id.Trace_id.to_string reference.Keeper_checkpoint_ref.trace_id)
+    (actual |> member "trace_id" |> to_string);
+  check int "owned turn" reference.turn_count (actual |> member "turn_count" |> to_int);
+  check string "exact retained hash" reference.sha256 (actual |> member "sha256" |> to_string)
+;;
+
+let check_unavailable_inventory kind observed =
+  let open Yojson.Safe.Util in
+  check string "unavailable source" "unavailable" (observed |> member "status" |> to_string);
+  check bool "no invented input reference" true (observed |> member "checkpoint_ref"=`Null);
+  check bool "no borrowed question" true (observed |> member "pending_input"=`Null);
+  check string "exact unavailable category" kind (observed |> member "error" |> member "kind" |> to_string)
 ;;
 
 let test_input_wait_inventory_tracks_exact_replacements () =
-  with_input_wait_inventory @@ fun ~trace_id ~session_dir ~canonical ~read ->
-  let module Store = Keeper_checkpoint_store in
-  let open Yojson.Safe.Util in
-  let initial = make_inventory_checkpoint ~session_id:trace_id ~turn_count:4 ~created_at:10.0 in
-  let save checkpoint =
-    match Store.save_agent_core_classified ~history_retained:2 ~session_dir checkpoint with
-    | Ok (Store.Saved _) -> ()
-    | Ok (Store.Stale_noop _) -> fail "input replacement was not stored"
-    | Error detail -> fail detail
-  in
-  let inspect ~status pending =
-    let observed = read () in
-    check string "observation source" "canonical_checkpoint"
-      (observed |> member "source" |> to_string);
-    check string "stored wait status" status (observed |> member "status" |> to_string);
-    check bool "canonical pending proof" true (observed |> member "pending_input" = pending);
-    check bool "readable observation has no error" true (observed |> member "error" = `Null);
-    let reference = observed |> member "checkpoint_ref" in
-    check string "original trace" trace_id (reference |> member "trace_id" |> to_string);
-    check int "same turn can replace a request" 4 (reference |> member "turn_count" |> to_int);
-    let expected = Digestif.SHA256.(to_hex (digest_string (Fs_compat.load_file canonical))) in
-    check string "hash of actual bytes, without re-encoding" expected
-      (reference |> member "sha256" |> to_string);
-    reference
-  in
-  let a = inventory_pending ~run_id:"run-a" ~request_id:"request-a" ~question:"First question?" in
-  save { initial with pending_input = Some a };
-  (* Equivalent JSON bytes must still have their own exact reference. *)
-  replace_inventory_checkpoint_bytes canonical ("\n" ^ Fs_compat.load_file canonical);
-  let ref_a = inspect ~status:"stored_pending" (Agent_core.Agent_input_request.pending_to_json a) in
-  let b = inventory_pending ~run_id:"run-b" ~request_id:"request-b" ~question:"Replacement question?" in
-  save { initial with pending_input = Some b; created_at = 11.0 };
-  let ref_b = inspect ~status:"stored_pending" (Agent_core.Agent_input_request.pending_to_json b) in
-  check bool "replacement has a different exact reference" false (ref_a = ref_b);
-  save { initial with pending_input = None; created_at = 12.0 };
-  let ref_none = inspect ~status:"stored_none" `Null in
-  check bool "settlement has a different exact reference" false (ref_b = ref_none);
-  check bool "old pending history still exists" true
-    (List.length (Store.list_agent_core_history_files ~session_dir) > 0)
+  with_input_wait_inventory @@ fun ~trace_id ~session_dir:_ ~canonical:_ ~read ~save ~publish ~consume
+      ~reference:_ ~restart ~change_trace:_ ~drain:_ ->
+  let initial=make_inventory_checkpoint ~session_id:trace_id ~turn_count:4 ~created_at:10.0 in
+  let a=inventory_pending ~run_id:"run-a" ~request_id:"request-a" ~question:"First question?" in
+  let waiting_a={initial with pending_input=Some a} in
+  save waiting_a;
+  let unobserved=read () in
+  check string "canonical pending is not an owned observation" "unobserved"
+    Yojson.Safe.Util.(unobserved |> member "status" |> to_string);
+  check bool "fresh Owner does not borrow canonical question" true
+    Yojson.Safe.Util.(unobserved |> member "pending_input"=`Null);
+  let ref_a=publish waiting_a in
+  check_owned_inventory ~status:"owned_pending" ~pending:(Agent_core.Agent_input_request.pending_to_json a)
+    ~reference:ref_a (read ());
+  let b=inventory_pending ~run_id:"run-b" ~request_id:"request-b" ~question:"Replacement question?" in
+  let ref_b=publish {initial with pending_input=Some b;created_at=11.0} in
+  check bool "same-turn input replacement has new exact reference" false (Keeper_checkpoint_ref.equal ref_a ref_b);
+  check_owned_inventory ~status:"owned_pending" ~pending:(Agent_core.Agent_input_request.pending_to_json b)
+    ~reference:ref_b (read ());
+  let consumed=consume b in
+  check bool "actual Core response consumed the pending input" true (Option.is_none consumed.pending_input);
+  let ref_none=publish consumed in
+  check bool "consumption changes the owned reference at the same turn" false (Keeper_checkpoint_ref.equal ref_b ref_none);
+  check_owned_inventory ~status:"owned_none" ~pending:`Null ~reference:ref_none (read ());
+  restart ();
+  check_owned_inventory ~status:"owned_none" ~pending:`Null ~reference:ref_none (read ())
 ;;
 
-let test_input_wait_inventory_refuses_unavailable_sources () =
-  with_input_wait_inventory @@ fun ~trace_id ~session_dir ~canonical ~read ->
-  let module Store = Keeper_checkpoint_store in
-  let open Yojson.Safe.Util in
-  let unavailable kind =
-    let observed = read () in
-    check string "source is explicitly unavailable" "unavailable"
-      (observed |> member "status" |> to_string);
-    check bool "no reference is fabricated" true (observed |> member "checkpoint_ref" = `Null);
-    check bool "no pending proof is borrowed" true (observed |> member "pending_input" = `Null);
-    check string "failure category" kind (observed |> member "error" |> member "kind" |> to_string)
-  in
-  unavailable "not_found";
-  let pending = inventory_pending ~run_id:"old-run" ~request_id:"old-request" ~question:"Old question?" in
-  let checkpoint = make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:10.0 in
-  (match Store.save_agent_core_classified ~history_retained:2 ~session_dir
-      { checkpoint with pending_input = Some pending } with
-   | Ok (Store.Saved _) -> ()
-   | Ok (Store.Stale_noop _) -> fail "fresh checkpoint was stale"
-   | Error detail -> fail detail);
-  (* Replace the canonical inode; in-place corruption would also corrupt its
-     hardlinked history and fail to test a readable historical fallback. *)
-  replace_inventory_checkpoint_bytes canonical "{invalid checkpoint";
-  unavailable "read_failed";
-  let unsupported = json_with_field
-      (Agent_core.Checkpoint.to_json checkpoint) "version"
-      (`Int (Agent_core.Checkpoint.checkpoint_version - 1)) in
-  replace_inventory_checkpoint_bytes canonical (Yojson.Safe.to_string unsupported);
-  unavailable "read_failed";
-  replace_inventory_checkpoint_bytes canonical (Agent_core.Checkpoint.to_string
-    { checkpoint with session_id = "foreign-session" });
-  unavailable "session_mismatch";
+let test_input_wait_inventory_ignores_canonical_drift () =
+  with_input_wait_inventory @@ fun ~trace_id ~session_dir:_ ~canonical ~read ~save ~publish ~consume
+      ~reference:_ ~restart ~change_trace:_ ~drain:_ ->
+  let pending=inventory_pending ~run_id:"run-retained" ~request_id:"request-retained" ~question:"Owned question?" in
+  let waiting={ (make_inventory_checkpoint ~session_id:trace_id ~turn_count:2 ~created_at:10.0) with pending_input=Some pending } in
+  save waiting;
+  let owned=publish waiting in
+  let inspect reference status pending=check_owned_inventory ~status ~pending ~reference (read ()) in
+  let question=Agent_core.Agent_input_request.pending_to_json pending in
+  replace_inventory_checkpoint_bytes canonical "{corrupt canonical";
+  inspect owned "owned_pending" question;
   Sys.remove canonical;
-  unavailable "not_found";
-  check bool "a readable old pending request remains in history" true
-    (Store.list_agent_core_history_files ~session_dir
-     |> List.exists (fun snapshot_id ->
-       match Store.load_agent_core_history_file ~session_dir ~snapshot_id with
-       | Ok old -> old.pending_input = Some pending
-       | Error _ -> false))
+  inspect owned "owned_pending" question;
+  let consumed=publish (consume pending) in
+  save waiting;
+  inspect consumed "owned_none" `Null;
+  replace_inventory_checkpoint_bytes canonical "{still corrupt";
+  inspect consumed "owned_none" `Null;
+  Sys.remove canonical;
+  restart ();
+  inspect consumed "owned_none" `Null
+;;
+
+let test_input_wait_inventory_refuses_unavailable_retained () =
+  with_input_wait_inventory @@ fun ~trace_id ~session_dir ~canonical:_ ~read ~save ~publish ~consume:_
+      ~reference:_ ~restart:_ ~change_trace:_ ~drain:_ ->
+  let module Store=Keeper_checkpoint_store in
+  let pending=inventory_pending ~run_id:"run-old" ~request_id:"request-old" ~question:"Retained question?" in
+  let waiting={ (make_inventory_checkpoint ~session_id:trace_id ~turn_count:2 ~created_at:10.0) with pending_input=Some pending } in
+  save waiting;
+  let reference=publish waiting in
+  (* Valid canonical and a historical pending request remain readable while
+     the owned retained artifact is unavailable. Neither can replace it. *)
+  save {waiting with created_at=11.0};
+  check bool "readable canonical history cannot replace missing owned bytes" true
+    (Store.list_agent_core_history_files ~session_dir |> List.exists (fun snapshot_id ->
+      match Store.load_agent_core_history_file ~session_dir ~snapshot_id with
+      | Ok old -> old.pending_input=Some pending | Error _ -> false));
+  let retained=Filename.concat (Filename.concat session_dir Store.retained_dirname) (reference.sha256 ^ ".json") in
+  let bytes=Fs_compat.load_file retained in
+  Sys.remove retained;
+  check_unavailable_inventory "retained_unavailable" (read ());
+  replace_inventory_checkpoint_bytes retained "{invalid retained bytes";
+  check_unavailable_inventory "retained_unavailable" (read ());
+  replace_inventory_checkpoint_bytes retained ("\n" ^ bytes);
+  check_unavailable_inventory "retained_unavailable" (read ());
+  replace_inventory_checkpoint_bytes retained bytes;
+  check_owned_inventory ~status:"owned_pending" ~pending:(Agent_core.Agent_input_request.pending_to_json pending)
+    ~reference (read ())
+;;
+
+let test_input_wait_inventory_observes_draining_owner () =
+  with_input_wait_inventory @@ fun ~trace_id ~session_dir:_ ~canonical:_ ~read ~save:_ ~publish ~consume:_
+      ~reference:_ ~restart:_ ~change_trace:_ ~drain ->
+  let pending=inventory_pending ~run_id:"run-draining" ~request_id:"request-draining" ~question:"Still observed?" in
+  let reference=publish { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:10.0) with pending_input=Some pending } in
+  drain ();
+  check_owned_inventory ~status:"owned_pending" ~pending:(Agent_core.Agent_input_request.pending_to_json pending)
+    ~reference (read ())
+;;
+
+let test_input_wait_inventory_refuses_missing_owner () =
+  with_input_wait_inventory ~install_owner:false @@ fun ~trace_id ~session_dir:_ ~canonical:_ ~read ~save
+      ~publish:_ ~consume:_ ~reference:_ ~restart:_ ~change_trace:_ ~drain:_ ->
+  let pending=inventory_pending ~run_id:"run-unowned" ~request_id:"request-unowned" ~question:"Unowned question?" in
+  save { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:10.0) with pending_input=Some pending };
+  check_unavailable_inventory "owner_unavailable" (read ())
+;;
+
+let test_input_wait_inventory_refuses_prior_unavailable () =
+  with_input_wait_inventory ~prior_unavailable:true @@ fun ~trace_id ~session_dir:_ ~canonical:_ ~read ~save
+      ~publish:_ ~consume:_ ~reference:_ ~restart:_ ~change_trace:_ ~drain:_ ->
+  let pending=inventory_pending ~run_id:"run-prior" ~request_id:"request-prior" ~question:"Prior unknown question?" in
+  save { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:10.0) with pending_input=Some pending };
+  check_unavailable_inventory "prior_input_unavailable" (read ())
+;;
+
+let test_input_wait_inventory_refuses_trace_drift () =
+  with_input_wait_inventory @@ fun ~trace_id ~session_dir:_ ~canonical:_ ~read ~save:_ ~publish ~consume:_
+      ~reference:_ ~restart:_ ~change_trace ~drain:_ ->
+  let pending=inventory_pending ~run_id:"run-original" ~request_id:"request-original" ~question:"Original trace?" in
+  ignore (publish { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:10.0) with pending_input=Some pending });
+  change_trace "trace-observation-external-change";
+  check_unavailable_inventory "trace_changed" (read ())
 ;;
 
 (* Clock groups fold the edge stream into a table of per-group accumulators.
@@ -1325,10 +1450,12 @@ let () =
             "input wait follows exact same-turn replacement and settlement"
             `Quick
             test_input_wait_inventory_tracks_exact_replacements
-        ; test_case
-            "input wait never borrows unavailable or historical state"
-            `Quick
-            test_input_wait_inventory_refuses_unavailable_sources
+        ; test_case "owned input ignores missing corrupt or stale canonical" `Quick test_input_wait_inventory_ignores_canonical_drift
+        ; test_case "input wait never borrows unavailable retained or historical state" `Quick test_input_wait_inventory_refuses_unavailable_retained
+        ; test_case "input wait remains observable during Owner drain" `Quick test_input_wait_inventory_observes_draining_owner
+        ; test_case "input wait refuses unavailable Owner" `Quick test_input_wait_inventory_refuses_missing_owner
+        ; test_case "input wait refuses unavailable prior input history" `Quick test_input_wait_inventory_refuses_prior_unavailable
+        ; test_case "input wait refuses changed Owner trace" `Quick test_input_wait_inventory_refuses_trace_drift
         ] )
     ; ( "checkpoint_purge"
       , [ test_case

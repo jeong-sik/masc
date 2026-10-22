@@ -445,3 +445,17 @@ ambiguity, canonical CAS and journal commit uncertainty. Source typing is separa
 from actually executing those fixtures. This boundary does not prove a provider
 turn, host response admission, reconnect/TUI behavior, live installation or whole
 issue completion. The entire #38005 stack remains Draft.
+
+
+### Reading current owned input waits
+
+The explicit Keeper checkpoint inventory reads `input_wait_observation` from
+the current Owner's trace/root/input relation and exact retained payload. The
+`masc.keeper.input-wait.observation.v2` response uses source
+`retained_input_owner` and statuses `unobserved`, `owned_pending`, `owned_none`
+or `unavailable`. A missing Owner, unavailable prior input, changed trace or
+unreadable retained artifact never falls back to canonical/history. Canonical
+checkpoint summaries remain independent diagnostics, so stale pending files
+cannot resurrect consumed input. This read is a snapshot, including during
+Owner drain; it grants no response or continuation permission. See
+[Agent input wait ownership](../design/agent-input-wait-ownership.md#owned-http-observation).

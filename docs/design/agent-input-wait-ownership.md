@@ -89,27 +89,47 @@ preserves that absence rather than refusing the pause or inventing a provider
 turn; it emits no per-AfterTurn cost event in that case and projects a null
 ordinal. Other successful stop kinds still require their original ordinal.
 
-## Stored HTTP observation
+## Owned HTTP observation
 
 The existing admin `GET /api/v1/keepers/:name/checkpoints` response includes
-`input_wait_observation`, with schema `masc.keeper.input-wait.observation.v1`
-and source `canonical_checkpoint`. One strict exact-snapshot read supplies
-the current summary, the full pending proof and its checkpoint reference
-`{trace_id, turn_count, sha256}`. The SHA-256 names the bytes actually read,
-without JSON re-encoding. Replacing a request in the same turn changes that
-reference. It is an observation at that read, not a promise that storage
-has remained unchanged until a later response.
+`input_wait_observation`, with schema `masc.keeper.input-wait.observation.v2`
+and source `retained_input_owner`. One current Owner mailbox read captures
+its trace, original session root and durable input relation. The route first
+checks that this trace matches the inventory metadata, then loads and validates
+the exact retained artifact named by the Owner reference. Its
+`{trace_id, turn_count, sha256}` names those retained bytes. The canonical file
+and history remain independent diagnostic inventory; they never supply input
+state when owned evidence is unavailable.
 
-`stored_pending` includes the original run ID and canonical request; a readable
-checkpoint with no wait is `stored_none`, with a non-null reference and null
-pending input. Missing, corrupt, unsupported, identity-mismatched or unreadable
-sources produce `unavailable` with a typed error, null reference and null input.
-History remains a separate summary and never supplies a replacement current
-wait. This explicit inventory route adds no fleet-wide scan or refresh loop.
+| Status | Meaning | Checkpoint reference | Pending input |
+| --- | --- | --- | --- |
+| `unobserved` | Fresh-history Owner has no input observation for its current trace | null | null |
+| `owned_pending` | Exact owned retained checkpoint contains a pending request | exact owned reference | full original run/request/question/schema |
+| `owned_none` | Exact owned retained checkpoint contains no pending request | exact owned reference | null |
+| `unavailable` | Current Owner, original trace relation, prior input history or retained artifact cannot be verified | null | null |
 
-An exact persisted checkpoint proves its stored observation, not the authority
-of every possible live or retained continuation. In particular, retained native
-Owner state can differ after an uncertain canonical write. Owner-serialized
-response admission/CAS, live/retained reconciliation, SSE invalidation and TUI
-projection remain subsequent layers. Clients must not turn this stored
-observation or historical feed replay into permission to submit a response.
+The response also includes `trace_id` for successful observations and null for
+unavailable ones. Typed error categories distinguish `owner_unavailable`,
+`trace_changed`, `prior_input_unavailable` and `retained_unavailable`; retained
+errors preserve a cause and detail. No failure invents a fresh state or borrows
+another question. Replacing a request or consuming it within the same turn
+changes the exact owned reference. A stale pending canonical cannot resurrect
+consumed input, and a missing/corrupt canonical cannot hide an owned wait.
+
+This is a read-time snapshot. The Owner can advance after the mailbox read;
+retained evidence can then become unavailable. Neither successful observation
+nor reconnect grants response or continuation authority. Reads remain possible
+through the original Owner's draining lookup and create no Owner. The explicit
+inventory request adds no fleet-wide scan, refresh loop, cache or inferred expiry.
+
+The source fixtures use the actual HTTP handler, Owner input publisher and
+retained store, and an actual Core decline candidate to observe consumption.
+They cover same-turn replacement, stale/missing/corrupt canonical state,
+Owner reinstall, missing/corrupt/hash-mismatched retained evidence, unavailable
+Owner/prior history and metadata trace drift. Source typing, executing these
+fixtures, and product acceptance remain separate evidence.
+
+Owner-serialized response admission/CAS, durable waiting and continuation
+lifecycle, live/retained reconciliation, SSE invalidation and persistent TUI
+projection remain unfinished. All #38005 layers remain Draft; this contract
+does not authorize installation, merge or whole-issue completion.

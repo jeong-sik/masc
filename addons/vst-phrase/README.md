@@ -26,6 +26,12 @@ local player process; they do not measure device audibility. A render failure is
 a known state, not a successful silent render. This observer has no action tool:
 local playback does not create a `masc_lane_act` receipt.
 
+In the phrase editor, `:wave PATH` also updates this snapshot for a selected VST.
+`exported` means the WAV was copied to the requested destination; its evidence
+references that file and the retained MIDI with their render hashes.
+`export_failed` retains the requested destination and error without claiming a
+published WAV. An export does not start or acknowledge an audio player.
+
 Build the image through the repository's permitted Lane image CI and retain its
 exact source SHA and image ID separately from the stdio tests. The manifest alone
 does not establish an installed or running worker. No Steinberg or other vendor

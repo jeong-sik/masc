@@ -569,11 +569,20 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       case 'save-as': await save(value.path); break
       case 'export': await writeFile(value.path, projectMidi(editor.project), { flag: 'wx', mode: 0o600 }); status = `Exported ${value.path}`; break
       case 'wave': {
-        const job = renderAudio(editor.project, { pattern: editor.pattern })
-        const wave = await job.promise
-        if (accepting && !closed) {
-          await copyFile(wave.path, value.path, constants.COPYFILE_EXCL)
-          status = `Exported ${value.path}${wave.clippedSamples > 0 ? ' · clipped; lower :level' : ''}`
+        const sound = audioInstrument(), exportPath = resolve(value.path)
+        try {
+          const job = renderAudio(editor.project, { pattern: editor.pattern })
+          const wave = await job.promise
+          if (accepting && !closed) {
+            await copyFile(wave.path, exportPath, constants.COPYFILE_EXCL)
+            if (wave.vst) observe({ state: 'exported', selection: wave.selection,
+              render: { ...wave.vst, output_path: exportPath }, export_path: exportPath })
+            status = `Exported ${value.path}${wave.clippedSamples > 0 ? ' · clipped; lower :level' : ''}`
+          }
+        } catch (error) {
+          if (sound.kind === 'vst' && accepting && !closed) observe({ state: 'export_failed',
+            selection: sound.selection, render: null, export_path: exportPath, error: error.message })
+          throw error
         }
         break
       }

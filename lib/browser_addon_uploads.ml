@@ -54,7 +54,7 @@ let source path = protect (fun () ->
         else Ok (Bytes.to_string bytes)))
 let upload_paths = function
   | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload {paths;_};_}) -> Ok paths
-  | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _|Page_capture _|Page_scene _|Page_interact _
+  | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _|Page_capture _|Page_scene _|Page_interact _
   | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
   | Page_act (Open_tab _|On_tab {interaction=Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
   | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Error "grant requires one upload command"
@@ -116,7 +116,7 @@ let with_claim t ~id ~actor ~route ~verb f =
     match verb with
     | B.Page_act (B.Action.On_tab ({interaction=Upload {selector;_};_} as target)) ->
         Ok (f (B.Page_act (B.Action.On_tab {target with interaction=Upload {selector;paths=Lease.paths grant.snapshot}})))
-    | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _|Page_capture _|Page_scene _|Page_interact _
+    | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _|Page_capture _|Page_scene _|Page_interact _
     | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
     | Page_act (Open_tab _|On_tab {interaction=Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
     | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Error "grant command is not an upload")

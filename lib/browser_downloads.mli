@@ -24,6 +24,7 @@ val to_json : verify:(string -> (string * int, string) result) -> download -> Yo
 type connection = {
   read : context:string -> (Yojson.Safe.t, string) result;
   console : context:string -> (Yojson.Safe.t, string) result;
+  network : context:string -> (Yojson.Safe.t, string) result;
   check : unit -> (unit, string) result;
   close : unit -> unit;
 }

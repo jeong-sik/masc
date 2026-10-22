@@ -181,29 +181,3 @@ let message t =
          runs in this process, so whether a browser host polls that port is not observed \
          here; a running server's own check reports it. %s"
         port environment_note
-
-let to_json t =
-  let workspace_port, workspace_port_error =
-    match t.workspace_port with
-    | Ok port -> `Int port, `Null
-    | Error error -> `Null, `String (Workspace_connection.error_message error)
-  in
-  let serving_port, polling_hosts =
-    match t.server with
-    | Serving { port; polling } -> `Int port, `Int (List.length polling)
-    | Not_serving -> `Null, `Null
-  in
-  `Assoc
-    [ "launcher", `String (match t.launcher with
-        | Not_installed -> "not_installed" | Undeclared -> "undeclared"
-        | Unreadable -> "unreadable" | Describes_another_launcher -> "describes_another_launcher"
-        | Follows_workspace -> "follows_workspace")
-    ; "workspace_port", workspace_port
-    ; "workspace_port_error", workspace_port_error
-    ; "serving_port", serving_port
-    ; "polling_hosts", polling_hosts
-    ; "verdict", `String (match verdict t with
-        | Absent -> "absent" | Connected -> "connected" | Aligned -> "aligned"
-        | Unverified -> "unverified" | Misconfigured -> "misconfigured")
-    ; "message", `String (message t)
-    ]

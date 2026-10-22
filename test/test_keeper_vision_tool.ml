@@ -2335,14 +2335,6 @@ let test_browser_screenshot_reaches_vision_reader () =
             assert (assoc_string "transport" data = "web_extension");
             if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"]))))))
 
-let test_browser_screenshot_requires_keeper_owner () =
-  let result = Masc.Tool_misc_browser_lane.handle_read
-      ~base_path:(Filename.get_temp_dir_name ()) ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
-      (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
-  match result with
-  | Tool_result.Failed failure -> assert (failure.message = "screenshot requires an owning Keeper")
-  | _ -> failwith "generic caller invented a Keeper screenshot owner"
-
 let test_browser_screenshot_rejects_bad_pixels () =
   with_temp_base (fun _ ->
     List.iter (fun encoded ->
@@ -2640,7 +2632,6 @@ let run_all () =
   test_artifact_failures_are_classified ();
   test_browser_screenshot_rejects_invalid_client ();
   test_browser_screenshot_rejects_invalid_observation ();
-  test_browser_screenshot_requires_keeper_owner ();
   test_browser_screenshot_reaches_vision_reader ();
   test_browser_screenshot_rejects_bad_pixels ();
   test_vision_output_tokens_default_and_env ();

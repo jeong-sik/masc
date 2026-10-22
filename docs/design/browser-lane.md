@@ -134,14 +134,11 @@ also gives the tab's window focus, which `activate_tab` promises not to do.
 
 A request its connection does not serve is a selection failure: the server
 queues no command and answers `live_transport_unsupported`. A Keeper tool's
-rejection carries the refused `clientId`, its `transport`, the `capability`,
-the `servingTransports`, the connected `servingClients` and a `retry`
-sentence. With a serving browser connected, the Keeper lists that
+rejection carries the refused `clientId`, its `transport` and the
+`capability`. With a serving browser connected, the Keeper lists that
 connection's tabs, observes the page again and retries there. With none, the
-`retry` says what the operator attaches, and when BiDi serves the work the
-answer also carries `bidiHost` (`state` and `message`): what the BiDi host's
-own record says, for the Keeper to pass on
-([Live BiDi browser host](browser-bidi-live-host.md)). The extension and the BiDi peer keep
+operator attaches one ([Live BiDi browser host](browser-bidi-live-host.md)).
+The extension and the BiDi peer keep
 their own refusals for work outside their vocabulary; the server does not
 send it to them.
 
@@ -208,21 +205,6 @@ to the same Firefox, select the BiDi client for trusted `hover_at` or `drag`,
 then read its tabs and capture its viewport. Tab IDs do not transfer between
 those connections. [What each live connection serves](#what-each-live-connection-serves)
 lists the rest.
-
-When a Keeper browser tool meets `no_live_client` or
-`selected_client_disconnected`, before or after its target was resolved, its
-result also carries `host`: the installed launcher (`follows_workspace` when
-the installer's `launch.json` carries the SHA-256 of the `launch` beside it,
-`describes_another_launcher` when it does not, `undeclared`, `unreadable` or
-`not_installed`), the `workspace_port` connection.toml names, the
-`serving_port` this server's listener actually bound with `polling_hosts`, the
-browser hosts whose poll lease is current (both null where no bound listener
-is known), and the same verdict and message the onboarding check reports.
-The verdict is `connected` while a host polls this server, whatever the
-launcher or file says; otherwise `aligned` only when a declared launcher's
-workspace port is the bound port, `unverified` where no bound port is known,
-such as `masc doctor`, and `misconfigured` for the rest. The Keeper cannot
-change either side, so the retry text names what the operator does.
 
 Tab IDs belong to their selected client. The operator read resolves that client
 once before listing tabs and keeps it for the subsequent page request. Successful

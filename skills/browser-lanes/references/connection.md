@@ -15,31 +15,17 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
   발생할 수 있다. “브라우저가 꺼졌다”로 단정하지 않는다. 결과의 `error`가 경우를
   나눈다.
   - `ambiguous_browser_clients`: `clients`에서 하나를 골라 그 clientId로 다시 부른다.
-  - `selected_client_disconnected`: `clients`에 남은 연결이 있으면 고른다. 없으면
-    `no_live_client`와 같이 한다.
-  - `no_live_client`: `host`에 워크스페이스 포트(`workspace_port`), 이 서버가 실제로
-    듣는 포트(`serving_port`), 지금 이 서버를 poll 하는 host 수(`polling_hosts`),
-    판정(`verdict`)과 `message`가 있다. 연결이 하나도 남지 않은 이 답과, 남은 연결이
-    없는 `selected_client_disconnected`에는 `bidiHost`도 있다. 이
-    `message`와 `retry`를 운영자에게 그대로 전한다. 고칠 수 있는 사람은 운영자뿐이라
-    같은 호출을 되풀이해도 답은 같다.
-  - `live_transport_unsupported`: 고른 연결이 그 일을 못 한다. live 연결은 방식
-    (`transport`)에 따라 할 수 있는 일이 다르다. `hover_at`과 `drag`는
-    `webdriver_bidi` 연결만 하고, `activate_tab`은 `web_extension` 연결만 한다.
-    읽기(`mode=text`·`elements`·`scene`·`screenshot`)는 둘 다 한다. `servingClients`에 연결이 있으면 그 clientId로
-    탭 목록과 페이지를 다시 읽은 뒤 거기서 다시 한다. 탭 ID와 관측은 연결마다
-    따로다. 비어 있으면 `retry`를 운영자에게 그대로 전한다.
-    `webdriver_bidi` 연결이 필요한 일인데 그 일을 할 연결이 하나도 없으면 응답에
-    `bidiHost`가 있다. `state`는 BiDi host의 상태(`never_started`·`running`·`ended`·
-    `died`·`unreadable`)다. `message`는 host가 지금 떠 있는지, 마지막 host가 언제 왜
-    끝났는지, 다음 host를 띄우기 전에 운영자가 할 일(예: 그 Firefox를 다시 띄우기)을
-    말한다. 요청에 따라 서버가 자기 Keeper용 연결을 시작한 경우 `bidiConnection`과
-    `started`가 그 결과다. 그 연결의 탭을 새로 읽고 해당 clientId를 쓴다.
-    `bidiStartFailed.kind=operator_needed`이면 메시지를 운영자에게 전하고,
-    `start_failed`나 `not_listed_in_time`이면 반환된 원인과 재시도 안내를 따른다.
-    `servingClients`에 연결이 있으면 `bidiHost`는 없다. `bidiHost`가 `ended`나 `died`면
-    그 `message`가 마지막 host가 언제 왜 끝났는지와 다음 host 전에 운영자가 할 일을
-    담는다.
+  - `selected_client_disconnected`: 고른 연결(`clientId`)이 끊겼다. 남은 연결이 있으면
+    그 연결의 탭 목록부터 다시 읽고, 없으면 `no_live_client`와 같이 한다.
+  - `no_live_client`: 이 lane에 연결된 브라우저가 없다. 고칠 수 있는 사람은
+    운영자뿐이라 같은 호출을 되풀이해도 답은 같다. 운영자에게 알린다.
+  - `live_transport_unsupported`: 고른 연결(`clientId`, `transport`)이 그 일
+    (`capability`)을 못 한다. live 연결은 방식(`transport`)에 따라 할 수 있는 일이
+    다르다. `hover_at`과 `drag`는 `webdriver_bidi` 연결만 하고, `activate_tab`은
+    `web_extension` 연결만 한다. 읽기(`mode=text`·`elements`·`scene`·`screenshot`)는
+    둘 다 한다. 그 일을 하는 다른 연결이 있으면 그 clientId로 탭 목록과 페이지를 다시
+    읽은 뒤 거기서 다시 한다. 탭 ID와 관측은 연결마다 따로다. 그런 연결이 없으면
+    운영자에게 알린다.
 - live 응답은 성공했을 때도 `clientId` 옆에 `transport`를 싣는다. hover나 drag가 필요한
   일이면 시작할 때 이 값을 본다. `web_extension`이면 그 연결로는 못 하므로, 연결 목록에
   `webdriver_bidi` 연결이 있는지 먼저 확인한다. automation과 stagehand 응답에는

@@ -330,10 +330,6 @@ does next:
     `lane_off`, `not_configured` (no `[browser.live.bidi]`) and `not_known`
     (no configuration was read) carry nothing more.
   - `message`: the paragraph the doctor prints.
-- A Keeper whose hover or drag is refused as `live_transport_unsupported`
-  while no connected browser serves it gets `bidiHost` in the answer, with
-  `state` and `message` only, to pass on to the operator. An answer that
-  offers a connection in `servingClients` has no `bidiHost`.
 - The TUI's Browser Lane picker draws it from the server's `bidiHost`:
   whether a host runs and whether the server lists it, why the last one
   ended, what comes before the next, the results the host holds no

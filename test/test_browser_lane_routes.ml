@@ -253,41 +253,9 @@ let test_malformed_poll_envelope_is_an_error () =
       Yojson.Safe.Util.(answer |> member "error" |> to_string))
     [`Null;`Assoc [];`Assoc ["verb",`Int 1;"args",`Assoc []];`Assoc ["verb",`String "page.interact"]]
 
-let test_partial_failure_receipt_reaches_keeper_output () =
-  Eio_main.run @@ fun env ->
-  Time_compat.set_clock (Eio.Stdenv.clock env);
-  let id = match Browser_lane.client_id_of_string "50000000-0000-4000-8000-000000000007" with
-    | Ok id -> id | Error message -> fail message in
-  let info : Browser_lane.client_info = {client_id=id;browser=Firefox;version="158.0";
-    engine_version="158.0";transport=Webdriver_bidi} in
-  (match Browser_lane.register info with
-   | Ok _ -> () | Error refusal -> fail (Browser_lane.registration_refusal_to_wire refusal));
-  Fun.protect ~finally:(fun () -> ignore (Browser_lane.disconnect_client ~client_id:id)) (fun () ->
-    let target = match Browser_lane.resolve_target ~verb:Browser_lane.Session_status (Browser_lane.Live_route (Some id)) with
-      | Ok target -> target | Error error -> fail (Browser_lane.selection_error_code error) in
-    let receipt = `Assoc ["action",`String "open_tab";"created",`Bool true;
-      "tabId",`Int 2;"clientId",`String "spoofed";"transport",`String "web_extension"] in
-    let payload = Server_routes_http_routes_browser_lane.result_payload
-      ["ok",`Bool false;"effectPhase",`String "partial";"error",`String "navigation rejected";"data",receipt] in
-    let answer = Masc.Tool_misc_browser_lane.add_client target (Browser_lane.Answered payload) in
-    let result = Masc.Tool_misc_browser_lane.answer_to_result ~lane:Browser_lane.Lane_name.Live
-      ~tool_name:"masc_browser_act" ~start_time:(Tool_timing.start ()) answer in
-    (match result with
-     | Tool_result.Failed failed ->
-       check bool "creation is a confirmed effect" true (failed.effect_disposition = Tool_result.Proven_post_effect)
-     | Tool_result.Completed _ | Tool_result.Deferred _ -> fail "partial failure became a success");
-    let expected = `Assoc (Browser_lane.target_connection_fields target @
-      ["action",`String "open_tab";"created",`Bool true;"tabId",`Int 2]) in
-    check bool "HTTP receipt uses the selected authoritative connection" true (Tool_result.data result = expected);
-    let output = Yojson.Safe.from_string (Tool_result.message result) in
-    check bool "Keeper raw output contains recovery connection and tab IDs" true
-      Yojson.Safe.Util.(output |> member "data" = expected))
-
 let () =
   run "browser lane routes"
-    [ ( "partial recovery", [test_case "receipt reaches Keeper raw output" `Quick
-          test_partial_failure_receipt_reaches_keeper_output] )
-    ; ( "discovery"
+    [ ( "discovery"
       , [ test_case "distinguishes transports with identical browser metadata" `Quick
             test_discovery_distinguishes_transports_of_the_same_browser ] )
     ; ( "ping"

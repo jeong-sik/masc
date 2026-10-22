@@ -1265,7 +1265,7 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
     | _ -> Alcotest.fail "expected two registered evaluations" in
   let check_cancelled label registry =
     match Runs.get registry ~run_id:cancelled_id with
-    | Some { status = Runs.Completed { outcome = Runs.Cancelled; elapsed_s; output = `Null; _ };
+    | Some { status = Runs.Completed { outcome = Runs.Cancelled; elapsed_s = Some elapsed_s; output = `Null; _ };
              output_availability = Some Runs.Available; _ } ->
       Alcotest.(check bool) (label ^ " retains measured cancellation duration") true (elapsed_s > 0.)
     | _ -> Alcotest.fail (label ^ " did not retain the exact cancelled subrun and its payload")
@@ -2347,7 +2347,7 @@ let check_failed_absorb_evaluations ~status ~body ~failure_code ~diagnostic () =
          | Registry.Exact_input _ -> false) in
   Alcotest.(check int) "one recorded evaluation per pass" 3 (List.length evaluations);
   List.iter (fun (run : Registry.run) -> match run.status with
-    | Registry.Completed { outcome = Registry.Failed { code; _ }; elapsed_s; _ } ->
+    | Registry.Completed { outcome = Registry.Failed { code; _ }; elapsed_s = Some elapsed_s; _ } ->
       Alcotest.(check string) "decoded judgment failure is not transport success" failure_code code;
       Alcotest.(check bool) "elapsed includes the delayed provider response" true (elapsed_s >= 0.01)
     | Registry.Running | Registry.Completed _ | Registry.Completion_persistence_failed _ ->

@@ -4,7 +4,10 @@
     lane. It joins immutable lane admission with existing durable observation
     registries so operator surfaces can distinguish idle, running, degraded,
     and lanes with no retained observation without inventing another lifecycle
-    authority. *)
+    authority. Latest terminal selection uses measured finish when available,
+    otherwise the original registration as an ordering anchor, with source/id
+    ties. The anchor is not an inferred finish or execution chronology. A
+    selected unmeasured terminal has no finish timestamp or latency sample. *)
 
 type lane_configuration =
   | Configured of

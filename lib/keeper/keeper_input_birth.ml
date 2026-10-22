@@ -35,19 +35,10 @@ let keeper_uid (creation : creation) = creation.keeper_uid
 let live ~base_path ~intake_token (creation : creation) =
   Keeper_shutdown_intake_fence.intake_token_matches intake_token ~base_path ~keeper_name:creation.keeper_name
 let retain ~session_dir snapshot =
-  let outcome = Checkpoint.retain_exact_snapshot ~session_dir snapshot in
-  let auxiliary = match outcome with
-    | Checkpoint.Installed installed -> installed.auxiliary
-    | Not_installed refused -> refused.auxiliary in
-  List.iter (function
-    | Checkpoint.Commit_observer_failed ((Eio.Cancel.Cancelled _ as cause),backtrace)
-    | Post_commit_unwind_interrupted ((Eio.Cancel.Cancelled _ as cause),backtrace) ->
-      Printexc.raise_with_backtrace cause backtrace
-    | Commit_observer_failed _ | Post_commit_unwind_interrupted _
-    | Commit_durability_unknown _ | Release_process_lock_failed _ -> ()) auxiliary;
-  match outcome with
-  | Checkpoint.Installed {auxiliary=[];_} -> Ok ()
-  | (Installed _ | Not_installed _) as outcome -> Error (Retention_unconfirmed outcome)
+  Checkpoint.retain_exact_snapshot ~session_dir snapshot
+  |> Checkpoint.require_confirmed_installation
+  |> Result.map ignore
+  |> Result.map_error (fun outcome -> Retention_unconfirmed outcome)
 let session_directory session_root creation =
   Filename.concat session_root (Keeper_id.Trace_id.to_string creation.trace_id)
 let reserve_session ~base_path ~intake_token creation =

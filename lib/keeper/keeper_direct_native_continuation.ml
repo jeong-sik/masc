@@ -258,10 +258,9 @@ let retain binding (checkpoint : Agent_core.Checkpoint.t) =
   let* snapshot = Checkpoint.exact_snapshot_of_value ~expected_session_id:session_id checkpoint
     |> Result.map_error Checkpoint.checkpoint_ref_load_error_to_string in
   let* () = validate_scope binding (Checkpoint.exact_snapshot_checkpoint snapshot) in
-  match Checkpoint.retain_exact_snapshot ~session_dir:binding.session_dir snapshot with
-  | Checkpoint.Installed {auxiliary=[]; _} -> Ok (Checkpoint.exact_snapshot_reference snapshot)
-  | Checkpoint.Installed _ | Checkpoint.Not_installed _ ->
-    Error "native checkpoint retention is not durably confirmed"
+  Checkpoint.retain_exact_snapshot ~session_dir:binding.session_dir snapshot
+  |> Checkpoint.require_confirmed_installation
+  |> Result.map_error (fun _ -> "native checkpoint retention is not durably confirmed")
 
 let call_checkpoint binding (config : Runtime_agent.config) agent_ref =
   match !agent_ref with

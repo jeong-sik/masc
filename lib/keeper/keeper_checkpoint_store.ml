@@ -1354,6 +1354,20 @@ type checkpoint_installation =
   | Not_installed of not_installed_checkpoint
   | Installed of installed_checkpoint
 
+let require_confirmed_installation installation =
+  let auxiliary = match installation with
+    | Installed installed -> installed.auxiliary
+    | Not_installed refused -> refused.auxiliary in
+  List.iter (function
+    | Commit_observer_failed ((Eio.Cancel.Cancelled _ as cause), backtrace)
+    | Post_commit_unwind_interrupted ((Eio.Cancel.Cancelled _ as cause), backtrace) ->
+      Printexc.raise_with_backtrace cause backtrace
+    | Commit_observer_failed _ | Post_commit_unwind_interrupted _
+    | Commit_durability_unknown _ | Release_process_lock_failed _ -> ()) auxiliary;
+  match installation with
+  | Installed {installed_ref; auxiliary=[]} -> Ok installed_ref
+  | (Installed {auxiliary=_::_; _} | Not_installed _) as unconfirmed -> Error unconfirmed
+
 let not_installed cause = Not_installed { cause; auxiliary = [] }
 
 let append_installation_auxiliary installation auxiliary =

@@ -149,7 +149,7 @@ test('loading a saved arrangement dispatches before phrase terminal or backgroun
     async mkdtemp() { ownership.temporary++; throw new Error('Unexpected terminal temporary directory') },
     rm: unexpected('rm'), writeFile: unexpected('writeFile'), copyFile: unexpected('copyFile'),
     emitKeypressEvents: unexpected('keypress setup'), snapshotWriter: unexpected('VST observation'),
-    captureVstSound: unexpected('VST capture'), renderVstPhrase: unexpected('VST render'),
+    captureVstSound: unexpected('VST capture'), renderVstPhrase: unexpected('VST render'), openVstSession: unexpected('VST session'),
     captureFluidSound: unexpected('FluidSynth capture'), renderFluidSound: unexpected('FluidSynth render'),
     openStepInput: unexpected('MIDI input'), openPlayback: unexpected('playback'), saveProject: unexpected('save'),
     InstrumentPicker: refused('instrument picker'), MidiSourcePicker: refused('MIDI source picker'),

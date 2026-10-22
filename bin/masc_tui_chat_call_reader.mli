@@ -16,5 +16,9 @@ val complete : t -> request -> (Masc.Tui_decode.keeper_call, string) result -> t
 val back : t -> t
 val document : t -> Masc_tui_detail_reading.t
 val move : count:int -> height:int -> Masc_tui_detail_reading.movement -> t -> t
+val search_key : width:int -> height:int -> key:string -> t -> t option
+val search_insert : width:int -> height:int -> text:string -> t -> t
+(** Search belongs to the captured document. Choosing another execution or
+    returning to the chooser creates a fresh document and clears its query. *)
 val observation : t -> Masc.Tui_decode.keeper_call Masc_tui_fetched.view
 val pending : t -> bool

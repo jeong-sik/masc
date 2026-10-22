@@ -37,6 +37,14 @@ let test_original_and_owners () =
     (match R.pending_preparation late with Some pending -> pending==request new_preparation | None -> false);
   let ready=R.complete_preparation late (request new_preparation)
     (Ok (R.prepare (request new_preparation))) in
+  let searched=match R.search_key ~width:20 ~height:5 ~key:"/" ready with
+    | Some reader -> R.search_insert ~width:20 ~height:5 ~text:"밤섬" reader
+    | None -> Alcotest.fail "captured attachment did not own search" in
+  Alcotest.(check bool) "search stays with the original reference" true
+    (Option.equal R.equal_key (R.key ready) (R.key searched));
+  Alcotest.(check string) "search cannot rewrite copy authority" original (R.source searched |> require);
+  Alcotest.(check bool) "closing discards attachment query" true
+    (Option.is_none (Masc_tui_detail_reading.search_query (R.document (R.close searched))));
   Alcotest.(check string) "copy remains exact original CRLF bytes" original (R.source ready |> require);
   Alcotest.(check bool) "close withdraws copy and save authority" true
     (Result.is_error (R.source (R.close ready)) && Option.is_none (R.saved_source (R.close ready)))

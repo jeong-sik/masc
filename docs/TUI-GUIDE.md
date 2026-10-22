@@ -1058,6 +1058,9 @@ display. Execute results also expose their printed output with its original
 line breaks. If no original execution ID was recorded, the reader says so.
 
 Inside a result, `j`/`k`, PageUp/PageDown and Home/End scroll the whole record.
+`/` searches the captured document; Enter keeps the query for `n`/`N` to move
+between matching rows. Esc while typing cancels the query and keeps the reader
+open. Query input and paste stay in this reader; they do not edit the chat draft.
 `r` rereads the same execution and keeps the last result, read position and any
 known read failure while the new read is pending. A missing, ambiguous or
 unavailable record remains a read failure. Esc returns to the original call
@@ -1834,8 +1837,12 @@ each with a `[N]` number. On the read pane, pressing the number opens that
 attachment: audio plays locally (afplay or the next player on the chain),
 MIDI plays through fluidsynth (set `[tui] midi_soundfont` in runtime.toml;
 without it the file is handed to the local app with a note saying why), and
-everything else - Guitar Pro files included - is saved to the local cache
-and opened with the default app. A MIDI that parses reports what it is on
+file and score attachments with stored blob references open a captured reader.
+Use `u` for source, `m` for Markdown or `h` for inert HTML, `y` to request an
+original-text copy, and `s` to save original bytes. `/` searches this reading;
+Enter keeps the query for `n`/`N`, and Esc while typing cancels it. Binary
+attachments retain explicit save access. Other attachment actions use their
+local handler or default app. A MIDI that parses reports what it is on
 the status line (tracks, BPM, time signature, length). What each key did,
 or why it could not, stays on the pane's bottom line until the next post
 opens.
@@ -2894,6 +2901,8 @@ remains separate from a successfully read zero value.
 Workspace's repository list and System → Models offer `v` for a full, read-only
 capture of the selected object. Long paths, assignment lists, failure reasons,
 account names and owning TOML sections wrap without the preview's row limit.
+`/` searches this captured document, Enter keeps the query for `n`/`N`, and
+Esc while typing cancels the query. Query text and paste belong to the capture.
 `j/k`, arrows, PageUp/PageDown and Home/End read the complete capture; Esc or `v`
 returns to the same selection. The capture stays fixed while background reads
 or selections change. Close, refresh and reopen for updated data. Leaving the

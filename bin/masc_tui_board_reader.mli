@@ -27,6 +27,8 @@ val prepare : preparation_request -> Masc_tui_detail_reading.row list
 val complete_preparation : t -> preparation_request -> (Masc_tui_detail_reading.row list, string) result -> t
 val document : t -> Masc_tui_detail_reading.t
 val move : count:int -> height:int -> Masc_tui_detail_reading.movement -> t -> t
+val search_key : width:int -> height:int -> key:string -> t -> t option
+val search_insert : width:int -> height:int -> text:string -> t -> t
 val source : t -> (string, string) result
 (** Exact original UTF-8 bytes for explicit copy; binary content is refused. *)
 val saved_source : t -> (request * key * string) option

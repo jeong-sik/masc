@@ -114,6 +114,10 @@ let complete_preparation t request result=
     {t with preparation;document}
 let document t=t.document
 let move ~count ~height movement t={t with document=D.move ~count ~height movement t.document}
+let search_key ~width ~height ~key t=
+  Option.map (fun document -> {t with document}) (D.search_key ~width ~height ~key t.document)
+let search_insert ~width ~height ~text t=
+  {t with document=D.search_insert ~width ~height ~text t.document}
 let source t=match ready t with
   | Some (_,content) when String.is_valid_utf_8 content.original -> Ok content.original
   | Some _ -> Error "Binary attachment cannot be copied as terminal text; use s to save"

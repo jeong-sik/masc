@@ -9,12 +9,11 @@ log_elapsed() {
   echo "${label} in ${elapsed}s"
 }
 
-install_os_packages() {
-  if [ -z "${OS_PACKAGES:-}" ]; then
-    echo "No extra OS packages requested."
-    return 0
-  fi
-
+# opam's depext step (e.g. conf-protoc -> libprotobuf-dev protobuf-compiler)
+# runs apt-get install even when no OS_PACKAGES are requested. A stale runner
+# image index then points at superseded .deb versions and every fetch 404s,
+# so refresh the index unconditionally before any apt or opam install.
+refresh_apt_index() {
   local started_at
   started_at="$(date +%s)"
   echo "Refreshing apt package index..."
@@ -25,7 +24,15 @@ install_os_packages() {
       "::warning::apt package index refresh failed; attempting install with existing package index" \
       >&2
   fi
+}
 
+install_os_packages() {
+  if [ -z "${OS_PACKAGES:-}" ]; then
+    echo "No extra OS packages requested."
+    return 0
+  fi
+
+  local started_at
   started_at="$(date +%s)"
   declare -a package_args=()
   read -r -a package_args <<< "${OS_PACKAGES}"
@@ -100,6 +107,7 @@ main() {
   export OPAMCONFIRMLEVEL="${OPAMCONFIRMLEVEL:-unsafe-yes}"
   export OPAMYES="${OPAMYES:-1}"
 
+  refresh_apt_index
   install_os_packages
 
   for attempt in 1 2 3; do

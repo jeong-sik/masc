@@ -2263,7 +2263,10 @@ let test_browser_screenshot_reaches_vision_reader () =
           let handle = assoc_string "artifact" data in
           let root_dir = Vt.vision_store_dir ~base_path ~keeper_name:meta.name () in
           let frames_dir = Vt.frames_dir ~base_path ~keeper_name:meta.name () in
-          let ambient_dir = Vt.vision_store_dir ~keeper_name:meta.name () in
+          (* The test executable points MASC_BASE_PATH at the last workspace
+             it opened, which after the attach is the served one, so the
+             ambient store is named by its base, not read from the env. *)
+          let ambient_dir = Vt.vision_store_dir ~base_path:ambient_base ~keeper_name:meta.name () in
           assert (root_dir <> ambient_dir);
           let frame_path = Filename.concat frames_dir handle in
           let kept_path = Filename.concat root_dir handle in

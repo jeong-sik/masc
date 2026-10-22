@@ -118,6 +118,10 @@ let with_worker ?(clients=[]) ~env ~config ~respond run =
       Eio_context.with_test_env ~sw ~clock:(Eio.Stdenv.clock env)
         ~mono_clock:(Eio.Stdenv.mono_clock env) ~net:(Eio.Stdenv.net env) (fun () ->
         R.For_testing.reset ();
+        (* A served workspace has its .masc directory before any Lane Add-on
+           attaches, and the Lane Add-on store creates only its own root under
+           it. Tests that start from a bare temp directory get the same. *)
+        Fs_compat.mkdir_p (Workspace.masc_dir config);
         let requests=Filename.concat root "requests" and answers=Filename.concat root "answers" in
         Unix.mkdir requests 0o700;Unix.mkdir answers 0o700;
         let tool=Browser_addon_tool.definition in

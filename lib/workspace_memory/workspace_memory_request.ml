@@ -167,10 +167,9 @@ let check_rows rows =
   let* _ = traverse neighbors rows in
   Ok ()
 
-(* The model reads the canonical input. A snapshot keeps only that input, and a
-   restore renders the same prompt from it. *)
+(* The model reads the input as [build] lays it out. A restore builds it again
+   from the snapshot rows and the captured ledger, so it renders the same prompt. *)
 let rendered ~render ~size ~index_stats rows input ids =
-  let* input = Lane_addon_action.canonical input |> Result.map_error (fun detail -> Invalid_batch detail) in
   let* rendered_prompt = render input |> Result.map_error (fun detail -> Render_failed detail) in
   Ok { rows; selected = List.map (fun (row : row) -> row.fact) rows; size; input; rendered_prompt; ids; index_stats }
 

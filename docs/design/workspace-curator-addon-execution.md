@@ -401,11 +401,15 @@ under the existing serialized workspace lease; it is not a cross-file transactio
 The link operation makes no worker call, model call, domain save or observer ACK.
 
 Capture format `workspace.memory.execution-capture.v3` stores the model input
-once, inside the batch snapshot. A batch renders its prompt over its canonical
-input (sorted keys), so restore renders the same prompt again with the captured
-template; the capture keeps only the prompt's SHA-256 and refuses a restore
-whose rendering no longer matches it. The observer registration receipt names
-the capture by its request digest instead of holding a copy.
+once, inside the batch snapshot. A classification restore builds the input again
+from the snapshot rows and the captured ledger and requires it to equal the
+stored one. A Briefing snapshot keeps the pass and how many of its unconsumed
+entries the batch selected, and a restore builds the input from them. Either
+restore renders the prompt again with the captured template; the capture keeps
+only the prompt's SHA-256 and refuses a restore whose rendering no longer
+matches it. The captured ledger is the classification before-state and also
+holds the claim and conflict texts the input cites. The observer registration
+receipt names the capture by its request digest instead of holding a copy.
 
 The capture format requires an explicit nullable predecessor. Root constructors
 emit null; a child records its immediate original parent. The decoder is strict: missing predecessor and old-format
@@ -458,9 +462,9 @@ Selected successor run39679636091 at062bea30 compiled and ran the selected
 suites, then failed three interrupted-link fixtures. A newly constructed capture
 kept noncanonical internal row key order, while a strict persisted restore read
 canonical rows, so narrowing rendered a different child prompt from those
-equivalent rows. Capture.make canonicalizes its internal whole-work snapshot,
-and every batch renders over its canonical input, so fresh and restored captures
-narrow to the same child. This keeps the exact child comparison. The failed run
+equivalent rows. Capture.make keeps the work it restores from its own canonical
+snapshot, so fresh and restored captures narrow from the same typed work to the
+same child. This keeps the exact child comparison. The failed run
 and earlier pre-MCP-dependency compile failure39679243670 remain historical; a
 new-head run is separate evidence.
 

@@ -49,19 +49,19 @@ let restore store ~workspace record = C.restore ~workspace
   ~load:(fun ~request_id -> Owner.load ~store ~scope:C.scope ~request_id
     |> Result.map_error Owner.error_to_string) record
 let rejected = function Error _ -> () | Ok _ -> Alcotest.fail "invalid host capture accepted"
+let occurrences sub text =
+  let n = String.length sub in
+  let rec count from total = match String.index_from_opt text from sub.[0] with
+    | Some i when i + n <= String.length text ->
+      if String.equal (String.sub text i n) sub then count (i + n) (total + 1) else count (i + 1) total
+    | Some _ | None -> total in
+  count 0 0
 
 let test_canonical_storage_preserves_original_prompt_and_selected_judgment () = with_workspace (fun root store ->
   let workspace = get (C.observe_workspace ~base_path:root) in
   let a,_,batch,capture = classification workspace in
   let retained = retain ~request:(C.to_json capture) store in
   let restored = get (restore store ~workspace:(get (C.observe_workspace ~base_path:root)) retained) in
-  let occurrences sub text =
-    let n = String.length sub in
-    let rec count from total = match String.index_from_opt text from sub.[0] with
-      | Some i when i + n <= String.length text ->
-        if String.equal (String.sub text i n) sub then count (i + n) (total + 1) else count (i + 1) total
-      | Some _ | None -> total in
-    count 0 0 in
   Alcotest.(check int) "the stored capture holds the model input once" 1
     (occurrences a.claim (Yojson.Safe.to_string retained.request));
   Alcotest.(check string) "actual original prompt is restored" batch.rendered_prompt (C.rendered_prompt restored);
@@ -153,6 +153,53 @@ let test_briefing_contract_and_partial_publication_are_original () = with_worksp
     rejected (C.validate_output restored (`Assoc ["briefing",`String " "]))
   | C.Classification_commit _ -> Alcotest.fail "briefing changed domain")
 
+(* Each change below still decodes: the rows, id map, ledger and pass agree
+   with it. Only the digest of the prompt that was sent tells it apart. *)
+let test_a_restore_refuses_a_changed_input_that_still_decodes () = with_workspace (fun root _ ->
+  let workspace = get (C.observe_workspace ~base_path:root) in
+  let restores_after name edit capture =
+    let store = Store.create ~root:(Filename.concat root name) in
+    restore store ~workspace (retain ~request:(edit (C.to_json capture)) store) in
+  let in_batch f capture =
+    let work = member "work" capture in
+    replace "work" (replace "batch" (f (member "batch" work)) work) capture in
+  let rows f = function `List rows -> `List (List.map f rows) | _ -> Alcotest.fail "expected array" in
+  let a,_,_,classified = classification workspace in
+  let forged = "Forged source evidence A" in
+  let sha text = `String Digestif.SHA256.(digest_string text |> to_hex) in
+  let forge_claim batch =
+    let input = member "input" batch in
+    let claims = rows (fun row ->
+        if member "claim" row = `String a.claim then replace "claim" (`String forged) row else row)
+        (member "facts" input) in
+    let refs = rows (fun row ->
+        let fact = member "fact" row in
+        if member "claim_sha256" fact = sha a.claim then replace "fact" (replace "claim_sha256" (sha forged) fact) row
+        else row) (member "facts" batch) in
+    batch |> replace "input" (replace "facts" claims input) |> replace "facts" refs in
+  ignore (get (restores_after "classification-as-sent" Fun.id classified));
+  rejected (restores_after "classification-forged-claim" (in_batch forge_claim) classified);
+  let source id : B.source = {id;kind=B.Claim;text="Uncut evidence " ^ id} in
+  let sources = [source "a";source "b";source "c"] in
+  let p = prompt "Original briefing: {{workspace_memory_briefing}}" in
+  let render = render Prompt_names.workspace_memory_briefing "workspace_memory_briefing" p in
+  let prepared state = match get (B.prepare ~sources ~contract:(B.contract ~template:p.effective) ~render state) with
+    | B.Prepared batch -> batch
+    | B.Unchanged | B.Cleanup _ -> Alcotest.fail "expected briefing work" in
+  let partial = get (B.accept (some (get (B.narrow ~render (prepared B.empty)))) ~text:"Partial original summary") in
+  let briefed = get (C.briefing ~request_id:id ~workspace ~destination ~prompt:p
+      ~batch:(some (get (B.narrow ~render (prepared partial))))) in
+  let stored = (retain ~request:(C.to_json briefed) (Store.create ~root:(Filename.concat root "briefing-stored"))).request in
+  Alcotest.(check int) "the stored briefing holds each unconsumed entry once" 1
+    (occurrences "Uncut evidence b" (Yojson.Safe.to_string stored));
+  let forge_summary batch =
+    let state = member "state" batch in
+    replace "state" (replace "building" (replace "text" (`String "Forged prior summary") (member "building" state)) state)
+      batch in
+  ignore (get (restores_after "briefing-as-sent" Fun.id briefed));
+  rejected (restores_after "briefing-forged-summary" (in_batch forge_summary) briefed);
+  rejected (restores_after "briefing-wider-selection" (in_batch (replace "selected_count" (`Int 2))) briefed))
+
 let test_descriptor_scope_refuses_replaced_root_before_return () = with_workspace (fun root _ ->
   let before = Unix.stat root in
   let observed = Fs_compat.with_owned_inventory_root root (fun held ->
@@ -214,6 +261,7 @@ let () = Alcotest.run "Curator trusted host capture" ["capture",[
   Alcotest.test_case "changed provenance, schema and original owner" `Quick test_changed_capture_provenance_and_owner_are_refused;
   Alcotest.test_case "physical root copy and replacement" `Quick test_physical_root_replacement_and_copy_are_refused;
   Alcotest.test_case "briefing original contract and partial publication" `Quick test_briefing_contract_and_partial_publication_are_original;
+  Alcotest.test_case "a changed input that still decodes" `Quick test_a_restore_refuses_a_changed_input_that_still_decodes;
   Alcotest.test_case "descriptor scope rejects a replaced root" `Quick test_descriptor_scope_refuses_replaced_root_before_return;
   Alcotest.test_case "next classification size follows the last answer" `Quick
     test_next_classification_size_follows_the_last_answer]]

@@ -144,7 +144,7 @@ let make ~request_id ~workspace ~destination ~prompt work =
   let* snapshot = Lane_addon_action.canonical (work_json work) in
   let* restored = work_of_json ~prompt snapshot in
   let* () = if String.equal (rendered work) (rendered restored) then Ok ()
-    else Error "captured prompt differs from its template rendered over the canonical input" in
+    else Error "captured prompt differs from the one its stored snapshot renders" in
   let* () = check ~prompt restored in
   Ok {id=request_id;predecessor=None;workspace;destination;prompt;work=restored}
 let classification ~request_id ~workspace ~destination ~prompt ~ledger ~batch =

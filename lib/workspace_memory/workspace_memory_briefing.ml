@@ -106,9 +106,9 @@ let render_batch ~render ~state ~selected ~remaining =
   match state.building with
   | None -> Error "briefing batch has no active pass"
   | Some building ->
-    (* The model reads the canonical input. A snapshot keeps neither it nor the
-       prompt; a restore renders both again from the pass and its selection. *)
-    let* input = Lane_addon_action.canonical (model_input building.text selected) in
+    (* A snapshot keeps neither the input nor the prompt; a restore builds both
+       again from the pass and its selection. *)
+    let input = model_input building.text selected in
     let* rendered_prompt = render input in
     Ok { state; selected; remaining; input; rendered_prompt }
 
@@ -244,27 +244,25 @@ let of_json json =
 
 let batch_schema = "workspace.memory.briefing-batch.v2"
 
+(* The batch selects a prefix of the pass's unconsumed entries and leaves the
+   rest, so the snapshot keeps that prefix length, not a second copy of them. *)
 let batch_to_json batch = `Assoc
   ["schema", `String batch_schema;
    "state", to_json batch.state;
-   "selected", `List (List.map source_json batch.selected);
-   "remaining", `List (List.map source_json batch.remaining)]
+   "selected_count", `Int (List.length batch.selected)]
 
 let batch_of_json ~render json =
-  let* fields = exact_fields "briefing batch" ["schema"; "state"; "selected"; "remaining"] json in
+  let* fields = exact_fields "briefing batch" ["schema"; "state"; "selected_count"] json in
   let* () = match List.assoc "schema" fields with
     | `String schema when String.equal schema batch_schema -> Ok ()
     | _ -> Error "unknown workspace briefing batch schema" in
   let* state = of_json (List.assoc "state" fields) in
-  let* selected = array decode_source (List.assoc "selected" fields) in
-  let* remaining = array decode_source (List.assoc "remaining" fields) in
-  let* () = validate_sources (selected @ remaining) in
-  match state.building with
-  | None -> Error "briefing batch snapshot has no active pass"
-  | Some building ->
-    if selected = [] || selected @ remaining <> building.remaining
-    then Error "briefing batch snapshot changes its original unconsumed partition"
-    else render_batch ~render ~state ~selected ~remaining
+  match state.building, List.assoc "selected_count" fields with
+  | None, _ -> Error "briefing batch snapshot has no active pass"
+  | Some building, `Int count when count >= 1 && count <= List.length building.remaining ->
+    render_batch ~render ~state ~selected:(List.take count building.remaining)
+      ~remaining:(List.drop count building.remaining)
+  | Some _, _ -> Error "briefing batch snapshot must select between one and all unconsumed entries"
 
 let path ~directory = Filename.concat directory "briefing.json"
 let io f =

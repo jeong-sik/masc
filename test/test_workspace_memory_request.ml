@@ -104,8 +104,10 @@ let test_narrow_keeps_the_oldest_half_and_its_context () =
   Alcotest.(check bool) "only facts the kept row references are listed" true
     (List.length (ids_of "facts" narrowed) = 1 + List.length (List.hd narrowed.rows).neighbors);
   (match Request.narrow ~render ~ledger batch with
-   | Ok (Some again) -> Alcotest.check json "one parent always yields the same child"
-                          (Request.batch_to_json narrowed) (Request.batch_to_json again)
+   | Ok (Some again) ->
+     Alcotest.check json "one parent always yields the same child"
+       (Request.batch_to_json narrowed) (Request.batch_to_json again);
+     Alcotest.(check string) "and the same child prompt" narrowed.rendered_prompt again.rendered_prompt
    | Ok None | Error _ -> Alcotest.fail "narrowing the same parent changed");
   Alcotest.(check int) "narrowing does not rebuild the index"
     batch.index_stats.index_builds narrowed.index_stats.index_builds;

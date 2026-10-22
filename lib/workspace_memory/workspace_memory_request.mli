@@ -33,7 +33,7 @@ type batch = private
         (** The size the batch was prepared for; a narrowed child keeps its
             parent's. [selected] can be shorter: the frame or the backlog
             stopped it first. *)
-  ; input : Yojson.Safe.t  (** canonical: sorted keys ({!Lane_addon_action.canonical}) *)
+  ; input : Yojson.Safe.t  (** as [build] lays it out; a restore builds it again *)
   ; rendered_prompt : string  (** [render input]; never stored *)
   ; ids : ids
   ; index_stats : Keeper_memory_search_index.batch_stats
@@ -66,7 +66,7 @@ val batch_of_json
     the model saw is the captured ledger's. Also refuses a neighbor owned by
     its selected fact's Keeper, a repeated fact and a selected fact already
     disposed in that ledger. The snapshot holds no rendered prompt: [render]
-    renders it again from the canonical input, so the caller passes the
+    renders it again from the rebuilt input, so the caller passes the
     captured template and keeps evidence of the prompt it sent. *)
 
 val prepare

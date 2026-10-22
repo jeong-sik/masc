@@ -32,8 +32,8 @@ val classification : request_id:Request_id.t -> workspace:workspace -> destinati
 val briefing : request_id:Request_id.t -> workspace:workspace -> destination:destination ->
   prompt:Prompt_registry.prompt_resolution -> batch:Workspace_memory_briefing.batch -> (t, string) result
 (** Check the original whole batch and its rendered prompt against the captured
-    template: the batch must render its prompt over its canonical input, so the
-    capture stores the input once and only the SHA-256 of the prompt. Briefing
+    template: a restore of the stored snapshot must render the same prompt, so
+    the capture stores the input once and only the SHA-256 of the prompt. Briefing
     must have the same original prompt/schema contract as its prepared pass.
     Destination revisions and prompt resolution must be supplied by the trusted
     host owner; these constructors do not establish their external provenance

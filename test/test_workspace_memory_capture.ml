@@ -47,8 +47,10 @@ let test_classification_reopens_exact_batches_and_applies_only_selected () = wit
     let retained = some (owned (load (Store.create ~root) request_id)) in
     let ledger = get (Ledger.of_json (member "ledger" retained.request)) in
     let restored = requested (Request.batch_of_json ~ledger ~render (member "batch" retained.request)) in
-    Alcotest.check json "original rows, neighbors, suffix, prompt and index observations"
-      (Request.batch_to_json original) (Request.batch_to_json restored))
+    Alcotest.check json "original rows, neighbors, id map and index observations"
+      (Request.batch_to_json original) (Request.batch_to_json restored);
+    Alcotest.(check string) "the restore renders the prompt that was sent"
+      original.Request.rendered_prompt restored.Request.rendered_prompt)
     ["classification-full",full; "classification-child",narrowed];
   let retained = some (owned (load (Store.create ~root) "classification-child")) in
   let restored = requested (Request.batch_of_json ~ledger:Ledger.empty ~render (member "batch" retained.request)) in
@@ -108,10 +110,10 @@ let test_briefing_reopens_original_chunk_without_early_publication () = with_sto
   Alcotest.check json "whole original pass and exact chunk survive reopening" request (Briefing.batch_to_json restored);
   let refused raw = match Briefing.batch_of_json ~render raw with
     | Error _ -> () | Ok _ -> Alcotest.fail "changed original pass restored" in
-  refused (replace "remaining" (`List []) request);
-  (match member "remaining" request with
-   | `List rows -> refused (replace "remaining" (`List (List.rev rows)) request)
-   | _ -> Alcotest.fail "remaining sources");
+  Alcotest.(check string) "the restore renders the prompt that was sent"
+    (Briefing.rendered_prompt original) (Briefing.rendered_prompt restored);
+  refused (replace "selected_count" (`Int 0) request);
+  refused (replace "selected_count" (`Int 4) request);
   let partial = get (Briefing.accept restored ~text:"Partial evidence summary") in
   (match Briefing.observe ~sources ~contract partial with
    | Briefing.Stale summary -> Alcotest.(check string) "partial does not replace publication" "Old complete publication" summary.text

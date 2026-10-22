@@ -156,9 +156,9 @@ let print_bidi_steps plan =
        browser Add-on starts no Firefox. Turn it on first.";
   print_endline
     "  1. Restart the MASC server to load runtime.toml. A browser Add-on that was attached \
-     before keeps its old settings until it is detached and attached again. The Add-on owns \
-     this Firefox and its BiDi connection; its observation reports readiness or the startup \
-     refusal.";
+     before keeps its old settings until it is detached; the server attaches its declaration \
+     again on the next maintenance pass. The Add-on owns this Firefox and its BiDi \
+     connection; its observation reports readiness or the startup refusal.";
   print_endline
     "  2. In that Firefox, log in once to the sites the Keepers work on. The profile keeps \
      the logins.";
@@ -214,9 +214,10 @@ let print_automation ~runtime_config_path plan =
        browser Add-on starts no geckodriver. Turn it on first.";
   print_endline
     "  Restart the MASC server to load the updated runtime.toml. A browser Add-on that was \
-     attached before keeps its old settings until it is detached and attached again. The \
-     attached Add-on owns this geckodriver and stops it during detach. Each new automation \
-     session uses a fresh profile; logins do not carry over to a new session.";
+     attached before keeps its old settings until it is detached; the server attaches its \
+     declaration again on the next maintenance pass. The attached Add-on owns this \
+     geckodriver and stops it during detach. Each new automation session uses a fresh \
+     profile; logins do not carry over to a new session.";
   print_endline
     "  A browser that needs a login is another route: --mode bidi or --mode extension."
 
@@ -224,23 +225,26 @@ let print_automation ~runtime_config_path plan =
 let print_addon (installed : Addon_setup.installed) =
   let manifest = Filename.concat installed.package_directory "lane.toml" in
   Printf.printf "Browser Add-on package  %s (%s)\n" installed.package_directory
-    (match installed.files_written with
-     | 0 -> "already this build's"
-     | written -> Printf.sprintf "%d files written" written);
+    (match installed.files_written, installed.files_removed with
+     | 0, 0 -> "already this build's"
+     | written, 0 -> Printf.sprintf "%d files written" written
+     | written, removed -> Printf.sprintf "%d files written, %d removed" written removed);
   (match installed.declaration with
    | Addon_setup.Created { path } ->
      Printf.printf "Declared the browser Add-on in %s\n" path;
      print_endline
        "The MASC server attaches it when it starts and on its maintenance pass; set \
         enabled = false there to keep it detached."
-   | Addon_setup.Present { path; this_build = true; _ } ->
-     Printf.printf "The browser Add-on is declared in %s\n" path
-   | Addon_setup.Present { path; manifest_path; this_build = false } ->
-     Printf.printf
-       "The browser Add-on is declared in %s with the package %s, not the one this masc \
-        carries, and is left as it is. To use this build's package, write %s there.\n"
-       path manifest_path
-       (Toml_line_editor.scalar_line ~key:"manifest_path" ~value:manifest));
+   | Addon_setup.Present { path; manifest_path; this_build; enabled } ->
+     Printf.printf "The browser Add-on is declared in %s\n" path;
+     if not this_build
+     then
+       Printf.printf
+         "It names the package %s, not the one this masc carries, and is left as it is. To \
+          use this build's package, write %s there.\n"
+         manifest_path
+         (Toml_line_editor.scalar_line ~key:"manifest_path" ~value:manifest);
+     if not enabled then print_endline "Its enabled = false keeps it detached.");
   match installed.missing_programs with
   | [] -> ()
   | missing ->
@@ -248,6 +252,16 @@ let print_addon (installed : Addon_setup.installed) =
       "Not found beside masc or on PATH: %s. scripts/install-local-build.sh installs them \
        beside masc; the server looks for them the same way.\n"
       (String.concat ", " missing)
+
+(* With --mode addon the browser Add-on step's refusal is the command's. With
+   any other mode it is reported and that mode's own steps go on, so a Lane
+   directory problem never stops a host refresh or a table write. *)
+let addon_refusal ~required error =
+  let message = Addon_setup.error_message error in
+  if required then Error message else Ok (Error message)
+
+let print_addon_skipped message =
+  prerr_endline ("The browser Add-on was not set up: " ^ message)
 
 let print_host_only =
   "--mode host connects no browser: it installs the native host and launcher for a browser \
@@ -273,9 +287,16 @@ let install
       ~geckodriver
       ~browser
   =
-  (* Everything that can be refused is refused before the first write. *)
+  (* Every refusal of the modes' own steps comes before the first write. The
+     browser Add-on step refuses what it can there too, and the rest after it
+     wrote its package ({!Addon_setup.apply}); see [addon_refusal]. *)
+  let required = List.mem Addon modes in
   let planned =
-    let* addon = Addon_setup.plan ~base_path |> Result.map_error Addon_setup.error_message in
+    let* addon =
+      match Addon_setup.plan ~base_path with
+      | Ok plan -> Ok (Ok plan)
+      | Error error -> addon_refusal ~required error
+    in
     let* extension = extension_route ~modes ~manifest_dir ~host_name in
     let* bidi = bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port in
     let* automation = automation_plan ~modes ~runtime_config_path ~geckodriver ~browser in
@@ -298,16 +319,24 @@ let install
     in
     let installed =
       Result.bind installed (fun installed ->
-        Addon_setup.apply addon
-        |> Result.map (fun addon -> installed, addon)
-        |> Result.map_error Addon_setup.error_message)
+        let* addon =
+          match addon with
+          | Error message -> Ok (Error message)
+          | Ok plan ->
+            (match Addon_setup.apply plan with
+             | Ok applied -> Ok (Ok applied)
+             | Error error -> addon_refusal ~required error)
+        in
+        Ok (installed, addon))
     in
     (match installed with
      | Error message -> refuse message
      | Ok (installed, addon) ->
        Option.iter (print_installed ~base_path) installed;
        if Option.is_some installed then print_endline "";
-       print_addon addon;
+       (match addon with
+        | Ok applied -> print_addon applied
+        | Error message -> print_addon_skipped message);
        let tabled =
          match bidi with
          | None -> Ok None

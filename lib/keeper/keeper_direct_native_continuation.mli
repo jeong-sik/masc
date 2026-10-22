@@ -64,12 +64,16 @@ val authorize_incomplete_response_cut :
   (retired_history_cut, string) result
 (** For the host's typed [Retry_without_thinking] decision only. Witness that
     this checkpoint removes exactly the last incomplete Assistant message
-    from the current Retire receipt, preserving every earlier message and
+    from the current Retire source, or its confirmed preserving host source,
+    preserving every earlier message and
     every other checkpoint field except its observation timestamp. The
     removed message cannot contain a settled ToolResult. Pending input must be
     absent. Preparation reads input authority against the original source;
     actual scope publication retains the cut and atomically binds its input
-    reference with the next native call, using the actual next seed. The proof
+    reference with the next native call, using the actual next seed. An operation
+    branch compares its exact host predecessor and advances to that seed without
+    writing global input; retained native-to-host preservation is revalidated by
+    Owner. The proof
     cannot be reused for an edited checkpoint. This is neither
     acknowledgement nor an execution-journal mutation. *)
 

@@ -467,7 +467,10 @@ val bind_retired_input_cut : t -> writer:input_checkpoint_writer ->
   observed:Keeper_native_call.state -> call:Keeper_native_call.t ->
   cut:Keeper_input_history_cut.binding -> (input_checkpoint_writer, error) result
 (** Admit a new call and the exact retired-response cut together. This requires
-    the current direct child and refuses stopping/shutdown admission. *)
+    the current direct child and refuses stopping/shutdown admission. A branch
+    revalidates retained native N to host H preservation and H to cut to seed,
+    compares the captured H with the journal in the same native Bind transaction,
+    and returns a writer naming the actual next seed. Global input is untouched. *)
 (** Admit a native call for dispatch: a fresh one, a replacement for a retired
     one, or the same call again when its scope resumes. A stopping Owner refuses
     it with [Owner_stopping]. Checkpoint and terminal receipts are still

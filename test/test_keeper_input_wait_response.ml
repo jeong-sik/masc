@@ -642,6 +642,54 @@ let test_operation_response_preserves_producer_g ?(gate_fault=None) ~canonical_i
             && Core.Context.get seed.context "original-native-tool-receipt"=Some (`Bool true));
         check bool "real native completion preserves global input G" true
           (Keeper_owner.input_checkpoint owner ~trace_id:meta.runtime.trace_id |> owner_ok=Journal.Input_observed g);
+        (* Exercise the typed retired cut with distinct actual native N and
+           confirmed host H. The earlier settled tool result must survive the
+           second real invocation; no provider truncation decision is simulated. *)
+        let context=Core.Context.copy seed.context ~eio:true in
+        Core.Context.set context "host-before-response-cut" (`String "retained host metadata");
+        let host={seed with Core.Checkpoint.context} in
+        (match Keeper_checkpoint_destination.save destination host |> value with
+         | Store.Saved _ -> () | Stale_noop _ -> fail "host cut source was not confirmed");
+        let host=Keeper_checkpoint_destination.current_checkpoint destination |> value |> Option.get in
+        let host_ref=Store.exact_snapshot_reference (exact host) in
+        check bool "actual retired N and host H are distinct" false
+          (Keeper_checkpoint_ref.equal actual_native.checkpoint host_ref);
+        let cut={host with Core.Checkpoint.messages=List.take (List.length host.messages-1) host.messages} in
+        let cut_config={native_config with context=Some cut.context;checkpoint_sidecar=cut.working_context} in
+        let prepare_cut ?retired_history_cut checkpoint agent_ref=
+          Keeper_direct_native_continuation.prepare ~binding ~runtime_id:"native.primary" ~config:cut_config
+            ~agent_core_checkpoint:(Some checkpoint) ~input:Keeper_direct_native_continuation.Continue_from_checkpoint
+            ~agent_ref ?retired_history_cut () in
+        (match prepare_cut cut (ref None) with Error _ -> () | Ok _ -> fail "ordinary branch continuation accepted an unproved history cut");
+        let proof=Keeper_direct_native_continuation.authorize_incomplete_response_cut ~binding ~checkpoint:cut () |> value in
+        (match prepare_cut ~retired_history_cut:proof {cut with working_context=None} (ref None) with
+         | Error _ -> () | Ok _ -> fail "branch cut proof accepted an edited next source");
+        let agent_ref=ref None in
+        let prepared_cut=prepare_cut ~retired_history_cut:proof cut agent_ref |> value in
+        let retried=Keeper_direct_native_continuation.reconcile_after_dispatch binding (fun () ->
+          Runtime_agent.continue_from_checkpoint ~sw:turn_sw ~net:env#net
+            ~config:(Keeper_direct_native_continuation.config prepared_cut) ~agent_ref
+            ~checkpoint:(Keeper_direct_native_continuation.prepared_checkpoint prepared_cut |> Option.get) ())
+          |> Result.map_error Core.Error.to_string |> value in
+        check string "actual branch continuation after typed cut completes" "original branch native completed"
+          (Core.Types.text_of_content retried.response.content);
+        check int "typed history cut never repeats the original tool effect" 1 !tool_calls;
+        check int "only the extra native final round dispatches after cut" 3 (Exact_output_fixture.post_count server);
+        let observed_native=Keeper_owner.direct_native_call owner ~operation_id |> owner_ok in
+        let after_cut=match observed_native with
+          | Native.Terminal_unacknowledged (call,{Core.Agent.recovery=Retire;_}) -> call
+          | No_native_call | Active _
+          | Terminal_unacknowledged (_, {Core.Agent.recovery=Operator_repair_required Effect_outcome_unknown;_}) ->
+            fail "typed cut continuation did not retire its actual journal" in
+        let seed=Keeper_checkpoint_destination.current_checkpoint destination |> value |> Option.get in
+        let seed_ref=Store.exact_snapshot_reference (exact seed) in
+        check bool "typed cut publishes next native and branch together with host metadata" true
+          (Keeper_checkpoint_ref.equal after_cut.checkpoint seed_ref
+            && Core.Context.get seed.context "host-before-response-cut"=Some (`String "retained host metadata")
+            && List.for_all (fun message -> List.mem message seed.messages) cut.messages);
+        check string "actual branch cut leaves all independent G bytes unchanged" g_bytes (Fs_compat.load_file canonical);
+        check bool "actual branch cut leaves global input G unchanged" true
+          (Keeper_owner.input_checkpoint owner ~trace_id:meta.runtime.trace_id |> owner_ok=Journal.Input_observed g);
         let call_id="019a0010-1000-7000-8000-000000000053" in
         let locator=Core.Agent.execution_locator_of_yojson
             (`Assoc ["version",`Int 1;"run_id",`String "execution-run-owner-branch-continuation"]) |> value in

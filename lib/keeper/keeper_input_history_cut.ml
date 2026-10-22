@@ -53,12 +53,16 @@ let bind_seed t ~seed =
     | Some _ | None -> Error "next native seed does not preserve the exact input history cut" in
   Ok {source=t.source_ref;cut=t.cut_ref;seed}
 let checkpoint binding = binding.cut
+let source_reference binding = binding.source
+let validate_publication binding ~observed_source ~(call:Keeper_native_call.t) =
+  if Keeper_checkpoint_ref.equal observed_source binding.source
+      && Keeper_checkpoint_ref.equal call.seed_checkpoint binding.seed
+      && Keeper_checkpoint_ref.equal call.checkpoint binding.seed then Ok ()
+  else Error "input history cut no longer owns its exact source and next native seed"
 let validate_native binding ~observed ~(call:Keeper_native_call.t) =
   match observed with
-  | Keeper_native_call.Terminal_unacknowledged (previous,{Agent_core.Agent.recovery=Retire;_})
-      when Keeper_checkpoint_ref.equal previous.checkpoint binding.source
-        && Keeper_checkpoint_ref.equal call.seed_checkpoint binding.seed
-        && Keeper_checkpoint_ref.equal call.checkpoint binding.seed -> Ok ()
-  | Terminal_unacknowledged (_, {Agent_core.Agent.recovery=(Retire | Operator_repair_required Effect_outcome_unknown);_})
+  | Keeper_native_call.Terminal_unacknowledged (previous,{Agent_core.Agent.recovery=Retire;_}) ->
+    validate_publication binding ~observed_source:previous.checkpoint ~call
+  | Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Operator_repair_required Effect_outcome_unknown;_})
   | Active _ | No_native_call ->
     Error "input history cut no longer owns its retired source and next native seed"

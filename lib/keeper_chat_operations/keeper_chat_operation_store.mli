@@ -352,6 +352,16 @@ val bind_direct_input_checkpoint : t -> now:float ->
     This and [update_direct_input_checkpoint] refuse operation input branches;
     a branch must use its own native/branch publication instead of global input. *)
 
+val bind_direct_branch_checkpoint : t -> now:float ->
+  operation_id:Operation.Operation_id.t -> execution_digest:string ->
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t ->
+  observed_branch:Keeper_checkpoint_ref.t -> (unit, error) result
+(** Compare the exact branch predecessor and native state, then bind the next
+    native seed and advance the branch in one transaction. The retired native
+    reference may differ from the host branch source: Owner must validate that
+    physical relationship and its typed cut first. Global input is untouched;
+    uncertain commits remain Error without readback-to-success. *)
+
 val direct_input_wait : t -> operation_id:Operation.Operation_id.t ->
   (Keeper_semantic_execution.input_wait option, error) result
 val defer_direct_input_wait : t -> now:float -> operation_id:Operation.Operation_id.t ->

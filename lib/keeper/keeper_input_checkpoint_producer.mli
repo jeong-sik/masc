@@ -27,7 +27,10 @@ val bind_retired_input_cut : t -> cut:Keeper_input_history_cut.t ->
   operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
   observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (t, error) result
 (** Retain the verified cut, bind its actual seed, then atomically publish input
-    ownership and the next native call. Failure never grants replay authority. *)
+    ownership and the next native call. A branch compares its captured host
+    predecessor and publishes the next seed without changing global input;
+    Owner freshly validates the retained native-to-host relationship. Failure
+    never grants replay authority. *)
 val publish_autonomous : t -> Agent_core.Checkpoint.t -> (t, error) result
 val publish_direct : t -> operation_id:Keeper_chat_operation.Operation_id.t ->
   execution_digest:string -> call_id:string -> observed:Keeper_checkpoint_ref.t ->

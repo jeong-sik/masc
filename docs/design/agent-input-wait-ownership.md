@@ -603,15 +603,35 @@ The fresh response source fixture now continues stored response C through actual
 Native.prepare and Runtime_agent.continue_from_checkpoint. A loopback provider
 requests one real tool invocation and then completes; the fixture checks model
 input, tool execution, native Retire, branch Context/reference and unchanged G.
+It then creates a distinct confirmed host H, authorizes an exact incomplete
+Assistant cut and invokes the native adapter again. The second real call must
+preserve the settled ToolResult and host metadata, publish matching native and
+branch references, execute no second tool effect and leave G unchanged. This
+tests the typed cut path; it does not simulate the provider's truncation decision.
 It subsequently uses synthetic next-boundary receipts to test another pending
 request and host finalization/reopen. Those later synthetic receipts are not
 another actual Core invocation. The fixture is source only until executed on
 this exact candidate; it does not prove the production AgentRun/finalizer flow
 or a crash during the actual invocation.
 
-The retired incomplete-response cut still needs branch-specific predecessor and
-next-seed publication, including the separate native N/host H relation. Full
-Gate success/replay, all fallback/error paths, actual invocation crash recovery
+The retired cut now has a branch-specific Store Bind. It requires Retire with
+the host source's trace and turn, compares the exact captured host predecessor
+and native observed state, and publishes native plus next branch seed in one
+SQLite transaction. Commit uncertainty remains Error; no readback grants an
+acknowledgement or file cleanup. Global input is not read or written.
+
+Native authorization starts at the dispatch's confirmed H after validating
+retained N-to-H preservation. At publication the original Owner child verifies
+its captured predecessor equals the opaque cut source, rereads exact retained
+N/H/cut/seed payloads, checks the original operation scope, reconstructs the
+N-to-H preservation and H-to-cut-to-seed proof, then invokes that Store Bind.
+The returned branch writer names the actual next seed, while the canonical
+writer retains its existing exact-cut input relation. Store source regressions
+add stale predecessor/native/digest refusal and before/after-commit fault/reopen
+cases with distinct N/H and preserved global G. These new cases remain unexecuted
+until an actual exact-head result is inspected.
+
+Full Gate success/replay, all fallback/error paths, actual invocation crash recovery
 and public branch response acceptance remain unverified. The public exact-W
 guard therefore remains in place while this coherent integration is unfinished.
 Durable autonomous waiting, dedicated waiting outcomes, snapshot/SSE revision and

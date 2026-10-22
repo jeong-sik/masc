@@ -1157,20 +1157,30 @@ let owns_running_operation t operation_id =
   | Some current -> Operation_id.equal current operation_id
   | None -> false
 
+let load_retained_branch_checkpoint t reference =
+  let session_dir=Filename.concat t.session_root (Keeper_id.Trace_id.to_string reference.Keeper_checkpoint_ref.trace_id) in
+  Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference
+  |> Result.map_error (fun error -> Chat_operation_store.Invalid_input (match error with
+    | Keeper_checkpoint_store.Source_unavailable error -> Keeper_checkpoint_store.checkpoint_ref_load_error_to_string error
+    | Source_changed _ -> "host branch retained checkpoint identity changed"
+    | Candidate_identity_invalid error -> Keeper_checkpoint_store.checkpoint_identity_error_to_string error
+    | Candidate_session_mismatch _ -> "host branch retained trace changed"
+    | Candidate_turn_regressed _ -> "host branch retained turn regressed"
+    | Commit_not_installed _ -> "host branch retained installation is unconfirmed"))
+
+let validate_retained_branch_scope ~operation_id (checkpoint:Agent_core.Checkpoint.t) =
+  let ( let* ) = Result.bind in
+  let* frame=Keeper_repetition_context.load checkpoint.Agent_core.Checkpoint.context
+    |> Result.map_error (fun error -> Chat_operation_store.Invalid_input (Keeper_repetition_snapshot.error_to_string error)) in
+  match Keeper_repetition_snapshot.active frame with
+  | Some scope when Keeper_execution_scope_id.equal scope (Keeper_execution_scope_id.direct_operation operation_id) -> Ok ()
+  | Some _ | None -> Error (Chat_operation_store.Invalid_input "host checkpoint no longer owns the original operation scope")
+
 let validate_retained_branch_checkpoint t ~operation_id ~observed ~checkpoint ~transformation =
   let ( let* ) = Result.bind in
   let invalid detail=Error (Chat_operation_store.Invalid_input detail) in
-  let session_dir=Filename.concat t.session_root (Keeper_id.Trace_id.to_string observed.Keeper_checkpoint_ref.trace_id) in
-  let load reference=Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference
-    |> Result.map_error (fun error -> Chat_operation_store.Invalid_input (match error with
-      | Keeper_checkpoint_store.Source_unavailable error -> Keeper_checkpoint_store.checkpoint_ref_load_error_to_string error
-      | Source_changed _ -> "host branch retained checkpoint identity changed"
-      | Candidate_identity_invalid error -> Keeper_checkpoint_store.checkpoint_identity_error_to_string error
-      | Candidate_session_mismatch _ -> "host branch retained trace changed"
-      | Candidate_turn_regressed _ -> "host branch retained turn regressed"
-      | Commit_not_installed _ -> "host branch retained installation is unconfirmed")) in
-  let* source=load observed in
-  let* candidate=load checkpoint in
+  let* source=load_retained_branch_checkpoint t observed in
+  let* candidate=load_retained_branch_checkpoint t checkpoint in
   let* ()=Keeper_checkpoint_host_transform.validate transformation ~source ~candidate
     |> Result.map_error (fun detail -> Chat_operation_store.Invalid_input detail) in
   let source=Keeper_checkpoint_store.exact_snapshot_checkpoint source in
@@ -1181,12 +1191,33 @@ let validate_retained_branch_checkpoint t ~operation_id ~observed ~checkpoint ~t
     else invalid "host checkpoint cannot change the branch's complete pending input" in
   List.fold_left (fun result (value:Agent_core.Checkpoint.t) ->
     let* ()=result in
-    let* frame=Keeper_repetition_context.load value.context
-      |> Result.map_error (fun error -> Chat_operation_store.Invalid_input (Keeper_repetition_snapshot.error_to_string error)) in
-    match Keeper_repetition_snapshot.active frame with
-    | Some scope when Keeper_execution_scope_id.equal scope (Keeper_execution_scope_id.direct_operation operation_id) -> Ok ()
-    | Some _ | None -> invalid "host checkpoint no longer owns the original operation scope")
+    validate_retained_branch_scope ~operation_id value)
     (Ok ()) [source;candidate]
+
+let validate_retired_branch_cut t ~operation_id ~cut ~observed ~(call:Keeper_native_call.t) =
+  let ( let* ) = Result.bind in
+  let string_result result=Result.map_error (fun detail -> Chat_operation_store.Invalid_input detail) result in
+  let* previous=match observed with
+    | Keeper_native_call.Terminal_unacknowledged (previous,{Agent_core.Agent.recovery=Retire;_}) -> Ok previous
+    | No_native_call | Active _
+    | Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Operator_repair_required Effect_outcome_unknown;_}) ->
+      Error (Chat_operation_store.Invalid_input "branch cut requires its exact retired native source") in
+  let source_ref=Keeper_input_history_cut.source_reference cut in
+  let* ()=Keeper_input_history_cut.validate_publication cut ~observed_source:source_ref ~call |> string_result in
+  let* native=load_retained_branch_checkpoint t previous.checkpoint in
+  let* source=load_retained_branch_checkpoint t source_ref in
+  let* candidate=load_retained_branch_checkpoint t (Keeper_input_history_cut.checkpoint cut) in
+  let* seed=load_retained_branch_checkpoint t call.seed_checkpoint in
+  let* _=Keeper_checkpoint_host_transform.preserve ~source:native
+      ~candidate:(Keeper_checkpoint_store.exact_snapshot_checkpoint source) |> string_result in
+  let* prepared=Keeper_input_history_cut.prepare ~source
+      ~candidate:(Keeper_checkpoint_store.exact_snapshot_checkpoint candidate) |> string_result in
+  let* binding=Keeper_input_history_cut.bind_seed prepared ~seed |> string_result in
+  let* ()=Keeper_input_history_cut.validate_publication binding ~observed_source:source_ref ~call |> string_result in
+  List.fold_left (fun result snapshot ->
+    let* ()=result in
+    validate_retained_branch_scope ~operation_id (Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot))
+    (Ok ()) [native;source;candidate;seed]
 
 let capture_input_checkpoint_target t ~lane ~trace_id =
   let ( let* ) = Result.bind in
@@ -2136,25 +2167,33 @@ let start
                     && Keeper_id.Trace_id.equal meta.runtime.trace_id writer.input_trace
                     && Keeper_id.Trace_id.equal checkpoint.trace_id writer.input_trace
                     && Keeper_interrupt_token.equal interrupt_token writer.input_child ->
-                (match Keeper_input_history_cut.validate_native cut ~observed ~call with
-                 | Error detail -> Error (Operation_rejected (Chat_operation_store.Invalid_input detail))
-                 | Ok () ->
-                   match run_operation_command t ~label:"bind retired input history cut" (fun () ->
+                (match run_operation_command t ~label:"bind retired input history cut" (fun () ->
+                     let ( let* )=Result.bind in
                      match writer.input_target with
                      | Global_target ->
+                       let* ()=Keeper_input_history_cut.validate_native cut ~observed ~call
+                         |> Result.map_error (fun detail -> Chat_operation_store.Invalid_input detail) in
                        Chat_operation_store.bind_direct_input_checkpoint t.operation_store ~now:(t.now ())
                          ~operation_id ~execution_digest ~observed ~call
                          ~observed_input:writer.input_reference ~checkpoint
                      | Operation_target original when Operation_id.equal original.operation_id operation_id
                          && String.equal original.execution_digest execution_digest
                          && owns_running_operation t operation_id ->
-                       Chat_operation_store.update_direct_native_call t.operation_store ~now:(t.now ())
-                         ~operation_id ~execution_digest (Keeper_native_call.Bind {observed;call})
+                       let* observed_branch=match writer.input_reference with
+                         | Some reference when Keeper_checkpoint_ref.equal reference (Keeper_input_history_cut.source_reference cut) -> Ok reference
+                         | Some _ | None -> Error (Chat_operation_store.Invalid_input
+                             "input history cut does not own its captured branch predecessor") in
+                       let* ()=validate_retired_branch_cut t ~operation_id ~cut ~observed ~call in
+                       Chat_operation_store.bind_direct_branch_checkpoint t.operation_store ~now:(t.now ())
+                         ~operation_id ~execution_digest ~observed ~call ~observed_branch
                        |> Result.map (fun () -> Chat_operation_store.Input_checkpoint_updated)
                      | Operation_target _ -> Error (Chat_operation_store.Invalid_input
                          "input history cut belongs to another operation")) with
                    | Ok (Chat_operation_store.Input_checkpoint_updated,_) ->
-                     Ok {writer with input_reference=Some checkpoint}
+                     let reference=match writer.input_target with
+                       | Global_target -> checkpoint
+                       | Operation_target _ -> call.Keeper_native_call.checkpoint in
+                     Ok {writer with input_reference=Some reference}
                    | Ok (Chat_operation_store.Input_checkpoint_source_changed _,_) ->
                      Error (Operation_rejected (Chat_operation_store.Invalid_input
                        "input history cut predecessor changed; reconcile both owners"))

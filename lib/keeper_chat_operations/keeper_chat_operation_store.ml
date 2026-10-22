@@ -2965,6 +2965,26 @@ let bind_direct_input_checkpoint store ~now ~operation_id ~execution_digest
       let* () = install_input_checkpoint_with_db store ~previous checkpoint in
       Ok Input_checkpoint_updated)
 
+let bind_direct_branch_checkpoint store ~now ~operation_id ~execution_digest
+    ~observed ~call ~observed_branch =
+  let* () = ensure_open store in
+  let* () = match observed with
+    | Keeper_native_call.Terminal_unacknowledged (previous,{Agent_core.Agent.recovery=Retire;_})
+        when Keeper_id.Trace_id.equal previous.checkpoint.trace_id observed_branch.Keeper_checkpoint_ref.trace_id
+          && previous.checkpoint.turn_count=observed_branch.turn_count -> Ok ()
+    | No_native_call | Active _
+    | Terminal_unacknowledged (_, {Agent_core.Agent.recovery=(Retire | Operator_repair_required Effect_outcome_unknown);_}) ->
+      Error (Invalid_input "branch history cut requires its retired native trace and host turn") in
+  with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    let* execution = direct_execution_with_db store.db operation in
+    let* () = match Option.bind execution (fun (execution:Semantic.t) -> execution.input_branch) with
+      | Some branch when Keeper_checkpoint_ref.equal branch.checkpoint observed_branch -> Ok ()
+      | Some _ | None -> Error (Invalid_input "retired cut lost its exact operation branch predecessor") in
+    let* _ = apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest
+      (Keeper_native_call.Bind {observed;call}) in
+    Ok ())
+
 let resolve_direct_gate store ~now ~operation_id ~resolution =
   let* () = ensure_open store in
   let expected_commit = ref None in

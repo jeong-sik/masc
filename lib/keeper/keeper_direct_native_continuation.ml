@@ -231,6 +231,17 @@ let authorize_incomplete_response_cut ~binding ~checkpoint () =
     | No_native_call | Active _
     | Terminal_unacknowledged (_, {Agent.recovery=Operator_repair_required Effect_outcome_unknown;_}) ->
       Error "response cut requires an exact retired native call" in
+  let* source=match Keeper_checkpoint_destination.destination binding.checkpoint_destination with
+    | Keeper_owner.Global_input -> Ok source
+    | Operation_input operation_id when Keeper_chat_operation.Operation_id.equal operation_id binding.operation_id ->
+      let* current=Keeper_checkpoint_destination.current_checkpoint binding.checkpoint_destination in
+      let* current=match current with Some current -> Ok current
+        | None -> Error "response cut lost its confirmed operation host source" in
+      let* _=Keeper_checkpoint_host_transform.preserve ~source ~candidate:current in
+      Checkpoint.exact_snapshot_of_value
+        ~expected_session_id:(Checkpoint.exact_snapshot_reference source).trace_id current
+      |> Result.map_error Checkpoint.checkpoint_ref_load_error_to_string
+    | Operation_input _ -> Error "response cut destination belongs to another operation" in
   let* proof=Keeper_input_history_cut.prepare ~source ~candidate:checkpoint in
   Ok {observed;proof}
 

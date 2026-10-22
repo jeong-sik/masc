@@ -770,8 +770,68 @@ let test_branch_host_checkpoint_commit_uncertainty after_commit () = with_path @
     check bool "actual host checkpoint commit survives reopen" true (Keeper_checkpoint_ref.equal (branch_head store) expected);
     actual_global store newer)
 
+let retired_branch_with_host store =
+  let operation,newer=actual_running_branch store in
+  let call=branch_native_call operation in
+  publish_branch_native store operation (Native.Bind {observed=Native.No_native_call;call}) |> ok;
+  publish_branch_native store operation
+    (Native.Checkpoint {call_id=call.call_id;observed=branch_native_seed;checkpoint=branch_native_next}) |> ok;
+  publish_branch_native store operation (Native.Terminal {call_id=call.call_id;
+    disposition={Agent.outcome=Agent.Terminal_succeeded;recovery=Agent.Retire}}) |> ok;
+  let host=response_checkpoint branch_native_next.turn_count "host source of exact response cut" in
+  publish_host_branch store operation ~observed:branch_native_next ~checkpoint:host |> ok;
+  operation,newer,native store,host
+let next_branch_cut_call operation =
+  let seed=response_checkpoint branch_native_next.turn_count "next native seed after exact response cut" in
+  let locator=Agent.execution_locator_of_yojson
+    (`Assoc ["version",`Int 1;"run_id",`String "execution-run-after-branch-history-cut"]) |> value in
+  Native.create ~call_id:"019a0010-1000-7000-8000-000000000054" ~runtime_id:"native.primary"
+    ~operation_digest:operation.Operation.execution_digest ~api:Native.Continue_from_checkpoint
+    ~seed_checkpoint:seed ~locator |> value
+let test_branch_cut_compares_native_and_host_predecessors () = with_path @@ fun path ->
+  let newer,expected=with_store path (fun store ->
+    let operation,newer,observed,host=retired_branch_with_host store in
+    let call=next_branch_cut_call operation in
+    let bind ~observed ~observed_branch ~execution_digest=Store.bind_direct_branch_checkpoint store ~now:20.
+      ~operation_id:original ~execution_digest ~observed ~call ~observed_branch in
+    let before=Semantic.to_json (semantic store) in
+    rejected (bind ~observed ~observed_branch:branch_native_next ~execution_digest:operation.execution_digest);
+    rejected (bind ~observed:Native.No_native_call ~observed_branch:host ~execution_digest:operation.execution_digest);
+    rejected (bind ~observed ~observed_branch:host ~execution_digest:"another invocation digest");
+    check bool "stale native/host/digest changes no authority" true (before=Semantic.to_json (semantic store));
+    bind ~observed ~observed_branch:host ~execution_digest:operation.execution_digest |> ok;
+    check_native_branch_pair store call.seed_checkpoint;
+    rejected (bind ~observed ~observed_branch:host ~execution_digest:operation.execution_digest);
+    actual_global store newer;newer,call.seed_checkpoint) in
+  with_store path (fun store ->check_native_branch_pair store expected;actual_global store newer)
+let test_branch_cut_commit_uncertainty after_commit () = with_path @@ fun path ->
+  let newer,expected,previous=with_store path (fun store ->
+    let operation,newer,observed,host=retired_branch_with_host store in
+    let call=next_branch_cut_call operation in
+    ignore (Store.take_released_checkpoints store);
+    Store.For_testing.fail_next_commit (if after_commit then Fail_after_commit else Fail_before_commit);
+    (match Store.bind_direct_branch_checkpoint store ~now:20. ~operation_id:original
+        ~execution_digest:operation.execution_digest ~observed ~call ~observed_branch:host with
+     | Error (Store.Store_unavailable _) -> ()
+     | Error _ | Ok () -> fail "uncertain branch cut Bind minted acknowledgement");
+    Store.For_testing.clear_commit_fault ();
+    let expected=if after_commit then call.seed_checkpoint else host in
+    check bool "branch cut reflects actual commit only" true (Keeper_checkpoint_ref.equal (branch_head store) expected);
+    if after_commit then check_native_branch_pair store expected
+    else check bool "failed branch cut preserves actual retired N and host H" true (Native.equal_state (native store) observed);
+    check int "uncertain cut grants no retained-file cleanup" 0 (List.length (Store.take_released_checkpoints store));
+    actual_global store newer;newer,expected,observed) in
+  with_store path (fun store ->
+    check bool "actual branch cut head survives reopen" true (Keeper_checkpoint_ref.equal (branch_head store) expected);
+    if after_commit then check_native_branch_pair store expected
+    else check bool "reopen preserves distinct native N and host H" true (Native.equal_state (native store) previous);
+    actual_global store newer)
+
 let () = run "durable original input wait"
   ["store",[
+    test_case "branch history cut compares native N and host H before binding next seed" `Quick test_branch_cut_compares_native_and_host_predecessors;
+    test_case "branch history cut Bind precommit failure grants no receipt" `Quick (test_branch_cut_commit_uncertainty false);
+    test_case "branch history cut uncertain Bind survives reopen without acknowledgement" `Quick (test_branch_cut_commit_uncertainty true);
     test_case "host checkpoint preserves exact native retirement and independent input" `Quick test_branch_host_checkpoint_preserves_native_retirement;
     test_case "host checkpoint cannot hide unknown native effects" `Quick test_branch_host_checkpoint_rejects_unknown_effect;
     test_case "host checkpoint precommit failure grants no receipt" `Quick (test_branch_host_checkpoint_commit_uncertainty false);

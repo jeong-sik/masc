@@ -14,6 +14,12 @@ val bind_seed : t -> seed:Keeper_checkpoint_store.exact_checkpoint_snapshot ->
 (** The actual next native seed must retain all cut messages and pending=None.
     A binding is immutable; mutable context values never carry its authority. *)
 val checkpoint : binding -> Keeper_checkpoint_ref.t
+val source_reference : binding -> Keeper_checkpoint_ref.t
+val validate_publication : binding -> observed_source:Keeper_checkpoint_ref.t ->
+  call:Keeper_native_call.t -> (unit, string) result
+(** Match the exact cut source and next native seed. This alone does not prove
+    that a distinct retired native N owns a host source H; the original Owner
+    must revalidate retained N-to-H preservation before branch publication. *)
 val validate_native : binding -> observed:Keeper_native_call.state ->
   call:Keeper_native_call.t -> (unit, string) result
 (** Require the exact retired source and exact admitted next seed. Owner must

@@ -49,3 +49,7 @@ type playable = {
 val newest_playable : t list -> playable option
 (** The last playable block in producer order — the same newest-wins rule as
     {!newest_image}. External http(s) sources are not playable here. *)
+
+val newest_midi : t list -> playable option
+(** Last locally readable MIDI attachment in producer order. A newer voice or
+    audio block cannot replace the MIDI selected for explicit editing. *)

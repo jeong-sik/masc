@@ -211,6 +211,11 @@ let prepare ~fetch (attachment : Masc_tui_types.board_attachment) =
                 | Play_local | Open_external | Save_only -> None in
               Ok (Prepared_file { name; path; action; midi_summary })
 
+let midi_path = function
+  | Prepared_file {path; action=Play_midi; _} -> Some path
+  | Prepared_file {action=(Play_local | Open_external | Save_only); _}
+  | Prepared_url _ -> None
+
 let perform prepared ~midi_soundfont =
   match prepared with
   | Prepared_url url ->

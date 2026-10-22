@@ -288,6 +288,34 @@ let test_listen_replacement_and_replay () =
   Alcotest.(check bool) "same completion cannot play twice" false
     (take_chat_listen state second)
 
+let test_midi_editor_request_ownership () =
+  let open Masc_tui_types in
+  let state = listen_state () in
+  let midi = {audio with Masc_tui_chat_media.kind=`Midi; name="phrase.mid"} in
+  let editor = begin_chat_listen ~destination:Listen_music_editor state ~keeper:"music" midi in
+  let player = begin_chat_listen state ~keeper:"music" audio in
+  Alcotest.(check bool) "request freezes its editor intent" true
+    (editor.lr_destination=Listen_music_editor && editor.lr_media=midi);
+  Alcotest.(check bool) "new playback retires a prepared editor" false
+    (take_chat_listen state editor);
+  Alcotest.(check bool) "replacement retains player intent" true
+    (player.lr_destination=Listen_player && take_chat_listen state player);
+  let editor = begin_chat_listen ~destination:Listen_music_editor state ~keeper:"music" midi in
+  ignore (withdraw_chat_music_editor state);
+  Alcotest.(check bool) "new gesture retires editor focus" false
+    (take_chat_listen state editor);
+  let player = begin_chat_listen state ~keeper:"music" audio in
+  ignore (withdraw_chat_music_editor state);
+  Alcotest.(check bool) "ordinary playback survives newer input" true
+    (take_chat_listen state player);
+  let editor = begin_chat_listen ~destination:Listen_music_editor state ~keeper:"music" midi in
+  Alcotest.(check bool) "explicit editor opens while its terminal is still owned" true
+    (take_chat_listen state editor);
+  let editor = begin_chat_listen ~destination:Listen_music_editor state ~keeper:"music" midi in
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "retired workspace cannot open its MIDI editor" false
+    (take_chat_listen state editor)
+
 let test_listen_target_and_workspace_withdrawal () =
   let open Masc_tui_types in
   let state = listen_state () in
@@ -336,6 +364,8 @@ let () =
     ; ( "listen ownership"
       , [ Alcotest.test_case "replacement and duplicate completion" `Quick
             test_listen_replacement_and_replay
+        ; Alcotest.test_case "MIDI editor intent and retirement" `Quick
+            test_midi_editor_request_ownership
         ; Alcotest.test_case "target and workspace withdrawal" `Quick
             test_listen_target_and_workspace_withdrawal
         ; Alcotest.test_case "surface withdrawal" `Quick

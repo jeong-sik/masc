@@ -56,6 +56,8 @@ type t =
       (** [/artifacts] or [/reports] opens the published artifact library. *)
   | Open_music
       (** [/music] opens the terminal music library without score graphics. *)
+  | Open_music_midi
+      (** [/music midi] opens the newest MIDI in this conversation in the phrase editor. *)
   | Music_invalid_arguments
   | Listen
       (** [/listen] — play the newest playable attachment in this

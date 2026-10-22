@@ -178,8 +178,8 @@ receipts remain distinct from successful contract validation.
    reply cannot supply a host pathname or change this storage scope. Image
    ingestion and other producers with a Workspace also forward it; callers
    without a Workspace retain process-config resolution. Checkpoint image
-   eviction requires the save caller's base path, including initialization and
-   history-clear saves, so a reloaded handle stays readable in that Workspace.
+   eviction requires the save caller's base path, including initialization
+   saves, so a reloaded handle stays readable in that Workspace.
    The screenshot-to-Vision
    fixture uses separate ambient and served Workspaces, checks refusal from the
    other Workspace, and preserves native-image, pixel, rotation and connection

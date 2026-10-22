@@ -2414,7 +2414,11 @@ and goal_timeline_unavailability =
 
 val decode_goal_detail_timeline : Yojson.Safe.t -> (goal_timeline, string) result
 
+type task_history_source = Task_activity | Task_audit
+type task_history_origin =
+  { tho_source : task_history_source; tho_file : string; tho_offset : int }
 type task_history_event = {
+  th_origin : task_history_origin option;
   th_ts : string;
   th_label : string;  (** [action] when present, else [type], else "event" *)
   th_from_status : string option;

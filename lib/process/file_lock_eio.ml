@@ -283,13 +283,15 @@ let with_mutex path f =
     ~finally:(fun () -> release_entry entry)
     (fun () -> with_entry_lock entry f)
 
+let lock_file_path path = path ^ ".lock"
+
 (** Run [f] while holding both the per-path {!Cross_context_mutex} and an
     OS-level flock on [path].lock. The flock uses non-blocking F_TLOCK
     retries; sleep/yield stays scheduler-friendly whether or not a clock
     is provided. Max 200 attempts (~2s with sleeps). *)
 let with_lock ?clock path f =
   let run_with_flock () =
-    let lock_path = path ^ ".lock" in
+    let lock_path = lock_file_path path in
     let dir = Filename.dirname lock_path in
     if not (Sys.file_exists dir) then
       (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());

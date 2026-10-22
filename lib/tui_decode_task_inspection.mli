@@ -10,10 +10,13 @@ val detail : ?previous:detail -> task_id:string -> Yojson.Safe.t -> (detail, str
     for the same captured original source and workspace; this is no
     admission, freshness or authority cache. Run decoding/equality on the CPU path. *)
 val history : task_id:string -> Yojson.Safe.t -> (Tui_decode.task_history_event list, string) result
-(** History rows must name the captured Task through [task] or [task_id].
-    Conflicting identities are rejected rather than shown under that Task. *)
+(** Source-tagged physical observations must name the captured Task through
+    their declared source codec. All present original identities must agree;
+    conflicting nested identities and unknown sources are rejected. *)
+type history_source_state = Source_observed | Source_not_created
 type history = private
   { history_task_id : string
+  ; history_sources : (Tui_decode.task_history_source * history_source_state) list
   ; history_events : Tui_decode.task_history_event list
   ; history_records : Yojson.Safe.t list
   ; history_verifications : string list
@@ -33,6 +36,8 @@ val history_page : request:history_request -> Yojson.Safe.t -> (history, string)
     appending to the captured immutable prefix. A missing next cursor ends only
     the observed stored prefix. Exact verification ids retain first-observed
     order across the prefix; malformed ids fail rather than disappear.
+    Identities come from the audit event or canonical activity payload inside
+    the validated physical observation, never from its transport envelope.
     Original records remain available for explicit full evidence reading;
     display summaries do not erase verdict reasons or authority metadata.
     Parsing/concatenation belongs on the CPU path. *)

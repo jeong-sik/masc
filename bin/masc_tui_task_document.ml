@@ -21,9 +21,14 @@ let history_rows = function
                   | Some actor -> "  by " ^ actor
                   | None -> ""
                 in
-                Printf.sprintf "    %s  %s%s%s"
+                let provenance=match event.th_origin with
+                  | None -> ""
+                  | Some origin -> Printf.sprintf " [%s · %s:%d]"
+                    (match origin.tho_source with Tui_decode.Task_activity -> "lifecycle" | Tui_decode.Task_audit -> "audit")
+                    origin.tho_file origin.tho_offset in
+                Printf.sprintf "    %s  %s%s%s%s"
                   (Planning_detail.short_ts event.th_ts)
-                  event.th_label transition actor
+                  event.th_label transition actor provenance
                 :: (match event.th_note with
                     | Some note -> [ "      " ^ note ]
                     | None -> []))
@@ -53,7 +58,13 @@ let history_status_lines ~width ~(view : Masc.Tui_decode_task_inspection.history
     | Some history -> [match history.history_next_cursor with
         | Some _ -> "    H:read earlier stored history · r:start a fresh prefix"
         | None -> "    observed stored prefix exhausted · r:read latest history"] in
-  ("" :: header :: (pending @ rows @ boundary))
+  let sources=match Masc_tui_fetched.value view with
+    | None -> []
+    | Some history -> List.map (fun (source,state) ->
+      "    " ^ (match source with Tui_decode.Task_activity -> "Lifecycle" | Tui_decode.Task_audit -> "Audit")
+      ^ (match state with Masc.Tui_decode_task_inspection.Source_observed -> ": observed stored prefix"
+        | Masc.Tui_decode_task_inspection.Source_not_created -> ": store not yet created; no observations available")) history.history_sources in
+  ("" :: header :: (pending @ rows @ sources @ boundary))
 
 let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
   let width = max 1 (framed_inner_width cols - 2) in

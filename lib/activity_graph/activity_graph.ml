@@ -33,11 +33,17 @@ let current_dated_path (config : Workspace_utils.config) =
 let day_path (config : Workspace_utils.config) =
   (current_dated_path config).Dated_jsonl.Store.path
 
+let sequence_filename = "_seq"
+let stream_lock_key = "_stream"
+
+let root_entry_is_metadata name =
+  name = sequence_filename || name = File_lock_eio.lock_file_path stream_lock_key
+
 let seq_path (config : Workspace_utils.config) =
-  Filename.concat (root_dir config) "_seq"
+  Filename.concat (root_dir config) sequence_filename
 
 let lock_path (config : Workspace_utils.config) =
-  Filename.concat (root_dir config) "_stream"
+  Filename.concat (root_dir config) stream_lock_key
 
 (* Takes the path the caller is about to append to, so the directory made and
    the file opened come from one reading of the clock. *)

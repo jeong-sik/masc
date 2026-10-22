@@ -59,6 +59,14 @@ type successor_result = Indivisible of Lane_addon_tool_request_owner.retained
   | Successor_waiting of Lane_addon_tool_request_owner.retained
   | Successor_ready of { parent:Lane_addon_tool_request_owner.retained;
       child:Lane_addon_tool_request_owner.retained }
+val successor_is_current : config:Workspace.config -> capture:Workspace_memory_execution_capture.t ->
+  (bool, error) Stdlib.result
+(** Observe whether an original candidate belongs to the current continuation
+    frontier: fresh live semantic destination, readable selected sources and
+    matching current captured Ledger or prepared Briefing state/contract.
+    A known mismatch is false; unavailable authority/domain reads remain Error.
+    This neither publishes nor grants a successor. The serialized caller must
+    still invoke [narrow], which checks fresh admission before a new intention. *)
 val narrow : config:Workspace.config -> request_id:string -> (successor_result, error) Stdlib.result
 (** The serialized workspace owner may replace a positively size-refused
     original batch with one whole-prefix child. Persist the child's ID and
@@ -66,7 +74,12 @@ val narrow : config:Workspace.config -> request_id:string -> (successor_result, 
     the actual child back and acknowledge it in the parent before returning it.
     Recovered intent always reuses that ID. Unconfirmed publication is not
     permission to mint another child. No worker RPC, domain write or automatic
-    scheduling runs here. Briefing preserves its original prepared state.
+    scheduling runs here. New intentions require a currently live configured
+    installation with matching package/tool and semantic configuration revision,
+    under Runtime's fresh configuration/action publication boundary. Raw source
+    bytes remain original provenance, so formatting and Off/On do not rewrite
+    the child. Existing Subdividing/Subdivided recovery remains local while Off.
+    Briefing preserves its original prepared state.
     Caller holds the workspace process lease throughout, including retries. *)
 type original = private {
   capture : Workspace_memory_execution_capture.t;

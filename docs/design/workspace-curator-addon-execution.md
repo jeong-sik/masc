@@ -7,8 +7,8 @@ and [shared host semantic port](workspace-curator-semantic-validation.md) are no
 implemented. The original admission consumer now captures actual Runtime
 provenance and reads/submits/restores the original worker result. Its separate
 commit consumer now applies and recovers original Ledger/Briefing judgments;
-scoped lifecycle/result wake delivery now signals the existing owner. Production
-scheduler switching remains.
+scoped lifecycle/result wake delivery now signals the existing owner. The [production scheduler](workspace-curator-production-owner.md) now uses this
+original execution path; registry delivery and installed UI parity remain.
 This is not a claim of completed extraction or an installed replacement.
 
 Source baseline: `3145acf9fc32ab77c25d97ab7e5710194cd270cf`.
@@ -16,8 +16,8 @@ The Candle receipt follow-up changes neither Curator nor its domain interfaces.
 
 ## Decisions and existing owners
 
-Keep one server-owned Curator for each physical workspace. Its current
-[`start_with` owner](../../lib/server/server_workspace_memory_curator.ml)
+Keep one server-owned Curator for each physical workspace. Its public
+[`start` owner](../../lib/server/server_workspace_memory_curator.ml)
 serializes classification and briefing, listens to memory commits and exact-lane
 configuration changes, and parks when idle. Preserve this owner and its
 `request` wake; a package must not create a second fact scanner or polling loop.
@@ -50,7 +50,8 @@ these pure host checks **before candidate acceptance**, using
 receive the same validation. The common Addon Exact runner originally validated
 only package/request schemas. The [trusted semantic port](workspace-curator-semantic-validation.md)
 now binds original Curator captures before candidate acceptance and retained delivery;
-production owner capture and worker integration are still required.
+production capture and worker integration now use that port; execution evidence
+and installed behavior remain separate.
 Checking only after the worker retains a terminal answer would silently lose
 this semantic fallback. The extraction must provide a shared host-owned
 validation port inside the original admitted flow, before terminal delivery,
@@ -83,12 +84,10 @@ Before the first worker RPC, the host must retain an immutable accepted request:
   configuration revisions. Worker incarnation is an execution reference, not
   the identity of a durable fact or the right to claim another installation's work.
 
-Mint a request identity once and retain it with this capture. The current Curator
-mints an observer run ID inside each classification/briefing attempt; that alone
-cannot identify accepted work across restart. Do not derive identity solely from
+Mint a request identity once and retain it with this capture. An observer run ID alone cannot identify accepted work across restart. Do not derive identity solely from
 prompt bytes: an explicit later pass may legitimately use equal input.
 
-Use `Lane_addon_runtime.retain_tool_request_owner` before any RPC to preserve the
+Use `Lane_addon_runtime.capture_tool_request_owner` before any RPC to preserve the
 existing installation fence. Its backing `Lane_addon_tool_request_owner.retain`
 now stores the complete canonical request with its digest and destination, and
 `load` strictly restores a known key. The batch codecs preserve classification
@@ -524,8 +523,8 @@ The port uses local original journals and can recover an already stored intent
 without a live worker or model route. New root/new successor admission still
 needs the actual current configured Runtime authority, separately linearized
 with its action serializer. Do not infer that authority from this inventory or
-an old enabled boolean. Production still uses the old direct provider owner at
-this layer: switching its scheduler/frontier, new-child authority, registry
-receipt delivery, real worker/provider lifecycle, Dashboard/TUI and installation
+an old enabled boolean. The [production owner follow-up](workspace-curator-production-owner.md) now
+uses this discovery boundary and fresh new-child authority. Registry receipt
+delivery, real provider/container lifecycle, Dashboard/TUI and installation
 verification remain required. The new real-Store scenario definitions and
 parser checks are not compiled execution or those integration proofs.

@@ -2557,6 +2557,7 @@ type settled_block_memo = {
   sbm_revision : int;
   sbm_member_ids : string list;
   sbm_admission_preludes : Keeper_chat_transcript.drawn_item list;
+  sbm_covered_media : Keeper_chat_transcript.drawn_origin list;
   sbm_timeline_at : float option;
   sbm_committed_error : bool;
   sbm_reasoning : reasoning_visibility;
@@ -2939,7 +2940,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
          if List.exists (fun (held : Keeper_chat_transcript.drawn_item) -> held.origin = item.origin) items
          then items else items @ [item]) []
   in
-  let log_projection ~committed:_ ~preludes (turn_log : Masc_tui_types.turn_log) =
+  let log_projection ~committed:_ ~preludes ~covered_media (turn_log : Masc_tui_types.turn_log) =
     let transcript = turn_log.tl_transcript in
     let request_id = Masc_tui_types.turn_log_execution_id turn_log in
     let member_ids = member_ids_of
@@ -3154,7 +3155,9 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                         | Admission_of_request _ -> false
                         | Text_stretch _ | Media_stretch _ | Thinking_stretch _ | Tool_stretch _ | Unstreamed_skills
                         | Reply_of_segment _ | Error_of_segment _ -> true)
-                    (Keeper_chat_transcript.drawn transcript))))
+                    (Keeper_chat_transcript.drawn transcript))
+               |> List.filter (fun (_, (item : Keeper_chat_transcript.drawn_item)) ->
+                    not (List.mem item.origin covered_media))))
     in
     { lb_log = turn_log; lb_request_id = request_id; lb_member_ids = member_ids; lb_insertion = insertion; lb_timeline_at = timeline_at;
       lb_entries = entries }
@@ -3174,9 +3177,31 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     in
     let revision = Keeper_chat_transcript.revision turn_log.tl_transcript in
     let preludes = admission_preludes turn_log in
+    let media_items = Keeper_chat_transcript.drawn turn_log.tl_transcript
+      |> List.filter_map (fun (item : Keeper_chat_transcript.drawn_item) ->
+        match item.superseded, item.drawn with
+        | None, Drawn_media media -> Some (item.origin, media)
+        | Some _, _ | None, (Drawn_text _ | Drawn_reply _ | Drawn_thinking _
+          | Drawn_tools _ | Drawn_skill _ | Drawn_status _ | Drawn_error _) -> None) in
+    let uncovered = Masc_tui_types.generated_media_uncovered_by_rows
+      ~keeper_name:(Masc_tui_types.turn_log_keeper_name turn_log)
+      ~source:(Masc_tui_types.turn_log_execution_source turn_log)
+      ~generated:(List.map snd media_items) committed_messages in
+    let rec consume media = function
+      | [] -> None
+      | head :: tail when head=media -> Some tail
+      | head :: tail -> Option.map (List.cons head) (consume media tail) in
+    let _, covered_media = List.fold_left (fun (remaining, covered) (origin, media) ->
+      match consume media remaining with
+      | Some remaining -> remaining, covered
+      | None -> remaining, origin :: covered) (uncovered, []) media_items in
+    let covered_media = List.rev covered_media in
+    (* Coverage is derived again from the actual committed rows. A history
+       arrival invalidates this block even if the journal revision is unchanged.
+       Original transcript media and durable failure prose remain untouched. *)
     (* What the committed rows say about this log is the moment it sits at
-       and whether one of them is its error. The block's rows read those two
-       and nothing else of the conversation; where the block goes
+       and whether one of them is its error. Generated media also reads its
+       counted durable coverage; where the block goes
        ([insertion]) is a position, and an older page moving every row down
        moves it too without touching a row of the block. Keyed on the two
        values, a page landing keeps every block it did not change. *)
@@ -3199,6 +3224,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
            && memo.sbm_revision = revision
            && memo.sbm_member_ids = member_ids
            && memo.sbm_admission_preludes = preludes
+           && memo.sbm_covered_media = covered_media
            && Option.equal Float.equal memo.sbm_timeline_at timeline_at
            && Bool.equal memo.sbm_committed_error committed_error
            && memo.sbm_reasoning = state.msg_reasoning_visibility
@@ -3220,7 +3246,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
           block
         end
     | Some _ | None ->
-        let block = log_projection ~committed ~preludes turn_log in
+        let block = log_projection ~committed ~preludes ~covered_media turn_log in
         Hashtbl.replace settled_block_memo key
           { sbm_log = turn_log;
             sbm_committed = committed;
@@ -3228,6 +3254,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
             sbm_revision = revision;
             sbm_member_ids = member_ids;
             sbm_admission_preludes = preludes;
+            sbm_covered_media = covered_media;
             sbm_timeline_at = timeline_at;
             sbm_committed_error = committed_error;
             sbm_reasoning = state.msg_reasoning_visibility;

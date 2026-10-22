@@ -3493,7 +3493,7 @@
 (test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
- (libraries masc masc.masc_types masc_tui_keeper_chat_log masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
+ (libraries masc masc.agent_core masc_tui_chat_media masc.masc_types masc_tui_keeper_chat_log masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
   masc_tui_message_layout masc_tui_types))
 
 (test

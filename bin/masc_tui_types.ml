@@ -13309,6 +13309,21 @@ let log_draws_row (held : held_turn) (row : msg_entry) =
 (* The committed rows the pane still draws once these turns are held by
    settled logs: a turn has one source, and for a held turn that is the log.
    The same list when nothing is held, so the memo above it can tell. *)
+(* A partial journal may coexist with a durable failure or final output before
+   Reply_details arrives. Those rows retain their exact prose and media. Only
+   the same execution's persisted output occurrences can cover live media. *)
+let generated_media_uncovered_by_rows ~keeper_name ~source ~generated rows =
+  let persisted = rows |> List.concat_map (fun (row : msg_entry) ->
+    if row.me_keeper_name <> keeper_name || row.me_execution_source <> Some source then []
+    else match row.me_role with
+      | Message_keeper | Message_autonomous | Message_error | Message_status -> row.me_media
+      | Message_user _ | Message_tool | Message_skill _ | Message_thinking
+      | Message_local | Message_memory -> []) in
+  let _, _, uncovered = Masc_tui_chat_media.without_drawn_generated
+    ~covered:generated persisted [] in
+  uncovered
+;;
+
 let media_remainder_with_coverage ~diagrams ~generated (row : msg_entry) =
   match row.me_role, row.me_media with
   | (Message_keeper | Message_autonomous), (_ :: _ as media) ->

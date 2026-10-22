@@ -61,7 +61,7 @@ let scenario manifest fixture =
         ["Earlier observation.";"Continue\n\nwith this observation."]
         (match request.messages with [_;{role=Assistant;text=a};{role=User;text=b}] -> [a;b]
           | _ -> fail "original user/assistant/user history");
-      let attempt=Exact.run ~validate_request:(Server_lane_addon_exact.validate_request ~base_path) ~store:(Lane_addon_store.create ~root:(Filename.concat base_path "host-store"))
+      let attempt=Exact.run ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path) ~store:(Lane_addon_store.create ~root:(Filename.concat base_path "host-store"))
         ~declaration_id:"browser" ~package ~runner:(Server_lane_addon_exact.runner ~base_path) request |> ok in
       (match attempt with Exact.Final final -> deliver request (Exact.final_to_json final)
        | Not_final _ -> fail "loopback model did not finish");

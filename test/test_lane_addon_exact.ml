@@ -5,7 +5,9 @@ module Exact = Masc.Lane_addon_exact
 module Store = Masc.Lane_addon_store
 module Types = Masc.Lane_addon_types
 
-let validate_request ~store:_ ~declaration_id:_ ~package:_ _ = Ok (fun _ -> Ok ())
+let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
+  Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
+      validate_output=(fun _ -> Ok ())}
 
 let require = function Ok value -> value | Error error -> fail error
 
@@ -66,7 +68,7 @@ type step =
    host has retained so far for that request. *)
 let counting_runner store steps =
   let sends = ref 0 and seen = ref [] in
-  let runner ~lane_key ~schema:_ (request : Exact.request) =
+  let runner ~admission_class:_ ~lane_key ~schema:_ (request : Exact.request) =
     match !steps with
     | [] -> fail "the runner was asked more often than the test expected"
     | step :: rest ->
@@ -88,7 +90,7 @@ let counting_runner store steps =
   in
   runner, sends, seen
 
-let run_request store runner request = require (Exact.run ~validate_request ~store ~declaration_id ~package ~runner request)
+let run_request store runner request = require (Exact.run ~authorize_request ~store ~declaration_id ~package ~runner request)
 
 let attempts store id =
   match require (Store.load_exact_request store ~declaration_id ~request_id:id) with
@@ -175,7 +177,7 @@ let test_a_started_attempt_without_outcome_is_unknown () =
 let test_an_exception_ends_the_request_as_unknown () =
   with_root (fun root ->
     let store = Store.create ~root in
-    let runner ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ -> failwith "connection reset after send") in
+    let runner ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ -> failwith "connection reset after send") in
     check bool "an exception is Outcome_unknown" true (run_request store runner (request "r5") = Exact.Final Exact.Outcome_unknown);
     match attempts store "r5" with
     | [ attempt ] ->
@@ -195,7 +197,7 @@ let test_an_undeclared_output_is_not_allowed () =
       (run_request restarted runner (request "r6") = Exact.Final Exact.Request_id_reused);
     let allowed = {package with exact_outputs = [{Types.name="grade";schema;request_schema=Types.Package_schema_only}]} in
     check bool "the same denied request retains its final after permission changes" true
-      (match require (Exact.run ~validate_request ~store:restarted ~declaration_id ~package:allowed ~runner (request ~output:"grade" "r6")) with
+      (match require (Exact.run ~authorize_request ~store:restarted ~declaration_id ~package:allowed ~runner (request ~output:"grade" "r6")) with
        | Exact.Final (Exact.Not_allowed _) -> true | _ -> false);
     check int "without a send" 0 !sends)
 
@@ -204,7 +206,7 @@ let test_selection_hides_but_preserves_a_retained_answer () =
     let store = Store.create ~root in
     let runner, sends, _ = counting_runner store (ref [Answer question]) in
     ignore (run_request store runner (request "selected"));
-    let off request = require (Exact.run ~validate_request ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner request) in
+    let off request = require (Exact.run ~authorize_request ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner request) in
     check bool "permission does not mask a changed identity" true
       (off (request ~output:"grade" "selected") = Exact.Final Exact.Request_id_reused);
     check bool "disabled output does not disclose the original answer" true
@@ -221,7 +223,7 @@ let test_a_request_in_flight_is_not_run_twice () =
   with_root (fun root ->
     let entered, enter = Eio.Promise.create () in
     let released, release = Eio.Promise.create () in
-    let blocking ~lane_key:_ ~schema:_ _ =
+    let blocking ~admission_class:_ ~lane_key:_ ~schema:_ _ =
       Ok
         (fun ~validate ->
            Eio.Promise.resolve enter ();
@@ -251,14 +253,14 @@ let test_a_request_in_flight_is_not_run_twice () =
 let test_a_cancelled_call_leaves_its_attempt_started () =
   with_root (fun root ->
     let store = Store.create ~root in
-    let cancelled ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ -> raise (Eio.Cancel.Cancelled Exit)) in
-    (match Exact.run ~validate_request ~store ~declaration_id ~package ~runner:cancelled (request "r10") with
+    let cancelled ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ -> raise (Eio.Cancel.Cancelled Exit)) in
+    (match Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:cancelled (request "r10") with
      | _ -> fail "a cancellation must reach the caller"
      | exception Eio.Cancel.Cancelled _ -> ());
     check bool "the started attempt stays" true (attempts store "r10" = [ `Null ]);
     let runner, sends, _ = counting_runner store (ref []) in
     check bool "disabled output refuses delivery of an unresolved attempt" true
-      (match require (Exact.run ~validate_request ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner (request "r10")) with
+      (match require (Exact.run ~authorize_request ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner (request "r10")) with
        | Exact.Final (Exact.Not_allowed _) -> true | _ -> false);
     check bool "the next run reads it as unknown, so the claim was released" true
       (run_request store runner (request "r10") = Exact.Final Exact.Outcome_unknown);
@@ -280,7 +282,7 @@ let test_a_retained_answer_is_checked_against_the_schema_declared_now () =
                   ; "properties", `Assoc [ "question", `Assoc [ "type", `String "integer" ] ]
                   ; "additionalProperties", `Bool false ] } ] }
     in
-    (match require (Exact.run ~validate_request ~store ~declaration_id ~package:changed ~runner (request "r11")) with
+    (match require (Exact.run ~authorize_request ~store ~declaration_id ~package:changed ~runner (request "r11")) with
      | Exact.Final (Exact.Call_final (Exact.Invalid_output _)) -> ()
      | _ -> fail "an answer retained under the old schema must not be delivered as answered");
     check int "and the provider is not called again" 1 !sends;
@@ -290,7 +292,7 @@ let test_an_outcome_that_cannot_be_written_stays_unknown () =
   with_root (fun root ->
     let store = Store.create ~root in
     let directory = Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
-    let locking ~lane_key:_ ~schema:_ _ =
+    let locking ~admission_class:_ ~lane_key:_ ~schema:_ _ =
       Ok
         (fun ~validate ->
            Unix.chmod directory 0o500;
@@ -298,7 +300,7 @@ let test_an_outcome_that_cannot_be_written_stays_unknown () =
            | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None })
            | Error detail -> fail detail)
     in
-    let result = Exact.run ~validate_request ~store ~declaration_id ~package ~runner:locking (request "r12") in
+    let result = Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:locking (request "r12") in
     Unix.chmod directory 0o700;
     check bool "the run reports the failed write" true (Result.is_error result);
     let runner, sends, _ = counting_runner store (ref []) in
@@ -356,7 +358,7 @@ let consumer_schema = `Assoc ["$schema",`String "https://json-schema.org/draft/2
     `Assoc ["type",`String "string"];`Assoc ["type",`String "null"]]]]]
 let consumer_package = {package with exact_outputs=[{
   Types.name="author";schema;request_schema=Types.Consumer_request_schema}]}
-let consumer_run store runner request = require (Exact.run ~validate_request ~store ~declaration_id
+let consumer_run store runner request = require (Exact.run ~authorize_request ~store ~declaration_id
   ~package:consumer_package ~runner request)
 
 let test_request_schema_authority_and_retention () =
@@ -384,7 +386,7 @@ let test_request_schema_is_provider_requirement_not_baseline_replacement () =
   with_root (fun root ->
     let store=Store.create ~root in
     let sent_schema=ref None in
-    let runner ~lane_key:_ ~schema _request =
+    let runner ~admission_class:_ ~lane_key:_ ~schema _request =
       sent_schema:=Some schema;
       Ok (fun ~validate -> match validate (`Assoc ["question",`Null]) with
         | Ok output -> Exact.Call_ended (Answered {output;slot="fixture";usage=None})
@@ -447,7 +449,7 @@ let test_observe_missing_and_original_terminal_without_another_call ()=with_root
 let test_observe_started_is_open_while_provider_is_running ()=with_root (fun root ->
   let store=Store.create ~root in
   let original=request "readonly-running" in
-  let runner ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
+  let runner ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
     let before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
     check bool "actual provider's started record remains open" true
       (require (observe (Store.create ~root) original)=Exact.Retained_open);
@@ -458,16 +460,16 @@ let test_observe_started_is_open_while_provider_is_running ()=with_root (fun roo
 let test_observe_exception_and_later_denial_preserves_original ()=with_root (fun root ->
   let store=Store.create ~root in
   let original=request "readonly-exception" in
-  let runner ~lane_key:_ ~schema:_ _=Ok (fun ~validate:_ -> raise Exit) in
+  let runner ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate:_ -> raise Exit) in
   ignore (run_request store runner original);
   let hidden={package with exact_outputs=[]} in
-  ignore (require (Exact.run ~validate_request ~store ~declaration_id ~package:hidden ~runner original));
+  ignore (require (Exact.run ~authorize_request ~store ~declaration_id ~package:hidden ~runner original));
   check bool "exception evidence and denial audit do not replace the original unknown" true
     (require (observe (Store.create ~root) original)=Exact.Retained_terminal Exact.Outcome_unknown);
   let valid=request "readonly-denied-answer" in
   let answer,_,_=counting_runner store (ref [Answer question]) in
   ignore (run_request store answer valid);
-  ignore (require (Exact.run ~validate_request ~store ~declaration_id ~package:hidden ~runner:answer valid));
+  ignore (require (Exact.run ~authorize_request ~store ~declaration_id ~package:hidden ~runner:answer valid));
   check bool "host observation is the original answer, not package redelivery" true
     (match require (observe store valid) with
      | Exact.Retained_terminal (Exact.Call_final (Exact.Answered {output;_})) -> Exact.checked_json output=question
@@ -481,7 +483,7 @@ let test_observe_interrupted_attempt_with_later_denial ()=with_root (fun root ->
     "attempts",`List [`Null];"final",`Null]));
   check bool "read alone leaves the interrupted attempt open" true (require (observe store original)=Exact.Retained_open);
   let runner,sends,_=counting_runner store (ref []) in
-  ignore (require (Exact.run ~validate_request ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner original));
+  ignore (require (Exact.run ~authorize_request ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner original));
   check bool "existing producer can retain unknown with a later denial after the null attempt" true
     (require (observe store original)=Exact.Retained_terminal Exact.Outcome_unknown);
   check int "observing recovery never sends again" 0 !sends)
@@ -506,6 +508,79 @@ let test_observe_rejects_malformed_identity_attempts_and_schema ()=with_root (fu
   let granted=request ~schema "readonly-granted" in
   check bool "a supplied schema cannot weaken the original request grant" true
     (Result.is_error (Exact.observe_retained ~store ~declaration_id ~schema:(`Assoc ["type",`String "string"]) granted)))
+
+let test_host_admission_class_is_forwarded admission_class () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request "host-policy" in
+    let expected_wire=Exact.request_to_json original and expected_digest=Exact.digest original in
+    let observed=ref [] in
+    let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
+      Ok {Exact.admission_class; validate_output=(fun _ -> Ok ())} in
+    let runner ~admission_class ~lane_key:_ ~schema:_ _ =
+      observed:=admission_class :: !observed;
+      Ok (fun ~validate ->
+        match validate question with
+        | Ok output -> Exact.Call_ended (Exact.Answered {output;slot="host-slot";usage=None})
+        | Error detail -> fail detail) in
+    check bool "host-authorized request answers" true
+      (answered_with question (require (Exact.run ~store ~declaration_id ~package
+        ~authorize_request ~runner original)));
+    check bool "the broker forwards the host's exact typed class" true (!observed=[admission_class]);
+    let stored=match require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) with
+      | Some stored -> stored | None -> fail "original execution record was not retained" in
+    check bool "host policy does not change the retained worker request" true
+      (Yojson.Safe.equal expected_wire (Yojson.Safe.Util.member "request" stored));
+    check string "host policy does not change the retained request digest" expected_digest
+      (Yojson.Safe.Util.member "digest" stored |> Yojson.Safe.Util.to_string))
+
+let test_retained_delivery_rechecks_host_authority () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request "fresh-host-authority" in
+    let permitted=ref true and checks=ref 0 in
+    let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
+      incr checks;
+      if !permitted then
+        Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
+            validate_output=(fun _ -> Ok ())}
+      else Error "original host authority is unavailable" in
+    let runner,sends,_=counting_runner store (ref [Answer question]) in
+    let execute store = Exact.run ~store ~declaration_id ~package ~authorize_request ~runner original in
+    check bool "original answers" true (answered_with question (require (execute store)));
+    let original_record=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
+    permitted:=false;
+    let reopened=Store.create ~root in
+    check bool "reopened retained delivery needs fresh host authority" true (Result.is_error (execute reopened));
+    check bool "authority refusal preserves the complete original result" true
+      (original_record=require (Store.load_exact_request reopened ~declaration_id ~request_id:original.request_id));
+    permitted:=true;
+    check bool "restored authority delivers the original answer" true
+      (answered_with question (require (execute reopened)));
+    check int "authority is read on every new and retained request" 3 !checks;
+    check int "retained delivery never resolves or runs another provider" 1 !sends;
+    check bool "successful replay preserves the original record too" true
+      (original_record=require (Store.load_exact_request reopened ~declaration_id ~request_id:original.request_id)))
+
+let test_authority_refusal_does_not_start_a_request () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request "host-refused-before-start" in
+    let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ = Error "original binding refused" in
+    let runner ~admission_class:_ ~lane_key:_ ~schema:_ _ = fail "refused original reached the runner" in
+    check bool "new request preserves host refusal" true
+      (Result.is_error (Exact.run ~store ~declaration_id ~package ~authorize_request ~runner original));
+    check bool "no admission or started record was published" true
+      (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)=None))
+
+let test_worker_cannot_select_admission_policy () =
+  let original=request "untrusted-policy" in
+  let fields=match Exact.request_to_json original with
+    | `Assoc fields -> fields | _ -> fail "expected original request object" in
+  List.iter (fun field ->
+    check bool "worker policy field is not accepted as permission" true
+      (Result.is_error (Exact.request_of_json (`Assoc ((field,`String "background")::fields)))))
+    ["priority";"admission_class"]
 
 let () =
   run "lane add-on exact requests"
@@ -539,4 +614,11 @@ let () =
         ; test_case "started provider remains open during a read" `Quick test_observe_started_is_open_while_provider_is_running
         ; test_case "exception and denial audit preserve the original terminal" `Quick test_observe_exception_and_later_denial_preserves_original
         ; test_case "interrupted started marker and denial audit remain valid" `Quick test_observe_interrupted_attempt_with_later_denial
-        ; test_case "strict original identity attempt and schema validation" `Quick test_observe_rejects_malformed_identity_attempts_and_schema ] ) ]
+        ; test_case "strict original identity attempt and schema validation" `Quick test_observe_rejects_malformed_identity_attempts_and_schema
+        ; test_case "trusted Background reaches the runner" `Quick
+            (test_host_admission_class_is_forwarded Agent_core.Llm_provider.Admission_class.Background)
+        ; test_case "trusted Standard reaches the runner" `Quick
+            (test_host_admission_class_is_forwarded Agent_core.Llm_provider.Admission_class.Standard)
+        ; test_case "retained delivery rechecks authority without replacing original" `Quick test_retained_delivery_rechecks_host_authority
+        ; test_case "host refusal prevents a new admission and dispatch" `Quick test_authority_refusal_does_not_start_a_request
+        ; test_case "worker wire cannot select admission policy" `Quick test_worker_cannot_select_admission_policy ] ) ]

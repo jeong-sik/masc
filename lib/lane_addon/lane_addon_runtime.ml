@@ -250,8 +250,8 @@ let delivery_handler = ref None
 let register_delivery_handler handler = delivery_handler := Some handler
 let sampling_factory = ref None
 let register_sampling_factory factory = sampling_factory := Some factory
-let exact_runner : (Lane_addon_exact.runner * Lane_addon_exact.validation_authority) option ref = ref None
-let register_exact_runner ~validate_request runner = exact_runner := Some (runner, validate_request)
+let exact_runner : (Lane_addon_exact.runner * Lane_addon_exact.execution_authority) option ref = ref None
+let register_exact_runner ~authorize_request runner = exact_runner := Some (runner, authorize_request)
 let github_reader : Lane_addon_records.github ref = ref (fun ~repository_id:_ -> Error "this host has no GitHub reader")
 let register_github_reader reader = github_reader := reader
 let prepare_sampling_handler ~sw ~store ~instance_id ~(package : package) ~binding =
@@ -964,7 +964,7 @@ let run_host_cycle m e (port : host_port) =
               (* A manual Attach has no declaration id, so it owns no add-on lane. *)
               Ok (Lane_addon_exact.Not_final (Lane_addon_exact.Lane_unavailable Lane_addon_exact.Lane_unconfigured))
           | Some _, None -> Error No_exact_runner
-          | Some owner, Some (runner, validate_request) ->
+          | Some owner, Some (runner, authorize_request) ->
              let result =
                try Eio.Cancel.sub (fun cancellation ->
                  e.cancel_exact <- Some (Eio.Cancel.cancel cancellation);
@@ -984,7 +984,7 @@ let run_host_cycle m e (port : host_port) =
                             Lane_addon_host_request.request_id request=exact.Lane_addon_exact.request_id) requests)
                         then raise Host_cycle_stopped else Ok () in
                    Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package
-                     ~runner ~validate_request exact))
+                     ~runner ~authorize_request exact))
                with Eio.Cancel.Cancelled (Worker_detached | Host_request_withdrawn) ->
                  (* Consume only retirement/withdrawal of this exact call. Worker/root
                     cancellation must still propagate through this boundary. *)

@@ -148,19 +148,33 @@ type call = validate:(Yojson.Safe.t -> (checked, string) result) -> call_outcome
     declared schema. Raising other than [Eio.Cancel.Cancelled] is recorded as
     [Outcome_unknown]. *)
 
-type runner = lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
+type runner = admission_class:Agent_core.Llm_provider.Admission_class.t ->
+  lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
 (** Resolves the add-on lane [lane_key] for the permitted provider [schema]
     (package baseline or request schema). The supplied [validate] still checks
-    the package baseline independently. It sends nothing; the returned [call] does. *)
+    the package baseline independently. [admission_class] comes only from the
+    trusted host authority for this original request and is retained by the
+    returned call, never selected by worker data. It governs the HTTP Exact
+    flow, not an official client's separate process admission.
+    It sends nothing; the returned [call] does. *)
 
-type validation_authority =
+type output_validator = Yojson.Safe.t -> (unit, string) result
+type request_authorization = {
+  admission_class : Agent_core.Llm_provider.Admission_class.t;
+  validate_output : output_validator;
+}
+type execution_authority =
   store:Lane_addon_store.t -> declaration_id:string -> package:Lane_addon_types.package ->
-  request -> (Yojson.Safe.t -> (unit, string) result, string) result
-(** Trusted host binding to an original consumer's pure domain validator.
-    Resolution may read host-owned state; the returned validator must perform
-    no effects. A worker cannot supply this port or disable it through Hooks.
+  request -> (request_authorization, string) result
+(** Trusted host binding to an original consumer's pure domain validator and
+    execution admission policy. Resolution may read host-owned state; the
+    returned validator must perform no effects. Both fields belong to the same
+    verified original request. Worker package/lane names are not policy grants.
+    A worker cannot supply this port or disable it through Hooks.
     [Error] refuses both dispatch and delivery without replacing the original
-    result. Authority is resolved again on every [run], including replay. *)
+    result. Authority is resolved again on every [run], including replay;
+    delivering a retained result never invokes the runner. The authorization is
+    not serialized into the worker request or a durable admission-class audit. *)
 
 type retained_observation = Retained_absent | Retained_open | Retained_terminal of final
 val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
@@ -185,7 +199,7 @@ val run :
   declaration_id:string ->
   package:Lane_addon_types.package ->
   runner:runner ->
-  validate_request:validation_authority ->
+  authorize_request:execution_authority ->
   request ->
   (attempt, string) result
 (** Request-schema permission is checked before dispatch and delivery without

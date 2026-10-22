@@ -6,10 +6,12 @@ val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
-val register_exact_runner : validate_request:Lane_addon_exact.validation_authority -> Lane_addon_exact.runner -> unit
-(** Server-owned runner and mandatory consumer-validation authority for packages'
+val register_exact_runner : authorize_request:Lane_addon_exact.execution_authority -> Lane_addon_exact.runner -> unit
+(** Server-owned runner and mandatory host execution authority for packages'
     exact-output requests, registered together before
-    configuration maintenance. Without it a declared installation's exact
+    configuration maintenance. The authority binds the pure output validator
+    and typed admission class to the original request; worker data cannot select
+    provider priority. Without it a declared installation's exact
     request ends its host request cycle with [no_exact_runner]. Retirement
     cancels its current exact call independently of worker cleanup; a pending
     provider outcome is not replayed and no later request is dispatched. *)

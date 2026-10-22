@@ -1,4 +1,8 @@
 (** Frame-bounded delivery of a host result, with durable request-bound recovery. *)
+val arguments_bytes : Yojson.Safe.t -> int
+(** The size the worker frame bounds (RFC-0471 row 1): an arguments object the
+    host sends, as compact JSON bytes. The package's [max_reply_bytes] is the
+    largest value a worker connection accepts. *)
 type owner = { instance_id : string; authority : Yojson.Safe.t }
 type error = Refused of string | Storage_failed of string
 val restore :

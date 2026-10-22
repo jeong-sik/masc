@@ -32,10 +32,17 @@ let resolve ~config ~reserved =
 let same_semantic_destination (actual:Runtime.tool_request_destination) (expected:Capture.destination) =
   actual.installation_id=expected.installation_id && actual.package_id=expected.package_id
   && actual.tool=expected.tool && actual.configuration_revision=expected.configuration_revision
-let capture ~config make =
+let destination ~config =
   let reserved=reserved () in
   let* export=resolve ~config ~reserved in
-  let request_id=Capture.Request_id.fresh () in
+  Runtime.with_tool_request_destination ~config ~access:Lane_addon_sources.Operator_configuration
+    ~reserved ~export ~publish:(fun destination -> Ok destination) |> Result.map_error runtime_error
+let captured_destination (destination : Runtime.tool_request_destination) : Capture.destination = {
+  installation_id=destination.installation_id;package_id=destination.package_id;tool=destination.tool;
+  source_revision=destination.source_revision;configuration_revision=destination.configuration_revision}
+let capture ~config ~request_id make =
+  let reserved=reserved () in
+  let* export=resolve ~config ~reserved in
   let* workspace=Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path:config.Workspace.base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
   Runtime.capture_tool_request_owner ~config ~access:Lane_addon_sources.Operator_configuration ~reserved ~export
@@ -43,22 +50,25 @@ let capture ~config make =
     ~capture:(fun (destination : Runtime.tool_request_destination) ->
       let* ()=if destination.package_id=Binding.package_id && destination.tool=Binding.tool then Ok ()
         else Error "Curator capture requires its declared package and tool" in
-      let destination : Capture.destination = {
-        installation_id=destination.installation_id;package_id=destination.package_id;tool=destination.tool;
-        source_revision=destination.source_revision;configuration_revision=destination.configuration_revision} in
-      let* capture=make ~request_id ~workspace ~destination in
+      let* capture=make ~workspace ~destination in
       Ok (capture,Capture.to_json capture)) |> Result.map_error runtime_error
-let capture_classification ~config ~prompt ~ledger ~batch =
-  capture ~config (fun ~request_id ~workspace ~destination ->
-    Capture.classification ~request_id ~workspace ~destination ~prompt ~ledger ~batch)
+let capture_classification ~config ~request_id ~prompt ~ledger ~batch =
+  capture ~config ~request_id (fun ~workspace ~destination ->
+    let* capture=Capture.classification ~request_id ~workspace ~destination:(captured_destination destination)
+      ~prompt ~ledger ~batch in
+    (* The batch was sized against this destination's frame before capture.
+       A package changed since then is refused here; the next pass sizes again. *)
+    let* ()=Binding.check_frame ~max_reply_bytes:destination.max_reply_bytes capture in
+    Ok capture)
 let capture_briefing ~config ~prompt ~batch =
   let* current=Eio_unix.run_in_systhread (fun () ->
     Briefing.load ~directory:(Ledger.directory ~base_path:config.Workspace.base_path))
     |> Result.map_error (fun detail -> Unavailable detail) in
   let* ()=if Yojson.Safe.equal (Briefing.to_json current) (Briefing.to_json (Briefing.prepared_state batch))
     then Ok () else Error (Rejected "Confirm the original prepared briefing state before capturing model work") in
-  capture ~config (fun ~request_id ~workspace ~destination ->
-    Capture.briefing ~request_id ~workspace ~destination ~prompt ~batch)
+  let request_id=Capture.Request_id.fresh () in
+  capture ~config ~request_id (fun ~workspace ~destination ->
+    Capture.briefing ~request_id ~workspace ~destination:(captured_destination destination) ~prompt ~batch)
 
 type wait = Capacity | Worker_pending | Worker_unknown | Missing_after_dispatch | Journal_recheck
 type result =
@@ -162,7 +172,7 @@ let resume_with ~store ~base_path ~request_id ~call =
     | Acknowledged record -> Ok (Awaiting (Journal_recheck,record))
     | New original ->
       let* request=rejected (Binding.request capture) in
-      let submit=`Assoc ["kind",`String "submit";"request",Exact.request_to_json request] in
+      let submit=Binding.submit request in
       (match invoke submit with
        | Ok (state,evidence) -> received original ~submission:true state evidence
        | Error error ->

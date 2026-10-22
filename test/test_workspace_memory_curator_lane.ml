@@ -179,9 +179,11 @@ let capture_classification config =
   let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
     prompt ["workspace_memory_changes",Yojson.Safe.to_string input] in
   let batch=match Request.prepare ~neighbor_limit:0 ~render ~ledger:change.ledger
-    ~current:change.current_facts ~pending:change.new_facts |> Result.map_error Request.error_to_string |> get with
+    ~current:change.current_facts ~pending:change.new_facts ~frame:max_int ~measure:(fun _ -> Ok 0)
+    |> Result.map_error Request.error_to_string |> get with
     | Some batch -> batch | None -> fail "fixture requires pending classification" in
-  Consumer.capture_classification ~config ~prompt ~ledger:change.ledger ~batch |> consumed
+  Consumer.capture_classification ~config ~request_id:(Capture.Request_id.fresh ()) ~prompt
+    ~ledger:change.ledger ~batch |> consumed
 let original_record store capture =
   match owned (Owner.load ~store ~scope:Capture.scope ~request_id:(Capture.Request_id.to_string (Capture.request_id capture))) with
   | Some record -> record | None -> fail "public capture did not retain its original"
@@ -392,6 +394,28 @@ let test_existing_intent_recovers_locally_off_then_runs_on ()=
       && ready_summary base_path && Curator.For_testing.is_idle ~base_path);
     check bool "original child ID completes after actual reattachment" true
       (List.exists (fun record -> record.Owner.request_id=intent.request_id && is_finished record) (records store)))
+let test_capture_refuses_a_batch_over_the_destination_frame ()=
+  with_fixture ~start_owner:false
+    (fun ~sw:_ ~clock ~base_path:_ ~config ~store ~source:_ ~declaration:_ ~server:_ ~urls:_ ~mode:_ ~delivery:_ ->
+    await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
+    let (destination : Runtime.tool_request_destination)=Consumer.destination ~config |> consumed in
+    (* One claim longer than the declared frame, prepared without one, as a
+       batch sized before the package changed would be. *)
+    let claim=String.make (destination.max_reply_bytes+1) 'x' in
+    let fact : Ledger.pending_fact={fact=Ledger.Ordinary {keeper_id="writer";claim_sha256=Store.digest claim};claim} in
+    let prompt=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_curator in
+    let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
+      prompt ["workspace_memory_changes",Yojson.Safe.to_string input] in
+    let batch=match Request.prepare ~neighbor_limit:0 ~render ~ledger:Ledger.empty ~current:[fact] ~pending:[fact]
+        ~frame:max_int ~measure:(fun _ -> Ok 0) |> Result.map_error Request.error_to_string |> get with
+      | Some batch -> batch | None -> fail "expected one pending classification" in
+    let request_id=Capture.Request_id.fresh () in
+    (match Consumer.capture_classification ~config ~request_id ~prompt ~ledger:Ledger.empty ~batch with
+     | Error (Consumer.Rejected _) -> ()
+     | Ok _ | Error (Consumer.Unavailable _ | Consumer.Uncertain _) ->
+       fail "a classification over the destination frame was captured");
+    check bool "a refused capture retains nothing" true
+      (owned (Owner.load ~store ~scope:Capture.scope ~request_id:(Capture.Request_id.to_string request_id))=None))
 let test_accepted_host_terminal_commits_off_without_worker ()=
   let response_error=ref None in
   with_fixture ~start_owner:false
@@ -690,9 +714,10 @@ let test_successor_frontier_ignores_an_old_semantic_destination ()=
     let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
       prompt ["workspace_memory_changes",Yojson.Safe.to_string input] in
     let batch=match Request.prepare ~neighbor_limit:0 ~render ~ledger:change.ledger ~current:change.current_facts ~pending
-        |> Result.map_error Request.error_to_string |> get with
+        ~frame:max_int ~measure:(fun _ -> Ok 0) |> Result.map_error Request.error_to_string |> get with
       | Some batch -> batch | None -> fail "expected disjoint current pending work" in
-    let current_capture=Consumer.capture_classification ~config ~prompt ~ledger:change.ledger ~batch |> consumed in
+    let current_capture=Consumer.capture_classification ~config ~request_id:(Capture.Request_id.fresh ()) ~prompt
+        ~ledger:change.ledger ~batch |> consumed in
     ignore (seed_size_refusal store current_capture);
     check bool "retained candidates carry different actual semantic revisions" true
       ((Capture.destination old_capture).configuration_revision<>(Capture.destination current_capture).configuration_revision);
@@ -839,6 +864,8 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "new child rejects changed canonical worker inputs" `Quick test_new_child_rejects_changed_worker_inputs;
   test_case "existing successor intent recovers locally Off and completes after On" `Quick test_existing_intent_recovers_locally_off_then_runs_on;
   test_case "accepted retained host terminal commits Off without another provider" `Quick test_accepted_host_terminal_commits_off_without_worker;
+  test_case "capture refuses a classification over the destination frame" `Quick
+    test_capture_refuses_a_batch_over_the_destination_frame;
   test_case "idle subscription observes queued and already completed wakes" `Quick test_idle_barrier_has_no_lost_wake;
   test_case "idle subscription cancellation and owner stop preserve other waiters" `Quick test_idle_barrier_cancel_and_stop;
   test_case "Briefing successor observes the guarded live contract without publication" `Quick

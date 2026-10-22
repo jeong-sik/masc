@@ -7,6 +7,10 @@ type error =
   | Render_failed of string
   | Index_unavailable of string
   | Invalid_batch of string
+  | Measure_failed of string
+  | Exceeds_frame of { fact : Workspace_memory_ledger.fact_ref; bytes : int; frame : int }
+      (** The oldest pending fact with its neighbors alone measures [bytes],
+          over the receiving Add-on's declared [frame]. *)
 
 val error_to_string : error -> string
 
@@ -57,12 +61,20 @@ val prepare
   -> ledger:Workspace_memory_ledger.t
   -> current:Workspace_memory_ledger.pending_fact list
   -> pending:Workspace_memory_ledger.pending_fact list
+  -> frame:int
+  -> measure:(batch -> (int, string) result)
   -> (batch option, error) result
-(** Prepare every pending fact in the given order ({!Workspace_memory_ledger.reconcile}
-    gives its new facts oldest first), with BM25-ranked facts
-    from other Keepers in [current]. One transient SQLite index serves all
-    queries; the complete prompt is rendered once, without estimating provider
-    input capacity. [neighbor_limit] bounds retrieval results and may be zero.
+(** Prepare the longest prefix of [pending] whose request fits [frame], the
+    receiving Add-on's declared worker frame. [measure] gives the bytes the
+    host would send for a batch. The prefix keeps the given order
+    ({!Workspace_memory_ledger.reconcile} gives its new facts oldest first).
+    Each fact gets BM25-ranked facts from other Keepers in [current], bounded
+    by [neighbor_limit] (which may be zero). The size doubles from one fact
+    until it does not fit, then bisects. Ranking stops at the first size that
+    does not fit, so at most twice the chosen facts are ranked, each once:
+    the work follows the batch, not the backlog. [index_stats] counts every
+    ranking that ran. This is the
+    declared protocol frame, not an estimate of provider input capacity.
     No pending facts return [Ok None] without building an index or rendering a
     prompt. *)
 

@@ -36,7 +36,8 @@ let fact keeper claim : L.pending_fact =
 let classification workspace =
   let a = fact "writer" "Complete source evidence A" and b = fact "writer" "Complete source evidence B" in
   let render = render Prompt_names.workspace_memory_curator "workspace_memory_changes" classification_prompt in
-  let full = some (requested (R.prepare ~neighbor_limit:0 ~render ~ledger:L.empty ~current:[a;b] ~pending:[a;b])) in
+  let full = some (requested (R.prepare ~neighbor_limit:0 ~render ~ledger:L.empty ~current:[a;b] ~pending:[a;b]
+      ~frame:max_int ~measure:(fun _ -> Ok 0))) in
   let batch = some (requested (R.narrow ~render ~ledger:L.empty full)) in
   a,b,batch,get (C.classification ~request_id:id ~workspace ~destination ~prompt:classification_prompt ~ledger:L.empty ~batch)
 let retain ?(scope=C.scope) ?(installation_id=destination.installation_id) ?(tool=destination.tool)

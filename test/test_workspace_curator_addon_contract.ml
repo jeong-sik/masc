@@ -39,6 +39,7 @@ let capture ~base_path domain =
     let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
       prompt ["workspace_memory_changes",Yojson.Safe.to_string input] in
     let batch=match Request.prepare ~neighbor_limit:0 ~render ~ledger:Ledger.empty ~current:[fact] ~pending:[fact]
+        ~frame:max_int ~measure:(fun _ -> Ok 0)
       |> Result.map_error Request.error_to_string |> get with
       | Some batch -> batch | None -> fail "expected an original classification batch" in
     let capture=get (Capture.classification ~request_id ~workspace ~destination ~prompt ~ledger:Ledger.empty ~batch) in
@@ -329,6 +330,21 @@ let test_repeated_observation_retains_original_history_without_another_fact () =
     check bool "return to pending after uncertainty is another fact" false
       (Yojson.Safe.equal absent (observation pending)))
 
+let test_classification_is_measured_as_the_submit_it_sends () =
+  let base_path=Filename.temp_dir "curator-addon-frame-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let capture,_,_=capture ~base_path Classification in
+    let batch=match Capture.work capture with
+      | Capture.Classification {batch;_} -> batch
+      | Capture.Briefing _ -> fail "expected a classification capture" in
+    let sent=Lane_addon_host_delivery.arguments_bytes (Binding.submit (get (Binding.request capture))) in
+    check int "the size measured before capture is the submit the host sends" sent
+      (get (Binding.classification_submit_bytes ~request_id:(Capture.request_id capture) batch));
+    check bool "a submit that fills the frame exactly is accepted" true
+      (Result.is_ok (Binding.check_frame ~max_reply_bytes:sent capture));
+    check bool "a submit one byte over the frame is refused" true
+      (Result.is_error (Binding.check_frame ~max_reply_bytes:(sent-1) capture)))
+
 let () = run "Workspace Curator actual worker and common Exact contract" ["original requests",[
   test_case "classification survives worker restart and full semantic HTTP acceptance" `Quick (scenario Classification);
   test_case "briefing retains its original partial pass across worker and host reads" `Quick (scenario Briefing);
@@ -339,4 +355,6 @@ let () = run "Workspace Curator actual worker and common Exact contract" ["origi
   test_case "original output limit survives without worker replay or a domain judgment" `Quick
     test_original_output_limit_is_retained_without_worker_replay_or_a_judgment;
   test_case "equal pending unknown and absent observations do not grow original history" `Quick
-    test_repeated_observation_retains_original_history_without_another_fact]]
+    test_repeated_observation_retains_original_history_without_another_fact;
+  test_case "classification is measured as the submit it sends and refused over the frame" `Quick
+    test_classification_is_measured_as_the_submit_it_sends]]

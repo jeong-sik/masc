@@ -16,7 +16,8 @@ let source_id = function
 let nullable value = Option.fold ~none:`Null ~some:(fun text -> `String text) value
 let storage result = Result.map_error (fun detail -> Storage_failed detail) result
 let wrap request_id result = Lane_addon_host_request.result_arguments ~request_id ~result
-let fits ~max_bytes value = String.length (Yojson.Safe.to_string value) <= max_bytes
+let arguments_bytes value = String.length (Yojson.Safe.to_string value)
+let fits ~max_bytes value = arguments_bytes value <= max_bytes
 
 let snapshot_json (snapshot : Fs_compat.owned_regular_file_snapshot) = `Assoc [
   "device", `Int snapshot.device; "inode", `Int snapshot.inode;

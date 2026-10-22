@@ -6,17 +6,38 @@ let ( let* ) = Result.bind
 let package_id = Capture.package_id
 let tool = Capture.tool
 
-let request capture =
-  let output = match Capture.work capture with
-    | Capture.Classification _ -> "classification"
-    | Capture.Briefing _ -> "briefing" in
+let classification_output = "classification"
+let briefing_output = "briefing"
+
+let exact_request ~request_id ~output ~rendered_prompt ~schema =
   Exact.request_of_json (`Assoc [
     "kind", `String "exact_output";
-    "request_id", `String (Capture.Request_id.to_string (Capture.request_id capture));
+    "request_id", `String (Capture.Request_id.to_string request_id);
     "output", `String output;
-    "messages", `List [`Assoc ["role", `String "user";
-      "text", `String (Capture.rendered_prompt capture)]];
-    "schema", Capture.output_schema capture])
+    "messages", `List [`Assoc ["role", `String "user"; "text", `String rendered_prompt]];
+    "schema", schema])
+
+let request capture =
+  let output = match Capture.work capture with
+    | Capture.Classification _ -> classification_output
+    | Capture.Briefing _ -> briefing_output in
+  exact_request ~request_id:(Capture.request_id capture) ~output
+    ~rendered_prompt:(Capture.rendered_prompt capture) ~schema:(Capture.output_schema capture)
+
+let submit request = `Assoc ["kind", `String "submit"; "request", Exact.request_to_json request]
+
+let classification_submit_bytes ~request_id (batch : Workspace_memory_request.batch) =
+  let* request = exact_request ~request_id ~output:classification_output
+      ~rendered_prompt:batch.rendered_prompt ~schema:Workspace_memory_decision.output_schema in
+  Ok (Lane_addon_host_delivery.arguments_bytes (submit request))
+
+let check_frame ~max_reply_bytes capture =
+  let* request = request capture in
+  let bytes = Lane_addon_host_delivery.arguments_bytes (submit request) in
+  if bytes <= max_reply_bytes then Ok ()
+  else Error (Printf.sprintf
+    "Curator request arguments measure %d bytes; the receiving Add-on declares a %d-byte frame"
+    bytes max_reply_bytes)
 
 let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.package)
     (exact : Exact.request) =

@@ -1335,7 +1335,7 @@ let clip_tool_result ~max_cells text =
     | prefix :: _ -> prefix ^ "…"
 
 
-let tool_result_preview ~failed (activity : Keeper_chat_transcript.tool_activity) value =
+let tool_result_preview (activity : Keeper_chat_transcript.tool_activity) value =
   match Keeper_chat_transcript.descriptor_of_tool_name activity.Keeper_chat_transcript.tool_name with
   | Some descriptor
     when descriptor.runtime_handler = Masc.Keeper_tool_descriptor.Tool_execute ->
@@ -1352,11 +1352,7 @@ let tool_result_preview ~failed (activity : Keeper_chat_transcript.tool_activity
              (List.filter (fun text -> String.trim text <> "")
                 [ Masc_tui_execute_result.status_text result; output ])
        | None -> value)
-  | Some _ | None ->
-      Masc_tui_browser_rejection.preview ~failed
-        ~lacking:(fun transport capability ->
-          Browser_lane_view.lacking_clause transport [capability])
-        value
+  | Some _ | None -> value
 
 
 let tool_result_rows state ~keeper_name ~max_cells projection =
@@ -1364,9 +1360,6 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
     List.concat_map
       (fun (activity : Keeper_chat_transcript.tool_activity) ->
         let association = keeper_call_association state ~keeper_name activity in
-        (* Exact durable failure wins over a transcript that has not been
-           enriched yet. Receipt otherwise makes no success claim. *)
-        let durable_failure = durable_call_failed association in
         let result_state = Call_evidence.result_state activity.outcome association in
         let marker = Call_evidence.result_marker result_state in
         let status = Call_evidence.result_label result_state in
@@ -1383,9 +1376,7 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
         let preview, unavailable =
           match association with
           | Call_execution_exact call ->
-              let failed =
-                durable_failure || activity.outcome = Keeper_chat_transcript.Failed in
-              Option.map (tool_result_preview ~failed activity) call.kc_output,
+              Option.map (tool_result_preview activity) call.kc_output,
               "result text not recorded"
           | Call_log_not_loaded -> None, "result preview not loaded"
           | Call_log_loading -> None, "loading result preview"

@@ -82,7 +82,10 @@ let verb_of_json ~route value =
   | "page.network" -> one_tab (fun tab_id -> B.Page_network {tab_id})
   | "page.cookies" -> one_tab (fun tab_id -> B.Page_cookies {tab_id})
   | "page.capture" -> one_tab (fun tab_id -> B.Page_capture {tab_id})
-  | "page.elements" -> let* fields = fields ["tabId"] in let* tab_id = optional_tab fields in Ok (B.Page_elements {tab_id})
+  | "page.elements" ->
+      let* fields = fields ["tabId";"within"] in let* tab_id = optional_tab fields in
+      let* within = Browser_page_script.within_of_json (List.assoc_opt "within" fields) in
+      Ok (B.Page_elements {tab_id;within})
   | "page.scene" ->
       let* fields = fields ["tabId";"maxChars";"view";"scope"] in
       let* raw = required fields "tabId" in let* tab_id = tab raw in
@@ -93,7 +96,7 @@ let verb_of_json ~route value =
       let* scope = optional_field fields "scope" Browser_scene.scope_of_json in
       Ok (B.Page_scene {tab_id;max_chars;view;scope})
   | "page.interact" ->
-      let* fields = object_fields ["tabId";"expectedUrl";"action";"selector";"text";"x";"y";"documentId";"nodeId";"point";"from";"to";"viewport";"button";"source";"destination";"via";"durationMs";"key";"modifiers";"factor";"width";"height";"value"] args in
+      let* fields = object_fields Browser_interaction.wire_fields args in
       let* request = Browser_interaction.parse (`Assoc (route_fields route @ fields)) in
       Ok (B.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;action=request.action})
   | "session.open" -> let* fields = fields ["headless"] in let* headless = optional_field fields "headless" boolean in Ok (B.Session_open {headless})
@@ -105,13 +108,15 @@ let verb_of_json ~route value =
       let* _ = object_fields ["action";"tabId";"framePath";"url";"selector";"text";"key";"value";"x";"y";"paths"] args in
       B.Action.parse args |> Result.map (fun action -> B.Page_act action)
   | "page.context" ->
-      let* fields = fields ["tabId";"framePath";"mode";"maxChars"] in
+      let* fields = fields ["tabId";"framePath";"mode";"maxChars";"within"] in
       let* raw = required fields "tabId" in let* tab_id = tab raw in
       let* frame_path = B.Action.parse_frame_path args in
       let* name = text_field fields "mode" in
-      let* mode = match name,List.assoc_opt "maxChars" fields with
-        | "text",Some raw -> let* cap = integer raw in let* _ = Browser_page_script.text_cap (Some cap) in Ok (`Text cap)
-        | "elements",None -> Ok `Elements | "frames",None -> Ok `Frames | "dialog",None -> Ok `Dialog
+      let* within = Browser_page_script.within_of_json (List.assoc_opt "within" fields) in
+      let* mode = match name,List.assoc_opt "maxChars" fields,within with
+        | "text",Some raw,None -> let* cap = integer raw in let* _ = Browser_page_script.text_cap (Some cap) in Ok (`Text cap)
+        | "elements",None,within -> Ok (`Elements within)
+        | "frames",None,None -> Ok `Frames | "dialog",None,None -> Ok `Dialog
         | _ -> Error "invalid context read mode" in
       Ok (B.Page_context {tab_id;frame_path;mode})
   | "page.instruct" -> let* fields = fields ["tabId";"instruction"] in

@@ -140,11 +140,7 @@ let test_pre_effect_tool_outcome () = with_upload_context (fun config meta -> fi
       "paths",`List [`String (Filename.concat config.base_path "outside-secret")]] in
     let denied = invoke upload in
     check bool "outside upload is pre-effect" true (denied.failure_effect_disposition = Tool_result.Proven_pre_effect);
-    check int "denied upload sends no browser commands, including clear" 0 (List.length !calls);
-    let _,phase = Masc.Tool_misc_browser_lane.handle_act_with_phase ~base_path:config.base_path
-        ~tool_name:"masc_browser_act" ~start_time:(Tool_timing.start ()) (`Assoc upload) in
-    check bool "generic upload requires owner" true (phase = Tool_result.Proven_pre_effect);
-    check int "generic upload sends no browser commands" 0 (List.length !calls)))))
+    check int "denied upload sends no browser commands, including clear" 0 (List.length !calls)))))
 
 let test_owned_upload_staging () = with_upload_context (fun config meta -> fixture (fun _env driver _ _ _ ->
   let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
@@ -310,37 +306,34 @@ let test_interact_production_failure_phase () =
     check bool "error wording alone never establishes pre-effect" true
       (phase (invoke args) = Tool_result.Effect_outcome_unknown)))))
 
-let test_stagehand_partial_open_tool_outcome () = Eio_main.run (fun env ->
-  Time_compat.set_clock (Eio.Stdenv.clock env);
-  let tabs = Masc.Browser_stagehand_executor.Tabs.create () in
-  let creates = ref 0 and navigations = ref 0 in
-  let call = function
-    | Masc.Browser_stagehand_wire.Context_new_page ->
-      incr creates; Ok (`Assoc ["page_id",`String "created-page"])
-    | Masc.Browser_stagehand_wire.Page_goto _ ->
-      incr navigations; Error (Masc.Browser_stagehand_session.Rejected {code = -32000;message="navigation rejected"})
-    | _ -> fail "partial creation unexpectedly sent another command" in
-  Lane.install_stagehand_executor (Some (fun ~actor verb ->
-    Masc.Browser_stagehand_executor.execute ~tabs ~call ?actor verb));
-  Fun.protect ~finally:(fun () -> Lane.install_stagehand_executor None) (fun () ->
-    let result,phase = Masc.Tool_misc_browser_lane.handle_act_with_phase ~base_path:"/fixture"
-      ~tool_name:"masc_browser_act" ~start_time:(Tool_timing.start ())
-      (`Assoc ["lane",`String "stagehand";"action",`String "open_tab";"url",`String "https://example.org/new"]) in
-    check bool "production action adapter retains confirmed creation phase" true
-      (phase=Tool_result.Proven_post_effect);
-    (match result with
-     | Tool_result.Failed failed -> check bool "failed result agrees with returned phase" true
-         (failed.effect_disposition=phase)
-     | Tool_result.Completed _ | Tool_result.Deferred _ -> fail "partial create became successful tool result");
-    let receipt = Tool_result.data result in
-    check bool "owning lane is authoritative" true (field "lane" receipt=Some (`String "stagehand"));
-    check bool "owned browser has no live client ID" true (field "clientId" receipt=Some `Null);
-    check bool "created tab stays in failure data" true
-      (field "tabId" receipt=Some (`Int 0) && field "created" receipt=Some (`Bool true));
-    let raw = Yojson.Safe.from_string (Tool_result.message result) in
-    check bool "Keeper model-facing output receives same recovery receipt" true (field "data" raw=Some receipt);
-    check int "tool path creates exactly once" 1 !creates;
-    check int "tool path navigates exactly once" 1 !navigations))
+(* A composition node receives the answer BrowserGoto returns to the model:
+   the landing receipt with the browser that served it. The node's declared
+   output has to accept that whole object, because the navigation has already
+   happened by the time the output is checked. *)
+let test_goto_answer_satisfies_output_contract () = with_upload_context (fun config _meta ->
+  fixture (fun env _driver _current _calls _matches ->
+    let landing = `Assoc ["url",`String "https://example.org/landing";"title",`String "Landing page"] in
+    Browser_addon_fixture.with_worker ~env ~config ~respond:(fun ~route:_ -> function
+      | Lane.Page_goto _ -> Lane.Answered (`Assoc ["ok",`Bool true;"data",landing])
+      | _ -> fail "navigation issued a command other than Page_goto") (fun _ ->
+      let args = `Assoc ["lane",`String "automation";"tabId",`Int 7;"url",`String "https://example.org/"] in
+      let result = Masc.Browser_addon_tools.handle ~config
+        ~access:Masc.Lane_addon_sources.Operator_configuration
+        ~principal:(Lane_addon_call_context.Host_actor "browser-navigator") ~reserved:[]
+        ~keeper_name:None ~tool:Masc.Browser_capabilities.Goto ~tool_name:"BrowserGoto"
+        ~start_time:(Tool_timing.start ()) args in
+      check bool "the navigation was answered" true (Tool_result.is_success result);
+      let module Plan = Masc.Keeper_tool_plan in
+      let id = match Plan.Node_id.make "navigate" with
+        | Ok id -> id | Error Plan.Node_id.Empty -> fail "empty node id" in
+      let node = Plan.node ~id ~tool_name:"BrowserGoto" ~input:(Plan.Json_template.literal args) () in
+      let plan = match Plan.create ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ()) [ node ] with
+        | Ok plan -> plan | Error error -> fail (Plan.error_to_string error) in
+      match Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id:id (Tool_result.data result) with
+      | Ok _ -> ()
+      | Error _ ->
+        fail ("BrowserGoto's declared output rejects its own answer: "
+          ^ Yojson.Safe.to_string (Tool_result.data result)))))
 
 let test_public_locate_retains_browser () = with_upload_context (fun config _meta ->
   fixture (fun env _driver _calls _matches _extra ->
@@ -366,9 +359,46 @@ let test_public_locate_retains_browser () = with_upload_context (fun config _met
           "instruction",`String "Click the menu";"tabId",`Int 3]));
       check int "unsupported act cannot become an observe or switch browsers" 1 (List.length !sent))))
 
+(* An extension built before [within] answers a scoped read with every control.
+   The tool refuses an answer that does not carry the page's own match count. *)
+let test_public_scoped_elements () = with_upload_context (fun config _meta ->
+  fixture (fun env _driver _calls _matches _extra ->
+    let sent=ref [] and answer=ref `Null in
+    Browser_addon_fixture.with_worker ~env ~config ~respond:(fun ~route verb ->
+      sent:=(route,verb)::!sent;
+      Lane.Answered (`Assoc ["ok",`Bool true;"data",!answer])) (fun _ ->
+      let invoke fields=Masc.Browser_addon_tools.handle ~config
+        ~access:Masc.Lane_addon_sources.Operator_configuration
+        ~principal:(Lane_addon_call_context.Host_actor "browser-reader") ~reserved:[]
+        ~keeper_name:None ~tool:Masc.Browser_capabilities.Read ~tool_name:"masc_browser_read"
+        ~start_time:(Tool_timing.start ()) (`Assoc fields) in
+      let read=["lane",`String "automation";"tabId",`Int 3;"mode",`String "elements";"within",`String "nav"] in
+      answer:=`Assoc ["tabId",`Int 3;"total",`Int 8;"truncated",`Bool false;
+        "elements",`List [`Assoc ["selector",`String "#outside"]]];
+      let refused=invoke read in
+      check bool "an answer without withinMatches is not a scoped answer" true
+        (Tool_result.is_failed refused);
+      let carried=Yojson.Safe.to_string (Tool_result.data refused) in
+      let rec mentions index=index+8<=String.length carried
+        && (String.sub carried index 8="#outside" || mentions (index+1)) in
+      check bool "the refusal does not pass on the unscoped controls" false (mentions 0);
+      check bool "the scope reaches the browser" true
+        (List.hd !sent=(Lane.Automation_route,Lane.Page_elements {tab_id=Some 3;within=Some "nav"}));
+      answer:=`Assoc ["tabId",`Int 3;"within",`String "nav";"withinMatches",`Int 1;
+        "total",`Int 2;"truncated",`Bool false;"elements",`List []];
+      check bool "a scoped answer is returned" true (Tool_result.is_success (invoke read));
+      check bool "within is refused outside elements" true
+        (Tool_result.is_failed (invoke ["lane",`String "automation";"tabId",`Int 3;
+          "mode",`String "text";"within",`String "nav"]));
+      check bool "an empty within is refused" true
+        (Tool_result.is_failed (invoke ["lane",`String "automation";"tabId",`Int 3;
+          "mode",`String "elements";"within",`String ""]));
+      check int "refused arguments send no browser command" 2 (List.length !sent))))
+
 let () = run "Firefox controls" ["behavior",[
   test_case "public locate keeps its owned browser through native routing" `Quick test_public_locate_retains_browser;
-  test_case "Stagehand partial creation survives production tool boundary" `Quick test_stagehand_partial_open_tool_outcome;
+  test_case "a scoped elements read needs the page's own match count" `Quick test_public_scoped_elements;
+  test_case "navigation answer satisfies its output contract" `Quick test_goto_answer_satisfies_output_contract;
   test_case "production interact preserves failure phase" `Quick test_interact_production_failure_phase;
   test_case "download result reaches provider manifest" `Quick test_download_result_reaches_provider;
   test_case "navigation uses requested tab" `Quick test_targeted_goto;

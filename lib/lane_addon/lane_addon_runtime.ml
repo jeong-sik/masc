@@ -1405,14 +1405,16 @@ let native_retain ~store ~installation_id ~instance_id =
   | Native_addon_lease.Settled, [] -> Error "native claim has no host slot"
   | (Native_addon_lease.Awaiting_exec | Live _ | Cleanup_pending _), _ ->
       Error "native claim has not settled; its process or process group may still run"
+let native_claim_root_requirement =
+  {Resource_requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Clear 0o077;links=Any_count}
 let prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_live_instance =
   let* () = offload (fun () ->
     try
       let root = native_claim_root store in
       (try Unix.mkdir root 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
       let stat = Unix.lstat root in
-      if stat.Unix.st_kind=Unix.S_DIR && stat.st_uid=Unix.geteuid () && stat.st_perm land 0o077=0
-      then Ok () else Error (Lifecycle.Worker_failed "native claim root must be a private host-owned directory")
+      Resource_requirement.check ~label:"native claim root" native_claim_root_requirement ~path:root stat
+      |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail)
     with (Unix.Unix_error _ | Sys_error _) as exn -> Error (Lifecycle.Worker_failed (Printexc.to_string exn))) in
   let directories = native_directories store installation_id in
   let* old = offload (fun () ->

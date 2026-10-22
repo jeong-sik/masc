@@ -74,6 +74,8 @@ TUI Browser Lane에 여러 관측 탭이 보이면 `1`–`9`로 표시된 탭을
 
 다음 판단에 필요한 읽기 하나를 고른다. 본문과 참조가 함께 필요하면 scene,
 텍스트만 필요하면 text, 추가 컨트롤 정보가 필요하면 elements를 사용한다.
+elements에 `within`(CSS selector)을 주면 그 요소와 그 안의 컨트롤만 돌려준다.
+응답의 `withinMatches`가 0이면 selector가 아무 요소도 고르지 못한 것이다.
 관측된 역할·이름·문맥과 main/article/이름 있는 section 등 의미 영역으로 대상을 고른다.
 태그만으로 본문이라고 단정하지 않으며, 전체 div나 긴 selector 목록부터 읽지 않는다.
 
@@ -126,6 +128,9 @@ scene/regions 읽기에서도 유지한다. 탭이 사라졌을 때만 같은 �
 운영자의 화면·로그인 세션은 live다. 연결 정보가 없으면 BrowserTabs로 선택해
 clientId/tabId 쌍을 유지한다. `complete=false`이면 `unavailableTabs`의 ID와 오류를
 확인한다. 목록의 다른 탭은 계속 사용할 수 있고, 읽지 못한 탭을 닫힌 탭으로 해석하지 않는다.
+live BiDi 연결의 로그인을 써야 하면 BrowserAct `open_tab`(그 clientId)으로 탭을 열고,
+그 탭에서만 BrowserGoto(`lane=live`, clientId, tabId)로 URL을 옮긴다. 운영자가 연 탭은
+URL로 옮기지 않는다.
 독립 조사에는 BrowserSession open과 BrowserGoto를 사용한다. 반환된
 browserSelection.lane을 읽기·조작에 유지하고 clientId가 null이면 생략한다.
 live 인증 화면을 연결 오류 때문에 automation이나 별도 API·수집 버퍼로 대체하지 않는다.

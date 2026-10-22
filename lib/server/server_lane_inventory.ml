@@ -119,39 +119,15 @@ let machine_state ~config ~configuration machine =
     |> machine_publication in
   Machine_state (activity,publication)
 
-(* With no observation, the declarations say which absence it is: none
-   declared, one switched off, or one switched on that the runtime runs no
-   installation of. A browser Add-on is a package whose worker serves the
-   browser. *)
-let browser_absence (declarations : Config.declaration list) =
-  let browsers = List.filter (fun (d : Config.declaration) ->
-    match d.package.worker_service with
-    | Lane_addon_types.Browser_service -> true
-    | Lane_addon_types.Mcp_tools -> false) declarations in
-  if List.exists (fun (d : Config.declaration) -> d.enabled) browsers then Browser_addon_not_running
-  else match browsers with [] -> Browser_addon_absent | _ :: _ -> Browser_addon_off
-let browser_reading ~declarations = function
+let browser_map f = function
+  | Browser_addon_presence.Observed published -> Browser_observed (f published)
+  | Browser_addon_presence.Absent -> Browser_addon_absent
+  | Browser_addon_presence.Off -> Browser_addon_off
+  | Browser_addon_presence.Not_running -> Browser_addon_not_running
   (* The inventory is served to the operator alone (CanAdmin), so a failure is
      shown with its detail. *)
-  | Error (Addon.Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _ as refusal) ->
-      Browser_addon_unavailable (Addon.export_refusal_operator_message refusal)
-  | Ok None -> browser_absence declarations
-  | Ok (Some (snapshot : Addon.export_observation)) ->
-      (match Browser_addon_observation.read snapshot.output with
-       | Ok published -> Browser_observed published
-       | Error detail -> Browser_addon_unavailable ("its observation is unreadable: " ^ detail))
-(* Read once per snapshot, so the three browser rows describe one
-   observation. *)
-let browser_publication ~config ~declarations =
-  Addon.observation_for_export ~config ~access:Lane_addon_sources.Operator_configuration
-    ~name:Browser_addon_tool.definition.name
-  |> browser_reading ~declarations
-let browser_map f = function
-  | Browser_observed value -> Browser_observed (f value)
-  | Browser_addon_absent -> Browser_addon_absent
-  | Browser_addon_off -> Browser_addon_off
-  | Browser_addon_not_running -> Browser_addon_not_running
-  | Browser_addon_unavailable detail -> Browser_addon_unavailable detail
+  | Browser_addon_presence.Unavailable reason ->
+      Browser_addon_unavailable (Browser_addon_presence.unavailable_operator_message reason)
 let browser_state ~activity publication = function
   | Browser_lane.Lane_name.Live ->
       Browser_clients (activity, browser_map (fun (p : Browser_addon_observation.published) ->
@@ -163,10 +139,8 @@ let browser_state ~activity publication = function
       Browser_executor (activity, browser_map (fun (p : Browser_addon_observation.published) ->
         p.stagehand.registered) publication)
 
-let snapshot ~config =
-  let exact = Exact_projection.observe () in
-  let browser_activity = Server_browser_configuration.activity_snapshot () in
-  let machine_configuration = Runtime.machine_configuration () in
+(* The Lane directory and what it declares, read off the server fiber. *)
+let declarations ~config =
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
   let directory = Config.directory ~config_root:resolution.config_root.path in
   let declarations : Config.snapshot = match resolution.status with
@@ -175,7 +149,20 @@ let snapshot ~config =
          issues=[{source_path=directory;id=None;message=String.concat "; " resolution.warnings}]}
     | Ready | Warn | Missing_status ->
         Eio_unix.run_in_systhread (fun () -> Config.load ~directory) in
-  let browser_publication = browser_publication ~config ~declarations:declarations.declarations in
+  directory, declarations
+
+let browser_presence ~config =
+  let _directory, declarations = declarations ~config in
+  Browser_addon_presence.read ~config ~declarations
+
+let snapshot ~config =
+  let exact = Exact_projection.observe () in
+  let browser_activity = Server_browser_configuration.activity_snapshot () in
+  let machine_configuration = Runtime.machine_configuration () in
+  let directory, declarations = declarations ~config in
+  (* Read once per snapshot, so the three browser rows describe one
+     observation. *)
+  let browser_publication = Browser_addon_presence.read ~config ~declarations in
   let builtin = Lane_id.all_of_builtin |> List.map (fun lane ->
     let selection,state = match lane with
       | Lane_id.Exact id -> Exact id,Exact_state (Exact_projection.configuration exact id)
@@ -260,7 +247,6 @@ let to_json t = `Assoc ["schema",str "masc.lane-inventory/v1";"observed_at",`Flo
       `Assoc ["source_path",str path;"message",str detail]) t.issues)]]
 module For_testing = struct
   let machine_publication = machine_publication
-  let browser_reading = browser_reading
   let browser_state = browser_state
   let package_rows = package_rows
   let exact_outputs = exact_outputs

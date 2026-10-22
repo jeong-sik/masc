@@ -4,4 +4,4 @@
  (deps
   ../skills/browser-live-follow-read/SKILL.md
   ../skills/browser-navigate-read/SKILL.md)
- (libraries masc_test_deps masc.browser_lane))
+ (libraries masc_test_deps))

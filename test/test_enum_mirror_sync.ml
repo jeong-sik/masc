@@ -456,6 +456,147 @@ let test_browser_read_mode_mirror () =
        ~property:"mode")
 ;;
 
+(* The capability table names a tool and an [action] or [mode] for every
+   operation it calls available. [Browser_capabilities.support] writes those
+   strings by hand, and a stale one tells a keeper to call a value the tool
+   schema rejects. The table once pointed Pointer_down, Pointer_up, the
+   clipboard and network interception at BrowserRead modes through a pattern
+   that shared an arm, and nothing noticed. *)
+let test_capability_table_names_advertised_values () =
+  let module Cap = Masc.Browser_capabilities in
+  let module Schemas = Tool_schemas_misc in
+  let schema_of = function
+    | Cap.Tabs -> Schemas.browser_tabs_schema
+    | Cap.Read -> Schemas.browser_read_schema
+    | Cap.Interact -> Schemas.browser_interact_schema
+    | Cap.Act -> Schemas.browser_act_schema
+    | Cap.Session -> Schemas.browser_session_schema
+    | Cap.Goto -> Schemas.browser_goto_schema
+    | Cap.Instruct -> Schemas.browser_instruct_schema
+  in
+  let tool_label = function
+    | Cap.Tabs -> "BrowserTabs" | Cap.Read -> "BrowserRead" | Cap.Interact -> "BrowserInteract"
+    | Cap.Act -> "BrowserAct" | Cap.Session -> "BrowserSession" | Cap.Goto -> "BrowserGoto"
+    | Cap.Instruct -> "BrowserInstruct"
+  in
+  let backends =
+    [ Cap.Connected Browser_lane.Web_extension
+    ; Cap.Connected Browser_lane.Webdriver_bidi
+    ; Cap.Owned_gecko
+    ; Cap.Owned_chromium
+    ; Cap.Safari_unavailable
+    ]
+  in
+  let invocation = function
+    | Cap.Available invocation | Cap.Conditional { invocation; _ } -> Some invocation
+    | Cap.Unsupported _ -> None
+  in
+  List.iter
+    (fun backend ->
+       List.iter
+         (fun (entry : Cap.entry) ->
+            match invocation entry.support with
+            | None -> ()
+            | Some (inv : Cap.invocation) ->
+              let advertised property =
+                advertised_values_for_schemas [ schema_of inv.tool ] ~property
+              in
+              let check_field property = function
+                | None -> ()
+                | Some value ->
+                  check
+                    bool
+                    (Printf.sprintf "%s on %s: %s %S is advertised by %s"
+                       (Cap.operation_name entry.operation)
+                       (match backend with
+                        | Cap.Connected Browser_lane.Web_extension -> "extension"
+                        | Cap.Connected Browser_lane.Webdriver_bidi -> "live BiDi"
+                        | Cap.Owned_gecko -> "owned Gecko"
+                        | Cap.Owned_chromium -> "Stagehand"
+                        | Cap.Safari_unavailable -> "Safari")
+                       property value (tool_label inv.tool))
+                    true
+                    (List.mem value (advertised property))
+              in
+              check_field "action" inv.action;
+              check_field "mode" inv.mode)
+         (Cap.catalog backend))
+    backends
+;;
+
+(* [Browser_interaction.parse] and the Add-on wire parser read one list of argument
+   names, and the tool schema writes the same names by hand. A name the schema
+   offers and the parser refuses (or the reverse) is a call that fails after the
+   keeper was told it was legal. *)
+let test_interact_arguments_match_the_schema () =
+  let properties =
+    match Tool_schemas_misc.browser_interact_schema.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc named) -> List.map fst named
+       | _ -> fail "masc_browser_interact has no properties object")
+    | _ -> fail "masc_browser_interact input schema is not an object"
+  in
+  check
+    (list string)
+    "masc_browser_interact arguments match the names the parser accepts"
+    (List.sort_uniq String.compare
+       (Masc.Browser_interaction.route_names @ Masc.Browser_interaction.wire_fields))
+    (List.sort_uniq String.compare properties)
+;;
+
+(* Two operations may name the same tool call only when one call really does
+   both jobs. A pattern that lists several operations before one arm, with the
+   arm's body written for only the last of them, makes every listed operation
+   claim that call: the table once reported Pointer_down and Pointer_up as
+   console reads, and the clipboard and network interception as cookie reads.
+   Each legitimate sharing is listed here by name; a new one is a decision. *)
+let test_capability_table_sharing_is_listed () =
+  let module Cap = Masc.Browser_capabilities in
+  let allowed =
+    [ [ "list_tabs"; "list_windows" ] (* BrowserTabs list_tabs rows carry windowId *)
+    ; [ "middle_click"; "right_click" ] (* click_at with a button *)
+    ; [ "key_chord"; "press_key" ] (* press_key with modifiers *)
+    ; [ "html5_drop"; "pointer_drag" ] (* drag_to on Stagehand *)
+    ]
+  in
+  let invocation = function
+    | Cap.Available invocation | Cap.Conditional { invocation; _ } -> Some invocation
+    | Cap.Unsupported _ -> None
+  in
+  List.iter
+    (fun backend ->
+       let by_call = Hashtbl.create 64 in
+       List.iter
+         (fun (entry : Cap.entry) ->
+            match invocation entry.support with
+            | None -> ()
+            | Some inv ->
+              let key = inv.Cap.tool, inv.Cap.action, inv.Cap.mode in
+              let known = Option.value (Hashtbl.find_opt by_call key) ~default:[] in
+              Hashtbl.replace by_call key (Cap.operation_name entry.operation :: known))
+         (Cap.catalog backend);
+       Hashtbl.iter
+         (fun _ operations ->
+            match operations with
+            | [] | [ _ ] -> ()
+            | _ :: _ :: _ ->
+              let sorted = List.sort String.compare operations in
+              check
+                bool
+                (Printf.sprintf "operations sharing one tool call are a listed pair: %s"
+                   (String.concat ", " sorted))
+                true
+                (List.mem sorted allowed))
+         by_call)
+    [ Cap.Connected Browser_lane.Web_extension
+    ; Cap.Connected Browser_lane.Webdriver_bidi
+    ; Cap.Owned_gecko
+    ; Cap.Owned_chromium
+    ; Cap.Safari_unavailable
+    ]
+;;
+
 (* Board sub-board access. [Masc.Board] owns the vocabulary through
    [sub_board_access_of_string_opt]; the schema writes the three strings by
    hand, in two places. *)
@@ -640,6 +781,9 @@ let () =
         ; test_case "goal tool enums" `Quick test_goal_tool_enum_mirrors
         ; test_case "operator tool enums" `Quick test_operator_tool_enum_mirrors
         ; test_case "browser read mode" `Quick test_browser_read_mode_mirror
+        ; test_case "capability table names advertised values" `Quick test_capability_table_names_advertised_values
+        ; test_case "capability table sharing is listed" `Quick test_capability_table_sharing_is_listed
+        ; test_case "interact arguments match the schema" `Quick test_interact_arguments_match_the_schema
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode
         ; test_case "reclaim_policy values decode" `Quick

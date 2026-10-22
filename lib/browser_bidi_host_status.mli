@@ -1,8 +1,7 @@
 (** What is said of a workspace's BiDi browser host: the host's own record,
     beside the launcher it is started with and the connections this process's
-    server lists. [masc doctor], the dashboard's onboarding check, the
-    connection list the TUI reads and the browser tools answer from this one
-    observation. *)
+    server lists. [masc doctor], the dashboard's onboarding check and the
+    connection list the TUI reads answer from this one observation. *)
 
 (** The live Firefox configuration. This is configuration, not an Addon
     readiness observation; the manual host record below is independent. *)
@@ -30,18 +29,13 @@ type observation =
   ; keeper : keeper
   }
 
-(** Reads the manual host record and launcher, then asks this process's server.
-    Reading can let other fibers
+(** Reads the manual host record and launcher, then asks this process's server,
+    which in a serving process reads the browser Add-on's published clients
+    ({!Browser_lane_launcher.current_server}). Reading can let other fibers
     run, so the server is asked last: a host that attached during the reads
     is in the list the observation holds. [configuration] is the one this
     process loaded, or the workspace's [runtime.toml] read for it. *)
 val observe : base_path:string -> configuration:Browser_configuration.t option -> observation
-
-(** The lane's connections an answer lists beside what it says of the host:
-    the list the observation was made from, so the two say of one list. A
-    process that bound no listener was not asked for one, and its lane is
-    listed by this call. *)
-val listed_clients : observation -> Browser_lane.client_info list
 
 (** What the record, the lock and the observed server say together. *)
 type verdict =
@@ -53,8 +47,9 @@ type verdict =
           connection, so hover and drag are served there. *)
   | Host_unverified
       (** A host's status is unverified: its record is missing while its lock
-          is held, it is still connecting, no server is observed here, or the
-          observed one does not list the client its record names. *)
+          is held, it is still connecting, no server is observed here, the
+          observed one does not read the browser Add-on or the Add-on lists no
+          host, or the Add-on does not list the client its record names. *)
   | Host_not_running
       (** None runs: the last one ended or died, or none has run where a
           lane is installed. *)
@@ -151,7 +146,3 @@ val report_to_json : report -> Yojson.Safe.t
 val report_of_json : Yojson.Safe.t -> (report, string) result
 
 val to_json : observation -> Yojson.Safe.t
-
-(** [state] and [message] alone, for an answer a Keeper passes on to the
-    operator: the record itself stays with the readers that show it. *)
-val summary_to_json : observation -> Yojson.Safe.t

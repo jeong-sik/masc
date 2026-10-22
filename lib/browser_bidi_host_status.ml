@@ -28,13 +28,6 @@ let observe ~base_path ~configuration =
   let lane = Launcher.observe ~base_path ~server:Launcher.Not_serving in
   { lane = { lane with server = Launcher.current_server () }; record; keeper }
 
-(* A process that bound no listener was not asked for its connections, so
-   they are listed here: once, either way. *)
-let listed_clients { lane; _ } =
-  match lane.server with
-  | Launcher.Serving { polling; _ } -> polling
-  | Launcher.Not_serving -> Browser_lane.active_clients ()
-
 type launcher_standing = Launcher_installed | Launcher_not_installed | Launcher_needs_reinstall
 
 type attach = { launcher : string; arguments : string; standing : launcher_standing }
@@ -110,12 +103,20 @@ let bidi_clients polling =
    host the list lacks serves nothing there, unless it is there under an ID
    its record has not caught up with, which is what another BiDi connection
    in the list may be. *)
-type poll = Poll_unobserved | Polls_here | Not_listed_here | Another_bidi_listed
+type poll =
+  | Poll_unobserved
+  | Poll_unread
+  | Addon_lists_none of Launcher.unlisted
+  | Polls_here
+  | Not_listed_here
+  | Another_bidi_listed
 
 let poll_of (t : Launcher.t) (entry : Record.entry) =
   match t.server with
   | Launcher.Not_serving -> Poll_unobserved
-  | Launcher.Serving { polling; _ } ->
+  | Launcher.Serving { polling = Launcher.Not_observed; _ } -> Poll_unread
+  | Launcher.Serving { polling = Launcher.Unlisted unlisted; _ } -> Addon_lists_none unlisted
+  | Launcher.Serving { polling = Launcher.Polling polling; _ } ->
       let named = Browser_lane.client_id_to_string entry.client_id in
       (match
          List.partition
@@ -139,13 +140,17 @@ let verdict { lane; record; _ } =
   | Record.Running entry, _ ->
       (match poll_of lane entry with
        | Polls_here -> Host_serving
-       | Poll_unobserved | Not_listed_here | Another_bidi_listed -> Host_unverified)
+       | Poll_unobserved | Poll_unread | Addon_lists_none _ | Not_listed_here
+       | Another_bidi_listed -> Host_unverified)
   | Record.Unreadable _, _ -> Host_unreadable
 
-let poll_sentence = function
+let poll_sentence (t : Launcher.t) = function
   | Poll_unobserved ->
       " No MASC server runs in this process, so whether it polls one is not observed here; a \
        running server's own check reports it."
+  | Poll_unread ->
+      " This server reads no browser Add-on, so whether the host polls it is not observed here."
+  | Addon_lists_none unlisted -> " " ^ Launcher.unlisted_message ~base_path:t.base_path unlisted
   | Polls_here -> " It polls this server."
   | Not_listed_here ->
       Printf.sprintf
@@ -168,8 +173,8 @@ let poll_sentence = function
    they can differ. *)
 let listed_beside (t : Launcher.t) =
   match t.server with
-  | Launcher.Not_serving -> ""
-  | Launcher.Serving { polling; _ } ->
+  | Launcher.Not_serving | Launcher.Serving { polling = Launcher.Unlisted _ | Launcher.Not_observed; _ } -> ""
+  | Launcher.Serving { polling = Launcher.Polling polling; _ } ->
       (match bidi_clients polling with
        | [] -> ""
        | _ :: _ ->
@@ -302,7 +307,7 @@ let by_operator t record =
       (match entry.attached_at, poll_of t entry with
        | Some attached, poll ->
            Printf.sprintf "A BiDi browser host (pid %d) is attached to %s since %s, as client %s.%s%s"
-             entry.pid entry.bidi_url (at attached) client (poll_sentence poll)
+             entry.pid entry.bidi_url (at attached) client (poll_sentence t poll)
              (unacknowledged t entry)
        (* Only a host that has its session polls, so a listed client is an
           attached host whose record is behind. *)
@@ -312,7 +317,8 @@ let by_operator t record =
               %s. Its record does not say since when: it was read before the host wrote that, \
               or the host could not write it.%s"
              entry.pid entry.bidi_url client (unacknowledged t entry)
-       | None, (Poll_unobserved | Not_listed_here | Another_bidi_listed) ->
+       | None, (Poll_unobserved | Poll_unread | Addon_lists_none _ | Not_listed_here
+               | Another_bidi_listed) ->
            Printf.sprintf "A BiDi browser host (pid %d) started at %s and is connecting to %s."
              entry.pid (at entry.started_at) entry.bidi_url)
   | Record.Ended (entry, ending) ->
@@ -447,12 +453,6 @@ let report_to_json { state; attach; keeper; message } =
     ]
 
 let to_json observation = report_to_json (report observation)
-
-let summary_to_json observation =
-  `Assoc
-    [ "state", `String (state_name observation.record)
-    ; "message", `String (message observation)
-    ]
 
 (* Exactly the fields the writer writes: one more, one fewer or one twice
    is another layout, and is refused rather than read around. *)

@@ -5,14 +5,36 @@ type launcher =
   | Describes_another_launcher
   | Follows_workspace
 
+type unlisted =
+  | No_browser_addon
+  | Browser_addon_off
+  | Browser_addon_not_running
+  | Browser_addon_unreadable of string
+
+type polling =
+  | Polling of Browser_lane.client_info list
+  | Unlisted of unlisted
+  | Not_observed
+
 type server =
   | Not_serving
-  | Serving of { port : int; polling : Browser_lane.client_info list }
+  | Serving of { port : int; polling : polling }
+
+(* Installed by the server, so this module never depends on Lane Add-on
+   runtime code; the server's bootstrap installs it beside the port. *)
+let browser_addon_reader : (unit -> polling) option Atomic.t = Atomic.make None
+let install_browser_addon_reader reader = Atomic.set browser_addon_reader reader
 
 let current_server () =
   match Browser_lane.serving_port () with
   | Browser_lane.Serving_port_unknown -> Not_serving
-  | Browser_lane.Serving_port port -> Serving { port; polling = Browser_lane.active_clients () }
+  | Browser_lane.Serving_port port ->
+      let polling =
+        match Atomic.get browser_addon_reader with
+        | None -> Not_observed
+        | Some read -> read ()
+      in
+      Serving { port; polling }
 
 type t =
   { base_path : string
@@ -21,7 +43,16 @@ type t =
   ; server : server
   }
 
-type verdict = Absent | Connected | Aligned | Unverified | Misconfigured
+type verdict =
+  | Absent
+  | Connected
+  | Addon_missing
+  | Addon_off
+  | Addon_not_running
+  | Addon_unreadable
+  | Aligned
+  | Unverified
+  | Misconfigured
 
 let host_directory base_path =
   List.fold_left Filename.concat base_path [ Common.masc_dirname; Common.browser_lane_dirname; "host" ]
@@ -100,24 +131,35 @@ let observe ~base_path ~server =
   in
   { base_path; launcher; workspace_port; server }
 
+(* A host that polls says more than any file, and a missing launcher says
+   there is no lane to speak of. Past those, a browser Add-on that cannot
+   take a host comes before the launcher and the port: fixing those connects
+   nothing while it cannot. *)
 let verdict t =
   match t.server, t.launcher, t.workspace_port with
-  | Serving { polling = _ :: _; _ }, _, _ -> Connected
+  | Serving { polling = Polling (_ :: _); _ }, _, _ -> Connected
   | _, Not_installed, _ -> Absent
-  | _, (Undeclared | Unreadable | Describes_another_launcher), _ | _, Follows_workspace, Error _ ->
+  | Serving { polling = Unlisted No_browser_addon; _ }, _, _ -> Addon_missing
+  | Serving { polling = Unlisted Browser_addon_off; _ }, _, _ -> Addon_off
+  | Serving { polling = Unlisted Browser_addon_not_running; _ }, _, _ -> Addon_not_running
+  | Serving { polling = Unlisted (Browser_addon_unreadable _); _ }, _, _ -> Addon_unreadable
+  | (Not_serving | Serving { polling = Polling [] | Not_observed; _ }),
+    (Undeclared | Unreadable | Describes_another_launcher), _
+  | (Not_serving | Serving { polling = Polling [] | Not_observed; _ }), Follows_workspace, Error _ ->
       Misconfigured
-  | Not_serving, Follows_workspace, Ok _ -> Unverified
-  | Serving { port; polling = [] }, Follows_workspace, Ok workspace when workspace = port -> Aligned
-  | Serving { polling = []; _ }, Follows_workspace, Ok _ -> Misconfigured
+  | (Not_serving | Serving { polling = Not_observed; _ }), Follows_workspace, Ok _ -> Unverified
+  | Serving { port; polling = Polling [] }, Follows_workspace, Ok workspace when workspace = port -> Aligned
+  | Serving { polling = Polling []; _ }, Follows_workspace, Ok _ -> Misconfigured
 
 type route = Extension | Bidi | Host
 
 let routes = [ Extension; Bidi; Host ]
 let route_name = function Extension -> "extension" | Bidi -> "bidi" | Host -> "host"
 
-let install ~route ~base_path =
-  Printf.sprintf "masc browser-lane-setup --mode %s --base-path %s" (route_name route)
-    (Filename.quote base_path)
+let setup_command ~mode ~base_path =
+  Printf.sprintf "masc browser-lane-setup --mode %s --base-path %s" mode (Filename.quote base_path)
+
+let install ~route ~base_path = setup_command ~mode:(route_name route) ~base_path
 
 let reinstall ~base_path =
   Printf.sprintf
@@ -153,20 +195,60 @@ let launcher_problem t =
         (Filename.concat (host_directory base_path) declaration_name) (reinstall ~base_path))
   | Follows_workspace -> None
 
+(* What the operator is told when the browser Add-on lists no host for this
+   server, and what they do about it. *)
+let unlisted_message ~base_path unlisted =
+  let lane_addons = "the Lane Add-ons screen" in
+  match unlisted with
+  | No_browser_addon ->
+      Printf.sprintf
+        "This workspace declares no browser Add-on, so no browser host can register with this \
+         server. The operator runs %s; the server attaches the Add-on on its next maintenance \
+         pass."
+        (setup_command ~mode:"addon" ~base_path)
+  | Browser_addon_off ->
+      Printf.sprintf
+        "The browser Add-on is declared and switched off, so no browser host can register with \
+         this server. The operator sets enabled = true in its declaration, which %s shows; the \
+         server attaches it on its next maintenance pass."
+        lane_addons
+  | Browser_addon_not_running ->
+      Printf.sprintf
+        "The browser Add-on is declared on, but this server runs no installation of it, so no \
+         browser host can register here. The operator reads why on %s."
+        lane_addons
+  | Browser_addon_unreadable detail ->
+      Printf.sprintf
+        "This server cannot read the browser Add-on (%s), so whether a browser host polls it is \
+         not known. The operator reads the Add-on's state on %s."
+        detail lane_addons
+
+(* The sentence follows {!verdict}: a polling host first, then a missing
+   launcher, then the browser Add-on, then the launcher and the port. *)
 let message t =
   let polling = "A browser lane host polls this server now." in
   match t.server, launcher_problem t, t.workspace_port with
-  | Serving { polling = _ :: _; _ }, None, _ -> polling
-  | Serving { polling = _ :: _; _ }, Some problem, _ -> polling ^ " " ^ problem
-  | (Not_serving | Serving { polling = []; _ }), Some problem, _ -> problem
-  | (Not_serving | Serving { polling = []; _ }), None, Error error ->
+  | Serving { polling = Polling (_ :: _); _ }, None, _ -> polling
+  | Serving { polling = Polling (_ :: _); _ }, Some problem, _ -> polling ^ " " ^ problem
+  | Serving { polling = Unlisted unlisted; _ }, problem, _ ->
+      (match t.launcher, problem with
+       | Not_installed, Some problem -> problem
+       | (Not_installed | Undeclared | Unreadable | Describes_another_launcher | Follows_workspace),
+         (Some _ | None) -> unlisted_message ~base_path:t.base_path unlisted)
+  | (Not_serving | Serving { polling = Polling [] | Not_observed; _ }), Some problem, _ -> problem
+  | (Not_serving | Serving { polling = Polling [] | Not_observed; _ }), None, Error error ->
       Workspace_connection.error_message error
-  | Serving { port = serving; polling = [] }, None, Ok port when port = serving ->
+  | Serving { polling = Not_observed; _ }, None, Ok port ->
+      Printf.sprintf
+        "The browser lane host follows the workspace connection port, now %d. This server reads \
+         no browser Add-on, so whether a browser host polls it is not observed here. %s"
+        port environment_note
+  | Serving { port = serving; polling = Polling [] }, None, Ok port when port = serving ->
       Printf.sprintf
         "The browser lane host follows the workspace connection port, %d, which is the port \
          this server listens on, and no browser host polls this server now. %s"
         port environment_note
-  | Serving { port = serving; polling = [] }, None, Ok port ->
+  | Serving { port = serving; polling = Polling [] }, None, Ok port ->
       Printf.sprintf
         "The workspace connection names port %d, but this server listens on %d, and no browser \
          host polls this server. A host the launcher starts goes to %d. After a request there \
@@ -181,29 +263,3 @@ let message t =
          runs in this process, so whether a browser host polls that port is not observed \
          here; a running server's own check reports it. %s"
         port environment_note
-
-let to_json t =
-  let workspace_port, workspace_port_error =
-    match t.workspace_port with
-    | Ok port -> `Int port, `Null
-    | Error error -> `Null, `String (Workspace_connection.error_message error)
-  in
-  let serving_port, polling_hosts =
-    match t.server with
-    | Serving { port; polling } -> `Int port, `Int (List.length polling)
-    | Not_serving -> `Null, `Null
-  in
-  `Assoc
-    [ "launcher", `String (match t.launcher with
-        | Not_installed -> "not_installed" | Undeclared -> "undeclared"
-        | Unreadable -> "unreadable" | Describes_another_launcher -> "describes_another_launcher"
-        | Follows_workspace -> "follows_workspace")
-    ; "workspace_port", workspace_port
-    ; "workspace_port_error", workspace_port_error
-    ; "serving_port", serving_port
-    ; "polling_hosts", polling_hosts
-    ; "verdict", `String (match verdict t with
-        | Absent -> "absent" | Connected -> "connected" | Aligned -> "aligned"
-        | Unverified -> "unverified" | Misconfigured -> "misconfigured")
-    ; "message", `String (message t)
-    ]

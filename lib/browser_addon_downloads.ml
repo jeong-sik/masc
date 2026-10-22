@@ -1,4 +1,5 @@
 module B = Browser_lane
+module Requirement = Resource_requirement
 let ( let* ) = Result.bind
 type descriptor = {snapshot_id:string;root_device:int;root_inode:int;
   device:int;inode:int;bytes:int;sha256:string}
@@ -81,19 +82,32 @@ let changed_source_message snapshot observed =
     "snapshotId",`String snapshot.descriptor.snapshot_id;
     "expected",file_observation snapshot.source_stat;
     "observed",file_observation observed])
-let private_directory path =
-  let info=Unix.lstat path in
-  if info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid ()
-    && info.st_perm=0o700 && Unix.realpath path=path then Ok info
-  else Error "download allocation is not a canonical private directory"
+let allocation_label = "download allocation"
+let snapshots_label = "download snapshot directory"
+let private_directory ~label path =
+  let* info=Requirement.lstat ~label Requirement.private_directory path in
+  let* ()=Requirement.canonical ~label path in Ok info
+let snapshot_matches ~label ~path descriptor (info:Unix.stats) =
+  let* ()=Requirement.check ~label Requirement.private_file ~path info in
+  let observed=Requirement.identity info in
+  let* ()=if observed.Requirement.device=descriptor.device && observed.inode=descriptor.inode then Ok ()
+    else Error (Requirement.replaced ~label ~path
+      ~expected:{Requirement.device=descriptor.device;inode=descriptor.inode} ~observed) in
+  if info.st_size=descriptor.bytes then Ok ()
+  else Error (Printf.sprintf "%s %s must have %d bytes; it has %d" label path descriptor.bytes info.st_size)
+let pinned ~label ~path ~expected observed =
+  if same_identity observed expected then Ok ()
+  else Error (Requirement.replaced ~label ~path ~expected:(Requirement.identity expected)
+    ~observed:(Requirement.identity observed))
 let check t =
-  let* allocation=private_directory t.directory in let* root=private_directory t.root in
-  if same_identity allocation t.allocation && same_identity root t.root_stat then Ok ()
-  else Error "download allocation identity changed"
+  let* allocation=private_directory ~label:allocation_label t.directory in
+  let* root=private_directory ~label:snapshots_label t.root in
+  let* ()=pinned ~label:allocation_label ~path:t.directory ~expected:t.allocation allocation in
+  pinned ~label:snapshots_label ~path:t.root ~expected:t.root_stat root
 let create ~directory = io (fun () ->
-  let* allocation=private_directory directory in
+  let* allocation=private_directory ~label:allocation_label directory in
   let root=Filename.concat directory "download-snapshots" in Unix.mkdir root 0o700;
-  let* root_stat=private_directory root in
+  let* root_stat=private_directory ~label:snapshots_label root in
   Ok {directory;allocation;root;root_stat;mutex=Mutex.create ();changed=Condition.create ();
     cleanup_mutex=Mutex.create ();serving=true;preparing=0;settled=false;failure=None;
     snapshots=Hashtbl.create 8;grants=Hashtbl.create 8})
@@ -106,12 +120,14 @@ let close_pins snapshots = List.fold_left (fun result snapshot ->
   let closed=close_pin snapshot in
   match result,closed with Error detail,_ | Ok (),Error detail -> Error detail
     | Ok (),Ok () -> Ok ()) (Ok ()) snapshots
+let source_parent = {Requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Clear 0o022;links=Any_count}
+let source_file = {Requirement.kind=Unix.S_REG;owner=Effective_user;mode=Any_mode;links=Exactly_one}
+let owned_directory = {Requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Any_mode;links=Any_count}
 let source_parents t path =
   let downloads=Filename.concat t.directory "downloads" in
   let rec collect current acc =
     let stat=Unix.lstat current in
-    if stat.Unix.st_kind<>Unix.S_DIR || stat.st_uid<>Unix.geteuid () || stat.st_perm land 0o022<>0
-    then Error "download source parent is not owned" else
+    let* ()=Requirement.check ~label:"download source parent" source_parent ~path:current stat in
     let acc=(current,stat)::acc in
     if current=downloads then Ok acc
     else let parent=Filename.dirname current in
@@ -121,7 +137,9 @@ let source_parents t path =
 let check_parents parents = List.fold_left (fun result (path,expected) ->
   let* ()=result in let current=Unix.lstat path in
   if same_identity current expected && current.st_uid=expected.Unix.st_uid
-    && current.st_perm=expected.st_perm then Ok () else Error "download source parent identity changed") (Ok ()) parents
+    && current.st_perm=expected.st_perm then Ok ()
+  else Error ("download source parent " ^ path ^ " changed: " ^ Yojson.Safe.to_string (`Assoc [
+    "expected",file_observation expected;"observed",file_observation current]))) (Ok ()) parents
 let write_all fd buffer count =
   let rec loop offset = if offset<count then
     let written=Unix.write fd buffer offset (count-offset) in
@@ -129,11 +147,10 @@ let write_all fd buffer count =
   loop 0
 let copy t path id = io (fun () ->
   let* ()=check t in
-  let* ()=if Unix.realpath path=path then Ok () else Error "download source must be canonical" in
+  let* ()=Requirement.canonical ~label:"download source" path in
   let* parents=source_parents t path in
   let before=Unix.lstat path in
-  let* ()=if before.Unix.st_kind=Unix.S_REG && before.st_uid=Unix.geteuid () && before.st_nlink=1
-    then Ok () else Error "download source is not an owned regular file" in
+  let* ()=Requirement.check ~label:"download source" source_file ~path before in
   let source=Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC;Unix.O_NONBLOCK] 0 in
   let transferred=ref false in
   Fun.protect ~finally:(fun () -> if not !transferred then Unix.close source) (fun () ->
@@ -248,10 +265,10 @@ let release t ~id ~actor ~route ~verb = locked t (fun () ->
 let revoke t = locked t (fun () -> t.serving<-false)
 let rec empty_downloads path =
   match Unix.lstat path with
-  | stat when stat.Unix.st_kind=Unix.S_DIR && stat.st_uid=Unix.geteuid () ->
+  | stat ->
+      let* ()=Requirement.check ~label:"session downloads entry" owned_directory ~path stat in
       Array.fold_left (fun result name -> let* ()=result in
         empty_downloads (Filename.concat path name)) (Ok ()) (Sys.readdir path)
-  | _ -> Error "session downloads contain an unpublished or unknown resource"
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
 let original_digest fd bytes =
   ignore (Unix.lseek fd 0 Unix.SEEK_SET);
@@ -327,10 +344,9 @@ let retire t retirement =
       let* ()=remove_original t snapshot in
       let* path=snapshot_path ~directory:t.directory ~snapshot_id:snapshot.descriptor.snapshot_id in
       match Unix.lstat path with
-      | stat when stat.Unix.st_dev=snapshot.descriptor.device && stat.st_ino=snapshot.descriptor.inode
-          && stat.st_kind=Unix.S_REG && stat.st_size=snapshot.descriptor.bytes
-          && stat.st_uid=Unix.geteuid () && stat.st_perm=0o600 && stat.st_nlink=1 -> Unix.unlink path;Ok ()
-      | _ -> Error "download snapshot identity changed"
+      | stat ->
+          let* ()=snapshot_matches ~label:"download snapshot" ~path snapshot.descriptor stat in
+          Unix.unlink path;Ok ()
       | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok () in
     (* One snapshot's failure must not skip the rest: attempt each snapshot and
        report the failures once, leaving only failed items behind. *)

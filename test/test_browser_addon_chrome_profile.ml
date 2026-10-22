@@ -5,6 +5,9 @@ module Socket = Masc.Browser_addon_socket
 module Wire = Masc.Browser_addon_wire
 module Lease = Native_addon_lease
 module B = Browser_lane
+module Automation = Masc.Browser_addon_automation
+module Live = Masc.Browser_addon_live_bidi
+module Models = Masc.Browser_addon_models
 let ok = function Ok value -> value | Error detail -> Alcotest.fail detail
 let lease value = ok (Result.map_error Lease.error_to_string value)
 let check = Alcotest.check Alcotest.bool
@@ -102,10 +105,64 @@ while True:
       let replacement=Unix.openfile gate [Unix.O_CREAT;Unix.O_EXCL;Unix.O_WRONLY] 0o600 in Unix.close replacement;
       check "replaced synchronization inode refuses another selection" true
         (Result.is_error (Profile.select ~path:(Some profile_path)));
+      check "a replaced claim gate fails verification" true (Result.is_error (Profile.verify profile));
       Unix.unlink gate;Unix.rename saved gate;
+      ok (Profile.verify profile);
+      let anchor=Filename.concat profile_path ".masc-browser-profile.json" in
+      let recorded=In_channel.with_open_bin anchor In_channel.input_all in
+      let rewrite text=Out_channel.with_open_gen [Open_wronly;Open_trunc;Open_binary] 0o600 anchor
+        (fun out -> output_string out text) in
+      let elsewhere=match Yojson.Safe.from_string recorded with
+        | `Assoc fields -> Yojson.Safe.to_string (`Assoc (List.map (fun (name,value) ->
+            if String.equal name "root" then (name,`Assoc ["device",`Int 0;"inode",`Int 0]) else (name,value)) fields))
+        | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ -> Alcotest.fail "the anchor is not an object" in
+      rewrite elsewhere;
+      check "an anchor that records another profile fails verification" true (Result.is_error (Profile.verify profile));
+      rewrite recorded;
       ok (Profile.verify profile)))))
+let refused label result = check label true (Result.is_error result)
+let admitted label result = check label true (Result.is_ok result)
+let decoders () =
+  admitted "an automation configuration decodes"
+    (Automation.configuration_of_json (`Assoc ["driver",`String "/bin/driver";"binary",`Null]));
+  refused "an automation key set without binary is refused"
+    (Automation.configuration_of_json (`Assoc ["driver",`String "/bin/driver"]));
+  refused "a relative automation driver is refused"
+    (Automation.configuration_of_json (`Assoc ["driver",`String "driver";"binary",`Null]));
+  refused "a list is not an automation configuration" (Automation.configuration_of_json (`List []));
+  let id=`Assoc ["device",`Int 1;"inode",`Int 2] in
+  let firefox ~port ~profile ~root=`Assoc ["claim_directory",`String "/c";"firefox",`String "/f";"gate",id;
+    "guardian",`String "/g";"launcher",`String "/l";"lease",id;"port",`Int port;"profile",`String profile;
+    "root",root;"slot",id] in
+  admitted "a Firefox configuration decodes" (Live.configuration_of_json (firefox ~port:9222 ~profile:"/p" ~root:id));
+  refused "a Firefox port of 0 is refused" (Live.configuration_of_json (firefox ~port:0 ~profile:"/p" ~root:id));
+  refused "a relative Firefox profile is refused" (Live.configuration_of_json (firefox ~port:9222 ~profile:"p" ~root:id));
+  refused "a Firefox identity without an inode is refused"
+    (Live.configuration_of_json (firefox ~port:9222 ~profile:"/p" ~root:(`Assoc ["device",`Int 1])));
+  refused "a Firefox identity with a string inode is refused"
+    (Live.configuration_of_json (firefox ~port:9222 ~profile:"/p" ~root:(`Assoc ["device",`Int 1;"inode",`String "2"])));
+  refused "a Firefox key set without slot is refused" (Live.configuration_of_json (`Assoc ["firefox",`String "/f"]));
+  let persistent ~path=`Assoc ["kind",`String "persistent";"path",`String path;"root",id;"slot",id;
+    "gate",id;"lease",id;"anchor",id] in
+  admitted "a private profile descriptor decodes" (Profile.of_json (`Assoc ["kind",`String "private"]));
+  admitted "a persistent profile descriptor decodes" (Profile.of_json (persistent ~path:"/profile"));
+  refused "a relative persistent profile path is refused" (Profile.of_json (persistent ~path:"profile"));
+  refused "an unknown profile lifetime is refused" (Profile.of_json (`Assoc ["kind",`String "shared"]));
+  let chrome ~chrome=`Assoc ["chrome",`String chrome;"claim_directory",`String "/c";"extension",`String "/e";
+    "guardian",`String "/g";"launcher",`String "/l";"profile",`Assoc ["kind",`String "private"]] in
+  admitted "a Chrome configuration decodes" (Chrome.configuration_of_json (chrome ~chrome:"/chrome"));
+  refused "a relative Chrome binary is refused" (Chrome.configuration_of_json (chrome ~chrome:"chrome"));
+  refused "a Chrome key set without profile is refused" (Chrome.configuration_of_json (`Assoc ["chrome",`String "/chrome"]));
+  admitted "a model broker configuration decodes"
+    (Models.configuration_of_json (`Assoc ["store_root",`String "/r";"outputs",`Assoc []]));
+  refused "a relative model receipt root is refused"
+    (Models.configuration_of_json (`Assoc ["store_root",`String "r";"outputs",`Assoc []]));
+  refused "a model output without request_schema is refused"
+    (Models.configuration_of_json (`Assoc ["store_root",`String "/r";"outputs",`Assoc ["result",`Assoc ["schema",`Assoc []]]]));
+  refused "a model key set without outputs is refused" (Models.configuration_of_json (`Assoc ["store_root",`String "/r"]))
 let () =
   if Array.length Sys.argv<>3 then (prerr_endline "expected native launcher and guardian";exit 1);
   let launcher=Unix.realpath Sys.argv.(1) and guardian=Unix.realpath Sys.argv.(2) in
   Alcotest.run ~argv:[|Sys.argv.(0)|] "browser preserved profile"
-    ["lifecycle",[Alcotest.test_case "shared admission, old cleanup and original profile preservation" `Quick (scenario launcher guardian)]]
+    ["lifecycle",[Alcotest.test_case "shared admission, old cleanup and original profile preservation" `Quick (scenario launcher guardian)];
+     "decoders",[Alcotest.test_case "configuration decoders refuse wrong keys and fields" `Quick decoders]]

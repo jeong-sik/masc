@@ -115,3 +115,9 @@
  (modules test_browser_addon_reply_policy)
  (libraries masc masc.browser_lane masc.time_compat masc.lane_addon_call_context
   masc.lane_addon_tool_result masc.tool_types mcp_protocol alcotest eio eio.mock yojson))
+
+(test
+ (name test_browser_addon_scoped_elements)
+ (modules test_browser_addon_scoped_elements)
+ (libraries masc masc.browser_lane masc.time_compat masc.lane_addon_call_context
+  masc.lane_addon_tool_result masc.tool_types mcp_protocol alcotest eio eio.mock yojson))

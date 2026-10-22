@@ -137,9 +137,11 @@ let test_fresh_ancestor_and_file_permissions_are_checked_after_io () =
   with_store (fun root store -> retain store "original";
     fail_inventory (inventory store ~sync_file:(fun fd -> Unix.fsync fd;Unix.chmod (path root "original") 0o666)));
   with_store (fun root store -> retain store "original";
+    let relative = get (Fs_compat.owned_relative_path
+      [Filename.basename root; "tool-request-owners"; Store.digest scope; Store.digest "original" ^ ".json"]) in
     let result = Fs_compat.with_owned_inventory_root (Filename.dirname root) (fun held ->
       Fs_compat.with_owned_inventory_regular_file ~owner_uid:(Unix.geteuid () + 1) held
-        (path root "original") (fun ~file:_ ~parent:_ ~stat:_ -> ())) in
+        relative (fun ~file:_ ~parent:_ ~stat:_ -> ())) in
     fail_inventory result)
 
 let test_original_publication_waits_for_actual_read_across_store_aliases () =
@@ -191,7 +193,35 @@ let test_original_publication_waits_for_actual_read_across_store_aliases () =
           Alcotest.(check bool) "fresh known-ID read sees the exact new original progress" true
             (Progress.phase fresh.progress=Progress.Dispatch_pending None))))))
 
+let test_owned_relative_path_refuses_non_names () =
+  List.iter (fun components ->
+    Alcotest.(check bool) (String.concat "|" components ^ " is refused") true
+      (Result.is_error (Fs_compat.owned_relative_path components)))
+    [[]; [""]; ["."]; [".."]; ["a/b"]; ["a"; ".."]];
+  Alcotest.(check string) "names join below the root" "a/b"
+    (Fs_compat.owned_relative_path_to_string (get (Fs_compat.owned_relative_path ["a"; "b"])))
+
+(* #45130: the held root is canonical. A root reached through a symbolic link
+   (macOS /var is /private/var) must still read its entries. *)
+let test_held_root_through_a_symlink_reads_entries_by_relative_path () =
+  with_store (fun root store -> retain store "original";
+    let parent = Filename.dirname root in
+    let alias = Filename.concat parent "alias" in
+    Unix.symlink parent alias;
+    let relative = get (Fs_compat.owned_relative_path
+      [Filename.basename root; "tool-request-owners"; Store.digest scope; Store.digest "original" ^ ".json"]) in
+    let read = Fs_compat.with_owned_inventory_root alias (fun held ->
+      Fs_compat.with_owned_inventory_regular_file ~owner_uid:(Unix.geteuid ()) held relative
+        (fun ~file:_ ~parent:_ ~stat -> stat.Unix.st_size)) in
+    match read with
+    | Ok bytes -> Alcotest.(check int) "the entry is read below the canonical root"
+        (String.length (Fs_compat.load_file (path root "original"))) bytes
+    | Error error -> Alcotest.fail (Fs_compat.owned_regular_file_read_error_to_string error))
+
 let () = Alcotest.run "Original Add-on request discovery" ["inventory",[
+  Alcotest.test_case "owned relative paths are names only" `Quick test_owned_relative_path_refuses_non_names;
+  Alcotest.test_case "a held root reached through a symlink reads by relative path" `Quick
+    test_held_root_through_a_symlink_reads_entries_by_relative_path;
   Alcotest.test_case "restart discovers original input and progress" `Quick test_restart_discovers_original_input_progress_and_scope;
   Alcotest.test_case "absence requires owned settled authority and creates nothing" `Quick test_initial_absence_requires_existing_safe_anchor_without_creation;
   Alcotest.test_case "bad record and unknown entry refuse complete inventory" `Quick test_bad_record_or_unknown_name_never_returns_a_partial_inventory;

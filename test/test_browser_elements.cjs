@@ -68,11 +68,11 @@ function fixture() {
 
 const plain = value => JSON.parse(JSON.stringify(value));
 
-function runNative(context) {
-  return plain(vm.runInNewContext(`(function () {${nativeScript}})()`, context));
+function runNative(context, args = {}) {
+  return plain(vm.runInNewContext(`(function () {${nativeScript}})(${JSON.stringify(args)})`, context));
 }
 
-async function runExtension(context) {
+async function runExtension(context, args = {}) {
   const api = {
     runtime: {
       connectNative() {
@@ -88,7 +88,7 @@ async function runExtension(context) {
   };
   const extension = vm.createContext({ browser: api, setTimeout, clearTimeout });
   vm.runInContext(extensionSource, extension);
-  return plain(await extension.pageElements({ tabId: 37 }));
+  return plain(await extension.pageElements({ tabId: 37, ...args }));
 }
 
 function checkControls(observation) {
@@ -182,4 +182,88 @@ test('element text is cut by code point, never through a surrogate pair', async 
   for (const cut of await cuts()) assert.equal(cut, '\u{1F600}'.repeat(500));
   text.innerText = 'short \u{1F600}';
   for (const cut of await cuts()) assert.equal(cut, 'short \u{1F600}');
+});
+
+// [within] is read by the page's CSS engine. The fixture stands in for it with
+// a table of selectors: each names the elements it matches, and one is not CSS.
+function scope(context, containers) {
+  const controls = context.document.querySelectorAll();
+  context.document.querySelectorAll = selector => {
+    if (selector.startsWith('a[href]')) return controls;
+    if (selector === 'nav((') throw new SyntaxError('not a selector');
+    return containers[selector] ?? [];
+  };
+}
+
+test('within keeps the controls inside the matched elements, in both readers', async () => {
+  const { context, text } = fixture();
+  const body = text.parentElement;
+  const controls = body.children;
+  const [first, second, ...rest] = controls;
+  const nav = { localName: 'nav', nodeType: 1, parentElement: body, children: [first, second],
+    getAttribute() { return null; } };
+  first.parentElement = nav;
+  second.parentElement = nav;
+  body.children = [nav, ...rest];
+  scope(context, { nav: [nav], '#agree': [second], '#missing': [] });
+  const read = async within => {
+    const native = runNative(context, { within });
+    const { tabId, ...extension } = await runExtension(context, { within });
+    assert.deepEqual(extension, native, 'both readers apply the same scope');
+    return native;
+  };
+
+  const inNav = await read('nav');
+  assert.equal(inNav.within, 'nav');
+  assert.equal(inNav.withinMatches, 1);
+  assert.equal(inNav.total, 2);
+  assert.deepEqual(inNav.elements.map(item => item.value), ['current edit', 'agree']);
+
+  const itself = await read('#agree');
+  assert.equal(itself.total, 1, 'a control that matches within counts');
+  assert.equal(itself.elements[0].value, 'agree');
+
+  const none = await read('#missing');
+  assert.equal(none.withinMatches, 0);
+  assert.equal(none.total, 0);
+
+  const whole = runNative(context);
+  assert.equal(Object.hasOwn(whole, 'within'), false);
+  assert.equal(Object.hasOwn(whole, 'withinMatches'), false);
+  assert.equal(whole.total, 8);
+});
+
+test('an invalid within is refused, never read as the whole page', async () => {
+  const { context } = fixture();
+  scope(context, {});
+  assert.throws(() => runNative(context, { within: 'nav((' }), /invalid_css_selector/);
+  await assert.rejects(runExtension(context, { within: 'nav((' }), /invalid_css_selector/);
+  await assert.rejects(runExtension(context, { within: '' }), /invalid_within/);
+});
+
+// The page's CSS engine answers which elements an id selects. The fixture
+// lists them; CSS.escape is the identity for the plain ids used here.
+function ids(context, byId) {
+  const controls = context.document.querySelectorAll();
+  context.CSS = { escape: id => id };
+  context.document.querySelectorAll = selector =>
+    selector.startsWith('#') ? (byId[selector.slice(1)] ?? []) : controls;
+}
+
+test('a selector starts at the nearest id no other element carries', async () => {
+  const { context, text } = fixture();
+  const body = text.parentElement;
+  const [first, second, third] = body.children;
+  body.id = 'form';
+  first.id = 'twice';
+  second.id = 'agree';
+  third.id = 'twice';
+  ids(context, { form: [body], agree: [second], twice: [first, third] });
+  const native = runNative(context);
+  const { tabId, ...extension } = await runExtension(context);
+  assert.deepEqual(extension, native, 'both readers anchor the same way');
+  assert.equal(native.elements[0].selector, '#form > input:nth-of-type(1)', 'a shared id is not an anchor');
+  assert.equal(native.elements[1].selector, '#agree', 'a control with its own unique id needs no path');
+  assert.equal(native.elements[2].selector, '#form > input:nth-of-type(3)');
+  assert.equal(new Set(native.elements.map(item => item.selector)).size, 8);
 });

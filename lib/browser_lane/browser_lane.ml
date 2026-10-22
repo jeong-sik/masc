@@ -74,9 +74,9 @@ type verb =
      question a keeper has before deciding to open one. *)
   | Session_status
   | Page_goto of { url : string; tab_id : int option }
-  | Page_elements of { tab_id : int option }
+  | Page_elements of { tab_id : int option; within : string option }
   | Page_act of Browser_action.t
-  | Page_context of { tab_id : int; frame_path : string list; mode : [ `Text of int | `Elements | `Frames | `Dialog ] }
+  | Page_context of { tab_id : int; frame_path : string list; mode : [ `Text of int | `Elements of string option | `Frames | `Dialog ] }
   (* Sentences for the Stagehand runtime (RFC-browser-lane-stagehand §3.2):
      act on, locate, or extract from the page, with element choice left to
      the model the runtime asks. *)
@@ -95,6 +95,17 @@ let reply_timeout_sec = function
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
   | Page_scene _ | Page_interact _ | Page_elements _ | Page_context _
   | Page_instruct _ | Page_locate _ | Page_extract _ -> default_timeout_sec
+
+(* The CSS scope an elements read carries, top-level or in a frame. Every
+   caller that relays such a read checks the answer against it. *)
+let elements_within = function
+  | Page_elements { within; _ } -> within
+  | Page_context { mode = `Elements within; _ } -> within
+  | Page_context { mode = (`Text _ | `Frames | `Dialog); _ }
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _
+  | Page_cookies _ | Page_capture _ | Page_scene _ | Page_interact _ | Session_open _ | Session_close
+  | Session_status | Page_goto _ | Page_act _ | Page_instruct _ | Page_locate _ | Page_extract _ -> None
+;;
 
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
@@ -240,13 +251,15 @@ let verb_json = function
   | Page_goto { url; tab_id } ->
     `Assoc ["verb", `String "page.goto"; "args", `Assoc
       (["url", `String url] @ Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
-  | Page_elements { tab_id } ->
+  | Page_elements { tab_id; within } ->
     `Assoc ["verb", `String "page.elements"; "args", `Assoc
-      (Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
+      (Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id)
+       @ Option.to_list (Option.map (fun selector -> "within", `String selector) within))]
   | Page_context {tab_id;frame_path;mode} ->
     let name, extra = match mode with
       | `Text cap -> "text", ["maxChars",`Int cap]
-      | `Elements -> "elements", [] | `Frames -> "frames", [] | `Dialog -> "dialog", [] in
+      | `Elements within -> "elements", Option.to_list (Option.map (fun selector -> "within", `String selector) within)
+      | `Frames -> "frames", [] | `Dialog -> "dialog", [] in
     `Assoc ["verb",`String "page.context";"args",`Assoc
       (["tabId",`Int tab_id;"framePath",`List (List.map (fun s -> `String s) frame_path);"mode",`String name] @ extra)]
   | Page_act action ->
@@ -305,6 +318,7 @@ type live_capability =
   | Viewport_resize
   | Tab_activation
   | Tab_history
+  | Tab_navigation
   | Tab_closing
   | Tab_creation
 [@@deriving enumerate]
@@ -329,6 +343,7 @@ let live_capability_to_wire = function
   | Viewport_resize -> "viewport_resize"
   | Tab_activation -> "tab_activation"
   | Tab_history -> "tab_history"
+  | Tab_navigation -> "tab_navigation"
   | Tab_closing -> "tab_closing"
   | Tab_creation -> "tab_creation"
 ;;
@@ -365,10 +380,11 @@ let live_capability = function
   | Page_act (Action.Open_tab _) -> Some Tab_creation
   | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Some Tab_history
   | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Some Tab_closing
+  | Page_goto _ -> Some Tab_navigation
   | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ -> None
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
-  | Session_open _ | Session_close | Session_status | Page_goto _
+  | Session_open _ | Session_close | Session_status
   | Page_act (Action.On_tab { interaction =
       ( Action.Click _ | Action.Fill _ | Action.Press _ | Action.Select _ | Action.Scroll _
       | Action.Upload _ | Action.Accept_dialog _ | Action.Dismiss_dialog ); _ }) -> None
@@ -476,20 +492,25 @@ let live_transport_of_string = function
    The extension acts through DOM calls inside the page, so it has no pointer
    the browser treats as the operator's: it cannot hover or drag, and its
    point click is the element's own [click()]. The BiDi peer sends pointer
-   and wheel input through the browser. It does not implement tab activation
-   (Browser_bidi_peer.dispatch): BiDi's own activation also takes window
-   focus. test_browser_bidi_peer holds this table to what that peer does. *)
+   and wheel input through the browser. Both switch the active tab; BiDi's
+   activation also gives the browser window system focus. The BiDi peer's
+   history, close and navigation act only on tabs it opened; the extension
+   opens none. test_browser_bidi_peer holds this table to what that peer
+   does. *)
 let live_transport_serves transport capability =
   match transport, capability with
   | ( (Web_extension | Webdriver_bidi)
     , ( Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture
       | Scene_read | Dom_interaction | Point_click | Point_scroll ) ) -> true
-  | Web_extension, (Tab_activation | Browser_zoom) -> true
+  | (Web_extension | Webdriver_bidi), Tab_activation -> true
+  | Web_extension, Browser_zoom -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
-                    | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_closing) -> false
+                    | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
+                    | Tab_closing) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
-                    | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_closing) -> true
-  | Webdriver_bidi, (Tab_activation | Browser_zoom) -> false
+                    | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
+                    | Tab_closing) -> true
+  | Webdriver_bidi, Browser_zoom -> false
 ;;
 
 let live_transports_serving capability =
@@ -500,16 +521,6 @@ let live_transports_serving capability =
 let live_transport_setup_doc = function
   | Web_extension -> "connectors/browser/host/README.md"
   | Webdriver_bidi -> "docs/design/browser-bidi-live-host.md"
-;;
-
-(* What adds a connection of each kind. Both are the operator's to do. *)
-let live_transport_setup transport =
-  let steps = match transport with
-    | Web_extension ->
-      "the operator loads the browser-lane extension and its native host in that browser"
-    | Webdriver_bidi ->
-      "the operator attaches that browser's Remote Agent with a BiDi browser host" in
-  Printf.sprintf "%s (%s)" steps (live_transport_setup_doc transport)
 ;;
 
 type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string;

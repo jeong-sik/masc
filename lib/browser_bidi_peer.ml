@@ -5,8 +5,8 @@ let string name json = match field name json with
 let obj xs = `Assoc xs
 let str s = `String s
 let required name json = match field name json with Some v -> Ok v | None -> Error ("missing " ^ name)
-type created_tab_failure = { tab_id : int; message : string }
-type failure = Before_effect of string | Partial_failure of created_tab_failure | Outcome_unknown of string
+type partial_failure = { tab_id : int; message : string; receipt : Yojson.Safe.t }
+type failure = Before_effect of string | Partial_failure of partial_failure | Outcome_unknown of string
 (* The error codes Firefox answers that this host acts on, read once where
    the answer arrives; any other code is kept as Firefox wrote it.
    "session not created": Firefox will not serve a [session.new]. It takes
@@ -31,14 +31,16 @@ let refusal_message = function
   | Rejected code -> "BiDi command rejected: " ^ error_code_to_wire code
   | Unanswered why | Unsent why -> why
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
+  | Page_goto
 let verb_to_wire = function
   | Browser_info -> "browser.info" | Tabs_list -> "tabs.list" | Page_read -> "page.read"
   | Page_scene -> "page.scene" | Page_elements -> "page.elements" | Page_capture -> "page.capture"
-  | Page_interact -> "page.interact" | Page_act -> "page.act"
+  | Page_interact -> "page.interact" | Page_act -> "page.act" | Page_goto -> "page.goto"
 let verb_of_wire = function
   | "browser.info" -> Some Browser_info | "tabs.list" -> Some Tabs_list | "page.read" -> Some Page_read
   | "page.scene" -> Some Page_scene | "page.elements" -> Some Page_elements
   | "page.capture" -> Some Page_capture | "page.interact" -> Some Page_interact | "page.act" -> Some Page_act
+  | "page.goto" -> Some Page_goto
   | _ -> None
 type session_end_failure = Connection_gone of string | Not_confirmed of string
 let session_end_failure_message = function Connection_gone why | Not_confirmed why -> why
@@ -207,7 +209,8 @@ let open_tab t url =
   let message reason =
     Printf.sprintf "New tab was created as tabId %d on this connection. %s. Do not open another tab to retry." id reason in
   let partial reason = Partial_failure {tab_id=id;message=message reason ^
-    " Inspect it using this same clientId and tabId."} in
+    " Inspect it using this same clientId and tabId.";
+    receipt=obj ["action",str "open_tab";"created",`Bool true;"tabId",`Int id]} in
   let rpc_failure = function
     | Rejected (Other_error _) as refusal -> partial (refusal_message refusal)
     | Rejected (Session_not_created | Invalid_session_id) | Unanswered _ | Unsent _ as refusal ->
@@ -327,16 +330,35 @@ let keyboard t context args ~sources ~name =
    this host never saw, and these actions carry no expectedUrl to say which page the caller observed. Of
    Firefox's refusals, only [codes_before_acting] mean nothing happened. A reload or a history step waits for
    the document, and one that lands on an error page is answered with an error after the tab moved, so any
-   other error, like a command that got no answer, is [Outcome_unknown]. *)
+   other error, like a command that got no answer, may have had an effect: a navigation step reads the tab
+   again ([settle_navigation]) and a close stays [Outcome_unknown]. *)
 let codes_before_acting = ["no such history entry"; "invalid argument"; "no such frame"]
+let ask_on_tab ?(before=codes_before_acting) t method_ params = match t.ask method_ params with
+  | Ok result -> Ok result
+  | Error (Unsent _ as refusal) -> Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
+  | Error (Rejected (Other_error code) as refusal) when List.mem code before ->
+    Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
+  | Error (Rejected (Other_error _ | Session_not_created | Invalid_session_id) | Unanswered _ as refusal) ->
+    Error (Outcome_unknown (method_ ^ ": " ^ refusal_message refusal ^ "; inspect the tab before repeating"))
+let tab_receipt t context id name =
+  let* summary = Result.map_error (fun e -> Outcome_unknown e)
+    (script t context "return {url:location.href,title:document.title};" (obj [])) in
+  match summary with
+  | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str name)::fields))
+  | _ -> Error (Outcome_unknown ("invalid post-" ^ name ^ " observation"))
+(* A navigation step Firefox answered with an error may have moved the tab
+   already, onto an error page or part way. Reading the tab again settles
+   where it is, so the step is a known partial effect and the connection
+   stays; only a tab that cannot be read leaves the outcome unknown. *)
+let settle_navigation t context id name = function
+  | Ok _ -> tab_receipt t context id name
+  | Error (Outcome_unknown message) ->
+    (match tab_receipt t context id name with
+     | Ok receipt -> Error (Partial_failure {tab_id=id;message;receipt})
+     | Error _ -> Error (Outcome_unknown message))
+  | Error (Before_effect _ | Partial_failure _ as failure) -> Error failure
 let tab_action t ~tab_id interaction =
-  let ask method_ params = match t.ask method_ params with
-    | Ok result -> Ok result
-    | Error (Unsent _ as refusal) -> Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
-    | Error (Rejected (Other_error code) as refusal) when List.mem code codes_before_acting ->
-      Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
-    | Error (Rejected (Other_error _ | Session_not_created | Invalid_session_id) | Unanswered _ as refusal) ->
-      Error (Outcome_unknown (method_ ^ ": " ^ refusal_message refusal ^ "; inspect the tab before repeating")) in
+  let ask = ask_on_tab t in
   let* () = match interaction with
     | (Browser_lane.Action.Close_tab | Browser_lane.Action.Back | Browser_lane.Action.Forward
       | Browser_lane.Action.Reload) when not (List.mem tab_id t.opened) ->
@@ -346,19 +368,16 @@ let tab_action t ~tab_id interaction =
     | Browser_lane.Action.Press _ | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _
     | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog -> Ok () in
   let* context,id = Result.map_error (fun e -> Before_effect e) (resolve t (obj ["tabId",`Int tab_id])) in
-  let after name =
-    let* summary = Result.map_error (fun e -> Outcome_unknown e)
-      (script t context "return {url:location.href,title:document.title};" (obj [])) in
-    match summary with
-    | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str name)::fields))
-    | _ -> Error (Outcome_unknown ("invalid post-" ^ name ^ " observation")) in
   match interaction with
   | Browser_lane.Action.Back ->
-    let* _ = ask "browsingContext.traverseHistory" (obj ["context",str context;"delta",`Int (-1)]) in after "back"
+    settle_navigation t context id "back"
+      (ask "browsingContext.traverseHistory" (obj ["context",str context;"delta",`Int (-1)]))
   | Browser_lane.Action.Forward ->
-    let* _ = ask "browsingContext.traverseHistory" (obj ["context",str context;"delta",`Int 1]) in after "forward"
+    settle_navigation t context id "forward"
+      (ask "browsingContext.traverseHistory" (obj ["context",str context;"delta",`Int 1]))
   | Browser_lane.Action.Reload ->
-    let* _ = ask "browsingContext.reload" (obj ["context",str context;"wait",str "complete"]) in after "reload"
+    settle_navigation t context id "reload"
+      (ask "browsingContext.reload" (obj ["context",str context;"wait",str "complete"]))
   | Browser_lane.Action.Close_tab ->
     let* _ = ask "browsingContext.close" (obj ["context",str context;"promptUnload",`Bool false]) in
     t.opened <- List.filter (fun opened -> opened <> id) t.opened;
@@ -367,6 +386,58 @@ let tab_action t ~tab_id interaction =
   | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _ | Browser_lane.Action.Upload _
   | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog ->
     Error (Before_effect "live BiDi page.act supports open_tab, back, forward, reload and close_tab only")
+
+(* A URL navigation follows the rule of the history steps above: only a tab
+   this connection opened, so a tab the operator opened is refused before any
+   effect. The URL comes from the caller, so only an absolute HTTP(S) URL is
+   sent to Firefox. *)
+let goto t args =
+  let refuse reason = Error (Before_effect reason) in
+  let* url = match field "url" args with
+    | Some (`String url) ->
+      let uri = Uri.of_string url in
+      (match Uri.scheme uri, Uri.host uri with
+       | Some ("http" | "https"), Some host when host <> "" -> Ok url
+       | (None | Some _), (None | Some _) -> refuse "page.goto requires an absolute HTTP(S) URL")
+    | Some _ | None -> refuse "page.goto requires an absolute HTTP(S) URL" in
+  let* tab_id = match field "tabId" args with
+    | Some (`Int id) when List.mem id t.opened -> Ok id
+    | Some _ | None ->
+      refuse "a connected browser navigates only a tab this connection opened with open_tab; pass that tabId" in
+  let* context,id = Result.map_error (fun e -> Before_effect e) (resolve t (obj ["tabId",`Int tab_id])) in
+  settle_navigation t context id "goto"
+    (ask_on_tab t "browsingContext.navigate" (obj ["context",str context;"url",str url;"wait",str "complete"]))
+
+(* Firefox brings the tab to the front and gives it focus; the W3C
+   specification extends that to the system focus of its window, which the
+   extension's activation does not take. The observed URL is checked first, so
+   a tab that moved on is refused before any effect. Each error Firefox
+   documents for this command is one it answers before acting. *)
+let activation_refusals = ["invalid argument"; "no such frame"; "unsupported operation"]
+let activate t context id args =
+  let* observed = Result.map_error (fun e -> Before_effect e)
+    (script t context Browser_interaction.url_guard_script args) in
+  let* old_url = Result.map_error (fun e -> Before_effect e) (string "url" observed) in
+  let receipt after = obj (["tabId",`Int id;"action",str "activate_tab";"urlBefore",str old_url]
+    @ List.filter_map (fun key -> Option.map (fun value -> key,value) (field key after)) ["url";"active";"title"]) in
+  (* Whatever Firefox answered, the tab is read again: once it is read, what is
+     in front is known and the connection stays. *)
+  let settle message = match tab_metadata t context with
+    | Ok after -> Error (Partial_failure {tab_id=id;message;receipt=receipt after})
+    | Error _ -> Error (Outcome_unknown message) in
+  match ask_on_tab ~before:activation_refusals t "browsingContext.activate" (obj ["context",str context]) with
+  | Error (Before_effect _ | Partial_failure _ as failure) -> Error failure
+  | Error (Outcome_unknown message) -> settle message
+  | Ok _ ->
+    match tab_metadata t context with
+    | Error message -> Error (Outcome_unknown message)
+    | Ok after -> match field "url" after, field "active" after with
+      | Some (`String url), Some (`Bool true) when String.equal url old_url ->
+        Ok (obj ["urlBefore",str old_url;"url",str url;"active",`Bool true;
+          "title",Option.value (field "title" after) ~default:`Null])
+      | (Some _ | None), (Some _ | None) ->
+        Error (Partial_failure {tab_id=id;receipt=receipt after;
+          message="Firefox activated the tab, but the observed page is not in the foreground; inspect it before repeating"})
 
 (* The override stays on the tab until a later [Browser_default] clears it, so a refusal before the
    command leaves the viewport as it was. *)
@@ -405,9 +476,10 @@ let dispatch ?actor ?request_id t ~verb args =
         let result = use context id in
         phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _) -> Browser_pointer_feedback.Refused | Error (Partial_failure _ | Outcome_unknown _) -> Browser_pointer_feedback.Unknown);
         result)
-    | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene|Page_act), (None|Some _)
+    | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene|Page_act|Page_goto), (None|Some _)
     | Page_interact,None -> use context id in
   match verb with
+  | Page_goto -> goto t args
   | Page_act ->
     let* action = pre (Browser_lane.Action.parse args) in
     (match action with
@@ -446,7 +518,9 @@ let dispatch ?actor ?request_id t ~verb args =
   | Page_elements -> on_tab (fun context id -> pre (
         (* The inventory the automation lane reads, so its selectors mean the
            same thing to the DOM interactions below. *)
-        let* p=parsed_document t context Browser_page_script.elements (obj []) in with_tab id p))
+        let* within=Browser_page_script.within_of_json (field "within" args) in
+        let* p=parsed_document t context Browser_page_script.elements
+            (Browser_page_script.elements_args within) in with_tab id p))
   | Page_read -> on_tab (fun context id -> pre (let* p=read t context args in with_tab id p))
   | Page_scene -> on_tab (fun context id -> pre (let* fields=match args with `Assoc xs->Ok xs|_->Error "invalid scene arguments" in
         let* p=scene t context (obj (("mode",str "read")::fields)) in with_tab id p))
@@ -499,7 +573,7 @@ let dispatch ?actor ?request_id t ~verb args =
             | None -> Ok result))
       | Browser_lane.Set_viewport size -> set_viewport t context args size
       | Browser_lane.Set_zoom _ -> Error (Before_effect "set_zoom requires a connected WebExtension browser")
-      | Browser_lane.Activate_tab -> Error (Before_effect "unsupported BiDi interaction") in
+      | Browser_lane.Activate_tab -> activate t context id args in
       let receipt = match receipt with
         | `Assoc fields -> obj (("action",str (Browser_lane.interaction_verb request.action))
             :: List.remove_assoc "action" fields)

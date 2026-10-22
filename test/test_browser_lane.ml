@@ -96,9 +96,15 @@ let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
 let test_sources_and_live_policy () = with_clients (fun _ connect ->
   let client = connect Lane.Firefox in
   check bool "missing transport UUID rejected" true (Result.is_error (Lane.client_id_of_string ""));
-  List.iter (fun verb -> match Lane.issue_for ~target:(target client.client_id) ~verb ~timeout_sec:0.1 with
-    | Ok (Lane.Rejected_before_effect _) -> () | _ -> fail "live session/navigation must be rejected before effect")
-    [Lane.Page_goto {url="https://example.org";tab_id=None}; Lane.Session_open {headless=None}];
+  (match Lane.issue_for ~target:(target client.client_id) ~verb:(Lane.Session_open {headless=None}) ~timeout_sec:0.1 with
+   | Ok (Lane.Rejected_before_effect _) -> () | _ -> fail "a live session must be rejected before effect");
+  (* Navigation is BiDi work on a tab that connection opened; the extension is
+     refused as a selection, with nothing queued. *)
+  check bool "extension navigation is refused as a selection" true
+    (Lane.issue_for ~target:(target client.client_id) ~verb:(Lane.Page_goto {url="https://example.org";tab_id=Some 2})
+       ~timeout_sec:0.1
+     = Error (Lane.Transport_unsupported
+         {client_id=client.client_id; transport=client.transport; capability=Lane.Tab_navigation}));
   Lane.install_automation_executor None;
   check bool "automation still needs its native executor" true
     (Lane.issue_automation ~verb:Lane.Tabs_list ~timeout_sec:0.1 = Lane.Lane_absent))
@@ -113,7 +119,7 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Tab_listing -> Tabs_list
   | Text_read -> Page_read {tab_id=Some 2; max_chars=None}
   | Document_source -> Page_document {tab_id=2}
-  | Element_inventory -> Page_elements {tab_id=Some 2}
+  | Element_inventory -> Page_elements {tab_id=Some 2;within=None}
   | Viewport_capture -> Page_capture {tab_id=2}
   | Scene_read -> Page_scene {tab_id=2; max_chars=1000; view=Content; scope=None}
   | Dom_interaction -> interact (Click "#button")
@@ -129,6 +135,7 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
       | Browser_zoom -> interact (Set_zoom {factor=1.5})
   | Tab_history -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Back})
   | Tab_closing -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Close_tab})
+  | Tab_navigation -> Page_goto {url="https://example.test/next";tab_id=Some 2}
   | Tab_activation -> interact Activate_tab
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new"))
 
@@ -139,9 +146,9 @@ let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the extension has no pointer the browser trusts"
-    Lane.[Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_closing; Tab_creation] (unserved Lane.Web_extension);
-  check (list capability) "the BiDi peer has no tab activation"
-    Lane.[Browser_zoom; Tab_activation] (unserved Lane.Webdriver_bidi);
+    Lane.[Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation] (unserved Lane.Web_extension);
+  check (list capability) "the BiDi peer has no browser zoom"
+    Lane.[Browser_zoom] (unserved Lane.Webdriver_bidi);
   List.iter (fun capability ->
     check bool (Lane.live_capability_to_wire capability ^ " is reachable on some connection") true
       (Lane.live_transports_serving capability <> []);
@@ -255,11 +262,11 @@ let test_unsupported_message_names_the_serving_transport () =
      trusted_hover; a webdriver_bidi connection does"
     (Lane.selection_error_message (Lane.Transport_unsupported
        {client_id; transport=Web_extension; capability=Trusted_hover}));
-  check string "tab activation on BiDi points at the extension"
+  check string "browser zoom on BiDi points at the extension"
     "live_transport_unsupported: this browser is connected over webdriver_bidi, which does not serve \
-     tab_activation; a web_extension connection does"
+     browser_zoom; a web_extension connection does"
     (Lane.selection_error_message (Lane.Transport_unsupported
-       {client_id; transport=Webdriver_bidi; capability=Tab_activation}))
+       {client_id; transport=Webdriver_bidi; capability=Browser_zoom}))
 
 let test_optional_document_preserves_existing_work () = with_clients (fun sw connect ->
   let info = connect Lane.Firefox in

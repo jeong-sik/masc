@@ -15,6 +15,11 @@ let error_to_string = function
   | Protocol (Protocol.Invalid_contract detail | Protocol.Protocol_failed detail | Protocol.Invalid_observation detail) -> detail
   | Protocol (Protocol.Host_refusal (Lane_addon_call_context.Rejected detail | Unavailable detail | Activity_disabled detail | Activity_unobserved detail)) -> detail
   | Protocol Protocol.Stopped | Stopped -> "native Add-on is stopped"
+let status_text = function
+  | Native_addon_lease.Awaiting_exec -> "awaiting its launcher"
+  | Live owner -> Printf.sprintf "live as pid %d" owner.pid
+  | Cleanup_pending owner -> Printf.sprintf "waiting for cleanup of pid %d" owner.pid
+  | Settled -> "settled"
 type phase = Initializing | Validating_owner | Serving | Retired
 type t = {
   protocol : Protocol.t;
@@ -93,7 +98,9 @@ let start ~sw ~clock ~grace_seconds ~admission ~launcher ~contract ~command ?cwd
   let* state = admission_status admission |> Result.map_error (fun error -> Admission error) in
   let* () = match state with
     | Native_addon_lease.Awaiting_exec -> Ok ()
-    | Live _ | Cleanup_pending _ | Settled -> Error (Admission Native_addon_lease.Stale_claim) in
+    | (Live _ | Cleanup_pending _ | Settled) as state ->
+        Error (Admission (Native_addon_lease.Stale_claim (Printf.sprintf
+          "native instance %s must be awaiting its launcher; it is %s" instance_id (status_text state)))) in
   let arguments = ["--instance";instance_id] @
     List.concat_map (fun directory -> ["--slot";directory]) (Native_addon_lease.directories admission) @
     ["--";command.executable] @ command.arguments in
@@ -188,8 +195,10 @@ let start ~sw ~clock ~grace_seconds ~admission ~launcher ~contract ~command ?cwd
                                           (fun () -> Eio.Promise.await stop_requested)
                                           (fun () -> ignore (Agent_core.Mcp.await_exit connected : Eio.Process.exit_status));
                                         Protocol.revoke protocol)
-                               | Ok (Awaiting_exec | Live _ | Cleanup_pending _ | Settled) ->
-                                   failure := Some (Admission Native_addon_lease.Stale_claim)
+                               | Ok ((Awaiting_exec | Live _ | Cleanup_pending _ | Settled) as state) ->
+                                   failure := Some (Admission (Native_addon_lease.Stale_claim (Printf.sprintf
+                                     "native instance %s must be live as launcher pid %d; it is %s"
+                                     (Native_addon_lease.instance_id admission) pid (status_text state))))
                                | Error error -> failure := Some (Admission error)))));
         cleanup_completed := true
         with Eio.Cancel.Cancelled _ as exn -> cleanup_completed := true;raise exn) in

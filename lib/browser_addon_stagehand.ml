@@ -2,6 +2,7 @@ module Lease = Native_addon_lease
 module Session = Browser_stagehand_session
 module Process = Browser_chromium_process
 module Profile = Browser_addon_chrome_profile
+module Requirement = Resource_requirement
 let ( let* ) = Result.bind
 
 type configuration = { chrome : string; extension : string; launcher : string;
@@ -9,8 +10,11 @@ type configuration = { chrome : string; extension : string; launcher : string;
 
 let absolute path = path<>"" && not (Filename.is_relative path) && not (String.contains path '\000')
 let configuration ~(browser:Browser_configuration.stagehand) ~launcher ~guardian ~claim_directory =
-  let* ()=if List.for_all absolute [browser.chrome;browser.extension;launcher;guardian;claim_directory]
-    then Ok () else Error "Chrome Add-on resources must have absolute paths without NUL" in
+  let* ()=List.fold_left (fun result (name,path) -> let* ()=result in
+      if absolute path then Ok ()
+      else Error (Printf.sprintf "%s must be an absolute path without NUL; it is %S" name path)) (Ok ())
+    ["[browser.stagehand] chrome",browser.chrome;"[browser.stagehand] extension",browser.extension;
+     "Chrome launcher",launcher;"Chrome guardian",guardian;"Chrome claim directory",claim_directory] in
   let* profile=Profile.select ~path:browser.profile in
   Ok {chrome=browser.chrome;extension=browser.extension;launcher;guardian;claim_directory;profile}
 
@@ -20,21 +24,25 @@ let claim_directories c = c.claim_directory :: (match c.profile with
 let configuration_to_json c = `Assoc ["chrome",`String c.chrome;"extension",`String c.extension;
   "launcher",`String c.launcher;"guardian",`String c.guardian;"claim_directory",`String c.claim_directory;
   "profile",Profile.to_json c.profile]
+let configuration_label = "Chrome Add-on configuration"
+let configuration_keys = ["chrome";"claim_directory";"extension";"guardian";"launcher";"profile"]
 let configuration_of_json = function
-  | `Assoc fields when List.sort String.compare (List.map fst fields)=
-      ["chrome";"claim_directory";"extension";"guardian";"launcher";"profile"] ->
-    let field name=match List.assoc_opt name fields with
-      | Some (`String path) when absolute path -> Ok path
-      | None | Some _ -> Error ("invalid Chrome resource: " ^ name) in
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=configuration_keys ->
+    let field name=match List.assoc name fields with
+      | `String path when absolute path -> Ok path
+      | value -> Error (Printf.sprintf "%s field %s must be an absolute path without NUL; it is %s"
+          configuration_label name (Yojson.Safe.to_string value)) in
     let* chrome=field "chrome" in
     let* extension=field "extension" in
     let* launcher=field "launcher" in
     let* guardian=field "guardian" in
     let* claim_directory=field "claim_directory" in
-    let* profile=match List.assoc_opt "profile" fields with
-      | Some value -> Profile.of_json value | None -> Error "missing Chrome profile lifetime" in
+    let* profile=Profile.of_json (List.assoc "profile" fields) in
     Ok {chrome;extension;launcher;guardian;claim_directory;profile}
-  | _ -> Error "invalid Chrome Add-on configuration"
+  | `Assoc fields ->
+    Error (Requirement.keys ~label:configuration_label ~found:(List.map fst fields) ~required:configuration_keys)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as value ->
+    Error (Printf.sprintf "%s must be a JSON object; it is %s" configuration_label (Yojson.Safe.to_string value))
 
 let protect work = try work () with
   | (Unix.Unix_error _ | Sys_error _ | Yojson.Json_error _) as exn -> Error (Printexc.to_string exn)
@@ -114,7 +122,9 @@ let check_settled c ~incarnation ~directory = protect (fun () ->
    A configured operator profile never enters this private tree. *)
 let rec remove_profile path =
   let info=Unix.lstat path in
-  if info.Unix.st_uid<>Unix.geteuid () then Error "Chrome profile contains another owner's resource"
+  if info.Unix.st_uid<>Unix.geteuid () then
+    Error (Printf.sprintf "Chrome profile entry %s must be owned by uid %d; it is owned by uid %d"
+      path (Unix.geteuid ()) info.st_uid)
   else match info.st_kind with
   | Unix.S_DIR ->
     let* ()=Array.fold_left (fun result name -> let* ()=result in
@@ -122,14 +132,18 @@ let rec remove_profile path =
     Unix.rmdir path;Ok ()
   | Unix.S_LNK -> Unix.unlink path;Ok ()
   | Unix.S_REG when info.st_nlink=1 -> Unix.unlink path;Ok ()
-  | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
-    Error "Chrome profile contains an unconfirmed resource"
+  | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK as kind ->
+    Error (Printf.sprintf
+      "Chrome profile entry %s must be a directory, a symbolic link or a regular file with exactly one link; it is a %s with %d links"
+      path (Requirement.kind_name kind) info.st_nlink)
 let profiles directory = Filename.concat directory "chromium-profiles"
+let profiles_label = "Chrome private profiles directory"
 let cleanup c ~incarnation ~directory = protect (fun () ->
   let* claim=original c ~incarnation ~directory in
   let* ()=settle c ~incarnation ~directory in
   match Unix.lstat (profiles directory) with
-  | info when info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid () && info.st_perm=0o700 ->
+  | info ->
+    let* ()=Requirement.check ~label:profiles_label Requirement.private_directory ~path:(profiles directory) info in
     let names=Sys.readdir (profiles directory) in
     let* ()=if names<>[||] && Option.is_none claim then Error "Chrome profiles have no original child claim"
       else Ok () in
@@ -138,7 +152,6 @@ let cleanup c ~incarnation ~directory = protect (fun () ->
       | Some uuid when Uuidm.to_string uuid=name -> remove_profile (Filename.concat (profiles directory) name)
       | None | Some _ -> Error "Chrome profile directory contains an unknown allocation") (Ok ()) names in
     Unix.rmdir (profiles directory);Ok ()
-  | _ -> Error "Chrome profile root identity changed"
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ())
 
 let read_configuration directory =
@@ -210,8 +223,8 @@ let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~l
       | Private -> protect (fun () ->
       (try Unix.mkdir (profiles directory) 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
       let root=Unix.lstat (profiles directory) in
-      let* ()=if root.Unix.st_kind=Unix.S_DIR && root.st_uid=Unix.geteuid () && root.st_perm=0o700
-        && Unix.realpath (profiles directory)=profiles directory then Ok () else Error "Chrome profile root is not private" in
+      let* ()=Requirement.check ~label:profiles_label Requirement.private_directory ~path:(profiles directory) root in
+      let* ()=Requirement.canonical ~label:profiles_label (profiles directory) in
       let profile=Filename.concat (profiles directory) instance_id in
       Unix.mkdir profile 0o700;Ok (Process.Private_profile profile))) in
     let profile=Process.profile_path selected_profile in

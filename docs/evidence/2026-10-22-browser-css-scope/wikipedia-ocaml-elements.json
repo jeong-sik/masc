@@ -1,0 +1,79 @@
+{
+ "url": "https://en.wikipedia.org/wiki/OCaml",
+ "firefox": "ok",
+ "rows": [
+  {
+   "read": "main (before)",
+   "bytes": 90328,
+   "total": 744,
+   "returned": 200,
+   "truncated": true,
+   "withinMatches": null,
+   "selectorBytesMean": 295,
+   "selectorBytesMax": 402,
+   "sample": [
+    "html:nth-of-type(1) > body:nth-of-type(1) > a:nth-of-type(1)",
+    "html:nth-of-type(1) > body:nth-of-type(1) > div:nth-of-type(2) > header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > label:nth-of-type(1)",
+    "html:nth-of-type(1) > body:nth-of-type(1) > div:nth-of-type(2) > header:nth-of-type(1) > div:nth-of-type(1) > a:nth-of-type(1)"
+   ]
+  },
+  {
+   "read": "stack, no within",
+   "bytes": 42389,
+   "total": 744,
+   "returned": 200,
+   "truncated": true,
+   "withinMatches": null,
+   "selectorBytesMean": 55,
+   "selectorBytesMax": 198,
+   "sample": [
+    "html:nth-of-type(1) > body:nth-of-type(1) > a:nth-of-type(1)",
+    "#vector-main-menu-dropdown-label",
+    "html:nth-of-type(1) > body:nth-of-type(1) > div:nth-of-type(2) > header:nth-of-type(1) > div:nth-of-type(1) > a:nth-of-type(1)"
+   ]
+  },
+  {
+   "read": "stack, within #vector-toc",
+   "bytes": 6629,
+   "total": 32,
+   "returned": 32,
+   "truncated": false,
+   "withinMatches": 1,
+   "selectorBytesMean": 41,
+   "selectorBytesMax": 76,
+   "sample": [
+    "#vector-toc > div:nth-of-type(1) > button:nth-of-type(2)",
+    "#toc-mw-content-text > a:nth-of-type(1)",
+    "#toc-Philosophy > a:nth-of-type(1)"
+   ]
+  },
+  {
+   "read": "stack, within #p-lang-btn",
+   "bytes": 325,
+   "total": 1,
+   "returned": 1,
+   "truncated": false,
+   "withinMatches": 1,
+   "selectorBytesMean": 17,
+   "selectorBytesMax": 17,
+   "sample": [
+    "#p-lang-btn-label"
+   ]
+  },
+  {
+   "read": "stack, within nav",
+   "bytes": 11256,
+   "total": 51,
+   "returned": 51,
+   "truncated": false,
+   "withinMatches": 12,
+   "selectorBytesMean": 63,
+   "selectorBytesMax": 198,
+   "sample": [
+    "#vector-main-menu-dropdown-label",
+    "#pt-sitesupport-2 > a:nth-of-type(1)",
+    "#pt-createaccount-2 > a:nth-of-type(1)"
+   ]
+  }
+ ]
+}

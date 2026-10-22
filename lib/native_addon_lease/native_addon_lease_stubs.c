@@ -7,25 +7,15 @@
 #include <stdio.h>
 #include <stdatomic.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
-static int private_owned(int fd, int directory) {
-  struct stat st;
-  if (fstat(fd, &st) < 0) return 0;
-  if (st.st_uid != geteuid() || (st.st_mode & 0077) != 0 ||
-      (directory ? !S_ISDIR(st.st_mode) : (!S_ISREG(st.st_mode) || st.st_nlink != 1))) {
-    errno = EACCES; return 0;
-  }
-  return 1;
-}
+/* These open without following a final symlink. The caller decides the
+   returned descriptor's kind, owner, mode and link count with fstat and
+   closes it on refusal, so the refusal can name what it found. */
 CAMLprim value masc_native_lease_directory(value path) {
   CAMLparam1(path);
   int fd = open(String_val(path), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
   if (fd < 0) caml_uerror("native lease directory", path);
-  if (!private_owned(fd, 1)) {
-    int saved = errno; close(fd); errno = saved; caml_uerror("private native lease directory", path);
-  }
   CAMLreturn(Val_int(fd));
 }
 CAMLprim value masc_native_lease_file(value directory, value name, value create) {
@@ -39,9 +29,6 @@ CAMLprim value masc_native_lease_file(value directory, value name, value create)
   if (Bool_val(create)) flags |= O_CREAT;
   int fd = openat(Int_val(directory), text, flags, 0600);
   if (fd < 0) caml_uerror("native lease openat", name);
-  if (!private_owned(fd, 0)) {
-    int saved = errno; close(fd); errno = saved; caml_uerror("private native lease file", name);
-  }
   CAMLreturn(Val_int(fd));
 }
 CAMLprim value masc_native_lease_holder(value descriptor) {

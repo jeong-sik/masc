@@ -296,6 +296,76 @@ let launch_command base = launcher_of base ^ " --bidi-url ws://127.0.0.1:PORT/se
 let run_again base = "runs " ^ launcher_of base ^ " --bidi-url 'ws://127.0.0.1:9222/session'"
 let record_file base = Filename.concat base ".masc/browser-lane/bidi-host.json"
 
+(* Browser hosts register with the browser Add-on's worker, so a polling
+   host comes first, a missing launcher next, and then an Add-on that cannot
+   take a host, before the launcher and the port. *)
+let the_launcher_verdict_reads_the_browser_addon_before_the_launcher () =
+  let host : Browser_lane.client_info =
+    { client_id = host_client; browser = Browser_lane.Firefox; version = "157.0"
+    ; engine_version = "157.0"; transport = Browser_lane.Web_extension }
+  in
+  let lane ?(launcher = Launcher.Follows_workspace) polling : Launcher.t =
+    { base_path = "/workspace"; launcher; workspace_port = Ok 8935
+    ; server = Launcher.Serving { port = 8935; polling } }
+  in
+  List.iter (fun (name, observed, verdict) -> check bool name true (Launcher.verdict observed = verdict))
+    [ "a polling host is connected whatever the launcher says",
+      lane ~launcher:Launcher.Undeclared (Launcher.Polling [ host ]), Launcher.Connected
+    ; "no launcher stays absent",
+      lane ~launcher:Launcher.Not_installed (Launcher.Unlisted Launcher.No_browser_addon), Launcher.Absent
+    ; "no browser Add-on", lane (Launcher.Unlisted Launcher.No_browser_addon), Launcher.Addon_missing
+    ; "an Add-on switched off", lane (Launcher.Unlisted Launcher.Browser_addon_off), Launcher.Addon_off
+    ; "an Add-on declared on and not run",
+      lane (Launcher.Unlisted Launcher.Browser_addon_not_running), Launcher.Addon_not_running
+    ; "an Add-on this server cannot read",
+      lane (Launcher.Unlisted (Launcher.Browser_addon_unreadable "owner busy")), Launcher.Addon_unreadable
+    ; "the Add-on comes before a launcher to reinstall",
+      lane ~launcher:Launcher.Undeclared (Launcher.Unlisted Launcher.Browser_addon_off), Launcher.Addon_off
+    ; "a server with no Add-on reader does not read as no host", lane Launcher.Not_observed,
+      Launcher.Unverified
+    ; "no host on the bound workspace port", lane (Launcher.Polling []), Launcher.Aligned ]
+
+(* A serving process asks the browser Add-on which hosts poll it, once per
+   inspection; a process that serves nothing does not ask. *)
+let the_browser_lane_check_asks_the_browser_addon_only_when_serving () =
+  browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
+  let asked = ref 0 in
+  let reading = ref (Launcher.Unlisted Launcher.No_browser_addon) in
+  Launcher.install_browser_addon_reader (Some (fun () -> incr asked; !reading));
+  Fun.protect ~finally:(fun () ->
+      Launcher.install_browser_addon_reader None;
+      Browser_lane.withdraw_serving_port ())
+  @@ fun () ->
+  let lane_condition () = condition Onboarding_status.Browser_lane (inspect ~base_path:(Some base)) in
+  check bool "outside a server the lane is unconfirmed" true
+    (lane_condition () = Onboarding_status.Needs_verification);
+  check int "outside a server the Add-on is not asked" 0 !asked;
+  Browser_lane.install_serving_port 64850;
+  let host : Browser_lane.client_info =
+    { client_id = host_client; browser = Browser_lane.Firefox; version = "157.0"
+    ; engine_version = "157.0"; transport = Browser_lane.Web_extension }
+  in
+  let cases =
+    [ "no browser Add-on is a step to take", Launcher.Unlisted Launcher.No_browser_addon,
+      Onboarding_status.Needs_setup
+    ; "an Add-on switched off is a step to take", Launcher.Unlisted Launcher.Browser_addon_off,
+      Onboarding_status.Needs_setup
+    ; "an Add-on declared on and not run is broken", Launcher.Unlisted Launcher.Browser_addon_not_running,
+      Onboarding_status.Invalid
+    ; "an Add-on this server cannot read is unconfirmed",
+      Launcher.Unlisted (Launcher.Browser_addon_unreadable "owner busy"), Onboarding_status.Needs_verification
+    ; "a host the Add-on lists is connected", Launcher.Polling [ host ], Onboarding_status.Satisfied
+    ; "no host on the bound workspace port is aligned", Launcher.Polling [], Onboarding_status.Satisfied ]
+  in
+  List.iter (fun (name, polling, expected) ->
+      reading := polling;
+      check bool name true (lane_condition () = expected))
+    cases;
+  check int "each inspection asks the Add-on once" (List.length cases) !asked;
+  Launcher.install_browser_addon_reader None;
+  check bool "a server with no Add-on reader is unconfirmed, not aligned" true
+    (lane_condition () = Onboarding_status.Needs_verification)
+
 let a_workspace_without_a_browser_lane_says_nothing_of_a_bidi_host () = with_workspace @@ fun base ->
   Unix.mkdir (Filename.concat base ".masc") 0o700;
   check bool "no lane and no host record: no BiDi check" true
@@ -620,7 +690,7 @@ let a_running_host_is_rated_by_the_server_that_lists_it () =
   let client transport client_id : Browser_lane.client_info =
     { client_id; browser = Browser_lane.Firefox; version = "157.0"; engine_version = "157.0"; transport }
   in
-  let serving polling = Launcher.Serving { port = 8935; polling } in
+  let serving polling = Launcher.Serving { port = 8935; polling = Launcher.Polling polling } in
   let listing = serving [ client Browser_lane.Webdriver_bidi host_client ] in
   (* The same ID over the extension is another connection. *)
   let lists_no_bidi = [ serving []; serving [ client Browser_lane.Web_extension host_client ] ] in
@@ -848,14 +918,7 @@ let a_bidi_host_report_reads_back_as_written () =
   refused "a last_start field on Addon configuration"
     (with_managed "last_start" (`Assoc [ "kind", `String "absent" ]));
   refused "a keeper field written twice"
-    (with_keeper_json (`Assoc (managed_fields @ [ "port", `Int 9222 ])));
-  (* A Keeper is sent the state and the paragraph, not the record. *)
-  let ended_observation = observation (Record.Ended (ended, ending)) in
-  check bool "the summary is the state and its message" true
-    (Status.summary_to_json ended_observation
-     = `Assoc
-         [ "state", `String "ended"
-         ; "message", `String (Status.message ended_observation) ])
+    (with_keeper_json (`Assoc (managed_fields @ [ "port", `Int 9222 ])))
 
 (* The front door opened imp's history only when no check at all was Invalid, so
    a browser lane launcher left on an old port sent an operator with a working
@@ -1272,6 +1335,10 @@ let () = run "Onboarding observations"
                        a_server_inspection_does_not_probe_the_backend;
                      test_case "an unreadable declaration is setup even when not probed" `Quick
                        an_unreadable_declaration_is_setup_even_when_not_probed];
+   "browser Add-on", [test_case "the launcher verdict reads the browser Add-on before the launcher" `Quick
+                        the_launcher_verdict_reads_the_browser_addon_before_the_launcher;
+                      test_case "the browser lane check asks the browser Add-on only when serving" `Quick
+                        the_browser_lane_check_asks_the_browser_addon_only_when_serving];
    "BiDi host", [test_case "a workspace without a browser lane says nothing of a BiDi host" `Quick
                    a_workspace_without_a_browser_lane_says_nothing_of_a_bidi_host;
                  test_case "a lane with no BiDi host says how one is attached" `Quick

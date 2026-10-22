@@ -5221,14 +5221,11 @@
 (include stanzas/test_browser_network.inc)
 (include stanzas/test_browser_cookies.inc)
 (include stanzas/test_browser_stagehand_backend.inc)
-(include stanzas/test_browser_instruct.inc)
 (include stanzas/stagehand_browser_probe.inc)
 (include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
-
-(include stanzas/test_tui_browser_rejection.inc)
 
 (include stanzas/test_browser_lane_name.inc)
 
@@ -5638,6 +5635,11 @@
  (name test_lane_addon_worker_protocol)
  (modules test_lane_addon_worker_protocol)
  (libraries masc masc.agent_core masc.lane_addon_call_context mcp_protocol alcotest eio eio_main yojson))
+
+(test
+ (name test_resource_requirement)
+ (modules test_resource_requirement)
+ (libraries alcotest unix masc.resource_requirement))
 
 (test
  (name test_native_addon_lease)

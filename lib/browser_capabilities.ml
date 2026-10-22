@@ -66,7 +66,10 @@ let support backend operation = match backend with
     | Activate_tab -> (match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"activate_tab" Interact
           [observed;"Changes the browser's active tab without promising window focus."]
-      | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
+      | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"activate_tab" Interact
+          [observed;"Requires expectedUrl; a tab whose page moved on is refused before any effect.";
+           "Brings the tab to the front and gives its browser window system focus, which can take focus from what the operator is doing."]
+      | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
     | List_windows -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional Tabs
           ["Every list_tabs row carries windowId when Firefox names the tab's window; tabs with the same windowId share a window, and the distinct values are the windows.";
@@ -75,8 +78,12 @@ let support backend operation = match backend with
     | Create_window | Close_window -> missing
     | Navigate -> (match backend with
       | Owned_gecko | Owned_chromium -> conditional Goto ["An open owned session and an HTTP(S) URL are required; preserve its concrete browser binding."]
-      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable ->
-          Unsupported "Direct navigation of a connected operator browser is not exposed; use an inspected follow_link or supported open_tab.")
+      | Connected Browser_lane.Webdriver_bidi -> conditional Goto
+          [observed;"Requires the exact observed clientId and the tabId of a tab this connection opened with open_tab; a tab the operator opened is refused before any effect.";
+           "Waits for the new document. An error after the navigation started leaves the result unknown: inspect the same tab."]
+      | Connected Browser_lane.Web_extension -> Unsupported
+          "A connected WebExtension does not navigate a tab; use an inspected follow_link, or a live BiDi connection's open_tab and goto."
+      | Safari_unavailable -> missing)
     | Follow_link -> conditional ~action:"follow_link" Interact
         [observed;target;"Requires expectedUrl and an observed same-tab HTTP(S) anchor; rejects downloads, new-window targets and unsupported referrer semantics."]
     | Back -> (match backend with
@@ -143,7 +150,7 @@ let support backend operation = match backend with
     | Scroll_page -> conditional ~action:"scroll" Interact [observed;"Scrolls the page; use scroll_at for a nested pane."]
     | Scroll_at -> conditional ~action:"scroll_at" Interact [observed;geometry;"Scrolls the pane at the observed viewport point."]
     | Fill -> conditional ~action:"fill" Interact
-        [observed;target;"Replaces text input/textarea value and emits input/change; this is not trusted keyboard typing or submission."]
+        [observed;target;"Replaces the value of a text input or textarea and emits input/change, or replaces the content of a contenteditable editor with insertText (the editor gets input events); this is not trusted keyboard typing or submission."]
     | Double_click -> if native backend then conditional ~action:"double_click" Interact
         [observed;target;"Native double click; application behavior must be observed afterward."] else missing
     | Type_text -> if native backend then conditional ~action:"type_text" Interact
@@ -201,14 +208,14 @@ let support backend operation = match backend with
       | Connected Browser_lane.Web_extension -> Unsupported
           "WebExtension clicks through the DOM and cannot send touch input; the selected tab must not be silently moved to another browser."
       | Safari_unavailable -> missing)
-    | Pointer_down | Pointer_up
+    | Pointer_down | Pointer_up -> missing
     | Read_console -> gecko_only backend (invoke ~mode:"console" Read)
         [observed;"Messages and uncaught errors since the session opened, for one tab, oldest first. At most 200 are kept and the reply says how many older ones were dropped; each text is cut at 4000 bytes and says so. Entries Firefox gave no tab for, and events that were not what BiDi documents, are counted in the reply and do not end the session.";
          "The text is whatever the page printed, and a page can print anything."]
     | Read_network -> gecko_only backend (invoke ~mode:"network" Read)
         [observed;"Requests since the session opened, for one tab, oldest first; at most 200 are kept and the reply says how many older ones were dropped.";
          "Each row has method, address, state, and status, mimeType and bytesReceived once it completed. Header values, cookies and bodies are never returned, only header names; the address keeps its path and replaces every query value with REDACTED. A path can still carry a token."]
-    | Read_clipboard | Write_clipboard | Intercept_network
+    | Read_clipboard | Write_clipboard | Intercept_network -> missing
     | Read_storage -> gecko_only backend (invoke ~mode:"cookies" Read)
         [observed;"The cookies the tab's page can see, at most 200, with the total. Name, domain, path, secure, httpOnly, sameSite and expiry; the value is never returned.";
          "Only cookies are covered. Web storage (localStorage, sessionStorage) is not read."]

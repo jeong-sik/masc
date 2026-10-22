@@ -2,7 +2,8 @@ module B = Browser_lane
 module W = Browser_addon_wire
 module Peer = Browser_bidi_peer
 module Lease = Native_addon_lease
-type identity = { device:int; inode:int }
+module Requirement = Resource_requirement
+type identity = Requirement.identity = { device:int; inode:int }
 type validation_phase = Idle | Validating
 type configuration = { firefox:string; profile:string; port:int; launcher:string;
   guardian:string; claim_directory:string; root:identity; slot:identity;
@@ -13,32 +14,38 @@ let protect work = try work () with
 let lease result = Result.map_error Lease.error_to_string result
 let absolute path = path<>"" && not (Filename.is_relative path) && not (String.contains path '\000')
 let shared_slot profile = Filename.concat profile ".masc-firefox-profile-claim"
-let identity ~directory path =
-  let stat=Unix.lstat path in
-  if stat.Unix.st_kind=(if directory then Unix.S_DIR else Unix.S_REG)
-     && stat.st_uid=Unix.geteuid () && stat.st_perm=(if directory then 0o700 else 0o600)
-     && (directory || stat.st_nlink=1)
-  then Ok {device=stat.st_dev;inode=stat.st_ino}
-  else Error "Firefox profile claim is not private and host-owned"
+let profile_label = "Firefox profile"
+let slot_label = "Firefox profile claim directory"
+let gate_label = "Firefox profile claim gate"
+let lease_label = "Firefox profile claim lease"
+let identity ~label ~directory path =
+  let* stat=Requirement.lstat ~label
+    (if directory then Requirement.private_directory else Requirement.private_file) path in
+  Ok (Requirement.identity stat)
 let verify c = protect (fun () ->
-  let* ()=if Unix.realpath c.profile=c.profile then Ok () else Error "Firefox profile canonical path changed" in
-  List.fold_left (fun result (path,directory,expected) -> let* ()=result in
-    let* actual=identity ~directory path in
-    if actual=expected then Ok () else Error "Firefox profile or stable claim inode changed") (Ok ())
-    [c.profile,true,c.root;shared_slot c.profile,true,c.slot;
-     Filename.concat (shared_slot c.profile) "gate",false,c.gate;
-     Filename.concat (shared_slot c.profile) "lease",false,c.lease])
+  let* ()=Requirement.canonical ~label:profile_label c.profile in
+  List.fold_left (fun result (label,path,directory,expected) -> let* ()=result in
+    let* observed=identity ~label ~directory path in
+    if observed=expected then Ok () else Error (Requirement.replaced ~label ~path ~expected ~observed)) (Ok ())
+    [profile_label,c.profile,true,c.root;slot_label,shared_slot c.profile,true,c.slot;
+     gate_label,Filename.concat (shared_slot c.profile) "gate",false,c.gate;
+     lease_label,Filename.concat (shared_slot c.profile) "lease",false,c.lease])
 let configuration ~(browser:Browser_configuration.live_bidi) ~launcher ~guardian ~claim_directory = protect (fun () ->
-  let* ()=if List.for_all absolute [browser.firefox;browser.profile;launcher;guardian;claim_directory]
-    && browser.port>0 && browser.port<=65535 then Ok () else Error "invalid owned Firefox resources" in
+  let* ()=List.fold_left (fun result (name,path) -> let* ()=result in
+      if absolute path then Ok ()
+      else Error (Printf.sprintf "%s must be an absolute path without NUL; it is %S" name path)) (Ok ())
+    ["[browser.live.bidi] firefox",browser.firefox;"[browser.live.bidi] profile",browser.profile;
+     "Firefox launcher",launcher;"Firefox guardian",guardian;"Firefox claim directory",claim_directory] in
+  let* ()=if browser.port>0 && browser.port<=65535 then Ok ()
+    else Error (Printf.sprintf "[browser.live.bidi] port must be between 1 and 65535; it is %d" browser.port) in
   let profile=Unix.realpath browser.profile in
-  let* root=identity ~directory:true profile in
+  let* root=identity ~label:profile_label ~directory:true profile in
   let slot_path=shared_slot profile in
   (try Unix.mkdir slot_path 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
-  let* slot=identity ~directory:true slot_path in
+  let* slot=identity ~label:slot_label ~directory:true slot_path in
   let* _=lease (Lease.recover_preparation ~directory:slot_path) in
-  let* gate=identity ~directory:false (Filename.concat slot_path "gate") in
-  let* claim_lease=identity ~directory:false (Filename.concat slot_path "lease") in
+  let* gate=identity ~label:gate_label ~directory:false (Filename.concat slot_path "gate") in
+  let* claim_lease=identity ~label:lease_label ~directory:false (Filename.concat slot_path "lease") in
   let c={firefox=browser.firefox;profile;port=browser.port;launcher;guardian;claim_directory;
     root;slot;gate;lease=claim_lease} in
   let* ()=verify c in Ok c)
@@ -48,23 +55,36 @@ let configuration_to_json c = `Assoc ["firefox",`String c.firefox;"profile",`Str
   "port",`Int c.port;"launcher",`String c.launcher;"guardian",`String c.guardian;
   "claim_directory",`String c.claim_directory;"root",id_json c.root;"slot",id_json c.slot;
   "gate",id_json c.gate;"lease",id_json c.lease]
+let configuration_label = "owned Firefox configuration"
+let configuration_keys =
+  ["claim_directory";"firefox";"gate";"guardian";"launcher";"lease";"port";"profile";"root";"slot"]
+let field_refusal name requirement value = Printf.sprintf "%s field %s must be %s; it is %s"
+  configuration_label name requirement (Yojson.Safe.to_string value)
+let identity_requirement = "an object with exactly the integer keys device and inode"
+let integer = function
+  | `Int value -> Some value
+  | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> None
 let configuration_of_json = function
-  | `Assoc fields when List.sort String.compare (List.map fst fields)=
-      ["claim_directory";"firefox";"gate";"guardian";"launcher";"lease";"port";"profile";"root";"slot"] ->
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=configuration_keys ->
     let path name=match List.assoc name fields with
-      | `String path when absolute path -> Ok path | _ -> Error "invalid owned Firefox path" in
+      | `String path when absolute path -> Ok path
+      | value -> Error (field_refusal name "an absolute path without NUL" value) in
     let read name=match List.assoc name fields with
-      | `Assoc pair when List.sort String.compare (List.map fst pair)=["device";"inode"] ->
-        (match List.assoc "device" pair,List.assoc "inode" pair with
-         | `Int device,`Int inode -> Ok {device;inode} | _ -> Error "invalid Firefox resource identity")
-      | _ -> Error "invalid Firefox resource identity" in
+      | `Assoc pair as value when List.sort String.compare (List.map fst pair)=["device";"inode"] ->
+        (match integer (List.assoc "device" pair),integer (List.assoc "inode" pair) with
+         | Some device,Some inode -> Ok {device;inode}
+         | None,(Some _ | None) | Some _,None -> Error (field_refusal name identity_requirement value))
+      | value -> Error (field_refusal name identity_requirement value) in
     let* firefox=path "firefox" in let* profile=path "profile" in let* launcher=path "launcher" in
     let* guardian=path "guardian" in let* claim_directory=path "claim_directory" in
     let* port=match List.assoc "port" fields with `Int port when port>0 && port<=65535 -> Ok port
-      | _ -> Error "invalid Firefox port" in
+      | value -> Error (field_refusal "port" "an integer between 1 and 65535" value) in
     let* root=read "root" in let* slot=read "slot" in let* gate=read "gate" in let* lease=read "lease" in
     Ok {firefox;profile;port;launcher;guardian;claim_directory;root;slot;gate;lease}
-  | _ -> Error "invalid owned Firefox configuration"
+  | `Assoc fields ->
+    Error (Requirement.keys ~label:configuration_label ~found:(List.map fst fields) ~required:configuration_keys)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as value ->
+    Error (Printf.sprintf "%s must be a JSON object; it is %s" configuration_label (Yojson.Safe.to_string value))
 let context c ~incarnation ~directory = `Assoc ["kind",`String "browser_addon_live_bidi";
   "incarnation",`String incarnation;"directory",`String directory;"profile",`String c.profile;
   "root",id_json c.root]
@@ -152,8 +172,8 @@ let decode (issued:B.issued) =
 let payload = function
   | Ok data -> `Assoc ["ok",`Bool true;"data",data]
   | Error (Peer.Before_effect detail) -> `Assoc ["ok",`Bool false;"error",`String detail;"effectPhase",`String "not_started"]
-  | Error (Peer.Partial_failure {tab_id;message}) -> `Assoc ["ok",`Bool false;"error",`String message;
-      "effectPhase",`String "partial";"data",`Assoc ["action",`String "open_tab";"created",`Bool true;"tabId",`Int tab_id]]
+  | Error (Peer.Partial_failure {message;receipt;_}) -> `Assoc ["ok",`Bool false;"error",`String message;
+      "effectPhase",`String "partial";"data",receipt]
   | Error (Peer.Outcome_unknown detail) -> `Assoc ["ok",`Bool false;"error",`String detail]
 let accepted = function
   | W.Receipt -> Ok ()

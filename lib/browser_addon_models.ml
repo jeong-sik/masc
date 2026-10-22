@@ -6,30 +6,50 @@ let configuration_to_json configuration = `Assoc ["store_root",`String configura
   "outputs",`Assoc (List.map (fun (output:Lane_addon_types.exact_output) -> output.name,
     `Assoc ["schema",output.schema;"request_schema",`Bool (match output.request_schema with
       | Package_schema_only -> false | Consumer_request_schema -> true)]) configuration.outputs)]
+let configuration_label = "browser model configuration"
+let configuration_keys = ["outputs";"store_root"]
+let output_keys = ["request_schema";"schema"]
+let not_object label value =
+  Printf.sprintf "%s must be a JSON object; it is %s" label (Yojson.Safe.to_string value)
+let rec repeated = function
+  | first :: (second :: _ as rest) -> if String.equal first second then first :: repeated rest else repeated rest
+  | [] | [_] -> []
 let configuration_of_json = function
-  | `Assoc fields when List.sort String.compare (List.map fst fields)=["outputs";"store_root"] ->
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=configuration_keys ->
       let* store_root = match List.assoc "store_root" fields with
         | `String path when not (Filename.is_relative path) && not (String.contains path '\000') -> Ok path
-        | _ -> Error "model receipt root must be an absolute host path" in
+        | value -> Error (Printf.sprintf "%s field store_root must be an absolute host path without NUL; it is %s"
+            configuration_label (Yojson.Safe.to_string value)) in
       let* outputs = match List.assoc "outputs" fields with
         | `Assoc outputs ->
             let names=List.map fst outputs in
-            let* () = if List.length names=List.length (List.sort_uniq String.compare names) then Ok ()
-              else Error "duplicate browser model output" in
+            let* () = match List.sort_uniq String.compare (repeated (List.sort String.compare names)) with
+              | [] -> Ok ()
+              | _ :: _ as duplicates -> Error (Printf.sprintf "%s outputs must have distinct names; these repeat: %s"
+                  configuration_label (String.concat ", " duplicates)) in
             List.fold_right (fun (name,value) acc -> let* rest=acc in
-              let* ()=if Runtime_schema.exact_output_name_valid name then Ok () else Error "invalid browser model output" in
+              let output_label=Printf.sprintf "%s output %s" configuration_label name in
+              let* ()=if Runtime_schema.exact_output_name_valid name then Ok ()
+                else Error (Printf.sprintf "%s output name %S is not a valid exact output name" configuration_label name) in
               let* schema,request_schema = match value with
-                | `Assoc fields when List.sort String.compare (List.map fst fields)=["request_schema";"schema"] ->
+                | `Assoc fields when List.sort String.compare (List.map fst fields)=output_keys ->
                     (match List.assoc "request_schema" fields with
                      | `Bool allowed -> Ok (List.assoc "schema" fields,
                          if allowed then Lane_addon_types.Consumer_request_schema else Package_schema_only)
-                     | _ -> Error "browser model request_schema must be boolean")
-                | _ -> Error "browser model output requires schema and request_schema" in
+                     | found -> Error (Printf.sprintf "%s field request_schema must be a boolean; it is %s"
+                         output_label (Yojson.Safe.to_string found)))
+                | `Assoc fields ->
+                    Error (Resource_requirement.keys ~label:output_label ~found:(List.map fst fields) ~required:output_keys)
+                | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (not_object output_label value) in
               let* ()=Lane_addon_action.validate_value_schema schema in
               Ok ({Lane_addon_types.name;schema;request_schema}::rest)) outputs (Ok [])
-        | _ -> Error "browser model outputs must be an object" in
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as value ->
+            Error (not_object (configuration_label ^ " field outputs") value) in
       Ok {store_root;outputs}
-  | _ -> Error "invalid browser model configuration"
+  | `Assoc fields ->
+      Error (Resource_requirement.keys ~label:configuration_label ~found:(List.map fst fields) ~required:configuration_keys)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as value ->
+      Error (not_object configuration_label value)
 type error = Retired | Output_disabled of string | Request_in_use
   | Receipt_failed of string | Invalid_result of string | Schema_refused of string
 let error_to_string = function

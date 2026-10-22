@@ -12,7 +12,9 @@ let roundtrips () =
     Page_scene {tab_id=7;max_chars=1000;view=B.Regions;scope=Some {document_id="doc";node_id="region"}};
     Page_interact {tab_id=7;expected_url=Some "https://example.org";action=B.Fill_node {target={document_id="doc";node_id="edit"};text=""}};
     Session_open {headless=Some false};Session_close;Session_status;
-    Page_goto {url="https://example.org";tab_id=Some 7};Page_elements {tab_id=Some 7};
+    Page_goto {url="https://example.org";tab_id=Some 7};Page_elements {tab_id=Some 7;within=None};
+    Page_elements {tab_id=None;within=Some "nav[aria-label=\"Channels\"] > ul"};
+    Page_context {tab_id=7;frame_path=["#frame"];mode=`Elements (Some "#sidebar")};
     Page_act (B.Action.On_tab {tab_id=7;frame_path=["#frame"];interaction=B.Action.Fill {selector="#edit";text=""}});
     Page_context {tab_id=7;frame_path=["#frame"];mode=`Text 1000};
     Page_instruct {tab_id=7;instruction="Open the menu"};Page_locate {tab_id=7;instruction=None};
@@ -28,6 +30,10 @@ let rejections () =
   check bool "duplicate verb rejected" true (Result.is_error (W.verb_of_json ~route
     (`Assoc ["verb",`String "tabs.list";"verb",`String "tabs.list";"args",`Assoc []])));
   check bool "irrelevant read field rejected" true (Result.is_error (decode "tabs.list" ["tabId",`Int 7]));
+  check bool "empty within is not a scope" true
+    (Result.is_error (decode "page.elements" ["tabId",`Int 7;"within",`String ""]));
+  check bool "within scopes elements only" true (Result.is_error (decode "page.context"
+    ["tabId",`Int 7;"framePath",`List [];"mode",`String "frames";"within",`String "#sidebar"]));
   check bool "pointer needs observed viewport" true (Result.is_error (decode "page.interact"
     ["tabId",`Int 7;"action",`String "hover_at";"point",`Assoc ["x",`Float 0.5;"y",`Float 0.5]]));
   check bool "native input needs expected document" true (Result.is_error (decode "page.interact"

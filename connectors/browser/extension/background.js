@@ -633,6 +633,9 @@ async function pageElements(args) {
   const tabId = typeof args?.tabId === "number" ? args.tabId
     : (await browser.tabs.query({active:true,currentWindow:true}))[0]?.id;
   if (!Number.isInteger(tabId) || tabId < 0) throw new Error("invalid_tab_id");
+  const within = args?.within;
+  if (within !== undefined && (typeof within !== "string" || within === ""))
+    throw new Error("invalid_within");
   const [page] = await browser.tabs.executeScript(tabId, {
     runAt: "document_end",
     code: '(' + (function () {
@@ -642,10 +645,41 @@ const ariaRoles = new Set('alert alertdialog application article banner blockquo
 const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
   .find(role => ariaRoles.has(role)) || null;
 const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
-const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'));
+// [within] is a CSS selector read by the page's own engine: only controls that
+// match it, or sit inside an element that matches it, are observed. An invalid
+// selector is refused rather than read as the whole page.
+const within = (arguments[0] || {}).within;
+let scope = null;
+if (within !== undefined) {
+  try { scope = new Set(document.querySelectorAll(within)); }
+  catch { throw new Error('invalid_css_selector'); }
+}
+// Membership in the matched set, not closest(): closest() reads :scope as
+// the control itself, while the count above reads it as the root element.
+const inScope = el => {
+  for (let node = el; node; node = node.parentElement) if (scope.has(node)) return true;
+  return false;
+};
+const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'))
+  .filter(el => scope === null || inScope(el));
+// A selector path stops at the nearest element, the control itself included,
+// whose id no other element in the document carries. Without one it runs from
+// the root element. Either way it names exactly one element.
+const idAnchors = new Map();
+const idAnchor = node => {
+  const id = node.id;
+  if (typeof id !== 'string' || id === '') return null;
+  if (!idAnchors.has(id)) {
+    const anchor = '#' + CSS.escape(id);
+    idAnchors.set(id, document.querySelectorAll(anchor).length === 1 ? anchor : null);
+  }
+  return idAnchors.get(id);
+};
 function selector(el) {
   const parts=[];
   for (let node=el; node && node.nodeType===1; node=node.parentElement) {
+    const anchor=idAnchor(node);
+    if (anchor !== null) { parts.unshift(anchor); break; }
     const tag=node.localName;
     const siblings=node.parentElement ? Array.from(node.parentElement.children).filter(s=>s.localName===tag) : [node];
     parts.unshift(tag+':nth-of-type('+(siblings.indexOf(node)+1)+')');
@@ -734,9 +768,11 @@ function observe(el) {
   }
   return result;
 }
-return {url:location.href,title:document.title,total:visible.length,truncated:visible.length>200,
+return {url:location.href,title:document.title,
+  ...(scope === null ? {} : {within,withinMatches:scope.size}),
+  total:visible.length,truncated:visible.length>200,
   elements:visible.slice(0,200).map(observe)};
-}).toString() + ')()'
+}).toString() + ')(' + JSON.stringify(within === undefined ? {} : {within}) + ')'
   });
   if (!page) throw new Error("page_unavailable");
   return {tabId,...page};
@@ -969,6 +1005,20 @@ function interactInPage(args) {
       if (typeof args.text !== "string") throw new Error("fill_text_required");
       const input = element instanceof HTMLInputElement;
       const textarea = element instanceof HTMLTextAreaElement;
+      if (!input && !textarea && element.isContentEditable === true) {
+        if (args.text === "" && element.textContent === "") return {action: args.action, urlBefore: before, url: location.href,
+          title: document.title, scrollX: window.scrollX, scrollY: window.scrollY};
+        element.focus();
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    effectStarted = true;
+        const applied = args.text === "" ? document.execCommand("delete") : document.execCommand("insertText", false, args.text);
+        if (!applied) throw new Error("editable_rejected_text");
+        if (!args.text.includes("\n") && element.textContent.replace(/\u00a0/g, " ") !== args.text.replace(/\u00a0/g, " ")) throw new Error("editable_changed_text");
+      } else {
       if ((!input && !textarea) || (input && !["text", "search", "email", "url", "tel", "password", "number"].includes(element.type)))
         throw new Error("element_is_not_a_text_input");
       if (element.readOnly) throw new Error("element_read_only");
@@ -984,6 +1034,7 @@ function interactInPage(args) {
       element.dispatchEvent(new Event("input", {bubbles: true}));
       element.dispatchEvent(new Event("change", {bubbles: true}));
       if (element.value !== args.text) throw new Error("input_changed_during_events");
+      }
     }
   } else throw new Error("unknown_interaction_action");
   return {action: args.action, urlBefore: before, url: location.href,

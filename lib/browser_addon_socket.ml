@@ -1,4 +1,5 @@
 let ( let* ) = Result.bind
+module Requirement = Resource_requirement
 type t = {path:string;incarnation:string;automation:bool;models:bool;stagehand:bool;live_bidi:bool;device:int;inode:int}
 type acquisition = Missing | Acquired of int * int | Cleaning of int * int | Retained of int * int | Released
 type settlement = Allocation_released | Allocation_retained
@@ -25,44 +26,44 @@ let context ~instance_id ~automation ~stagehand ~live_bidi ~models = protect (fu
     "live_bidi",(match live_bidi with None -> `Null | Some c -> Browser_addon_live_bidi.configuration_to_json c);
     "models",(match models with None -> `Null | Some configuration -> Browser_addon_models.configuration_to_json configuration);
     "automation",(match automation with None -> `Null | Some configuration -> Browser_addon_automation.configuration_to_json configuration)]))
+let cleanup_descriptor_label = "native cleanup descriptor"
+let cleanup_descriptor_keys = ["automation";"directory";"kind";"live_bidi";"models";"stagehand"]
 let context_of_json ~instance_id = function
   | None -> Ok None
-  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=["automation";"directory";"kind";"live_bidi";"models";"stagehand"] ->
-    (match List.assoc_opt "kind" fields,List.assoc_opt "directory" fields with
-     | Some (`String "browser_socket"),Some (`String root) ->
+  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=cleanup_descriptor_keys ->
+    (match List.assoc "kind" fields,List.assoc "directory" fields with
+     | `String "browser_socket",`String root ->
        let* expected=leaf instance_id in
        if Filename.is_relative root || Filename.basename root<>expected
-         || Unix.realpath (Filename.dirname root)<>Filename.dirname root then Error "invalid browser allocation path"
+         || Unix.realpath (Filename.dirname root)<>Filename.dirname root then
+         Error (Printf.sprintf "browser allocation directory %s must be an absolute path named %s under its own canonical parent"
+           root expected)
        else
-         let* automation=match List.assoc_opt "automation" fields with
-           | Some `Null -> Ok None
-           | Some value -> Browser_addon_automation.configuration_of_json value |> Result.map Option.some
-           | None -> Error "missing automation descriptor" in
-         let* models=match List.assoc_opt "models" fields with
-           | Some `Null -> Ok None
-           | Some value -> Browser_addon_models.configuration_of_json value |> Result.map Option.some
-           | None -> Error "missing model broker descriptor" in
-         let* stagehand=match List.assoc_opt "stagehand" fields with
-           | Some `Null -> Ok None
-           | Some value -> Browser_addon_stagehand.configuration_of_json value |> Result.map Option.some
-           | None -> Error "missing Chrome descriptor" in
-         let* live_bidi=match List.assoc_opt "live_bidi" fields with
-           | Some `Null -> Ok None
-           | Some value -> Browser_addon_live_bidi.configuration_of_json value |> Result.map Option.some
-           | None -> Error "missing live BiDi descriptor" in
+         let optional decode name=match List.assoc name fields with
+           | `Null -> Ok None
+           | value -> decode value |> Result.map Option.some in
+         let* automation=optional Browser_addon_automation.configuration_of_json "automation" in
+         let* models=optional Browser_addon_models.configuration_of_json "models" in
+         let* stagehand=optional Browser_addon_stagehand.configuration_of_json "stagehand" in
+         let* live_bidi=optional Browser_addon_live_bidi.configuration_of_json "live_bidi" in
          Ok (Some (root,automation,models,stagehand,live_bidi))
-     | _ -> Error "unknown native cleanup descriptor")
-  | Some _ -> Error "invalid native cleanup descriptor"
+     | kind,directory ->
+       Error (Printf.sprintf "%s must have kind \"browser_socket\" and a string directory; it has kind %s and directory %s"
+         cleanup_descriptor_label (Yojson.Safe.to_string kind) (Yojson.Safe.to_string directory)))
+  | Some (`Assoc fields) ->
+    Error (Requirement.keys ~label:cleanup_descriptor_label ~found:(List.map fst fields) ~required:cleanup_descriptor_keys)
+  | Some value ->
+    Error (Printf.sprintf "%s must be a JSON object; it is %s" cleanup_descriptor_label (Yojson.Safe.to_string value))
 let context_path admission =
   let* context=Native_addon_lease.cleanup_context admission |> Result.map_error Native_addon_lease.error_to_string in
   context_of_json ~instance_id:(Native_addon_lease.instance_id admission) context
 let slot admission directory =
   let directory=Unix.realpath directory in
   if List.mem directory (Native_addon_lease.directories admission) then
-    let info=Unix.lstat directory in
-    if info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid () && info.st_perm=0o700 then Ok directory
-    else Error "browser claim slot is not private and host-owned"
-  else Error "browser resource is outside its native claim"
+    let* _=Requirement.lstat ~label:"browser claim slot" Requirement.private_directory directory in
+    Ok directory
+  else Error (Printf.sprintf "browser claim slot %s must be one of its native claim's directories %s"
+    directory (String.concat ", " (Native_addon_lease.directories admission)))
 let record_of_instance instance_id directory = Filename.concat directory
   ("browser-" ^ Digestif.SHA256.(to_hex (digest_string instance_id)) ^ ".json")
 let record admission directory = record_of_instance (Native_addon_lease.instance_id admission) directory
@@ -110,38 +111,43 @@ let acquire ~admission ~directory = protect (fun () ->
 let with_download_snapshot t (descriptor:Browser_addon_downloads.descriptor) consume = protect (fun () ->
   let allocation=Filename.dirname t.path in
   let root=Filename.concat allocation "download-snapshots" in
-  let directory path ~device ~inode =
-    let info=Unix.lstat path in
-    if info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid () && info.st_perm=0o700
-      && info.st_dev=device && info.st_ino=inode && Unix.realpath path=path then Ok ()
-    else Error "original browser download allocation changed" in
+  let directory ~label path ~device ~inode =
+    let* info=Requirement.lstat ~label Requirement.private_directory path in
+    let observed=Requirement.identity info in
+    let* ()=if observed.Requirement.device=device && observed.inode=inode then Ok ()
+      else Error (Requirement.replaced ~label ~path ~expected:{Requirement.device;inode} ~observed) in
+    Requirement.canonical ~label path in
   let roots () =
-    let* ()=directory allocation ~device:t.device ~inode:t.inode in
-    directory root ~device:descriptor.root_device ~inode:descriptor.root_inode in
-  let valid (info:Unix.stats) = info.st_kind=Unix.S_REG && info.st_uid=Unix.geteuid ()
-    && info.st_perm=0o600 && info.st_nlink=1 && info.st_dev=descriptor.device
-    && info.st_ino=descriptor.inode && info.st_size=descriptor.bytes in
+    let* ()=directory ~label:"browser allocation directory" allocation ~device:t.device ~inode:t.inode in
+    directory ~label:"browser download snapshot directory" root
+      ~device:descriptor.root_device ~inode:descriptor.root_inode in
   let* path=Browser_addon_downloads.snapshot_path ~directory:allocation ~snapshot_id:descriptor.snapshot_id in
+  let valid label info = Browser_addon_downloads.snapshot_matches ~label ~path descriptor info in
   let* ()=roots () in
-  if not (valid (Unix.lstat path)) then Error "download snapshot identity changed" else
+  let* ()=valid "download snapshot" (Unix.lstat path) in
   let source=Unix.openfile path [Unix.O_RDONLY;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0 in
   Fun.protect ~finally:(fun () -> Unix.close source) (fun () ->
-    if not (valid (Unix.fstat source)) then Error "opened download snapshot identity changed" else
+    let* ()=valid "opened download snapshot" (Unix.fstat source) in
     let* ()=roots () in
     let* value=consume source in
     let* ()=roots () in
-    if not (valid (Unix.fstat source)) || not (valid (Unix.lstat path)) then
-      Error "download snapshot changed during import" else Ok value))
-let private_root root info = info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid ()
-  && info.st_perm=0o700 && Unix.realpath root=root
+    let* ()=valid "opened download snapshot after import" (Unix.fstat source) in
+    let* ()=valid "download snapshot after import" (Unix.lstat path) in
+    Ok value))
+let socket_directory_label = "browser socket directory"
+let private_root root info =
+  let* ()=Requirement.check ~label:socket_directory_label Requirement.private_directory ~path:root info in
+  Requirement.canonical ~label:socket_directory_label root
+let socket_record = {Requirement.kind=Unix.S_REG;owner=Effective_user;mode=Any_mode;links=Exactly_one}
+let owned_directory = {Requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Any_mode;links=Any_count}
 (* Only empty directory trees may be removed. Files, links and uncertain
    acquisitions are retained for the original incarnation; never recursive rm. *)
 let rec empty_tree path =
   match Unix.lstat path with
-  | info when info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid () ->
+  | info ->
+      let* ()=Requirement.check ~label:"owned browser profile or download entry" owned_directory ~path info in
       let* ()=Array.fold_left (fun acc name -> let* ()=acc in empty_tree (Filename.concat path name)) (Ok ()) (Sys.readdir path) in
       Unix.rmdir path;Ok ()
-  | _ -> Error "owned browser still has profile or download contents"
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
 let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi ~confirmed ~confirm =
   let read name =
@@ -200,40 +206,54 @@ let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi 
   let* ()=confirm () in
   List.fold_left (fun acc name -> let* ()=acc in
     let path=Filename.concat root name in
-    match (Unix.lstat path).Unix.st_kind with
+    let info=Unix.lstat path in
+    match info.Unix.st_kind with
     | Unix.S_SOCK when name="s" -> Unix.unlink path;Ok ()
     | Unix.S_REG when List.mem name ["automation.json";"automation-closed.json";"webdriver.log";"models.json";"stagehand.json";"chromium.log";"live-bidi.json";"live-firefox.log"] ->
-        let info=Unix.lstat path in
-        if info.st_uid=Unix.geteuid () && info.st_nlink=1 then (Unix.unlink path;Ok ())
-        else Error "owned browser file identity is unknown"
-    | Unix.S_DIR|Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK ->
-        Error "browser directory contains an unexpected resource") (Ok ())
+        let* ()=Requirement.check ~label:"owned browser file" socket_record ~path info in
+        Unix.unlink path;Ok ()
+    | Unix.S_DIR|Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK as kind ->
+        Error (Printf.sprintf "browser socket directory entry %s is an unexpected %s"
+          path (Requirement.kind_name kind))) (Ok ())
     (Sys.readdir root |> Array.to_list)
+let socket_record_keys = ["device";"directory";"incarnation";"inode";"state"]
 (* The socket acquisition record [cleanup] reads in the installation slot. *)
 let acquisition ~instance_id ~root ~file ~directory =
   let* value=match Unix.lstat file with
-    | info when info.Unix.st_kind=Unix.S_REG && info.st_uid=Unix.geteuid () && info.st_nlink=1 ->
+    | info ->
+      let* ()=Requirement.check ~label:"browser socket record" socket_record ~path:file info in
       Fs_compat.load_owned_regular_file ~ownership_root:directory file
         |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
         |> Result.map (Option.map Yojson.Safe.from_string)
-    | _ -> Error "browser socket record is not a host-owned regular file"
     | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None in
   match value with
   | None -> Ok Missing
   | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=["state"]
       && List.assoc_opt "state" fields=Some (`String "released") -> Ok Released
-  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=
-      ["device";"directory";"incarnation";"inode";"state"] ->
-    (match List.assoc_opt "incarnation" fields,List.assoc_opt "directory" fields,
-      List.assoc_opt "device" fields,List.assoc_opt "inode" fields,List.assoc_opt "state" fields with
-     | Some (`String incarnation),Some (`String known),Some (`Int device),Some (`Int inode),Some (`String state)
-       when incarnation=instance_id && root=known ->
-         (match state with "acquired" -> Ok (Acquired (device,inode))
-          | "cleaning" -> Ok (Cleaning (device,inode))
-          | "retained" -> Ok (Retained (device,inode))
-          | _ -> Error "invalid browser allocation state")
-     | _ -> Error "invalid browser socket resource identity")
-  | Some _ -> Error "invalid browser socket resource record"
+  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=socket_record_keys ->
+    let refuse name requirement found = Error (Printf.sprintf "browser socket record %s field %s must be %s; it is %s"
+      file name requirement (Yojson.Safe.to_string found)) in
+    let text name=match List.assoc name fields with
+      | `String value -> Ok value
+      | found -> refuse name "a string" found in
+    let number name=match List.assoc name fields with
+      | `Int value -> Ok value
+      | found -> refuse name "an integer" found in
+    let* incarnation=text "incarnation" in
+    let* known=text "directory" in
+    let* device=number "device" in
+    let* inode=number "inode" in
+    let* state=text "state" in
+    if incarnation<>instance_id then refuse "incarnation" (Printf.sprintf "%S" instance_id) (`String incarnation)
+    else if root<>known then refuse "directory" (Printf.sprintf "%S" root) (`String known)
+    else (match state with
+      | "acquired" -> Ok (Acquired (device,inode))
+      | "cleaning" -> Ok (Cleaning (device,inode))
+      | "retained" -> Ok (Retained (device,inode))
+      | other -> refuse "state" "\"acquired\", \"cleaning\" or \"retained\"" (`String other))
+  | Some value -> Error (Printf.sprintf
+      "browser socket record %s must be {\"state\":\"released\"} or an object with exactly the keys %s; it is %s"
+      file (String.concat ", " socket_record_keys) (Yojson.Safe.to_string value))
 let check_retained ~instance_id ~slot context = protect (fun () ->
   let* root=context_of_json ~instance_id context in
   match root with
@@ -267,7 +287,8 @@ let cleanup ~admission ~directory = protect (fun () ->
        removed or released here. *)
     match identity with Retained _ -> Ok Allocation_retained | Missing|Acquired _|Cleaning _|Released ->
     let* ()=match Unix.lstat root with
-      | info when private_root root info ->
+      | info ->
+        let* ()=private_root root info in
         let* ()=match identity with
           | Released -> Error "released browser socket directory reappeared"
           | Retained _ -> Error "retained browser allocation reached release"
@@ -276,7 +297,8 @@ let cleanup ~admission ~directory = protect (fun () ->
             else Error "unconfirmed browser acquisition contains resources"
           | Acquired (device,inode)|Cleaning (device,inode) ->
             if info.st_dev=device && info.st_ino=inode then Ok ()
-            else Error "browser socket directory identity changed" in
+            else Error (Requirement.replaced ~label:socket_directory_label ~path:root
+              ~expected:{Requirement.device;inode} ~observed:(Requirement.identity info)) in
         let confirmed=match identity with Cleaning _ -> true | Missing|Acquired _|Retained _|Released -> false in
         let confirm ()=if confirmed then Ok () else
           Fs_compat.save_file_atomic_strict file
@@ -287,7 +309,6 @@ let cleanup ~admission ~directory = protect (fun () ->
         let live_bidi=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> live_bidi in
         let* ()=cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi ~confirmed ~confirm in
         Unix.rmdir root;Ok ()
-      | _ -> Error "browser socket directory identity changed"
       | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
         (match identity,Option.is_some automation || Option.is_some stagehand || Option.is_some live_bidi with
          | Acquired _,true -> Error "owned browser allocation vanished without confirmed cleanup"
@@ -319,11 +340,14 @@ let retain ~admission ~directory = protect (fun () ->
     match identity,Unix.lstat root with
     | Released,_ -> Ok Allocation_released
     | Retained _,_ -> Ok Allocation_retained
-    | (Acquired (device,inode)|Cleaning (device,inode)),info when private_root root info ->
+    | (Acquired (device,inode)|Cleaning (device,inode)),info ->
+        let* ()=private_root root info in
         if info.st_dev=device && info.st_ino=inode then retained ~device ~inode
-        else Error "browser socket directory identity changed"
-    | Missing,info when private_root root info -> retained ~device:info.st_dev ~inode:info.st_ino
-    | (Missing|Acquired _|Cleaning _),_ -> Error "browser socket directory identity changed"
+        else Error (Requirement.replaced ~label:socket_directory_label ~path:root
+          ~expected:{Requirement.device;inode} ~observed:(Requirement.identity info))
+    | Missing,info ->
+        let* ()=private_root root info in
+        retained ~device:info.st_dev ~inode:info.st_ino
     | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
         (match identity with
          | Acquired (device,inode)|Cleaning (device,inode) -> retained ~device ~inode

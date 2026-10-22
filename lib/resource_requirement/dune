@@ -1,0 +1,10 @@
+(include_subdirs no)
+
+(library
+ (name masc_resource_requirement)
+ (public_name masc.resource_requirement)
+ (wrapped false)
+ (modules resource_requirement)
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ (libraries unix))

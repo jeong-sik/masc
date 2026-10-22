@@ -1,5 +1,6 @@
 module B = Browser_lane
 module W = Browser_addon_wire
+module Requirement = Resource_requirement
 let ( let* ) = Result.bind
 type error = Identity_changed | Unconfirmed of string
 let protect run = try run () with
@@ -11,12 +12,14 @@ let sync directory =
 let canonical_root root =
   if Filename.is_relative root then Error (Unconfirmed "browser registration root must be absolute")
   else Ok (Filename.concat (Unix.realpath (Filename.dirname root)) (Filename.basename root))
-let private_directory path info =
-  if info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid () && info.st_perm=0o700
-      && Unix.realpath path=path then Ok ()
-  else Error (Unconfirmed "browser registration directory is not private and host-owned")
-let inspect path = match Unix.lstat path with
-  | info -> let* ()=private_directory path info in Ok true
+let unconfirmed result = Result.map_error (fun detail -> Unconfirmed detail) result
+let private_directory ~label path info =
+  let* ()=unconfirmed (Requirement.check ~label Requirement.private_directory ~path info) in
+  unconfirmed (Requirement.canonical ~label path)
+let root_label = "browser registration root"
+let directory_label = "browser registration directory"
+let inspect ~label path = match Unix.lstat path with
+  | info -> let* ()=private_directory ~label path info in Ok true
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok false
 let leaf root client = Filename.concat root (B.client_id_to_string client.B.client_id)
 let file directory = Filename.concat directory "owner.json"
@@ -34,9 +37,7 @@ let decode json = match json with
 let read ~root ~client directory =
   let path=file directory in
   let* ()=match Unix.lstat path with
-    | info when info.Unix.st_kind=Unix.S_REG && info.st_uid=Unix.geteuid ()
-        && info.st_nlink=1 && info.st_perm=0o600 -> Ok ()
-    | _ -> Error (Unconfirmed "browser registration record is not private and host-owned")
+    | info -> unconfirmed (Requirement.check ~label:"browser registration record" Requirement.private_file ~path info)
     | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
         Error (Unconfirmed "browser client reservation has no completed owner record") in
   let* bytes=Fs_compat.load_owned_regular_file ~ownership_root:root path
@@ -51,20 +52,20 @@ let read ~root ~client directory =
   Ok instance
 let find ~root ~client = protect (fun () ->
   let* root=canonical_root root in
-  let* exists=inspect root in
+  let* exists=inspect ~label:root_label root in
   if not exists then Ok None else
   let directory=leaf root client in
-  let* exists=inspect directory in
+  let* exists=inspect ~label:directory_label directory in
   if not exists then Ok None else read ~root ~client directory |> Result.map Option.some)
 let claim ~root ~client ~instance_id = protect (fun () ->
   let* instance_id=canonical_instance instance_id in
   let* _=W.client_of_json (W.client_to_json client) |> Result.map_error (fun detail -> Unconfirmed detail) in
   let* root=canonical_root root in
   (try Unix.mkdir root 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
-  let* _=inspect root in
+  let* _=inspect ~label:root_label root in
   let directory=leaf root client in
   let created=try Unix.mkdir directory 0o700;true with Unix.Unix_error (Unix.EEXIST,_,_) -> false in
-  let* _=inspect directory in
+  let* _=inspect ~label:directory_label directory in
   let* ()=if not created then Ok () else (
     sync directory;sync root;sync (Filename.dirname root);
     let record=`Assoc ["instance_id",`String instance_id;"client",W.client_to_json client] in

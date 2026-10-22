@@ -245,9 +245,12 @@ let test_reads_run_the_page_scripts () =
   check string "text read with the default cap"
     (Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:Masc.Browser_page_script.text ~args:(`Int Masc.Browser_page_script.default_text_chars))
     (sent_expression ());
-  let elements = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_elements { tab_id = None })) in
-  check string "elements script" (Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:Masc.Browser_page_script.elements ~args:`Null) (sent_expression ());
+  let elements = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_elements { tab_id = None; within = None })) in
+  check string "elements script" (Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:Masc.Browser_page_script.elements ~args:(`Assoc [])) (sent_expression ());
   check int "elements of the active tab name it" 1 Yojson.Safe.Util.(member "tabId" elements |> to_int);
+  let _ = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_elements { tab_id = None; within = Some "nav" })) in
+  check string "within reaches the elements script" (Executor.evaluate_expression ~runtime:Executor.No_runtime
+    ~body:Masc.Browser_page_script.elements ~args:(`Assoc ["within",`String "nav"])) (sent_expression ());
   let scene =
     served (Executor.execute ~tabs ~call:(call fake)
       (Lane.Page_scene { tab_id = 0; max_chars = 2000; view = Lane.Content; scope = None }))

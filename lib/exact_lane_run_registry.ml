@@ -1061,9 +1061,9 @@ let confirmed_payload ~log_path ~run_id kind ~value ~source =
   | In_row -> let* ()=validate_original_json value in Ok value
   | In_file {bytes;sha256} ->
     let root=Filename.dirname log_path in
-    let path=payload_path ~log_path ~run_id kind ~sha256 in
+    let* relative=Fs_compat.owned_relative_path [payload_dirname;run_id;payload_leaf kind ~sha256] in
     let confirmed=Fs_compat.with_owned_inventory_root root (fun held ->
-      let* value=Fs_compat.with_owned_inventory_regular_file ~owner_uid:(Unix.geteuid ()) held path
+      let* value=Fs_compat.with_owned_inventory_regular_file ~owner_uid:(Unix.geteuid ()) held relative
         (fun ~file ~parent ~stat ->
           if stat.Unix.st_size<>bytes then Error "Original payload size changed" else
           let buffer=Bytes.create bytes in

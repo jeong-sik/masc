@@ -300,7 +300,7 @@ record: a host that held the lock under its predecessor's record would be
 read as that predecessor. A record that could not be written later does not
 stop a serving host; the next write that succeeds carries it.
 
-Four places read the record and say what it says, with what the operator
+Three places read the record and say what it says, with what the operator
 does next:
 
 - `masc doctor` prints a `browser_bidi_host` line. It reads the files, so it
@@ -310,7 +310,8 @@ does next:
     That is where hover and drag are served.
   - `needs_verification`: a host runs and that is all that is known. It is
     still connecting, the check runs outside a server as `masc doctor` does,
-    or the answering server does not list the host's client.
+    or the answering server does not list the host's client: its browser
+    Add-on lists another client, lists none, or cannot be read.
   - `needs_setup`: none runs.
   - `invalid`: the record or its lock cannot be read.
 
@@ -330,10 +331,6 @@ does next:
     `lane_off`, `not_configured` (no `[browser.live.bidi]`) and `not_known`
     (no configuration was read) carry nothing more.
   - `message`: the paragraph the doctor prints.
-- A Keeper whose hover or drag is refused as `live_transport_unsupported`
-  while no connected browser serves it gets `bidiHost` in the answer, with
-  `state` and `message` only, to pass on to the operator. An answer that
-  offers a connection in `servingClients` has no `bidiHost`.
 - The TUI's Browser Lane picker draws it from the server's `bidiHost`:
   whether a host runs and whether the server lists it, why the last one
   ended, what comes before the next, the results the host holds no
@@ -341,8 +338,8 @@ does next:
   starts it, that MASC does and what its last start left
   ([the rows](../guides/tui-browser-lanes.md)).
 
-The doctor, the connection list and the Keeper's answer each read the
-record first and ask the server for its connections once, after that. What
+The doctor and the connection list each read the record first and ask the
+server for its connections once, after that. What
 an answer says of the host and the connections it lists are of that one
 list. The TUI draws what the connection list answered.
 

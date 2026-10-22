@@ -66,6 +66,8 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
   `>`와 따옴표, 기존 CSS escape를 보존한다. JSON 표시용 escape를 문자열에
   다시 삽입하거나 모든 backslash를 일괄 제거하지 않는다.
   긴 `nth-of-type` 경로를 기억으로 재작성하거나 실패한 경로의 숫자를 고치지 않는다.
+- selector 는 문서에서 하나뿐인 id(`#…`)가 있으면 거기서 시작한다. 그 앞부분을
+  elements 의 `within` 에 그대로 넘기면 그 영역의 컨트롤만 다시 읽는다.
 - live 조작은 `BrowserInteract`의 click/fill/scroll을 사용하고 직전 URL을
   `expectedUrl`로 전달한다. automation에서는 요청에 맞게 `BrowserInteract`나
   `BrowserAct`를 사용한다. 텍스트 입력과 Enter·제출은 별개의 동작이다.
@@ -111,7 +113,7 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 4. 새 screenshot의 `viewport`와 그 컨트롤 위의 `point`로 `click_at` 한다.
 5. 다시 읽어 결과를 확인한다.
 
-연결이 `web_extension`뿐이면 이 일은 할 수 없다. 거절의 `retry`를 운영자에게 전한다.
+연결이 `web_extension`뿐이면 이 일은 할 수 없다. `webdriver_bidi` 연결이 필요하다고 운영자에게 알린다.
 
 화면 확인이 필요하면 관측된 `tabId`로 `BrowserRead mode=screenshot`을 호출한다.
 Keeper 응답의 `artifact`를 `keeper_analyze_image`에 넘긴다. 텍스트만 읽고 이미지의

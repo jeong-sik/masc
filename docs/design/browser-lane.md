@@ -17,8 +17,11 @@ or no answer in time); a result the server answered with any status is logged
 as undelivered and the host returns to polling.
 They accept only `live`. Automation requires the configured in-process
 WebDriver executor and reports `Lane_absent` when it is not installed.
-Session management and direct URL navigation are automation-only. The live lane
-can follow an observed same-tab HTTP(S) anchor through `BrowserInteract`.
+Session management belongs to the server-owned browsers. A live BiDi
+connection navigates only a tab it opened with `open_tab` (`BrowserGoto` with
+`lane = "live"`, its `clientId` and that `tabId`). On the operator's own tabs
+the live lane can follow an observed same-tab HTTP(S) anchor through
+`BrowserInteract`.
 
 Keeper browser tools use the same source state. They reject backend failures,
 malformed envelopes, absent lanes and timeouts instead of reporting success.
@@ -120,28 +123,27 @@ build their rejection from it.
 | `touch_input` | `tap_at`, `swipe` | no | yes |
 | `viewport_resize` | `set_viewport` | no | yes |
 | `tab_history` | `back`, `forward`, `reload`, only for a tab the same connection opened | no | yes |
+| `tab_navigation` | `BrowserGoto`, only for a tab the same connection opened | no | yes |
 | `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes |
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel |
 | `trusted_hover` | `hover`, `hover_at` | no | yes |
 | `trusted_drag` | `drag_to`, `drag` | no | yes |
-| `tab_activation` | `activate_tab` | yes | no |
+| `tab_activation` | `activate_tab` | yes | yes, and it also focuses the window |
 
 The extension acts through DOM calls inside the page and has no pointer the
 browser treats as the operator's. The BiDi peer sends pointer and wheel input
-through the browser; it does not implement tab activation. BiDi's own
-[`browsingContext.activate`](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/browsingContext/activate)
-also gives the tab's window focus, which `activate_tab` promises not to do.
+through the browser. Its `activate_tab` uses
+[`browsingContext.activate`](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/browsingContext/activate),
+which also gives the tab's window system focus; the extension's activation
+does not take window focus.
 
 A request its connection does not serve is a selection failure: the server
 queues no command and answers `live_transport_unsupported`. A Keeper tool's
-rejection carries the refused `clientId`, its `transport`, the `capability`,
-the `servingTransports`, the connected `servingClients` and a `retry`
-sentence. With a serving browser connected, the Keeper lists that
+rejection carries the refused `clientId`, its `transport` and the
+`capability`. With a serving browser connected, the Keeper lists that
 connection's tabs, observes the page again and retries there. With none, the
-`retry` says what the operator attaches, and when BiDi serves the work the
-answer also carries `bidiHost` (`state` and `message`): what the BiDi host's
-own record says, for the Keeper to pass on
-([Live BiDi browser host](browser-bidi-live-host.md)). The extension and the BiDi peer keep
+operator attaches one ([Live BiDi browser host](browser-bidi-live-host.md)).
+The extension and the BiDi peer keep
 their own refusals for work outside their vocabulary; the server does not
 send it to them.
 
@@ -155,7 +157,9 @@ the separate `BrowserRead`/`BrowserAct` contracts described in the
 
 Interactions are ordered writes under the same tool permission policy as
 `BrowserGoto`; live interaction uses the operator's logged-in tab. Session
-creation, closure, and direct URL navigation remain automation-only.
+creation and closure belong to the server-owned browsers. Direct URL
+navigation on a live connection is limited to a tab that BiDi connection
+opened.
 
 ## Shared observation and Skill composition
 
@@ -202,27 +206,25 @@ returns `no_live_client`. An explicit missing/retired ID returns
 `selected_client_disconnected`; it never selects a replacement. Automation
 requests omit `clientId` and return it as null.
 
+`masc doctor` and the dashboard's setup check (`GET /api/v1/setup/status`)
+report the lane as one `browser_lane` line. Hosts register with the browser
+Add-on's worker, so a server reads which hosts poll it from the Add-on's last
+published observation, the same reading the Lanes screen's browser rows show.
+`masc doctor` runs outside a server and does not read it. The line is
+`satisfied` while a host polls, or while none does and the installed launcher
+follows the port the server bound. Before the launcher and the port it names a
+browser Add-on that cannot take a host: none declared or one switched off is
+`needs_setup` (the first is fixed by
+`masc browser-lane-setup --mode addon --base-path <path>`), one declared on
+that the server does not run is `invalid`, and one the server cannot read is
+`needs_verification`. A workspace with no launcher installed has no such line.
+
 `transport` is `web_extension` or `webdriver_bidi`. The TUI browser picker
 displays WebExtension or BiDi beside the browser name. When both hosts attach
 to the same Firefox, select the BiDi client for trusted `hover_at` or `drag`,
 then read its tabs and capture its viewport. Tab IDs do not transfer between
 those connections. [What each live connection serves](#what-each-live-connection-serves)
 lists the rest.
-
-When a Keeper browser tool meets `no_live_client` or
-`selected_client_disconnected`, before or after its target was resolved, its
-result also carries `host`: the installed launcher (`follows_workspace` when
-the installer's `launch.json` carries the SHA-256 of the `launch` beside it,
-`describes_another_launcher` when it does not, `undeclared`, `unreadable` or
-`not_installed`), the `workspace_port` connection.toml names, the
-`serving_port` this server's listener actually bound with `polling_hosts`, the
-browser hosts whose poll lease is current (both null where no bound listener
-is known), and the same verdict and message the onboarding check reports.
-The verdict is `connected` while a host polls this server, whatever the
-launcher or file says; otherwise `aligned` only when a declared launcher's
-workspace port is the bound port, `unverified` where no bound port is known,
-such as `masc doctor`, and `misconfigured` for the rest. The Keeper cannot
-change either side, so the retry text names what the operator does.
 
 Tab IDs belong to their selected client. The operator read resolves that client
 once before listing tabs and keeps it for the subsequent page request. Successful

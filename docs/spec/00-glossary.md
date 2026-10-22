@@ -371,11 +371,11 @@ status: reference
   - `Source audition` — 가져온 MIDI 소스의 순서 있는 원본 메시지 열을 명시한 MIDI 출력이나
     VST로 내보내는 재생. 처음부터 시작하고 pause/resume과 source-clock seek를 지원한다
     (MIDI-SOURCE.md "Ordered source audition", README.md "Imported performance audition").
-    두 문서만 같은 재생을 `full-source audition`이라 부른다 — `grep -F "audition"`
+    한 문서(두 곳)만 같은 재생을 `full-source audition`이라 부른다 — `grep -F "audition"`
     한 번으로 두 이름이 다 잡히도록 여기 함께 적는다(ARRANGEMENT.md의 "full-source audition
     remains available separately"·"original full-source audition's complete ordered-stream
     delivery"). `full-source`는 이 재생을 가리키는 다른 이름이지 더 큰 범위의 재생이 아니다.
-    같은 낱말이 `paired audition` 자리에서도 다른 문서 세 곳에 쓰이므로, 이 이름이 보이면
+    같은 낱말이 `paired audition` 자리에서도 다른 문서 세 곳과 코드 주석 한 곳에 쓰이므로, 이 이름이 보이면
     어느 재생인지 문맥으로 먼저 가른다.
   - `Source-window audition` — 소스 피아노 롤에서 `:loop START END`로 잡은 세션 국소 소스
     구간만 반복해 들려주는 재생. 루프 선택은 소스 문서와 MIDI/WAV 내보내기를 바꾸지 않고,
@@ -387,12 +387,14 @@ status: reference
     (CAPTURE-AUDIO-CLOCK.md "Captured-region WAV audition", README.md의 `:play-audio`).
   - `paired audition` — 저장한 take의 WAV와 UMP 스트림을 함께 듣는 재생
     (CAPTURE-PLAYBACK.md: "A saved take can audition its original WAV and UMP stream
-    together."). 이 자리의 재생을 CAPTURE-PLAYBACK.md "Full-source audition still emits
-    every original message", README.md "capture timing survive full-source audition",
-    CAPTURE-UMP-REGIONS.md "full-source audition remains available",
-    `tools/alphatex/native/UmpTransport.swift` 주석 "original full-source audition"이
-    `full-source audition`이라 부른다. 한낱말이 소스 재생과 캡처 재생 두 쪽에서 다른
-    이름으로 쓰이므로 문장은 어느 쪽인지 밝혀야 한다.
+    together."). 아래 네 곳은 소스 재생이 아니라 `paired audition`을
+    `full-source audition`이라 부른다 — CAPTURE-PLAYBACK.md "Full-source audition still
+    emits every original message", README.md "capture timing survive full-source
+    audition", CAPTURE-UMP-REGIONS.md "full-source audition remains available",
+    `tools/alphatex/native/UmpTransport.swift` 주석 "original full-source audition".
+    한낱말이 소스 재생과 캡처 재생 두 쪽에서 다른 이름으로 쓰이므로 문장은 어느 쪽인지
+    밝혀야 한다. 따옴표 안은 원문을 옮겨 적은 스냅샷이라 원문이 바뀌면 함께 낡는다.
+    갱신할 때는 `git grep -F "full-source audition"`으로 다시 확인한다.
   - `Bound SoundFont audition` — 문서에 묶인 SoundFont 선택으로 그 악기를 써서 듣는 재생.
     `:soundfont-fluid [SF2_PATH]`는 선택과 실제 SF2 바이트·SHA256·엔진 버전을 문서에
     저장할 뿐 재생을 시작하지 않고, 재생은 Space가 한다(README.md "Bound FluidSynth

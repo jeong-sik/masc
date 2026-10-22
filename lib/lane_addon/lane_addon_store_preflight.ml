@@ -265,10 +265,17 @@ let scan store ~base_path =
         (fun ~group:_ ~name:_ ~path:_ json ->
            Lane_addon_exact.check_retained_record json |> decoded Exact_record)
     | Tool_request_owners ->
+      (* A record is read with the body it names, as discovery reads it. *)
+      let read_body ~scope ~request_digest =
+        match Fs_compat.load_file_opt
+                (Filename.concat root (Lane_addon_store.tool_request_body_path ~scope ~request_digest)) with
+        | exception Sys_error detail -> Error detail
+        | body -> Ok body
+      in
       scan_grouped root Lane_addon_store.tool_request_owners_directory
         ~entry:tool_request_owner_entry
         (fun ~group ~name ~path:_ json ->
-           Lane_addon_tool_request_owner.check_published ~directory_name:group ~file_name:name json
+           Lane_addon_tool_request_owner.check_published ~read_body ~directory_name:group ~file_name:name json
            |> decoded Tool_request_owner)
   in
   Result.map finish report

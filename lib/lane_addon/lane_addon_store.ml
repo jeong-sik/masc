@@ -26,6 +26,9 @@ let digest bytes =
         (offset + count)
   in
   feed Digestif.SHA256.empty 0
+let is_digest text =
+  String.length text = 2 * Digestif.SHA256.digest_size
+  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) text
 let protect f =
   try f () with
   | Sys_error message -> Error message
@@ -301,6 +304,7 @@ let bindings_directory = "bindings"
 let actions_directory = "actions"
 let exact_requests_directory = "exact-requests"
 let tool_request_owners_directory = "tool-request-owners"
+let tool_request_bodies_directory = "tool-request-bodies"
 let binding_path instance_id = Filename.concat bindings_directory (digest instance_id ^ ".json")
 let save_binding t ~instance_id json = write t (binding_path instance_id) (Yojson.Safe.to_string json)
 let remove_binding_with ~sync_parent t ~instance_id = protect (fun () ->
@@ -572,14 +576,16 @@ let rec load_exact_request_with ~sync_file ~sync_parent t ~declaration_id ~reque
 let load_exact_request = load_exact_request_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 
 let owned_result value = Result.map_error Fs_compat.owned_regular_file_read_error_to_string value
-let with_tool_request_owner_scope ~sync_parent t ~scope fn =
+(* One scope directory of [namespace] (records or request bodies), held under
+   the same per-scope serializer that publication uses. *)
+let with_tool_request_scope ~namespace ~sync_parent t ~scope fn =
   let blocking () = protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     let* result = Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
       let result =
         let owner_uid = Unix.geteuid () in
         let parent = Fs_compat.owned_inventory_root_path anchor in
         let root = Filename.concat parent (Filename.basename t.root) in
-        let directory = Filename.concat root (Filename.concat tool_request_owners_directory (digest scope)) in
+        let directory = Filename.concat root (Filename.concat namespace (digest scope)) in
         let* observed = Fs_compat.with_owned_directory_inventory_if_present ~owner_uid
           ~inventory_root:anchor ~sync_directory:sync_parent directory (fun held names ->
             let* value = fn ~owner_uid held names in
@@ -597,16 +603,20 @@ let with_tool_request_owner_scope ~sync_parent t ~scope fn =
   | Fs_compat.Eio_fiber ->
     let result = Eio_unix.run_in_systhread ~label:"addon-original-request-read" blocking in
     Eio.Fiber.check (); result
-let read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name =
+let with_tool_request_owner_scope ~sync_parent t ~scope fn =
+  with_tool_request_scope ~namespace:tool_request_owners_directory ~sync_parent t ~scope fn
+let read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name =
   let path = Filename.concat (Fs_compat.owned_inventory_root_path held) name in
   let* relative = Fs_compat.owned_relative_path [name] in
   let* result = Fs_compat.with_owned_inventory_regular_file ~owner_uid held relative
     (fun ~file ~parent ~stat -> protect (fun () ->
       let* bytes = record_bytes file stat.Unix.st_size in
       let* read = settle_verified_record ~sync_file ~sync_parent path file stat bytes parent in
-      let* bytes = changed_during_verification read in
-      Ok (Yojson.Safe.from_string bytes))) |> owned_result in
+      changed_during_verification read)) |> owned_result in
   result
+let read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name =
+  let* bytes = read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name in
+  protect (fun () -> Ok (Yojson.Safe.from_string bytes))
 let load_tool_request_owner t ~scope ~request_id =
   let name = digest request_id ^ ".json" in
   let* result = with_tool_request_owner_scope ~sync_parent:Unix.fsync t ~scope
@@ -615,6 +625,23 @@ let load_tool_request_owner t ~scope ~request_id =
       else read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
         |> Result.map Option.some) in
   Ok (Option.join result)
+let tool_request_body_path ~scope ~request_digest =
+  Filename.concat tool_request_bodies_directory (Filename.concat (digest scope) (request_digest ^ ".json"))
+let load_tool_request_body t ~scope ~request_digest =
+  let name = request_digest ^ ".json" in
+  let* result = with_tool_request_scope ~namespace:tool_request_bodies_directory ~sync_parent:Unix.fsync t ~scope
+    (fun ~owner_uid held names ->
+      if not (List.mem name names) then Ok None
+      else read_owned_tool_request_bytes ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
+        |> Result.map Option.some) in
+  Ok (Option.join result)
+(* A body is named by the digest of its bytes, so writing it again publishes
+   the same file; each write is atomic and synced with its directory. *)
+let save_tool_request_body t ~scope ~request_digest bytes =
+  let* () = if String.equal (digest bytes) request_digest then Ok ()
+    else Error "a request body must be named by the digest of its bytes" in
+  protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
+    write_with ~sync_parent:sync_parent_directory t (tool_request_body_path ~scope ~request_digest) bytes))
 type namespace_entry = Record_entry | Staged_entry | Unknown_entry
 let tool_request_owner_entry name =
   if Fs_compat.is_atomic_orphan_name name then Staged_entry

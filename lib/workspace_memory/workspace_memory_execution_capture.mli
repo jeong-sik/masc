@@ -83,8 +83,9 @@ val restore : workspace:workspace ->
     and require the SHA-256 recorded for the prompt that was sent. The caller supplies a fresh observation under its original
     workspace lease/serialization, and still revalidates live authority before
     effects. Strictly load each predecessor; require its matching acknowledged
-    child and original typed size refusal, re-derive the entire child capture,
-    and reject missing, conflicting, unreadable or cyclic ancestry. A retained
+    child and original typed size refusal, re-derive the entire child capture
+    and require the request digest the parent's intent names, and reject
+    missing, conflicting, unreadable or cyclic ancestry. A retained
     child whose parent is still Subdividing cannot execute. This is neither
     restart enumeration nor a commit journal. *)
 val recoverable_successors : workspace:workspace ->

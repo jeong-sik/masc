@@ -377,27 +377,42 @@ let test_lane_addon_exact_requests () = with_lane_store (fun base root ->
     expect_refusals P.Store.Exact_requests ~base_path:base ~rows:2
       [path "string-messages", P.Exact_record])))
 
-let tool_request_owner ~scope ~request_id ~schema =
-  let request = `Assoc ["query", `String "rows"] in
+let owner_request = `Assoc ["query", `String "rows"]
+let owner_request_bytes = Yojson.Safe.to_string owner_request
+
+(* The current record names its request body by digest; the body lives
+   beside the scope's records. *)
+let tool_request_owner ~scope ~request_id ~schema ~request_digest =
   `Assoc ["schema", `String schema; "scope", `String scope; "request_id", `String request_id
          ; "installation_id", `String {|["configuration","curator"]|}; "package_id", `String "curator"
-         ; "tool", `String "read"; "request_digest", `String (Lane_addon_store.digest (Yojson.Safe.to_string request))
-         ; "request", request
+         ; "tool", `String "read"; "request_digest", `String request_digest
          ; "progress", Lane_addon_request_progress.to_json Lane_addon_request_progress.captured]
 
 let test_lane_addon_tool_request_owners () = with_lane_store (fun base root ->
   let path id = grouped root Lane_addon_store.tool_request_owners_directory ~group:"scope" ~id in
-  put (path "current")
-    (tool_request_owner ~scope:"scope" ~request_id:"current" ~schema:"lane.addon.tool-request-owner.v2");
-  (* #44911 moved the record to schema v2. *)
-  put (path "v1")
-    (tool_request_owner ~scope:"scope" ~request_id:"v1" ~schema:"lane.addon.tool-request-owner.v1");
+  let request_digest = Lane_addon_store.digest owner_request_bytes in
+  let body = Filename.concat root (Lane_addon_store.tool_request_body_path ~scope:"scope" ~request_digest) in
+  Fs_compat.mkdir_p (Filename.dirname body);
+  write body owner_request_bytes;
+  let owner = tool_request_owner ~scope:"scope" ~schema:"lane.addon.tool-request-owner.v3" in
+  put (path "current") (owner ~request_id:"current" ~request_digest);
+  put (path "without-body")
+    (owner ~request_id:"without-body" ~request_digest:(Lane_addon_store.digest "a body never published"));
+  (* #44911 moved the record to schema v2. v3 names the request body by
+     digest instead of carrying the request. *)
+  let carrying_request ~request_id ~schema =
+    match tool_request_owner ~scope:"scope" ~request_id ~schema ~request_digest with
+    | `Assoc fields -> `Assoc (("request", owner_request) :: fields)
+    | json -> json in
+  put (path "v2") (carrying_request ~request_id:"v2" ~schema:"lane.addon.tool-request-owner.v2");
+  put (path "v1") (carrying_request ~request_id:"v1" ~schema:"lane.addon.tool-request-owner.v1");
   (* Discovery fails the whole scope on an entry it does not know. *)
   let stray = Filename.concat (Filename.dirname (path "current")) "notes.txt" in
   write stray "operator notes";
   ignore (unchanged root (fun () ->
-    expect_refusals P.Store.Tool_request_owners ~base_path:base ~rows:3
-      [path "v1", P.Tool_request_owner; stray, P.Tool_request_inventory])))
+    expect_refusals P.Store.Tool_request_owners ~base_path:base ~rows:5
+      [path "without-body", P.Tool_request_owner; path "v2", P.Tool_request_owner;
+       path "v1", P.Tool_request_owner; stray, P.Tool_request_inventory])))
 
 
 (* The deploy gate itself: a refused Lane Add-on record stops validate-stores. *)

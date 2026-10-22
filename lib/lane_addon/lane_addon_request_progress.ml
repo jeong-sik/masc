@@ -5,7 +5,7 @@ type refusal_stage = Before_dispatch | Execution
 type refusal = { stage : refusal_stage; evidence : Yojson.Safe.t }
 type change = { before : Yojson.Safe.t; after : Yojson.Safe.t }
 type commit = { judgment : Yojson.Safe.t; change : change }
-type successor = { request_id : string; request : Yojson.Safe.t }
+type successor = { request_id : string; request_digest : string }
 type event = Dispatch_intended | Admission_declined of Yojson.Safe.t | Execution_observed of observation
   | Judgment_retained of Yojson.Safe.t | Commit_intended of change
   | Commit_uncertain of Yojson.Safe.t | Commit_retry_observed of Yojson.Safe.t
@@ -42,7 +42,7 @@ let event_to_json = function
   | Commit_observed after -> envelope "commit_observed" ["after",after]
   | Commit_conflicted observed -> envelope "commit_conflicted" ["observed",observed]
   | Successor_intended successor -> envelope "successor_intended"
-      ["request_id",`String successor.request_id;"request",successor.request]
+      ["request_id",`String successor.request_id;"request_digest",`String successor.request_digest]
   | Successor_observed request_id -> envelope "successor_observed" ["request_id",`String request_id]
   | Refused {stage;evidence} ->
     let stage = match stage with Before_dispatch -> "before_dispatch" | Execution -> "execution" in
@@ -73,11 +73,12 @@ let event_of_json json =
   | "commit_observed" -> value "after" (fun value -> Commit_observed value)
   | "commit_conflicted" -> value "observed" (fun value -> Commit_conflicted value)
   | "successor_intended" ->
-    let* fields = fields ["request_id";"request"] in
-    (match List.assoc "request_id" fields with
-     | `String request_id when String.trim request_id <> "" ->
-       Ok (Successor_intended {request_id;request=List.assoc "request" fields})
-     | _ -> Error "successor intent requires a nonblank child ID")
+    let* fields = fields ["request_id";"request_digest"] in
+    (match List.assoc "request_id" fields, List.assoc "request_digest" fields with
+     | `String request_id, `String request_digest
+       when String.trim request_id <> "" && Lane_addon_store.is_digest request_digest ->
+       Ok (Successor_intended {request_id;request_digest})
+     | _ -> Error "successor intent requires a nonblank child ID and its request digest")
   | "successor_observed" ->
     let* fields = fields ["request_id"] in
     (match List.assoc "request_id" fields with

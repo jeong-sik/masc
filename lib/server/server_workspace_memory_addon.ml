@@ -427,8 +427,8 @@ let narrow_with ~admit ~store ~base_path ~request_id =
     let* child = derive refusal id in
     let* child = match child with Some child -> Ok child
       | None -> Error (Rejected "An indivisible original batch cannot have a successor") in
-    let* expected = rejected (Lane_addon_action.canonical (Capture.to_json child)) in
-    let* () = if Yojson.Safe.equal expected intent.request then Ok ()
+    let* digest = rejected (Owner.request_digest (Capture.to_json child)) in
+    let* () = if String.equal digest intent.request_digest then Ok ()
       else Error (Rejected "Stored successor differs from the original whole-batch reduction") in
     Ok child in
   let confirm parent child =
@@ -438,22 +438,24 @@ let narrow_with ~admit ~store ~base_path ~request_id =
     let* child = read ~request_id:intent.Progress.request_id in
     let* child = match child with Some child -> Ok child
       | None -> Error (Unavailable "The original child capture is absent; acknowledged work cannot be recreated") in
-    let* () = if Yojson.Safe.equal child.request intent.request then Ok ()
+    let* () = if String.equal child.request_digest intent.request_digest then Ok ()
       else Error (Rejected "Retained child differs from its original parent intent") in
     confirm parent child in
   let retain_child parent refusal intent =
+    (* The intent names the child by digest; the child retained is the one
+       derived again from the parent, which [validate_intent] matched to it. *)
     let* child = validate_intent refusal intent in
     let destination = Capture.destination child in
     let* () = Eio_unix.run_in_systhread (fun () ->
       Owner.retain ~store ~scope:Capture.scope ~request_id:intent.Progress.request_id
         ~installation_id:destination.installation_id ~package_id:destination.package_id
-        ~tool:destination.tool ~request:intent.request) |> owned in
-    (* This strict read and complete immutable equality establish only that the
+        ~tool:destination.tool ~request:(Capture.to_json child)) |> owned in
+    (* This strict read and the equal request digest establish only that the
        intended child is durable. Ordinary restore still rejects it until ACK. *)
     let* retained = read ~request_id:intent.request_id in
     let* retained = match retained with Some retained -> Ok retained
       | None -> Error (Uncertain "Child publication has no confirmed original capture") in
-    let* () = if Yojson.Safe.equal retained.request intent.request
+    let* () = if String.equal retained.request_digest intent.request_digest
         && retained.installation_id=destination.installation_id
         && retained.package_id=destination.package_id && retained.tool=destination.tool then Ok ()
       else Error (Rejected "Another child binding cannot acknowledge the original successor") in
@@ -469,8 +471,8 @@ let narrow_with ~admit ~store ~base_path ~request_id =
     (match child with
      | None -> Ok (Indivisible parent)
      | Some child ->
-       let* request = rejected (Lane_addon_action.canonical (Capture.to_json child)) in
-       let intent : Progress.successor = {request_id=Capture.Request_id.to_string child_id;request} in
+       let* request_digest = rejected (Owner.request_digest (Capture.to_json child)) in
+       let intent : Progress.successor = {request_id=Capture.Request_id.to_string child_id;request_digest} in
        admit original (fun () ->
          let* published = publish parent (Progress.Successor_intended intent) in
          match published with

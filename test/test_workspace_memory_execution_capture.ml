@@ -237,7 +237,8 @@ let test_next_classification_size_follows_the_last_answer () = with_workspace (f
   let parent = root_of ~size:(R.Up_to 4) 4 in
   let child = some (get (C.narrow ~request_id:(C.Request_id.fresh ())
       ~final:(Lane_addon_exact.Call_final (Input_refused Input_capacity)) parent)) in
-  let link : P.successor = {request_id=C.Request_id.to_string (C.request_id child);request=`Null} in
+  let link : P.successor = {request_id=C.Request_id.to_string (C.request_id child);
+    request_digest=get (Owner.request_digest (C.to_json child))} in
   Alcotest.check size "a child answered after a size refusal keeps its count" (R.Up_to 2)
     (C.classification_size [older,P.Finished commit;parent,P.Subdivided (refusal,link);
                             child,P.Conflicted (commit,`Null)]);

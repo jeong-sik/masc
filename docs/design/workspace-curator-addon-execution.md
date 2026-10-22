@@ -393,9 +393,10 @@ A selected compiled execution for this layer is separate evidence.
 
 ## Durable size successor, before production scheduling
 
-The original owner now retains one `Successor_intended` fact containing the
-child ID and its entire canonical capture, then retains and strictly reloads
-that child, then records `Successor_observed`. Subdividing/Subdivided keep the
+The original owner now retains one `Successor_intended` fact naming the child
+ID and the request digest the child's own record names it by. It then derives
+the child again from the parent, requires that digest, retains and strictly
+reloads that child, then records `Successor_observed`. Subdividing/Subdivided keep the
 original execution refusal. This is recoverable publication across two records,
 under the existing serialized workspace lease; it is not a cross-file transaction.
 The link operation makes no worker call, model call, domain save or observer ACK.
@@ -410,6 +411,18 @@ only the prompt's SHA-256 and refuses a restore whose rendering no longer
 matches it. The captured ledger is the classification before-state and also
 holds the claim and conflict texts the input cites. The observer registration
 receipt names the capture by its request digest instead of holding a copy.
+
+An original owner record (`lane.addon.tool-request-owner.v3`) holds the
+identity, the request digest and the progress. The request body is written
+once, before any record names it, beside the scope's records at
+`tool-request-bodies/<scope digest>/<request digest>.json`. Progress rewrites
+only the record, and retain and progress compare the request by its digest, so
+a progress event reads and writes a record whose size does not depend on the
+request. A record whose body is
+missing, changed or not canonical JSON is an error, not absence. A retain
+interrupted between the two writes leaves a body no record names, and the next
+retain writes it again. The deploy store check reads each record with the body
+it names. Candle Appraiser keeps its originals in the same store.
 
 The capture format requires an explicit nullable predecessor. Root constructors
 emit null; a child records its immediate original parent. The decoder is strict: missing predecessor and old-format

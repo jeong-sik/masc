@@ -10,6 +10,8 @@ val digest : string -> string
     Bounded C feeds allow the runtime to service another systhread between
     chunks; they neither cap the input nor introduce an Eio suspension. The
     caller still owns CPU scheduling and cancellation of the complete work. *)
+val is_digest : string -> bool
+(** Whether the text has the shape {!digest} returns: lowercase hex SHA-256. *)
 val blob_reference : string -> Lane_addon_types.evidence
 (** Content-addressed reference without writing. It may be used to measure a
     complete acquisition envelope; publish it only after [write_blob] succeeds. *)
@@ -65,8 +67,10 @@ val bindings_directory : string
 val actions_directory : string
 val exact_requests_directory : string
 val tool_request_owners_directory : string
+val tool_request_bodies_directory : string
 (** The directories below {!root} that hold binding, action receipt, Exact
-    request and original tool request records. *)
+    request and original tool request records, and the request bodies those
+    records name by digest. *)
 val binding_path : string -> string
 (** One instance's binding record, relative to {!root}. *)
 val observation_dir : string -> string
@@ -119,6 +123,18 @@ val load_tool_request_owner : t -> scope:string -> request_id:string -> (Yojson.
     parent descriptors for content, fsync and final verification. The same
     original-scope serializer as publication excludes cooperative replacements
     throughout these checks; external changes still refuse. *)
+val tool_request_body_path : scope:string -> request_digest:string -> string
+(** One original request body, relative to {!root}: beside the scope's
+    records, not inside their directory, which holds only records. *)
+val save_tool_request_body : t -> scope:string -> request_digest:string -> string -> (unit, string) result
+(** Publish one original request body, named by the {!digest} of its bytes.
+    Bytes that do not match [request_digest] are refused before writing.
+    Writing the same body again publishes the same file. Same serializer and
+    durability as record publication. *)
+val load_tool_request_body : t -> scope:string -> request_digest:string -> (string option, string) result
+(** Strict read of one published body with the same owned-descriptor checks
+    as {!load_tool_request_owner}. [None] means no body has that name; the
+    caller compares the bytes with the digest it holds. *)
 val tool_request_owner_inventory : t -> scope:string -> ((string * Yojson.Safe.t) list, string) result
 (** Complete sorted published [.json] records in one scope, with filenames for
     the consumer's exact key/schema validation. Missing descendants under an

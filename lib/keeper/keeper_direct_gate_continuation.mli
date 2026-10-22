@@ -7,7 +7,11 @@ val resolution : admission -> Keeper_event_queue.hitl_resolution
 val source_reference : admission -> Keeper_checkpoint_ref.t option
 val load : config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   operation_id:Keeper_chat_operation.Operation_id.t -> session_dir:string ->
-  (admission option, string) result
+  destination:Keeper_checkpoint_destination.t -> (admission option, string) result
+(** Admission errors requeue the exact captured wait, including when branch
+    host admission already entered Resuming_gate and the pending projection is
+    absent. The original durable decision remains available to reconciliation;
+    a failed admission supplies no continuation or effect authority. *)
 val runtime_lane : admission -> Keeper_turn_driver.deferred_runtime_lane option
 type yield_source =
   | Captured_agent_core of Keeper_checkpoint_store.exact_checkpoint_snapshot

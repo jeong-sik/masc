@@ -46,3 +46,19 @@ let admit ?(co_inputs = []) ~session_dir ~identity ~message (fallback : Agent_co
   | Error (Keeper_checkpoint_store.Ref_identity_invalid _)
   | Error (Keeper_checkpoint_store.Ref_session_mismatch _)
   | Error (Keeper_checkpoint_store.Ref_lock_failed _) -> Error "approval input could not read authoritative checkpoint identity"
+
+
+let admit_to_destination ?(co_inputs=[]) ~destination ~session_dir ~identity ~message fallback =
+  match Keeper_checkpoint_destination.destination destination with
+  | Keeper_owner.Global_input -> admit ~co_inputs ~session_dir ~identity ~message fallback
+  | Operation_input _ ->
+    let ( let* )=Result.bind in
+    let* current=Keeper_checkpoint_destination.current_checkpoint destination in
+    let* current=match current with
+      | Some current -> Ok {current with Agent_core.Checkpoint.system_prompt=fallback.Agent_core.Checkpoint.system_prompt}
+      | None -> Error "operation approval input lost its retained branch source" in
+    let* checkpoint=candidate ~co_inputs ~identity ~message current in
+    let* saved=Keeper_checkpoint_destination.save destination checkpoint in
+    match saved with
+    | Keeper_checkpoint_store.Saved {checkpoint;_} -> Ok checkpoint
+    | Stale_noop _ -> Error "operation approval input was not confirmed on its original branch"

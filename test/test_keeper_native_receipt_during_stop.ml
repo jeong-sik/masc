@@ -107,7 +107,7 @@ let stop_while_dispatching env ~root ~workspace ~session_dir =
       claim () |> require "claim operation" |> Option.get in
     let binding : Native.binding =
       {base_path=root; keeper_name; operation_id;
-       execution_digest=operation.execution_digest; session_dir; session_id} in
+       execution_digest=operation.execution_digest; session_dir; session_id; checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir} in
     (match Native.load ~binding |> require "load native admission" with
      | Native.No_pending -> ()
      | Native.Resume _ | Native.Terminal_pending _ -> fail "a fresh operation has a native call");

@@ -11,6 +11,7 @@ type binding =
   ; execution_digest : string
   ; session_dir : string
   ; session_id : string
+  ; checkpoint_destination : Keeper_checkpoint_destination.t
   }
 
 type input =
@@ -279,6 +280,7 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
   let* () = match config.Runtime_agent.execution_store with
     | None -> Ok ()
     | Some _ -> Error "native dispatch already carries an explicit execution store" in
+  let* _=Keeper_checkpoint_destination.current_checkpoint binding.checkpoint_destination in
   let* observed = state binding in
   let* () = match retired_history_cut with
     | None -> Ok ()
@@ -321,6 +323,14 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
       ~trace_id:input_trace
       ~source:input_source
     |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
+  let* ()=match Keeper_input_checkpoint_producer.destination input_producer,
+      Keeper_checkpoint_destination.destination binding.checkpoint_destination with
+    | Keeper_owner.Global_input,Global_input -> Ok ()
+    | Operation_input actual,Operation_input expected
+        when Keeper_chat_operation.Operation_id.equal actual expected
+          && Keeper_chat_operation.Operation_id.equal actual binding.operation_id -> Ok ()
+    | (Global_input | Operation_input _),(Global_input | Operation_input _) ->
+      Error "native binding and actual Producer checkpoint destinations disagree" in
   let input_producer = ref input_producer in
   let call_id, api, resume, initial_call = match resumed with
     | Some resumed ->
@@ -341,61 +351,70 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
       (try Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 dir; Ok () with
        | Eio.Io _ as exn -> Error (Format.asprintf "%a" Eio.Exn.pp exn)) in
   let current_call = ref initial_call in
+  let terminal_checkpoint_source = ref Agent_snapshot in
   let advance checkpoint =
     match !current_call with
     | None -> Error "native checkpoint was emitted before locator publication"
     | Some call ->
-      let* reference = retain binding checkpoint in
-      let* () = Owner.checkpoint_direct_native_call ~base_path:binding.base_path
-          ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
-          ~execution_digest:binding.execution_digest ~call_id
-          ~observed:call.checkpoint ~checkpoint:reference |> owner in
-      let* next = Native.advance call ~observed:call.checkpoint ~checkpoint:reference in
+      terminal_checkpoint_source:=Retained_input_owner;
+      let* next=Keeper_checkpoint_destination.publish_native binding.checkpoint_destination
+          ~checkpoint (fun () ->
+        let* reference = retain binding checkpoint in
+        let* () = Owner.checkpoint_direct_native_call ~base_path:binding.base_path
+            ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
+            ~execution_digest:binding.execution_digest ~call_id
+            ~observed:call.checkpoint ~checkpoint:reference |> owner in
+        let* next = Native.advance call ~observed:call.checkpoint ~checkpoint:reference in
+        Ok (reference,next)) in
       current_call := Some next;
       Ok () in
   let on_scope_ready locator =
-    let* call = match resumed with
-      | Some resumed -> Ok resumed.call
-      | None ->
-        let* seed = call_checkpoint binding config agent_ref in
-        let* () = match observed with
-          | Native.Terminal_unacknowledged (previous, ({Agent.recovery=Retire; _} as disposition)) ->
-            let* settled = load_checkpoint binding previous.checkpoint in
-            let* terminal = retired_evidence binding previous disposition in
-            let* retained = retains_settled_results binding previous seed.messages
-                terminal.settled_tool_results in
-            let* () = if retained then Ok ()
-              else Error "next native call is missing a canonically settled ToolResult" in
-            let* expected = match retired_history_cut with
-              | None -> Ok settled.messages
-              | Some cut -> Keeper_input_history_cut.cut_checkpoint cut.proof
-                  |> Result.map (fun checkpoint -> checkpoint.Agent_core.Checkpoint.messages) in
-            if not terminal.has_tool_attempts || is_prefix expected seed.messages then Ok ()
-            else Error "next native call does not retain the settled call's exact history"
-          | Native.No_native_call -> Ok ()
-          | Native.Active _
-          | Native.Terminal_unacknowledged
-              (_, {Agent.recovery=Operator_repair_required Effect_outcome_unknown; _}) ->
-            Error "native call cannot replace unsettled execution authority" in
-        let* seed_checkpoint = retain binding seed in
-        Native.create ~call_id ~runtime_id ~operation_digest:binding.execution_digest
-          ~api ~seed_checkpoint ~locator in
-    let* ()=match retired_history_cut with
-      | None -> Owner.bind_direct_native_call ~base_path:binding.base_path
-          ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
-          ~execution_digest:binding.execution_digest ~observed ~call |> owner
-      | Some cut ->
-        let* seed=Checkpoint.load_retained_exact_snapshot ~session_dir:binding.session_dir
-            ~reference:call.seed_checkpoint
-          |> Result.map_error (fun _ -> "exact next native seed is unavailable") in
-        let* producer=Keeper_input_checkpoint_producer.bind_retired_input_cut !input_producer
-            ~cut:cut.proof ~seed ~operation_id:binding.operation_id
-            ~execution_digest:binding.execution_digest ~observed ~call
-          |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
-        input_producer:=producer; Ok () in
+    let* seed=match resumed with
+      | Some resumed -> load_checkpoint binding resumed.call.checkpoint
+      | None -> call_checkpoint binding config agent_ref in
+    let* () = match observed with
+      | Native.Terminal_unacknowledged (previous, ({Agent.recovery=Retire; _} as disposition)) ->
+        let* settled = load_checkpoint binding previous.checkpoint in
+        let* terminal = retired_evidence binding previous disposition in
+        let* retained = retains_settled_results binding previous seed.messages terminal.settled_tool_results in
+        let* () = if retained then Ok ()
+          else Error "next native call is missing a canonically settled ToolResult" in
+        let* expected = match retired_history_cut with
+          | None -> Ok settled.messages
+          | Some cut -> Keeper_input_history_cut.cut_checkpoint cut.proof
+              |> Result.map (fun checkpoint -> checkpoint.Agent_core.Checkpoint.messages) in
+        if not terminal.has_tool_attempts || is_prefix expected seed.messages then Ok ()
+        else Error "next native call does not retain the settled call's exact history"
+      | Native.No_native_call | Native.Active _ -> Ok ()
+      | Native.Terminal_unacknowledged
+          (_, {Agent.recovery=Operator_repair_required Effect_outcome_unknown; _}) ->
+        Error "native call cannot replace unsettled execution authority" in
+    terminal_checkpoint_source:=Retained_input_owner;
+    let* call=Keeper_checkpoint_destination.publish_native binding.checkpoint_destination
+        ~checkpoint:seed (fun () ->
+      let* call = match resumed with
+        | Some resumed -> Ok resumed.call
+        | None ->
+          let* seed_checkpoint = retain binding seed in
+          Native.create ~call_id ~runtime_id ~operation_digest:binding.execution_digest
+            ~api ~seed_checkpoint ~locator in
+      let* ()=match retired_history_cut with
+        | None -> Owner.bind_direct_native_call ~base_path:binding.base_path
+            ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
+            ~execution_digest:binding.execution_digest ~observed ~call |> owner
+        | Some cut ->
+          let* seed=Checkpoint.load_retained_exact_snapshot ~session_dir:binding.session_dir
+              ~reference:call.seed_checkpoint
+            |> Result.map_error (fun _ -> "exact next native seed is unavailable") in
+          let* producer=Keeper_input_checkpoint_producer.bind_retired_input_cut !input_producer
+              ~cut:cut.proof ~seed ~operation_id:binding.operation_id
+              ~execution_digest:binding.execution_digest ~observed ~call
+            |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
+          input_producer:=producer; Ok () in
+      Ok (call.checkpoint,call)) in
     current_call := Some call;
+    terminal_checkpoint_source:=Agent_snapshot;
     Ok () in
-  let terminal_checkpoint_source = ref Agent_snapshot in
   let on_terminal_disposition disposition =
     let* () = match !terminal_checkpoint_source with
       | Agent_snapshot ->
@@ -425,12 +444,15 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
          | None -> Error "native input checkpoint preceded locator publication"
          | Some call ->
            let* () = validate_scope binding checkpoint in
-           let* producer, reference = Keeper_input_checkpoint_producer.publish_direct !input_producer
-               ~operation_id:binding.operation_id ~execution_digest:binding.execution_digest
-               ~call_id ~observed:call.checkpoint checkpoint
-             |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
+           let* producer,next=Keeper_checkpoint_destination.publish_native binding.checkpoint_destination
+               ~checkpoint (fun () ->
+             let* producer,reference=Keeper_input_checkpoint_producer.publish_direct !input_producer
+                 ~operation_id:binding.operation_id ~execution_digest:binding.execution_digest
+                 ~call_id ~observed:call.checkpoint checkpoint
+               |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
+             let* next=Native.advance call ~observed:call.checkpoint ~checkpoint:reference in
+             Ok (reference,(producer,next))) in
            (* Publication returned a confirmed atomic input/native advance. *)
-           let* next = Native.advance call ~observed:call.checkpoint ~checkpoint:reference in
            input_producer := producer;
            current_call := Some next;
            Ok ())

@@ -300,7 +300,7 @@ is-default = true
     if fresh then write digest_path operation.execution_digest
     else check string "execution digest is unchanged after restart" (read digest_path) operation.execution_digest;
     let binding : Native.binding = {base_path=root;keeper_name;operation_id;
-      execution_digest=operation.execution_digest;session_dir;session_id} in
+      execution_digest=operation.execution_digest;session_dir;session_id; checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir} in
     if not fresh then resumed_proof := Some (check_resume_authority ~env ~root binding);
     let gate = Keeper_tool_approval_gate.create
         ~registry:(Keeper_tool_approval_registry.create ())
@@ -403,7 +403,7 @@ is-default = true
        | Keeper_chat_operation.Failed {failure={kind=Interrupted_by_restart;_};_} -> true
        | Queued | Running _ | Succeeded _ | Failed _ | Cancelled _ -> false);
     let binding : Native.binding = {base_path=root;keeper_name;operation_id;
-      execution_digest=operation.execution_digest;session_dir;session_id} in
+      execution_digest=operation.execution_digest;session_dir;session_id; checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir} in
     (match Native.load ~binding |> require "terminal admission" with
      | Native.Terminal_pending _ -> ()
      | No_pending | Resume _ -> fail "terminal receipt became replayable");

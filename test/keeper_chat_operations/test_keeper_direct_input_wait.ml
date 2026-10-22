@@ -735,7 +735,7 @@ let test_branch_host_checkpoint_preserves_native_retirement () = with_path @@ fu
        | Native.Terminal_unacknowledged (actual,{Agent.recovery=Retire;_}) ->
          Keeper_checkpoint_ref.equal actual.checkpoint branch_native_next
        | No_native_call | Active _
-       | Terminal_unacknowledged (_, {Agent.recovery=(Retire | Operator_repair_required Effect_outcome_unknown);_}) -> false);
+       | Terminal_unacknowledged (_, {Agent.recovery=Operator_repair_required Effect_outcome_unknown;_}) -> false);
     actual_global store newer;newer,host) in
   with_store path (fun store ->
     check bool "post-native host checkpoint survives actual SQLite reopen" true (Keeper_checkpoint_ref.equal (branch_head store) host);

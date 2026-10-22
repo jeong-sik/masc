@@ -228,7 +228,7 @@ is-default = true
       let native_binding =
         if not durable_native then None else
           Some { Keeper_direct_native_continuation.base_path; keeper_name; operation_id;
-                 execution_digest=operation.execution_digest; session_dir; session_id } in
+                 execution_digest=operation.execution_digest; session_dir; session_id; checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir } in
       Option.iter (fun binding ->
         check_native_acknowledged binding;
         observe_native_request := observe_native_provider_request binding native_calls_seen)
@@ -519,7 +519,7 @@ is-default = true
       let native_binding =
         if not durable_native then None else
           Some { Keeper_direct_native_continuation.base_path; keeper_name; operation_id;
-                 execution_digest=operation.execution_digest; session_dir; session_id } in
+                 execution_digest=operation.execution_digest; session_dir; session_id; checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir } in
       Option.iter (fun binding ->
         check_native_acknowledged binding;
         observe_native_request := observe_native_provider_request binding native_calls_seen)

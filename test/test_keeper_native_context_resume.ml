@@ -63,7 +63,7 @@ let run_phase ~child root =
       (Keeper_chat_operation.Operation_id.equal operation_id operation.operation_id);
     let binding : Native.binding =
       {base_path=root; keeper_name; operation_id;
-       execution_digest=operation.execution_digest; session_dir; session_id} in
+       execution_digest=operation.execution_digest; session_dir; session_id; checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir} in
     let admission = Native.load ~binding |> require "load native admission" in
     let context, checkpoint, input = match child, admission with
       | true, Native.No_pending ->
@@ -224,7 +224,7 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
   let execute ~sw:turn_sw ~keeper_name:_ ~claim =
     let operation : Keeper_chat_operation.t = claim () |> require "claim operation" |> Option.get in
     let binding : Native.binding = {base_path=root;keeper_name;operation_id;
-      execution_digest=operation.execution_digest;session_dir;session_id} in
+      execution_digest=operation.execution_digest;session_dir;session_id; checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir} in
     let context = Agent_core.Context.create () in
     let scope = Keeper_execution_scope_id.direct_operation operation_id in
     let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
@@ -354,7 +354,7 @@ let test_retired_input_history_cut () =
   let execute ~sw:turn_sw ~keeper_name:_ ~claim =
     let operation:Keeper_chat_operation.t=claim () |> require "claim" |> Option.get in
     let binding:Native.binding={base_path=root;keeper_name;operation_id;session_id;session_dir;
-                               execution_digest=operation.execution_digest} in
+                               execution_digest=operation.execution_digest; checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir} in
     let context=Agent_core.Context.create () in
     let frame=Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
         (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation operation_id))

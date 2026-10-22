@@ -172,7 +172,7 @@ let run_call ~scenario root =
       claim () |> require "claim operation" |> Option.get in
     let binding : Native.binding =
       {base_path=root; keeper_name; operation_id;
-       execution_digest=operation.execution_digest; session_dir; session_id} in
+       execution_digest=operation.execution_digest; session_dir; session_id; checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir} in
     match scenario, !executions with
     | Suspend_then_resume, 2 ->
       let observed = match Registry.direct_checkpoint ~base_path:root ~keeper_name ~operation_id

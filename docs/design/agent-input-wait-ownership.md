@@ -524,13 +524,14 @@ reopen comparisons, plus an actual Registry/Owner child that consumes a retained
 cooperative admission, binds and advances native receipts, publishes a second
 pending input and defers that same original operation. It checks outside-child
 publication refusal, exact branch/native references and unchanged independent
-G bytes/input through reopen. It does not invoke Core's native runtime. These
-fixtures have only been parsed locally; their execution and typing remain
-unverified at this integration checkpoint.
+G bytes/input through reopen. The fresh response fixture now also invokes the
+actual native adapter and Core journal against a loopback provider, as described
+below. These changed fixtures have only been parsed locally; their execution and
+typing remain unverified at this integration checkpoint.
 
-This is still one unfinished native integration unit. Gate/approval admission,
-all ordinary/error/fallback/rejected-response/finalization persistence, actual
-original native invocation and crash acceptance remain required. Public Owner
+This is still one unfinished native integration unit. Complete Gate/approval,
+ordinary/error/fallback/rejected-response/finalization and actual original
+invocation/crash acceptance remain required. Public Owner
 response admission retains its exact global-W and Canonical_input restriction
 until those paths are connected and tested together. That restriction is not
 the intended final recovery behavior. No whole R1/R2/TUI acceptance, installation
@@ -568,8 +569,51 @@ reference. Same turn alone is never physical proof of this relationship.
 The source fixture covers cancelled host publication, immutable confirmed
 Context, edited-candidate proof refusal, lost response/repetition refusal,
 pre-native host admission, actual Owner/Producer publications and separate
-Retire N plus host H waiting, preserving independent G. It still does not invoke
-Core's native runtime. This dispatch service is not yet wired through the actual
-native adapter, Gate/approval, all host saves or finalizer. Those integrations,
-real invocation/crash behavior and public operation response acceptance remain
-required. Source parsing and review are not execution or whole-issue acceptance.
+Retire N plus host H waiting, preserving independent G. Source parsing and review
+are not execution or whole-issue acceptance.
+
+## Native and host destination wiring (integration work in progress)
+
+The direct native binding now requires the same dispatch destination captured
+by the original Owner child before continuation loading. Native scope admission,
+ordinary checkpoints and pending-input publication fence and confirm that
+destination around their actual retained/Owner/Producer writes. An active native
+resume publishes the exact retained source rather than its in-memory repetition
+reconciliation. Failed publication never replaces its receipt with a later
+Agent snapshot during terminal handling.
+
+Branch Gate loading reads retained original and branch checkpoints instead of
+canonical G. It enters the exact resolved Gate phase before host admission.
+Admission captures the original wait before that transition: retained-source or
+host-save errors requeue that wait even though Resuming_gate has no pending Gate
+projection. Durable approval truth is reread by reconciliation. The source adds
+two actual original-child failure scenarios, checking wait, obligation, requeue,
+resolution recovery, reopen and unchanged G. One removes the exact retained file
+after destination capture; the other supplies a destination fenced by a cancelled
+host save. These cases do not claim successful Gate effect replay.
+
+AgentRun uses the confirmed branch payload before context preparation, routes
+approval admission and ordinary checkpoint sinks through its captured destination,
+and uses an exact typed witness for incomplete-response history removal. Its
+finalizer reads the confirmed latest payload, applies the existing direct replay
+projection under a typed proof and records the actual retained artifact path.
+Canonical dispatches retain their existing canonical save and replay policy.
+
+The fresh response source fixture now continues stored response C through actual
+Native.prepare and Runtime_agent.continue_from_checkpoint. A loopback provider
+requests one real tool invocation and then completes; the fixture checks model
+input, tool execution, native Retire, branch Context/reference and unchanged G.
+It subsequently uses synthetic next-boundary receipts to test another pending
+request and host finalization/reopen. Those later synthetic receipts are not
+another actual Core invocation. The fixture is source only until executed on
+this exact candidate; it does not prove the production AgentRun/finalizer flow
+or a crash during the actual invocation.
+
+The retired incomplete-response cut still needs branch-specific predecessor and
+next-seed publication, including the separate native N/host H relation. Full
+Gate success/replay, all fallback/error paths, actual invocation crash recovery
+and public branch response acceptance remain unverified. The public exact-W
+guard therefore remains in place while this coherent integration is unfinished.
+Durable autonomous waiting, dedicated waiting outcomes, snapshot/SSE revision and
+incarnation reconciliation, and persistent/reconnected Acting/TUI acceptance also
+remain part of #38005; none is replaced by this implementation checkpoint.

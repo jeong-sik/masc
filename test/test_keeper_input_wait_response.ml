@@ -258,11 +258,13 @@ let test_install_refuses_stale_nonhistory () =
   check bool "fresh confirmed rewrite belongs only to fresh authority" true (Response.belongs_to receipt fresh);
   check bool "recovery installs the exact recorded candidate" true (Keeper_checkpoint_ref.equal intent.candidate (Response.installed_checkpoint receipt))
 
+type branch_gate_fault = Retained_gate_source_missing | Gate_host_destination_unconfirmed
+
 (* Actual physical files, SQLite and an independently executing Owner child
-   publishing G through the real Producer. This does not dispatch the original
-   native continuation; the public Owner response remains guarded until that
-   whole branch path is connected. *)
-let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
+   publishing G through the real Producer. The fresh branch case also invokes
+   the native adapter; the public response remains guarded while the complete
+   recovery/finalization path is being connected. *)
+let test_operation_response_preserves_producer_g ?(gate_fault=None) ~canonical_intent ~fault () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   let root=Filename.temp_dir "branch-response-producer-" "" in
@@ -410,19 +412,105 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
         ~observed:waiting ~checkpoint:branched.candidate with
      | Error _ -> () | Ok () -> fail "duplicate branch response was accepted");
     check_g journal);
-  (* Exercise actual Owner child authority and both direct loader/publication
-     adapters once. Native records here are real Owner/SQLite receipts, but no
-     Core native invocation is dispatched by this fixture. *)
+  (* Exercise actual Owner child authority and the selected continuation. *)
   match canonical_intent,fault with
   | true,(Some _ | None) | false,Some _ -> ()
   | false,None ->
+    match gate_fault with
+    | Some gate_fault ->
+      let module Gate=Keeper_direct_gate_continuation in
+      ignore (Keeper_approval_queue.install_persistence ~base_path:root |> prepared);
+      let submission=Keeper_approval_queue.submit_pending ~base_path:root ~keeper_name
+        ~tool_name:"original-branch-gated-effect" ~input:(`Assoc ["original",`Bool true])
+        ~call_summary:None ~origin:Keeper_approval_origin.unavailable () |> prepared in
+      let observed=Keeper_approval_queue.observe_waiting_request ~base_path:root ~id:submission.approval_id
+        |> prepared |> Option.get in
+      let obligation=Semantic.gate_obligation ~approval_id:submission.approval_id
+        ~tool_name:observed.waiting_request.tool_name ~input_hash:observed.waiting_request.input_hash |> value in
+      let gate_wait=Semantic.gate_wait ~checkpoint:branched.candidate ~obligations:[obligation] |> value in
+      with_journal (fun journal ->
+        ignore (Journal.claim_next journal ~now:11. |> journal_ok |> Option.get);
+        Journal.resume_direct_checkpoint journal ~now:12. ~operation_id
+          ~observed:(Semantic.Agent_core branched.candidate) |> journal_ok;
+        ignore (Journal.defer_direct_gate journal ~now:13. ~operation_id
+          ~execution_digest:operation.execution_digest ~waiting:gate_wait |> journal_ok));
+      let ready=ref false in
+      let owner_cell=ref None in
+      let result_cell=ref None in
+      let settled,resolve_settled=Eio.Promise.create () in
+      let owner_ok result=Result.map_error Keeper_owner.error_to_string result |> value in
+      let execute ~sw:_ ~keeper_name:_ ~claim =
+        ready:=false;
+        let result=try
+          let (claimed:Keeper_chat_operation.t)=claim () |> owner_ok |> Option.get in
+          check bool "Gate failure belongs to the original branch child" true
+            (Keeper_chat_operation.Operation_id.equal claimed.operation_id operation_id);
+          let destination=Keeper_checkpoint_destination.capture_direct ~base_path:root ~keeper_name
+            ~session_dir ~trace_id:meta.runtime.trace_id ~operation_id |> value in
+          let checkpoint=Keeper_checkpoint_destination.current_checkpoint destination |> value |> Option.get in
+          let retained_path=Store.retained_checkpoint_path ~session_dir branched.candidate in
+          (match gate_fault with
+           | Retained_gate_source_missing -> Unix.rename retained_path (retained_path ^ ".held")
+           | Gate_host_destination_unconfirmed ->
+             (match Eio.Cancel.sub (fun cancellation ->
+                Eio.Cancel.cancel cancellation (Failure "cancel Gate host destination");
+                Keeper_checkpoint_destination.save destination checkpoint) with
+              | exception Eio.Cancel.Cancelled _ -> ()
+              | Ok _ | Error _ -> fail "cancelled Gate host save returned without cancellation"));
+          let loaded=Fun.protect ~finally:(fun () -> match gate_fault with
+            | Retained_gate_source_missing -> Unix.rename (retained_path ^ ".held") retained_path
+            | Gate_host_destination_unconfirmed -> ())
+            (fun () -> Gate.load ~config:workspace ~meta ~operation_id ~session_dir ~destination) in
+          (match loaded with Error _ -> () | Ok _ -> fail "failed Gate admission authorized continuation");
+          let owner=Option.get !owner_cell in
+          let state=Keeper_owner.direct_gate_state owner ~operation_id |> owner_ok |> Option.get in
+          check bool "post-resume failure restores the exact original wait" true
+            (Semantic.equal_gate_wait state.waiting gate_wait && state.resolution=None);
+          check bool "Gate obligation survives post-resume failure" true
+            (Keeper_owner.direct_gate_obligations owner ~operation_id |> owner_ok=[obligation]);
+          check bool "failed Gate is pending rather than dispatchable" true
+            (Gate.pending ~base_path:root ~keeper_name ~operation_id |> value
+              =Some (Gate.Bound_checkpoint branched.candidate));
+          check string "failed Gate admission preserves independent canonical G" g_bytes (Fs_compat.load_file canonical);
+          Ok ()
+        with exn -> Error exn in
+        result_cell:=Some result;Keeper_owner.Operation_deferred in
+      Eio.Switch.run (fun owner_sw ->
+        let runner={Keeper_owner.ready=(fun ~keeper_name:_ -> !ready);execute;
+          on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ -> Eio.Promise.resolve resolve_settled ())} in
+        Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:(Some runner)
+          ~on_turn_slot_released:None workspace |> prepared |> ignore;
+        let owner=Keeper_owner_registry.get ~base_path:root ~keeper_name |> prepared in
+        owner_cell:=Some owner;
+        Keeper_approval_queue.resolve_with_policy ~base_path:root ~id:submission.approval_id
+          ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+          ~source:Keeper_approval_queue_rules_types.Auto_judge () |> prepared |> ignore;
+        Gate.reconcile ~config:workspace ~meta |> value;
+        ready:=true;Keeper_owner.wake_operation_drain owner |> owner_ok;
+        Eio.Promise.await settled;
+        (match !result_cell with Some (Ok ()) -> () | Some (Error exn) -> raise exn
+          | None -> fail "original Gate child did not run");
+        let operation=Keeper_owner.exact_operation owner operation_id |> owner_ok |> Option.get in
+        check bool "failed admission requeues the original operation" true (operation.state=Keeper_chat_operation.Queued);
+        Gate.reconcile ~config:workspace ~meta |> value;
+        let state=Keeper_owner.direct_gate_state owner ~operation_id |> owner_ok |> Option.get in
+        check bool "durable resolution can wake the same restored Gate" true
+          (state.resolution=Some {Semantic.obligation;decision=Semantic.Gate_approved});
+        ignore (Keeper_owner.begin_stopping owner |> owner_ok));
+      with_journal (fun journal ->
+        check_g journal;
+        let state=Journal.direct_gate_state journal ~operation_id |> journal_ok |> Option.get in
+        check bool "reopen retains the original Gate wait and obligation" true
+          (Semantic.equal_gate_wait state.waiting gate_wait
+            && state.resolution=Some {Semantic.obligation;decision=Semantic.Gate_approved}))
+    | None ->
     let ready=ref false in
     let owner_cell=ref None in
     let writer_cell=ref None in
     let execution_result=ref None in
     let settled,resolve_settled=Eio.Promise.create () in
     let owner_ok result=Result.map_error Keeper_owner.error_to_string result |> value in
-    let execute ~sw:_ ~keeper_name:_ ~claim =
+    let execute ~sw:turn_sw ~keeper_name:_ ~claim =
       ready:=false;
       let result = try
         let (claimed:Keeper_chat_operation.t)=claim () |> owner_ok |> Option.get in
@@ -459,7 +547,7 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
          | Operation_input _ | Global_input -> fail "branch child borrowed global input destination");
         let writer=Keeper_owner.begin_input_checkpoint owner ~trace_id:meta.runtime.trace_id |> owner_ok in
         writer_cell:=Some writer;
-        let context=Core.Context.copy consumed.context in
+        let context=Core.Context.copy consumed.context ~eio:true in
         Core.Context.set context "original-native-setup" (`Bool true);
         let seed={consumed with Core.Checkpoint.context} in
         (match Keeper_checkpoint_destination.save destination seed |> value with
@@ -478,6 +566,82 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
             ~transformation:identity_proof with
          | Error (Keeper_owner.Operation_rejected (Journal.Invalid_input _)) -> ()
          | Error _ | Ok () -> fail "Owner reused a host proof for an edited retained candidate");
+        (* Run the real native adapter and Core journal against loopback HTTP,
+           using the consumed original C while the independent global G stays
+           installed. Later synthetic receipts below cover another pending
+           boundary; they are not evidence of another Core invocation. *)
+        Runtime_agent_execution_runtime.initialize ~sw:turn_sw ~domain_mgr:env#domain_mgr ~domain_count:1
+          |> Result.map_error Runtime_agent_execution_runtime.initialization_error_to_string |> value;
+        let previous_catalog=Llm_provider.Model_catalog.global () in
+        Eio.Switch.on_release turn_sw (fun () -> match previous_catalog with
+          | None -> Llm_provider.Model_catalog.clear_global ()
+          | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+        let catalog=Printf.sprintf
+          "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" seed.model in
+        Llm_provider.Model_catalog.of_toml_string ~source:"original-branch-native-test" catalog |> value
+          |> Llm_provider.Model_catalog.set_global;
+        let tool_calls=ref 0 in
+        let response index=Yojson.Safe.to_string (`Assoc ["id",`String "original-branch-native";
+          "model",`String seed.model;"choices",`List [`Assoc ["index",`Int 0;
+            "message",(if index=0 then `Assoc ["role",`String "assistant";"content",`Null;
+              "tool_calls",`List [`Assoc ["id",`String "original-branch-effect-call";"type",`String "function";
+                "function",`Assoc ["name",`String "branch_effect";"arguments",`String "{}"]]]]
+              else `Assoc ["role",`String "assistant";"content",`String "original branch native completed"]);
+            "finish_reason",`String (if index=0 then "tool_calls" else "stop")]];
+          "usage",`Assoc ["prompt_tokens",`Int 1;"completion_tokens",`Int 1;"total_tokens",`Int 2]]) in
+        let server=Exact_output_fixture.start_server ~sw:turn_sw ~net:env#net ~clock:env#clock
+          (Exact_output_fixture.Reply_with (fun index _ ->
+            check string "actual native provider dispatch preserves G bytes" g_bytes (Fs_compat.load_file canonical);
+            `OK,response index)) in
+        let provider_cfg=Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.OpenAI_compat
+          ~provider_id:"fixture" ~model_id:seed.model ~base_url:server.base_url ~request_path:"/v1/chat/completions" () in
+        let tool=Core.Tool.create ~name:"branch_effect" ~description:"Record the original operation's effect" ~parameters:[]
+          (fun _ -> incr tool_calls;
+            Core.Context.set seed.context "original-native-tool-receipt" (`Bool true);
+            Ok {Core.Types.content="original branch effect recorded";content_blocks=None;_meta=None}) in
+        let binding:Keeper_direct_native_continuation.binding={base_path=root;keeper_name;operation_id;
+          execution_digest=operation.execution_digest;session_dir;session_id=original.session_id;
+          checkpoint_destination=destination} in
+        let native_config=Runtime_agent.default_config ~name:keeper_name ~provider_cfg
+          ~system_prompt:"Continue the original operation from its accepted response." ~tools:[tool] in
+        let native_config={native_config with context=Some seed.context;session_id=Some original.session_id;
+          checkpoint_sidecar=seed.working_context;
+          checkpoint_sink=Some (fun snapshot ->
+            let result=Keeper_checkpoint_destination.save destination snapshot.Core.Agent.checkpoint in
+            check string "actual native host sink preserves G bytes" g_bytes (Fs_compat.load_file canonical);
+            Result.map (fun _ -> ()) result)} in
+        let agent_ref=ref None in
+        let prepared_native=Keeper_direct_native_continuation.prepare ~binding ~runtime_id:"native.primary"
+          ~config:native_config ~agent_core_checkpoint:(Some seed)
+          ~input:Keeper_direct_native_continuation.Continue_from_checkpoint ~agent_ref () |> value in
+        let result=Keeper_direct_native_continuation.reconcile_after_dispatch binding (fun () ->
+          Runtime_agent.continue_from_checkpoint ~sw:turn_sw ~net:env#net
+            ~config:(Keeper_direct_native_continuation.config prepared_native) ~agent_ref
+            ~checkpoint:(Keeper_direct_native_continuation.prepared_checkpoint prepared_native |> Option.get) ())
+          |> Result.map_error Core.Error.to_string |> value in
+        check string "actual native continuation completes" "original branch native completed"
+          (Core.Types.text_of_content result.response.content);
+        check int "original native tool executes once" 1 !tool_calls;
+        check int "native provider sees only its tool and final rounds" 2 (Exact_output_fixture.post_count server);
+        List.iter (fun body ->
+          let fields=Yojson.Safe.from_string body |> Yojson.Safe.Util.member "messages" |> Yojson.Safe.Util.to_list in
+          check bool "actual model input retains its original explicit declined response" true
+            (List.exists (fun row -> Yojson.Safe.Util.member "role" row=`String "user"
+              && Yojson.Safe.Util.member "content" row=`String "[Input declined] Original question?") fields))
+          (Exact_output_fixture.request_bodies server);
+        let observed_native=Keeper_owner.direct_native_call owner ~operation_id |> owner_ok in
+        let actual_native=match observed_native with
+          | Native.Terminal_unacknowledged (call,{Core.Agent.recovery=Retire;_}) -> call
+          | No_native_call | Active _
+          | Terminal_unacknowledged (_, {Core.Agent.recovery=Operator_repair_required Effect_outcome_unknown;_}) ->
+            fail "actual Core continuation did not retire its original native receipt" in
+        let seed=Keeper_checkpoint_destination.current_checkpoint destination |> value |> Option.get in
+        let seed_ref=Store.exact_snapshot_reference (exact seed) in
+        check bool "actual native terminal Context and branch reference are confirmed together" true
+          (Keeper_checkpoint_ref.equal seed_ref actual_native.checkpoint
+            && Core.Context.get seed.context "original-native-tool-receipt"=Some (`Bool true));
+        check bool "real native completion preserves global input G" true
+          (Keeper_owner.input_checkpoint owner ~trace_id:meta.runtime.trace_id |> owner_ok=Journal.Input_observed g);
         let call_id="019a0010-1000-7000-8000-000000000053" in
         let locator=Core.Agent.execution_locator_of_yojson
             (`Assoc ["version",`Int 1;"run_id",`String "execution-run-owner-branch-continuation"]) |> value in
@@ -485,7 +649,7 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
             ~api:Native.Continue_from_checkpoint ~seed_checkpoint:seed_ref ~locator |> value in
         Keeper_checkpoint_destination.publish_native destination ~checkpoint:seed (fun () ->
           Keeper_owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
-            ~observed:Native.No_native_call ~call
+            ~observed:observed_native ~call
           |> Result.map_error Keeper_owner.error_to_string |> Result.map (fun () -> seed_ref,())) |> value;
         let context=Core.Context.copy seed.context in
         let observation=Keeper_repetition_snapshot.observation ~tool_name:"original-native-tool"
@@ -550,7 +714,7 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
              Keeper_checkpoint_ref.equal actual.checkpoint next_ref
              && not (Keeper_checkpoint_ref.equal actual.checkpoint host_ref)
            | No_native_call | Active _
-           | Terminal_unacknowledged (_, {Core.Agent.recovery=(Retire | Operator_repair_required Effect_outcome_unknown);_}) -> false);
+           | Terminal_unacknowledged (_, {Core.Agent.recovery=Operator_repair_required Effect_outcome_unknown;_}) -> false);
         ignore (Keeper_owner.defer_direct_input_wait owner ~operation_id ~request:next_pending.request |> owner_ok);
         Ok host_ref
       with exn -> Error exn in
@@ -594,6 +758,12 @@ let () =
     [ "independent branch response primitives",
       [test_case "fresh response preserves actual Producer G and other pending" `Quick
          (test_operation_response_preserves_producer_g ~canonical_intent:false ~fault:None);
+       test_case "branch Gate retained-read failure restores its original wait" `Quick
+         (test_operation_response_preserves_producer_g ~gate_fault:(Some Retained_gate_source_missing)
+            ~canonical_intent:false ~fault:None);
+       test_case "branch Gate host-save refusal restores its original wait" `Quick
+         (test_operation_response_preserves_producer_g ~gate_fault:(Some Gate_host_destination_unconfirmed)
+            ~canonical_intent:false ~fault:None);
        test_case "canonical intent promotes with same consumed C after actual Producer G" `Quick
          (test_operation_response_preserves_producer_g ~canonical_intent:true ~fault:None);
        test_case "branch precommit failure reopens exact physical intent" `Quick

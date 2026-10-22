@@ -149,6 +149,7 @@ let finalize
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~(result : Runtime_agent.run_result)
     ~last_persisted_checkpoint
+    ~checkpoint_destination
     ~final_agent_core_turn_ordinal
     ~checkpoint_persistence_error
     ~post_turn_t0
@@ -239,36 +240,47 @@ let finalize
         capture_replay_response ~response_text)
   in
   let save_agent_core_checkpoint result_checkpoint =
-    let checkpoint, source_already_persisted =
-        Keeper_replay_checkpoint.select_finalization_checkpoint
-          ~last_persisted_checkpoint
-          result_checkpoint
-      in
-      let checkpoint_for_save_result =
+    (* A failed native/host publication must be observed before considering a
+       Reused fast path. Branch finalization starts at its actual confirmed
+       terminal payload, including Context changes after the last host sink. *)
+    let* current=Keeper_checkpoint_destination.current_checkpoint checkpoint_destination
+      |> Result.map_error (fun detail -> checkpoint_persistence_error ~keeper_name:meta.name ~detail) in
+    let checkpoint,source_already_persisted=match current with
+      | Some checkpoint -> checkpoint,true
+      | None -> Keeper_replay_checkpoint.select_finalization_checkpoint
+          ~last_persisted_checkpoint result_checkpoint in
+    let checkpoint_for_save_result=match Keeper_checkpoint_destination.destination checkpoint_destination with
+      | Keeper_owner.Global_input ->
         Keeper_replay_checkpoint.checkpoint_for_replay_persistence
-          ~history_messages
-          ~session_id:
-            (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          ~response_text
-          ~suppress_visible_response
-          ~stop_reason:result.stop_reason
-          ~exclude_thought_from_replay
-          checkpoint
-      in
+          ~history_messages ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ~response_text ~suppress_visible_response ~stop_reason:result.stop_reason
+          ~exclude_thought_from_replay checkpoint
+        |> Result.map (fun (patched,pruned) -> patched,pruned,None,false)
+      | Operation_input _ ->
+        let ( let* )=Result.bind in
+        let* ()=if exclude_thought_from_replay then
+          Error "original operation branch cannot use internal-thought replay pruning" else Ok () in
+        let* source=Keeper_checkpoint_store.exact_snapshot_of_value ~expected_session_id:meta.runtime.trace_id checkpoint
+          |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string in
+        let* transformation,patched,pruned=Keeper_checkpoint_host_transform.replay ~source
+          ~history_messages ~response_text ~suppress_visible_response ~stop_reason:result.stop_reason in
+        let* candidate=Keeper_checkpoint_store.exact_snapshot_of_value ~expected_session_id:meta.runtime.trace_id patched
+          |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string in
+        let unchanged=Keeper_checkpoint_ref.equal (Keeper_checkpoint_store.exact_snapshot_reference source)
+          (Keeper_checkpoint_store.exact_snapshot_reference candidate) in
+        Ok (patched,pruned,Some transformation,unchanged)
+    in
       (match checkpoint_for_save_result with
        | Error detail ->
          Error
            (checkpoint_persistence_error
               ~keeper_name:meta.name
               ~detail)
-       | Ok (patched, replay_suffix_pruned) ->
-         let already_persisted =
-           Keeper_replay_checkpoint.finalization_checkpoint_already_persisted
-             ~source_already_persisted
-             ~source:checkpoint
-             ~patched
-             ~replay_suffix_pruned
-         in
+       | Ok (patched,replay_suffix_pruned,transformation,branch_unchanged) ->
+         let already_persisted=match transformation with
+           | Some _ -> source_already_persisted && branch_unchanged
+           | None -> Keeper_replay_checkpoint.finalization_checkpoint_already_persisted
+               ~source_already_persisted ~source:checkpoint ~patched ~replay_suffix_pruned in
          let save_outcome =
            if already_persisted
            then Ok `Reused
@@ -276,12 +288,10 @@ let finalize
              let save_started_at = Time_compat.now () in
              let save_started_mono = Mtime_clock.now () in
              let save_result =
-               Keeper_checkpoint_store.save_agent_core_for_keeper
-                 ~keeper_name:meta.name
-                 ~session_dir:session.session_dir
-                 ~history_retained:
-                   (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
-                 patched
+               match transformation with
+               | Some transformation -> Keeper_checkpoint_destination.save_transformed
+                   checkpoint_destination ~transformation patched
+               | None -> Keeper_checkpoint_destination.save checkpoint_destination patched
              in
              let save_finished_mono = Mtime_clock.now () in
              let save_finished_at = Time_compat.now () in
@@ -320,13 +330,15 @@ let finalize
          (match save_outcome with
        | Ok `Reused
        | Ok (`Written (Keeper_checkpoint_store.Saved _)) ->
+         let* persisted=match stored_checkpoint with Some checkpoint -> Ok checkpoint
+           | None -> Error (checkpoint_persistence_error ~keeper_name:meta.name
+               ~detail:"confirmed checkpoint save lost its exact payload") in
+         let* checkpoint_path=Keeper_checkpoint_destination.path checkpoint_destination persisted
+           |> Result.map_error (fun detail -> checkpoint_persistence_error ~keeper_name:meta.name ~detail) in
          append_manifest ~site:"checkpoint_saved"
            ~keeper_turn_id:manifest_keeper_turn_id
            ~agent_core_turn_count:result.turns
-           ~checkpoint_path:
-             (Keeper_checkpoint_store.agent_core_checkpoint_path
-                ~session_dir:session.session_dir
-                ~session_id:patched.session_id)
+           ~checkpoint_path
            ~decision:
              (`Assoc
                [

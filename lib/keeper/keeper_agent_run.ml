@@ -1057,9 +1057,21 @@ let run_turn
   Lsp_turn_pool.with_turn_pool ~servers:(Runtime.lsp_servers ())
   @@ fun () ->
   let runtime_id_string = runtime_id in
-  let direct_resume_checkpoint = match native_resume with
-    | Some resumed -> Some (Keeper_direct_native_continuation.checkpoint resumed)
-    | None -> Option.bind direct_resume direct_checkpoint in
+  let direct_resume_checkpoint=match native_resume,native_binding with
+    | Some resumed,_ -> Ok (Some (Keeper_direct_native_continuation.checkpoint resumed))
+    | None,Some binding ->
+      (match Keeper_checkpoint_destination.destination binding.checkpoint_destination with
+       | Keeper_owner.Global_input -> Ok (Option.bind direct_resume direct_checkpoint)
+       | Operation_input _ ->
+         let retained=Keeper_checkpoint_destination.current_checkpoint binding.checkpoint_destination in
+         (match retained with Ok (Some _) -> retained
+          | Ok None -> Error "operation dispatch lost its original retained branch payload"
+          | Error _ as error -> error))
+    | None,None -> Ok (Option.bind direct_resume direct_checkpoint) in
+  match direct_resume_checkpoint with
+  | Error detail -> Keeper_agent_result.not_dispatched
+      (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
+  | Ok direct_resume_checkpoint ->
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
   (* Not a [let*] bind. Result.bind put every later expression -- including the
@@ -1124,6 +1136,9 @@ let run_turn
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
   let session = ctx.session in
+  let checkpoint_destination=match native_binding with
+    | Some binding -> binding.Keeper_direct_native_continuation.checkpoint_destination
+    | None -> Keeper_checkpoint_destination.canonical ~keeper_name:meta.name ~session_dir:session.session_dir in
   let base_system_prompt = ctx.base_system_prompt in
   let resume_agent_core_checkpoint = ctx.resume_agent_core_checkpoint in
   let start_turn_count = ctx.start_turn_count in
@@ -1145,10 +1160,17 @@ let run_turn
       ~trace_id
       ~keeper_turn_id:manifest_keeper_turn_id
   in
-  let checkpoint_path =
-    Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir:session.session_dir
-      ~session_id:trace_id
-  in
+  let checkpoint_path=match Keeper_checkpoint_destination.destination checkpoint_destination with
+    | Keeper_owner.Global_input -> Ok (Keeper_checkpoint_store.agent_core_checkpoint_path
+        ~session_dir:session.session_dir ~session_id:trace_id)
+    | Operation_input _ ->
+      (match direct_resume_checkpoint with
+       | Some checkpoint -> Keeper_checkpoint_destination.path checkpoint_destination checkpoint
+       | None -> Error "operation dispatch has no original retained artifact") in
+  match checkpoint_path with
+  | Error detail -> Keeper_agent_result.not_dispatched
+      (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
+  | Ok checkpoint_path ->
   let append_manifest =
     Turn_helpers.make_append_manifest
       ~config
@@ -1398,7 +1420,7 @@ let run_turn
                answered_ask_inputs
            in
            Result.bind co_inputs (fun co_inputs ->
-             Keeper_approval_input_checkpoint.admit ~co_inputs
+             Keeper_approval_input_checkpoint.admit_to_destination ~co_inputs ~destination:checkpoint_destination
                ~session_dir:session.session_dir ~identity ~message checkpoint
              |> Result.map (fun checkpoint -> Some checkpoint)))
       | _ -> Ok None
@@ -1885,12 +1907,21 @@ let run_turn
                 let save_started_at = Time_compat.now () in
                 let save_started_mono = Mtime_clock.now () in
                 let save_result =
-                  Keeper_checkpoint_store.save_agent_core_for_keeper
-                    ~keeper_name:meta.name
-                    ~session_dir:session.session_dir
-                    ~history_retained:
-                      (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
-                    checkpoint
+                  match snapshot.stage,Keeper_checkpoint_destination.destination checkpoint_destination with
+                  | Agent_core.Agent.After_rejected_response_dropped,Keeper_owner.Operation_input _ ->
+                    let ( let* )=Result.bind in
+                    let* source=Keeper_checkpoint_destination.current_checkpoint checkpoint_destination in
+                    let* source=match source with Some source -> Ok source
+                      | None -> Error "rejected-response cut lost its original branch source" in
+                    let* snapshot=Keeper_checkpoint_store.exact_snapshot_of_value
+                        ~expected_session_id:meta.runtime.trace_id source
+                      |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string in
+                    let* transformation=Keeper_checkpoint_host_transform.incomplete_response_cut ~source:snapshot ~candidate:checkpoint in
+                    Keeper_checkpoint_destination.save_transformed checkpoint_destination ~transformation checkpoint
+                  | After_rejected_response_dropped,Global_input
+                  | (After_input_wait_changed | After_assistant_collected | After_tool_results_appended | After_context_injection),
+                      (Global_input | Operation_input _) ->
+                    Keeper_checkpoint_destination.save checkpoint_destination checkpoint
                 in
                 let save_finished_mono = Mtime_clock.now () in
                 let save_finished_at = Time_compat.now () in
@@ -2421,6 +2452,7 @@ let run_turn
                              ~model:manifest_model_label
                              ~acc
                              ~result
+                             ~checkpoint_destination
                              ~last_persisted_checkpoint:
                                !last_persisted_checkpoint_ref
                              ~final_agent_core_turn_ordinal

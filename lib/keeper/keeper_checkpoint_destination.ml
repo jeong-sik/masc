@@ -130,7 +130,7 @@ let publish_native destination ~checkpoint publish = match destination with
         Error "native publication no longer owns its exact retained operation branch" in
     Ok (candidate,value))
 
-let path destination checkpoint = match destination with
+let path destination (checkpoint:Agent_core.Checkpoint.t) = match destination with
   | Canonical location -> Ok (Store.agent_core_checkpoint_path ~session_dir:location.session_dir
       ~session_id:checkpoint.Agent_core.Checkpoint.session_id)
   | Operation (location,branch) ->

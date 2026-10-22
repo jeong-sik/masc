@@ -9,6 +9,7 @@ type binding =
   ; execution_digest : string
   ; session_dir : string
   ; session_id : string
+  ; checkpoint_destination : Keeper_checkpoint_destination.t
   }
 
 type input =
@@ -90,8 +91,10 @@ val prepare :
     [retired_history_cut] witness. Provider-only calls admit the host's existing
     media projection when no Tool attempt was admitted.
 
-    Input checkpoint candidates advance the retained Owner before the optional
-    canonical sink. Until a subsequent ordinary checkpoint succeeds, terminal
+    The binding captures one destination before admission. It must match the
+    actual Producer destination; branch callbacks fence that destination before
+    any retention/publication and record only confirmed exact native payloads.
+    Input checkpoint candidates advance the retained Owner before the host sink. Until a subsequent ordinary checkpoint succeeds, terminal
     disposition preserves the actual retained reference instead of publishing
     an older in-memory Agent snapshot. A failed/uncertain sink is not a retry
     permission and terminal handling does not replay that checkpoint write. *)

@@ -78,7 +78,7 @@ let run_case ~how root =
       claim () |> require "claim operation" |> Option.get in
     let binding : Native.binding =
       {base_path=root; keeper_name; operation_id;
-       execution_digest=operation.execution_digest; session_dir; session_id} in
+       execution_digest=operation.execution_digest; session_dir; session_id; checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir} in
     (* A real Core execution. Its host sink fails after the journal commits the
        terminal, which is the state left when the Owner receipt write fails. *)
     let runtime = Runtime_agent_execution_runtime.get () |> Option.get in

@@ -9971,7 +9971,8 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
         | Some operation -> operation | None -> fail "resolved original request not ready" in
       check bool "same operation and complete original input" true
         (Keeper_chat_operation.Operation_id.equal operation_id claimed.operation_id && claimed.input=Some canonical);
-      let admission = match Gate.load ~config ~meta ~operation_id ~session_dir |> require "admit current history" with
+      let destination = Masc.Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir in
+      let admission = match Gate.load ~config ~meta ~operation_id ~session_dir ~destination |> require "admit current history" with
         | Some value -> value | None -> fail "missing Gate admission" in
       (match runtime_lane, Gate.runtime_lane admission with
        | None, None -> ()

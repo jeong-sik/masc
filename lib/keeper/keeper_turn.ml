@@ -463,6 +463,9 @@ let run_keeper_invocation_turn_admitted_inner
         let* operation = match operation with
           | Some operation -> Ok operation
           | None -> Error "direct native admission has no owning operation" in
+        let* checkpoint_destination=Keeper_checkpoint_destination.capture_direct
+            ~base_path:ctx.config.base_path ~keeper_name:meta.name ~session_dir
+            ~trace_id:meta.runtime.trace_id ~operation_id in
         let binding : Keeper_direct_native_continuation.binding =
           { base_path = ctx.config.base_path
           ; keeper_name = meta.name
@@ -470,6 +473,7 @@ let run_keeper_invocation_turn_admitted_inner
           ; execution_digest = operation.execution_digest
           ; session_dir
           ; session_id
+          ; checkpoint_destination
           } in
         let* admission = Keeper_direct_native_continuation.load ~binding in
         match admission with
@@ -479,7 +483,7 @@ let run_keeper_invocation_turn_admitted_inner
           Error "native execution is terminal and awaiting Owner settlement; it cannot be dispatched again"
         | Keeper_direct_native_continuation.No_pending ->
           let* direct_resume = (match Keeper_direct_gate_continuation.load
-          ~config:ctx.config ~meta ~operation_id ~session_dir with
+          ~config:ctx.config ~meta ~operation_id ~session_dir ~destination:checkpoint_destination with
         | Error _ as error -> error
         | Ok (Some admission) -> Ok (Some (Keeper_agent_run.Gate_continuation admission))
         | Ok None ->

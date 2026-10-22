@@ -70,15 +70,26 @@ let retained ~config ~operation_id ~reference =
     Ok original
   | Some _ | None -> Error "retained checkpoint does not own this original direct operation"
 
-let current_with_original ~config ~operation_id ~session_dir ~session_id (waiting : Semantic.gate_wait) =
+let current_with_original ~config ~keeper_name ~operation_id ~session_dir ~session_id (waiting : Semantic.gate_wait) =
   let* () = check_session_dir ~config ~session_dir ~session_id in
   let* reference = match waiting.checkpoint with Semantic.Agent_core value -> Ok value
     | Semantic.Official_client _ -> Error "official-client Gate has no Agent Core checkpoint" in
   let* original = retained ~config ~operation_id ~reference in
-  let* current = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
-    |> Result.map_error (fun _ -> "current Keeper checkpoint is unavailable") in
+  let* branch=Owner.direct_input_branch ~base_path:config.Workspace.base_path ~keeper_name ~operation_id |> owner in
+  let* current=match branch with
+    | None -> Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
+        |> Result.map_error (fun _ -> "current Keeper checkpoint is unavailable")
+    | Some branch ->
+      let* ()=if Keeper_id.Trace_id.to_string branch.checkpoint.trace_id=session_id then Ok ()
+        else Error "Gate branch belongs to another session" in
+      retained ~config ~operation_id ~reference:branch.checkpoint in
   let original_checkpoint = Checkpoint.exact_snapshot_checkpoint original in
   let current_checkpoint = Checkpoint.exact_snapshot_checkpoint current in
+  match branch with
+  | Some _ ->
+    let* _=Keeper_checkpoint_host_transform.preserve ~source:original ~candidate:current_checkpoint in
+    Ok (current,current_checkpoint)
+  | None ->
   if not (original_prefix original_checkpoint.messages current_checkpoint.messages) then
     Error "current history no longer retains the exact original Gate input; reconciliation is required"
   else
@@ -256,7 +267,7 @@ let reconcile ~config ~(meta : Keeper_meta_contract.keeper_meta) =
           | None -> first_resolved remaining
           | Some decision ->
             let* () = match state.waiting.checkpoint with
-              | Semantic.Agent_core _ -> current_with_original ~config ~operation_id ~session_dir ~session_id state.waiting |> Result.map (fun _ -> ())
+              | Semantic.Agent_core _ -> current_with_original ~config ~keeper_name ~operation_id ~session_dir ~session_id state.waiting |> Result.map (fun _ -> ())
               | Semantic.Official_client checkpoint -> validate_native ~base_path ~keeper_name checkpoint in
             Owner.resolve_direct_gate ~base_path ~keeper_name ~operation_id
               ~resolution:(resolution_of_observation obligation decision) |> owner |> Result.map (fun _ -> ()) in
@@ -276,9 +287,9 @@ let denial_input (selected : Semantic.gate_resolution) =
     Ok (identity, Agent_core.Types.user_msg
       ("Gate request " ^ selected.obligation.approval_id ^ " was denied: " ^ detail))
 
-let load_ready ~config ~(meta : Keeper_meta_contract.keeper_meta) ~operation_id ~session_dir =
+let load_ready ~config ~(meta : Keeper_meta_contract.keeper_meta) ~operation_id ~session_dir ~destination
+    (state : Semantic.gate_wait_state option) =
   let base_path = config.Workspace.base_path and keeper_name = meta.name in
-  let* state = Owner.direct_gate_state ~base_path ~keeper_name ~operation_id |> owner in
   match state with
   | None -> Ok None
   | Some {resolution=None; _} -> Error "unresolved Gate operation was claimed"
@@ -288,23 +299,42 @@ let load_ready ~config ~(meta : Keeper_meta_contract.keeper_meta) ~operation_id 
       | Some decision when resolution_of_observation selected.obligation decision = selected -> Ok ()
       | Some _ | None -> Error "durable Gate resolution changed before resume" in
     let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    (* Branch host admission is legal only after this exact Gate resolution has
+       entered Resuming_gate. A later load failure uses the existing deferral
+       path to retain the same obligation, never granting model dispatch. *)
+    let* branch_resumed=match Keeper_checkpoint_destination.destination destination,waiting.checkpoint with
+      | Keeper_owner.Global_input,_ -> Ok false
+      | Operation_input actual,Semantic.Agent_core _
+          when Keeper_chat_operation.Operation_id.equal actual operation_id ->
+        Owner.resume_direct_gate ~base_path ~keeper_name ~operation_id ~waiting ~resolution:selected
+        |> owner |> Result.map (fun () -> true)
+      | Operation_input _,(Semantic.Agent_core _ | Official_client _) ->
+        Error "Gate branch destination or checkpoint owner changed" in
     let* authority = match waiting.checkpoint with
     | Semantic.Official_client checkpoint ->
       let* () = validate_native ~base_path ~keeper_name checkpoint in
       Ok (Official_client checkpoint)
     | Semantic.Agent_core reference ->
-    let* source, checkpoint = current_with_original ~config ~operation_id ~session_dir ~session_id waiting in
-    let* () = match Checkpoint.save_agent_core_if_source ~session_dir
-        ~expected_source_ref:(Checkpoint.exact_snapshot_reference source) checkpoint with
-      | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
-      | Checkpoint.Installed _ | Checkpoint.Not_installed _ -> Error "current-history Gate admission is not durably confirmed" in
+    let* source, checkpoint = current_with_original ~config ~keeper_name ~operation_id ~session_dir ~session_id waiting in
+    let* checkpoint=match Keeper_checkpoint_destination.destination destination with
+      | Keeper_owner.Global_input ->
+        (match Checkpoint.save_agent_core_if_source ~session_dir
+            ~expected_source_ref:(Checkpoint.exact_snapshot_reference source) checkpoint with
+         | Checkpoint.Installed {auxiliary=[]; _} -> Ok checkpoint
+         | Checkpoint.Installed _ | Checkpoint.Not_installed _ -> Error "current-history Gate admission is not durably confirmed")
+      | Operation_input actual when Keeper_chat_operation.Operation_id.equal actual operation_id ->
+        let* saved=Keeper_checkpoint_destination.save destination checkpoint in
+        (match saved with Checkpoint.Saved {checkpoint;_} -> Ok checkpoint
+         | Stale_noop _ -> Error "operation Gate admission was not confirmed on its retained branch")
+      | Operation_input _ -> Error "Gate destination belongs to another operation" in
     let* checkpoint = match selected.decision with
       | Semantic.Gate_approved -> Ok checkpoint
       | Semantic.Gate_denied _ ->
         let* identity, message = denial_input selected in
-        Keeper_approval_input_checkpoint.admit ~session_dir ~identity ~message checkpoint in
+        Keeper_approval_input_checkpoint.admit_to_destination ~destination ~session_dir ~identity ~message checkpoint in
     Ok (Agent_core {checkpoint; source_reference=reference}) in
-    let* () = Owner.resume_direct_gate ~base_path ~keeper_name ~operation_id ~waiting ~resolution:selected |> owner in
+    let* ()=if branch_resumed then Ok () else
+      Owner.resume_direct_gate ~base_path ~keeper_name ~operation_id ~waiting ~resolution:selected |> owner in
     let resolution =
       {Keeper_event_queue.approval_id=selected.obligation.approval_id;
        decision=(match selected.decision with Semantic.Gate_approved -> Keeper_event_queue.Hitl_approved
@@ -374,13 +404,16 @@ let complete_native ~config ~keeper_name ~operation_id admission =
     Owner.discharge_direct_gate ~base_path:config.Workspace.base_path ~keeper_name ~operation_id
       ~obligation:admission.selected.obligation |> owner
 
-let load ~config ~meta ~operation_id ~session_dir =
-  match load_ready ~config ~meta ~operation_id ~session_dir with
+let load ~config ~meta ~operation_id ~session_dir ~destination =
+  let base_path = config.Workspace.base_path in
+  let keeper_name = meta.Keeper_meta_contract.name in
+  (* Resume_gate deliberately removes the pending Gate projection. Keep the
+     exact wait read before admission: a failure after that transition must not
+     try to recover it from a projection that now reports None. *)
+  let* state = Owner.direct_gate_state ~base_path ~keeper_name ~operation_id |> owner in
+  match load_ready ~config ~meta ~operation_id ~session_dir ~destination state with
   | Ok _ as ready -> ready
   | Error detail ->
-    let base_path = config.Workspace.base_path in
-    let keeper_name = meta.Keeper_meta_contract.name in
-    let* state = Owner.direct_gate_state ~base_path ~keeper_name ~operation_id |> owner in
     (match state with
      | None -> Error detail
      | Some state ->

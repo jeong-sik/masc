@@ -50,23 +50,29 @@ let test_allows_external_open_blocks_executable_extensions () =
   Alcotest.(check bool) "extensionless blocked" false
     (Action.allows_external_open ~name:"attachment")
 
-let test_target_path_uses_digest_prefix_and_basename () =
+let test_target_path_uses_full_digest_and_basename () =
   let path =
     Action.target_path ~name:(Some "riff.gp5")
       ~sha256:"0123456789abcdef0123456789abcdef"
   in
   Alcotest.(check bool) "it lives in the cache dir" true
     (String.starts_with ~prefix:(Action.cache_dir () ^ "/") path);
-  Alcotest.(check string) "the basename carries the digest prefix"
-    "01234567-riff.gp5" (Filename.basename path);
+  Alcotest.(check string) "the source directory carries the full digest"
+    "0123456789abcdef0123456789abcdef" (Filename.basename (Filename.dirname path));
+  Alcotest.(check string) "the original filename remains intact" "riff.gp5"
+    (Filename.basename path);
+  let other = Action.target_path ~name:(Some "riff.gp5")
+      ~sha256:"0123456789abcdef0123456789abcdeff" in
+  Alcotest.(check bool) "shared digest prefix cannot replace another prepared source"
+    false (String.equal path other);
   let unnamed =
     Action.target_path ~name:None
       ~sha256:"0123456789abcdef0123456789abcdef"
   in
-  Alcotest.(check string) "no name falls back to a word" "01234567-attachment"
+  Alcotest.(check string) "no name falls back to a word" "attachment"
     (Filename.basename unnamed);
   let separated = Action.target_path ~name:(Some "a/b.mid") ~sha256:"ffffffff" in
-  Alcotest.(check string) "a separator keeps only the basename" "ffffffff-b.mid"
+  Alcotest.(check string) "a separator keeps only the basename" "b.mid"
     (Filename.basename separated)
 
 (* A PATH with nothing in it picks no player; a PATH with one fake executable
@@ -181,14 +187,14 @@ let test_save_served_artifact_boundary () =
   Fun.protect
     ~finally:(fun () ->
       Filename.set_temp_dir_name previous;
-      Array.iter
-        (fun entry ->
-          let cache = Filename.concat root entry in
-          Array.iter (fun name -> Sys.remove (Filename.concat cache name))
-            (Sys.readdir cache);
-          Unix.rmdir cache)
-        (Sys.readdir root);
-      Unix.rmdir root)
+      let rec remove path =
+        match Unix.lstat path with
+        | {Unix.st_kind=Unix.S_DIR;_} ->
+            Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+            Unix.rmdir path
+        | {Unix.st_kind=(Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+            | Unix.S_FIFO | Unix.S_SOCK);_} -> Unix.unlink path in
+      remove root)
     (fun () ->
       Filename.set_temp_dir_name root;
       let limit = Tool_blob_store.max_served_bytes in
@@ -285,7 +291,7 @@ let () =
         ; Alcotest.test_case "external open allowlists safe extensions" `Quick
             test_allows_external_open_blocks_executable_extensions
         ; Alcotest.test_case "the cache path names digest and file" `Quick
-            test_target_path_uses_digest_prefix_and_basename
+            test_target_path_uses_full_digest_and_basename
         ; Alcotest.test_case "no player in an empty path" `Quick
             test_player_argvs_empty_without_path
         ; Alcotest.test_case "the available player is picked" `Quick

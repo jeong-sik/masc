@@ -52,15 +52,12 @@ let cache_dir () =
   dir
 
 let target_path ~name ~sha256 =
-  let prefix =
-    if String.length sha256 > 8 then String.sub sha256 0 8 else sha256
-  in
   let base =
     match name with
     | Some name when not (String.equal name "") -> Filename.basename name
     | Some _ | None -> "attachment"
   in
-  Filename.concat (cache_dir ()) (prefix ^ "-" ^ base)
+  Filename.concat (Filename.concat (cache_dir ()) sha256) base
 
 (* {1 Players} *)
 
@@ -156,15 +153,6 @@ let describe_outcome { name; result; midi_summary } =
 
 (* {1 Effects} *)
 
-let write_file path bytes =
-  try
-    let channel = open_out_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr channel)
-      (fun () -> output_string channel bytes);
-    Ok ()
-  with Sys_error message -> Error message
-
 let digest_display_bytes = 12
 
 let display_name ~(sha256 : string) = function
@@ -204,7 +192,14 @@ let prepare ~fetch (attachment : Masc_tui_types.board_attachment) =
             Tool_blob_store.max_served_bytes)
       | Ok bytes ->
           let path = target_path ~name:(Some name) ~sha256 in
-          match write_file path bytes with
+          let published =
+            try
+              Fs_compat.mkdir_p (Filename.dirname path);
+              Fs_compat.save_file_atomic_rename_only path bytes
+            with
+            | Sys_error detail -> Error detail
+            | Unix.Unix_error (code, _, _) -> Error (Unix.error_message code) in
+          match published with
           | Error reason -> failed reason
           | Ok () ->
               let action = action_of attachment.ba_kind in

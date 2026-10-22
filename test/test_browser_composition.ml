@@ -67,7 +67,8 @@ let test_goto_answer_satisfies_output_contract () =
           | Browser_lane.Page_interact _ | Browser_lane.Page_elements _ | Browser_lane.Page_act _
           | Browser_lane.Page_context _ | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _
           | Browser_lane.Page_extract _ | Browser_lane.Session_open _ | Browser_lane.Session_close
-          | Browser_lane.Session_status ) ->
+          | Browser_lane.Session_status | Browser_lane.Page_console _ | Browser_lane.Page_network _
+          | Browser_lane.Page_cookies _ ) ->
           fail "navigation issued a command other than Page_goto" in
       Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
       Browser_lane.install_automation_executor (Some execute);

@@ -715,7 +715,7 @@ let test_snapshot_loss_admits_remaining_input_into_new_memory () = with_store (f
      ~judge:(fun _ -> fail "input judged against a receipt whose snapshot is gone") with
    | Worker.Unavailable _ -> ()
    | Worker.Disabled | Worker.Idle | Worker.Recheck_new_input | Worker.Settled _
-   | Worker.Pending _ -> fail "a receipt without its snapshot was accepted");
+   | Worker.Pending _ | Worker.Addon_unattached _ -> fail "a receipt without its snapshot was accepted");
   ignore (Current.committed_durable_coverage ~keepers_dir ~keeper_id:"keeper"
     ~receipt_scope:"ordinary-librarian-read" |> require);
   let judged = ref [] in
@@ -764,7 +764,7 @@ let test_snapshot_loss_quarantines_explicit_receipts_and_queue_proceeds () = wit
      ~judge:(fun _ -> fail "input judged against a receipt whose snapshot is gone") with
    | Worker.Unavailable _ -> ()
    | Worker.Disabled | Worker.Idle | Worker.Recheck_new_input | Worker.Settled _
-   | Worker.Pending _ -> fail "a receipt without its snapshot was accepted");
+   | Worker.Pending _ | Worker.Addon_unattached _ -> fail "a receipt without its snapshot was accepted");
   check bool "admission keeps the receipt file" true (Sys.file_exists receipt_path);
   check (list string) "admission moves no receipt aside" [] (rejected_receipt_files keepers_dir);
   ignore (Current.committed_durable_coverage ~keepers_dir ~keeper_id:"keeper"

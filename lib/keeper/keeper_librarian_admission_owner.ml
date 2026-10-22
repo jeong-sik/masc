@@ -23,14 +23,26 @@ let reserved () =
   List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas
   @ (Keeper_tool_descriptor.all_descriptors () |> List.concat_map Keeper_tool_descriptor.registered_names)
   |> List.sort_uniq String.compare
-let resolve ~config ~reserved =
+type export_state = Attached of Runtime.tool_export | Unattached | Conflicted of string
+let export_state ~config ~reserved =
   let snapshot=Runtime.tool_export_snapshot ~config ~reserved ~access:Lane_addon_sources.Operator_configuration in
-  let* ()=match List.find_opt (fun (conflict : Lane_addon_tool_export.conflict) ->
+  match List.find_opt (fun (conflict : Lane_addon_tool_export.conflict) ->
     conflict.name=Capture.tool) snapshot.conflicts with
-    | None -> Ok () | Some conflict -> Error (Lane_addon_tool_export.conflict_to_string conflict) in
-  match List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name=Capture.tool) snapshot.exports with
-  | None -> Error "Librarian Addon is not enabled and attached"
-  | Some export -> Ok export
+  | Some conflict -> Conflicted (Lane_addon_tool_export.conflict_to_string conflict)
+  | None ->
+    match List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name=Capture.tool) snapshot.exports with
+    | None -> Unattached
+    | Some export -> Attached export
+let resolve ~config ~reserved = match export_state ~config ~reserved with
+  | Attached export -> Ok export
+  | Unattached -> Error "Librarian Addon is not enabled and attached"
+  | Conflicted detail -> Error detail
+(* No keeper-librarian Add-on serves admit_memory right now: explicit
+   admission is off, as with the Curator and Candle Add-ons. A conflicting
+   export is a configuration error and stays one. *)
+let unattached ~config ~reserved = match export_state ~config ~reserved with
+  | Unattached -> true
+  | Attached _ | Conflicted _ -> false
 let destination (value : Runtime.tool_request_destination) : Capture.destination = {
   installation_id=value.installation_id;package_id=value.package_id;tool=value.tool;
   source_revision=value.source_revision;configuration_revision=value.configuration_revision}
@@ -59,7 +71,7 @@ let fresh_authority ~config ~reserved owner capture =
   admit ~config ~reserved ~destination:(Capture.destination capture) ~publish:(fun () -> Ok ())
 
 type outcome = Disabled | Idle | Recheck_new_input | Settled of {has_more:bool}
-  | Pending of string | Unavailable of string
+  | Pending of string | Addon_unattached of {pending:int} | Unavailable of string
 
 type original = {capture:Capture.t;record:Owner.retained}
 type inventory = {parts:Parts.inventory;executions:original list}
@@ -145,21 +157,17 @@ let new_capture ~config ~reserved ~owner part =
   Ok {capture;record}
 let call ~config ~reserved ~expected ~(original : Owner.retained) ~arguments =
   match resolve ~config ~reserved with
-  | Error detail -> Error (Dispatch.Unavailable detail)
+  | Error detail -> Error (Lane_addon_submit_once.Not_sent (Dispatch.Unavailable detail))
   | Ok export -> Runtime.call_captured_tool_request ~config ~reserved ~export
     ~access:Lane_addon_sources.Operator_configuration ~installation_id:expected.Capture.installation_id
     ~package_id:expected.package_id ~tool:expected.tool ~configuration_revision:expected.configuration_revision
-    ~original ~arguments |> Result.map_error (function
-      | Runtime.Unavailable detail -> Dispatch.Unavailable detail
-      | Outcome_unknown detail -> Dispatch.Uncertain detail
-      | Host_refusal refusal -> Dispatch.Rejected (match refusal with
-          | Lane_addon_call_context.Rejected detail | Unavailable detail
-          | Activity_disabled detail | Activity_unobserved detail -> detail))
+    ~original ~arguments |> Result.map_error Lane_addon_submit_once.call_error_of_runtime
 
 type part_result =
   | Terminal of Parts.terminal_source * bool
   | Children of Parts.part * Parts.part
   | Waiting of string
+  | Addon_off
 let source original part = Parts.Original_execution {
   part_id=Parts.part_id part;execution_id=original.record.request_id}
 let local_admit actual ~destination:expected ~publish =
@@ -247,8 +255,18 @@ let answered ~store ~config ~reserved ~owner ~inventory part original =
   match parsed with
   | Keeper_librarian_runtime.Deferred -> Ok (Terminal (source original part,false))
   | Accepted accepted -> gate_result ~store ~config ~reserved ~owner ~inventory part original proposal accepted
+(* A part with no original yet, or one still before admission, can only move
+   through a live worker read and submit. *)
+let needs_worker = function
+  | None -> true
+  | Some original -> (match Progress.phase original.record.progress with
+    | Progress.Captured | Admission_wait _ -> true
+    | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
+    | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false)
 let evaluate ~store ~config ~reserved ~owner ~inventory part =
-  let* original=match for_part inventory part with
+  let existing=for_part inventory part in
+  if needs_worker existing && unattached ~config ~reserved then Ok Addon_off else
+  let* original=match existing with
     | Some original -> Ok original
     | None -> new_capture ~config ~reserved ~owner part in
   let* ()=check_owner owner in
@@ -259,7 +277,11 @@ let evaluate ~store ~config ~reserved ~owner ~inventory part =
     ~validate_answer:(fun proposal -> Capture.validate_proposal original.capture proposal |> Result.map (fun _ -> ()))
     ~call:(call ~config ~reserved) |> Result.map_error Dispatch.error_to_string in
   match state with
-  | Dispatch.Pending _ -> Ok (Waiting "Original Librarian Addon request is pending")
+  (* A dispatched original whose worker cannot be reached while no Add-on is
+     attached is the Add-on being off, not a pending provider. *)
+  | Dispatch.Pending (Dispatch.Worker_unreachable,_) when unattached ~config ~reserved -> Ok Addon_off
+  | Dispatch.Pending ((Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+      | Missing_after_dispatch | Journal_recheck),_) -> Ok (Waiting "Original Librarian Addon request is pending")
   | Refused (_,record) ->
     size_refused ~store ~config ~reserved ~owner ~inventory part {original with record}
   | Answered (_,record) | Commit_pending record ->
@@ -332,20 +354,31 @@ let run_queue ~base_path ~keeper_name =
     let* ()=result in Gate_journal.recover_retries ~store ~owner ~capture:original.capture)
     (Ok ()) initial.executions) in
   let* inventory=io (fun () -> discover ~store ~owner) in
+  (* A new root needs the live destination, so without the Add-on the
+     pending candidates stay queued and the pass reports the Add-on off. *)
+  let root ?supersession batch =
+    if unattached ~config ~reserved then Ok None
+    else let* root=retain_root ~store ~config ~reserved ~owner ?supersession batch in Ok (Some [root]) in
   let* parts=match Parts.roots inventory.parts,pending with
-    | [],None -> Ok []
-    | [],Some batch -> let* root=retain_root ~store ~config ~reserved ~owner batch in Ok [root]
-    | _::_,None -> Ok (Parts.runnable inventory.parts)
+    | [],None -> Ok (Some [])
+    | [],Some batch -> root batch
+    | _::_,None -> Ok (Some (Parts.runnable inventory.parts))
     | _::_,Some batch ->
       let* frontier=frontier ~store ~owner inventory in
       (match frontier with
-       | None -> Ok (Parts.runnable inventory.parts)
+       | None -> Ok (Some (Parts.runnable inventory.parts))
        | Some frontier ->
          let* supersession=io (fun () -> Parts.prove_supersession ~store ~owner ~restore_gate:(restore_gate ~store ~owner)
            ~inventory:inventory.parts ~batch ~frontier) in
          match supersession with
-         | None -> Ok (Parts.runnable inventory.parts)
-         | Some supersession -> let* root=retain_root ~store ~config ~reserved ~owner ~supersession batch in Ok [root]) in
+         | None -> Ok (Some (Parts.runnable inventory.parts))
+         | Some supersession -> root ~supersession batch) in
+  let addon_unattached () =
+    let* pending=read () in
+    Ok (Addon_unattached {pending=Option.fold ~none:0 ~some:(fun batch -> List.length (Queue.candidates batch)) pending}) in
+  match parts with
+  | None -> addon_unattached ()
+  | Some parts ->
   let through=List.fold_left (fun through part -> max through (Parts.original_through part)) 0 parts in
   let finish ~committed ~reason =
     let* pending=read () in
@@ -367,6 +400,7 @@ let run_queue ~base_path ~keeper_name =
             Only a completed walk may request another immediate queue pass;
             actual Runtime/candidate events wake waiting originals. *)
          Ok (if committed then Settled {has_more=false} else Pending reason)
+       | Ok Addon_off -> if committed then Ok (Settled {has_more=false}) else addon_unattached ()
        | Ok (Terminal (_,did_commit)) -> walk ~committed:(committed || did_commit) rest
        | Ok (Children (left,right)) -> walk ~committed (left::right::rest)) in
   walk ~committed:false parts

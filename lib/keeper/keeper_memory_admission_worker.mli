@@ -10,6 +10,7 @@ type outcome = Keeper_librarian_admission_owner.outcome =
   | Recheck_new_input
   | Settled of { has_more : bool }
   | Pending of string
+  | Addon_unattached of { pending : int }
   | Unavailable of string
 
 val run : base_path:string -> keeper_name:string -> outcome

@@ -50,6 +50,10 @@ Read an existing host Exact terminal or the original worker request before any
 new submission. Retain a dispatch intention before the send. An unknown sent
 outcome does not authorize another model call. Package replacement must not
 transfer an old request to different inputs, installation or schema.
+The Workspace Curator and the Librarian share one submit-once journal
+(`Lane_addon_submit_once`). Its pre-send destination check runs before the
+intent is written. A submit the host refused before sending declines that
+intent, so the next pass reads absence and submits the same request again.
 
 Retain the raw proposal, validate it against that original input, run the
 existing host absorption gate and apply the existing locked Memory disposition.
@@ -60,7 +64,9 @@ receipt instead of generating another judgment.
 
 Off must refuse fresh root/child admission while allowing already retained
 results and confirmed local commit/ACK recovery. This differs from the existing
-global Librarian disabled policy. Preserve the purge fence, sparse deferred
+global Librarian disabled policy. With no attached keeper-librarian Add-on the
+owner reports `Addon_unattached` with the waiting candidate count instead of a
+repeated failure; candidates stay queued. Preserve the purge fence, sparse deferred
 gaps, newly appended candidates and concurrent retirement checks. Unchanged
 deferred, unknown or refused work must not mint a new root on each wake.
 

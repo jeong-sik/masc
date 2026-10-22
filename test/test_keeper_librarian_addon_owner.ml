@@ -174,9 +174,9 @@ let drive_until fixture predicate =
       if predicate outcome then outcome
       else (await_delivery fixture ~after:before;loop ()) in loop ())
 let assert_settled = function Worker.Settled _ -> ()
-  | Disabled | Idle | Recheck_new_input | Pending _ | Unavailable _ -> fail "actual original decision did not commit Memory"
+  | Disabled | Idle | Recheck_new_input | Pending _ | Addon_unattached _ | Unavailable _ -> fail "actual original decision did not commit Memory"
 let settled = function Worker.Settled _ -> true
-  | Disabled | Idle | Recheck_new_input | Pending _ | Unavailable _ -> false
+  | Disabled | Idle | Recheck_new_input | Pending _ | Addon_unattached _ | Unavailable _ -> false
 let terminal (original,capture)=match Progress.phase original.Owner.progress with
   | Progress.Finished _ | Conflicted _ | Rejected _ | Subdivided _ -> true
   | Judged judgment ->
@@ -479,7 +479,7 @@ let test_purge_cancels_waiting_memory_unit_without_consumption ()=with_fixture (
 let original_path fixture ~scope ~request_id=Filename.concat (Store.root fixture.store)
   (Filename.concat "tool-request-owners" (Filename.concat (Store.digest scope) (Store.digest request_id ^ ".json")))
 let assert_unavailable = function Worker.Unavailable _ -> ()
-  | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ -> fail "invalid complete original history must refuse before local repair"
+  | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Addon_unattached _ -> fail "invalid complete original history must refuse before local repair"
 let test_invalid_original_blocks_receipt_backed_ack ()=with_fixture (fun ~sw:_ fixture ->
   let queue_path=Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
   let original_queue=io (fun () -> Fs_compat.load_file queue_path) in
@@ -614,7 +614,7 @@ let test_purge_joins_provider_after_memory_unit_returned ()=with_fixture (fun ~s
     `OK,F.openai_response (answer (fun _ -> true) capture));
   Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
     (match run_worker fixture with Worker.Pending _ -> ()
-     | Disabled | Idle | Recheck_new_input | Settled _ | Unavailable _ ->
+     | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ ->
        fail "the actual ordinary Memory unit must return while its provider is pending");
     Eio.Promise.await arrived;
     Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
@@ -779,7 +779,7 @@ let test_production_refresh_new_tail_quiesces_while_provider_pending ()=with_fix
     Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
     ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
     (match run_worker fixture with Worker.Pending _ -> ()
-     | Disabled | Idle | Recheck_new_input | Settled _ | Unavailable _ ->
+     | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ ->
        fail "the original actual provider must remain pending");
     Eio.Promise.await arrived;
     Keeper_librarian_queue_refresh.install ();
@@ -812,7 +812,7 @@ let test_purged_original_does_not_block_another_keeper ()=with_fixture (fun ~sw:
     `OK,F.openai_response (answer (fun _ -> true) capture));
   Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
     (match run_worker fixture with Worker.Pending _ -> ()
-     | Disabled | Idle | Recheck_new_input | Settled _ | Unavailable _ -> fail "first actual provider must be pending");
+     | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ -> fail "first actual provider must be pending");
     Eio.Promise.await arrived;
     let record,capture=match observed_originals fixture with [original] -> original
       | [] | _::_::_ -> fail "expected the one original belonging to the purged Keeper" in
@@ -845,7 +845,7 @@ let test_purged_original_does_not_block_another_keeper ()=with_fixture (fun ~sw:
       match outcome with
       | Worker.Settled _ -> ()
       | Pending _ | Recheck_new_input -> await_delivery fixture ~after:before;drive_second ()
-      | Disabled | Idle | Unavailable _ -> fail "a stale original prevented the other Keeper from making progress" in
+      | Disabled | Idle | Addon_unattached _ | Unavailable _ -> fail "a stale original prevented the other Keeper from making progress" in
     drive_second ();
     let second_record=io (fun () -> originals_for ~keeper_name:second_keeper
       fixture.base_path fixture.keepers_dir fixture.store) |> function
@@ -876,6 +876,26 @@ let test_purged_original_does_not_block_another_keeper ()=with_fixture (fun ~sw:
           ~declaration_id:"librarian" ~schema exact |> get) with
        | Lane_addon_exact.No_completed_latest -> true | Completed_latest _ -> false)))
 
+let await_export_absent fixture =
+  Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+    let rec loop ()=
+      let snapshot=Runtime.tool_export_snapshot ~config:fixture.config
+        ~access:Lane_addon_sources.Operator_configuration ~reserved:[] in
+      if List.exists (fun (export : Runtime.tool_export) -> export.tool.name=Capture.tool) snapshot.exports
+      then (Eio.Time.sleep fixture.clock 0.02;loop ()) in
+    loop ())
+let test_unattached_addon_reports_off_and_keeps_candidates ()=with_fixture (fun ~sw:_ fixture ->
+  set_enabled fixture false;
+  await_export_absent fixture;
+  let posts=F.post_count fixture.server in
+  (match run_worker fixture with
+   | Worker.Addon_unattached {pending} -> check int "every explicit candidate is reported waiting" 2 pending
+   | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Unavailable _ ->
+     fail "a missing keeper-librarian Add-on must report explicit admission off");
+  check int "no original capture is minted without the Add-on" 0 (List.length (observed_originals fixture));
+  check int "no provider call starts without the Add-on" posts (F.post_count fixture.server);
+  check int "the explicit candidates stay queued" 2 (io (fun () -> List.length (pending_rows fixture.keepers_dir))))
+
 let ()=run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "actual Memory lane, worker, HTTP, domain validation and receipt-backed ACK" `Quick test_actual_happy_path;
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
@@ -897,4 +917,5 @@ let ()=run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "published first gate before ACK recovers the same child while Off" `Quick (test_original_gate_root_publication_recovery Child_before_ack);
   test_case "acknowledged missing first gate refuses without replacement" `Quick (test_original_gate_root_publication_recovery Acknowledged_then_missing);
   test_case "production refresh quiesces with a new tail while its provider remains pending" `Quick test_production_refresh_new_tail_quiesces_while_provider_pending;
-  test_case "a purged pending original cannot block another Keeper in the same shared worker" `Quick test_purged_original_does_not_block_another_keeper]]
+  test_case "a purged pending original cannot block another Keeper in the same shared worker" `Quick test_purged_original_does_not_block_another_keeper;
+  test_case "no attached Add-on reports explicit admission off and keeps every candidate" `Quick test_unattached_addon_reports_off_and_keeps_candidates]]

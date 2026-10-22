@@ -237,8 +237,10 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) f =
       let store=Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
       let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper_name;
         "trace_id",`String "librarian-original-owner"]) |> get in
-      io (fun () -> Keeper_meta_store.replace_snapshot config meta |> get;
-        List.iter (fun (id,claim) -> ignore (append keepers_dir id claim)) initial);
+      (* Metadata publication owns an Eio-aware directory lock. Keep it on
+         this fiber; only the blocking admission Store work goes to [io]. *)
+      Keeper_meta_store.replace_snapshot config meta |> get;
+      io (fun () -> List.iter (fun (id,claim) -> ignore (append keepers_dir id claim)) initial);
       let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
         |> Result.map_error Lane_addon_manifest.error_to_string |> get in
       let source=Filename.concat (Runtime.configuration_directory config) "librarian.toml" in
@@ -829,10 +831,10 @@ let test_purged_original_does_not_block_another_keeper ()=with_fixture (fun ~sw:
     (match purged with Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
     (* The Python worker keeps A's unanswered request. Neither its state nor
        the host original Store is cleared to let B pass. *)
+    let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String second_keeper;
+      "trace_id",`String "second-librarian-original-owner"]) |> get in
+    Keeper_meta_store.replace_snapshot fixture.config meta |> get;
     io (fun () ->
-      let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String second_keeper;
-        "trace_id",`String "second-librarian-original-owner"]) |> get in
-      Keeper_meta_store.replace_snapshot fixture.config meta |> get;
       Queue.append ~keepers_dir:fixture.keepers_dir ~keeper_id:second_keeper
         ~request_id:"second-original" (fact "Durable second Keeper")
         |> Result.map_error Queue.append_error_to_string |> get |> ignore);

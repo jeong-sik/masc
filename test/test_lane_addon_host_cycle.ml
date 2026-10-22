@@ -228,6 +228,11 @@ let test_original_exact_semantic_dispatch_authority () =
       | [d] -> d | [] | _::_::_ -> fail "one replacement declaration" in
     let changed_guard ()=Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:changed.id
       ~package_id:changed.package.id ~configuration_revision:changed.revision in
+    (* The first reconciliation retires the old revision. This fixture has no
+       configuration service to attach its replacement on the next beat. *)
+    await clock (fun () -> host_requests config = `Null);
+    check bool "a replacement declaration alone grants no provider authority" true (Result.is_error (changed_guard ()));
+    ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
     await clock (fun () -> Result.is_ok (changed_guard ()));
     check bool "the replacement worker cannot execute the old original" true (Result.is_error (guard ()));
     write source "invalid TOML = [";

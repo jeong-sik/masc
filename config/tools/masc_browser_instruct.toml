@@ -1,7 +1,14 @@
 name = "masc_browser_instruct"
 description = """
-Stagehand browser only (open it with BrowserSession lane=stagehand; tabId from BrowserTabs lane=stagehand). Say in one sentence what to do: act performs it and can change external state; observe lists matching elements with the action for each; extract returns data shaped by schema. Returns Stagehand's data and metadata."""
+Use the owned browser lane and tabId returned by BrowserTabs. observe finds matching elements: automation uses its installation-selected locate Exact Output and returns freshly checked node references; stagehand uses its observer. Model explanations are inference, not permission to click. act and extract require stagehand; act can change external state and extract returns data shaped by schema. No browser is substituted for the observed tab."""
 additional_properties = false
+
+[[params]]
+name = "lane"
+type = "string"
+enum = ["automation", "stagehand"]
+required = true
+description = "The owned lane that supplied tabId."
 
 [[params]]
 name = "action"

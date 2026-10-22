@@ -14,6 +14,8 @@ type outcome = Final of Lane_addon_exact.final
   | Exceeds_frame of { sha256 : string; bytes : int }
 val create : incarnation:string -> configuration:configuration -> (t, string) result
 val incarnation : t -> string
+val output_schema : t -> name:string -> Yojson.Safe.t option
+(** Effective selected schema while serving; no provider or filesystem access. *)
 val request : t -> Lane_addon_exact.request -> (outcome, error) result
 (** Publishes one request and waits. Completion/cancellation withdraws only
     this waiter and signals a new availability revision. No input is replayed. *)

@@ -7,7 +7,7 @@ type error = Binding_required | No_available_browser | Ambiguous_browsers of Lan
   | Required_actions_unavailable of { required : Browser_capabilities.operation list;
       candidates : (Lane.route * Browser_capabilities.operation list) list }
   | Unsupported_required_actions of { route : Lane.route; missing : Browser_capabilities.operation list }
-type work_browser = { activity : Lane.activity; registered : bool; session : Lane.session_observation }
+type work_browser = { activity : Lane.activity; registered : bool; session : Lane.session_observation; locate : bool }
 type snapshot = { live_activity : Lane.activity; live_clients : Lane.client_info list
   ; automation : work_browser; stagehand : work_browser }
 
@@ -55,7 +55,9 @@ let snapshot () =
   let work lane =
     let observed = Lane.inventory_observation (Lane.server_lane_name lane) in
     let registered = match observed.backend with Lane.Executor_registered value -> value | Lane.Live_clients _ -> false in
-    {activity=observed.activity;registered;session=Lane.server_session_observation lane} in
+    let locate=match lane with Lane.Server_automation -> Lane.automation_locate_available ()
+      | Lane.Server_stagehand -> registered in
+    {activity=observed.activity;registered;session=Lane.server_session_observation lane;locate} in
   {live_activity=Lane.activity Lane.Lane_name.Live;live_clients=Lane.connected_clients ();
    automation=work Lane.Server_automation;stagehand=work Lane.Server_stagehand}
 
@@ -90,7 +92,11 @@ let choose_candidates ~verb ~bound ~snapshot preference =
     (enabled state.activity || lifecycle_inspection_or_cleanup) in
   let eligible route state = ready state && match route with
     | Lane.Stagehand_route -> stagehand_serves verb
-    | Lane.Automation_route -> automation_serves verb
+    | Lane.Automation_route -> automation_serves verb &&
+        (match verb with Lane.Page_locate _ -> state.locate
+         | Lane.Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
+         | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _
+         | Page_instruct _|Page_extract _ -> true)
     | Lane.Live_route _ -> false in
   let opened route state = eligible route state && match state.session with
     | Lane.Browser_open -> true | Lane.Browser_closed | Lane.Browser_changing | Lane.Browser_unknown -> false in

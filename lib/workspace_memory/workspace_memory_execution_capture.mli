@@ -35,19 +35,35 @@ val briefing : request_id:Request_id.t -> workspace:workspace -> destination:des
     these constructors do not establish their external provenance or ownership. *)
 val scope : string
 val request_id : t -> Request_id.t
+val predecessor : t -> Request_id.t option
+(** None identifies an original root capture. A successor keeps its original
+    parent ID; [restore] verifies the complete acknowledged ancestry. *)
 val destination : t -> destination
 val work : t -> work
 val input_text : t -> string
 val rendered_prompt : t -> string
 val output_schema : t -> Yojson.Safe.t
 val to_json : t -> Yojson.Safe.t
-val restore : workspace:workspace -> Lane_addon_tool_request_owner.retained -> (t, string) result
+val narrow : request_id:Request_id.t -> final:Lane_addon_exact.final -> t -> (t option, string) result
+(** Pure whole-row/whole-entry bisection using the original captured template,
+    ledger, physical workspace and destination. Input_capacity, Context_overflow
+    and Request_body_refused permit either kind; Output_limit_reached permits
+    classification only. Every other terminal is rejected. [Ok None] means one
+    indivisible row remains. Does not mint IDs, save state or establish that
+    [final] actually belongs to this original request; the host journal does. *)
+val restore : workspace:workspace ->
+  load:(request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+  Lane_addon_tool_request_owner.retained -> (t, string) result
 (** Restore only from a strict original-owner read. Match the current observed
     physical workspace, original scope/ID/destination and domain schema; verify
     the captured input/template/actual prompt together without reading today's
     prompt override. The caller supplies a fresh observation under its original
     workspace lease/serialization, and still revalidates live authority before
-    effects. This is neither restart enumeration nor a commit journal. *)
+    effects. Strictly load each predecessor; require its matching acknowledged
+    child and original typed size refusal, re-derive the entire child capture,
+    and reject missing, conflicting, unreadable or cyclic ancestry. A retained
+    child whose parent is still Subdividing cannot execute. This is neither
+    restart enumeration nor a commit journal. *)
 type expected_commit =
   | Classification_commit of Workspace_memory_ledger.t
   | Briefing_commit of Workspace_memory_briefing.t

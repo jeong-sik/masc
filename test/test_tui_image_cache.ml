@@ -161,6 +161,51 @@ let converter_succeeds dir name bytes =
 
 let unwrap = function Ok value -> value | Error _ -> fail "unexpected workflow failure"
 
+let test_character_frame_refuses_unrepresentable_ratio () =
+  with_cache (fun cache_dir _run ->
+    let be32 n = String.init 4 (fun i -> Char.chr ((n lsr ((3 - i) * 8)) land 255)) in
+    let run _ = fail "unrepresentable image must be refused before starting a decoder" in
+    List.iter (fun (width, height, columns, rows) ->
+      let png = png_header ^ be32 width ^ be32 height in
+      let display = Cache.Character_cells {columns;rows} in
+      check bool "unrepresentable ratio refused" true
+        (Result.is_error (Cache.prepare_presentation ~run ~cache_dir display png));
+      check (list string) "refusal creates no temporary files" []
+        (Sys.readdir cache_dir |> Array.to_list))
+      [400,1,100,20; 1000,10,78,21])
+
+let test_character_frame_protocol_and_cleanup () =
+  with_cache (fun cache_dir run ->
+    (* The process fixture supplies decoder output; this header supplies its
+       declared dimensions. Real PNG/ffmpeg decoding is a separate native
+       manual observation, not claimed by this boundary test. *)
+    let png = png_header ^ "\000\000\000\002\000\000\000\002" in
+    let source = Filename.concat cache_dir "retained-original" in
+    write_file source png;
+    let rgba = "\025\169\116\255\235\087\087\255\025\169\116\000\235\087\087\128" in
+    let display = Cache.Character_cells {columns=2;rows=1} in
+    let attempt bytes =
+      converter_succeeds cache_dir "ffmpeg" bytes;
+      let result = Cache.prepare_presentation ~run ~cache_dir display png in
+      check string "original retained" png (read_file source);
+      check (list string) "only source and process fixture retained"
+        ["ffmpeg";"retained-original"] (Sys.readdir cache_dir |> Array.to_list |> List.sort String.compare);
+      result in
+    List.iter (fun bytes ->
+      check bool "wrong decoder frame length refused" true (Result.is_error (attempt bytes)))
+      [String.sub rgba 0 15; rgba ^ "x"];
+    (match unwrap (attempt rgba) with
+     | Cache.Rgba {columns;pixel_rows;bytes} ->
+       check int "RGBA width" 2 columns;
+       check int "RGBA height" 2 pixel_rows;
+       check string "alpha and pixel bytes preserved" rgba bytes
+     | Png _ -> fail "character request returned PNG");
+    executable cache_dir "ffmpeg" "exit 127";
+    check bool "missing decoder remains a refusal" true
+      (Result.is_error (Cache.prepare_presentation ~run ~cache_dir display png));
+    check (list string) "failed attempt leaves no temporary files"
+      ["ffmpeg";"retained-original"] (Sys.readdir cache_dir |> Array.to_list |> List.sort String.compare))
+
 let test_mosaic_failure_retains_input_and_can_recover () =
   List.iter (fun code -> with_cache (fun cache_dir run ->
     let url = "https://fixture.invalid/preview.png" in
@@ -470,7 +515,11 @@ let test_a_killed_decoder_is_described_as_killed () =
 let () =
   run "tui image cache"
     [ ( "workflows"
-      , [ test_case "a delete during the fetch does not take the download" `Quick
+      , [ test_case "character preview refuses an unrepresentable ratio before decoding" `Quick
+            test_character_frame_refuses_unrepresentable_ratio
+        ; test_case "character decoder frame protocol and attempt cleanup" `Quick
+            test_character_frame_protocol_and_cleanup
+        ; test_case "a delete during the fetch does not take the download" `Quick
             test_a_delete_during_the_fetch_does_not_take_the_download
         ; test_case "a delete during the conversion does not take the frame" `Quick
             test_a_delete_during_the_conversion_does_not_take_the_frame

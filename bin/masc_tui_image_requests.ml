@@ -3,7 +3,10 @@ type source =
       format : Masc_tui_image_payload.format }
   | Generated of Masc_tui_image_preview.output_source
 
-let load ~host ~port ~cache_dir ~diagram_width ~diagram_colors source =
+let load ~host ~port ~cache_dir ~diagram_width ~diagram_colors ~display source =
+  let present result = Result.bind result (fun png ->
+    Masc_tui_image_cache.prepare_presentation ~run:Unix.system
+      ~cache_dir:(cache_dir ()) display png) in
   let prepare bytes =
     Masc_tui_image_cache.prepare_payload ~run:Unix.system ~cache_dir:(cache_dir ()) bytes in
   let prepare_declared format bytes = match format with
@@ -25,22 +28,22 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_colors source =
           let ( let* ) = Result.bind in
           let* response = Masc_tui_http.decode_json ~allow_empty:false ~status_code ~body in
           let* bytes = Masc_tui_image_preview.decode_artifact reference response in
-          prepare_declared format bytes))
+          present (prepare_declared format bytes)))
   | Generated (Masc_tui_image_preview.Inline_data data) ->
     Eio_guard.run_in_systhread ~label:"tui-output-image-decode" (fun () ->
-      Result.bind (Masc_tui_image_payload.decode data)
-        (prepare_declared (Masc_tui_image_payload.format data)))
+      present (Result.bind (Masc_tui_image_payload.decode data)
+        (prepare_declared (Masc_tui_image_payload.format data))))
   | Generated (Masc_tui_image_preview.Inline_svg svg) ->
     Eio_guard.run_in_systhread ~label:"tui-output-svg-convert" (fun () ->
-      Masc_tui_pele.render ~format:Svg ~cache_dir:(cache_dir ()) ~max_width:diagram_width
-        ~colors:diagram_colors svg)
+      present (Masc_tui_pele.render ~format:Svg ~cache_dir:(cache_dir ()) ~max_width:diagram_width
+        ~colors:diagram_colors svg))
   | Generated (Masc_tui_image_preview.Inline_mermaid source) ->
     Eio_guard.run_in_systhread ~label:"tui-pele-render" (fun () ->
-      Masc_tui_pele.render ~format:Mermaid ~cache_dir:(cache_dir ()) ~max_width:diagram_width
-        ~colors:diagram_colors source)
+      present (Masc_tui_pele.render ~format:Mermaid ~cache_dir:(cache_dir ()) ~max_width:diagram_width
+        ~colors:diagram_colors source))
   | Generated (Masc_tui_image_preview.Remote_uri url) ->
     Eio_guard.run_in_systhread ~label:"tui-output-image-download" (fun () ->
-      Masc_tui_image_cache.prepare_png ~run:Unix.system ~cache_dir:(cache_dir ()) url)
+      present (Masc_tui_image_cache.prepare_png ~run:Unix.system ~cache_dir:(cache_dir ()) url))
   | Generated (Masc_tui_image_preview.Server_path path) ->
     Result.bind (peer path) (fun (_, body) ->
-      Eio_guard.run_in_systhread ~label:"tui-output-image-convert" (fun () -> prepare body))
+      Eio_guard.run_in_systhread ~label:"tui-output-image-convert" (fun () -> present (prepare body)))

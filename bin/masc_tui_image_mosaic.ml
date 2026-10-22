@@ -20,7 +20,8 @@ let fit_grid ~src_w ~src_h ~max_cols ~max_rows =
        When it does not, the height is the binding bound and the width
        follows from it. *)
     let rows_at_full_width = even (max_cols * src_h / src_w) in
-    if rows_at_full_width > 0 && rows_at_full_width <= max_rows then
+    if rows_at_full_width <= 0 then (0, 0)
+    else if rows_at_full_width <= max_rows then
       (max_cols, rows_at_full_width)
     else begin
       let rows = even max_rows in

@@ -288,3 +288,40 @@ let prepare_payload ~run ~cache_dir bytes =
       match convert_to_png ~run ~cache_dir input with
       | Ok path -> read_bytes path
       | Error failures -> Error (conversion_failure_text failures))
+
+type display = Pixel_graphics | Character_cells of { columns : int; rows : int }
+
+type presentation =
+  | Png of string
+  | Rgba of { columns : int; pixel_rows : int; bytes : string }
+
+let prepare_presentation ~run ~cache_dir display png =
+  match display with
+  | Pixel_graphics -> Ok (Png png)
+  | Character_cells {columns;rows} ->
+    let ( let* ) = Result.bind in
+    let* width, height =
+      match verdict_of_bytes png, Masc.Keeper_image_dimensions.image_dimensions png with
+      | Known_image {media_type="image/png"}, Some (width,height)
+        when width > 0 && height > 0 -> Ok (width,height)
+      | (Known_image _ | Unknown_signature | Empty), (Some _ | None) ->
+        Error "character image preview requires a PNG with valid dimensions" in
+    let columns, pixel_rows = Masc_tui_image_mosaic.fit_grid
+      ~src_w:width ~src_h:height ~max_cols:columns ~max_rows:(rows * 2) in
+    if columns <= 0 || pixel_rows <= 0 then Error "no room for the image preview"
+    else
+      let* input = attempt_path ~cache_dir ~prefix:"cell_image_" ~suffix:".png" in
+      Fun.protect ~finally:(fun () -> discard input) (fun () ->
+        let* output = attempt_path ~cache_dir ~prefix:"cell_frame_" ~suffix:".rgba" in
+        Fun.protect ~finally:(fun () -> discard output) (fun () ->
+          let* () =
+            try Out_channel.with_open_bin input (fun oc -> Out_channel.output_string oc png); Ok ()
+            with Sys_error detail -> Error detail in
+          let command = Printf.sprintf
+            "ffmpeg -v error -nostdin -y -i %s -vf scale=%d:%d -frames:v 1 -f rawvideo -pix_fmt rgba %s >/dev/null 2>&1"
+            (Filename.quote input) columns pixel_rows (Filename.quote output) in
+          let* _ = Result.map_error decode_failure_text (run_decoder ~run ~output_path:output command) in
+          let* bytes = read_bytes output in
+          if String.length bytes <> columns * pixel_rows * 4 then
+            Error "image decoder returned an incomplete or unexpected RGBA frame"
+          else Ok (Rgba {columns;pixel_rows;bytes})))

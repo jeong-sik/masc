@@ -168,6 +168,20 @@ encoded wire blob's MIME, and verify wire size and digest before rendering.
 Other declared image formats keep
 the existing image converter path. Percent-encoded SVG data URIs are not
 supported by the base64 image path.
+
+Selected Resources images and generated/retained chat images use pixel graphics
+when the terminal supports them. A truecolour or 256-colour terminal without
+those graphics protocols receives a colour character-cell preview instead.
+PNG-to-RGBA decoding runs in the same acquisition worker with an aspect-preserving
+grid fitted to the captured body box. Alpha is retained for the existing mosaic
+renderer and colours go through the terminal palette projection. Temporary
+decoder files belong to one attempt and are removed on success and failure.
+The owner applies the existing generation, resource-reading and physical
+workspace checks before painting either representation. A smaller terminal at
+completion refuses the old grid and asks to reopen it; any key dismisses the
+preview. Missing decoders and unsupported colour capabilities leave a visible
+refusal with the original reading intact. This path does not change local named
+file or staged-attachment image previews, browser layout or copied source bytes.
 Scripts, metadata, templates, embedded frames and explicit hidden subtrees do
 not contribute reading/image candidates. This reading does not execute CSS or
 JavaScript, and does not reproduce a browser's page layout.

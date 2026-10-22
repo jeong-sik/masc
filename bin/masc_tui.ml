@@ -10544,6 +10544,43 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
       state.image_open <- true
   end
 
+let character_images_available () =
+  Masc_tui_theme.colors_enabled
+  && match Masc_tui_terminal_palette.stdout_color_level () with
+     | Masc_tui_terminal_palette.True_color | Ansi256 -> true
+     | Ansi16 | Unknown -> false
+
+let draw_prepared_image state ~refuse ~title = function
+  | Masc_tui_image_cache.Png png -> draw_image state ~refuse ~title png
+  | Rgba {columns=image_columns;pixel_rows;bytes} ->
+    let rows, columns = Masc_tui_ansi.get_terminal_size () in
+    if state.msx_open then
+      refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
+    else if not (character_images_available ()) then
+      refuse "this terminal has no colour image presentation"
+    else if image_columns > columns - 2 || pixel_rows / 2 > rows - 3 then
+      refuse "terminal size changed; reopen the image preview"
+    else
+      let lines = Masc_tui_image_mosaic.render_rgba
+        ~project:Masc_tui_terminal_palette.best_color
+        ~cols:image_columns ~rows:pixel_rows bytes in
+      match lines with
+      | [] -> refuse "image preview has no character frame"
+      | _ :: _ ->
+        state.browser_viewport <- None;
+        browser_image_region := None;
+        browser_pointer_press := None;
+        let title = Keeper_chat.terminal_safe_text ~preserve_newlines:false title in
+        let body = List.mapi (fun index line ->
+          Printf.sprintf "\x1b[%d;1H%s" (index + 2) line) lines
+          |> String.concat "" in
+        Masc_tui_msx.invalidate ();
+        write_to_terminal (Ansi.clear ^ "\x1b[1;1H"
+          ^ Message_layout.fit_width title (max 1 (columns - 1)) ^ body
+          ^ Printf.sprintf "\x1b[%d;1H%s" rows
+              (Message_layout.fit_width "  colour-cell preview · any key: back" (max 1 (columns - 1))));
+        state.image_open <- true
+
 let download_remote_image url =
   Masc_tui_image_cache.download ~run:Unix.system
     ~cache_dir:(ensure_img_cache_dir ()) url
@@ -10855,9 +10892,16 @@ let settle_retired_sent_image state =
 let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
-  if !terminal_draws_images = Some false then
-    notice ~kind:Notice_failure terminal_draws_no_images
-  else begin
+  let rows, columns = Masc_tui_ansi.get_terminal_size () in
+  let display = match !active_graphics_protocol with
+    | Masc_tui_graphics.Kitty_protocol | ITerm2_protocol -> Some Masc_tui_image_cache.Pixel_graphics
+    | Unsupported_protocol ->
+      if character_images_available () then Some (Masc_tui_image_cache.Character_cells
+        {columns=max 0 (columns - 2);rows=max 0 (rows - 3)})
+      else None in
+  match display with
+  | None -> notice ~kind:Notice_failure "image preview requires pixel graphics or 256-colour text"
+  | Some display ->
     notice ~kind:Notice_reply (Printf.sprintf "Loading image (any key cancels): %s" name);
     let port = state.port in
     let keeper_name = if state.view = Resources then None else state.msg_target_keeper_name in
@@ -10866,7 +10910,6 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
     state.sent_image_read <- Some {sir_generation=generation; sir_view=view;
       sir_keeper=keeper_name; sir_name=name; sir_authority=state.workspace_read_authority;
       sir_resource=(if view = Resources then state.resource_content else None)};
-    let _, columns = Masc_tui_ansi.get_terminal_size () in
     (* When the terminal supplies no pixel geometry, use the half-em advance
        of Pele's 16px default font as a logical layout width. The existing
        image presenter still fits the resulting PNG to the actual cells. *)
@@ -10886,7 +10929,7 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
       (Masc_tui_terminal_palette.snapshot_palette palette) in
     let run () =
       let result = Masc_tui_image_requests.load ~host:server_peer_host ~port
-        ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_colors source in
+        ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_colors ~display source in
       enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; skill_reference; result })
     in
     match Eio_context.get_switch_opt () with
@@ -10894,7 +10937,6 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
     | None ->
         state.sent_image_read <- None;
         notice ~kind:Notice_failure "image preview requires an active connection"
-  end
   end
 
 let current_resource_images (state : state) =
@@ -20359,7 +20401,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         in
         match result with
         | Error reason -> refuse reason
-        | Ok data -> draw_image state ~refuse ~title:name data
+        | Ok presentation -> draw_prepared_image state ~refuse ~title:name presentation
       end
   | Image_render_ready { title; caption; page_url; image_url; result } ->
       if not state.msx_open then begin

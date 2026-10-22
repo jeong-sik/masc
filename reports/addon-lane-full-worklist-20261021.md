@@ -563,3 +563,19 @@ raw fixture 수정8ccc의 [선택 실행39697203989](https://github.com/jeong-si
 외부에서 `fix/candle-derive-observation-20261022`에 병합된 사실을 REST로 확인했다.
 실제 대상3630add의 전체 tree는 이전8ccc와 동일하다. gh stack rebase의 conflict resolution에서
 이미 병합된 prefix를 제외하고 새 읽기 경계만 다시 올렸다. main 통합·운영 설치를 뜻하지 않는다.
+
+## 2026-10-22 executed foundation receipt and production wait diagnostics
+
+raw nonfinite fixture 수정의 정확한8ccc 선택 실행39697203989는 실제 completed/success다.
+[공개 실행 영수증](../docs/evidence/2026-10-22-exact-observation-timing/selected-execution.json)에
+registry37·projection17·Candle14·Librarian55 합123건 성공, 실제 source/log hash와 이전
+c7의 serializer FAIL을 함께 보존했다. 새 current-disk 읽기·production owner·provider/UI/설치의
+성공으로 이월하지 않는다. #44989 final077c의 독립 bounded source PASS와 새3-suite
+선택39698460839 요청은 이 foundation 실행과 별개다.
+
+production642의 남은 case10 timeout은 원래 host Exact terminal을 기다리는 단계이며
+아직 Off 정산에 도달하지 않았다. 후속 fixture는 같은 원래 request/instance에 결속한
+absent/open/terminal/error, host Inspect, strict retained Exact의 attempts, 실제 HTTP body/count와
+provider callback의 원래 예외/backtrace를 실패 때 보존한다. timeout·수락 조건·resume 호출·
+Off 순서와 production 실행은 바꾸지 않는다. 새 진단 소스·파싱과 compiled 실행/원인 수리는
+구분한다. 조건부 publication·원래 관측 delivery/ACK와 A01–H06 전체 완료는 계속 남는다.

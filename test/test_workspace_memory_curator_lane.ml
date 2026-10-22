@@ -144,7 +144,8 @@ let seed_size_refusal store capture =
   advance store record (Progress.Refused {stage=Progress.Execution;
     evidence=Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final (Input_refused Input_capacity))})
 type provider_mode = Answer | Refuse_fact of string
-let with_fixture ?(off=false) ?(routes=true) ?(start_owner=true) ?(invalid_first=false)
+let with_fixture ?(on_response_error=(fun _ _ -> ()))
+    ?(off=false) ?(routes=true) ?(start_owner=true) ?(invalid_first=false)
     ?(claims=["An original production source"]) f =
   let base_path=Filename.temp_dir "curator-production-owner-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
@@ -179,6 +180,7 @@ let with_fixture ?(off=false) ?(routes=true) ?(start_owner=true) ?(invalid_first
           (captures base_path store) in
         match matches with [(_,capture)] -> capture | [] | _::_::_ -> fail "provider has no unique original request" in
       let response bad _index body=
+        try
         let original=original_for body in
         let output=match Capture.work original with
           | Capture.Classification {batch;_} ->
@@ -187,7 +189,13 @@ let with_fixture ?(off=false) ?(routes=true) ?(start_owner=true) ?(invalid_first
             `Assoc ["decisions",`List (if refuse then [] else List.map (fun (fact:Ledger.pending_fact) ->
               `Assoc ["fact_id",`String (Request.fact_id fact.fact);"kind",`String "create_claim";"value",`String fact.claim]) batch.selected)]
           | Capture.Briefing _ -> `Assoc ["briefing",`String (if bad then " " else "The original selected workspace evidence was synthesized.")] in
-        `OK,F.openai_response output in
+        `OK,F.openai_response output
+        with
+        | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+        | exn ->
+          let backtrace=Printexc.get_raw_backtrace () in
+          on_response_error exn backtrace;
+          Printexc.raise_with_backtrace exn backtrace in
       let server=F.start_server ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) (F.Reply_with (response false)) in
       let urls=if invalid_first then
         let bad=F.start_server ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) (F.Reply_with (response true)) in
@@ -321,16 +329,60 @@ let test_existing_intent_recovers_locally_off_then_runs_on ()=
     check bool "original child ID completes after actual reattachment" true
       (List.exists (fun record -> record.Owner.request_id=intent.request_id && is_finished record) (records store)))
 let test_accepted_host_terminal_commits_off_without_worker ()=
-  with_fixture ~start_owner:false (fun ~sw ~clock ~base_path ~config ~store ~source ~declaration ~server ~urls:_ ~mode:_ ~delivery ->
+  let response_error=ref None in
+  with_fixture ~start_owner:false
+    ~on_response_error:(fun exn backtrace -> response_error:=Some (exn,backtrace))
+    (fun ~sw ~clock ~base_path ~config ~store ~source ~declaration ~server ~urls:_ ~mode:_ ~delivery ->
     await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
     delivery:=true;
     let capture=capture_classification config in
     let request_id=Capture.Request_id.to_string (Capture.request_id capture) in
+    let inventory=Runtime.inventory ~config in
+    if not inventory.owner_present || not inventory.complete || inventory.issues<>[]
+    then fail "terminal fixture cannot bind an incomplete original worker inventory";
+    let instance_id=match inventory.instances |> List.filter
+        (fun (item:Runtime.inventory_instance) -> item.presence=Runtime.Live
+          && item.package_id=Capture.package_id
+          && match item.configuration with Some owner -> owner.id="curator" | None -> false) with
+      | [instance] -> instance.instance_id
+      | [] | _::_::_ -> fail "terminal fixture requires the original live configured worker" in
     ignore (Consumer.resume ~config ~request_id |> consumed);
     let request=Server_workspace_memory_addon_validation.request capture |> get in
-    await clock (fun () -> match Lane_addon_exact.observe_retained ~store ~declaration_id:"curator"
-        ~schema:(Capture.output_schema capture) request |> get with
-      | Lane_addon_exact.Retained_terminal _ -> true | Retained_absent | Retained_open -> false);
+    let observation=ref `Null in
+    let diagnostic ()=
+      let result_json = function Ok value -> `Assoc ["value",value]
+        | Error detail -> `Assoc ["error",`String detail] in
+      let inspected=Runtime.dispatch ~access:Lane_addon_sources.Operator_configuration ~config
+        ~operation:Runtime.Inspect (`Assoc ["instance_id",`String instance_id])
+        |> Result.map_error Runtime.error_to_string |> result_json in
+      let retained=Store.load_exact_request store ~declaration_id:"curator" ~request_id
+        |> Result.map (function Some value -> `Assoc ["present",value]
+          | None -> `Assoc ["absent",`Bool true]) |> result_json in
+      `Assoc ["request_id",`String request_id;"instance_id",`String instance_id;
+        "last_retained_observation",!observation;"host_inspection",inspected;"retained_exact",retained;
+        "http_posts",`Int (F.post_count server);
+        "http_request_bodies",`List (List.map (fun body -> `String body) (F.request_bodies server));
+        "provider_callback_error",(match !response_error with None -> `Null
+          | Some (exn,backtrace) -> `Assoc ["exception",`String (Printexc.to_string exn);
+            "backtrace",`String (Printexc.raw_backtrace_to_string backtrace)])] in
+    (match await clock (fun () ->
+        (match !response_error with None -> ()
+         | Some (exn,backtrace) -> Printexc.raise_with_backtrace exn backtrace);
+        match Lane_addon_exact.observe_retained ~store ~declaration_id:"curator"
+          ~schema:(Capture.output_schema capture) request with
+        | Error detail -> observation:=`Assoc ["error",`String detail];fail detail
+        | Ok (Lane_addon_exact.Retained_terminal _) -> observation:=`String "terminal";true
+        | Ok Retained_absent -> observation:=`String "absent";false
+        | Ok Retained_open -> observation:=`String "open";false) with
+     | () -> ()
+     | exception (Eio.Cancel.Cancelled _ as cancellation) -> raise cancellation
+     | exception exn ->
+       let backtrace=Printexc.get_raw_backtrace () in
+       (try Format.eprintf "Retained terminal failure context: %a@." Yojson.Safe.pp (diagnostic ())
+        with
+        | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+        | diagnostic_error -> Format.eprintf "Terminal diagnostic also failed: %s@." (Printexc.to_string diagnostic_error));
+       Printexc.raise_with_backtrace exn backtrace);
     check int "original provider answered before the lost delivery" 1 (F.post_count server);
     save_source config source (declaration false);
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);

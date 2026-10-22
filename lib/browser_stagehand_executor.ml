@@ -558,7 +558,7 @@ let execute ~tabs ~call ?actor verb =
     | Browser_lane.Page_extract { tab_id; instruction; schema } ->
       sentence ~tabs ~call ~tab_id ~outcome:reported_as_data (fun page_id -> Wire.Extract { page_id; instruction; schema; timeout = Wire.sentence_timeout })
     | Browser_lane.Session_open _ | Browser_lane.Session_close | Browser_lane.Session_status
-    | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | Browser_lane.Page_network _
+    | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | Browser_lane.Page_network _ | Browser_lane.Page_cookies _
     | Browser_lane.Page_context _ ->
       Error
         (Browser_lane.Rejected_before_effect

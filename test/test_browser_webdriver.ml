@@ -494,6 +494,7 @@ let test_console_read_uses_the_tabs_context () =
       Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
         console=(fun ~context -> asked := context :: !asked;
           Ok (`Assoc ["entries",`List [`Assoc ["text",`String "hello"]];"dropped",`Int 0]));
+        network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
         check=(fun () -> Ok ());close=(fun () -> ())} in
     let driver = Driver.create ~start_downloads ~request () in
     (match Driver.execute driver (Lane.Page_console {tab_id=1}) with
@@ -512,6 +513,33 @@ let test_console_read_uses_the_tabs_context () =
     (match Driver.execute driver (Lane.Page_console {tab_id=99}) with
      | Lane.Refused _ -> () | _ -> fail "an unknown tab must be refused");
     check (list string) "an unknown tab asks nothing" ["tab"] !asked)
+
+let test_cookie_values_never_leave_the_driver_module () =
+  Eio_main.run (fun _ ->
+    let request ~method_ ~path ~body:_ = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET, "/session/owned/window" -> Ok (`String "tab")
+      | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/execute/sync" -> Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture"])
+      | `GET, "/session/owned/cookie" ->
+        Ok (`List [`Assoc ["name",`String "sid";"value",`String "DRIVERSECRET";"domain",`String "example.test";
+                           "path",`String "/";"secure",`Bool true;"httpOnly",`Bool true]])
+      | _ -> fail ("unexpected cookie request: " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    (match Driver.execute driver (Lane.Page_cookies {tab_id=1}) with
+     | Lane.Refused _ -> () | _ -> fail "a closed session must refuse a cookie read");
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    match Driver.execute driver (Lane.Page_cookies {tab_id=1}) with
+    | Lane.Answered json ->
+      let text = Yojson.Safe.to_string json in
+      check bool "the value never reaches the answer" false
+        (try ignore (Str.search_forward (Str.regexp_string "DRIVERSECRET") text 0); true with Not_found -> false);
+      check bool "the cookie's name does" true
+        (try ignore (Str.search_forward (Str.regexp_string "sid") text 0); true with Not_found -> false)
+    | _ -> fail "the cookie read was not answered")
 
 let test_pointer_guard_failure_rejects_before_effect () =
   Eio_main.run (fun _ ->
@@ -711,4 +739,5 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "explicit Zen binary never falls back" `Quick test_selected_binary;
   test_case "touch sends a touch pointer and releases it" `Quick test_touch_sends_a_touch_pointer_and_releases_it;
   test_case "console read uses the tab's context" `Quick test_console_read_uses_the_tabs_context;
+  test_case "cookie values never leave the driver module" `Quick test_cookie_values_never_leave_the_driver_module;
   test_case "browser configuration" `Quick test_browser_configuration ]]

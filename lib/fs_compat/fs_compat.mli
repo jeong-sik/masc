@@ -236,6 +236,17 @@ val owned_inventory_entry_kind
   : owned_inventory_root -> string
   -> (Unix.file_kind, owned_regular_file_read_error) result
 
+val with_owned_inventory_regular_file
+  : owner_uid:int -> owned_inventory_root -> string
+  -> (file:Unix.file_descr -> parent:Unix.file_descr -> stat:Unix.stats -> 'a)
+  -> ('a, owned_regular_file_read_error) result
+(** Existing regular file and its actual parent through the same no-follow
+    chain. Descriptors are borrowed for blocking I/O only: do not close, retain
+    or use them from another fiber. Fresh UID/permission, path/descriptor and
+    single-link and file-snapshot checks finish before returning the callback's result. The
+    callback may fsync those very descriptors; this scope does not itself make
+    data durable. Run the complete enclosing root scope on a system thread. *)
+
 type owned_regular_file_range_digest =
   { content : string
   ; sha256 : string
@@ -305,6 +316,19 @@ val read_owned_directory_if_present
     enumeration/final-validation failure, remains an error. [Some []] is an
     existing empty directory. Uses the same no-follow descriptors and cleanup
     contract as {!read_owned_directory}, never a separate pathname preflight. *)
+
+val with_owned_directory_inventory_if_present
+  : owner_uid:int -> inventory_root:owned_inventory_root
+  -> sync_directory:(Unix.file_descr -> unit)
+  -> string -> (owned_inventory_root -> string list -> 'a)
+  -> ('a option, owned_regular_file_read_error) result
+(** The same optional no-follow directory binding, retaining the root and every
+    ancestor descriptor throughout the callback and its entry reads. The nested
+    root is borrowed and must not escape. Initial child absence returns [None]
+    only after actual bound ancestors settle and pass fresh ownership checks.
+    Listed-directory disappearance, callback/settlement failures and replaced
+    ancestors are errors. The complete scope is blocking; callers supply their
+    original process lease and run it on one system thread. *)
 
 (** Eio-native, deterministically sorted directory inventory. *)
 val read_dir : string -> string list

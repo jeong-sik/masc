@@ -18,6 +18,13 @@ val load : store:Lane_addon_store.t -> scope:string -> request_id:string ->
     store. [None] means the key is absent; malformed, changed or unreadable
     records are errors. This restores a known ID, not restart discovery or
     permission to dispatch or commit. The caller owns workspace authority. *)
+val discover : store:Lane_addon_store.t -> scope:string -> (retained list, error) result
+(** Read and strictly validate every published original request in this scope,
+    including its exact hashed filename and complete input/progress history.
+    Any malformed, misnamed, vanished or unreadable published record rejects the
+    inventory; no partial list is returned as complete. No directories, requests
+    or dispatches are created. Results are observations; load/advance and actual
+    workspace authority must be revalidated by the original serialized owner. *)
 val retain : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   installation_id:string -> package_id:string -> tool:string -> request:Yojson.Safe.t -> (unit, error) result
 (** Persist the complete canonical request before dispatch. Same input and

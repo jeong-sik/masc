@@ -29,7 +29,14 @@ let refused error = Ok (Peer.result_marker ^ Yojson.Safe.to_string (obj ["ok",`B
 let field name json = Yojson.Safe.Util.member name json
 let text json = Yojson.Safe.Util.to_string json
 
-let capture_directory () = Filename.temp_dir "masc-ego-peer-" ""
+(* Every directory a case made, removed with what is left in it once the run ends. *)
+let created = ref []
+let capture_directory () =
+  let directory = Filename.temp_dir "masc-ego-peer-" "" in
+  created := directory :: !created; directory
+let () = at_exit (fun () -> List.iter (fun directory ->
+  Array.iter (fun name -> Sys.remove (Filename.concat directory name)) (Sys.readdir directory);
+  Sys.rmdir directory) !created)
 
 let opened ?(capture_directory=capture_directory ()) run =
   let run script = let sent = sent_of script in

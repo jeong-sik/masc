@@ -459,7 +459,7 @@ let rec execute_unlocked t = function
             (Browser_lane.Keyboard.input_source ~id:"masc-browser-keyboard" key)
         | Browser_lane.Double_click_at {point;viewport}
         | Browser_lane.Hover_at {point;viewport}
-        | Browser_lane.Click_at {point;viewport}
+        | Browser_lane.Click_at {point;viewport;_}
         | Browser_lane.Scroll_at {point;viewport;_}
         | Browser_lane.Drag {from=point;viewport;_} ->
           (* The guard runs before any /actions request, so a stale URL or
@@ -475,11 +475,12 @@ let rec execute_unlocked t = function
             | Browser_lane.Double_click_at _ -> Browser_lane.Pointer.Double_click
             | Browser_lane.Drag {to_;via;duration_ms;_} -> Browser_lane.Pointer.Drag {via;destination=to_;duration_ms}
             | Browser_lane.Scroll_at {x;y;_} -> Browser_lane.Pointer.Wheel {x;y}
+            | Browser_lane.Click_at {button;_} -> Browser_lane.Pointer.Click button
             | Browser_lane.Set_zoom _ | Browser_lane.Double_click _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
-            | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Follow_link _
-            | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Browser_lane.Pointer.Click in
+            | Browser_lane.Scroll _ | Browser_lane.Follow_link _
+            | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Browser_lane.Pointer.Click Browser_lane.Pointer.Primary in
           let actions = `Assoc ["actions", Browser_lane.Pointer.input_sources
             ~pointer_id:"masc-browser-pointer" ~wheel_id:"masc-browser-wheel"
             ~viewport ~start:point gesture] in

@@ -411,7 +411,7 @@ let test_semantic_pointer_input () =
         (Executor.evaluate_expression ~runtime:Executor.Scene_runtime
           ~body:Masc.Browser_interaction.pointer_guard_script
           ~args:(Lane.interaction_args ~tab_id:0 ~expected_url
-            (Lane.Click_at {point;viewport=observed_viewport}))) expression
+            (Lane.Click_at {point;viewport=observed_viewport;button=Lane.Pointer.Primary}))) expression
     | _ -> fail "observed click must resolve, guard, and dispatch one native click")
     [Lane.Click "#menu-item";Lane.Click_node {document_id="d1";node_id="n1"}];
   check bool "resolver refusal is before any input" true
@@ -514,7 +514,7 @@ let test_interactions () =
   fake.sent <- [];
   let clicked =
     served (Executor.execute ~tabs ~call:(call fake)
-      (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } }))
+      (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } }))
   in
   (match List.rev fake.sent with
    | [ Wire.Page_evaluate _; Wire.Page_click { page_id = "P2"; x = 400.; y = 150. }; Wire.Page_evaluate _ ] -> ()
@@ -525,14 +525,14 @@ let test_interactions () =
   fake.sent <- [];
   check bool "a malformed receipt after native input is refused" true
     (refused (Executor.execute ~tabs ~call:(call fake)
-       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } })));
+       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } })));
   check bool "native input was sent before the malformed receipt" true
     (List.exists (function Wire.Page_click _ -> true | _ -> false) fake.sent);
   fake.evaluated <- Some (`Assoc []);
   fake.sent <- [];
   check bool "a malformed guard result is before effect" true
     (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
-       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } })));
+       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } })));
   check bool "a malformed guard never sends native input" true
     (List.for_all (function Wire.Page_click _ -> false | _ -> true) fake.sent);
   fake.evaluated <- None;
@@ -540,7 +540,7 @@ let test_interactions () =
   fake.failing <- (function Wire.Page_evaluate _ -> Some (Session.Rejected { code = -32603; message = "page_url_changed" }) | _ -> None);
   check bool "a guard that refused is before effect" true
     (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
-       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } })));
+       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } })));
   check bool "and nothing was clicked" true
     (List.for_all (function Wire.Page_click _ -> false | _ -> true) fake.sent)
 ;;

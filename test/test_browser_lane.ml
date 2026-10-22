@@ -117,11 +117,12 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Viewport_capture -> Page_capture {tab_id=2}
   | Scene_read -> Page_scene {tab_id=2; max_chars=1000; view=Content; scope=None}
   | Dom_interaction -> interact (Click "#button")
-  | Point_click -> interact (Click_at {point;viewport})
+  | Point_click -> interact (Click_at {point;viewport;button=Pointer.Primary})
   | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
   | Trusted_hover -> interact (Hover_at {point;viewport})
   | Trusted_drag -> interact (Drag {from=point;to_=point;viewport;via=[];duration_ms=0})
   | Trusted_double_click -> interact (Double_click_at {point;viewport})
+  | Trusted_button_click -> interact (Click_at {point;viewport;button=Pointer.Secondary})
   | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
       | Browser_zoom -> interact (Set_zoom {factor=1.5})
   | Tab_activation -> interact Activate_tab
@@ -134,7 +135,7 @@ let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the extension has no pointer the browser trusts"
-    Lane.[Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_keyboard; Tab_creation] (unserved Lane.Web_extension);
+    Lane.[Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Trusted_keyboard; Tab_creation] (unserved Lane.Web_extension);
   check (list capability) "the BiDi peer has no tab activation"
     Lane.[Browser_zoom; Tab_activation] (unserved Lane.Webdriver_bidi);
   List.iter (fun capability ->

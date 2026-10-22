@@ -76,7 +76,7 @@ checking rendered application state, and gathering evidence across tabs.
 | `hover` | `documentId`/`nodeId` or a unique `selector`, plus `expectedUrl`; resolves the current visible, unobstructed element without clicking | live BiDi or automation |
 | `drag_to` | `source` and `destination`, each `{documentId,nodeId}` or `{selector}`, plus `expectedUrl` | live BiDi or automation |
 | `hover_at` | normalized `point`, captured `viewport`, and `expectedUrl`; moves the trusted pointer without clicking | live BiDi or automation |
-| `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y` | live or automation |
+| `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y`; `click_at` also takes `button` (`primary` by default, `middle`, `secondary`) | live or automation; a `middle` or `secondary` click needs live BiDi or automation |
 | `drag` | normalized `from`/`to` and captured `viewport`; trusted pointer press, move and release | live BiDi or automation |
 | `activate_tab` | the selected live `clientId`/`tabId` | live WebExtension only |
 
@@ -110,6 +110,7 @@ build their rejection from it.
 | `document_source` | the `browser_document` Lane Add-on source | yes | yes |
 | `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes |
 | `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer |
+| `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | no | yes |
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel |
 | `trusted_hover` | `hover`, `hover_at` | no | yes |
 | `trusted_drag` | `drag_to`, `drag` | no | yes |

@@ -7,14 +7,22 @@ val viewport_of_json : Yojson.Safe.t -> (viewport, string) result
 val point_to_json : point -> Yojson.Safe.t
 val viewport_to_json : viewport -> Yojson.Safe.t
 
+(** The mouse button of a click. [Primary] is the one a plain click uses. *)
+type button = Primary | Middle | Secondary
+
+val button_of_string : string -> button option
+val button_to_string : button -> string
+
 type gesture =
   | Hover
-  | Click
+  | Click of button
   | Double_click
   | Drag of { via : point list; destination : point; duration_ms : int }
   | Wheel of { x : int; y : int }
 
-(** Native WebDriver/BiDi input sources. Drag visits every supplied waypoint
+(** Native WebDriver/BiDi input sources. A click presses and releases the
+    button's WebDriver pointer button: 0 for [Primary], 1 for [Middle], 2 for
+    [Secondary]. Drag visits every supplied waypoint
     and moves over the destination twice before releasing. An empty path
     visits the midpoint first, so activation and destination movement occur
     at distinct positions when their CSS-pixel coordinates differ. This lets dragover

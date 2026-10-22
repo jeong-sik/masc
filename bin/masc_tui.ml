@@ -25004,7 +25004,8 @@ and is loaded on demand through keeper_skill.
                       | Some (x,y) ->
                           pointer
                             (if row=start_row && column=start_column then
-                               Browser_lane.Click_at {point=from;viewport=shot.viewport}
+                               Browser_lane.Click_at {point=from;viewport=shot.viewport;
+                                 button=Browser_lane.Pointer.Primary}
                              else Browser_lane.Drag {from;to_={x;y};viewport=shot.viewport;
                                via=[];duration_ms=0})
                       | None -> ())

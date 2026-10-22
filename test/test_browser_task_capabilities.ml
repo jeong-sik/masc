@@ -105,8 +105,29 @@ let test_model_selection () = fixture (fun ~chrome ~gecko ~live ~extension:_ ~bi
     (Tool_result.is_success (tabs (`Assoc required)));
   check int "selected consumer dispatches exactly the chosen discovery" (chrome_before+1) !chrome)
 
+let test_button_click_table () =
+  let reaches backend operation = match Cap.support backend operation with
+    | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
+  List.iter (fun operation ->
+    check bool (Cap.operation_name operation ^ " on live BiDi") true
+      (reaches (Cap.Connected Lane.Webdriver_bidi) operation);
+    check bool (Cap.operation_name operation ^ " on owned Gecko") true (reaches Cap.Owned_gecko operation);
+    check bool (Cap.operation_name operation ^ " is not claimed for Stagehand") false
+      (reaches Cap.Owned_chromium operation);
+    check bool (Cap.operation_name operation ^ " is not claimed for the extension") false
+      (reaches (Cap.Connected Lane.Web_extension) operation);
+    check bool (Cap.operation_name operation ^ " is not claimed for Safari") false
+      (reaches Cap.Safari_unavailable operation);
+    match Cap.support Cap.Owned_gecko operation with
+    | Cap.Conditional {invocation;_} ->
+      check bool (Cap.operation_name operation ^ " is invoked through click_at") true
+        (invocation.action = Some "click_at" && invocation.tool = Cap.Interact)
+    | Cap.Available _ | Cap.Unsupported _ -> fail "a button click is conditional on an observed point")
+    [Cap.Right_click; Cap.Middle_click]
+
 let () = run "task-aware browser choice" ["scenarios",[
   test_case "HTML5, frames/downloads and hover/typing discovery" `Quick test_task_choice;
   test_case "zoom, impossible requirements and immutable explicit owners" `Quick test_zoom_and_impossible;
   test_case "session opening and parse/binding pre-effect refusal" `Quick test_open_and_boundary;
-  test_case "selected model consumer is required before discovery and open" `Quick test_model_selection]]
+  test_case "selected model consumer is required before discovery and open" `Quick test_model_selection;
+  test_case "right and middle click are claimed only where the button is pressed" `Quick test_button_click_table]]

@@ -65,12 +65,14 @@ let enabled = function Lane.Enabled -> true | Lane.Disabled | Lane.Unobserved ->
 let stagehand_serves verb = Lane.verb_allowed_on_stagehand verb && match verb with
   | Lane.Page_interact {action=(Lane.Drag {duration_ms;_} | Lane.Drag_to {duration_ms;_});_} -> duration_ms=0
   | Lane.Page_interact {action=(Lane.Activate_tab | Lane.Set_zoom _);_} -> false
+  (* The runtime's [page.click] is not known to take a button. *)
+  | Lane.Page_interact {action=Lane.Click_at {button=(Lane.Pointer.Middle | Lane.Pointer.Secondary);_};_} -> false
   | Lane.Tabs_list | Lane.Page_read _ | Lane.Page_document _ | Lane.Page_downloads _
   | Lane.Page_capture _ | Lane.Page_scene _ | Lane.Session_open _ | Lane.Session_close | Lane.Session_status
   | Lane.Page_goto _ | Lane.Page_elements _ | Lane.Page_act _ | Lane.Page_context _ | Lane.Page_instruct _
   | Lane.Page_locate _ | Lane.Page_extract _
   | Lane.Page_interact {action=(Lane.Double_click _ | Lane.Double_click_at _ | Lane.Type_text _ | Lane.Press_key _ | Lane.Click _ | Lane.Fill _ | Lane.Scroll _ | Lane.Hover _ | Lane.Hover_at _
-      | Lane.Click_at _ | Lane.Scroll_at _ | Lane.Follow_link _ | Lane.Click_node _ | Lane.Fill_node _);_} -> true
+      | Lane.Click_at {button=Lane.Pointer.Primary;_} | Lane.Scroll_at _ | Lane.Follow_link _ | Lane.Click_node _ | Lane.Fill_node _);_} -> true
 let automation_serves verb = Lane.verb_allowed_on_automation verb && match verb with
   | Lane.Page_interact {action=(Lane.Activate_tab | Lane.Set_zoom _);_} -> false
   | Lane.Tabs_list | Lane.Page_read _ | Lane.Page_document _ | Lane.Page_downloads _

@@ -250,7 +250,7 @@ let read t context args =
   | None | Some (`Bool false) -> script t context
       "const chars=Array.from(document.body?.innerText??''); const cap=arguments[0].cap; return {url:location.href,title:document.title,text:chars.slice(0,cap).join(''),chars:chars.length,truncated:chars.length>cap};" (obj ["cap",`Int cap])
   | _ -> Error "invalid includeHtml"
-type pointer_motion = Hover_pointer | Click_pointer | Double_click_pointer | Drag_pointer of { destination : Browser_lane.Pointer.point; via : Browser_lane.Pointer.point list; duration_ms : int }
+type pointer_motion = Hover_pointer | Click_pointer of Browser_lane.Pointer.button | Double_click_pointer | Drag_pointer of { destination : Browser_lane.Pointer.point; via : Browser_lane.Pointer.point list; duration_ms : int }
   | Wheel_pointer of { x : int; y : int }
 let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start motion =
   let before result = Result.map_error (fun e -> Before_effect e) result in
@@ -258,7 +258,7 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   let* observed = before (script t context Browser_interaction.pointer_guard_script args) in
   let gesture = match motion with
     | Hover_pointer -> Browser_lane.Pointer.Hover
-    | Click_pointer -> Browser_lane.Pointer.Click
+    | Click_pointer button -> Browser_lane.Pointer.Click button
     | Double_click_pointer -> Browser_lane.Pointer.Double_click
     | Drag_pointer {destination;via;duration_ms} -> Browser_lane.Pointer.Drag {via;destination;duration_ms}
     | Wheel_pointer {x;y} -> Browser_lane.Pointer.Wheel {x;y} in
@@ -271,14 +271,14 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   let applied=Eio.Switch.run (fun sw ->
     (match motion with
     | Hover_pointer | Wheel_pointer _ -> ()
-    | Click_pointer | Double_click_pointer | Drag_pointer _ -> Eio.Switch.on_release sw (fun ()->
+    | Click_pointer _ | Double_click_pointer | Drag_pointer _ -> Eio.Switch.on_release sw (fun ()->
       released:=Result.map (fun _->()) (command t "input.releaseActions" (obj ["context",str context]))));
     command t "input.performActions" (obj ["context",str context;"actions",sources])) in
   let* _=unknown applied in
   let* ()=unknown !released in
   let* after = unknown (script t context Browser_interaction.pointer_receipt_script (obj [])) in
   let* old_url = unknown (string "url" observed) in
-  let action=match motion with Hover_pointer->"hover_at"|Click_pointer->"click_at"|Double_click_pointer->"double_click_at"|Drag_pointer _->"drag"|Wheel_pointer _->"scroll_at" in
+  let action=match motion with Hover_pointer->"hover_at"|Click_pointer _->"click_at"|Double_click_pointer->"double_click_at"|Drag_pointer _->"drag"|Wheel_pointer _->"scroll_at" in
   match after with `Assoc fields -> Ok (obj (("action",str action)::("urlBefore",str old_url)::fields))
   | _ -> Error (Outcome_unknown "invalid post-input observation")
 let keyboard t context args ~sources ~name =
@@ -391,7 +391,7 @@ let dispatch ?actor ?request_id t ~verb args =
       | Browser_lane.Press_key {key;_} ->
         keyboard t context args ~sources:(Browser_lane.Keyboard.input_source ~id:"masc-keyboard" key) ~name:"press_key"
       | Browser_lane.Hover_at {point;viewport} -> pointer t context args ~viewport ~start:point Hover_pointer
-      | Browser_lane.Click_at {point;viewport} -> pointer t context args ~viewport ~start:point Click_pointer
+      | Browser_lane.Click_at {point;viewport;button} -> pointer t context args ~viewport ~start:point (Click_pointer button)
       | Browser_lane.Scroll_at {point;viewport;x;y} -> pointer t context args ~viewport ~start:point (Wheel_pointer {x;y})
       | Browser_lane.Drag {from;to_;viewport;via;duration_ms} -> pointer t context args ~viewport ~start:from (Drag_pointer {destination=to_;via;duration_ms})
       | Browser_lane.Fill _ | Fill_node _ | Scroll _ | Follow_link _ ->

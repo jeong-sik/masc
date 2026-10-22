@@ -28,9 +28,28 @@ let viewport_to_json viewport = `Assoc ["documentId",`String viewport.document_i
   "width",`Float viewport.width;"height",`Float viewport.height;
   "scrollX",`Float viewport.scroll_x;"scrollY",`Float viewport.scroll_y]
 
+type button = Primary | Middle | Secondary
+
+let button_to_string = function
+  | Primary -> "primary"
+  | Middle -> "middle"
+  | Secondary -> "secondary"
+
+let button_of_string = function
+  | "primary" -> Some Primary
+  | "middle" -> Some Middle
+  | "secondary" -> Some Secondary
+  | _ -> None
+
+(* The WebDriver pointer button numbers: 0 left, 1 middle, 2 right. *)
+let button_number = function
+  | Primary -> 0
+  | Middle -> 1
+  | Secondary -> 2
+
 type gesture =
   | Hover
-  | Click
+  | Click of button
   | Double_click
   | Drag of { via : point list; destination : point; duration_ms : int }
   | Wheel of { x : int; y : int }
@@ -42,14 +61,16 @@ let input_sources ~pointer_id ~wheel_id ~viewport ~start gesture =
   let move ~duration_ms point = `Assoc
     ([ "type", `String "pointerMove"; "origin", `String "viewport"
      ; "duration", `Int duration_ms ] @ coords point) in
-  let button kind = `Assoc ["type", `String kind; "button", `Int 0] in
+  let button ?(which = Primary) kind =
+    `Assoc ["type", `String kind; "button", `Int (button_number which)] in
   let pointer actions = `Assoc
     [ "type", `String "pointer"; "id", `String pointer_id
     ; "parameters", `Assoc ["pointerType", `String "mouse"]
     ; "actions", `List actions ] in
   let source = match gesture with
     | Hover -> pointer [move ~duration_ms:0 start]
-    | Click -> pointer [move ~duration_ms:0 start; button "pointerDown"; button "pointerUp"]
+    | Click which ->
+        pointer [move ~duration_ms:0 start; button ~which "pointerDown"; button ~which "pointerUp"]
     | Double_click -> pointer [move ~duration_ms:0 start; button "pointerDown"; button "pointerUp";
         button "pointerDown"; button "pointerUp"]
     | Drag {via;destination;duration_ms} ->

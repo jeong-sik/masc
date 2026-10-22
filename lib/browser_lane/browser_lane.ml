@@ -39,7 +39,7 @@ type interaction = Activate_tab | Click of string | Fill of { selector : string;
   | Hover of pointer_target
   | Drag_to of { source : pointer_target; destination : pointer_target; via : Pointer.point list; duration_ms : int }
   | Hover_at of { point : Pointer.point; viewport : Pointer.viewport }
-  | Click_at of { point : Pointer.point; viewport : Pointer.viewport }
+  | Click_at of { point : Pointer.point; viewport : Pointer.viewport; button : Pointer.button }
   | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
   | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport; via : Pointer.point list; duration_ms : int }
   | Follow_link of node_ref | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
@@ -147,8 +147,11 @@ let interaction_args ~tab_id ~expected_url action =
         "x",`Int x; "y",`Int y]
     | Hover_at {point;viewport} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
-    | Click_at {point;viewport} -> [verb;
+    | Click_at {point;viewport;button} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
+        @ (match button with
+           | Pointer.Primary -> []
+           | Pointer.Middle | Pointer.Secondary -> ["button", `String (Pointer.button_to_string button)])
     | Drag {from;to_;viewport;via;duration_ms} -> [verb;
         "from", Pointer.point_to_json from; "to", Pointer.point_to_json to_;
         "viewport", Pointer.viewport_to_json viewport] @ drag_fields via duration_ms
@@ -259,6 +262,7 @@ type live_capability =
   | Trusted_hover
   | Trusted_drag
   | Trusted_double_click
+  | Trusted_button_click
   | Trusted_keyboard
   | Browser_zoom
   | Tab_activation
@@ -278,6 +282,7 @@ let live_capability_to_wire = function
   | Trusted_hover -> "trusted_hover"
   | Trusted_drag -> "trusted_drag"
   | Trusted_double_click -> "trusted_double_click"
+  | Trusted_button_click -> "trusted_button_click"
   | Trusted_keyboard -> "trusted_keyboard"
   | Browser_zoom -> "browser_zoom"
   | Tab_activation -> "tab_activation"
@@ -296,7 +301,8 @@ let live_capability_of_interaction = function
   | Double_click _ | Double_click_at _ -> Trusted_double_click
   | Type_text _ | Press_key _ -> Trusted_keyboard
   | Click _ | Fill _ | Scroll _ | Follow_link _ | Click_node _ | Fill_node _ -> Dom_interaction
-  | Click_at _ -> Point_click
+  | Click_at {button = Pointer.Primary; _} -> Point_click
+  | Click_at {button = Pointer.Middle | Pointer.Secondary; _} -> Trusted_button_click
   | Scroll_at _ -> Point_scroll
   | Hover _ | Hover_at _ -> Trusted_hover
   | Drag_to _ | Drag _ -> Trusted_drag
@@ -429,8 +435,10 @@ let live_transport_serves transport capability =
     , ( Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture
       | Scene_read | Dom_interaction | Point_click | Point_scroll ) ) -> true
   | Web_extension, (Tab_activation | Browser_zoom) -> true
-  | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_keyboard | Tab_creation) -> false
-  | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_keyboard | Tab_creation) -> true
+  | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click
+                    | Trusted_keyboard | Tab_creation) -> false
+  | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click
+                    | Trusted_keyboard | Tab_creation) -> true
   | Webdriver_bidi, (Tab_activation | Browser_zoom) -> false
 ;;
 

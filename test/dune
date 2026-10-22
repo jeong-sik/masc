@@ -6478,7 +6478,8 @@
  (name test_tui_resource_export)
  (modules test_tui_resource_export)
  (libraries masc_tui_resource_export masc_tui_resource_catalog masc masc.masc_tool_blob_store alcotest
-  digestif uri eio eio_main unix))
+  masc_tui_workspace_read masc_tui_kept_reads masc_tui_types masc.http_client
+  digestif uri yojson eio eio_main unix))
 
 (test
  (name test_tui_resource_document_search)

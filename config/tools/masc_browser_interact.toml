@@ -1,6 +1,6 @@
 name = "masc_browser_interact"
 description = """
-Click, fill, scroll, hover, drag, follow a link, activate a browser tab, set the page viewport size, or set actual browser zoom. set_viewport takes width and height together in CSS pixels (100–4096) on a live BiDi connection or Stagehand; on a live BiDi connection, giving neither restores the browser's own size. Read scene/screenshot geometry again afterward. set_zoom requires an exact WebExtension client/tab, expectedUrl and factor 0.3–5. It measures the resulting zoomFactor and zoomScope; Firefox per-origin zoom can affect same-site tabs. Read scene/screenshot geometry again afterward. hover/drag_to accept observed elements (selector or scene reference) without guessing screenshot coordinates. They resolve visible, unobstructed targets in the current viewport; scroll and re-read offscreen targets first. hover_at (no click) and drag move a trusted pointer. automation, Stagehand Chromium and live webdriver_bidi serve these actions; Stagehand supports custom drag paths but requires durationMs=0. activate_tab is live-only, on a web_extension connection (>=0.6.0): it verifies active=true without window focus or navigation. A live request its connection cannot serve is refused before input as live_transport_unsupported; servingClients are the connected browsers that can. List that connection's tabs first: tab IDs are per connection.
+Click, fill, scroll, hover, drag, follow a link, activate a browser tab, set the page viewport size, or set actual browser zoom. tap_at and swipe send a touch pointer (not a mouse) on a live BiDi connection or the owned Firefox: tap_at presses and releases at an observed point, swipe holds the touch from one observed point to another; Stagehand and a connected WebExtension refuse them before any effect. set_viewport takes width and height together in CSS pixels (100–4096) on a live BiDi connection or Stagehand; on a live BiDi connection, giving neither restores the browser's own size. Read scene/screenshot geometry again afterward. set_zoom requires an exact WebExtension client/tab, expectedUrl and factor 0.3–5. It measures the resulting zoomFactor and zoomScope; Firefox per-origin zoom can affect same-site tabs. Read scene/screenshot geometry again afterward. hover/drag_to accept observed elements (selector or scene reference) without guessing screenshot coordinates. They resolve visible, unobstructed targets in the current viewport; scroll and re-read offscreen targets first. hover_at (no click) and drag move a trusted pointer. automation, Stagehand Chromium and live webdriver_bidi serve these actions; Stagehand supports custom drag paths but requires durationMs=0. activate_tab is live-only, on a web_extension connection (>=0.6.0): it verifies active=true without window focus or navigation. A live request its connection cannot serve is refused before input as live_transport_unsupported; servingClients are the connected browsers that can. List that connection's tabs first: tab IDs are per connection.
 The tab is explicit; no arbitrary JavaScript. drag/drag_to issue trusted pointer input; a receipt does not prove the application accepted a drop. HTML5 DataTransfer/drop is not guaranteed by Firefox and has no synthetic fallback. Read again after success or failure before retrying: page handlers can change external state. click/fill require one visible inspected element. On automation, Stagehand Chromium and live webdriver_bidi, click resolves an unobstructed selector or scene node and sends native pointerDown/pointerUp, supporting trusted pointerdown/mousedown menus; disabled and aria-disabled targets are refused. Click captures the current URL when expectedUrl is omitted, then checks it before input. WebExtension retains DOM click. fill targets text inputs/textarea and sends input/change without Enter or submit. scroll_at scrolls the pane under the point. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
@@ -31,7 +31,7 @@ description = "Observed URL guard; required for explicit pointer actions, hover/
 name = "action"
 type = "string"
 required = true
-enum = ["set_zoom", "set_viewport", "activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
+enum = ["set_zoom", "set_viewport", "tap_at", "swipe", "activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
 
 [[params]]
 name = "selector"
@@ -77,7 +77,7 @@ description = "Scene node; survives reordering, fails on detach/replacement."
 [[params]]
 name = "point"
 type = "object"
-description = "click_at/hover_at/scroll_at: normalized x/y in [0,1); copy screenshot viewport/expectedUrl."
+description = "click_at/hover_at/scroll_at/tap_at: normalized x/y in [0,1); copy screenshot viewport/expectedUrl."
 
 additional_properties = false
 
@@ -98,7 +98,7 @@ exclusive_maximum = 1.0
 [[params]]
 name = "from"
 type = "object"
-description = "Native drag start; normalized x/y in [0,1)."
+description = "Native drag or swipe start; normalized x/y in [0,1)."
 
 additional_properties = false
 
@@ -119,7 +119,7 @@ exclusive_maximum = 1.0
 [[params]]
 name = "to"
 type = "object"
-description = "Native drag end; normalized x/y in [0,1)."
+description = "Native drag or swipe end; normalized x/y in [0,1)."
 
 additional_properties = false
 
@@ -212,7 +212,7 @@ type = "string"
 [[params]]
 name = "via"
 type = "array"
-description = "drag/drag_to: observed intermediate viewport fractions, in order. Omit for a straight drag through its midpoint. Stagehand also supports these paths through native CSS-pixel runtime routes."
+description = "drag/drag_to/swipe: observed intermediate viewport fractions, in order. Omit for a straight drag through its midpoint. Stagehand also supports these paths through native CSS-pixel runtime routes."
 
 [params.items]
 type = "object"
@@ -237,7 +237,7 @@ name = "durationMs"
 type = "integer"
 minimum = 0
 maximum = 9007199254740991
-description = "drag/drag_to: duration of each intermediate and destination move in milliseconds; default 0. Requires automation or live webdriver_bidi when nonzero."
+description = "drag/drag_to/swipe: duration of each intermediate and destination move in milliseconds; default 0. Requires automation or live webdriver_bidi when nonzero."
 
 [[params]]
 name = "key"

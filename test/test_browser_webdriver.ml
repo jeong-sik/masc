@@ -443,6 +443,40 @@ let test_pointer_release_recovery () =
     check int "wheel recovers only older remote release" 3 !releases;
     check int "recovery never replays previous input" 1 !gestures)
 
+let test_touch_sends_a_touch_pointer_and_releases_it () =
+  Eio_main.run (fun _ ->
+    let pointer_types = ref [] and releases = ref 0 in
+    let request ~method_ ~path ~body = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET, "/session/owned/window" -> Ok (`String "tab")
+      | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/execute/sync" -> Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture"])
+      | `POST, "/session/owned/actions" ->
+        (match body with
+         | Some json ->
+           pointer_types := Yojson.Safe.Util.(json |> member "actions" |> to_list |> List.hd
+             |> member "parameters" |> member "pointerType" |> to_string) :: !pointer_types;
+           Ok `Null
+         | None -> fail "actions require a body")
+      | `DELETE, "/session/owned/actions" -> incr releases; Ok `Null
+      | _ -> fail ("unexpected touch request: " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    let point : Lane.Pointer.point = {x=0.5;y=0.5} in
+    let viewport : Lane.Pointer.viewport = {document_id="fixture";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
+    let interact action = Driver.execute driver
+      (Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";action}) in
+    List.iter (fun action -> match interact action with
+      | Lane.Answered _ -> ()
+      | Lane.Refused _ | Lane.Rejected_before_effect _ | Lane.Lane_absent | Lane.Timed_out -> fail "touch input was not served")
+      [Lane.Tap_at {point;viewport};
+       Lane.Swipe {from=point;to_={x=0.9;y=0.5};viewport;via=[];duration_ms=0}];
+    check (list string) "each touch action sends a touch pointer" ["touch";"touch"] !pointer_types;
+    check int "each pressed touch is released" 2 !releases)
+
 let test_pointer_guard_failure_rejects_before_effect () =
   Eio_main.run (fun _ ->
     let actions = ref 0 in
@@ -639,4 +673,5 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "deadline cancels I/O and releases the session" `Quick test_timeout_releases_session;
   test_case "shutdown uses a live cleanup transport" `Quick test_shutdown_transport_lifetime;
   test_case "explicit Zen binary never falls back" `Quick test_selected_binary;
+  test_case "touch sends a touch pointer and releases it" `Quick test_touch_sends_a_touch_pointer_and_releases_it;
   test_case "browser configuration" `Quick test_browser_configuration ]]

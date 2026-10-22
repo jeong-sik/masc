@@ -249,6 +249,55 @@ let test_set_viewport () =
   check bool "the lane asks for the viewport capability" true
     (Browser_lane.live_capability (Browser_lane.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;
       action=request.action}) = Some Browser_lane.Viewport_resize)
+let test_touch_actions () =
+  let viewport = `Assoc ["documentId",`String "fixture";"width",`Int 800;
+    "height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0] in
+  let point = `Assoc ["x",`Float 0.25;"y",`Float 0.5] and other = `Assoc ["x",`Float 0.75;"y",`Float 0.5] in
+  let base = ["expectedUrl",`String "https://example.org";"viewport",viewport] in
+  let tap = fields "tap_at" @ base @ ["point",point] in
+  let swipe = fields "swipe" @ base @ ["from",point;"to",other] in
+  (match (parsed tap).action with
+   | Browser_lane.Tap_at _ -> () | _ -> fail "tap_at parsed as another action");
+  (match (parsed swipe).action with
+   | Browser_lane.Swipe {via=[];duration_ms=0;_} -> () | _ -> fail "swipe parsed as another action");
+  List.iter (fun input ->
+    let request = parsed input in
+    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
+    check bool "touch action survives the wire round trip" true
+      ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
+    check bool "touch action is the touch capability" true
+      (Browser_lane.live_capability (Browser_lane.Page_interact {tab_id=request.tab_id;
+        expected_url=request.expected_url;action=request.action}) = Some Browser_lane.Touch_input);
+    check bool "touch action requires its observed URL" true
+      (Result.is_error (Interaction.parse (`Assoc (List.remove_assoc "expectedUrl" input)))))
+    [tap; swipe];
+  let swipe_with extra = parsed (swipe @ extra) in
+  (match (swipe_with ["via",`List [other];"durationMs",`Int 200]).action with
+   | Browser_lane.Swipe {via=[_];duration_ms=200;_} -> ()
+   | _ -> fail "swipe lost its path or timing");
+  List.iter (fun (label,input) ->
+    check bool label true (Result.is_error (Interaction.parse (`Assoc input))))
+    ["tap_at with a button",tap @ ["button",`String "secondary"];
+     "tap_at with a drag path",tap @ ["via",`List []];
+     "swipe without a destination",fields "swipe" @ base @ ["from",point];
+     "swipe with a point",swipe @ ["point",point];
+     "swipe with a button",swipe @ ["button",`String "middle"]]
+let test_touch_sources_use_a_touch_pointer () =
+  let viewport : Browser_lane.Pointer.viewport = {document_id="d";width=100.;height=100.;scroll_x=0.;scroll_y=0.} in
+  let start : Browser_lane.Pointer.point = {x=0.1;y=0.1} and stop : Browser_lane.Pointer.point = {x=0.9;y=0.1} in
+  let source gesture = match Browser_lane.Pointer.input_sources ~pointer_id:"p" ~wheel_id:"w" ~viewport ~start gesture with
+    | `List [source] -> source | _ -> fail "one input source required" in
+  let pointer_type gesture = Yojson.Safe.Util.(source gesture |> member "parameters" |> member "pointerType" |> to_string) in
+  let types gesture = Yojson.Safe.Util.(source gesture |> member "actions" |> to_list
+    |> List.map (fun action -> member "type" action |> to_string)) in
+  let swipe = Browser_lane.Pointer.Swipe {via=[];destination=stop;duration_ms=40}
+  and drag = Browser_lane.Pointer.Drag {via=[];destination=stop;duration_ms=40} in
+  check string "a tap is a touch pointer" "touch" (pointer_type Browser_lane.Pointer.Tap);
+  check string "a swipe is a touch pointer" "touch" (pointer_type swipe);
+  check string "a click stays a mouse pointer" "mouse" (pointer_type (Browser_lane.Pointer.Click Browser_lane.Pointer.Primary));
+  check string "a drag stays a mouse pointer" "mouse" (pointer_type drag);
+  check (list string) "a tap presses and releases once" ["pointerMove";"pointerDown";"pointerUp"] (types Browser_lane.Pointer.Tap);
+  check (list string) "a swipe moves as a drag does" (types drag) (types swipe)
 let () = run "browser interaction" ["typed boundary", [
   test_case "browser zoom boundary" `Quick test_browser_zoom_boundary;
   test_case "native keyboard and double click parser" `Quick test_native_keyboard_parser;
@@ -258,6 +307,8 @@ let () = run "browser interaction" ["typed boundary", [
   test_case "screenshot pointer actions" `Quick test_pointer_actions;
   test_case "set_viewport takes both sides in bounds or neither" `Quick test_set_viewport;
   test_case "click button parses and round trips" `Quick test_click_button;
+  test_case "tap_at and swipe parse as touch" `Quick test_touch_actions;
+  test_case "touch sources use a touch pointer" `Quick test_touch_sources_use_a_touch_pointer;
   test_case "click button picks the live capability" `Quick test_click_button_capability;
   test_case "click button uses the WebDriver button numbers" `Quick test_click_button_wire_numbers;
   test_case "source hints preserve scope and reject malformed paths" `Quick test_source_context;

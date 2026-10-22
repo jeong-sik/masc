@@ -5938,6 +5938,7 @@ module Browser_lane_view = struct
     | Trusted_keyboard -> "native keys"
     | Browser_zoom -> "browser zoom"
     | Viewport_resize -> "viewport size"
+    | Touch_input -> "touch"
     | Tab_history -> "tab history"
     | Tab_closing -> "tab closing"
     | Tab_activation -> "tab switch"
@@ -7229,6 +7230,7 @@ module Browser_lane_view = struct
                                                 | Hover _ | Drag_to _
                                                 | Scroll _ | Hover_at _
                                                 | Click_at _ | Drag _
+                                                | Tap_at _ | Swipe _
                                                 | Follow_link _ | Click_node _
                                                 | Fill_node _)
                                           ; _ } )

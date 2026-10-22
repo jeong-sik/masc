@@ -439,6 +439,7 @@ let rec execute_unlocked t = function
         | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
         | Browser_lane.Activate_tab | Browser_lane.Fill _
         | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+        | Browser_lane.Tap_at _ | Browser_lane.Swipe _
         | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
         | Browser_lane.Fill_node _ -> Ok (expected_url,action) in
       let* result = match native_action with
@@ -461,7 +462,9 @@ let rec execute_unlocked t = function
         | Browser_lane.Double_click_at {point;viewport}
         | Browser_lane.Hover_at {point;viewport}
         | Browser_lane.Click_at {point;viewport;_}
+        | Browser_lane.Tap_at {point;viewport}
         | Browser_lane.Scroll_at {point;viewport;_}
+        | Browser_lane.Swipe {from=point;viewport;_}
         | Browser_lane.Drag {from=point;viewport;_} ->
           (* The guard runs before any /actions request, so a stale URL or
              viewport cannot have moved the pointer. [execute] turns this
@@ -477,6 +480,8 @@ let rec execute_unlocked t = function
             | Browser_lane.Drag {to_;via;duration_ms;_} -> Browser_lane.Pointer.Drag {via;destination=to_;duration_ms}
             | Browser_lane.Scroll_at {x;y;_} -> Browser_lane.Pointer.Wheel {x;y}
             | Browser_lane.Click_at {button;_} -> Browser_lane.Pointer.Click button
+            | Browser_lane.Tap_at _ -> Browser_lane.Pointer.Tap
+            | Browser_lane.Swipe {to_;via;duration_ms;_} -> Browser_lane.Pointer.Swipe {via;destination=to_;duration_ms}
             | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
@@ -496,6 +501,7 @@ let rec execute_unlocked t = function
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
             | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Drag _
+            | Browser_lane.Tap_at _ | Browser_lane.Swipe _
             | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> let released = ref None in
             let applied = Eio.Switch.run (fun sw ->
               Eio.Switch.on_release sw (fun () ->
@@ -665,6 +671,7 @@ let execute t verb =
             | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Scroll _
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+            | Browser_lane.Tap_at _ | Browser_lane.Swipe _
             | Browser_lane.Scroll_at _ | Browser_lane.Drag _
             | Browser_lane.Follow_link _ | Browser_lane.Click_node _
             | Browser_lane.Fill_node _ )

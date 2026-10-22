@@ -48,6 +48,8 @@ type interaction = Activate_tab | Click of string | Fill of { selector : string;
   | Hover of pointer_target
   | Drag_to of { source : pointer_target; destination : pointer_target; via : Pointer.point list; duration_ms : int }
   | Hover_at of { point : Pointer.point; viewport : Pointer.viewport }
+  | Tap_at of { point : Pointer.point; viewport : Pointer.viewport }
+  | Swipe of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport; via : Pointer.point list; duration_ms : int }
   | Click_at of { point : Pointer.point; viewport : Pointer.viewport; button : Pointer.button }
   | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
   | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport; via : Pointer.point list; duration_ms : int }
@@ -124,6 +126,8 @@ let interaction_verb = function
   | Hover _ -> "hover"
   | Drag_to _ -> "drag_to"
   | Hover_at _ -> "hover_at"
+  | Tap_at _ -> "tap_at"
+  | Swipe _ -> "swipe"
   | Click_at _ -> "click_at"
   | Drag _ -> "drag"
   | Click _ | Click_node _ -> "click"
@@ -159,6 +163,11 @@ let interaction_args ~tab_id ~expected_url action =
         "x",`Int x; "y",`Int y]
     | Hover_at {point;viewport} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
+    | Tap_at {point;viewport} -> [verb;
+        "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
+    | Swipe {from;to_;viewport;via;duration_ms} -> [verb;
+        "from", Pointer.point_to_json from; "to", Pointer.point_to_json to_;
+        "viewport", Pointer.viewport_to_json viewport] @ drag_fields via duration_ms
     | Click_at {point;viewport;button} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
         @ (match button with
@@ -275,6 +284,7 @@ type live_capability =
   | Trusted_drag
   | Trusted_double_click
   | Trusted_button_click
+  | Touch_input
   | Trusted_keyboard
   | Browser_zoom
   | Viewport_resize
@@ -298,6 +308,7 @@ let live_capability_to_wire = function
   | Trusted_drag -> "trusted_drag"
   | Trusted_double_click -> "trusted_double_click"
   | Trusted_button_click -> "trusted_button_click"
+  | Touch_input -> "touch_input"
   | Trusted_keyboard -> "trusted_keyboard"
   | Browser_zoom -> "browser_zoom"
   | Viewport_resize -> "viewport_resize"
@@ -325,6 +336,7 @@ let live_capability_of_interaction = function
   | Scroll_at _ -> Point_scroll
   | Hover _ | Hover_at _ -> Trusted_hover
   | Drag_to _ | Drag _ -> Trusted_drag
+  | Tap_at _ | Swipe _ -> Touch_input
 ;;
 
 let live_capability = function
@@ -458,9 +470,9 @@ let live_transport_serves transport capability =
     , ( Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture
       | Scene_read | Dom_interaction | Point_click | Point_scroll ) ) -> true
   | Web_extension, (Tab_activation | Browser_zoom) -> true
-  | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click
+  | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_closing) -> false
-  | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click
+  | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_closing) -> true
   | Webdriver_bidi, (Tab_activation | Browser_zoom) -> false
 ;;

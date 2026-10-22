@@ -19,6 +19,9 @@ type gesture =
   | Double_click
   | Drag of { via : point list; destination : point; duration_ms : int }
   | Wheel of { x : int; y : int }
+  | Tap  (** A touch pointer pressing and releasing at the start point. *)
+  | Swipe of { via : point list; destination : point; duration_ms : int }
+      (** A touch pointer held through the same path a drag takes. *)
 
 (** Native WebDriver/BiDi input sources. A click presses and releases the
     button's WebDriver pointer button: 0 for [Primary], 1 for [Middle], 2 for

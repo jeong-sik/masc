@@ -227,6 +227,11 @@ val with_owned_inventory_root
   -> (owned_inventory_root -> ('a, owned_regular_file_read_error) result)
   -> ('a, owned_regular_file_read_error) result
 val owned_inventory_root_path : owned_inventory_root -> string
+val owned_inventory_root_stat : owned_inventory_root -> Unix.stats
+(** The immutable descriptor observation captured when the held root opened.
+    Valid only within its callback. This is not a fresh permission check or
+    effect authority; the enclosing scope must return successfully before its
+    observation is used outside the callback. *)
 val owned_inventory_entry_kind
   : owned_inventory_root -> string
   -> (Unix.file_kind, owned_regular_file_read_error) result

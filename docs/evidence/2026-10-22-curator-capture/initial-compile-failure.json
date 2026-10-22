@@ -1,0 +1,11 @@
+{
+  "run": 39651355908,
+  "head": "3e2a8e2e12fb6a65be480e60416f299f190d1cd7",
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39651355908",
+  "status": "completed",
+  "conclusion": "failure",
+  "stage": "targeted executables compilation; no selected suite ran",
+  "cause": "workspace_memory_request.ml:141: Ledger.assignment inferred where Ledger.pending_fact required",
+  "original_layer_fix": "77c88c3185df5efd79a8c873bd4a2af8353c8127",
+  "fix_verification": "parser/source only; compiled correction remains unverified"
+}

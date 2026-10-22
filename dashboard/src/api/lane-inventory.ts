@@ -12,10 +12,15 @@ const configuration = Schema.Union(
     declared_slots: texts, declared_cli_slots: texts, dropped_slots: texts, admission_error: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('unconfigured', 'unavailable'), detail: Schema.String }),
 )
+const exactOutput = Schema.Struct({ output: text, source: Schema.Literal('declared', 'table_only'), configuration })
+export type AddonExactOutput = Schema.Schema.Type<typeof exactOutput>
+const exactOutputs = Schema.Array(exactOutput).pipe(Schema.filter(outputs =>
+  new Set(outputs.map(output => output.output)).size === outputs.length,
+{ message: () => 'An exact output is listed twice' }))
 const declaration = Schema.Union(
   Schema.Struct({ kind: Schema.Literal('valid'), enabled: Schema.Boolean, installation_id: text,
     run_id: text, package_id: text, title: text, desired_revision: text,
-    source_revision: text, application: laneAddonApplicationSchema }).pipe(Schema.filter(value => {
+    source_revision: text, exact_outputs: exactOutputs, application: laneAddonApplicationSchema }).pipe(Schema.filter(value => {
       switch (value.application.kind) {
         case 'starting': case 'applied': return value.enabled
         case 'inactive': return !value.enabled

@@ -305,9 +305,12 @@ describe('PromptRegistryPanel', () => {
     expect(librarian?.textContent).not.toContain('workspace_memory_curator')
     const curator = container.querySelector('[data-workspace-curator-runtime-contract]')
     for (const field of ['workspace_curator_exact', 'workspace_memory_changes',
-      '검증 전 분류 원장', 'keeper_workspace_memory_read', 'override']) {
+      '검증 전 분류 원장', 'keeper_workspace_memory_read', 'override',
+      'runtime.addon_exact_lanes.<installation-id>.classification',
+      'runtime.addon_exact_lanes.<installation-id>.briefing']) {
       expect(curator?.textContent).toContain(field)
     }
+    expect(curator?.textContent).not.toContain('runtime.exact_output_lanes.workspace_curator_exact.slots')
     const open = curator?.querySelector('button') as HTMLButtonElement
     fireEvent.click(open)
     await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement).value)

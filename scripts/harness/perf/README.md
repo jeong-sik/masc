@@ -27,6 +27,52 @@ Percentiles describe valid responses; stale samples are counted separately
 and disqualify the all-samples target flag. A changed runtime identity also
 prevents treating two endpoints of the measurement window as one deployment.
 
+## Same-method HTTP JSON, HTTP SSE and WS latency
+
+`transport_latency_probe.mjs` attaches to an existing server using Node 26+.
+It opens temporary sessions, invokes only `ping` (or `tools/list`), rotates
+the order of the three transports in every round, and closes its own sessions.
+It does not build, restart servers, invoke tools or enqueue Keeper work.
+
+```bash
+node scripts/harness/perf/transport_latency_probe.mjs \
+  --base-url http://127.0.0.1:8935 --samples 30 --interval-ms 1200 \
+  --output /tmp/transport-ping.json
+
+node scripts/harness/perf/transport_latency_probe.mjs \
+  --base-url http://127.0.0.1:8935 --method tools/list \
+  --output /tmp/transport-tools.json
+```
+
+Supply an existing credential through `MCP_TOKEN` or `--token-env NAME`.
+The script never obtains credentials or disables workspace authentication.
+Dashboard `hello` succeeding does not prove generic MCP authorization over WS;
+an auth rejection remains a failed sample, with its numeric RPC error code.
+Do not replace `ping` with `dashboard/ping` to make that comparison pass: they
+exercise different handlers and return different results.
+
+Both HTTP lanes advertise the MCP-required JSON and SSE media types. The JSON
+lane additionally uses MASC's `X-Masc-Force-Json: true` header. SSE here is a
+finite **POST response**, not a persistent observer subscription. Every reply
+must match the request ID and have the same canonical result hash as the HTTP
+JSON warmup reference. Session/auth setup and one method warmup per lane are
+reported separately. All lanes stop latency/CPU timing after reply validation,
+before computing that hash. Node process CPU windows include unsolicited WS
+traffic and are neither server CPU nor browser CPU measurements.
+The existing health/full identity must be present and unchanged at both ends.
+
+Percentiles include only successful equivalent responses; always read failures,
+setup, cleanup and `passed` alongside them. No numeric performance gate or
+automatic winner is imposed. HTTP socket reuse, raw samples, runner hash and
+WS unsolicited messages/payloads are recorded. Body bytes exclude HTTP headers,
+WS framing, compression and TLS; unsolicited bytes can overlap a mixed RPC/push
+message and must not be summed with RPC bytes as total wire traffic.
+
+Live traffic shares the server with other clients. These measurements establish
+neither per-transport server CPU/RSS nor throughput, browser render latency,
+observer event delivery or remote-network performance. An isolated auth-disabled
+run must be identified separately and cannot prove authenticated live usability.
+
 ## Paused-work disposition: exact 10-Keeper 8h soak
 
 `paused_work_disposition_soak.sh` is the release-evidence gate for #25191. It

@@ -541,6 +541,7 @@ let receipt_catalog_evidence = Generation_receipt.catalog_evidence
 let receipt_target_identity = Generation_receipt.target_identity
 let candidate_visit_count_to_int (Candidate_visit_count count) = count
 let generation_receipt_snapshot_phase = Generation_receipt.snapshot_phase
+let generation_receipt_snapshot_generation_dispatched = Generation_receipt.snapshot_generation_dispatched
 
 let generation_receipt_snapshot_dispatch_count =
   Generation_receipt.snapshot_dispatch_count

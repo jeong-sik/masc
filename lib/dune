@@ -5,7 +5,6 @@
  (public_name masc)
  (private_modules
   keeper_composition_child_exports
-  keeper_librarian_failure_evidence
   keeper_librarian_message_floor
   keeper_librarian_unread_ledger
   keeper_official_client_context_projection

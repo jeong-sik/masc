@@ -1,4 +1,4 @@
-(** Pure evidence collected from every failed visit of a Librarian walk.
+(** Pure host evidence collected from every failed visit of an exact walk.
     Historical range sizing and admission partitioning remain independent. *)
 
 type t = private
@@ -39,3 +39,34 @@ val after_cli_fallback : prior:t -> Keeper_lane_cli_oneshot.failure list -> t
     order. Only this walk supplies [measured_cli_capacity]; an earlier nested
     fallback's limit is not inherited. Choose the largest measured character
     limit, preserving the first slot when capacities tie. *)
+
+(** Closed immutable source observations. Projected from real typed host
+    causes, never from diagnostic text or worker decisions. *)
+type api_observation
+val api_observation : Agent_core.Exact_output.execution_error_cause -> api_observation
+val api_observation_to_yojson : api_observation -> Yojson.Safe.t
+val api_observation_of_yojson : Yojson.Safe.t -> (api_observation,string) result
+val of_api_observation : api_observation -> t
+val dispatched_valid_output_failure : api_observation -> bool
+
+(** Context refusals retain their actual native flags (and original message),
+    so decoding rederives safe named-capacity evidence rather than accepting a
+    precomputed authority boolean. Measured input limits remain separate. *)
+type cli_observation
+val cli_observation : Keeper_lane_cli_oneshot.failure -> cli_observation
+val cli_observation_to_yojson : cli_observation -> Yojson.Safe.t
+val cli_observation_of_yojson : Yojson.Safe.t -> (cli_observation,string) result
+val of_cli_observation : cli_observation -> t
+val cli_observation_slot : cli_observation -> string
+val cli_was_dispatched : cli_observation -> bool
+(** The original per-slot runner observes dispatch before native execution or
+    output validation, but never for an unresolved/non-official runtime. *)
+val combine : t -> t -> t
+
+type local_rejection = Runtime_unavailable | Runtime_contract | Input_contract
+  | Output_requirement | Local_input_capacity | Preparation_failed
+[@@deriving yojson]
+val local_rejection : Agent_core.Exact_output.candidate_rejection_disposition -> local_rejection
+val of_local_rejection : local_rejection -> t
+
+val api_generation_dispatched : api_observation -> bool

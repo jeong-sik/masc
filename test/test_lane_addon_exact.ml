@@ -2,6 +2,20 @@
     and replayed instead of asked again (RFC operator-quiz §4.3, K1). *)
 open Alcotest
 module Exact = Masc.Lane_addon_exact
+
+(* These fixtures exercise host publication, not real provider capture. Their
+   explicit synthetic CLI success never claims API-only failure coverage. *)
+let executed outcome =
+  let module Receipt = Masc.Keeper_exact_walk_receipt in
+  let declared_cli, dispatched, result = match outcome with
+    | Exact.Call_ended (Exact.Answered {slot; _}) -> [slot], [slot], Receipt.Answered slot
+    | Exact.Call_ended (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
+    | Exact.Call_refused _ -> [], [], Receipt.Not_reached in
+  let receipt = match Receipt.make ~declared_http:[] ~excluded_http:[] ~declared_cli
+      ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture")
+      ~cli:(Receipt.cli ~visited:dispatched ~dispatched ~failures:[] ~result) with
+    | Ok receipt -> receipt | Error detail -> Alcotest.fail detail in
+  {Exact.outcome; receipt}
 module Store = Masc.Lane_addon_store
 module Types = Masc.Lane_addon_types
 
@@ -79,14 +93,14 @@ let counting_runner store steps =
       in
       (match step with
        | Unavailable reason -> Error reason
-       | Refused reason -> Ok (fun ~validate:_ -> sent (); Exact.Call_refused reason)
+       | Refused reason -> Ok (fun ~validate:_ -> sent (); executed (Exact.Call_refused reason))
        | Answer json ->
          Ok
            (fun ~validate ->
               sent ();
               match validate json with
-              | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None })
-              | Error detail -> Exact.Call_ended (Exact.Invalid_output { detail })))
+              | Ok output -> executed (Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None }))
+              | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output { detail }))))
   in
   runner, sends, seen
 
@@ -229,7 +243,7 @@ let test_a_request_in_flight_is_not_run_twice () =
            Eio.Promise.resolve enter ();
            Eio.Promise.await released;
            match validate question with
-           | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None })
+           | Ok output -> executed (Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None }))
            | Error detail -> fail detail)
     in
     let first = ref None and second = ref None and other_root = ref None and during = ref [] in
@@ -288,7 +302,7 @@ let test_a_retained_answer_is_checked_against_the_schema_declared_now () =
     check int "and the provider is not called again" 1 !sends;
     check bool "the record keeps the answer as it came" true (answered_with question (run_request store runner (request "r11"))))
 
-let test_an_outcome_that_cannot_be_written_stays_unknown () =
+let test_confirmed_proof_recovers_lost_outcome_publication () =
   with_root (fun root ->
     let store = Store.create ~root in
     let directory = Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
@@ -297,15 +311,199 @@ let test_an_outcome_that_cannot_be_written_stays_unknown () =
         (fun ~validate ->
            Unix.chmod directory 0o500;
            match validate question with
-           | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None })
+           | Ok output -> executed (Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None }))
            | Error detail -> fail detail)
     in
     let result = Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:locking (request "r12") in
     Unix.chmod directory 0o700;
     check bool "the run reports the failed write" true (Result.is_error result);
     let runner, sends, _ = counting_runner store (ref []) in
-    check bool "the sent call is not repeated" true (run_request store runner (request "r12") = Exact.Final Exact.Outcome_unknown);
+    check bool "the original answer is published without another send" true (answered_with question (run_request store runner (request "r12")));
     check int "without a send" 0 !sends)
+
+let original_execution store ?(attempt_ordinal=1) original =
+  Exact.read_original_execution ~store ~declaration_id ~schema ~attempt_ordinal original
+
+let proof_address original =
+  let tuple values=Yojson.Safe.to_string (`List values) in
+  tuple [`String "exact-original-execution";`String declaration_id],
+  tuple [`String "original-request";`String original.Exact.request_id;`String (Exact.digest original)]
+
+let test_original_execution_is_bound_to_one_attempt () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request "attempt-proofs" in
+    let busy=Exact.Provider_unavailable {detail="synthetic original refusal"} in
+    let runner,sends,_=counting_runner store (ref [Refused busy;Answer question]) in
+    ignore (run_request store runner original);
+    (match require (original_execution (Store.create ~root) original) with
+     | Exact.Completed_original {outcome=Exact.Call_refused refusal;_} ->
+       check bool "first original refusal is retained" true (refusal=busy)
+     | Exact.No_completed_original | Exact.Completed_original _ -> fail "missing first original execution");
+    check bool "a future attempt cannot borrow the first proof" true
+      (require (original_execution store ~attempt_ordinal:2 original)=Exact.No_completed_original);
+    check bool "second trigger can answer" true (answered_with question (run_request store runner original));
+    (match require (original_execution store ~attempt_ordinal:2 original) with
+     | Exact.Completed_original {outcome=Exact.Call_ended (Exact.Answered {output;_});_} ->
+       check bool "second original answer has its own proof" true (Exact.checked_json output=question)
+     | Exact.No_completed_original | Exact.Completed_original _ -> fail "missing second original execution");
+    check int "only the two explicit triggers send" 2 !sends;
+    let changed={original with messages=[{Exact.role=User;text="different original"}]} in
+    check bool "read refuses a rebound request" true (Result.is_error (original_execution store changed));
+    check bool "read refuses a schema from another original" true
+      (Result.is_error (Exact.read_original_execution ~store ~declaration_id ~schema:(`Assoc []) ~attempt_ordinal:2 original));
+    check bool "read refuses a zero ordinal" true (Result.is_error (original_execution store ~attempt_ordinal:0 original)))
+
+let test_proof_publication_failure_never_exposes_an_answer () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request "blocked-proof" in
+    let sends=ref 0 in
+    let obstruction=Filename.concat root "host-results" in
+    let runner ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate ->
+      incr sends;
+      Out_channel.with_open_bin obstruction (fun channel -> output_string channel "not a proof directory");
+      let output=require (validate question) in
+      executed (Exact.Call_ended (Exact.Answered {output;slot="synthetic";usage=None}))) in
+    check bool "failed proof publication is an Error" true
+      (Result.is_error (Exact.run ~authorize_request ~store ~declaration_id ~package ~runner original));
+    let record=Option.get (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)) in
+    check bool "answer is not exposed as final before proof confirmation" true
+      (Yojson.Safe.Util.member "final" record=`Null);
+    Sys.remove obstruction;
+    let unused,_,_=counting_runner store (ref []) in
+    check bool "missing proof preserves unknown without replay" true
+      (run_request store unused original=Exact.Final Exact.Outcome_unknown);
+    check bool "an old generic unknown grants no execution proof" true
+      (require (original_execution store original)=Exact.No_completed_original);
+    check int "the original call ran once" 1 !sends)
+
+let test_malformed_proof_refuses_publication_recovery () =
+  let mutate field value json=match json with
+    | `Assoc fields -> `Assoc ((field,value)::List.remove_assoc field fields)
+    | _ -> fail "expected original proof object" in
+  List.iter (fun (label,change) -> with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request ("malformed-proof-"^label) in
+    let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
+    let runner ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate ->
+      let output=require (validate question) in
+      Unix.chmod directory 0o500;
+      executed (Exact.Call_ended (Exact.Answered {output;slot="synthetic";usage=None}))) in
+    let result=Exact.run ~authorize_request ~store ~declaration_id ~package ~runner original in
+    Unix.chmod directory 0o700;
+    check bool "actual final publication failed" true (Result.is_error result);
+    let instance_id,request_id=proof_address original in
+    let proof=Option.get (require (Store.load_host_result store ~instance_id ~request_id)) in
+    let changed=match proof with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
+          if key="executions" then (match value with `List [one] -> `List [change one]
+            | _ -> fail "expected one original attempt") else value) fields)
+      | _ -> fail "expected original execution link" in
+    require (Store.save_host_result store ~instance_id ~request_id changed);
+    let unused,_,_=counting_runner store (ref []) in
+    check bool "malformed original refuses rather than becoming absence" true
+      (Result.is_error (Exact.run ~authorize_request ~store:(Store.create ~root) ~declaration_id ~package ~runner:unused original));
+    check bool "trusted original read refuses the malformed evidence" true
+      (Result.is_error (original_execution store original));
+    let record=Option.get (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)) in
+    check bool "refusal neither publishes final nor erases started uncertainty" true
+      (Yojson.Safe.Util.member "final" record=`Null)))
+    ["request",mutate "request_id" (`String "another original");
+     "digest",mutate "digest" (`String (String.make 64 '0'));
+     "ordinal",mutate "attempt_ordinal" (`Int 2);
+     "store",mutate "store_root" (`String "/another-owner");
+     "schema",mutate "schema" (`String "invalid schema");
+     "extra",(fun json -> match json with `Assoc fields -> `Assoc (("complete",`Bool true)::fields) | _ -> json);
+     "receipt",mutate "receipt" (`Assoc ["exhausted",`Bool true])]
+
+let test_recovery_refuses_malformed_earlier_attempt () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request "malformed-earlier-attempt" in
+    let first,_,_=counting_runner store (ref [Refused (Exact.Provider_unavailable {detail="first original refusal"})]) in
+    ignore (run_request store first original);
+    let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
+    let second ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate ->
+      let output=require (validate question) in
+      Unix.chmod directory 0o500;
+      executed (Exact.Call_ended (Exact.Answered {output;slot="second";usage=None}))) in
+    let result=Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:second original in
+    Unix.chmod directory 0o700;
+    check bool "second final publication failed after its proof" true (Result.is_error result);
+    let original_wire=Option.get (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)) in
+    let broken=match original_wire with
+      | `Assoc fields -> `Assoc (("attempts",`List [`String "not an original outcome";`Null])::List.remove_assoc "attempts" fields)
+      | _ -> fail "expected original record" in
+    require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id broken);
+    let unused,_,_=counting_runner store (ref []) in
+    check bool "completed second proof cannot bypass malformed prior history" true
+      (Result.is_error (Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:unused original));
+    check bool "failed recovery preserves the original record bytes" true
+      (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)=Some broken))
+
+let test_orphaned_proof_prevents_another_dispatch () =
+  List.iter (fun preceded_by_unavailable -> with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request "orphaned-original-proof" in
+    let steps=if preceded_by_unavailable then [Unavailable Exact.Lane_off;Answer question] else [Answer question] in
+    let first,sends,_=counting_runner store (ref steps) in
+    if preceded_by_unavailable then ignore (run_request store first original);
+    ignore (run_request store first original);
+    let path=Filename.concat (Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id))
+      (Store.digest original.request_id ^ ".json") in
+    Sys.remove path;
+    let unused,_,_=counting_runner store (ref []) in
+    check bool "orphan proof is not permission to run the original again" true
+      (Result.is_error (Exact.run ~authorize_request ~store:(Store.create ~root) ~declaration_id ~package ~runner:unused original));
+    check bool "trusted read also refuses proof without its original record" true
+      (Result.is_error (original_execution store original));
+    check int "the completed original was dispatched once" 1 !sends)) [false;true]
+
+let test_recovered_refusal_is_returned_before_a_later_retry () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request "lost-refusal-publication" in
+    let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
+    let busy=Exact.Provider_unavailable {detail="original refusal before publication loss"} in
+    let sends=ref 0 in
+    let first ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ ->
+      incr sends;
+      Unix.chmod directory 0o500;
+      executed (Exact.Call_refused busy)) in
+    let result=Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:first original in
+    Unix.chmod directory 0o700;
+    check bool "original not-final outcome publication failed" true (Result.is_error result);
+    let unused,_,_=counting_runner store (ref []) in
+    check bool "recovery returns that original refusal without a new trigger" true
+      (run_request store unused original=Exact.Not_final (Exact.Provider_refused busy));
+    check int "only the original call ran before recovery" 1 !sends;
+    let later,later_sends,_=counting_runner store (ref [Answer question]) in
+    check bool "a separate later trigger can run the next attempt" true
+      (answered_with question (run_request store later original));
+    check int "later trigger starts its own one call" 1 !later_sends;
+    (match require (original_execution store original) with
+     | Exact.Completed_original {outcome=Exact.Call_refused refusal;_} ->
+       check bool "later success does not replace the original refusal proof" true (refusal=busy)
+     | Exact.No_completed_original | Exact.Completed_original _ -> fail "lost original refusal proof"))
+
+let test_completed_attempt_cannot_lose_its_final_and_dispatch_again () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request "terminal-without-final" in
+    let first,sends,_=counting_runner store (ref [Answer question]) in
+    ignore (run_request store first original);
+    let wire=Option.get (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)) in
+    let broken=match wire with
+      | `Assoc fields -> `Assoc (("final",`Null)::List.remove_assoc "final" fields)
+      | _ -> fail "expected original record" in
+    require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id broken);
+    let unused,_,_=counting_runner store (ref []) in
+    check bool "a terminal attempt with a lost final refuses instead of dispatching" true
+      (Result.is_error (Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:unused original));
+    check bool "original proof read also rejects contradictory final state" true
+      (Result.is_error (original_execution store original));
+    check int "only the actual original was sent" 1 !sends)
 
 let test_request_decoding_is_strict () =
   List.iter (fun (label, json) ->
@@ -389,8 +587,8 @@ let test_request_schema_is_provider_requirement_not_baseline_replacement () =
     let runner ~admission_class:_ ~lane_key:_ ~schema _request =
       sent_schema:=Some schema;
       Ok (fun ~validate -> match validate (`Assoc ["question",`Null]) with
-        | Ok output -> Exact.Call_ended (Answered {output;slot="fixture";usage=None})
-        | Error detail -> Exact.Call_ended (Invalid_output {detail})) in
+        | Ok output -> executed (Exact.Call_ended (Answered {output;slot="fixture";usage=None}))
+        | Error detail -> executed (Exact.Call_ended (Invalid_output {detail}))) in
     (match consumer_run store runner (request ~schema:consumer_schema "baseline") with
      | Exact.Final (Call_final (Invalid_output _)) -> ()
      | _ -> fail "the baseline string must hold even when the request allows null");
@@ -455,7 +653,7 @@ let test_observe_started_is_open_while_provider_is_running ()=with_root (fun roo
       (require (observe (Store.create ~root) original)=Exact.Retained_open);
     check bool "read cannot infer terminal uncertainty or rewrite started history" true
       (before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id));
-    let output=require (validate question) in Exact.Call_ended (Exact.Answered {output;slot="original";usage=None})) in
+    let output=require (validate question) in executed (Exact.Call_ended (Exact.Answered {output;slot="original";usage=None}))) in
   check bool "the actual in-flight call can still answer" true (answered_with question (run_request store runner original)))
 let test_observe_exception_and_later_denial_preserves_original ()=with_root (fun root ->
   let store=Store.create ~root in
@@ -521,7 +719,7 @@ let test_host_admission_class_is_forwarded admission_class () =
       observed:=admission_class :: !observed;
       Ok (fun ~validate ->
         match validate question with
-        | Ok output -> Exact.Call_ended (Exact.Answered {output;slot="host-slot";usage=None})
+        | Ok output -> executed (Exact.Call_ended (Exact.Answered {output;slot="host-slot";usage=None}))
         | Error detail -> fail detail) in
     check bool "host-authorized request answers" true
       (answered_with question (require (Exact.run ~store ~declaration_id ~package
@@ -601,8 +799,15 @@ let () =
         ; test_case "a cancelled call leaves its attempt started" `Quick test_a_cancelled_call_leaves_its_attempt_started
         ; test_case "a retained answer is checked against the schema declared now" `Quick
             test_a_retained_answer_is_checked_against_the_schema_declared_now
-        ; test_case "an outcome that cannot be written stays unknown" `Quick
-            test_an_outcome_that_cannot_be_written_stays_unknown
+        ; test_case "confirmed proof recovers lost outcome publication" `Quick
+            test_confirmed_proof_recovers_lost_outcome_publication
+        ; test_case "original execution binds request schema and actual attempt" `Quick test_original_execution_is_bound_to_one_attempt
+        ; test_case "proof failure leaves uncertainty without exposing an answer" `Quick test_proof_publication_failure_never_exposes_an_answer
+        ; test_case "malformed proof refuses local recovery without provider replay" `Quick test_malformed_proof_refuses_publication_recovery
+        ; test_case "recovery validates the complete original attempt history" `Quick test_recovery_refuses_malformed_earlier_attempt
+        ; test_case "orphan original proof prevents a duplicate dispatch" `Quick test_orphaned_proof_prevents_another_dispatch
+        ; test_case "recovered refusal returns before a later retry" `Quick test_recovered_refusal_is_returned_before_a_later_retry
+        ; test_case "completed terminal without final cannot dispatch again" `Quick test_completed_attempt_cannot_lose_its_final_and_dispatch_again
         ; test_case "request decoding is strict" `Quick test_request_decoding_is_strict
         ; test_case "conversation retention binds speaker roles" `Quick test_conversation_is_retained_with_role_identity
         ; test_case "conversation wire refuses ambiguous roles" `Quick test_conversation_rejects_ambiguous_or_unsupported_wire

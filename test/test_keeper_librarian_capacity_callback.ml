@@ -483,7 +483,56 @@ let test_named_provider_input_refusals () =
     {kind=Http.Context_overflow {limit=None};message="fixture"} in
   Alcotest.(check (list string)) "an unsent context failure is not a provider refusal" []
     (List.map I.to_string (Runtime.For_testing.cause_input_refusals
-      (E.Completion_failed {error=context_error;dispatch=E.No_generation_dispatch})))
+      (E.Completion_failed {error=context_error;dispatch=E.No_generation_dispatch})));
+  List.iter (fun cause ->
+    let module Shared = Keeper_exact_walk_failure in
+    let original=Shared.of_cause cause in
+    let decoded=match Shared.api_observation cause |> Shared.api_observation_to_yojson
+        |> Shared.api_observation_of_yojson with
+      | Ok observed -> Shared.of_api_observation observed
+      | Error detail -> Alcotest.fail detail in
+    Alcotest.(check bool) "named actual causes survive the strict shared receipt source codec" true
+      (original=decoded))
+    [refused E.Context_overflow;refused E.Input_capacity;refused E.Request_body_refused;
+     refused E.Rate_limited;E.Invalid_json_output;
+     E.Completion_failed {error=context_error;dispatch=E.No_generation_dispatch}]
+
+let test_native_context_receipt_flags () =
+  let module Shared = Keeper_exact_walk_failure in
+  let runtime_id = Fixture.cli_primary_runtime in
+  let codex tool_effect_attempted = Fusion_official_client.Codex_failure
+    (Runtime_codex_app_server.Context_window_exceeded
+      {message="original Codex context refusal";tool_effect_attempted}) in
+  let claude tool_effect_attempted response_emitted = Fusion_official_client.Claude_failure
+    (Runtime_claude_code.Context_window_exceeded
+      {message="original Claude context refusal";tool_effect_attempted;response_emitted}) in
+  List.iter (fun (cause,expected) ->
+    let failure=Keeper_lane_cli_oneshot.Execution_failed {runtime_id;cause} in
+    let json=Shared.cli_observation failure |> Shared.cli_observation_to_yojson in
+    let decoded=match Shared.cli_observation_of_yojson json with
+      | Ok decoded -> decoded | Error detail -> Alcotest.fail detail in
+    let evidence=Shared.of_cli_observation decoded in
+    Alcotest.(check bool) "restored native flags decide admission" expected
+      (Shared.refuses_input_capacity evidence);
+    Alcotest.(check bool) "unsafe native context cannot permit a smaller range" (not expected)
+      evidence.size_independent_execution_failure;
+    Alcotest.(check bool) "context refusal is not a measured character limit" false
+      (Shared.shows_range_size evidence);
+    Alcotest.(check bool) "original typed context flags and reason survive roundtrip" true
+      (Yojson.Safe.equal json (Shared.cli_observation_to_yojson decoded));
+    let without_flags = match json with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+          if key="cause" then key,(match value with
+            | `List [tag;`Assoc flags] -> `List [tag;`Assoc
+                (List.filter (fun (name,_) -> name<>"tool_effect_attempted") flags)]
+            | _ -> Alcotest.fail "context flags missing from original source proof")
+          else key,value) fields)
+      | _ -> Alcotest.fail "missing original native observation" in
+    Alcotest.(check bool) "missing safety evidence refuses instead of granting admission" true
+      (Result.is_error (Shared.cli_observation_of_yojson without_flags)))
+    [codex false,true;codex true,false;
+     claude false false,true;claude false true,false;
+     claude true false,false;claude true true,false]
 
 let test_size_verdict_table () =
   let module E = Agent_core.Exact_output in
@@ -723,10 +772,27 @@ let test_durable_runtime_returns_refusal_reports ~base_path () =
          && report.smaller_range_meets_same_failure) reports));
   Alcotest.(check int) "body-refusing provider called once" 1 (Fixture.post_count size);
   Alcotest.(check int) "quota provider called once" 1 (Fixture.post_count quota);
-  match Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id with
-  | Ok None -> ()
-  | Ok (Some _) -> Alcotest.fail "failed walk published Memory"
-  | Error detail -> Alcotest.fail detail
+  (match Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "failed walk published Memory"
+   | Error detail -> Alcotest.fail detail);
+  (* Exercise the actual message-floor inference producer too. Its unread
+     authority is deliberately separate from recursive admission partitioning. *)
+  (match Runtime.infer_memory_step ~base_path ~keepers_dir ~keeper_id
+    ~previous_state:None ~unread_messages:[] input with
+   | Runtime.Memory_inferred _ -> Alcotest.fail "a failed original walk became a Memory step"
+   | Memory_not_inferred failure ->
+     Alcotest.(check bool) "actual API-only exhaustion retains named source-refusal authority" true
+       (failure.exhausted_input_refusals=Some [Keeper_librarian_input_refusal.Request_body_refused]);
+     let classified=List.filter (fun (report : Runtime.not_committed) ->
+       report.provider_input_refusals<>[]) failure.reports in
+     Alcotest.(check bool) "actual inference retains a classified mixed walk" true (classified<>[]);
+     List.iter (fun report -> match Keeper_memory_admission_worker.For_testing.judgment_of_not_committed report with
+       | Keeper_memory_admission_worker.Deferred _ -> ()
+       | Input_size_refused _ | Committed | Awaiting_evidence ->
+         Alcotest.fail "the actual mixed quota/input walk recursively partitioned admission") classified);
+  Alcotest.(check int) "the inference producer made its own original body-refused call" 2 (Fixture.post_count size);
+  Alcotest.(check int) "the inference producer made its own original quota call" 2 (Fixture.post_count quota)
 
 let () =
   let base_path = Filename.temp_dir "librarian-capacity-" "" in
@@ -762,6 +828,8 @@ let () =
   Alcotest.run "Librarian capacity callbacks"
     ["size verdict", [Alcotest.test_case "named input refusal is separate from descent evidence" `Quick
        test_named_provider_input_refusals;
+       Alcotest.test_case "original native context flags remain admission authority" `Quick
+         test_native_context_receipt_flags;
        Alcotest.test_case "every provider cause, one row each" `Quick
        test_size_verdict_table;
        Alcotest.test_case "every official-client failure, one row each" `Quick

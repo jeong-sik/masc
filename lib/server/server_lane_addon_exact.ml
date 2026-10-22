@@ -2,6 +2,7 @@ module Exact = Agent_core.Exact_output
 module Addon = Lane_addon_exact
 module Failure = Exact_lane_failure
 module Registry = Runtime_exact_output_registry
+module Receipt = Keeper_exact_walk_receipt
 
 (* What one tried slot said. Every slot the call reached leaves one. *)
 type slot_failure =
@@ -66,7 +67,7 @@ type http_outcome =
 let usage_of_api (usage : Agent_core.Types.api_usage) =
   { Addon.input_tokens = usage.input_tokens; output_tokens = usage.output_tokens }
 
-let execute_http ~admission_class ~note ~resolved ~requirement ~messages ~validate =
+let execute_http ~admission_class ~note ~capture_http ~resolved ~requirement ~messages ~validate =
   let candidate (slot : Registry.selected_slot) =
     match Exact.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target with
     | Ok candidate -> Some candidate
@@ -74,7 +75,7 @@ let execute_http ~admission_class ~note ~resolved ~requirement ~messages ~valida
       note slot.slot_id Failure.Configuration_refused "blank slot id";
       None
   in
-  match List.filter_map candidate (Runtime_exact_lane_backpressure.order resolved).Registry.selected_slots with
+  match List.filter_map candidate resolved.Registry.selected_slots with
   | [] -> Http_exhausted
   | first :: rest ->
     match Exact.snapshot_flow ~first ~rest ~messages requirement with
@@ -123,6 +124,10 @@ let execute_http ~admission_class ~note ~resolved ~requirement ~messages ~valida
                 Ok ())
               ~validate:check attempt
           in
+          capture_http (match flow with
+            | Ok success -> Receipt.http_success success ~rejection_to_string:Fun.id
+            | Error error -> Receipt.http_failure ~callback_error_to_string:Fun.id
+                ~rejection_to_string:Fun.id error);
           Runtime_exact_lane_backpressure.observe ~resolved flow;
           match flow with
           | Ok success ->
@@ -166,6 +171,9 @@ let cli_prompt messages =
   texts [] messages
 
 let call ~admission_class ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (request : Addon.request) ~validate =
+  let resolved=Runtime_exact_lane_backpressure.order resolved in
+  let http=ref (Receipt.http_not_started ~detail:"no HTTP generation flow started") in
+  let visited=ref [] and dispatched=ref [] and cli_failures=ref [] in
   let failures = ref [] in
   let note slot failure detail = failures := { slot; failure; detail } :: !failures in
   let requirement = Exact.make_output_requirement ~schema ~minimum_guarantee:Exact.Json_syntax in
@@ -181,33 +189,47 @@ let call ~admission_class ~cli_runner ~base_path ~(resolved : Registry.resolved_
         request.messages
   in
   let ended () = ending (List.rev !failures) in
-  match execute_http ~admission_class ~note ~resolved ~requirement ~messages ~validate with
-  | Http_answered { output; slot; usage } -> Addon.Call_ended (Addon.Answered { output; slot; usage })
-  | Http_stopped -> ended ()
+  let complete cli_result outcome =
+    let cli=Receipt.cli ~visited:(List.rev !visited) ~dispatched:(List.rev !dispatched) ~failures:(List.rev !cli_failures) ~result:cli_result in
+    let receipt=match Receipt.make
+      ~declared_http:(List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) resolved.selected_slots)
+      ~excluded_http:[] ~declared_cli:resolved.cli_slots ~http:!http ~cli with
+      | Ok receipt -> receipt
+      | Error detail -> invalid_arg ("invalid original Addon walk: " ^ detail) in
+    {Addon.outcome;receipt} in
+  match execute_http ~admission_class ~note ~capture_http:(fun captured -> http:=captured)
+    ~resolved ~requirement ~messages ~validate with
+  | Http_answered { output; slot; usage } -> complete Receipt.Not_reached (Addon.Call_ended (Addon.Answered { output; slot; usage }))
+  | Http_stopped -> complete Receipt.Not_reached (ended ())
   | Http_exhausted ->
     Eio.Fiber.check ();
     match resolved.cli_slots with
-    | [] -> ended ()
+    | [] -> complete Receipt.Not_reached (ended ())
     | cli_slots ->
       match cli_prompt request.messages with
       | Error () ->
         List.iter (fun slot -> note slot Failure.Configuration_refused
           "a one-shot CLI cannot preserve assistant conversation turns") cli_slots;
-        ended ()
+        complete Receipt.Prompt_unavailable (ended ())
       | Ok prompt ->
       match
         Keeper_lane_cli_oneshot.walk ?runner:cli_runner ~base_dir:base_path ~cli_slots
           ~system_prompt:(Option.value request.system ~default:"") ~requirement
-          ~prompt ~validate ~on_failure:(fun _ -> ()) ()
+          ~prompt ~validate
+          ~observe:(function
+            | Keeper_lane_cli_oneshot.Dispatching {runtime_id} -> dispatched:=runtime_id::!dispatched
+            | Raw_response _ -> ())
+          ~on_failure:(fun failure ->
+            visited:=cli_failure_slot failure::!visited;
+            cli_failures:=failure::!cli_failures;
+            note (cli_failure_slot failure) (Failure.cli_failure failure)
+              (Keeper_lane_cli_oneshot.failure_to_string failure)) ()
       with
-      | Ok (slot, output) -> Addon.Call_ended (Addon.Answered { output; slot; usage = None })
-      | Error cli_failures ->
-        List.iter
-          (fun failure ->
-             note (cli_failure_slot failure) (Failure.cli_failure failure)
-               (Keeper_lane_cli_oneshot.failure_to_string failure))
-          cli_failures;
-        ended ()
+      | Ok (slot, output) ->
+        visited:=slot::!visited;
+        complete (Receipt.Answered slot)
+          (Addon.Call_ended (Addon.Answered { output; slot; usage = None }))
+      | Error _cli_failures -> complete Receipt.Exhausted (ended ())
 
 let resolve ~lane_key =
   match Registry.current () with

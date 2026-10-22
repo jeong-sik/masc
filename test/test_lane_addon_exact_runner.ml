@@ -84,6 +84,13 @@ let run_request ?(package=package) ?runner ?schema ?messages ~base_path ~store i
   | Ok attempt -> attempt
   | Error detail -> fail detail
 
+let original_receipt ~store id =
+  match Eio_unix.run_in_systhread (fun () -> Exact.read_original_execution ~store
+    ~declaration_id ~schema ~attempt_ordinal:1 (request id)) with
+  | Ok (Exact.Completed_original result) -> result.receipt
+  | Ok Exact.No_completed_original -> fail "actual original walk proof was not retained"
+  | Error detail -> fail detail
+
 let answered_by = function
   | Exact.Final (Exact.Call_final (Exact.Answered { output; slot; usage })) -> Some (Exact.checked_json output, slot, usage)
   | Exact.Final _ | Exact.Not_final _ -> None
@@ -117,7 +124,21 @@ let test_an_answer_outside_the_schema_advances () =
     (match answered_by (run_request ~base_path ~store "a2") with
      | Some (_, slot, _) -> check string "the next slot answers" "second" slot
      | None -> fail "the second slot's answer must be answered");
-    check int "the first slot was asked once" 1 (F.post_count wrong))
+    check int "the first slot was asked once" 1 (F.post_count wrong);
+    let original=original_receipt ~store "a2" |> Keeper_exact_walk_receipt.to_json in
+    let unsent_accepted=match original with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key="http" then
+          (match value with `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+            key,if key="attempts" then (match value with
+              | `List [first;`Assoc accepted] -> `List [first;`Assoc
+                  (List.map (fun (key,value) -> key,(match key with
+                    | "generation_sent" -> `Bool false | "dispatch_count" -> `Int 0
+                    | "phase" -> `List [`String "Before_wire"] | _ -> value)) accepted)]
+              | _ -> fail "two actual HTTP attempts missing") else value) fields)
+           | _ -> fail "HTTP receipt missing") else value) fields)
+      | _ -> fail "original receipt missing" in
+    check bool "earlier semantic generation cannot authorize an unsent accepted visit" true
+      (Result.is_error (Keeper_exact_walk_receipt.of_json unsent_accepted)))
 
 let test_every_answer_outside_the_schema_is_invalid_output () =
   with_case (fun ~sw ~net ~clock ~base_path ~store ->
@@ -195,6 +216,15 @@ let test_measurement_failure_is_not_a_terminal_input_size_refusal () =
     (match run_request ~base_path ~store "measurement-unavailable" with
      | Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable _)) -> ()
      | Exact.Final _ | Exact.Not_final _ -> fail "missing measurement is not proof that input is too big");
+    let receipt=match Eio_unix.run_in_systhread (fun () -> Exact.read_original_execution ~store
+      ~declaration_id ~schema ~attempt_ordinal:1 (request "measurement-unavailable")) with
+      | Ok (Exact.Completed_original result) -> result.receipt
+      | Ok Exact.No_completed_original -> fail "missing original measurement walk"
+      | Error detail -> fail detail in
+    check bool "measurement never grants a generation fact" true
+      (Keeper_exact_walk_receipt.generation_dispatch receipt=Agent_core.Exact_output.No_generation_dispatch);
+    check bool "measurement-only candidate rejection cannot authorize unread" true
+      (Keeper_exact_walk_receipt.exhausted_input_refusals receipt=None);
     check (list string) "only token measurement was dispatched" ["/v1/messages/count_tokens"] (F.request_paths server))
 
 let test_output_limit_keeps_the_original_cli_tail ~valid () =
@@ -631,7 +661,9 @@ let test_http_flow_preserves_host_admission_class admission_class () =
         check int "a queued flow has not sent HTTP" 0 (F.post_count server));
     let result=F.await_within_fixture_budget ~clock
       ~failure:"actual host-class HTTP flow did not finish" finished in
-    (match result with
+    check (option string) "the actual flow proof names its accepted transport" (Some target.target_ref)
+      (Keeper_exact_walk_receipt.answered_slot result.receipt);
+    (match result.outcome with
      | Exact.Call_ended (Exact.Answered {output;_}) ->
        check bool "the real HTTP response is accepted" true (Exact.checked_json output=question)
      | Call_ended (Invalid_output _ | Input_refused _ | Output_limit_reached _)
@@ -654,10 +686,123 @@ let test_worker_names_do_not_grant_background () =
     check bool "worker package and installation names are no Background grant" true
       (authorization.admission_class=Agent_core.Llm_provider.Admission_class.Standard))
 
+let test_original_mixed_failure_proof () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let size=F.start_server ~sw ~net ~clock (F.Reply_with (fun _ _ ->
+      `Request_entity_too_large,refusal_body "invalid_request_error")) in
+    let quota=F.start_server ~sw ~net ~clock (F.Reply_with (fun _ _ ->
+      `Too_many_requests,refusal_body "rate_limit_error")) in
+    publish ~base_path [{F.id="size";base_url=size.base_url};{F.id="quota";base_url=quota.base_url}];
+    ignore (run_request ~base_path ~store "mixed-original");
+    let reopened=Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+    let receipt=original_receipt ~store:reopened "mixed-original" in
+    let evidence=Keeper_exact_walk_receipt.failure_evidence receipt in
+    check bool "the original named capacity survives the quota" true evidence.named_input_capacity;
+    check bool "quota still vetoes recursive whole-input partition" true evidence.size_independent_execution_failure;
+    check bool "the separate actually exhausted API-only proof retains named causes" true
+      (Keeper_exact_walk_receipt.exhausted_input_refusals receipt=Some [Keeper_librarian_input_refusal.Request_body_refused]);
+    let wire=Keeper_exact_walk_receipt.to_json receipt in
+    let missing_advance=match wire with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key="http" then
+          (match value with `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+            key,if key="advances" then `List [] else value) fields) | _ -> fail "http object") else value) fields)
+      | _ -> fail "receipt object" in
+    check bool "a missing actual predecessor outcome cannot become exhaustion" true
+      (Result.is_error (Keeper_exact_walk_receipt.of_json missing_advance));
+    List.iter (fun (field,replacement) ->
+      let contradictory=match wire with
+        | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key="http" then
+            (match value with `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+              key,if key="attempts" then (match value with
+                | `List (`Assoc attempt::rest) -> `List (`Assoc
+                    (List.map (fun (key,value) -> key,if key=field then replacement else value) attempt)::rest)
+                | _ -> fail "missing real generation attempt") else value) fields)
+             | _ -> fail "http object") else value) fields)
+        | _ -> fail "receipt object" in
+      check bool "a contradictory original generation state refuses" true
+        (Result.is_error (Keeper_exact_walk_receipt.of_json contradictory)))
+      ["dispatch_count",`Int 0;"phase",`List [`String "Fresh"];"generation_sent",`Bool false];
+    check int "receipt consumption did not replay size provider" 1 (F.post_count size);
+    check int "receipt consumption did not replay quota provider" 1 (F.post_count quota))
+
+let test_semantic_failure_veto_survives_capacity () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let invalid=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response (`Assoc ["wrong",`String "value"]))) in
+    let size=F.start_server ~sw ~net ~clock (F.Reply_with (fun _ _ ->
+      `Request_entity_too_large,refusal_body "invalid_request_error")) in
+    publish ~base_path [{F.id="semantic";base_url=invalid.base_url};{F.id="size";base_url=size.base_url}];
+    ignore (run_request ~base_path ~store "semantic-size-original");
+    let receipt=original_receipt ~store "semantic-size-original" in
+    let evidence=Keeper_exact_walk_receipt.failure_evidence receipt in
+    check bool "an earlier actual domain rejection remains an invalid-output veto" true evidence.invalid_output;
+    check bool "that veto prevents partitioning despite later named capacity" false
+      (Keeper_exact_walk_failure.refuses_input_capacity evidence);
+    check bool "semantic moves outside advances still disqualify unread authority" true
+      (Keeper_exact_walk_receipt.exhausted_input_refusals receipt=None))
+
+let test_original_cli_prior_failure_proof () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let size=F.start_server ~sw ~net ~clock (F.Reply_with (fun _ _ ->
+      `Request_entity_too_large,refusal_body "invalid_request_error")) in
+    publish ~base_path ~cli_slots:[F.cli_primary_runtime;F.cli_secondary_runtime]
+      [{F.id="size";base_url=size.base_url}];
+    let calls=ref [] in
+    let cli_runner : Keeper_lane_cli_oneshot.runner = fun ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+      calls:=runtime_id::!calls;
+      Ok (if runtime_id=F.cli_primary_runtime then "not JSON" else Yojson.Safe.to_string question) in
+    let runner=Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner in
+    ignore (run_request ~runner ~base_path ~store "cli-original-proof");
+    let receipt=original_receipt ~store "cli-original-proof" in
+    check (option string) "the actual later official client answered" (Some F.cli_secondary_runtime)
+      (Keeper_exact_walk_receipt.answered_slot receipt);
+    check (list string) "actual official-client visits retain failed predecessor" [F.cli_primary_runtime;F.cli_secondary_runtime]
+      (List.rev !calls);
+    check bool "the failed earlier CLI JSON remains visible after success" true
+      (Keeper_exact_walk_receipt.failure_evidence receipt).invalid_output;
+    let wire=Keeper_exact_walk_receipt.to_json receipt in
+    List.iter (fun field ->
+      let reversed=match wire with
+        | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key="cli" then
+            (match value with `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+              key,if key=field then (match value with `List values -> `List (List.rev values)
+                | _ -> fail "CLI ordered trace missing") else value) fields)
+             | _ -> fail "CLI object missing") else value) fields)
+        | _ -> fail "original receipt object missing" in
+      check bool "reversed original CLI visit or dispatch prefix refuses" true
+        (Result.is_error (Keeper_exact_walk_receipt.of_json reversed))) ["visited";"dispatched"];
+    check bool "declared CLI participation never becomes API-only unread authority" true
+      (Keeper_exact_walk_receipt.exhausted_input_refusals receipt=None))
+
+let test_original_undispatched_cli_visit_order () =
+  let module Receipt = Keeper_exact_walk_receipt in
+  let failures=List.map (fun runtime_id -> Keeper_lane_cli_oneshot.Unknown_runtime {runtime_id})
+    ["unresolved-b";"unresolved-a"] in
+  let cli=Receipt.cli ~visited:["unresolved-b";"unresolved-a"] ~dispatched:[]
+    ~failures ~result:Receipt.Exhausted in
+  let original=match Receipt.make ~declared_http:[] ~excluded_http:[]
+      ~declared_cli:["unresolved-a";"unresolved-b"]
+      ~http:(Receipt.http_not_started ~detail:"explicit synthetic CLI trace") ~cli with
+    | Ok receipt -> receipt | Error detail -> fail detail in
+  check bool "actual visits may differ from configured order without inventing dispatch" true
+    (Result.is_ok (Receipt.of_json (Receipt.to_json original)));
+  let reversed=match Receipt.to_json original with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key="cli" then
+        (match value with `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+          key,if key="failures" then (match value with `List values -> `List (List.rev values)
+            | _ -> fail "CLI failures missing") else value) fields)
+         | _ -> fail "CLI object missing") else value) fields)
+    | _ -> fail "original receipt missing" in
+  check bool "an exhausted declaration set cannot hide reordered original failures" true
+    (Result.is_error (Receipt.of_json reversed))
+
 let () =
   run "lane add-on exact runner"
     [ ( "runner"
-      , [ test_case "an answer that matches the schema is answered" `Quick test_an_answer_that_matches_the_schema_is_answered
+      , [ test_case "undispatched CLI failures preserve actual order" `Quick test_original_undispatched_cli_visit_order
+        ; test_case "actual mixed failure proof survives Store reopen" `Quick test_original_mixed_failure_proof
+        ; test_case "actual semantic predecessor veto survives capacity" `Quick test_semantic_failure_veto_survives_capacity
+        ; test_case "actual CLI success retains prior failure" `Quick test_original_cli_prior_failure_proof
+        ; test_case "an answer that matches the schema is answered" `Quick test_an_answer_that_matches_the_schema_is_answered
         ; test_case "an answer outside the schema advances" `Quick test_an_answer_outside_the_schema_advances
         ; test_case "every answer outside the schema is invalid_output" `Quick
             test_every_answer_outside_the_schema_is_invalid_output

@@ -672,14 +672,13 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
        ])
 
 (* [stale_since_ts] records the wall-clock time of the FIRST invalidation or
-   refresh failure since the last successful refresh. It is preserved across
-   subsequent consecutive failures (never overwritten — see
-   [mark_full_health_snapshot_failure]) and cleared on the next
-   successful [store_full_health_snapshot].  This lets downstream
-   consumers compute "how long has the snapshot been stale?" without
-   relying on the per-failure [computed_at] timestamp, which under
-   partial-degradation now points at the LAST successful refresh, not
-   the failure event. *)
+   refresh failure since the last successful current-generation refresh.
+   It is preserved across failures and successful scans invalidated while
+   running, and cleared only when a successful scan certifies the current
+   generation. Consumers can therefore distinguish the uninterrupted stale
+   horizon from [computed_at], which records when the served observation
+   completed. A successful dirty scan updates that measurement timestamp
+   without restarting the stale horizon; a failed refresh preserves both. *)
 type full_health_snapshot = {
   fields : (string * Yojson.Safe.t) list;
   computed_at : float;
@@ -690,11 +689,15 @@ type full_health_snapshot = {
   section_timings : (string * int) list;
 }
 
+type full_health_refresh_freshness =
+  | Current_generation
+  | Invalidated_during_refresh of float
+
 type full_health_refresh_worker = {
   id : int;
   completion : unit Eio.Promise.or_exn;
-  started_generation : int;
-  mutable failure_reported : bool;
+  freshness : full_health_refresh_freshness;
+  failure_reported : bool;
 }
 
 let full_health_snapshot_mu = Stdlib.Mutex.create ()
@@ -1088,7 +1091,7 @@ let mark_full_health_refresh_wait_failure failure =
   with_full_health_snapshot_lock (fun () ->
       match !full_health_active_worker with
       | Some worker when not worker.failure_reported ->
-          worker.failure_reported <- true;
+          full_health_active_worker := Some { worker with failure_reported = true };
           mark_full_health_snapshot_failure_locked ~worker_active:true failure
       | Some _ | None -> ())
 
@@ -1110,14 +1113,15 @@ let finish_full_health_refresh_worker worker outcome =
     with_full_health_snapshot_lock (fun () ->
         match !full_health_active_worker with
         | Some active when active.id = worker.id ->
-            let dirty =
-              !full_health_invalidation_generation <> worker.started_generation
+            let dirty = match active.freshness with
+              | Current_generation -> false
+              | Invalidated_during_refresh _ -> true
             in
             full_health_active_worker := None;
             let finish_failure failure =
               (* A waiter timeout already recorded this worker's failed
                  attempt. Its eventual failed result must not count twice. *)
-              if worker.failure_reported then begin
+              if active.failure_reported then begin
                 full_health_refresh_in_flight := false;
                 full_health_refresh_started_at := None;
                 full_health_refresh_requested := false
@@ -1127,26 +1131,31 @@ let finish_full_health_refresh_worker worker outcome =
             in
             (match outcome with
              | Ok snapshot ->
-                 (match snapshot.failure, dirty with
+                 (match snapshot.failure, active.freshness with
                   | Some failure, _ -> finish_failure failure
-                  | None, false ->
+                  | None, Current_generation ->
                       store_full_health_snapshot_locked snapshot
                         ~refresh_requested:false
-                  | None, true ->
-                      (* A mutation landed during a successful scan. It cannot
-                         certify the current generation; keep the prior fields
-                         stale and schedule a successor. Failed observations
-                         above still record their evidence before the retry. *)
-                      full_health_refresh_in_flight := false;
-                      full_health_refresh_started_at := None;
-                      full_health_refresh_requested := true)
+                  | None, Invalidated_during_refresh since ->
+                      (* Retain a measured scan even when mutations prevent it
+                         from certifying freshness. Without this, a busy cold
+                         runtime can discard every successful observation.
+                         Only a current scan ends the continuous stale period. *)
+                      let stale_since = match !full_health_snapshot with
+                        | Some { stale_since_ts = Some previous; _ } ->
+                            Float.min previous since
+                        | Some { stale_since_ts = None; _ } | None -> since
+                      in
+                      store_full_health_snapshot_locked
+                        { snapshot with stale_since_ts = Some stale_since }
+                        ~refresh_requested:true)
              | Error exn -> finish_failure (Proactive_refresh.Raised exn));
             dirty
         | Some _ | None -> false)
   in
   if enqueue_follow_up then begin
     Log.Dashboard.debug
-      "full_health_snapshot discarded worker %d result after generation change"
+      "full_health_snapshot requests a successor after worker %d was invalidated"
       worker.id;
     signal_full_health_refresh_wakeup ()
   end
@@ -1164,7 +1173,7 @@ let await_full_health_refresh_worker ~sw ~compute =
             let worker =
               { id = !full_health_next_worker_id;
                 completion;
-                started_generation = !full_health_invalidation_generation;
+                freshness = Current_generation;
                 failure_reported = false
               }
             in
@@ -1330,13 +1339,21 @@ let mark_full_health_refresh_requested () =
 
 let invalidate_full_health_snapshot () =
   with_full_health_snapshot_lock (fun () ->
+      let now = Unix.gettimeofday () in
       incr full_health_invalidation_generation;
+      full_health_active_worker :=
+        Option.map
+          (fun worker -> match worker.freshness with
+             | Current_generation ->
+                 { worker with freshness = Invalidated_during_refresh now }
+             | Invalidated_during_refresh _ -> worker)
+          !full_health_active_worker;
       full_health_snapshot :=
         Option.map
           (fun snapshot ->
             match snapshot.stale_since_ts with
             | Some _ -> snapshot
-            | None -> { snapshot with stale_since_ts = Some (Unix.gettimeofday ()) })
+            | None -> { snapshot with stale_since_ts = Some now })
           !full_health_snapshot;
       full_health_refresh_requested := true);
   (* The state above is the invalidation; the wake only brings the refresh
@@ -1467,14 +1484,14 @@ module For_testing = struct
   let run_full_health_refresh_worker ~sw ~compute =
     await_full_health_refresh_worker ~sw ~compute:(fun () ->
         let started_at = Unix.gettimeofday () in
-        let failure = match compute () with Ok () -> None | Error failure -> Some failure in
-        let computed_at = Unix.gettimeofday () in
-        let fields = match failure with
-          | None -> []
-          | Some failure ->
+        let fields, failure = match compute () with
+          | Ok fields -> fields, None
+          | Error failure ->
               full_health_placeholder_fields
-                ~error:(Proactive_refresh.failure_message failure) ~status:"error" ()
+                ~error:(Proactive_refresh.failure_message failure) ~status:"error" (),
+              Some failure
         in
+        let computed_at = Unix.gettimeofday () in
         { fields;
           computed_at;
           duration_ms = duration_ms ~started_at ~finished_at:computed_at;

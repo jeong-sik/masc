@@ -1380,12 +1380,14 @@ type fleet_reading_freshness =
       (** The health snapshot is [ready]: the latest refresh measured it, and
           within the snapshot's time to live. *)
   | Fleet_last_good of { measured_at_unix : float; stale_reason : string }
-      (** The snapshot is [stale]: the refreshes since have timed out or
-          raised, or none has run within the time to live, so the server
-          serves the last reading it measured. [measured_at_unix] is when
-          (unix seconds on the server's clock); [stale_reason] is the
-          server's word for why ([last_good_refresh_timeout],
-          [last_good_refresh_error], [ttl_expired]). *)
+      (** The snapshot is [stale]: its observation was invalidated, a refresh
+          timed out or raised, or no refresh ran within the time to live.
+          A successful scan invalidated while running may supply the measured
+          reading without certifying the current generation. [measured_at_unix]
+          is when that observation completed (unix seconds on the server's
+          clock); [stale_reason] is the server's word for why ([invalidated],
+          [last_good_refresh_timeout], [last_good_refresh_error], [ttl_expired]).
+          The reason is retained as a string, including unrecognised values. *)
   | Unrecognised_snapshot_status of string
       (** A snapshot status this build has no reading for, beside a fleet
           reading, kept as the server spelled it. The server's other words

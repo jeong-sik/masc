@@ -57,10 +57,9 @@ let failing_text (fleet : Tui_decode.fleet_safety) =
 let not_measured_text ~status =
   Printf.sprintf "not measured yet (%s)" (Terminal_text.single_line status)
 
-(* The server names why the snapshot went stale with one of three wire words
-   (#39194). A reader should not have to know them, so the three the /health
-   contract defines are said in words; any other word is drawn as the server
-   wrote it, the way an unknown blocker or snapshot status is. *)
+(* Known refresh-failure and age reasons are said in words (#39194).
+   Other reasons, including invalidation, are drawn as the server wrote them,
+   the way an unknown blocker or snapshot status is. *)
 let stale_reason_text reason =
   match reason with
   | "last_good_refresh_timeout" -> "refresh timed out"

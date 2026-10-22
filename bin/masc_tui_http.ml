@@ -3259,7 +3259,13 @@ let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, st
     binary was built from, and the paths it resolved. The probe shape carries
     all three, so this does not pay for [full=1]. *)
 let fetch_server_identity ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/health"
+  (* This probe establishes identity, including from inside a document's
+     workspace-bound read. Health does not attest document preconditions;
+     inheriting that proof would reject its valid response and withdraw the
+     workspace. Callers decode and compare the observed roots themselves. *)
+  match http_get ~host ~port ~path:"/health" with
+  | Error _ as error -> error
+  | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
 
 (** Fetch the operator fleet reading from /health?full=1.
 

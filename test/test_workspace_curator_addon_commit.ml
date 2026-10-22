@@ -151,7 +151,8 @@ let test_refused_write_and_recovered_intent retry_only ()=with_workspace (fun ba
   check bool "fresh retry observation survives actual journal reopen" true
     (List.exists (function Progress.Commit_retry_observed _ -> true
       | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _ | Commit_intended _
-      | Commit_uncertain _ | Commit_observed _ | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ -> false) (Progress.events result.progress));
+      | Commit_uncertain _ | Commit_observed _ | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _
+      | Observer _ -> false) (Progress.events result.progress));
   settle ~save:no_save base_path store result |> accepted |> committed |> ignore)
 let test_changed_or_unreadable_sources unreadable ()=with_workspace (fun base_path store ->
   let capture,output=classification base_path ["Original selected source"] in

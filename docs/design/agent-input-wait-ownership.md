@@ -666,3 +666,40 @@ guard therefore remains in place while this coherent integration is unfinished.
 Durable autonomous waiting, dedicated waiting outcomes, snapshot/SSE revision and
 incarnation reconciliation, and persistent/reconnected Acting/TUI acceptance also
 remain part of #38005; none is replaced by this implementation checkpoint.
+
+
+The subsequent minimal run [39723082826](https://github.com/jeong-sik/masc/actions/runs/39723082826)
+checked out `48e31262fd2a5239ea5263e6d0801a5da5ef7789` and passed all 59
+cases: direct-input Store 42, physical response 12, and native-context five.
+The actual log confirms both Gate success cases, provider input assertions and
+durable replay recovery, and completion of the previously failing fresh branch
+case. This establishes the scoped repairs and Gate scenarios at that head;
+it does not execute the new branch process-restart scenario below.
+
+## Actual original-branch process restart scenario (source, not executed)
+
+The native-context restart suite now has a branch mode in addition to its
+existing canonical mode. Setup drives an actual Core BeforeTurn input pause,
+lets the original Owner derive and defer W, then runs a separate autonomous
+Owner child which publishes G through the real Producer. G carries different
+history, Context and another complete pending request. Its canonical bytes are
+frozen before installing the original operation's response C with the stored
+response primitive; public Owner response acceptance remains guarded.
+
+The original child consumes the exact cooperative C admission before native
+preparation. Core receives the original declined input, publishes a real Active
+native checkpoint containing a ToolUse, then the test calls Unix._exit before
+the tool executes. A new process/Eio/Owner lifetime captures the actual retained
+operation destination and resumes that Active call. The resumed tool, post-tool
+hook and injector must run once; their shared Context updates must reach the
+retained final checkpoint. Actual loopback provider input must contain the
+original explicit decline and must exclude independent G history. The final
+native and branch references must agree before Owner acceptance; only Owner
+completion retires the branch. G canonical bytes and its global reference are
+checked across publication, process restart, replay and completion.
+
+This is a source scenario until the new exact head is executed. It uses real
+native journals, SQLite, response artifacts, process exit and Owner restart,
+with a loopback provider and an in-process tool. It does not yet establish
+public response acceptance, production AgentRun/finalizer behavior, a crash
+after an unknown external effect, or the remaining autonomous/UI requirements.

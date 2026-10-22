@@ -195,23 +195,23 @@ let support backend operation = match backend with
           conditional ~action:"click" Interact
             [observed;"framePath (observed outer-to-inner iframe selectors) applies to click, fill, select_option and scroll with a selector. Inspect the same frame first; expectedUrl is the frame document's URL.";
              "Cross-origin frames work: the frame is entered through WebDriver or its own BiDi browsing context."]
-      | Connected Browser_lane.Web_extension | Owned_chromium | Safari_unavailable -> missing)
+      | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Owned_chromium | Safari_unavailable -> missing)
     | Read_dialog -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional Tabs
           ["Each list_tabs row of a tab blocked on a dialog carries dialog: type (alert, confirm, prompt or beforeunload), message and, for a prompt, defaultValue. It comes from the browser's own events since this connection began, so a dialog that was already open then is not listed.";
            "The message is whatever the page wrote, and a page can write anything."]
-      | Owned_gecko | Owned_chromium | Connected Browser_lane.Web_extension | Safari_unavailable ->
+      | Owned_gecko | Owned_chromium | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable ->
           gecko_only backend (invoke ~mode:"dialog" Read) [observed])
     | Accept_dialog -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"accept_dialog" Act
           [observed;"Only a tab this connection opened with open_tab; the person using the browser answers a dialog on their own tab.";
            "Optional text applies only to a prompt. The receipt names the dialog that was answered."]
-      | Owned_gecko | Owned_chromium | Connected Browser_lane.Web_extension | Safari_unavailable ->
+      | Owned_gecko | Owned_chromium | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable ->
           gecko_only backend (invoke ~action:"accept_dialog" Act) [observed;"Optional text applies only to an observed prompt."])
     | Dismiss_dialog -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"dismiss_dialog" Act
           [observed;"Only a tab this connection opened with open_tab; the person using the browser answers a dialog on their own tab."]
-      | Owned_gecko | Owned_chromium | Connected Browser_lane.Web_extension | Safari_unavailable ->
+      | Owned_gecko | Owned_chromium | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable ->
           gecko_only backend (invoke ~action:"dismiss_dialog" Act) [observed])
     | Upload_file -> gecko_only backend (invoke ~action:"upload" Act)
         [observed;"Requires an owning Keeper, an observed file input and sandbox-authorized file paths; 16 MiB per file."]

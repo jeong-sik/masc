@@ -523,7 +523,7 @@ let live_transport_serves transport capability =
   | Ego_task_space, (Document_source | Dom_interaction | Point_click | Point_scroll | Trusted_hover
                     | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Browser_zoom | Viewport_resize | Tab_activation | Tab_history
-                    | Tab_navigation | Tab_closing | Tab_creation) -> false
+                    | Tab_navigation | Tab_closing | Tab_creation | Dialog_answer) -> false
 ;;
 
 let live_transports_serving capability =

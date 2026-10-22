@@ -249,7 +249,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
   ignore (dispatch peer Live.Tabs_list (obj []));
   let viewport : Lane.Pointer.viewport = {document_id="observed"; width=800.; height=600.; scroll_x=0.; scroll_y=0.} in
   let point : Lane.Pointer.point = {x=0.5;y=0.5} in
-  let interact action = Lane.Page_interact {tab_id=1; expected_url=Some "https://app.slack.com/"; action} in
+  let interact action = Lane.Page_interact {tab_id=1; expected_url=Some "https://app.slack.com/"; frame_path=[]; action} in
   let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
     | Tab_listing -> Tabs_list
     | Text_read -> Page_read {tab_id=Some 1; max_chars=None}
@@ -272,7 +272,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Tab_closing -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Close_tab})
     | Tab_navigation -> Page_goto {url="https://example.test/next";tab_id=Some 1}
     | Tab_activation -> interact Activate_tab
-    | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")) in
+    | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
+    | Dialog_answer -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Dismiss_dialog})) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in

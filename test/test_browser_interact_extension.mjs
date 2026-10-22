@@ -19,13 +19,25 @@ class Input {
 class Textarea extends Input {}
 const note = new Textarea(), count = new Input('number');
 count.stored = '12';
+class Select {
+  constructor(values, multiple = false) {
+    this.multiple = multiple; this.selectedIndex = 0;
+    this.options = values.map((value, index) => ({value, index, disabled: value === 'off', matches(selector) { assert.equal(selector, ':disabled'); return this.disabled; }}));
+  }
+  get value() { return this.options[this.selectedIndex].value; }
+  getClientRects() { return [{}]; }
+  matches(selector) { assert.equal(selector, ':disabled'); return false; }
+  dispatchEvent(event) { events.push(event.type); }
+}
+const choice = new Select(['a', 'b', 'dup', 'dup', 'off', '']), several = new Select(['a', 'b'], true);
+const extra = {'#choice': [choice], '#several': [several]};
 const button = {getClientRects: () => [{}], matches: () => false, click: () => clicked++};
-const page = vm.createContext({HTMLInputElement: Input, HTMLTextAreaElement: Textarea,
+const page = vm.createContext({HTMLInputElement: Input, HTMLTextAreaElement: Textarea, HTMLSelectElement: Select,
   location: {href: 'https://example.org/form'},
   document: {title: 'Public fixture', querySelectorAll: selector => {
     if (selector === '[') throw new Error('syntax');
     return selector === '#note' ? [note] : selector === '#count' ? [count] : selector === '#button' ? [button]
-      : selector === '.ambiguous' ? [button, button] : [];
+      : selector === '.ambiguous' ? [button, button] : extra[selector] ?? [];
   }},
   getComputedStyle: () => ({display: 'block', visibility: 'visible'}),
   Event: class {constructor(type, options) {this.type = type; this.bubbles = options.bubbles;}},
@@ -57,6 +69,25 @@ assert.equal((await command({tabId: 7, action: 'fill', selector: '#count', text:
 assert.equal(count.value, '12'); assert.equal(events.length, 2);
 note.readOnly = true;
 assert.equal((await command({tabId: 7, action: 'fill', selector: '#note', text: 'blocked'})).error, 'element_read_only');
+events.length = 0;
+const picked = await command({tabId: 7, action: 'select_option', selector: '#choice', value: 'b'});
+assert.equal(picked.ok, true); assert.equal(choice.value, 'b'); assert.deepEqual(events, ['input', 'change']);
+assert.equal((await command({tabId: 7, action: 'select_option', selector: '#choice', value: ''})).ok, true, 'an option whose value is empty can be chosen');
+assert.equal(choice.selectedIndex, 5);
+choice.selectedIndex = 1; events.length = 0;
+for (const [label, args, error] of [
+  ['a value no option has', {selector: '#choice', value: 'zzz'}, 'option_not_found'],
+  ['a value two options share', {selector: '#choice', value: 'dup'}, 'option_is_ambiguous'],
+  ['a disabled option', {selector: '#choice', value: 'off'}, 'option_disabled'],
+  ['a multiple select', {selector: '#several', value: 'a'}, 'multiple_select_is_unsupported'],
+  ['an element that is not a select', {selector: '#button', value: 'a'}, 'element_is_not_a_select'],
+  ['a missing value', {selector: '#choice'}, 'option_value_required']]) {
+  const refused = await command({tabId: 7, action: 'select_option', ...args});
+  assert.equal(refused.error, error, label);
+}
+assert.equal(choice.selectedIndex, 1, 'a refused choice leaves the selection as it was');
+assert.deepEqual(events, [], 'a refused choice sends no event');
+events.length = 0;
 const scroll = await command({tabId: 7, action: 'scroll', x: 0, y: 300});
 assert.equal(scroll.ok, true); assert.equal(scroll.data.scrollY, 300);
 closed = true;

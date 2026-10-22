@@ -83,6 +83,7 @@ checking rendered application state, and gathering evidence across tabs.
 | `page.network` (`BrowserRead mode=network`) | `tabId`; the tab's requests, oldest first, at most 200 kept with `dropped` counting the rest: method, address, state and, once completed, status, mimeType and bytesReceived. Header names only, never values, cookies or bodies; every query value in the address is `REDACTED` | automation only |
 | `tap_at`, `swipe` | like `click_at` and `drag` (`point`, or `from`/`to` with `via` and `durationMs`), sent by a touch pointer | live BiDi or automation |
 | `set_viewport` | `expectedUrl`, and `width`/`height` in CSS pixels (100 to 4096) given together; live BiDi with neither restores the browser's own size | live BiDi or Stagehand |
+| `select_option` | `expectedUrl` is optional; a `selector` for one single-choice `<select>` and the exact `value` of one enabled option. A multiple select, a missing, repeated or disabled option, or a non-select element is refused before any effect. Sets the option and emits `input` and `change`; it is not a trusted click on the list | live or automation |
 | `activate_tab` | the selected live `clientId`/`tabId` | live WebExtension only |
 
 `BrowserRead mode=scene` supplies document-scoped node references and visible

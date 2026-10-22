@@ -31,17 +31,22 @@ description = "Observed URL guard; required for explicit pointer actions, hover/
 name = "action"
 type = "string"
 required = true
-enum = ["set_zoom", "set_viewport", "tap_at", "swipe", "activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
+enum = ["set_zoom", "set_viewport", "tap_at", "swipe", "activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "select_option", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
 
 [[params]]
 name = "selector"
 type = "string"
-description = "click/double_click/fill/hover: one visible top-document element; alternative to documentId/nodeId."
+description = "click/double_click/fill/hover/select_option: one visible top-document element; alternative to documentId/nodeId (select_option takes the selector only)."
 
 [[params]]
 name = "text"
 type = "string"
 description = "fill replaces; type_text sends native Unicode text to the currently focused enabled editable control. Empty fill clears. Control characters require explicit press_key, so text cannot navigate focus or submit. Text is never echoed."
+
+[[params]]
+name = "value"
+type = "string"
+description = "select_option only: the value attribute of the one option to select in a single-choice select. A select with several matching options, a disabled option or a multiple select is refused before any effect. The select gets input and change events; this is not a trusted click on the list."
 
 [[params]]
 name = "x"

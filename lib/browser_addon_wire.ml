@@ -93,7 +93,7 @@ let verb_of_json ~route value =
       let* scope = optional_field fields "scope" Browser_scene.scope_of_json in
       Ok (B.Page_scene {tab_id;max_chars;view;scope})
   | "page.interact" ->
-      let* fields = object_fields ["tabId";"expectedUrl";"action";"selector";"text";"x";"y";"documentId";"nodeId";"point";"from";"to";"viewport";"button";"source";"destination";"via";"durationMs";"key";"modifiers";"factor";"width";"height"] args in
+      let* fields = object_fields ["tabId";"expectedUrl";"action";"selector";"text";"x";"y";"documentId";"nodeId";"point";"from";"to";"viewport";"button";"source";"destination";"via";"durationMs";"key";"modifiers";"factor";"width";"height";"value"] args in
       let* request = Browser_interaction.parse (`Assoc (route_fields route @ fields)) in
       Ok (B.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;action=request.action})
   | "session.open" -> let* fields = fields ["headless"] in let* headless = optional_field fields "headless" boolean in Ok (B.Session_open {headless})

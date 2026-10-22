@@ -249,6 +249,32 @@ let test_set_viewport () =
   check bool "the lane asks for the viewport capability" true
     (Browser_lane.live_capability (Browser_lane.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;
       action=request.action}) = Some Browser_lane.Viewport_resize)
+let test_select_option () =
+  let base = fields "select_option" @ ["selector",`String "#country"] in
+  let request = parsed (base @ ["value",`String "kr"]) in
+  (match request.action with
+   | Browser_lane.Select_option {selector="#country";value="kr"} -> ()
+   | _ -> fail "select_option parsed as another action");
+  let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
+  check bool "select_option survives the wire round trip" true
+    ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
+  check bool "select_option is the DOM interaction capability" true
+    (Browser_lane.live_capability (Browser_lane.Page_interact {tab_id=request.tab_id;
+      expected_url=request.expected_url;action=request.action}) = Some Browser_lane.Dom_interaction);
+  (match (parsed (base @ ["value",`String ""])).action with
+   | Browser_lane.Select_option {value="";_} -> ()
+   | _ -> fail "an empty option value is a value");
+  List.iter (fun (label,input) ->
+    check bool label true (Result.is_error (Interaction.parse (`Assoc input))))
+    ["no value",base;
+     "a number value",base @ ["value",`Int 1];
+     "no selector",fields "select_option" @ ["value",`String "kr"];
+     "a node target",fields "select_option" @ ["documentId",`String "d";"nodeId",`String "n";"value",`String "kr"];
+     "text",base @ ["value",`String "kr";"text",`String "Korea"];
+     "a point",base @ ["value",`String "kr";"point",`Assoc ["x",`Float 0.5;"y",`Float 0.5]];
+     "value on fill",fields "fill" @ ["selector",`String "#country";"text",`String "kr";"value",`String "kr"];
+     "value on click",fields "click" @ ["selector",`String "#country";"value",`String "kr"]]
+
 let test_touch_actions () =
   let viewport = `Assoc ["documentId",`String "fixture";"width",`Int 800;
     "height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0] in
@@ -312,6 +338,7 @@ let () = run "browser interaction" ["typed boundary", [
   test_case "screenshot pointer actions" `Quick test_pointer_actions;
   test_case "set_viewport takes both sides in bounds or neither" `Quick test_set_viewport;
   test_case "click button parses and round trips" `Quick test_click_button;
+  test_case "select_option parses, round trips and refuses mixed fields" `Quick test_select_option;
   test_case "tap_at and swipe parse as touch" `Quick test_touch_actions;
   test_case "touch sources use a touch pointer" `Quick test_touch_sources_use_a_touch_pointer;
   test_case "click button picks the live capability" `Quick test_click_button_capability;

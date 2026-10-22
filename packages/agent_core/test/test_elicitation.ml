@@ -301,13 +301,16 @@ let test_current_wait_survives_rejection_and_replacement () =
     (Agent.pending_input agent = Some b && Agent.state agent = before);
   Alcotest.(check bool) "explicit decline settles B" true
     (Agent.provide_input agent b Hooks.Declined = Ok ());
-  Alcotest.(check bool) "decline has no synthetic message" true
-    (Agent.pending_input agent = None && Agent.state agent = before);
+  let after_decline = Agent.state agent in
+  Alcotest.(check bool) "decline settles and tells the next model input" true
+    (Agent.pending_input agent = None && after_decline.messages =
+      before.messages @ [Types.user_msg "[Input declined] question"]);
   let c = paused (Agent.run_turn_stream ~sw ~on_event:ignore agent) in
   Alcotest.(check bool) "explicit timeout response settles C" true
     (Agent.provide_input agent c Hooks.Timeout = Ok ());
-  Alcotest.(check bool) "timeout has no synthetic message" true
-    (Agent.pending_input agent = None && Agent.state agent = before)
+  Alcotest.(check bool) "timeout settles with a distinct model observation" true
+    (Agent.pending_input agent = None && (Agent.state agent).messages =
+      after_decline.messages @ [Types.user_msg "[Input timed out] question"])
 ;;
 
 let test_checkpoint_delta_retains_current_wait () =
@@ -411,6 +414,65 @@ let test_pause_survives_cleanup_and_answer_is_saved () =
   Agent.close restored
 ;;
 
+let test_callback_and_restored_response_prepare_same_model_input () =
+  List.iter (fun (response, expected_text) ->
+    with_input_checkpoint @@ fun path ->
+    Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+    let question : Hooks.elicitation_request =
+      {question="canonical question";schema=None;timeout_s=None} in
+    let config=Types.default_config ~model:"input-only" in
+    let capture_input seen = function
+      | Hooks.BeforeTurnParams {messages;current_params;_} ->
+        let prepared=Result.get_ok (Agent_turn.prepare_turn ~tools:Tool_set.empty
+            ~messages ~turn_params:current_params ()) in
+        seen:=Some prepared.effective_messages;
+        Hooks.HookFailed {stage=Hooks.Before_turn_params;detail="captured model input before dispatch"}
+      | _ -> Alcotest.fail "unexpected hook stage" in
+    let check_stopped = function
+      | Error (Error.Agent (Error.HookExecutionFailed {hook_name;_})) ->
+        Alcotest.(check string) "stopped at actual parameter stage" "before_turn_params" hook_name
+      | Error error -> Alcotest.fail (Error.to_string error)
+      | Ok _ -> Alcotest.fail "fixture dispatched a provider instead of capturing input" in
+    let callback_input=ref None in
+    let options={Agent.default_options with elicitation=Some (fun _ -> response);
+      hooks={Hooks.empty with before_turn=Some (fun _ -> Hooks.ElicitInput question);
+        before_turn_params=Some (capture_input callback_input)}} in
+    let live=Agent.create ~net:env#net ~config ~options () in
+    check_stopped (Agent.run ~sw live "original");
+    Agent.close live;
+    let options={Agent.default_options with hooks={Hooks.empty with
+      before_turn=Some (fun _ -> Hooks.ElicitInput question)}} in
+    let waiting=Agent.create ~net:env#net ~config ~options
+        ~checkpoint_sink:(save_input_checkpoint path) () in
+    (match Agent.run ~sw waiting "original" with
+     | Error (Error.Agent (Error.InputRequired _)) -> ()
+     | Error error -> Alcotest.fail (Error.to_string error)
+     | Ok _ -> Alcotest.fail "expected original input wait");
+    let pending=Option.get (Agent.pending_input waiting) in
+    Agent.close waiting;
+    let restored=Agent.resume ~net:env#net ~checkpoint:(read_input_checkpoint path)
+        ~checkpoint_sink:(save_input_checkpoint path) () in
+    let forged={pending with request={pending.request with question="foreign question"}} in
+    Alcotest.(check bool) "typed response is durably accepted for the owned question" true
+      (Agent.provide_input restored forged response=Ok ());
+    Agent.close restored;
+    let committed=read_input_checkpoint path in
+    let expected=[Types.user_msg "original";Types.user_msg expected_text] in
+    Alcotest.(check bool) "settlement and distinct canonical observation survive close/reopen" true
+      (committed.pending_input=None && committed.messages=expected);
+    let restored_input=ref None in
+    let options={Agent.default_options with hooks={Hooks.empty with
+      before_turn_params=Some (capture_input restored_input)}} in
+    let continued=Agent.resume ~net:env#net ~checkpoint:committed ~options () in
+    check_stopped (Agent.run_turn_stream ~sw ~on_event:ignore continued);
+    Agent.close continued;
+    Alcotest.(check bool) "callback and reopened continuation prepare identical model input" true
+      (!callback_input=Some expected && !restored_input=Some expected))
+    [Hooks.Answer (`String "yes"),"[User input] canonical question: \"yes\"";
+     Hooks.Declined,"[Input declined] canonical question";
+     Hooks.Timeout,"[Input timed out] canonical question"]
+;;
+
 let test_accepted_resume_persists_before_parameter_failure () =
   with_input_checkpoint @@ fun path ->
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -495,6 +557,8 @@ let () =
     "Elicitation"
     [ ( "durable input transitions"
       , [ test_case "first pause and canonical answer survive cleanup" `Quick test_pause_survives_cleanup_and_answer_is_saved
+        ; test_case "all typed responses prepare the same live and durably restored model input" `Quick
+            test_callback_and_restored_response_prepare_same_model_input
         ; test_case "accepted resume is saved before later failure" `Quick test_accepted_resume_persists_before_parameter_failure
         ; test_case "failed input writes preserve the original owner" `Quick test_input_sink_failure_preserves_owned_state
         ; test_case "uncertain writes require host reconciliation" `Quick test_uncertain_input_commit_is_not_a_stale_response ] )

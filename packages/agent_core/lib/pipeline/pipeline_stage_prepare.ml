@@ -44,15 +44,9 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
                   ; response
                   }))
         | None -> ());
-       (match
-          Agent_elicitation.message_of_response
-            ~metadata:[]
-            ~question:req.question
-            response
-        with
-        | Some message ->
-          update_state agent (fun s -> { s with messages = Util.snoc s.messages message })
-        | None -> ());
+       let message = Agent_elicitation.message_of_response
+           ~metadata:[] ~question:req.question response in
+       update_state agent (fun s -> {s with messages=Util.snoc s.messages message});
        Ok ()
      | None ->
        let input_required =

@@ -587,7 +587,10 @@ type input_response_error = Agent_types.input_response_error =
 (** Apply a response to the exact current run/request, then consume the pending
     wait at the same owned mutation boundary. A stale or repeated response is a
     typed refusal without mutation. Uses the owner's canonical question.
-    [Declined] and [Timeout] settle explicitly without a synthetic User message.
+    Every response appends one User message for the canonical question. [Answer]
+    carries its JSON; [Declined] and [Timeout] append distinct explicit settlement
+    observations without inventing an answer. [Timeout] is caller-reported and
+    does not install a timer or infer expiry from elapsed time.
     The candidate messages and consumed wait reach the configured checkpoint
     sink before the in-memory mutation. A sink error leaves the Agent unchanged
     and requires its host to reconcile any uncertain external commit.

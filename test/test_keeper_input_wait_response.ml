@@ -75,9 +75,12 @@ let test_canonical_response_preserves_complete_checkpoint () =
          (after.messages = original.messages @ [Core.Types.
            {role=User; content=[Text "[User input] Original question?: \"yes\""]
            ;name=None;tool_call_id=None;metadata=[]}])
-     | Core.Hooks.Declined | Core.Hooks.Timeout ->
-       check bool "explicit settlement preserves the original messages" true
-         (after.messages = original.messages));
+     | Core.Hooks.Declined ->
+       check bool "explicit decline preserves history and reports canonical question" true
+         (after.messages = original.messages @ [Core.Types.user_msg "[Input declined] Original question?"])
+     | Core.Hooks.Timeout ->
+       check bool "explicit timeout is distinct and preserves original history" true
+         (after.messages = original.messages @ [Core.Types.user_msg "[Input timed out] Original question?"]));
     match prepare env (exact after) owned response with
     | Error (Response.Input_not_current Core.Agent_input_request.No_pending_request) -> ()
     | Error (Source_changed _ | Input_checkpoint_failed _ | Input_not_current Request_not_current)

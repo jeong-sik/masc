@@ -30,11 +30,7 @@ let respond agent supplied ~message =
     match Agent_input_request.settle ~current:agent.pending_input supplied with
     | Error error -> Error (Input_not_current error)
     | Ok owned ->
-      let state = match message owned with
-        | None -> agent.state
-        | Some message ->
-          {agent.state with messages=Util.snoc agent.state.messages message}
-      in
+      let state = {agent.state with messages=Util.snoc agent.state.messages (message owned)} in
       match persist agent ~pending_input:None state with
       | Error error -> Error (Input_checkpoint_failed error)
       | Ok () -> agent.state <- state; agent.pending_input <- None; Ok ())

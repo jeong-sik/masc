@@ -133,6 +133,15 @@ check_runtime_config() {
     || fail "$RUNTIME_CONFIG_REJECTED (the helper verdict above names the key and the file); $next_step"
 }
 
+# A browser lane host installed on a workspace whose server has no browser
+# Add-on declared is answered with HTTP 503 on every poll since #44295. The
+# declaration is the operator's to save, so the gate refuses and writes
+# nothing. This runs before the stop step, where a refusal stops nothing.
+check_browser_addon() {
+  "$PREFLIGHT_HELPER" validate-browser-addon --base-path "$BASE_PATH" \
+    || fail "this workspace has a browser lane host and no browser Add-on declaration (the helper verdict above says what is missing); nothing was stopped or installed: save the declaration through the running server's lane Add-on editor, then run this again"
+}
+
 run_gate() {
   local runtime_root="$BASE_PATH/.masc"
   local keepers_root="$runtime_root/keepers"
@@ -295,6 +304,7 @@ if [[ "$RUNTIME_CONFIG_ONLY" -eq 1 ]]; then
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
     || fail "base path is not an exact directory: $BASE_PATH"
   check_runtime_config "$RUNTIME_CONFIG_NEXT_BEFORE_STOP"
+  check_browser_addon
   printf '[runtime-deployment-preflight] OK: base_path=%s runtime_config_only=1%s\n' \
     "$BASE_PATH" "$(helper_identity)"
   exit 0

@@ -111,3 +111,59 @@ if [ -e "$FIXTURE_DIR/prefix" ]; then
 fi
 
 echo "local install refuses runtime.toml before replacing binaries"
+
+# A workspace with a browser lane host and no browser Add-on declaration is
+# refused in the same before-the-stop pass, with the helper standing in for one
+# that accepts runtime.toml and refuses the missing declaration. A helper that
+# accepts both passes the pass.
+echo "deploy preflight refuses a browser host with no Add-on declaration before stopping prod"
+
+write_helper() {
+    cat > "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe" <<HELPER
+#!/usr/bin/env bash
+case "\$1" in
+    build-commit) echo fixture-commit ;;
+    durable-filenames) printf 'snapshot=fixture-snapshot.json\\nwal=fixture-wal.jsonl\\n' ;;
+    validate-runtime-config) echo "runtime.toml ok" ;;
+    validate-browser-addon)
+        if [ "$1" = refuse ]; then
+            echo "a browser lane host is installed and no browser Add-on declaration is saved" >&2
+            exit 1
+        fi
+        echo "browser Add-on declared id=fixture"
+        ;;
+    *) echo "unexpected helper call: \$*" >&2; exit 2 ;;
+esac
+HELPER
+    chmod +x "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe"
+}
+
+GATE="$FIXTURE_DIR/repo/scripts/check-runtime-deployment-preflight.sh"
+BROWSER_ERR="$FIXTURE_DIR/browser-addon.err"
+
+write_helper refuse
+if MASC_DEPLOYMENT_PREFLIGHT_HELPER="$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe" \
+    bash "$GATE" --base-path "$FIXTURE_DIR/runtime" --runtime-config-only \
+    >/dev/null 2>"$BROWSER_ERR"
+then
+    echo "expected a browser host with no Add-on declaration to be refused" >&2
+    exit 1
+fi
+if ! grep -q "no browser Add-on declaration" "$BROWSER_ERR" \
+    || ! grep -q "nothing was stopped or installed" "$BROWSER_ERR"; then
+    echo "the refusal does not say what is missing and that nothing was stopped" >&2
+    cat "$BROWSER_ERR" >&2
+    exit 1
+fi
+
+write_helper accept
+if ! MASC_DEPLOYMENT_PREFLIGHT_HELPER="$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe" \
+    bash "$GATE" --base-path "$FIXTURE_DIR/runtime" --runtime-config-only \
+    >/dev/null 2>"$BROWSER_ERR"
+then
+    echo "expected a declared browser Add-on to pass the before-the-stop pass" >&2
+    cat "$BROWSER_ERR" >&2
+    exit 1
+fi
+
+echo "deploy preflight accepts a declared browser Add-on"

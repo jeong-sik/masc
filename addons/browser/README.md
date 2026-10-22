@@ -35,6 +35,14 @@ and on its maintenance pass. Set `enabled = false` in the declaration to keep
 it detached. `browser-lane-setup --no-addon` makes a mode other than `addon`
 leave the package and the declaration as they are.
 
+The deployment preflight (`scripts/check-runtime-deployment-preflight.sh`) refuses a
+workspace that has a browser lane host installed and no enabled declaration of
+this package, because that server answers every native host poll with HTTP 503
+(`no_browser_addon`). `scripts/install-local-build.sh` runs it with
+`--browser-addon-declared-by-caller` when it installs the Add-on, because the
+setup step above writes the declaration after the check. With
+`--no-browser-addon` the check applies.
+
 The worker exports `browser_command` through ordinary Add-on discovery. The host
 supplies verified caller context through the private control port. The package
 selects `validate_input` and `validate_output`; an installation can override

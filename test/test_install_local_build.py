@@ -138,7 +138,8 @@ def register(manifests, base, name):
 # knows neither subcommand.
 def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False,
                      resolve_failure=False, stores_exit=0, resolve_failure_silent=False,
-                     resolve_notice=None, resolve_hang=False, named_unresolved=False):
+                     resolve_notice=None, resolve_hang=False, named_unresolved=False,
+                     browser_addon_exit=0):
     path = build / "deployment_preflight_helper.exe"
     if unnamed_workspace is None:
         unnamed = "printf 'workspace=none\\n'"
@@ -162,7 +163,10 @@ def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False,
                f"    else {unnamed}; fi ;;\n")
     validate = ("" if old else
                 f"  validate-runtime-config) echo 'runtime.toml fixture verdict'; exit {verdict_exit} ;;\n"
-                f"  validate-stores) echo 'stored state fixture verdict'; exit {stores_exit} ;;\n")
+                f"  validate-stores) echo 'stored state fixture verdict'; exit {stores_exit} ;;\n"
+                "  validate-browser-addon) "
+                + ("echo 'browser Add-on fixture verdict' >&2; " if browser_addon_exit else "")
+                + f"exit {browser_addon_exit} ;;\n")
     path.write_text("#!/bin/sh\n"
                     "printf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/helper-calls\"\n"
                     "case \"$1\" in\n"
@@ -966,6 +970,27 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertIn("Fresh state required", result.stderr)
             self.assertIn(f"validate-stores --base-path {base}", helper_calls(build))
             self.assertFalse(prefix.exists(), "a build that cannot read the stored state was installed")
+
+    # A workspace with a browser lane host and no browser Add-on declaration is
+    # refused before anything is replaced: its host polls would all get 503.
+    def test_a_browser_host_without_its_addon_declaration_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build, browser_addon_exit=1)
+            prefix = root / "prefix"
+            base = workspace(root)
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(base)],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("browser Add-on fixture verdict", result.stderr)
+            self.assertIn("nothing was stopped or installed", result.stderr)
+            self.assertIn(f"validate-browser-addon --base-path {base}", helper_calls(build))
+            self.assertFalse(prefix.exists(), "a workspace without its browser Add-on declaration was installed")
 
     # The stored state is read after runtime.toml passes and before anything
     # is replaced; a readable state lets the install go ahead.

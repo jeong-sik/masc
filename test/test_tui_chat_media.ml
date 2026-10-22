@@ -184,7 +184,28 @@ let test_all_producer_images () =
       check string "later source remains available" second two
   | _ -> fail "producer images were dropped or a voice became an image"
 
+let test_drawn_diagram_coverage () =
+  let first = "flowchart TD\n A[접수] --> B[검토]" in
+  let second = "pie title 작업 비율\n \"완료\" : 3" in
+  let canonical_only = Media.Mermaid {source="classDiagram\n A <|-- B";caption=None} in
+  let one = Media.Mermaid {source=first;caption=Some "first"} in
+  let two = Media.Mermaid {source=second;caption=None} in
+  let other = [canonical_only; Media.Image {src="/api/v1/media/image";cap=None}] in
+  let media = one :: two :: one :: other in
+  let previews = Media.images media in
+  let kept, images = Media.without_drawn_diagrams ~sources:[first;second] media previews in
+  check bool "one owned fence covers one canonical occurrence" true (kept = one :: other);
+  check bool "preview ownership follows the same occurrences" true (images = Media.images kept);
+  let kept_again, images_again = Media.without_drawn_diagrams
+      ~sources:[first;second;first] media previews in
+  check bool "repeated owned fences retain canonical-only outputs" true (kept_again = other);
+  check bool "uncovered image action survives" true (images_again = Media.images other);
+  let untouched, untouched_images = Media.without_drawn_diagrams ~sources:[] media previews in
+  check bool "no closed source claims no media" true (untouched=media && untouched_images=previews);
+  check int "coverage does not mutate the original source list" 5 (List.length media)
+
 let () = run "TUI retained output and playback" [ "history", [
+  test_case "drawn diagram occurrence coverage" `Quick test_drawn_diagram_coverage;
   test_case "all producer visual sources are retained" `Quick test_all_producer_images;
   test_case "canonical diagram preserves producer order and source" `Quick test_canonical_mermaid_preview;
   test_case "canonical source fence collision" `Quick test_canonical_mermaid_fence_collision;

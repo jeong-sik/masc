@@ -1672,6 +1672,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries masc_tui_resource_catalog masc_tui_observation_store masc_tui_system_logs masc.build_version masc_tui_observation_origin masc_tui_original_task_read masc_tui_task_dispatch masc.keeper_cost_coverage masc_tui_chat_visit masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
+   masc_tui_markdown
   masc_tui_chat_call_reader
   masc_tui_task_payloads
   masc_tui_task_document_observation

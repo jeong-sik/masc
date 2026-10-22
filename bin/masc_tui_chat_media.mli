@@ -19,6 +19,13 @@ val images : t list -> Masc_tui_image_preview.preview list
 (** Every image/diagram in producer order, including explicitly unavailable
     image sources. Filenames remain labels, not local filesystem paths. *)
 
+val without_drawn_diagrams : sources:string list -> t list ->
+  Masc_tui_image_preview.preview list -> t list * Masc_tui_image_preview.preview list
+(** Remove only diagram occurrences covered by the same execution's drawn,
+    unsuperseded speech. Each exact closed-fence source covers one occurrence
+    in each representation. Other media and uncovered repetitions survive;
+    inputs and source bytes remain unchanged. *)
+
 type playable = {
   name : string;
   kind : [ `Audio | `Midi ];

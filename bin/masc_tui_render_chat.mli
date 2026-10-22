@@ -93,6 +93,11 @@ val keeper_message_projection :
 (** The shared frame/search projection, before physical row wrapping and
     viewport clipping. Authored bodies and execution rails remain typed. *)
 
+val message_of_tag : tagged_row -> Masc_tui_types.msg_entry option
+(** The projected message carried by this row, including any source-owned media
+    remainder. [None] for journal blocks and child-content rows. The original
+    durable message is not recovered or substituted. *)
+
 val search_anchor_of_tag : tagged_row -> Masc_tui_types.chat_search_anchor option
 (** The durable search identity of a row; [None] for a block row that has no
     drawn origin. *)

@@ -13178,10 +13178,21 @@ let reasoning_drawn = function
    aggregate without streamed block identities: observing some reasoning
    cannot establish coverage of that aggregate, withheld steps or omissions. *)
 type held_turn =
-  { ht_source : Masc_tui_keeper_chat_log.journal_source }
+  { ht_source : Masc_tui_keeper_chat_log.journal_source
+  ; ht_diagrams : string list }
 
 let held_turn_of_log turn_log =
-  { ht_source = turn_log_execution_source turn_log }
+  let diagrams =
+    Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript
+    |> List.concat_map (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+         match item.superseded, item.drawn with
+         | None, (Drawn_text text | Drawn_reply text) ->
+             Masc_tui_markdown.mermaid_sources text
+         | Some _, _
+         | None, (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _
+           | Drawn_status _ | Drawn_error _) -> [])
+  in
+  { ht_source = turn_log_execution_source turn_log; ht_diagrams = diagrams }
 ;;
 
 (* Tool rows require exact receipt coverage in [compute_chat_rows_for].
@@ -13201,12 +13212,18 @@ let log_draws_row (held : held_turn) (row : msg_entry) =
 (* The committed rows the pane still draws once these turns are held by
    settled logs: a turn has one source, and for a held turn that is the log.
    The same list when nothing is held, so the memo above it can tell. *)
-let media_remainder (row : msg_entry) =
+let media_remainder ~diagrams (row : msg_entry) =
   match row.me_role, row.me_media with
   | (Message_keeper | Message_autonomous), (_ :: _ as media) ->
-      Some {row with me_text =
-        Masc_tui_chat_media.append_text ~text:"" media
-        |> Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true}
+      (* Only the selected execution's actual speech establishes coverage.
+         [row.me_text] already includes canonical-only media and cannot say
+         what the log received. Retain every other media kind and source. *)
+      let media, images = Masc_tui_chat_media.without_drawn_diagrams
+          ~sources:diagrams media row.me_images in
+      if media = [] && images = [] then None
+      else Some {row with me_media=media; me_images=images; me_text =
+          Masc_tui_chat_media.append_text ~text:"" media
+          |> Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true}
   | (Message_keeper | Message_autonomous), []
   | (Message_tool | Message_skill _ | Message_thinking | Message_user _
     | Message_status | Message_local | Message_error | Message_memory), _ -> None
@@ -13232,8 +13249,10 @@ let rows_the_logs_do_not_draw ~held rows =
             | Some source ->
               Hashtbl.find_all by_source (execution_source_key_of_source source)
           in
-          if List.exists (fun turn -> log_draws_row turn row) candidates
-          then media_remainder row else Some row)
+          match List.filter (fun turn -> log_draws_row turn row) candidates with
+          | [] -> Some row
+          | owners -> media_remainder
+              ~diagrams:(List.concat_map (fun turn -> turn.ht_diagrams) owners) row)
         rows
 ;;
 
@@ -16525,18 +16544,20 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
                | Masc_tui_keeper_chat_transcript.Drawn_status _
                | Masc_tui_keeper_chat_transcript.Drawn_error _ -> false)
              (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript)
-         then Some (turn_log_execution_source log)
+         then Some (held_turn_of_log log)
          else None)
   in
   let without_partial_replies rows =
     List.filter_map
       (fun (row : msg_entry) ->
         match row.me_role with
-        | Message_keeper | Message_autonomous
-          when List.exists (fun source -> row.me_execution_source = Some source) partial_replies ->
-            media_remainder row
+        | Message_keeper | Message_autonomous ->
+            (match List.find_opt
+                (fun owner -> row.me_execution_source = Some owner.ht_source) partial_replies with
+             | Some owner -> media_remainder ~diagrams:owner.ht_diagrams row
+             | None -> Some row)
         | Message_status | Message_local | Message_error | Message_tool | Message_thinking
-        | Message_memory | Message_user _ | Message_skill _ | (Message_keeper|Message_autonomous) -> Some row)
+        | Message_memory | Message_user _ | Message_skill _ -> Some row)
       rows
   in
   (* Selected logs own the exact tool receipts already drawn, including after

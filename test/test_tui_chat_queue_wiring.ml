@@ -2161,6 +2161,50 @@ let test_journal_replacement_retains_history_media () =
     [false,true,"MEDIA_REPLY";false,false,"MEDIA_REPLY";true,true,""]
 ;;
 
+let test_journal_diagram_coverage_is_source_owned () =
+  let module Media = Masc_tui_chat_media in
+  let module Preview = Masc_tui_image_preview in
+  let first="flowchart TD\n A[접수] --> B[검토]" in
+  let second="pie title 작업 비율\n \"완료\" : 3" in
+  let fence source="```mermaid\n" ^ source ^ "\n```" in
+  let spoken=fence first ^ "\n" ^ fence second in
+  let diagram source=Media.Mermaid {source;caption=None} in
+  let uncovered=[diagram "classDiagram\n A <|-- B";
+    Media.Image {src="/api/v1/media/image";cap=None}] in
+  let media=diagram first :: diagram second :: uncovered in
+  List.iter (fun (finished, reply, same_source, expected) ->
+    let source=Log.Operation "diagram-owner" in
+    let row={ (chat_entry ~request_id:"diagram-owner" ~role:Tui_types.Message_keeper
+        ~text:(Media.append_text ~text:spoken media) ~at:2. ()) with
+      me_execution_source=Some source;me_media=media;
+      me_images=Preview.in_message_previews ~text:spoken ~attachments:(Media.images media) } in
+    let state=Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_loaded_keeper <- Some "alpha";
+    state.msg_loaded <- [row];
+    let owner=if same_source then source else Log.Operation "other-owner" in
+    let log=Tui_types.turn_log_create_for_source ~keeper_name:"alpha" ~source:owner ~started_at:1. in
+    let events=[line 0 1. (E.Run_started {run_id="diagram-run";thread_id="keeper:alpha"});
+      line 1 1.1 (E.Reply_details {reply;turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
+        turn_ref=Ids.Turn_ref.make ~trace_id:"diagram" ~absolute_turn:1;
+        terminal_stream_scope=None})] @
+      (if finished then [line 2 1.2 (E.Run_finished {run_id="diagram-run"})] else []) in
+    ignore (Tui_types.turn_log_add_journaled log events);
+    Log.commit log.tl_log;
+    Tui_types.hold_settled_log state log;
+    (match Tui_types.chat_rows_for state "alpha" with
+     | [remaining] ->
+         check bool "only same-source closed diagrams are covered" true (remaining.me_media=expected);
+         check bool "remaining previews retain original actions" true (remaining.me_images=Media.images expected);
+         check bool "durable identity is retained" true (remaining.me_identity=row.me_identity)
+     | _ -> fail "uncovered media must remain source-owned");
+    check bool "stored original is immutable" true (List.hd state.msg_loaded == row))
+    [true,spoken,true,uncovered;false,spoken,true,uncovered;
+     true,"plain reply",true,media;false,"```mermaid\n" ^ first,true,media;
+     true,spoken,false,media;false,spoken,false,media]
+;;
+
 (* A journal read starts where the session's record of the turn ends: after a
    cut live stream's partial log, or from the beginning. *)
 let test_a_journal_read_resumes_after_a_partial_log () =
@@ -6281,7 +6325,9 @@ let () =
         ; test_case "persisted execution source and narrow delivery labels" `Quick
             test_persisted_execution_source_and_narrow_delivery_labels ] )
     ; ( "attachment captions", [test_case "journal replacement retains source-owned media" `Quick
-          test_journal_replacement_retains_history_media] )
+          test_journal_replacement_retains_history_media;
+        test_case "journal diagram coverage follows the execution source" `Quick
+          test_journal_diagram_coverage_is_source_owned] )
     ; ( "visible delivery",
         [ test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable
         ; test_case "speech preserves original words" `Quick test_speech_keeps_original_words_across_metadata_and_retry

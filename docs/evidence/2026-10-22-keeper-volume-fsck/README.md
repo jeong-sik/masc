@@ -34,12 +34,20 @@ superblock 은 1024 byte 지점의 1024 byte 다. 필드 위치는 커널 문서
 | 이미지 | magic | Errors detected | s_error_count | 첫 오류 | 마지막 오류 |
 |---|---|---|---|---|---|
 | `volume.img.pre-fsck-20261022` | 0xef53 | 켜짐 | 31,027,637 | 2026-10-12T07:06:40Z `ext4_check_bdev_write_error`:227 | 2026-10-22T10:59:31Z `ext4_find_extent`:944 |
-| 수리한 `volume.img` | 0xef53 | 꺼짐 | 0 | 없음 | 없음 |
+| 수리한 뒤 다음 게스트가 마운트한 `volume.img` | 0xef53 | 꺼짐 | 0 | 없음 | 없음 |
 
 게스트가 볼륨을 쓰고 있는 동안에도 커널이 오류를 superblock 에 적었다.
 마지막 오류 시각(10:59:31Z)은 게스트를 멈추기(11:05Z) 직전이다.
 
 같은 방식으로 `container volume ls` 의 ext4 볼륨 74개를 읽었다. 수리 뒤에는 오류가 기록된 볼륨이 없었다.
+
+두 superblock 의 기능 비트:
+
+- `s_feature_compat` 0x0208. `HAS_JOURNAL`(0x0004)이 없고 `s_journal_inum` 은 0 이다. journal 이 없다.
+- `s_feature_ro_compat` 0x4a. `metadata_csum`(0x0400)이 없어서 superblock 체크섬도 없다.
+- 수리 전 superblock 은 `container stop` 뒤에 떴는데 `s_state` 가 0x0002 다. "깨끗이 풀림"(0x0001)이 꺼져 있다.
+  journal 이 없는 ext4 는 마운트할 때 이 비트를 지우고 깨끗이 풀 때만 켠다. 마운트할 때 이미 깨끗하지 않았다는 뜻이다.
+- 수리 뒤 superblock 은 `s_state` 0x0000 이다. 다음 게스트가 마운트한 상태에서 떴다.
 
 ## 3. 운영자가 돌린 수리
 
@@ -78,3 +86,20 @@ superblock 은 1024 byte 지점의 1024 byte 다. 필드 위치는 커널 문서
 - 오류 비트만 켜진 경우 `e2fsck -f -y` 는 비트를 지우고도 0 으로 끝났다. 무엇이 고쳐졌는지는 종료 코드가 아니라 수리 전후 superblock 을 호스트에서 읽어 판단해야 한다.
 - 마운트가 풀렸는지는 `findmnt --mountpoint` 로 본다. `findmnt --target` 은 마운트가 풀리면 상위 파일시스템을 찾아 성공한다.
 - `container run` 1.3.1 에는 볼륨을 마운트하지 않고 블록 장치로만 붙이는 옵션이 없다(`--volume`, `--mount type=...` 뿐).
+- 이 실측은 오류 비트만 켠 깨끗한 1 GB 파일시스템이다. 실제로 망가진 파일시스템을 helper 가 마운트할 수 있는지는 재지 않았다.
+
+## 5. Keeper 이미지에 수리 도구가 있다
+
+수리 helper 는 trim helper 처럼 Keeper 자신의 이미지로 돈다. 이 호스트의 두 Keeper 이미지에서 쟀다.
+
+```
+container run --rm --network none <image> /bin/sh -c 'for p in /usr/sbin/e2fsck /usr/bin/findmnt /usr/bin/umount; do ...'
+== masc-sandbox:general
+ok /usr/sbin/e2fsck
+ok /usr/bin/findmnt
+ok /usr/bin/umount
+== masc-sandbox-ocaml:20260928T0216Z-c48e1e05
+ok /usr/sbin/e2fsck
+ok /usr/bin/findmnt
+ok /usr/bin/umount
+```

@@ -147,10 +147,13 @@ let report ~keeper_name ~(volume : Watch.volume) ~previous (observation : Watch.
 
 (* §3.3: one repair per error episode. [Running] while its fiber holds or
    waits for the lane; [Attempted] once a repair ran, until a clean read ends
-   the episode. No mark means the volume may be repaired. *)
+   the episode. A repair that stopped at a backup the operator owns tried
+   nothing, so [Awaiting_backup_removal] holds the volume only while that
+   backup exists. No mark means the volume may be repaired. *)
 type repair_mark =
   | Running
   | Attempted
+  | Awaiting_backup_removal of string
 
 let repair_marks : repair_mark Volume_map.t Atomic.t = Atomic.make Volume_map.empty
 
@@ -159,34 +162,45 @@ let rec update_marks change =
   if not (Atomic.compare_and_set repair_marks current (change current)) then update_marks change
 ;;
 
-let rec claim_repair volume =
+let rec claim_repair ~backup_exists volume =
   let current = Atomic.get repair_marks in
   match Volume_map.find_opt volume current with
   | Some (Running | Attempted) -> false
-  | None ->
+  | Some (Awaiting_backup_removal path) when backup_exists ~path -> false
+  | Some (Awaiting_backup_removal _) | None ->
     Atomic.compare_and_set repair_marks current (Volume_map.add volume Running current)
-    || claim_repair volume
+    || claim_repair ~backup_exists volume
 ;;
 
 let end_episode volume =
   update_marks (fun marks ->
     match Volume_map.find_opt volume marks with
-    | Some Attempted -> Volume_map.remove volume marks
+    | Some (Attempted | Awaiting_backup_removal _) -> Volume_map.remove volume marks
     | Some Running | None -> marks)
 ;;
 
+let mark_after (receipt : Repair.receipt) =
+  match receipt.outcome with
+  | Repair.Backup_present -> Awaiting_backup_removal (Repair.backup_path ~image:receipt.image)
+  | Repair.Helper_unavailable _ | Repair.Teardown_refused _ | Repair.Not_needed
+  | Repair.Unreadable_before _ | Repair.Backup_unavailable _ | Repair.Helper_refused _
+  | Repair.Repaired | Repair.Repair_incomplete _ | Repair.Unreadable_after _
+  | Repair.Recreated_at_next_boot -> Attempted
+;;
+
 (* The effects are arguments so the marks can be checked without a lane: a
-   repair that ran ends the episode's attempts, and a Keeper that was busy,
-   or a lane that refused, leaves the volume to the next pulse. *)
-let schedule_repair ~fork ~run_in_lane ~on_finished ~on_lane_error ~volume =
-  if claim_repair volume
+   repair that ran ends the episode's attempts, one that found the operator's
+   backup waits for its removal, and a Keeper that was busy, or a lane that
+   refused, leaves the volume to the next pulse. *)
+let schedule_repair ~fork ~backup_exists ~run_in_lane ~on_finished ~on_lane_error ~volume =
+  if claim_repair ~backup_exists volume
   then
     fork
       ~on_error:(fun () -> update_marks (Volume_map.remove volume))
       (fun () ->
          match run_in_lane () with
          | Ok (`Ran receipt) ->
-           update_marks (Volume_map.add volume Attempted);
+           update_marks (Volume_map.add volume (mark_after receipt));
            on_finished receipt
          | Ok (`Busy _) -> update_marks (Volume_map.remove volume)
          | Error error ->
@@ -301,7 +315,8 @@ let rollback_lines (receipt : Repair.receipt) =
         "To roll back, stop the Keeper's guest and move %s back to %s."
         backup
         receipt.image
-    ; "The next automatic repair of this volume waits until that backup is removed."
+    ; "The server does not repair this volume again until it reads clean or the server restarts, \
+       and not while that backup exists."
     ]
 ;;
 
@@ -309,13 +324,15 @@ let follow_up_lines (receipt : Repair.receipt) =
   match receipt.outcome with
   | Repair.Backup_present ->
     [ Printf.sprintf
-        "Check %s and remove it once it is no longer needed; the next automatic repair waits for that."
+        "Check %s and remove it once it is no longer needed; the server repairs the volume the next \
+         time the Keeper is idle after that."
         (Repair.backup_path ~image:receipt.image)
     ]
-  | Repair.Helper_unavailable _ | Repair.Teardown_refused _ | Repair.Not_needed
-  | Repair.Unreadable_before _ | Repair.Backup_unavailable _ | Repair.Helper_refused _
-  | Repair.Repaired | Repair.Repair_incomplete _ | Repair.Unreadable_after _
-  | Repair.Recreated_at_next_boot -> []
+  | Repair.Helper_unavailable _ | Repair.Teardown_refused _ | Repair.Unreadable_before _
+  | Repair.Backup_unavailable _ ->
+    [ "The server does not try this volume again until it reads clean or the server restarts." ]
+  | Repair.Not_needed | Repair.Helper_refused _ | Repair.Repaired | Repair.Repair_incomplete _
+  | Repair.Unreadable_after _ | Repair.Recreated_at_next_boot -> []
 ;;
 
 let cleanup_lines (receipt : Repair.receipt) =
@@ -397,6 +414,7 @@ let start_repair ~sw ~(config : Workspace.config) ~keeper_name ~(volume : Watch.
           on_error ();
           Server_bootstrap_loops_fiber.log_server_fiber_crash "keeper_volume_repair" exn)
         run)
+    ~backup_exists:(fun ~path -> Sys.file_exists path)
     ~run_in_lane:(fun () ->
       Keeper_owner_registry.run_maintenance_if_idle
         ~defer_to_chat:true

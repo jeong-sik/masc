@@ -31,9 +31,10 @@ type counts =
 let counts () = { lane = 0; finished = 0; refused = 0 }
 let run_now ~on_error:_ run = run ()
 
-let schedule counts ?(fork = run_now) ~lane volume =
+let schedule counts ?(fork = run_now) ?(backup_exists = fun ~path:_ -> false) ~lane volume =
   Sweep.schedule_repair
     ~fork
+    ~backup_exists
     ~run_in_lane:(fun () ->
       counts.lane <- counts.lane + 1;
       lane ())
@@ -44,9 +45,9 @@ let schedule counts ?(fork = run_now) ~lane volume =
 
 let ran () = Ok (`Ran receipt)
 
-(* A repair that ran, whatever its outcome, is not run again until a clean
-   read ends the episode: a repeat would remove the Keeper's guests on every
-   idle pulse. *)
+(* A repair that ran, whatever its outcome short of finding the operator's
+   backup, is not run again until a clean read ends the episode: a repeat
+   would remove the Keeper's guests on every idle pulse. *)
 let test_a_repair_runs_once_per_episode () =
   let c = counts () in
   let volume = "schedule-once" in
@@ -57,6 +58,33 @@ let test_a_repair_runs_once_per_episode () =
   Sweep.end_episode volume;
   schedule c ~lane:ran volume;
   check int "a new episode repairs again" 2 c.lane
+;;
+
+(* A repair that stopped at the operator's backup tried nothing. The Board
+   tells the operator to remove that backup, so its removal, not the end of
+   the episode, lets the next pulse repair. *)
+let test_a_found_backup_waits_for_its_removal () =
+  let c = counts () in
+  let volume = "schedule-backup" in
+  let backup = Repair.backup_path ~image:receipt.image in
+  let present = ref true in
+  let backup_exists ~path = String.equal path backup && !present in
+  let found () = Ok (`Ran { receipt with Repair.outcome = Repair.Backup_present }) in
+  schedule c ~backup_exists ~lane:found volume;
+  schedule c ~backup_exists ~lane:found volume;
+  check int "no lane while that backup exists" 1 c.lane;
+  check int "its result was handled once" 1 c.finished;
+  present := false;
+  schedule c ~backup_exists ~lane:ran volume;
+  check int "repaired once the backup is gone" 2 c.lane;
+  schedule c ~backup_exists ~lane:ran volume;
+  check int "that repair is the episode's one" 2 c.lane;
+  let cleaned = "schedule-backup-clean" in
+  present := true;
+  schedule c ~backup_exists ~lane:found cleaned;
+  Sweep.end_episode cleaned;
+  schedule c ~backup_exists ~lane:ran cleaned;
+  check int "a clean read also ends the wait" 4 c.lane
 ;;
 
 let test_a_busy_keeper_is_tried_again () =
@@ -145,6 +173,7 @@ let () =
     "server_keeper_volume_maintenance"
     [ ( "schedule"
       , [ test_case "once per episode" `Quick test_a_repair_runs_once_per_episode
+        ; test_case "found backup waits for its removal" `Quick test_a_found_backup_waits_for_its_removal
         ; test_case "busy keeper tried again" `Quick test_a_busy_keeper_is_tried_again
         ; test_case "refused lane tried again" `Quick test_a_refused_lane_is_reported_and_tried_again
         ; test_case "running repair not started twice" `Quick test_a_running_repair_is_not_started_twice

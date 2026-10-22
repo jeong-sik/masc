@@ -90,6 +90,7 @@ val image_of_inspect : Yojson.Safe.t -> (image, inspect_failure) result
 
 - 관측이 `Errors_recorded` 인 볼륨에서, 이번 오류 구간에 아직 수리를 돌리지 않았으면 시도한다. 깨끗한 읽기가 나오면 그 구간이 끝난다.
   - 한 번 돌면 결과가 무엇이든 그 구간에는 다시 시도하지 않는다. 아무것도 바꾸지 않은 결과(helper 이미지 없음 등)도 같다. 같은 실패를 pulse 마다 되풀이하지 않기 위해서다. 그런 결과는 결과 글로 운영자에게 알린다.
+  - 하나만 다르다. 운영자의 백업이 있어 멈춘 결과(`Backup_present`)는 시도한 것이 아니다. 그 백업이 있는 동안에는 레인도 잡지 않고 글도 쓰지 않는다. 운영자가 백업을 지우면 같은 구간이어도 다음 pulse 에 고친다. 결과 글이 운영자에게 그렇게 하라고 말하기 때문이다.
   - 이 기억은 프로세스 안에만 있다. 서버를 다시 띄우면 한 번 더 시도한다.
 - Owner 의 Maintenance 레인 `Keeper_owner_registry.run_maintenance_if_idle ~defer_to_chat:true` 안에서 돈다. `Busy` 거나 레인이 거절하면 다음 pulse 에 다시 시도한다.
 - 수리는 볼륨마다 자기 fiber 에서 돈다. 수리 하나가 오래 걸려도 다른 볼륨의 감지는 멈추지 않는다. 한 Keeper 의 두 볼륨이 겹치면 레인이 하나만 받고, 나머지는 `Busy` 로 다음 pulse 를 기다린다.
@@ -106,7 +107,7 @@ build volume 은 게스트가 새로 boot 할 때마다 지우고 다시 만든�
    - 지금 쓰는 두 이미지(`masc-sandbox:general`, `masc-sandbox-ocaml`)에 `e2fsck`, `findmnt`, `umount` 가 다 있다(증거 §5). 도구가 없는 이미지면 스크립트가 `umount` 전에 멈춘다.
 2. `<source>.pre-repair` 가 이미 있으면 수리하지 않는다(`Backup_present`).
    - 백업은 운영자 것이다. 서버는 백업을 덮어쓰거나 지우지 않는다.
-   - 수리가 실패하거나 끊겨도 처음 망가진 원본이 그대로 남는다. 운영자가 확인하고 지우면, 다음 오류 구간에서 다시 자동으로 고친다.
+   - 수리가 실패하거나 끊겨도 처음 망가진 원본이 그대로 남는다. 운영자가 확인하고 지우면 다시 자동으로 고친다. 이 단계에서 멈춘 구간이면 지운 뒤 다음 pulse 에, 수리를 이미 돌린 구간이면 다음 오류 구간에 고친다.
 3. 그 Keeper 의 게스트를 멈추고 지운다(`teardown_keeper_sandbox`). 앞 서버가 남긴 repair helper 도 여기서 지운다. 볼륨을 붙잡은 helper 가 있는 채로 다음 읽기와 복제를 하면 안 되기 때문이다. 다음 턴이 첫 도구 호출에서 새 게스트를 띄운다(지금의 lazy boot 그대로).
 4. superblock 을 다시 읽는다. 붙은 게스트가 없으니 이 읽기가 권위다. `Clean` 이면 끝난다(`Not_needed`).
 5. 이미지를 `<source>.pre-repair` 에 APFS 복제로 백업한다(`Fs_compat.clone_file`, `fclonefileat`).

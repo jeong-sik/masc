@@ -28,7 +28,11 @@ let resolve ~config ~reserved =
   match List.find_opt (fun (conflict : Lane_addon_tool_export.conflict) -> conflict.name=Binding.tool) snapshot.conflicts with
   | Some conflict -> Error (Rejected (Lane_addon_tool_export.conflict_to_string conflict))
   | None -> (match List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name=Binding.tool) snapshot.exports with
-      | Some export -> Ok export | None -> Error (Unavailable "No attached Add-on provides curate"))
+      | Some export -> Ok export
+      | None -> Error (Unavailable (match Lane_addon_unready.summary
+          (Lane_addon_unready.declaring ~name:Binding.tool snapshot.unready) with
+        | Some reason -> reason
+        | None -> "No attached Add-on provides curate")))
 let same_semantic_destination (actual:Runtime.tool_request_destination) (expected:Capture.destination) =
   actual.installation_id=expected.installation_id && actual.package_id=expected.package_id
   && actual.tool=expected.tool && actual.configuration_revision=expected.configuration_revision

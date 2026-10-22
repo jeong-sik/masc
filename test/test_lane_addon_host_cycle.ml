@@ -422,8 +422,8 @@ export=["queue_question"]
          this request. There is no await_change, registry event or reconcile. *)
       await clock (fun () -> cycles config >= 1 && !(worker.observations) >= 1);
       let before = cycles config in
-      let export = match Runtime.tool_exports ~config
-        ~access:Lane_addon_sources.Operator_configuration ~reserved:[] |> unwrap with
+      let export = match (Runtime.tool_export_reading ~config
+        ~access:Lane_addon_sources.Operator_configuration ~reserved:[] |> unwrap).exports with
         | [export] -> export | _ -> fail "the original tool must be exported" in
       let reply = match Runtime.call_exported_tool ~config
         ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export
@@ -446,7 +446,7 @@ let test_original_tool_destination_survives_replacement_and_reattachment () =
   let manifest = manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n" in
   with_installation ~manifest ~exported_tool:(tool,invoke) (fun clock config _worker _state root ->
     let access = Lane_addon_sources.Operator_configuration in
-    let current () = match Runtime.tool_exports ~config ~access ~reserved:[] |> unwrap with
+    let current () = match (Runtime.tool_export_reading ~config ~access ~reserved:[] |> unwrap).exports with
       | [export] -> Some export | _ -> None in
     await clock (fun () -> Option.is_some (current ()));
     let original = Option.get (current ()) in
@@ -490,7 +490,7 @@ let test_capture_factory_uses_actual_live_declaration_before_any_rpc () =
   let manifest=manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n" in
   with_installation ~manifest ~exported_tool:(tool,invoke) (fun clock config _worker _state _root ->
     let access=Lane_addon_sources.Operator_configuration in
-    let current ()=match Runtime.tool_exports ~config ~access ~reserved:[] |> unwrap with
+    let current ()=match (Runtime.tool_export_reading ~config ~access ~reserved:[] |> unwrap).exports with
       | [export] -> Some export | _ -> None in
     await clock (fun () -> Option.is_some (current ()));
     let export=Option.get (current ()) in

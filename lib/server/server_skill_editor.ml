@@ -470,8 +470,9 @@ let authoring_descriptors ~config ~access =
     @ List.concat_map Keeper_tool_descriptor.registered_names static
     |> List.sort_uniq String.compare
   in
-  Lane_addon_runtime.tool_exports ~config ~access ~reserved
-  |> Result.map (fun exports -> static @ List.map Keeper_lane_addon_descriptor.create exports)
+  Lane_addon_runtime.tool_export_reading ~config ~access ~reserved
+  |> Result.map (fun (reading : Lane_addon_runtime.export_reading) ->
+    static @ List.map Keeper_lane_addon_descriptor.create reading.exports)
 ;;
 
 let validate_source ~descriptors ~directory source_text =

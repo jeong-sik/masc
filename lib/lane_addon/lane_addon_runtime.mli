@@ -99,9 +99,6 @@ val tool_export_reading : config:Workspace.config -> access:Lane_addon_sources.a
     The caller supplies the complete reserved host namespace. Collisions fail
     explicitly. Visibility follows verified caller authority; an installation
     the caller cannot read is in neither list. *)
-val tool_exports : config:Workspace.config -> access:Lane_addon_sources.access ->
-  reserved:string list -> (tool_export list, string) result
-(** The exports of {!tool_export_reading}. *)
 val retain_tool_request_owner : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> export:tool_export -> scope:string -> request_id:string -> request:Yojson.Safe.t ->
   (unit, tool_call_error) result

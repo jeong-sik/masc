@@ -19,7 +19,10 @@ let resolve ~config ~reserved =
     match List.find_opt (fun (export : Lane_addon_runtime.tool_export) ->
       String.equal export.tool.name tool_name) snapshot.exports with
     | Some export -> Ok export
-    | None -> Error "No attached Add-on provides candle_appraise"
+    | None -> Error (match Lane_addon_unready.summary
+        (Lane_addon_unready.declaring ~name:tool_name snapshot.unready) with
+      | Some reason -> reason
+      | None -> "No attached Add-on provides candle_appraise")
 let available ~config () = Result.map (fun _ -> ()) (resolve ~config ~reserved:(reserved_names ()))
 let declaration_change_probe ~config () =
   let current () = resolve ~config ~reserved:(reserved_names ()) |> Result.to_option in

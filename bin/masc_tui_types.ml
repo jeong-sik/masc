@@ -7199,7 +7199,7 @@ module Browser_lane_view = struct
     | _ -> None
 
   let viewport_request ~tab_id ~expected_url ~action t =
-    let fields = match Browser_lane.interaction_args ~tab_id ~expected_url:(Some expected_url) action with
+    let fields = match Browser_lane.interaction_args ~tab_id ~frame_path:[] ~expected_url:(Some expected_url) action with
       | `Assoc fields -> fields | _ -> [] in
     `Assoc (("lane",`String (source_name t.source)) :: fields @
       (match client_id t with None -> [] | Some id -> ["clientId",`String id]))

@@ -1732,7 +1732,7 @@ let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) 
         ~installation_id ~package_id:e.package.id ~tool:export.tool.name ~request)
       |> Result.map_error (function
         | Lane_addon_tool_request_owner.Store_unavailable detail -> Unavailable detail
-        | (Binding_conflict | Invalid_identity _) as error ->
+        | (Binding_conflict | Invalid_identity _ | Invalid_request _) as error ->
           Host_refusal (Lane_addon_call_context.Rejected (Lane_addon_tool_request_owner.error_to_string error)))))
 
 let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =

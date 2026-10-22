@@ -174,6 +174,24 @@ let test_related_ledger_context_remains_in_the_whole_row () =
     (narrowed.selected = [changed] && narrowed.remaining = [second]);
   Alcotest.(check int) "narrowing does not rebuild the current-fact index" 1
     narrowed.index_stats.index_builds;
+  List.iter (fun original ->
+    let restored = match Request.batch_of_json ~ledger (Request.batch_to_json original) with
+      | Ok restored -> restored
+      | Error error -> Alcotest.fail (Request.error_to_string error) in
+    Alcotest.check json "captured related prose and narrowed suffix survive restoration"
+      (Request.batch_to_json original) (Request.batch_to_json restored)) [full; narrowed];
+  let replace key value = function
+    | `Assoc fields -> `Assoc (List.map (fun (name, old) -> name, if name = key then value else old) fields)
+    | _ -> Alcotest.fail "expected request object" in
+  List.iter (fun row ->
+    let tampered = replace "input" (`Assoc ["new_facts", `List [row]]) (Request.batch_to_json full) in
+    match Request.batch_of_json ~ledger tampered with
+    | Error (Request.Invalid_batch _) -> ()
+    | Error (Request.Invalid_limit | Request.Render_failed _ | Request.Index_unavailable _) | Ok _ ->
+      Alcotest.fail "changed selected evidence or captured related ledger prose restored")
+    [replace "related_claims" (`List [`Assoc ["claim_id",`String "c-unrelated";"claim",`String unrelated.claim]]) full_row;
+     replace "related_conflicts" (`List [replace "description" (`String "Changed conflict evidence") conflict]) full_row;
+     replace "new_fact" (replace "claim" (`String "Changed selected prose") (member "new_fact" full_row)) full_row];
   (match Request.narrow ~render narrowed with
    | Ok None -> () | _ -> Alcotest.fail "single row lost related ledger context")
 

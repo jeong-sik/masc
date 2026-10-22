@@ -118,19 +118,32 @@ let stage_route
         }
         (fun tracer ->
            let trace_context = Tracing.trace_context_headers tracer in
-           dispatch_stream
-             ~sw
-             ?clock
-             ~provider_config
-             ~trace_context
-             agent
-             prep
-             ~on_event
-             ?capture_id
-             ?on_telemetry
-             ?on_provider_failure
-             ?before_provider_attempt
-             ())
+           let capabilities =
+             Provider_runtime_binding.capabilities_for_provider_config provider_config in
+           if not capabilities.supports_native_streaming then begin
+             (* The full original response must reach the observer before
+                stage_collect removes or recovers tool names. Its raw block
+                indices and pre-admission inventory own Keeper's occurrences. *)
+             let* response = dispatch_sync
+               ~sw ?clock ~trace_context ?on_provider_failure
+               ?before_provider_attempt ~provider_config agent prep in
+             Llm_provider.Streaming.emit_synthetic_events response
+               (Llm_provider.Complete_stream.emit_stream_event on_event);
+             Ok response
+           end else
+             dispatch_stream
+               ~sw
+               ?clock
+               ~provider_config
+               ~trace_context
+               agent
+               prep
+               ~on_event
+               ?capture_id
+               ?on_telemetry
+               ?on_provider_failure
+               ?before_provider_attempt
+               ())
   in
   Result.map (fun response -> provider_config, response) result
 ;;

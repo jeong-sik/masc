@@ -17,12 +17,15 @@ new MASC container runtime, and its direct local commands are not
 executes the companion locally; retained results can enter the generic Lane
 through the existing `snapshot_file` contract.
 
-For a normal installation, run `scripts/install-vst-host.sh` from the repository
+For a normal installation, run `scripts/install-alphatex.sh` from the repository
 root. `--python` selects a Python 3.12+ interpreter and `--prefix` selects the
-commands directory. Dependencies and native code are kept in an immutable
-adjacent `share/masc/vst/<source digest>` runtime; the launcher is replaced only
-after discovery succeeds. The installed `masc-vst-host` reads the same jobs as
-the development command below.
+commands directory. The script copies `host.py` into the viewer runtime
+(`share/masc/alphatex/<revision>/vst/`) and writes a `vst/host` launcher beside
+it; the revision digest includes `host.py` and `requirements.lock`. The viewer
+starts that launcher from its own directory, so it never speaks to a host from
+another revision. The Python environment depends only on the lock and is shared
+as `share/masc/vst-env/<lock digest>`. The launcher is placed only after
+discovery succeeds and reads the same jobs as the development command below.
 
 For development, install the hashed dependency lock in an isolated Python 3.12+
 environment, then send one JSON job:

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, copyFile, symlink, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, copyFile, symlink, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname, delimiter } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
@@ -20,11 +20,13 @@ async function runtime({ pcm = 'paced', vst = 'valid' } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'monitor-worker-'))
   const trace = join(directory, 'events.jsonl'), workers = []
   for (const file of ['synth-stream.mjs', 'soundfont-stream.mjs', 'soundfont_stream.py', 'soundfont_host.py', 'step-monitor.mjs', 'step-monitor-worker.mjs', 'step-monitor-session.mjs',
-    'render-midi-clock.mjs', 'exact-time.mjs', 'phrase-backing.mjs', 'sequencer-project.mjs', 'project-sound.mjs', 'pcm-output.mjs', 'vst-stream.mjs', 'session-data.mjs', 'wave-file.mjs']) {
+    'render-midi-clock.mjs', 'exact-time.mjs', 'phrase-backing.mjs', 'sequencer-project.mjs', 'project-sound.mjs', 'pcm-output.mjs', 'vst-stream.mjs', 'vst-host.mjs', 'session-data.mjs', 'wave-file.mjs']) {
     await copyFile(new URL(`../${file}`, import.meta.url), join(directory, file))
   }
   await symlink(fileURLToPath(new URL('../node_modules', import.meta.url)), join(directory, 'node_modules'), 'dir')
-  for (const [name, fixture, mode] of [['music-pcm-output', 'pcm-output', pcm], ['masc-vst-host', 'vst-stream', vst]]) {
+  // Both fakes sit where the installed runtime keeps the real helpers.
+  await mkdir(join(directory, 'vst'))
+  for (const [name, fixture, mode] of [['music-pcm-output', 'pcm-output', pcm], ['vst/host', 'vst-stream', vst]]) {
     const fixtureURL = new URL(`./fixtures/${fixture}.mjs`, import.meta.url).href
     await writeFile(join(directory, name), `#!/usr/bin/env node
 import { appendFileSync } from 'node:fs'
@@ -232,7 +234,7 @@ test('actual FluidSynth runs inside the demand worker with independent live/back
     owner.stop();await owner.completion
     const rows=await fixture.assertClosed()
     assert.ok(rows.some(row=>row.kind==='pcm'&&row.samples.some(value=>value!==0)))
-    assert.equal(rows.filter(row=>row.kind==='start'&&row.name==='masc-vst-host').length,0)
+    assert.equal(rows.filter(row=>row.kind==='start'&&row.name==='vst/host').length,0)
     assert.equal(owner.diagnostics().worker.closed,true)
   } finally { owner.stop();await owner.completion.catch(()=>{});await fixture.dispose() }
 })

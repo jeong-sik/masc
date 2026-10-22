@@ -110,7 +110,7 @@ export class InstrumentPicker {
     catch (error) {
       if (epoch !== this.epoch) return
       this.view = previous?.kind === 'loading'
-        ? { kind: 'plugins', title: 'VST unavailable · install scripts/install-vst-host.sh',
+        ? { kind: 'plugins', title: 'VST unavailable · rerun scripts/install-alphatex.sh with Python 3.12+',
           items: this.soundfont ? [{ kind: 'soundfont', name: 'SoundFont' }] : [], cursor: 0, query: '', searching: false }
         : previous
       this.failed(error)

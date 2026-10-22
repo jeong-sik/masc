@@ -47,8 +47,9 @@ remains available on other terminals. In the score view:
 - `v` shows the source and complete official diagnostics; `s` stops playback;
   `q` or Escape returns to the conversation.
 
-Install `scripts/install-vst-host.sh` with Python 3.12+ to use installed VST3
-instruments. The host runs natively so vendor libraries and licensing stay on
+`scripts/install-alphatex.sh` also installs the VST host when Python 3.12+ is
+available (`--python` selects the interpreter). The viewer starts the host from
+its own runtime, so the two always come from the same revision. The host runs natively so vendor libraries and licensing stay on
 the user's machine. The picker remembers the exact instrument and preset.
 
 The continuous VST synthesis and [device-clocked PCM output](native/PCM-OUTPUT.md)
@@ -742,8 +743,7 @@ asset with the originally played track muted. Enter places the full phrase and
 the phrase; automatic pass alignment and recorded monitor PCM are separate.
 Select
 `:output AUDIO_UID` for playback through the captured VST identity/version and
-frozen preset. Install the matching `scripts/install-vst-host.sh` companion
-alongside `scripts/install-alphatex.sh`. To send the original raw MIDI externally,
+frozen preset; `scripts/install-alphatex.sh` installs the VST host with the viewer. To send the original raw MIDI externally,
 select `:mixed-output AUDIO_UID` and
 `:midi-source ASSET ORIGINAL_SOURCE_UID MIDI_UID`. Private receipt/context/arm/events files travel with
 save-as, including undo/redo-retained sources. Packet words, receive order,

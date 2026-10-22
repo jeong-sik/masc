@@ -6,13 +6,14 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import { validateVstSelection as selection } from './project-sound.mjs'
+import { vstHostPath } from './vst-host.mjs'
 
 // A protocol memory bound, not a phrase/job time limit. Native diagnostics
 // are on a separate stream and only their tail is retained for a failed job.
 const replyBytes = 16 * 1024 * 1024
 const diagnosticBytes = 64 * 1024
 
-export function nativeJob(request, { command = 'masc-vst-host', args = [], label = 'VST' } = {}) {
+export function nativeJob(request, { command = vstHostPath, args = [], label = 'VST' } = {}) {
   const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   let cancelled = false
   let failure = null

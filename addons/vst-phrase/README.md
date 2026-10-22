@@ -6,8 +6,8 @@ player. This worker reads its latest `snapshot.json` through the generic
 `snapshot_file` input. VST binaries, licenses and editors stay on the audio host.
 The container has no audio device, native VST runtime or network access.
 
-Install the helpers with `scripts/install-vst-host.sh` and
-`scripts/install-alphatex.sh`. In the TUI, open `/score`, press Space or `i`,
+Install the viewer and its VST host with `scripts/install-alphatex.sh`
+(Python 3.12+). In the TUI, open `/score`, press Space or `i`,
 select a VST, then select its default state or a saved `.vstpreset`. Press `e`
 in the preset menu to open the instrument's own factory browser and close its
 window to save that complete sound. `l` repeats, Space pauses/resumes, `s` stops.

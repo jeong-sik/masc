@@ -633,9 +633,55 @@ prove execution after this change. Its selected checks are:
 - [External WebExtension 39528932570](https://github.com/jeong-sik/masc/actions/runs/39528932570), exact source `f2d71690c8b0d1c63bad7e5e1abae2ae645fe53f`: 25/25 steps and 12 tool receipts; real native messaging/HTTP ingress, one witnessed click, borrowed Firefox preservation, fresh client/incarnation, stale refusal and final owned-worker cleanup. The fixture then deleted its external Firefox session and verified browser exit.
 - [Owned Gecko 39528937218](https://github.com/jeong-sik/masc/actions/runs/39528937218), the same exact source: 26/26 steps and 16 receipts; one canonical-schema model request, observed-node result, exact 65,567-byte upload/download, retained artifacts and confirmed cleanup. Both actual browser runs used workflow `f14befbde7638f40c26e8e2b74138970f3cccc04` and isolated Firefox 158.0.1; their source/workflow records and all five/four retained native executable hashes were verified.
 
-The environment-sentinel fixture still needs its direct dependency repaired and
-an actual passing execution. The two actual browser successes do not substitute
-for that missing check.
+After [the direct dependency repair](https://github.com/jeong-sik/masc/pull/44636),
+[native run 39530782815](https://github.com/jeong-sik/masc/actions/runs/39530782815)
+compiled composition `b5570b2980a7ebc0864d9388cd641273103e1d65` (product
+`f30b0253085887587e23162a894d916fe2ccaad9` plus the same two CI runner paths).
+The browser-service case passed: actual Runtime launcher, Python fixture worker
+and subprocess omitted both fake provider and unlisted sentinels, preserved
+operational settings and left the host credential unchanged. Its ingress,
+middleware, original identity, effect, cancellation and cleanup assertions also
+passed. This does not introspect an actual Firefox environment. The whole run
+failed: the four generic installation cases advertised an invalid action schema
+and timed out before observation. The [fixture repair](https://github.com/jeong-sik/masc/pull/44642)
+declares the existing closed action/context contract and reports typed lifecycle
+failures immediately; it does not change product validation or timeout values.
+The focused retry [39532506931](https://github.com/jeong-sik/masc/actions/runs/39532506931)
+passed all five cases of `test_lane_addon_native_runtime` at composition
+`cfcc25688c121f8e92cacb164d5740d6dc842dcf` (reviewed fixture source
+`9304ac5f09b03c9103bd200ea7e0789ed46e3bef` plus those two runner paths).
+The executed log confirms native action once-only behavior, original process
+settlement before release, retained recovery, fresh configured incarnation and
+installation-slot reuse, including all three interrupted-slot scenarios. The
+browser case also passed its environment, middleware, ingress, original-identity,
+cancellation and cleanup assertions. The original failed runs remain above;
+this focused result does not establish full regression success. Later changes
+only update evidence documentation, with fixture and product source unchanged.
+
+Current-source Chrome [39531126420](https://github.com/jeong-sik/masc/actions/runs/39531126420)
+passed 43/43 steps in each private and persistent mode. Each mode recorded five
+scripted HTTP model requests/responses with JSON mode and the canonical schema
+instruction, trusted input, cookies, held-model cancellation without replay,
+fresh incarnation and cleanup assertions. Its JSON records steps and model
+traffic, not ordinary MCP receipts; the screenshots show the reset fixture page.
+
+Live BiDi [39531129073](https://github.com/jeong-sik/masc/actions/runs/39531129073)
+passed 28/28 steps with 17 tool receipts. Trusted hover/click/double-click/drag,
+partial tab creation, original child settlement, persistent profile and fresh
+worker/client/claim passed. The held navigation arrived once; interrupted input
+kept `effect_outcome_unknown` and stale input did not reach the fixture. Its log
+also retains `BiDi command cancelled; download cleanup requires confirmed backend teardown`.
+This is not a successful orderly backend Retire receipt: original native claim
+settlement and host allocation cleanup independently confirm owned-process
+cleanup. The preserved raw PNG is not a Keeper-store reread after cleanup;
+that artifact guarantee is covered by the Gecko transfer evidence instead.
+
+Both runs compiled exact source `f30b0253085887587e23162a894d916fe2ccaad9`
+on workflow `f14befbde7638f40c26e8e2b74138970f3cccc04`, after the common
+environment projection. Source/workflow records, all four native input hashes,
+actual JSON outcomes and PNGs were inspected independently. The later fixture
+repair changes only its test, documentation and changelog; product and browser
+probes are unchanged.
 
 Full regression, personal-site sessions, installed TUI behavior, other browser
 families, formal whole-stack approval and merge remain separate claims.

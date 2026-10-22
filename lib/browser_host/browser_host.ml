@@ -28,6 +28,7 @@ let leaving_window_sec = 0.25
 
 type verb = Masc.Browser_bidi_peer.verb =
   | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
+  | Page_goto
 type command = { id : string; verb : verb; args : Yojson.Safe.t; actor : string option }
 type poll = Empty | Forward of command | Reject of string
 type exchange_phase = Writing_frame | Awaiting_reply
@@ -73,6 +74,7 @@ let decode_poll json =
       | "page.capture" -> Ok (Forward { id; verb = Page_capture; args; actor })
       | "page.interact" -> Ok (Forward { id; verb = Page_interact; args; actor })
       | "page.act" -> Ok (Forward { id; verb = Page_act; args; actor })
+      | "page.goto" -> Ok (Forward { id; verb = Page_goto; args; actor })
       | _ -> Ok (Reject id)
 
 let command_json ~deadline_ms command =

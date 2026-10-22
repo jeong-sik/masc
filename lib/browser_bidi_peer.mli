@@ -10,6 +10,7 @@ type failure =
   | Outcome_unknown of string
 (** Native host verbs, decoded once from the MASC poll wire. *)
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
+  | Page_goto
 (** The name a verb goes by on the wire and in the host's record. *)
 val verb_to_wire : verb -> string
 val verb_of_wire : string -> verb option

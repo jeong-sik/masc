@@ -17,8 +17,11 @@ or no answer in time); a result the server answered with any status is logged
 as undelivered and the host returns to polling.
 They accept only `live`. Automation requires the configured in-process
 WebDriver executor and reports `Lane_absent` when it is not installed.
-Session management and direct URL navigation are automation-only. The live lane
-can follow an observed same-tab HTTP(S) anchor through `BrowserInteract`.
+Session management belongs to the server-owned browsers. A live BiDi
+connection navigates only a tab it opened with `open_tab` (`BrowserGoto` with
+`lane = "live"`, its `clientId` and that `tabId`). On the operator's own tabs
+the live lane can follow an observed same-tab HTTP(S) anchor through
+`BrowserInteract`.
 
 Keeper browser tools use the same source state. They reject backend failures,
 malformed envelopes, absent lanes and timeouts instead of reporting success.
@@ -120,6 +123,7 @@ build their rejection from it.
 | `touch_input` | `tap_at`, `swipe` | no | yes |
 | `viewport_resize` | `set_viewport` | no | yes |
 | `tab_history` | `back`, `forward`, `reload`, only for a tab the same connection opened | no | yes |
+| `tab_navigation` | `BrowserGoto`, only for a tab the same connection opened | no | yes |
 | `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes |
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel |
 | `trusted_hover` | `hover`, `hover_at` | no | yes |
@@ -152,7 +156,9 @@ the separate `BrowserRead`/`BrowserAct` contracts described in the
 
 Interactions are ordered writes under the same tool permission policy as
 `BrowserGoto`; live interaction uses the operator's logged-in tab. Session
-creation, closure, and direct URL navigation remain automation-only.
+creation and closure belong to the server-owned browsers. Direct URL
+navigation on a live connection is limited to a tab that BiDi connection
+opened.
 
 ## Shared observation and Skill composition
 

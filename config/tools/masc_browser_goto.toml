@@ -1,6 +1,6 @@
 name = "masc_browser_goto"
 description = """
-Navigate a tab of a server-owned browser (lane automation or stagehand) to HTTP(S); returns landing URL/title. Live navigation is refused; use BrowserInteract for live-tab actions."""
+Navigate a tab to HTTP(S); returns landing URL/title. Server-owned browsers (automation, stagehand) navigate their tabs. A live BiDi connection navigates only a tab it opened with BrowserAct open_tab: pass lane live, its clientId and that tabId. A tab the operator opened is refused before any effect; use BrowserInteract there."""
 additional_properties = false
 
 [[params]]
@@ -12,11 +12,16 @@ description = "HTTP(S) URL."
 [[params]]
 name = "lane"
 type = "string"
-enum = ["automation", "stagehand"]
+enum = ["live", "automation", "stagehand"]
 description = "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
 
 [[params]]
 name = "tabId"
 type = "integer"
-description = "BrowserTabs ID; default current tab."
+description = "BrowserTabs ID; default current tab. Required on live."
 minimum = 0
+
+[[params]]
+name = "clientId"
+type = "string"
+description = "lane live: the exact observed clientId of the BiDi connection that opened tabId."

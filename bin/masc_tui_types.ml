@@ -5940,6 +5940,7 @@ module Browser_lane_view = struct
     | Viewport_resize -> "viewport size"
     | Touch_input -> "touch"
     | Tab_history -> "tab history"
+    | Tab_navigation -> "tab navigation"
     | Tab_closing -> "tab closing"
     | Tab_activation -> "tab switch"
     | Tab_creation -> "new tab"

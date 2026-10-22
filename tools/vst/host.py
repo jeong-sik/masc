@@ -238,25 +238,43 @@ class Retained:
 
     One instance: the one the latest snapshot or render left in a known state,
     keyed by plug-in path, plug-in name and the sha256 of that state's preset
-    bytes. A job asking for anything else loads a fresh instance, as a one-shot
-    job does, and replaces it.
+    bytes. A job asking for anything else releases it, then loads a fresh
+    instance as a one-shot job does, so two instruments are never held.
+
+    The raw state is recorded when the instance is kept. A controller or a
+    cancelled render can move a parameter, so reuse first restores that state
+    when it differs. `used` tells the serve loop whether the current job
+    touched the instance; a job that failed before reaching it keeps it.
     """
 
     def __init__(self):
         self.drop()
 
     def take(self, key):
-        return self.plugin if self.plugin is not None and key == self.key else None
+        if self.plugin is None or key != self.key:
+            return None
+        self.used = True
+        if self.plugin.raw_state != self.state:
+            self.plugin.raw_state = self.state
+        return self.plugin
 
     def keep(self, key, plugin, loaded_at):
-        self.key, self.plugin, self.loaded_at = key, plugin, loaded_at
+        self.key, self.plugin, self.loaded_at, self.state, self.used = key, plugin, loaded_at, plugin.raw_state, True
 
     def drop(self):
-        self.key, self.plugin, self.loaded_at = None, None, None
+        self.key, self.plugin, self.loaded_at, self.state, self.used = None, None, None, None, False
 
 
 def retained_key(request, state_sha256):
     return (nonempty(request.get("plugin_path"), "plugin_path"), request.get("plugin_name"), state_sha256)
+
+
+def load_frozen_preset(plugin, data):
+    """Load preset bytes from a private copy; the caller's file may go away."""
+    with tempfile.TemporaryDirectory(prefix="masc-vst-state-") as folder:
+        frozen = Path(folder) / "sound.vstpreset"
+        frozen.write_bytes(data)
+        plugin.load_preset(str(frozen))
 
 
 def load_instrument(request):
@@ -313,15 +331,13 @@ def edit(request):
 
 def snapshot(request, retained=None):
     """Capture an actual default/preset state without opening the native editor."""
+    if retained is not None:
+        retained.drop()
     plugin = load_instrument(request)
     loaded_at = time.monotonic()
     preset = request.get("preset_path")
     if preset is not None:
-        data = Path(nonempty(preset, "preset_path")).read_bytes()
-        with tempfile.TemporaryDirectory(prefix="masc-vst-state-") as folder:
-            frozen = Path(folder) / "sound.vstpreset"
-            frozen.write_bytes(data)
-            plugin.load_preset(str(frozen))
+        load_frozen_preset(plugin, Path(nonempty(preset, "preset_path")).read_bytes())
     data = plugin.preset_data
     if retained is not None:
         # The instance now holds exactly these bytes; a render of the sound
@@ -367,16 +383,18 @@ def render(request, retained=None, cancelled=lambda: False):
             events, phrase_seconds = midi_timeline(midi_bytes)
             source_receipt = {"midi_sha256": digest(midi_bytes)}
         preset = request.get("preset_path")
-        preset_hash = None
+        preset_bytes = preset_hash = None
         if preset is not None:
-            preset = Path(nonempty(preset, "preset_path"))
-            preset_hash = digest(preset.read_bytes())
+            preset_bytes = Path(nonempty(preset, "preset_path")).read_bytes()
+            preset_hash = digest(preset_bytes)
         key = retained_key(request, preset_hash) if retained is not None else None
         plugin = retained.take(key) if retained is not None else None
         if plugin is None:
+            if retained is not None:
+                retained.drop()
             plugin = load_instrument(request)
-            if preset is not None:
-                plugin.load_preset(str(preset))
+            if preset_bytes is not None:
+                load_frozen_preset(plugin, preset_bytes)
             loaded_at = time.monotonic()
             if retained is not None:
                 retained.keep(key, plugin, loaded_at)
@@ -617,8 +635,8 @@ def serve(source, emit, retained=None):
     Jobs run in arrival order on this thread; a reader thread admits cancels
     while a render runs. A cancel reaches a render between blocks; other jobs
     finish and their reply is dropped by the caller. The retained instrument
-    survives silence and cancellation. Any other failure leaves its state
-    unknown, so the next job loads a fresh instance.
+    survives silence and cancellation. Any other failure of a job that used it
+    leaves its state unknown, so the next job loads a fresh instance.
     """
     import queue
 
@@ -644,6 +662,7 @@ def serve(source, emit, retained=None):
     threading.Thread(target=admit, daemon=True).start()
     while (item := jobs.get()) is not None:
         job_id, job = item
+        retained.used = False
         try:
             if job_id in cancelled:
                 raise Cancelled("VST job cancelled")
@@ -651,7 +670,7 @@ def serve(source, emit, retained=None):
         except Cancelled:
             reply = {"id": job_id, "ok": False, "cancelled": True}
         except Exception as error:
-            if not isinstance(error, SilentRender):
+            if retained.used and not isinstance(error, SilentRender):
                 retained.drop()
             reply = {"id": job_id, "ok": False, "error": f"{type(error).__name__}: {error}"}
         cancelled.discard(job_id)

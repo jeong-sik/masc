@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { openVstSession } from '../vst-session.mjs'
 
@@ -69,4 +71,25 @@ test('close ends an idle host through its input and kills one that still runs a 
   await assert.rejects(stubborn.promise, error => error.code === 'ABORT_ERR')
   await loading.owner.close()
   assert.equal(loading.children[0].signalCode, 'SIGKILL')
+})
+
+test('a host that sent an invalid reply takes no new job while it is being killed', async () => {
+  const children = []
+  const owner = openVstSession({ spawnProcess() {
+    const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+      killed: null, kill(signal) { this.killed = signal } })
+    children.push(child); return child
+  } })
+  const first = owner.run({ operation: 'echo' })
+  const rejected = assert.rejects(first.promise, /invalid reply/)
+  children[0].stdout.write('not json\n')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(children[0].killed, 'SIGKILL')
+  const second = owner.run({ operation: 'echo' })
+  assert.equal(children.length, 2)
+  children[0].emit('close', null, 'SIGKILL')
+  await rejected
+  children[1].emit('close', 0, null)
+  await assert.rejects(second.promise, /VST host ended \(0\)/)
+  await owner.close()
 })

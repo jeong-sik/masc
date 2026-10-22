@@ -438,6 +438,42 @@ class ServeTests(unittest.TestCase):
             self.assertFalse(list(Path(folder).glob('.vst-*.wav')))
             self.assertIsNotNone(retained.plugin)
 
+    def test_reuse_restores_a_state_a_render_moved(self):
+        retained, plugin = Retained(), Kept()
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', side_effect=[plugin]) as load:
+            captured = snapshot({'operation': 'snapshot', **self.selection}, retained)
+            sound = base64.b64decode(captured['preset']['data'])
+            render(self.bound_render(folder, 'first', sound), retained)
+            plugin.raw_state = b'moved by a controller'
+            result = render(self.bound_render(folder, 'second', sound), retained)
+            self.assertEqual(load.call_count, 1)
+            self.assertEqual(plugin.raw_state, b'state')
+            self.assertEqual(result['state_sha256'], digest(b'state'))
+
+    def test_a_preset_file_removed_during_loading_still_loads_and_is_kept(self):
+        retained = Retained()
+        with tempfile.TemporaryDirectory() as folder:
+            request = self.bound_render(folder, 'removed', b'bound sound')
+
+            def load(_request):
+                # The caller rejected a cancelled job and removed its file.
+                Path(request['preset_path']).unlink()
+                return Kept()
+            with patch('host.load_instrument', side_effect=load):
+                render(request, retained)
+            self.assertEqual(retained.plugin.preset_data, b'bound sound')
+
+    def test_a_job_that_fails_before_using_the_instance_keeps_it(self):
+        retained = Retained()
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', side_effect=[Kept()]):
+            snapshot({'operation': 'snapshot', **self.selection}, retained)
+            kept = retained.plugin
+            existing = self.bound_render(folder, 'existing', b'default')
+            Path(existing['output_path']).write_bytes(b'')
+            replies = self.serve_lines([{'id': 1, 'job': existing}], retained)
+            self.assertRegex(replies[0]['error'], '^FileExistsError')
+            self.assertIs(retained.plugin, kept)
+
     def serve_lines(self, lines, retained, after=None):
         replies = []
 

@@ -25,7 +25,8 @@ export function openVstSession({ command = vstHostPath, args = [], spawnProcess 
     let text = '', stderr = Buffer.alloc(0), failure = null, ended
     // Sent jobs without a reply yet, cancelled ones included: the host is busy.
     const owned = { child, outstanding: new Set(), ended: new Promise(resolve => { ended = resolve }) }
-    const fail = error => { failure ??= error; child.kill('SIGKILL') }
+    // A failed host takes no new job; the next run starts another.
+    const fail = error => { failure ??= error; if (host === owned) host = null; child.kill('SIGKILL') }
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', chunk => {
       text += chunk

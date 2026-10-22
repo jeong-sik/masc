@@ -107,6 +107,96 @@ let test_unknown_judgment_is_terminal_even_after_an_event () =
       | _ -> fail "uncertainty lost its observer status")
   | _ -> fail "one original judgment must retain one observer identity"
 
+let stored_run registry run_id =
+  match Runs.get registry ~run_id with
+  | Some run -> run
+  | None -> fail "the original observer run disappeared"
+
+let test_terminal_reread_and_restart_preserve_the_first_receipt () =
+  with_workspace @@ fun base_path ->
+  let path = Filename.concat base_path "runs.jsonl" in
+  let registry = Runs.create ~path () in
+  let call ~arguments =
+    check string "retained completion is only read" "read" (operation arguments);
+    finished (request_id arguments) (`Assoc ["grade",`String "medium"]) in
+  let answer = runner ~registry ~base_path ~call grade |> unwrap in
+  let original = stored_run registry answer.trace.run_id |> Runs.run_to_yojson in
+  let verify registry =
+    let before = Fs_compat.load_file path in
+    ignore (runner ~registry ~base_path ~call grade |> unwrap);
+    check string "reread does not append another completion" before (Fs_compat.load_file path);
+    check bool "first elapsed, output, slot and usage survive" true
+      (Yojson.Safe.equal original (stored_run registry answer.trace.run_id |> Runs.run_to_yojson)) in
+  verify registry;
+  verify (Runs.replay path)
+
+let test_failed_receipt_append_retries_the_first_terminal_time () =
+  with_workspace @@ fun base_path ->
+  let path = Filename.concat base_path "runs.jsonl" in
+  let registry = Runs.create ~path () in
+  let registration = ref None and original_id = ref None in
+  let break_append ~arguments =
+    check string "failure does not submit a new model request" "read" (operation arguments);
+    let id = request_id arguments in
+    original_id := Some id;
+    registration := Some (Fs_compat.load_file path);
+    Sys.remove path;
+    Unix.mkdir path 0o700;
+    finished id (`Assoc ["grade",`String "medium"]) in
+  (match runner ~registry ~base_path ~call:break_append grade with
+   | Error (A.Transport_unavailable _) -> ()
+   | Ok _ | Error (A.Invalid_response _ | A.Execution_rejected _) ->
+     fail "a failed receipt append was not reported");
+  let id = match !original_id with Some id -> id | None -> fail "worker was not read" in
+  let first_elapsed = match (stored_run registry id).status with
+    | Runs.Completion_persistence_failed {elapsed_s;_} -> elapsed_s
+    | Runs.Running | Runs.Completed _ -> fail "failed receipt was not retained" in
+  Unix.rmdir path;
+  let registration = match !registration with
+    | Some bytes -> bytes | None -> fail "registration was not captured" in
+  Fs_compat.save_file path registration;
+  let call ~arguments =
+    check string "receipt recovery only reads" "read" (operation arguments);
+    finished (request_id arguments) (`Assoc ["grade",`String "medium"]) in
+  ignore (runner ~registry ~base_path ~call grade |> unwrap);
+  match (stored_run (Runs.replay path) id).status with
+  | Runs.Completed {elapsed_s;outcome=Runs.Succeeded;_} ->
+    check (float 0.) "append recovery retains first terminal time" first_elapsed elapsed_s
+  | Runs.Running | Runs.Completion_persistence_failed _
+  | Runs.Completed {outcome=(Runs.Cancelled | Runs.Failed _);_} ->
+    fail "the original successful result was not durably recovered"
+
+let test_missing_terminal_payload_is_not_silently_repaired_by_reread () =
+  with_workspace @@ fun base_path ->
+  let path = Filename.concat base_path "runs.jsonl" in
+  let registry = Runs.create ~path () in
+  let call ~arguments = finished (request_id arguments) (`Assoc ["grade",`String "medium"]) in
+  let answer = runner ~registry ~base_path ~call grade |> unwrap in
+  let original = stored_run registry answer.trace.run_id in
+  let output = match original.status with
+    | Runs.Completed {output;_} -> output
+    | Runs.Running | Runs.Completion_persistence_failed _ -> fail "original did not complete" in
+  let text = Yojson.Safe.to_string output in
+  let digest = Digestif.SHA256.(digest_string text |> to_hex) in
+  let payload = Filename.concat
+      (Filename.concat (Filename.concat base_path Runs.payload_dirname) answer.trace.run_id)
+      ("output-" ^ digest ^ ".json") in
+  Sys.remove payload;
+  let before = Fs_compat.load_file path in
+  (match runner ~registry ~base_path ~call grade with
+   | Error (A.Transport_unavailable _) -> ()
+   | Ok _ | Error (A.Invalid_response _ | A.Execution_rejected _) ->
+     fail "an unreadable terminal receipt was accepted or overwritten");
+  check string "missing output does not append a replacement receipt" before (Fs_compat.load_file path);
+  check bool "missing evidence is still explicit" true
+    ((stored_run registry answer.trace.run_id).output_availability =
+      Some (Runs.Unavailable Runs.Missing_completion));
+  Fs_compat.save_file payload text;
+  ignore (runner ~registry ~base_path ~call grade |> unwrap);
+  check bool "restored original evidence preserves the first receipt" true
+    (Yojson.Safe.equal (Runs.run_to_yojson original)
+      (stored_run registry answer.trace.run_id |> Runs.run_to_yojson))
+
 let test_a_replacement_cannot_replay_an_unknown_original () =
   with_workspace @@ fun base_path ->
   let unknown ~arguments =
@@ -188,6 +278,9 @@ let () = run "Candle Add-on consumer"
   ["original judgment", [
     test_case "lost submit reply resumes original after restart" `Quick test_lost_submit_reply_reads_the_retained_original_after_restart;
     test_case "unknown judgment stays terminal" `Quick test_unknown_judgment_is_terminal_even_after_an_event;
+    test_case "terminal reread and restart preserve first receipt" `Quick test_terminal_reread_and_restart_preserve_the_first_receipt;
+    test_case "failed receipt append retains first terminal time" `Quick test_failed_receipt_append_retries_the_first_terminal_time;
+    test_case "missing terminal payload stays unavailable" `Quick test_missing_terminal_payload_is_not_silently_repaired_by_reread;
     test_case "replacement cannot replay an unknown original" `Quick test_a_replacement_cannot_replay_an_unknown_original;
     test_case "full Candle decoding checks every recipient" `Quick test_domain_decode_rejects_incomplete_recipient_weights;
     test_case "capacity admission always reads first" `Quick test_capacity_wait_does_not_invent_a_retained_intent;

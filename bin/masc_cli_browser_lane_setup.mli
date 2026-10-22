@@ -13,9 +13,15 @@
     no host: that lane needs none. It starts no browser and loads no
     extension.
 
+    [--mode addon] writes the browser Add-on package this masc carries to
+    [.masc/packages/browser] and declares it when the workspace has no
+    declaration of it ({!Masc.Browser_addon_setup}). Every other mode does the
+    same after its host step, but there a refusal of that step is reported and
+    the mode's own steps go on; only [--mode addon] fails on it.
+
     An option that the chosen modes do not use is refused, not ignored. *)
 
-type mode = Extension | Bidi | Host | Automation
+type mode = Addon | Extension | Bidi | Host | Automation
 
 val all_modes : mode list
 

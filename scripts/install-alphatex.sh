@@ -138,39 +138,47 @@ fi
 # The VST host lives inside this runtime: viewers start vst/host beside their
 # own modules, so a viewer never speaks to a host from another revision. The
 # Python environment depends only on the lock and is shared between runtimes.
-if [ ! -x "$support_dir/vst/host" ]; then
-  if command -v "$python" >/dev/null 2>&1 \
-      && "$python" -c 'import sys; sys.exit(sys.version_info < (3, 12))' 2>/dev/null; then
-    lock_digest=$(node -e 'process.stdout.write(require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(process.argv[1])).digest("hex"))' "$repo_root/tools/vst/requirements.lock")
-    environment="$prefix/../share/masc/vst-env/$lock_digest"
-    if [ ! -f "$environment/.installed" ]; then
-      # Only an environment that never finished installing is cleared.
-      "$python" -m venv --clear "$environment"
-      if command -v uv >/dev/null 2>&1; then
-        uv pip install --python "$environment/bin/python" --require-hashes -r "$repo_root/tools/vst/requirements.lock"
-      else
-        "$environment/bin/python" -m pip install --require-hashes -r "$repo_root/tools/vst/requirements.lock"
-      fi
-      touch "$environment/.installed"
-    fi
-    mkdir -p "$support_dir/vst"
-    install -m 644 "$repo_root/tools/vst/host.py" "$support_dir/vst/host.py"
-    vst_launcher=$(mktemp "$support_dir/vst/.host.XXXXXX")
-    trap 'rm -f "$vst_launcher"' EXIT HUP INT TERM
-    cat > "$vst_launcher" <<'VST_LAUNCHER'
-#!/bin/sh
-set -eu
-vst_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-VST_LAUNCHER
-    printf 'exec "$vst_dir/../../../vst-env/%s/bin/python" "$vst_dir/host.py" "$@"\n' "$lock_digest" >> "$vst_launcher"
-    chmod 755 "$vst_launcher"
-    # Discovery does not load every installed plug-in or open its editor.
-    printf '%s\n' '{"operation":"candidates"}' | "$vst_launcher" > /dev/null
-    mv -f "$vst_launcher" "$support_dir/vst/host"
-    trap - EXIT HUP INT TERM
-  else
+# A failure here leaves the viewer installed with SoundFont playback, and the
+# next run retries. Each step is checked: set -e does not apply inside the
+# || list below.
+vst_discovers() {
+  # Discovery does not load every installed plug-in or open its editor.
+  printf '%s\n' '{"operation":"candidates"}' | "$1" > /dev/null
+}
+install_vst_host() {
+  if ! "$python" -c 'import sys; sys.exit(sys.version_info < (3, 12))' 2>/dev/null; then
     printf '%s\n' "VST instruments require Python 3.12 or newer ($python); SoundFont playback remains available." >&2
+    return 0
   fi
+  lock_digest=$(node -e 'process.stdout.write(require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(process.argv[1])).digest("hex"))' "$repo_root/tools/vst/requirements.lock") || return 1
+  environment="$prefix/../share/masc/vst-env/$lock_digest"
+  # A finished environment is reused only while its interpreter still imports
+  # the locked packages; an interpreter upgrade or removal rebuilds it.
+  if [ ! -f "$environment/.installed" ] || ! "$environment/bin/python" -c 'import mido, numpy, pedalboard' 2>/dev/null; then
+    rm -f "$environment/.installed"
+    "$python" -m venv --clear "$environment" || return 1
+    if command -v uv >/dev/null 2>&1; then
+      uv pip install --python "$environment/bin/python" --require-hashes -r "$repo_root/tools/vst/requirements.lock" || return 1
+    else
+      "$environment/bin/python" -m pip install --require-hashes -r "$repo_root/tools/vst/requirements.lock" || return 1
+    fi
+    touch "$environment/.installed" || return 1
+  fi
+  mkdir -p "$support_dir/vst" || return 1
+  install -m 644 "$repo_root/tools/vst/host.py" "$support_dir/vst/host.py" || return 1
+  vst_launcher=$(mktemp "$support_dir/vst/.host.XXXXXX") || return 1
+  if {
+    printf '%s\n' '#!/bin/sh' 'set -eu' 'vst_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)'
+    printf 'exec "$vst_dir/../../../vst-env/%s/bin/python" "$vst_dir/host.py" "$@"\n' "$lock_digest"
+  } > "$vst_launcher" && chmod 755 "$vst_launcher" && vst_discovers "$vst_launcher" \
+      && mv -f "$vst_launcher" "$support_dir/vst/host"; then
+    return 0
+  fi
+  rm -f "$vst_launcher"
+  return 1
+}
+if ! { [ -x "$support_dir/vst/host" ] && vst_discovers "$support_dir/vst/host" 2>/dev/null; }; then
+  install_vst_host || printf '%s\n' 'The VST host was not installed; SoundFont playback remains available. Rerun this script to retry.' >&2
 fi
 # The relative layout is shared by every prefix; no checkout or workspace path
 # is embedded in the launcher and the installed viewer survives worktree removal.

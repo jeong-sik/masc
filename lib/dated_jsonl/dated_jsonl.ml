@@ -1674,16 +1674,35 @@ let fold_captured_entries_result channel ~path ~from ~until ~init ~f =
       | Ok length ->
         let value = ref acc in
         let next_boundary = ref boundary in
-        for index = 0 to length - 1 do
-          match Bytes.get chunk index with
-          | '\n' ->
-            let line = Buffer.contents fragment in
-            Buffer.clear fragment;
-            next_boundary := position + index + 1;
-            if String.trim line <> "" then
-              value := f !value (recent_entry_of_line ~path line)
-          | character -> Buffer.add_char fragment character
-        done;
+        (* Search only bytes returned by [input], then copy each span at
+           once instead of inserting its bytes individually. *)
+        let rec newline_at index =
+          if index >= length || Bytes.get chunk index = '\n' then index
+          else newline_at (index + 1)
+        in
+        let rec consume start =
+          if start < length then begin
+            let index = newline_at start in
+            if index < length then begin
+              let line =
+                if Buffer.length fragment = 0 then
+                  Bytes.sub_string chunk start (index - start)
+                else begin
+                  Buffer.add_subbytes fragment chunk start (index - start);
+                  let line = Buffer.contents fragment in
+                  Buffer.clear fragment;
+                  line
+                end
+              in
+              next_boundary := position + index + 1;
+              if String.trim line <> "" then
+                value := f !value (recent_entry_of_line ~path line);
+              consume (index + 1)
+            end else
+              Buffer.add_subbytes fragment chunk start (length - start)
+          end
+        in
+        consume 0;
         drive !value !next_boundary (position + length) fragment
   in
   let seek =

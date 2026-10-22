@@ -57,7 +57,7 @@ description = "scroll/scroll_at vertical CSS-pixel delta."
 name = "button"
 type = "string"
 enum = ["primary", "middle", "secondary"]
-description = "click_at only: the mouse button, primary by default. middle and secondary need native pointer input: a live BiDi connection or the owned Firefox. A connected WebExtension and Stagehand refuse them before any effect."
+description = "click_at only: the mouse button, primary by default. middle and secondary need native pointer input: a live BiDi connection, the owned Firefox or Stagehand. A connected WebExtension refuses them before any effect."
 
 [[params]]
 name = "clientId"

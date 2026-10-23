@@ -52,6 +52,60 @@ let hook_contract () =
     "additionalProperties",`Bool false] in
   check bool "closed fieldless contract is unchanged" true
     (Result.is_error (Masc.Lane_addon_action.validate_value ~schema:closed ~name:"closed" (`Assoc ["x",`Int 1])))
+let control_identity ~sw ~owner =
+    let client_id=ok (B.client_id_of_string "0b000000-0000-4000-8000-000000000097") in
+    let arguments verb = `Assoc ["lane",`String "live";
+      "clientId",`String (B.client_id_to_string client_id);"command",B.verb_json verb] in
+    let send command=Owner.dispatch owner {W.incarnation;command} in
+    let client={B.client_id;browser=B.Ego_lite;version="test";engine_version="test";
+      transport=B.Ego_task_space} in
+    let poll ()=Eio.Fiber.fork_promise ~sw (fun () -> send (W.Poll {client;window_sec=2.})) in
+    let first_poll=poll () in
+    let rec registered ()=if B.connected_clients ()=[] then (Eio.Fiber.yield ();registered ()) in
+    registered ();
+    List.iteri (fun index control ->
+      let verb=B.Page_act (B.Action.Control control) in
+      List.iter (fun (label,selection) ->
+        let input=`Assoc (selection @ ["command",B.verb_json verb]) in
+        let expected=match Tool.command input with
+          | Error message -> message
+          | Ok _ -> fail (label ^ ": control reached selection without an observed client") in
+        let result=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") input in
+        check (option bool) (label ^ ": authenticated control is refused") (Some true) result.is_error;
+        check bool (label ^ ": refusal is proven before effect") true
+          (Lane_addon_tool_result.failure result=
+            (Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect));
+        check (option string) (label ^ ": invocation preserves the parse-boundary refusal") (Some expected)
+          (Option.bind result.structured_content (fun data ->
+            match Yojson.Safe.Util.member "message" data with
+            | `String message -> Some message | _ -> None)))
+        ["automatic",[];"unnamed live",["lane",`String "live"];
+         "automation",["lane",`String "automation"];"stagehand",["lane",`String "stagehand"]];
+      List.iter (fun input -> check bool "an observed client admits control" true
+        (ok (Tool.command input)=verb))
+        [arguments verb;`Assoc ["clientId",`String (B.client_id_to_string client_id);"command",B.verb_json verb]];
+      let polled=if index=0 then first_poll else poll () in
+      let pending=Eio.Fiber.fork_promise ~sw (fun () ->
+        Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") (arguments verb)) in
+      let issued=match Eio.Promise.await_exn polled with
+        | W.Poll_result {command=Some command;_} -> command
+        | _ -> fail "expected explicitly selected ego control" in
+      check string "only the explicitly selected control reaches the browser"
+        (Yojson.Safe.to_string (B.verb_json verb))
+        (Yojson.Safe.to_string (match issued.verb_json with
+          | `Assoc fields -> `Assoc (List.remove_assoc "actor" fields)
+          | value -> value));
+      check bool "control receipt delivered" true
+        (send (W.Deliver {client_id;id=issued.id;payload=`Assoc ["ok",`Bool true;
+          "data",`Assoc ["ownership",`String (match control with
+            | B.Action.Hand_off -> "operator" | Take_over -> "agent")]]})=W.Receipt);
+      check (option bool) "explicit ego control succeeds" (Some false)
+        (Eio.Promise.await_exn pending).is_error)
+      [B.Action.Hand_off;Take_over];
+    check bool "refused controls never entered the browser queue" true
+      (match send (W.Poll {client;window_sec=0.001}) with
+       | W.Poll_result {command=None;_} -> true | _ -> false)
+
 let scenario () = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () -> Eio.Switch.run (fun sw ->
@@ -141,56 +195,8 @@ let scenario () = Eio_main.run (fun env ->
        "unstarted read",Some "not_started",Tool_result.Proven_pre_effect];
     check bool "failed reads are not silently replayed" true
       (match send (W.Poll {client;window_sec=0.001}) with
-       | W.Poll_result {command=None;_} -> true | _ -> false))))
-let control_identity () = Eio_main.run (fun env ->
-  Time_compat.set_clock (Eio.Stdenv.clock env);
-  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () -> Eio.Switch.run (fun sw ->
-    let owner=ok (Owner.create ~incarnation) in
-    Eio.Switch.on_release sw (fun () -> Owner.revoke owner);
-    let send command=Owner.dispatch owner {W.incarnation;command} in
-    let client={B.client_id;browser=B.Ego_lite;version="test";engine_version="test";
-      transport=B.Ego_task_space} in
-    let poll ()=Eio.Fiber.fork_promise ~sw (fun () -> send (W.Poll {client;window_sec=2.})) in
-    let first_poll=poll () in
-    let rec registered ()=if B.connected_clients ()=[] then (Eio.Fiber.yield ();registered ()) in
-    registered ();
-    List.iteri (fun index control ->
-      let verb=B.Page_act (B.Action.Control control) in
-      List.iter (fun (label,selection) ->
-        let input=`Assoc (selection @ ["command",B.verb_json verb]) in
-        check bool (label ^ ": command refuses before browser selection") true
-          (Result.is_error (Tool.command input));
-        let result=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") input in
-        check (option bool) (label ^ ": authenticated control is refused") (Some true) result.is_error;
-        check bool (label ^ ": refusal is proven before effect") true
-          (Lane_addon_tool_result.failure result=
-            (Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect)))
-        ["automatic",[];"unnamed live",["lane",`String "live"];
-         "automation",["lane",`String "automation"];"stagehand",["lane",`String "stagehand"]];
-      check bool "an observed client admits control" true
-        (Result.is_ok (Tool.command (arguments verb)));
-      let polled=if index=0 then first_poll else poll () in
-      let pending=Eio.Fiber.fork_promise ~sw (fun () ->
-        Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") (arguments verb)) in
-      let issued=match Eio.Promise.await_exn polled with
-        | W.Poll_result {command=Some command;_} -> command
-        | _ -> fail "expected explicitly selected ego control" in
-      check string "only the explicitly selected control reaches the browser"
-        (Yojson.Safe.to_string (B.verb_json verb))
-        (Yojson.Safe.to_string (match issued.verb_json with
-          | `Assoc fields -> `Assoc (List.remove_assoc "actor" fields)
-          | value -> value));
-      check bool "control receipt delivered" true
-        (send (W.Deliver {client_id;id=issued.id;payload=`Assoc ["ok",`Bool true;
-          "data",`Assoc ["ownership",`String (match control with
-            | B.Action.Hand_off -> "operator" | Take_over -> "agent")]]})=W.Receipt);
-      check (option bool) "explicit ego control succeeds" (Some false)
-        (Eio.Promise.await_exn pending).is_error)
-      [B.Action.Hand_off;Take_over];
-    check bool "refused controls never entered the browser queue" true
-      (match send (W.Poll {client;window_sec=0.001}) with
-       | W.Poll_result {command=None;_} -> true | _ -> false))))
+       | W.Poll_result {command=None;_} -> true | _ -> false);
+    control_identity ~sw ~owner)))
 let ()=run "browser addon exported tool" ["contract",[
   test_case "selected hooks accept rich arguments and preserve closed boundaries" `Quick hook_contract];
-  "execution",[test_case "caller running observation and partial receipt" `Quick scenario;
-    test_case "ego control requires an observed client before dispatch" `Quick control_identity]]
+  "execution",[test_case "caller running observation and partial receipt" `Quick scenario]]

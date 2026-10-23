@@ -1,22 +1,31 @@
 # Native captured UMP experiments
 
 In an arrangement, `:edit-ump [ASSET]` opens a captured performance's MIDI2
-attacks. This edits a separate overlay on the verified original packets. It does
-not convert notes, velocities or clocks into MIDI1/960 PPQ. Original WAV, UMP,
+notes and recorded per-note expression. This edits a separate overlay on the
+verified original packets. It does not convert notes, velocities or clocks into MIDI1/960 PPQ. Original WAV, UMP,
 packet boundaries, source/group/channel identities and timestamp-origin flags
 remain stored under their original hashes.
 
 Select an attack with Up/Down or its displayed `PACKET:WORD` identity. Packet
 indices and word offsets start at zero and belong to the original MIDI part.
-`:scope SOURCE GROUP CHANNEL` selects that scope's first MIDI2 attack; groups and
-channels use 1–16. MIDI1 messages, controllers, SysEx, flex/stream and unknown
-messages remain source data; this first editor lists MIDI2 NoteOn messages.
+`:scope SOURCE GROUP CHANNEL` selects that scope's first event in the current
+view; groups and channels use 1–16. MIDI1 messages, other controllers, SysEx,
+flex/stream and unknown messages remain source data. The note view lists MIDI2 NoteOn messages. Tab or
+`:expressions` opens registered/assignable per-note controllers, per-note pitch
+bend and poly pressure; `:notes` returns to attacks. Expression-only takes open
+directly in their expression view. `:scope` selects the first matching event in
+the current view; `:select-expression PACKET:WORD` selects an exact original
+expression message.
 
 ```
 pitch-absolute 60.5
 velocity 0
 revoice Cmaj7 drop2 4 0
 harmony
+expressions
+value32 2147483648
+reset-expression
+notes
 undo
 redo
 reset-note
@@ -34,6 +43,28 @@ unknown attributes cannot be overwritten by this command. `velocity` changes
 the full 16-bit attack value 0–65535, preserving the attribute and release bytes.
 MIDI2 velocity zero remains an attack. `reset-note` removes both edits for the
 selected attack; the original message is restored.
+
+`:value32 INTEGER` changes the selected expression's complete unsigned 32-bit
+data word, from 0 through 4294967295, using exact decimal notation. No MIDI1
+scaling, normalization or controller-unit conversion is applied. The list shows
+the original note index, controller number where present, and current raw value.
+Per-note pitch bend is bipolar with center 2147483648; its sounding interval
+still depends on the recorded sensitivity and device state. Registered and
+assignable controller meanings are not inferred. In particular, the pitch
+controller's Q7.25 word differs from NoteOn's Q7.9 attribute.
+
+These edits keep the first address word, source/group/channel, note index,
+controller index, original message order, packet boundaries, integer host ticks
+and timestamp-origin flags. They do not infer a unique attack owner, move a
+controller to another note, or rewrite detach/reset management messages. A
+target with invalid note or reserved address bits is refused; opaque source
+messages remain unchanged. Controller numbers retain their original raw
+addresses without assuming a device-specific meaning.
+`:reset-expression` removes only that selected expression edit. Note edits and
+expression edits retain each other, share undo/redo, and travel together through
+the existing native playback, arrangement variant, portable save and raw export.
+Note commands require the note view; expression-value commands require the
+expression view, preventing edits to a hidden target.
 
 `:revoice SYMBOL MODE [OCTAVE [INVERSION]]` changes the exact-onset group sharing
 the selected attack's source, group and channel. Voices sort by their current
@@ -84,8 +115,8 @@ those edited packets as a new source, rather than reconstructing editor history.
 The saved arrangement is the portable editable document. The captured viewer's
 separate MIDI2 Clip export still declares its 1000 PPQ quantization.
 
-This first native editor does not yet add time/structure edits, per-note
-controller editing, raw practice-take editing or MIDI2 Clip import. These remain
+This native editor does not yet add time/structure edits, insertion/removal of
+expression messages, raw practice-take editing or MIDI2 Clip import. These remain
 part of the sequencer objective tracked by #44748. Focused source/worker/controller
 and native-protocol checks do not establish installed Ghostty or physical-device
 behavior.
@@ -102,7 +133,9 @@ replacing the installed application. This is virtual-endpoint evidence; it does
 not establish physical latency, audio/MIDI sample alignment or visible Ghostty.
 
 Protocol: [MMA/AMEI UMP 1.1.2](https://amei-music.github.io/midi2.0-docs/amei-pdf/M2-104-UM_v1-1-2_UMP_and_MIDI_2-0_Protocol_Specification.pdf),
-§7.4.2, §7.4.14–7.4.15.3 and Appendix C. Attribute 3 makes Note Number an index;
-absolute pitch overrides previous tuning for that attack only. The persisted
+§7.4.2–7.4.4, §7.4.12, §7.4.14–7.4.15.3 and Appendix C. Attribute 3 makes Note
+Number an index; absolute pitch overrides previous tuning for that attack only. The persisted
 `ump` overlay has schemaVersion 1, original `midiSha256` and unique note edits
 with original `packet`/`word` plus optional unsigned 16-bit `pitch`/`velocity`.
+Optional `expressions` edits use the same original identity with one unsigned
+32-bit `value`; duplicate or cross-kind identities are refused.

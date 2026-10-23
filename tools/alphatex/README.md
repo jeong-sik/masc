@@ -453,8 +453,8 @@ variant independently. Inputs/groups retain separate MIDI ports. See the
 Use `:capture-midi-region` on a captured MIDI region to derive only that source
 span, restoring supported entry notes/pedals and clipping its ending explicitly.
 For native MIDI2 experiments, `:edit-ump [ASSET]` keeps original packets and
-integer clocks while editing absolute Pitch7.9, full attack velocity and
-exact-onset voicings. The original recording stays intact; the returned overlay
+integer clocks while editing absolute Pitch7.9, full attack velocity, recorded
+32-bit per-note expression and exact-onset voicings. The original recording stays intact; the returned overlay
 variant supports native audition, portable save/reopen and raw export. See
 [native UMP editing](UMP-SOURCE.md) for commands and remaining expression limits.
 

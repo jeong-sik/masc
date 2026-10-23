@@ -112,13 +112,13 @@ let prepare ~keeper_name ~upload_paths tool json =
         | B.Action.On_tab ({interaction=Upload {selector;_};_} as target),Some paths ->
             Ok (B.Action.On_tab {target with interaction=Upload {selector;paths}})
         | On_tab {interaction=Upload _;_},None -> Error "upload requires an authoritative Keeper file context"
-        | (Open_tab _|On_tab {interaction=(Back|Forward|Reload
+        | (Open_tab _|Open_window _|On_tab {interaction=(Back|Forward|Reload
             |Close_tab|Accept_dialog _|Dismiss_dialog);_}),(None|Some _) -> Ok action in
       let* request=Legacy.tool_request json in
       let* ()=match action,request.route with
-        | B.Action.Open_tab _,Browser_selection.Exact (B.Live_route None) ->
-            Error "live open_tab requires an explicit observed clientId"
-        | (Open_tab _|On_tab _),(Automatic|Exact (Live_route _|Automation_route|Stagehand_route)) -> Ok () in
+        | (B.Action.Open_tab _|Open_window _),Browser_selection.Exact (B.Live_route None) ->
+            Error "live open_tab and open_window require an explicit observed clientId"
+        | (Open_tab _|Open_window _|On_tab _),(Automatic|Exact (Live_route _|Automation_route|Stagehand_route)) -> Ok () in
       prepared request Raw (B.Page_act action)
   | Instruct ->
       let* fields=fields ("lane"::Legacy.instruct_arguments) json in

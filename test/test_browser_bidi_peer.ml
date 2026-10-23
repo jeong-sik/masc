@@ -841,6 +841,37 @@ let test_context_reads_run_in_the_frame () =
      | Ok _ | Error _ -> fail "a dialog is not read through a frame");
     check (list string) "a refused mode runs no page script" [] !targets)
 
+let test_open_window_creates_a_window_context () =
+  Eio_main.run (fun _ ->
+    let created = ref [] and navigated = ref [] in
+    let command method_ args = match method_ with
+      | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+      | "browsingContext.create" -> created := args :: !created; Ok (obj ["context",`String "win"])
+      | "browsingContext.navigate" -> navigated := args :: !navigated; Ok `Null
+      | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/new";"title",`String "new";"active",`Bool true]))
+      | other -> failf "unexpected protocol command: %s" other in
+    let peer = peer_of command in
+    ignore (Peer.dispatch peer ~verb:Peer.Tabs_list (obj []));
+    (match Peer.dispatch peer ~verb:Peer.Page_act
+       (Browser_lane.Action.to_json (Browser_lane.Action.Open_window "https://example.test/new")) with
+     | Ok receipt ->
+       check string "the receipt names open_window" "open_window" Yojson.Safe.Util.(receipt |> member "action" |> to_string);
+       check bool "the new window is a tab this connection owns" true
+         (Yojson.Safe.Util.member "tabId" receipt = `Int 2)
+     | Error _ -> fail "a window must open");
+    (match !created with
+     | [ args ] ->
+       check bool "a background window is created" true
+         (Yojson.Safe.Util.member "type" args = `String "window"
+          && Yojson.Safe.Util.member "background" args = `Bool true)
+     | _ -> fail "one context must be created");
+    check bool "the window navigates in its own context" true
+      (match !navigated with [ args ] -> Yojson.Safe.Util.member "context" args = `String "win" | _ -> false);
+    (match Peer.dispatch peer ~verb:Peer.Page_act
+       (Browser_lane.Action.to_json (Browser_lane.Action.Open_window "file:///etc/hosts")) with
+     | Error (Peer.Before_effect _) -> check int "a refused URL creates nothing" 1 (List.length !created)
+     | Ok _ | Error _ -> fail "a non-HTTP URL must be refused before effect"))
+
 let test_hover_without_click () =
   Eio_main.run (fun _ ->
     let hovered = ref false in
@@ -1553,7 +1584,7 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
     test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;
     test_case "semantic clicks use trusted native input" `Quick test_semantic_click_uses_native_input;
-    test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "context reads run in the frame" `Quick test_context_reads_run_in_the_frame; test_case "a framed request runs in the child context" `Quick test_framed_interaction_runs_in_the_child_context; test_case "element inventory is the shared page script" `Quick test_element_inventory;
+    test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "open_window creates a window context" `Quick test_open_window_creates_a_window_context; test_case "context reads run in the frame" `Quick test_context_reads_run_in_the_frame; test_case "a framed request runs in the child context" `Quick test_framed_interaction_runs_in_the_child_context; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "capture retains URL and document/viewport guards" `Quick test_capture_guards;
     test_case "document source is the shared document helper" `Quick test_document_source;
     test_case "a document still loading is not answered for" `Quick test_document_still_loading;

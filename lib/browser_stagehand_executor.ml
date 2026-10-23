@@ -247,6 +247,7 @@ let tab_action ~tabs ~call =
     "Stagehand BrowserAct serves only open_tab and top-level back, forward, reload, close_tab; use BrowserInteract for supported native input") in
   function
   | Browser_lane.Action.Open_tab url -> open_tab ~tabs ~call url
+  | Browser_lane.Action.Open_window _ -> unsupported ()
   | Browser_lane.Action.On_tab {tab_id;frame_path;interaction} ->
     match frame_path with
     | _::_ -> unsupported ()

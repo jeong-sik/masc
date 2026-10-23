@@ -94,6 +94,10 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let second = open_tab "/second" in
     input first (Browser_lane.Click (selector "submit"));
     check "second tab remains independently readable" (member "url" (read second) = `String (fixture_url ^ "/second"));
+    let window_tab = success (run (Browser_lane.Page_act (Browser_action.Open_window (fixture_url ^ "/second")))) |> member "tabId" |> integer in
+    check "open_window returns a tab that reads as its own page" (member "url" (read window_tab) = `String (fixture_url ^ "/second"));
+    check "the window's tab id is new" (window_tab <> first && window_tab <> second);
+    act window_tab Browser_action.Close_tab;
     let rejected = interact_raw first (Browser_lane.Click "input") in
     check "ambiguous selector rejected before effect" (match rejected with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
     input first (Browser_lane.Scroll {x=0;y=400});

@@ -1242,7 +1242,7 @@
  (name masc_tui_press)
  (wrapped false)
  (modules masc_tui_press)
- (libraries masc_tui_hit masc_tui_types masc_tui_context_inspector))
+ (libraries masc_tui_hit masc_tui_types masc_tui_context_inspector masc_tui_lane_inventory))
 
 (library
  (name masc_tui_help)

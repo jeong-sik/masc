@@ -9136,6 +9136,7 @@ type state = {
   mutable keeper_lanes_reread_pending: bool;
   mutable keeper_lanes_resume: bool;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
+  mutable lanes_selection: Masc_tui_lane_inventory.identity option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_inflight: bool;
@@ -14194,10 +14195,39 @@ let pan_code_content (state : state) ~direction =
 let lane_inventory_rows (state : state) =
   match state.lane_inventory with
   | None -> []
-  | Some snapshot -> snapshot.Masc.Tui_decode_lane_inventory.rows
+  | Some snapshot -> Masc_tui_lane_inventory.ordered_rows snapshot.Masc.Tui_decode_lane_inventory.rows
+
+let lane_inventory_entries (state : state) =
+  match state.lane_inventory with
+  | None -> []
+  | Some snapshot -> Masc_tui_lane_inventory.overview_entries snapshot.Masc.Tui_decode_lane_inventory.rows
 
 let selected_inventory_lane (state : state) =
-  List.nth_opt (lane_inventory_rows state) state.lanes_cursor
+  Option.bind state.lanes_selection (fun selected ->
+    Masc_tui_lane_inventory.find_identity selected (lane_inventory_rows state))
+
+let select_inventory_lane (state : state) index =
+  Option.iter (fun row ->
+    state.lanes_selection <- Some (Masc_tui_lane_inventory.identity row);
+    state.lanes_cursor <- index) (List.nth_opt (lane_inventory_rows state) index)
+
+let replace_lane_inventory (state : state) (snapshot : Masc.Tui_decode_lane_inventory.snapshot) =
+  state.lane_inventory <- Some snapshot;
+  state.standalone_lanes <- Some snapshot.exact_snapshot;
+  let rows=lane_inventory_rows state in
+  (* A removed or replaced original remains selected by its old identity;
+     only explicit navigation can choose another target. *)
+  (match state.lanes_selection with
+   | None -> state.lanes_selection <- Option.map Masc_tui_lane_inventory.identity (List.nth_opt rows 0)
+   | Some _ -> ());
+  state.lanes_cursor <- (match Option.bind state.lanes_selection (fun selected ->
+      Masc_tui_lane_inventory.identity_index selected rows) with
+    | Some index -> index
+    | None -> Masc_tui_scroll.cursor_move ~count:(List.length rows) ~delta:0 state.lanes_cursor)
+
+let lane_inventory_visual_cursor (state : state) =
+  Option.bind (selected_inventory_lane state) (fun row ->
+    Masc_tui_lane_inventory.row_position ~id:row.Masc.Tui_decode_lane_inventory.id (lane_inventory_entries state))
 
 (* Exact-only editors retain their current data contract. The inventory cursor
    names a row by identity, never by its position in the exact-only snapshot. *)
@@ -15749,6 +15779,7 @@ let create_state
   keeper_lanes_reread_pending = false;
   keeper_lanes_resume = false;
   lane_inventory = None;
+  lanes_selection = None;
   standalone_lanes = None;
   standalone_lanes_error = None;
   standalone_lanes_inflight = false;
@@ -17674,7 +17705,7 @@ let lanes_scrolled (state : state) ~cols =
       }
   | Lanes_overview ->
       let notices = lane_inventory_notice_lines ~cols state in
-      { sc_count = lanes_inventory_count state
+      { sc_count = List.length (lane_inventory_entries state)
       ; sc_chrome = Masc_tui_frame.chrome_rows + 3
           + List.length notices
           + lanes_action_error_row_count ~cols state.lanes_action_error

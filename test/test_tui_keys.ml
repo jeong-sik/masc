@@ -918,7 +918,6 @@ let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Lanes;
   let exact_snapshot = standalone_snapshot four_standalone_lanes in
-  state.standalone_lanes <- Some exact_snapshot;
   let module Inventory = Masc.Tui_decode_lane_inventory in
   let exact_rows = List.map (fun (lane : Tui_decode.standalone_lane) ->
       { Inventory.id = Masc.Lane_id.to_wire (Builtin (Exact lane.sl_lane));
@@ -927,7 +926,7 @@ let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
       four_standalone_lanes in
   let machine = { Inventory.id="machine/dos"; label="DOS"; purpose="Shared machine";
     selection=Inventory.Machine Masc.Machine_lane.Dos; state=Inventory.Machine_state (Inventory.Machine_enabled, Inventory.Stable) } in
-  state.lane_inventory <- Some { Inventory.observed_at=0.; exact_snapshot;
+  replace_lane_inventory state { Inventory.observed_at=0.; exact_snapshot;
     rows=exact_rows @ [machine]; package_read={directory="/fixture/lane-addons";
       complete=true;owner_present=true;issues=[]} };
   state.lanes <- Some (keeper_snapshot (List.map keeper_lane keepers));
@@ -935,10 +934,12 @@ let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
 
 let test_inventory_selection_keeps_exact_editor_identity () =
   let state = lanes_state () in
-  state.lanes_cursor <- 4;
+  select_inventory_lane state (List.find_index (fun (row:Masc.Tui_decode_lane_inventory.row) ->
+    row.id="machine/dos") (lane_inventory_rows state) |> Option.get);
   Alcotest.(check bool) "machine selection cannot edit a neighbouring exact lane"
     true (Option.is_none (selected_standalone_lane state));
-  state.lanes_cursor <- 2;
+  select_inventory_lane state (List.find_index (fun (row:Masc.Tui_decode_lane_inventory.row) ->
+    row.id="exact/librarian_exact") (lane_inventory_rows state) |> Option.get);
   Alcotest.(check (option string)) "exact selection joins by typed identity"
     (Some "librarian_exact")
     (Option.map (fun lane -> Standalone_lane.to_id lane.Tui_decode.sl_lane) (selected_standalone_lane state));
@@ -947,6 +948,77 @@ let test_inventory_selection_keeps_exact_editor_identity () =
   Alcotest.(check (option string)) "exact detail reorder does not change selected lane"
     (Some "librarian_exact")
     (Option.map (fun lane -> Standalone_lane.to_id lane.Tui_decode.sl_lane) (selected_standalone_lane state))
+
+let test_grouped_inventory_keeps_original_action_target () =
+  let module I = Masc.Tui_decode_lane_inventory in
+  let module D = Masc_tui_lane_inventory in
+  let module C = Masc.Lane_addon_category in
+  let state=lanes_state () in
+  let initial=Option.get state.lane_inventory in
+  let package installation category : I.row =
+    {id="declaration//fixture/selected.toml";label="Selected package";purpose="Judges an original";
+     selection=I.Declaration "/fixture/selected.toml";
+     state=I.Package_state {declaration=Some (I.Valid {installation_id=installation;enabled=true;
+       run_id="run";package_id="fixture-package";title="Selected package";
+       desired_revision="desired";source_revision="source";ui_category=Some category;
+       application=Masc.Lane_addon_application.Inactive;
+       exact_outputs=[{output="judge";source=I.Declared;
+         configuration=I.Unconfigured "fixture has no candidates"}]});instances=[]}} in
+  let selected=package "original-installation" C.Analysis in
+  let other={(package "other-installation" C.Analysis) with I.id="declaration//fixture/other.toml";
+    selection=I.Declaration "/fixture/other.toml"} in
+  let publish rows=replace_lane_inventory state {initial with I.rows=rows} in
+  let choose row=select_inventory_lane state
+    (List.find_index (fun (current:I.row) -> current.id=row.I.id) (lane_inventory_rows state) |> Option.get) in
+  let target ()=Option.bind (selected_inventory_lane state) (fun row ->
+    Option.map (fun (installation,output) ->
+      Masc_tui_lane_inventory.exact_output_table_path ~installation_id:installation output)
+      (D.selected_exact_output ~selected:None row)) in
+  publish (initial.rows @ [selected]);choose selected;
+  let original_target=target () and original_press=D.identity selected in
+  let reclassified=package "original-installation" C.Memory_and_judgment in
+  publish (other :: reclassified :: List.rev initial.rows);
+  Alcotest.(check bool) "category change and unrelated insertion keep the actual settings target" true
+    (original_target=target () && Option.is_some original_target);
+  Alcotest.(check (option string)) "selection keeps its original row identity"
+    (Some selected.id) (Option.map (fun (row:I.row) -> row.id) (selected_inventory_lane state));
+  publish (other :: initial.rows);
+  Alcotest.(check bool) "a missing original offers no neighbouring settings or activity target" true
+    (Option.is_none (selected_inventory_lane state) && Option.is_none (target ()));
+  publish (reclassified :: other :: initial.rows);
+  Alcotest.(check bool) "the same original may reappear without selecting its neighbour" true
+    (target ()=original_target);
+  let replacement=package "replacement-installation" C.Memory_and_judgment in
+  publish (replacement :: other :: initial.rows);
+  Alcotest.(check bool) "a new installation at the same path does not inherit selection" true
+    (Option.is_none (selected_inventory_lane state) && Option.is_none (target ()));
+  Alcotest.(check bool) "a mouse press from the old frame cannot name the replacement" true
+    (Option.is_none (D.identity_index original_press (lane_inventory_rows state)));
+  choose replacement;
+  Alcotest.(check bool) "explicit navigation chooses the new actual installation table" true
+    (target ()=Some (Ok ["runtime";"addon_exact_lanes";"replacement-installation";"judge"]))
+
+let test_inventory_category_preserves_metadata_owner () =
+  let module I = Masc.Tui_decode_lane_inventory in
+  let module D = Masc_tui_lane_inventory in
+  let module C = Masc.Lane_addon_category in
+  let worker : I.instance = {instance_id="manual";incarnation="first";run_id="run";
+    package_id="package";title="Browser sounding name";package_revision="original";
+    ui_category=Some C.Analysis;presence=I.Live;phase=I.Observing;applied_revision=None} in
+  let manual : I.row = {id="instance/manual";label="Browser sounding name";purpose="fixture";
+    selection=I.Manual_instance {instance_id=worker.instance_id;incarnation=worker.incarnation};
+    state=I.Package_state {declaration=None;instances=[worker]}} in
+  Alcotest.(check bool) "manual category belongs to the exact original worker, not its title" true
+    (D.row_category manual=Some C.Analysis);
+  let declaration={manual with I.id="declaration//fixture/package.toml";
+    selection=I.Declaration "/fixture/package.toml";
+    state=I.Package_state {declaration=Some (I.Invalid ["unreadable current manifest"]);instances=[worker]}} in
+  Alcotest.(check bool) "invalid current declarations never borrow the original worker category" true
+    (D.row_category declaration=None);
+  let reincarnated={manual with I.selection=I.Manual_instance {instance_id="manual";incarnation="second"};
+    state=I.Package_state {declaration=None;instances=[{worker with I.incarnation="second"}]}} in
+  Alcotest.(check bool) "a new manual incarnation cannot receive an old frame's selection" true
+    (Option.is_none (D.find_identity (D.identity manual) [reincarnated]))
 
 let test_lanes_search_texts_lead_with_the_standalone_labels () =
   let state = lanes_state () in
@@ -1546,7 +1618,11 @@ let () =
             test_planning_detail_keeps_the_key_closed
         ] )
     ; ( "lanes rows"
-      , [ Alcotest.test_case "inventory selection retains exact editor identity" `Quick
+      , [ Alcotest.test_case "role grouping retains the original settings and activity target" `Quick
+            test_grouped_inventory_keeps_original_action_target
+        ; Alcotest.test_case "category and selection preserve their metadata owners" `Quick
+            test_inventory_category_preserves_metadata_owner
+        ; Alcotest.test_case "inventory selection retains exact editor identity" `Quick
             test_inventory_selection_keeps_exact_editor_identity
         ; Alcotest.test_case "search includes all inventory families" `Quick
             test_lanes_search_texts_lead_with_the_standalone_labels

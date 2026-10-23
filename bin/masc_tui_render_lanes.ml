@@ -515,12 +515,16 @@ let render_lanes_overview (state : state) =
   List.iter (fun notice -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ notice))
     (Masc_tui_types.lane_inventory_notice_lines ~cols state);
   let inventory = lane_inventory_rows state in
+  let entries = lane_inventory_entries state in
   let layout = Masc_tui_types.lanes_scrolled ~cols state in
   let height = Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
       ~overflow_takes_row:layout.sc_overflow_takes_row in
-  let scroll = Masc_tui_scroll.normalize ~count:layout.sc_count ~height state.lanes_scroll
-    |> Masc_tui_scroll.ensure_visible ~cursor:state.lanes_cursor ~height in
+  let selected_position = lane_inventory_visual_cursor state in
+  let scroll = Masc_tui_scroll.normalize ~count:layout.sc_count ~height state.lanes_scroll in
+  let scroll = match selected_position with
+    | None -> scroll
+    | Some cursor -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll in
   (* The standing leads the state, so a narrow STATE column still shows
      whether the lane is ready, failing or never set up. *)
   let standing row = match state.lane_inventory with
@@ -537,7 +541,7 @@ let render_lanes_overview (state : state) =
   let label_width = max 1 (inner - mark_width - status_width - 2) in
   box_line_styled buf cols ~style:(Theme.recede ())
     (String.make mark_width ' ' ^ fit_width "LANE" label_width ^ "  " ^ fit_width "STATE" status_width);
-  let window = Rows.of_list ~first:scroll ~height inventory in
+  let window = Rows.of_list ~first:scroll ~height entries in
   for offset = 0 to height - 1 do
     let index = scroll + offset in
     match Rows.at window index with
@@ -546,18 +550,21 @@ let render_lanes_overview (state : state) =
           (if Option.is_some state.standalone_lanes_error then "  r: retry inventory"
            else "  reading all lanes…")
     | None -> box_empty buf cols
-    | Some row ->
+    | Some (Masc_tui_lane_inventory.Category_header category) ->
+        box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ())
+          ("  " ^ Masc_tui_lane_inventory.category_label category)
+    | Some (Masc_tui_lane_inventory.Lane_row row) ->
         let standing = standing row in
         let label = fit_width (Terminal_text.single_line
-            (Masc_tui_lane_inventory.family_label row.selection ^ " · " ^ row.label)) label_width in
+            row.label) label_width in
         let mark = fit_width (Masc_tui_lane_standing.mark standing) mark_width in
         let state_text = fit_width (summary row) status_width in
         (* The final frame owns click geometry, including narrow terminals and
            scrolling. A retained mark names an identity, never a former index. *)
-        let marked text = pressable (Press_lane_row row.id) (fit_width text inner) in
+        let marked text = pressable (Press_lane_row (Masc_tui_lane_inventory.identity row)) (fit_width text inner) in
         (* The selection band takes no colour of its own, so the selected row
            keeps the mark and drops the styles. *)
-        if index = state.lanes_cursor then
+        if selected_position = Some index then
           box_line_selected buf cols (marked (mark ^ label ^ "  " ^ state_text))
         else
           let row_style = if Masc_tui_lane_standing.recedes standing then Theme.recede () else "" in
@@ -567,7 +574,7 @@ let render_lanes_overview (state : state) =
           box_line buf cols (marked (Masc_tui_lane_standing.colour standing ^ mark ^ Ansi.reset
             ^ row_style ^ label ^ "  " ^ Ansi.reset ^ state_style ^ state_text ^ Ansi.reset))
   done;
-  (match Masc_tui_scroll.position_row ~scroll ~height (List.length inventory) with
+  (match Masc_tui_scroll.position_row ~scroll ~height (List.length entries) with
    | None -> ()
    | Some text -> box_line_styled buf cols ~style:(Theme.recede ()) text);
   (* The selected row gets the remaining preview space; the list scrolls

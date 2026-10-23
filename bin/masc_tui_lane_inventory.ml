@@ -1,6 +1,62 @@
 module Inventory = Masc.Tui_decode_lane_inventory
 open Inventory
 
+module Category = Masc.Lane_addon_category
+let row_category (row : row) = match row.selection with
+  | Exact (Standalone_lane.Librarian | Hitl_auto_judge | Board_attention | Verifier | Candle_appraiser) ->
+      Some Category.Memory_and_judgment
+  | Exact Standalone_lane.Browser_stagehand | Browser _ -> Some Category.Browser
+  | Machine _ -> Some Category.Execution_environment
+  | Declaration _ ->
+      (match row.state with
+       | Package_state {declaration=Some (Valid value);_} -> value.ui_category
+       | Package_state {declaration=Some (Invalid _ | Absent | Unobserved) | None;_}
+       | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None)
+  | Manual_instance {instance_id;incarnation} ->
+      (match row.state with
+       | Package_state {declaration=None;instances} ->
+           Option.bind (List.find_opt (fun (item:instance) ->
+             item.instance_id=instance_id && item.incarnation=incarnation) instances)
+             (fun item -> item.ui_category)
+       | Package_state {declaration=Some _;_}
+       | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None)
+let category_label = function
+  | Some Category.Memory_and_judgment -> "기억 · 판단"
+  | Some Category.Browser -> "브라우저"
+  | Some Category.External_communications -> "외부 소통"
+  | Some Category.Voice_and_media -> "음성 · 미디어"
+  | Some Category.Execution_environment -> "실행 환경"
+  | Some Category.Analysis -> "분석"
+  | None -> "미분류"
+type overview_entry = Category_header of Category.t option | Lane_row of row
+let overview_entries rows =
+  [Some Category.Memory_and_judgment;Some Category.Browser;
+   Some Category.External_communications;Some Category.Voice_and_media;
+   Some Category.Execution_environment;Some Category.Analysis;None]
+  |> List.concat_map (fun category ->
+       match List.filter (fun row -> row_category row=category) rows with
+       | [] -> []
+       | grouped -> Category_header category :: List.map (fun row -> Lane_row row) grouped)
+let ordered_rows rows = overview_entries rows |> List.filter_map (function
+  | Category_header _ -> None | Lane_row row -> Some row)
+let row_position ~id entries = List.find_index (function
+  | Category_header _ -> false | Lane_row row -> String.equal row.id id) entries
+type identity = {row_id:string;target:selection;installation_id:string option}
+let identity (row : row) =
+  let installation_id=match row.selection with
+    | Declaration _ -> (match row.state with
+        | Package_state {declaration=Some (Valid value);_} -> Some value.installation_id
+        | Package_state {declaration=Some (Invalid _ | Absent | Unobserved) | None;_}
+        | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None)
+    | Exact _ | Browser _ | Machine _ | Manual_instance _ -> None in
+  {row_id=row.id;target=row.selection;installation_id}
+let identity_matches selected row =
+  let current=identity row in
+  selected.row_id=current.row_id && selected.target=current.target
+    && selected.installation_id=current.installation_id
+let find_identity selected rows = List.find_opt (identity_matches selected) rows
+let identity_index selected rows = List.find_index (identity_matches selected) rows
+
 let family_label = function
   | Exact _ -> "Exact-output"
   | Browser _ -> "Browser"
@@ -181,7 +237,8 @@ let refused_cli_slot_lines
     ]
 
 let detail_lines (row : row) =
-  [row.label; row.purpose; "Identity: " ^ row.id; "Reading: " ^ row_summary row]
+  [row.label; row.purpose; "Surface: " ^ family_label row.selection;
+   "Identity: " ^ row.id; "Reading: " ^ row_summary row]
   @ (match row.selection with
      | Exact _ -> ["Exact-output admission and retained run evidence are separate readings."]
      | Browser _ -> ["Opening this row reads the selected browser backend; it does not open a new session."]

@@ -24,7 +24,8 @@ type press_target =
   | Press_context_tab of Masc_tui_context_inspector.tab
   | Press_keeper_row of string  (** a Keepers list row, by Keeper name *)
   | Press_chat_call of Masc_tui_types.workspace_authority * unit ref * string * string
-  | Press_lane_row of string  (** an inventory row, by its stable row id *)
+  | Press_lane_row of Masc_tui_lane_inventory.identity
+      (** The frame's original row ID and typed installation/incarnation target. *)
 
 val press_changes_the_surface : press_target -> bool
 (** Whether a press changes what the surface shows. Only the Context

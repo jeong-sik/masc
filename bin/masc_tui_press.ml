@@ -25,7 +25,7 @@ type press_target =
   | Press_context_tab of Masc_tui_context_inspector.tab
   | Press_keeper_row of string
   | Press_chat_call of workspace_authority * unit ref * string * string
-  | Press_lane_row of string
+  | Press_lane_row of Masc_tui_lane_inventory.identity
 
 (* An overlay keeps the surface's strip on its first row, and a press there
    would change the surface under a modal no key can leave that way. The

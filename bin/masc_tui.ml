@@ -6910,14 +6910,14 @@ let row_list (state : state) : row_list option =
              state.lane_runs_cursor <- index)
        | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None
        | Lanes_overview ->
-           of_counted (fun count ->
-               scrolling ~count ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
-                 ~set_cursor:(fun index ->
+           Some {rl_count=lanes_inventory_count state;rl_cursor=state.lanes_cursor;
+             rl_place=(fun index ->
                    if index <> state.lanes_cursor then
                      Masc_tui_types.dismiss_runtime_lane_notice state;
                    state.lanes_action_error <- None;
-                   state.lanes_cursor <- index)
-                 ~set_scroll:(fun scroll -> state.lanes_scroll <- scroll)))
+                   select_inventory_lane state index;
+                   Option.iter (fun cursor -> follow ~cursor state.lanes_scroll
+                     (fun scroll -> state.lanes_scroll <- scroll)) (lane_inventory_visual_cursor state))})
   | Clients ->
       of_counted (fun count ->
           scrolling ~count ~cursor:state.clients_surface_cursor
@@ -13470,6 +13470,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
   state.lane_inventory <- None;
+  state.lanes_selection <- None;
   state.lanes_cursor <- 0;
   state.lanes_scroll <- 0;
   state.standalone_lanes <- None;
@@ -14878,13 +14879,13 @@ let press_marked_target state ~mailbox (target : press_target) =
   | Press_chat_call (authority,reading,keeper_name,execution_id) ->
       if authority=state.workspace_authority && reading==state.workspace_read_authority then
         open_chat_call_reader ~execution_id state ~mailbox keeper_name
-  | Press_lane_row id ->
+  | Press_lane_row target ->
       if state.view = Lanes && state.lanes_mode = Lanes_overview
           && Option.is_none state.slot_editor then
-        (match List.find_index (fun (row : Masc.Tui_decode_lane_inventory.row) ->
-             String.equal row.id id) (lane_inventory_rows state) with
+        (match Masc_tui_lane_inventory.identity_index target (lane_inventory_rows state) with
          | None -> ()
-         | Some index when index = state.lanes_cursor ->
+         | Some _ when Option.is_some (Option.bind (selected_inventory_lane state) (fun row ->
+               Masc_tui_lane_inventory.find_identity target [row])) ->
              open_lane_inventory_selection state ~mailbox
          | Some index -> Option.iter (fun list -> list.rl_place index) (row_list state))
   | Press_keeper_row name -> (
@@ -21936,16 +21937,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       if generation = state.standalone_lanes_generation then (
         match result with
         | Ok snapshot ->
-            let previous = Option.map (fun (row : Masc.Tui_decode_lane_inventory.row) -> row.id)
-              (selected_inventory_lane state) in
-            state.lane_inventory <- Some snapshot;
-            state.standalone_lanes <- Some snapshot.exact_snapshot;
-            state.lanes_cursor <- (match previous with
-              | Some id -> (match List.find_index (fun (row : Masc.Tui_decode_lane_inventory.row) ->
-                    String.equal row.id id) snapshot.rows with
-                  | Some index -> index
-                  | None -> Masc_tui_scroll.cursor_move ~count:(List.length snapshot.rows) ~delta:0 state.lanes_cursor)
-              | None -> Masc_tui_scroll.cursor_move ~count:(List.length snapshot.rows) ~delta:0 state.lanes_cursor);
+            replace_lane_inventory state snapshot;
             (match state.runtime_lane_write with
              | Masc_tui_types.Lane_write_rereading (Masc_tui_types.Standalone_lanes_list, answered_at, _receipt)
                when generation > answered_at ->
@@ -21960,9 +21952,9 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
             Masc_tui_types.reconcile_slot_editor_selection state;
             state.standalone_lanes_error <- None;
             (* Reuse the same geometry as key movement after identity retention. *)
-            (match row_list state with
-             | Some list when state.view = Lanes && state.lanes_mode = Lanes_overview -> list.rl_place state.lanes_cursor
-             | Some _ | None -> ());
+            (match selected_inventory_lane state,row_list state with
+             | Some _,Some list when state.view = Lanes && state.lanes_mode = Lanes_overview -> list.rl_place state.lanes_cursor
+             | None,_ | Some _,(Some _ | None) -> ());
             Masc_tui_types.runtime_lane_list_reread state
               ~list:Masc_tui_types.Standalone_lanes_list ~generation (Ok ())
         | Error detail ->

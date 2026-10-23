@@ -487,7 +487,11 @@ let record_bytes fd size =
   let* ()=read 0 in
   let rec end_of_record () =
     match Unix.read fd (Bytes.create 1) 0 1 with
-    | 0 -> Ok (Bytes.to_string buffer)
+    | 0 ->
+      (* This read owns [buffer]; it has never escaped and no write follows
+         EOF. Transfer it to the immutable result without copying the whole
+         record. The verification read still owns a distinct buffer. *)
+      Ok (Bytes.unsafe_to_string buffer)
     | _ -> Error "retained file grew during read"
     | exception Unix.Unix_error (Unix.EINTR,_,_) -> end_of_record () in
   end_of_record ()

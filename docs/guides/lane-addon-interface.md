@@ -1,5 +1,43 @@
 # Package input and display contracts
 
+## Primary navigation category
+
+A package may declare one top-level `ui_category` in its `lane.toml`:
+
+```toml
+ui_category = "memory_judgment"
+```
+
+The closed values are `memory_judgment`, `browser`, `external_communications`,
+`voice_media`, `execution_environment` and `analysis`. Omission means unclassified.
+Unknown values, padded strings, other types and duplicate declarations are errors;
+they are never guessed from package IDs, titles, tool names or model routes.
+Packages with several roles select one primary category and keep their original
+contributions, capabilities and outputs independently.
+
+Category is navigation metadata. It grants no capability, execution, credential,
+Required-service exemption or permission to switch a service Off. Browser engines
+and transports remain details of a browser service; exact-output model routes
+remain bindings of individual named outputs. They are not sibling package roles.
+
+Catalog and preview responses contain the current manifest's optional category.
+Inspect's `configuration.declarations[].ui_category` describes the last valid
+declaration reading. Its worker-input revision excludes only this new category,
+so editing it preserves the same live incarnation, tool owner and original
+request authority. Each worker's `package.ui_category` remains its immutable
+original declaration, including in retained history. Current-installation views
+use the matching current declaration's category; unreadable or unresolved
+declarations must not borrow an old worker's category. Missing category fields
+are omitted from JSON, while an explicitly invalid value is refused.
+The common Lane inventory also carries the category separately on valid
+declarations and on original instances; its typed TUI decoder preserves both.
+An invalid, absent or unobserved declaration stays in that original state,
+even when its previous worker has a category.
+
+This metadata contract does not itself implement TUI or Dashboard grouping.
+
+## Input and reading contracts
+
 An optional `[interface]` table in `lane.toml` declares JSON text in
 `binding_schema` and `presentation`. The binding schema uses the same enforceable
 JSON Schema subset as Lane actions. It must describe an object, including the

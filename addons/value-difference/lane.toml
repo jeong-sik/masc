@@ -1,6 +1,7 @@
 id = "value-difference"
 revision = "0.1.0"
 title = "Observed value changes"
+ui_category = "analysis"
 contributions = ["derive"]
 image = "masc-lane-value-difference:0.1.0"
 command = ["python3", "server.py"]

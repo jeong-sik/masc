@@ -1,6 +1,7 @@
 id = "vst-phrase"
 revision = "0.1.0"
 title = "Native MIDI phrase playback"
+ui_category = "voice_media"
 contributions = ["observe"]
 image = "masc-lane-vst-phrase:0.1.0"
 command = ["python3", "server.py"]

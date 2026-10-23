@@ -1,6 +1,7 @@
 id = "fusion-compute"
 revision = "0.1.0"
 title = "Fusion panel and judge computation"
+ui_category = "analysis"
 contributions = ["derive"]
 image = "masc-lane-fusion-compute:0.1.0"
 command = ["python3", "server.py"]

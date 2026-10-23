@@ -1,6 +1,7 @@
 id = "dos-world"
 revision = "0.1.0"
 title = "DOS input and guest state"
+ui_category = "execution_environment"
 contributions = ["observe", "act"]
 image = "masc-lane-dos-world:0.1.0"
 command = ["node", "/opt/dos-world/server.mjs"]

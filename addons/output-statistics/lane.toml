@@ -1,6 +1,7 @@
 id = "output-statistics"
 revision = "0.1.0"
 title = "Latest completed output statistics"
+ui_category = "analysis"
 contributions = ["derive"]
 image = "masc-lane-output-statistics:0.1.0"
 command = ["python3", "server.py"]

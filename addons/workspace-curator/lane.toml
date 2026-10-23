@@ -1,6 +1,7 @@
 id = "workspace-curator"
 revision = "0.1.1"
 title = "Workspace Curator worker"
+ui_category = "memory_judgment"
 contributions = ["derive"]
 image = "masc-lane-workspace-curator:0.1.1"
 command = ["python3", "server.py", "--state", "/state"]

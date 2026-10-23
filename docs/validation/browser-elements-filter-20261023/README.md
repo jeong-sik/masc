@@ -16,7 +16,8 @@ while diagnosing this request.
 - `node --test test/test_browser_interact_extension.mjs`: passed existing
   shared DOM interaction and extension dispatcher checks.
 - `node --check connectors/browser/extension/background.js`: passed.
-- `ocamlc -stop-after parsing`: 17 changed ML files parsed. This is syntax only;
+- `ocamlc -stop-after parsing`: 17 changed implementation/test ML files and the updated documented ego probe
+  parsed. This is syntax only;
   no native compilation, type check, OCaml test execution or CI run was done.
 
 ## Real DOM fixture

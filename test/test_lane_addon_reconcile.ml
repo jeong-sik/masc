@@ -342,7 +342,8 @@ let test_a_worker_that_ends_on_its_own_is_replaced () =
     await clock (fun () -> phase (instance config first) = "failed");
     check string "the end is recorded as a worker failure" "worker_failed"
       (failed_record (instance config first) |> member "cause" |> text "kind");
-    check (list string) "nothing replaces it before the configuration pass" [first] (starts state);
+    check (list string) "nothing stops or replaces it before the configuration pass" []
+      (stops state @ List.filter (fun id -> id <> first) (starts state));
     ignore (reconcile config directory);
     await_detached clock config first;
     check (list string) "the pass stopped the ended worker" [first] (stops state);

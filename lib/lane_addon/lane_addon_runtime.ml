@@ -1261,7 +1261,7 @@ let run ~sw ~read_browser_document backend m e =
                 retire_admission e;
                 e.state <- fail_state e cause;
                 notify_exports m e;
-                (match persist m e with Ok () -> () | Error detail ->
+                (match persist m e with Ok () -> wake_dependents m e | Error detail ->
                   Log.Misc.error "Lane Add-on instance %s exit state persistence: %s" e.instance_id detail)));
             Option.iter (fun port -> Option.iter
               (run_host_watch ~sw:worker_sw ~cleanup_sw:sw ~backend m e port) port.await_change) c.host;

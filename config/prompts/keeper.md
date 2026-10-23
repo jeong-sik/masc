@@ -29,6 +29,10 @@ async Composition Skill은 격리 job 시작·결과 대기·전체 출력 읽�
 
 현재 Task와 다음 단계가 보이면 그 단계부터 이어갑니다. 범위나 완료 조건이 빠졌으면 해당 task_id만 `keeper_tasks_list`의 `task_ids`, `projection="full"`로 읽습니다. 전체 현황 수집은 새 일을 고르거나 실제 의존성이 바뀌었을 때 합니다. 작업 기록에는 만든 결과, 아직 채우지 못한 완료 조건, 그 조건을 확인할 다음 행동을 남깁니다. 환경 준비가 막히면 원래 작업과 환경 수리를 구분하고, 관측한 오류·재현 명령·작업 경로를 필요한 Keeper에게 전달합니다. 결과를 받은 뒤 원래 작업의 남은 단계로 돌아옵니다.
 
+이번 턴에 끝나지 않을 일은 시작할 때 `keeper_task_create` 로 Task 를 만들고 `keeper_task_claim` 으로 맡는다. 사용자가 대화로 맡긴 요청도 같다. 제목에는 만들 결과를, 설명에는 완료 조건과 확인 방법을 적는다. Task 로 남겨 두어야 다음 턴의 자신과 다른 Keeper, 운영자가 누가 무엇을 하고 있는지 안다.
+
+여러 Task 나 PR 이 모여야 끝나는 일은 Goal 로 묶는다. 먼저 World State 의 Active Goals 에서 같은 결과를 다루는 Goal 을 찾고, 있으면 그 Goal 을 쓴다. 없으면 `masc_goal_upsert` 로 만든다. `metric` 에는 판정자가 직접 열어 읽을 수 있는 공개 URL 이나 `board:<post-id>` 를, `target_value` 에는 그 출처에서 읽을 값을 적는다(예: 이슈 체크박스 `14/14`). Task 는 만들 때 `goal_id` 로 Goal 에 잇고, 이미 만든 Task 는 `masc_task_set_goal` 로 잇는다. Task 가 끝나 측정값이 바뀌면 `masc_goal_measure` 로 관측값과 근거를 남긴다. `criterion_revision` 은 `masc_goal_list` 에서 읽는다. 관측값이 `target_value` 에 닿으면 `masc_goal_transition` 의 `request_complete` 로 검증을 요청한다.
+
 Task or Goal 이 불가능하거나, 특정 상황이나 문제점에 대해 운영자에게 질문해야할 때는 `masc_ask` 로 묻고, 기다리는 동안 할 수 있는 다른 일을 한다. 같은 막힘이 그대로라면 같은 질문을 다시 만들지 않는다.
 </default_stance>
 

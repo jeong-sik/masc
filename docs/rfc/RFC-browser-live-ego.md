@@ -45,6 +45,7 @@ Keeper 는 로그인된 브라우저가 필요할 때 ego lite 를 쓰지 못한
 | selector | ref, `text=`, `loc=role:…`, `loc=css:`, `xpath=`, 일반 CSS. 하나만 맞아야 한다. 대상이 화면 밖이면 스스로 스크롤한다 |
 | 없는 것 | 뒤로·앞으로 가기, 탭 앞으로 가져오기는 Page API 에 없다. `page.cdp()` 로는 부를 수 있다 |
 | 스크린샷 | 파일로 쓰고 경로를 돌려준다 |
+| 다운로드 | agent 작업 공간의 다운로드는 시작 전에 걸어 둔 `page.waitForEvent("download")` 로만 받는다. `saveAs(경로)` 는 복사본(링크 1개, 다른 inode)을 만들고 없는 상위 폴더도 만든다. ego 의 임시 파일은 시스템 임시 폴더(`ego-browser-download-*`)에 생긴다. 다운로드하는 동안 운영자의 `~/Downloads` 폴더의 수정 시각이 바뀌고(이동만 할 때는 그대로였다) 끝난 뒤 남는 것은 없었다. `delete()` 는 ego 의 임시 파일만 지운다. `timeout: 0` 은 거절하고 2147483647 ms 는 받는다. 닫힌 페이지의 대기는 "No target with given id found" 로 끝난다(2026-10-23, 0.6.0.16, Node v24.21.0) |
 | 로그인 | 공간은 브라우저 프로필의 쿠키를 같이 쓴다. 공간이 계정을 나누지는 않는다 |
 | 넘기기 | `task.handOff()` 는 바로 돌아오고, `listTaskSpaces()` 의 소유가 `agentDelegatedToUser` 가 된다. 그 뒤 그 공간의 호출(`tabs()`, `page.url()`, 다시 `handOff()`)은 모두 `error_code: "EGO_TASK_SPACE_USER_IN_CONTROL"` 로 실패한다. `taskSpace(id)` 로 다시 연 핸들의 `ownership` 도 `agentDelegatedToUser` 다. ego 화면에는 넘긴 공간을 돌려주는 버튼이 없다(운영자가 확인). `takeOverTaskSpace(id)` 는 운영자 동작 없이 바로 성공하고, `userPage()` 가 그때 활성이던 탭을 준다. `waitForControl` 은 시간이 다 될 때까지 기다리다 실패한다(2026-10-23) |
 
@@ -96,6 +97,7 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 | `tab_closing` | `page.close()` (agent 페이지만) | 한다 |
 | `tab_history` | 새로고침은 `page.reload()`. 뒤로·앞으로는 `page.cdp()` 로 `Page.getNavigationHistory` 를 읽고 `Page.navigateToHistoryEntry` 로 한 칸 옮긴 뒤, 그 탭의 현재 항목이 그 칸이 되고 문서가 다 불러와질 때까지 기다린다 (agent 페이지만) | 한다. 그 쪽에 항목이 없으면 행동 전에 거절한다 |
 | `dialog_answer` | `page.info()` 가 페이지를 막은 대화상자를 알려 주고, `acceptDialog(text?)`·`dismissDialog()` 로 답한다 (agent 페이지만) | 한다. 탭 목록의 행에 `dialog` 가 실린다. 클릭·키 입력이 대화상자를 열면 그 영수증에 담고, 페이지 스크립트가 막히면 부분 효과다. 열린 동안 그 페이지의 읽기·이동·입력은 행동 전에 거절하고, 탭 닫기는 받는다. 연결의 프로세스가 하나라서(4절) 다음 명령도 그 대화상자에 닿는다 |
+| `download_listing` | agent 페이지를 건드리는 단계가 그 페이지에 `page.waitForEvent("download")` 대기를 하나 걸어 둔다. 잡힌 다운로드는 `saveAs` 로 worker 의 다운로드 폴더 아래 `ego/<id>` 에 저장하고, ego 의 임시 파일은 `delete()` 로 지운다. 대기는 다운로드마다 다시 걸린다. 대기가 실패하면(페이지가 닫힌 경우 포함) 멈추고, 그 페이지의 다음 단계가 다시 건다 | 한다(BrowserRead `mode=downloads`, 탭 하나). 행은 Gecko 와 같은 모양(대기 중·끝남·중단)이고, 끝난 파일은 Gecko 와 같은 broker 로 publish 해 `artifact` 로 돌려준다. 목록은 ego 프로세스 안에 있어서, 멈춘 명령 뒤 새 프로세스는 그때부터 본 것만 안다. `watchingSince` 가 그 시점이다. 운영자의 다운로드 폴더에는 남는 것이 없다. ego 의 브라우저가 다운로드하는 동안 그 폴더를 건드리기는 한다 |
 | `tab_activation` | CDP `Target.activateTarget` | 다음 단계 |
 | 드래그, 터치, 줌, 뷰포트 | `page.mouse.down`·`up` 등 | 다음 단계 |
 

@@ -144,7 +144,7 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Frame_read -> Page_context {tab_id=2;frame_path=["#frame"];mode=`Frames}
   | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
   | Download_listing -> Page_downloads {tab_id=2}
-  | File_upload -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Upload {selector="#file";paths=["/tmp/note.txt"]}}))
+  | File_upload -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=["/tmp/note.txt"]}}))
 
 let capability = testable
   (fun ppf value -> Format.pp_print_string ppf (Lane.live_capability_to_wire value)) ( = )

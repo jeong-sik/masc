@@ -18,7 +18,7 @@ let roundtrips () =
     Page_goto {url="https://example.org";tab_id=Some 7};Page_elements {tab_id=Some 7;filter={within=None;selector=None}};
     Page_elements {tab_id=None;filter={within=Some "nav[aria-label=\"Channels\"] > ul";selector=Some "[role=row]"}};
     Page_context {tab_id=7;frame_path=["#frame"];mode=`Elements {within=Some "#sidebar";selector=None}};
-    Page_act (B.Action.On_tab {tab_id=7;frame_path=["#frame"];interaction=B.Action.Upload {selector="#edit";paths=["/staged/a.txt"]}});
+    Page_act (B.Action.On_tab {tab_id=7;frame_path=["#frame"];interaction=B.Action.Upload {target=B.Action.File_input "#edit";paths=["/staged/a.txt"]}});
     Page_context {tab_id=7;frame_path=["#frame"];mode=`Text 1000};
     Page_instruct {tab_id=7;instruction="Open the menu"};Page_locate {tab_id=7;instruction=None};
     Page_extract {tab_id=7;instruction="Read totals";schema=Some (`Assoc ["type",`String "object"])}] in

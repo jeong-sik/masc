@@ -10,8 +10,9 @@ type geolocation = { latitude : float; longitude : float; accuracy_m : float }
 type emulation = { geolocation : geolocation option; locale : string option; timezone : string option }
 let default_accuracy_m = 10.
 let max_accuracy_m = 10_000.
+type upload_target = File_input of string | Chooser_opener of string
 type interaction =
-  | Upload of { selector : string; paths : string list }
+  | Upload of { target : upload_target; paths : string list }
   | Set_cookie of cookie
   | Delete_cookie of string
   | Set_emulation of emulation
@@ -143,8 +144,8 @@ let parse = function
   | `Assoc fields ->
     let string key = match List.assoc_opt key fields with
       | Some (`String s) -> Ok s | _ -> Error (key ^ " must be a string") in
-    let selector () = let* s = string "selector" in
-      if String.trim s = "" then Error "selector must not be empty" else Ok s in
+    let nonempty key = let* s = string key in
+      if String.trim s = "" then Error (key ^ " must not be empty") else Ok s in
     let integer key = match List.assoc_opt key fields with
       | Some (`Int n) -> Ok n | _ -> Error (key ^ " must be an integer") in
     let exact allowed =
@@ -171,13 +172,17 @@ let parse = function
      | "hand_off" -> let* () = exact [] in Ok (Control Hand_off)
      | "take_over" -> let* () = exact [] in Ok (Control Take_over)
      | "upload" ->
-       let* selector = selector () in
+       let* target = match List.mem_assoc "selector" fields, List.mem_assoc "opener" fields with
+         | true, false -> Result.map (fun selector -> File_input selector) (nonempty "selector")
+         | false, true -> Result.map (fun opener -> Chooser_opener opener) (nonempty "opener")
+         | true, true -> Error "upload takes selector or opener, not both"
+         | false, false -> Error "upload requires selector (a file input) or opener (the control that opens a file chooser)" in
        let* paths = match List.assoc_opt "paths" fields with
          | Some value -> string_list "paths" value | None -> Error "upload requires paths" in
        let* () = if paths = [] then Error "upload requires at least one file" else Ok () in
        let* () = if List.exists (fun p -> String.contains p '\n' || String.contains p '\r' || String.contains p '\000') paths
          then Error "upload paths must not contain line separators or NUL" else Ok () in
-       on_tab ["selector";"paths"] (Upload {selector;paths})
+       on_tab ["selector";"opener";"paths"] (Upload {target;paths})
      | "accept_dialog" ->
        let* text = match List.assoc_opt "text" fields with
          | None -> Ok None | Some (`String text) -> Ok (Some text) | _ -> Error "text must be a string" in
@@ -206,7 +211,11 @@ let to_json = function
   | Control Take_over -> `Assoc ["action",`String "take_over"]
   | On_tab {tab_id;frame_path;interaction} ->
     let action, args = match interaction with
-      | Upload {selector;paths} -> "upload", ["selector",`String selector;"paths",`List (List.map (fun p -> `String p) paths)]
+      | Upload {target;paths} ->
+        "upload", [(match target with
+          | File_input selector -> "selector",`String selector
+          | Chooser_opener opener -> "opener",`String opener);
+          "paths",`List (List.map (fun p -> `String p) paths)]
       | Accept_dialog text -> "accept_dialog", Option.to_list (Option.map (fun s -> "text",`String s) text)
       | Dismiss_dialog -> "dismiss_dialog", []
       | Delete_cookie name -> "delete_cookie", ["cookieName",`String name]

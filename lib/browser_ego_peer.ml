@@ -716,6 +716,11 @@ let answer_dialog t id ~accept text =
       | None -> [] in
     Ok (obj (["tabId",`Int id;"action",str action] @ answered))
 
+(* ego shows a mouse step's [label] beside its own cursor highlight. It says
+   who acts and what, from the same pieces as the BiDi connection's overlay
+   badge (Browser_pointer_feedback): MASC, the actor, the interaction. *)
+let cursor_label ~actor ~verb = String.concat " · " ["MASC"; Option.value actor ~default:"agent"; verb]
+
 (* A file input takes the worker's copies of the files a Keeper chose. The
    selector means what it means for the owned Gecko: one CSS match, a file
    input itself, multiple when it is given more than one file. ego would
@@ -737,18 +742,22 @@ let upload_files = page_function {js|
 const input = document.querySelectorAll(arguments[0].selector)[0];
 return {url: location.href, title: document.title,
   files: input === undefined || input.files === null ? null : Array.from(input.files, file => ({name: file.name, size: file.size}))};|js}
-let regular_file path = match Unix.stat path with
-  | {Unix.st_kind = Unix.S_REG; _} -> true
-  | {Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _} -> false
-  | exception Unix.Unix_error _ -> false
+(* The name and size a page sees for one of the worker's copies. *)
+let chosen_file path = match Unix.stat path with
+  | {Unix.st_kind = Unix.S_REG; st_size; _} -> Some (obj ["name",str (Filename.basename path);"size",`Int st_size])
+  | {Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _} -> None
+  | exception Unix.Unix_error _ -> None
+let chosen_files = function
+  | [] -> Error (Live.Before_effect "upload needs at least one file")
+  | _ :: _ as paths ->
+    List.fold_right (fun path acc -> match acc, chosen_file path with
+      | Ok rows, Some row -> Ok (row :: rows)
+      | Ok _, None -> Error (Live.Before_effect ("the upload file " ^ Filename.basename path ^ " is not there"))
+      | (Error _ as error), _ -> error) paths (Ok [])
 let upload t id ~selector ~paths =
   let* label = label_of t id in
-  let* () = match paths with
-    | [] -> Error (Live.Before_effect "upload needs at least one file")
-    | _ :: _ -> (match List.find_opt (fun path -> not (regular_file path)) paths with
-      | Some path -> Error (Live.Before_effect ("the upload file " ^ Filename.basename path ^ " is not there"))
-      | None -> Ok ()) in
-  let interaction = Browser_lane.Action.Upload {selector; paths} in
+  let* _ = chosen_files paths in
+  let interaction = Browser_lane.Action.Upload {target = Browser_lane.Action.File_input selector; paths} in
   Browser_lane.Upload_lease.claim ~owner:t.uploads ~paths;
   match run_step t ~window_s:(tab_window id interaction) ~step:"page.upload"
           ~args:(obj ["label",str label;"tabId",`Int id;"selector",str selector;"paths",`List (List.map str paths);
@@ -788,6 +797,79 @@ let upload t id ~selector ~paths =
        | Error detail -> Error (Live.Outcome_unknown (detail ^ "; read tab " ^ string_of_int id)))
     | _ -> Error (Live.Outcome_unknown "ego answered an upload outside its frame")
 
+(* A page that makes its file input only when a control is clicked gets the
+   files through ego's file chooser. The run checks that the opener's CSS
+   selector names one element, arms waitForFileChooser, clicks the opener
+   through ego with the cursor label and hands the chooser the worker's
+   copies. The click is the effect: a chooser that does not open within
+   [chooser_wait_ms], or one that takes one file when more were given, is
+   reported after it. The page may keep that input out of its document, so
+   the receipt lists the files handed to the chooser ([chosen]) rather than
+   what an input holds. The lease is held as for a file input. A chooser
+   left unanswered makes ego refuse every later chooser wait in the same
+   process ("this Page is already waiting for a file chooser", 0.6.0.16),
+   and one process serves this connection, so the run closes a chooser it
+   does not fill with setFiles([]), which hands the page nothing. *)
+let chooser_wait_ms = 5000
+let opener_check = page_function {js|
+const nodes = document.querySelectorAll(arguments[0].selector);
+if (nodes.length !== 1) return {refused: nodes.length === 0 ? "no element matches the upload opener" : "the upload opener matches " + nodes.length + " elements"};
+return {ok: true};|js}
+let choose_files ?actor t id ~opener ~paths =
+  let* label = label_of t id in
+  let* chosen = chosen_files paths in
+  let interaction = Browser_lane.Action.Upload {target = Browser_lane.Action.Chooser_opener opener; paths} in
+  Browser_lane.Upload_lease.claim ~owner:t.uploads ~paths;
+  match run_step t ~window_s:(tab_window id interaction) ~step:"page.choose_files"
+          ~args:(obj ["label",str label;"tabId",`Int id;"opener",str opener;"paths",`List (List.map str paths);
+            "check",str opener_check;"cursor",str (cursor_label ~actor ~verb:"upload");"waitMs",`Int chooser_wait_ms])
+          (String.concat "\n" [
+      "  const reason = " ^ message ^ ";";
+      page_call;
+      unblocked_agent_page;
+      "    const page = task.page(args.label);";
+      "    const checked = await page.evaluate(pageCall(args.check, JSON.stringify({selector: args.opener})));";
+      "    const found = checked.pageError === undefined ? JSON.parse(checked.answer) : {refused: \"the upload opener could not be read: \" + checked.pageError};";
+      "    if (found.refused !== undefined) emit({ok: false, before: true, error: found.refused});";
+      "    else {";
+      "      let failure = null, chooser = null, set = null;";
+      "      const waiting = page.waitForFileChooser({timeout: args.waitMs});";
+      "      waiting.catch(() => {});";
+      "      try { await page.click(\"loc=css:\" + args.opener, {label: args.cursor}); }";
+      "      catch (error) { failure = \"ego did not click the opener: \" + reason(error); }";
+      "      if (failure === null) {";
+      "        try { chooser = await waiting; } catch (error) { failure = \"the opener opened no file chooser: \" + reason(error); }";
+      "      }";
+      "      if (chooser !== null) {";
+      "        const close = async () => { try { await chooser.setFiles([]); return \"\"; }";
+      "          catch (error) { return \"; closing the chooser failed too (\" + reason(error) + \"), so this tab's next chooser upload may be refused\"; } };";
+      "        let multiple = true;";
+      "        try { multiple = args.paths.length === 1 || await chooser.isMultiple(); } catch (error) { failure = \"ego did not say whether the chooser takes several files: \" + reason(error); }";
+      "        if (failure === null && !multiple) failure = \"the file chooser takes one file, so it was closed with none\";";
+      "        if (failure === null) {";
+      "          try { set = await chooser.setFiles(args.paths); } catch (error) { failure = \"ego did not set the files: \" + reason(error); }";
+      "          if (failure !== null) failure += await close();";
+      "        } else failure += await close();";
+      "      }";
+      "      const dialog = set !== null && set.dialog !== undefined && set.dialog !== null ? set.dialog : " ^ open_dialog "page" ^ ";";
+      "      const tab = " ^ row_after ^ ";";
+      "      emit({ok: true, value: {error: failure, dialog, tab: tab === undefined ? null : {url: tab.url, title: tab.title}}});";
+      "    }";
+      "  }" ]) with
+  | Error failure ->
+    Error (effect_failure ~unknown:(Printf.sprintf "the opener of tab %d may have been clicked: read tab %d before another upload" id id) failure)
+  | Ok value ->
+    let receipt extra = obj (["tabId",`Int id;"action",str "upload";"chosen",`List chosen] @ tab_fields (field "tab" value) @ extra) in
+    match field "error" value, field "dialog" value with
+    | Some (`String detail), _ ->
+      Error (Live.Outcome_unknown (Printf.sprintf "%s; read tab %d before another upload" (head detail) id))
+    | Some `Null, Some (`Assoc _ as dialog) ->
+      (match ego_dialog dialog with
+       | Ok dialog -> Ok (receipt ["dialog",Browser_surface.dialog_json dialog])
+       | Error reason -> Error (Live.Outcome_unknown ("the upload opened a dialog this connection cannot read: " ^ reason)))
+    | Some `Null, Some `Null -> Ok (receipt [])
+    | _ -> Error (Live.Outcome_unknown "ego answered an upload outside its frame")
+
 (* Input acts as a move or a close does: on a page an agent opened, checked
    in the run that acts. The page scripts the BiDi connection runs find the
    target, check that the document, URL and viewport are the observed ones,
@@ -805,10 +887,6 @@ let button_name = function
   | Browser_lane.Pointer.Primary -> "left"
   | Browser_lane.Pointer.Middle -> "middle"
   | Browser_lane.Pointer.Secondary -> "right"
-(* ego shows a mouse step's [label] beside its own cursor highlight. It says
-   who acts and what, from the same pieces as the BiDi connection's overlay
-   badge (Browser_pointer_feedback): MASC, the actor, the interaction. *)
-let cursor_label ~actor ~verb = String.concat " · " ["MASC"; Option.value actor ~default:"agent"; verb]
 let motion_lines = function
   | Move -> ["        await page.mouse.move(args.x, args.y, {label: args.cursor});"]
   | Press _ -> ["        await page.mouse.click(args.x, args.y, {button: args.button, clickCount: args.count, label: args.cursor});"]
@@ -1198,7 +1276,7 @@ let take_over t =
     | Some `Null -> Ok (obj ["action",str "take_over"])
     | Some _ | None -> Error (Live.Outcome_unknown ("ego answered the take over outside its answer frame; " ^ unknown))
 
-let act t args =
+let act ?actor t args =
   match Browser_lane.Action.parse args with
   | Error detail -> Error (Live.Before_effect detail)
   | Ok (Browser_lane.Action.Open_tab url) -> open_tab t url
@@ -1218,8 +1296,10 @@ let act t args =
     answer_dialog t tab_id ~accept:true text
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Dismiss_dialog}) ->
     answer_dialog t tab_id ~accept:false None
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Upload {selector; paths}}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Upload {target = Browser_lane.Action.File_input selector; paths}}) ->
     upload t tab_id ~selector ~paths
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Upload {target = Browser_lane.Action.Chooser_opener opener; paths}}) ->
+    choose_files ?actor t tab_id ~opener ~paths
   | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
@@ -1238,5 +1318,5 @@ let dispatch ?actor t ~verb args =
   | Page_context -> Error (Live.Before_effect "an ego connection does not read inside frames")
   | Page_snapshot -> pre (snapshot t args)
   | Page_downloads -> pre (downloads t args)
-  | Page_act -> act t args
+  | Page_act -> act ?actor t args
   | Page_interact -> interact ?actor t args

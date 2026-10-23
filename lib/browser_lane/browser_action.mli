@@ -19,8 +19,13 @@ type geolocation = { latitude : float; longitude : float; accuracy_m : float }
 type emulation = { geolocation : geolocation option; locale : string option; timezone : string option }
 val default_accuracy_m : float
 val max_accuracy_m : float
+(** Where an upload puts its files: [File_input] is a CSS selector for one
+    [<input type=file>]; [Chooser_opener] is a CSS selector for the one
+    control whose click opens the page's file chooser, as a button that
+    makes its input only when clicked does. *)
+type upload_target = File_input of string | Chooser_opener of string
 type interaction =
-  | Upload of { selector : string; paths : string list }
+  | Upload of { target : upload_target; paths : string list }
   | Set_cookie of cookie
   | Delete_cookie of string
   | Set_emulation of emulation

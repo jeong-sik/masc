@@ -8,7 +8,7 @@ module Tool = Masc.Browser_addon_tool
 let ok = function Ok value -> value | Error detail -> fail detail
 let id suffix = "0b000000-0000-4000-8000-0000000000" ^ suffix
 let command paths = B.Page_act (B.Action.On_tab
-  {tab_id=7;frame_path=["#frame"];interaction=Upload {selector="#file";paths}})
+  {tab_id=7;frame_path=["#frame"];interaction=Upload {target=B.Action.File_input "#file";paths}})
 let private_root () = Unix.realpath (Filename.temp_dir ~perms:0o700 "browser-upload-test-" "")
 let lease_ok = function Ok value -> value | Error _ -> fail "snapshot preparation failed"
 let contents path = In_channel.with_open_bin path In_channel.input_all
@@ -119,7 +119,15 @@ let live_route_grants_are_its_own () = Eio_main.run (fun _env ->
           | B.Page_act (B.Action.On_tab {interaction=Upload {paths;_};_}) -> paths
           | _ -> fail "the claim must hand back the upload")) in
         check bool "the connection gets the worker's copies" true
-          (List.for_all (fun path -> String.starts_with ~prefix:(root ^ "/uploads/") path) received)))))
+          (List.for_all (fun path -> String.starts_with ~prefix:(root ^ "/uploads/") path) received);
+        let opener = B.Page_act (B.Action.On_tab {tab_id=7;frame_path=[];
+          interaction=Upload {target=B.Action.Chooser_opener "#attach";paths}}) and chooser=id "15" in
+        ok (Broker.stage broker ~id:chooser ~actor ~route:live ~verb:opener);
+        (match ok (Broker.with_claim broker ~id:chooser ~actor ~route:live ~verb:opener (fun claimed -> claimed)) with
+         | B.Page_act (B.Action.On_tab {interaction=Upload {target=B.Action.Chooser_opener "#attach";paths=copies};_}) ->
+           check bool "an opener keeps its target and gets the copies" true
+             (copies <> paths && List.for_all (fun path -> String.starts_with ~prefix:(root ^ "/uploads/") path) copies)
+         | _ -> fail "the claim changed the upload's target")))))
 let () = run "browser Addon upload ownership" ["transfer",[
   test_case "public command keeps worker bytes through browser-owned lifetime" `Quick scenario;
   test_case "discard fences late preparation and replaced roots are retained" `Quick discard_and_replacement;

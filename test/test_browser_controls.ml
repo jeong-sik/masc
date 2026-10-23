@@ -80,9 +80,18 @@ let test_targeted_goto () = fixture (fun _env driver current calls _ ->
   check int "unknown tab cannot navigate current tab" 0 (List.length !calls))
 let test_selector_contract () = fixture (fun _env driver _ calls matches ->
   List.iter (fun count -> matches := count; calls := [];
-    (match act driver 1 (Action.Upload {selector="button";paths=["/x/payload.bin"]}) with Lane.Rejected_before_effect _ -> () | _ -> fail "non-unique selector accepted");
+    (match act driver 1 (Action.Upload {target=Action.File_input "button";paths=["/x/payload.bin"]}) with Lane.Rejected_before_effect _ -> () | _ -> fail "non-unique selector accepted");
     check bool "no file selection after absent or ambiguous selector" false
-      (List.exists (fun (_,_,path,_) -> String.ends_with ~suffix:"/value" path) !calls)) [0;2])
+      (List.exists (fun (_,_,path,_) -> String.ends_with ~suffix:"/value" path) !calls)) [0;2];
+  calls := [];
+  (match act driver 1 (Action.Upload {target=Action.Chooser_opener "#attach";paths=["/x/payload.bin"]}) with
+   | Lane.Rejected_before_effect detail ->
+     let word = "name it with selector" in
+     let rec found i = i + String.length word <= String.length detail
+       && (String.sub detail i (String.length word) = word || found (i + 1)) in
+     check bool "a chooser opener is refused, naming selector" true (found 0)
+   | _ -> fail "a chooser opener was accepted");
+  check int "and nothing reaches the driver" 0 (List.length !calls))
 let test_parallel_targeting () = fixture (fun _env driver _ calls _ ->
   Eio.Fiber.both
     (fun () -> ignore (ok (act driver 1 (Action.Reload))))
@@ -94,6 +103,11 @@ let test_parallel_targeting () = fixture (fun _env driver _ calls _ ->
 let test_parser () =
   let valid = `Assoc ["action",`String "upload";"tabId",`Int 2;"selector",`String "#name";"paths",`List [`String "a.txt"]] in
   (match Action.parse valid with Ok action -> check bool "round trip" true (Action.parse (Action.to_json action)=Ok action) | Error e -> fail e);
+  let opener = `Assoc ["action",`String "upload";"tabId",`Int 2;"opener",`String "#attach";"paths",`List [`String "a.txt"]] in
+  (match Action.parse opener with
+   | Ok (Action.On_tab {interaction=Action.Upload {target=Action.Chooser_opener "#attach";_};_} as action) ->
+     check bool "an opener round trips" true (Action.parse (Action.to_json action)=Ok action)
+   | Ok _ -> fail "an opener was read as another target" | Error e -> fail e);
   List.iter (fun fields -> check bool "invalid action rejected" true (Result.is_error (Action.parse (`Assoc fields))))
     [["action",`String "click";"tabId",`Int 1;"selector",`String "button"];
      ["action",`String "fill";"tabId",`Int 1;"selector",`String "#name";"text",`String ""];
@@ -101,6 +115,9 @@ let test_parser () =
      ["action",`String "select";"tabId",`Int 1;"selector",`String "select";"value",`String "x"];
      ["action",`String "scroll";"tabId",`Int 1;"x",`Int 0;"y",`Int 1];
      ["action",`String "upload";"tabId",`Int 1;"selector",`String "";"paths",`List [`String "a.txt"]];
+     ["action",`String "upload";"tabId",`Int 1;"opener",`String " ";"paths",`List [`String "a.txt"]];
+     ["action",`String "upload";"tabId",`Int 1;"selector",`String "#f";"opener",`String "#b";"paths",`List [`String "a.txt"]];
+     ["action",`String "upload";"tabId",`Int 1;"paths",`List [`String "a.txt"]];
      ["action",`String "reload";"tabId",`Int 1;"text",`String "ignored?"];
      ["action",`String "reload";"tabId",`Int 1;"tabId",`Int 2]]
 let test_stale_session_id () = fixture (fun _env driver _ calls _ ->
@@ -154,7 +171,7 @@ let test_owned_upload_staging () = with_upload_context (fun config meta -> fixtu
       let actual = Fun.protect ~finally:(fun () -> close_in ic)
         (fun () -> really_input_string ic (in_channel_length ic)) in
       check string "exact binary snapshot" bytes actual;
-      act driver 1 (Action.Upload {selector="input";paths})) in
+      act driver 1 (Action.Upload {target=Action.File_input "input";paths})) in
   (match outcome with
    | Ok (Lane.Answered _) -> ()
    | _ -> fail "owned binary snapshot did not reach native upload");
@@ -185,11 +202,11 @@ let test_upload_lease_failures () =
         ~files:["payload.bin",(fun () -> Ok "bytes")]
         (fun paths -> captured := paths; f paths) in
     matches := 0;
-    (match stage (fun paths -> act driver 1 (Action.Upload {selector="input";paths})) with
+    (match stage (fun paths -> act driver 1 (Action.Upload {target=Action.File_input "input";paths})) with
      | Ok (Lane.Rejected_before_effect _) -> () | _ -> fail "absent input should reject before effect");
     List.iter (fun path -> check bool "pre-effect snapshot is cleaned" false (Sys.file_exists path)) !captured;
     matches := 1; failing := true;
-    (match stage (fun paths -> act driver 1 (Action.Upload {selector="input";paths})) with
+    (match stage (fun paths -> act driver 1 (Action.Upload {target=Action.File_input "input";paths})) with
      | Ok (Lane.Refused _) -> () | _ -> fail "uncertain upload should fail with effect uncertainty");
     List.iter (fun path -> check bool "uncertain upload retains File backing" true (Sys.file_exists path)) !captured;
     check bool "unconfirmed close fails" true (Result.is_error (Driver.close driver));

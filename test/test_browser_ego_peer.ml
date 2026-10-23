@@ -548,6 +548,7 @@ let test_the_scripts_parse_as_modules () =
         "tab",obj ["url",str observed_url;"title",str "Slack"]])
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null;"after",in_page (obj ["files",`List []])])
+    | "page.choose_files" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -573,12 +574,13 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog (Some "hi")});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Dismiss_dialog});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {selector="#file";paths=[upload_file]}}) ];
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.File_input "#file";paths=[upload_file]}});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener "#attach";paths=[upload_file]}}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.drag";"page.input";"page.target_input";
-     "page.close";"page.reload";"page.history";"page.dialog";"page.dialog";"page.upload";"space.finish"]
+     "page.close";"page.reload";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
     let file = Filename.concat directory (step ^ ".mjs") in
@@ -683,7 +685,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}
     | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
     | Download_listing -> Page_downloads {tab_id=1}
-    | File_upload -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Upload {selector="#file";paths=[upload_file]}})) in
+    | File_upload -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=[upload_file]}})) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in
@@ -1468,7 +1470,7 @@ let test_an_upload_keeps_its_files_until_the_space_ends () =
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let upload ?(selector="#file") paths = dispatch peer Live.Page_act
-      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {selector;paths}})) in
+      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.File_input selector;paths}})) in
   let row = obj ["url",str "https://app.slack.com/";"title",str "Slack"] in
   let held = in_page (obj ["url",str "https://app.slack.com/";"title",str "Slack";"files",`List [obj ["name",str "note.txt";"size",`Int 5]]]) in
   reply := (fun _ -> answered (obj ["error",`Null;"dialog",`Null;"after",held;"tab",row]));
@@ -1498,6 +1500,60 @@ let test_an_upload_keeps_its_files_until_the_space_ends () =
   check bool "and so is no file" true
     (String_util.contains_substring (before_effect "no file" (upload [])) "at least one file");
   check int "neither runs ego" runs (List.length !asked);
+  check (result unit string) "finish" (Ok ()) (Peer.finish peer);
+  check bool "the space's end lets the copies go" false (List.exists Sys.file_exists paths)
+
+(* A page that makes its file input on a click gets the copies through ego's
+   file chooser. The click is the effect, so a chooser that did not open is
+   reported after it; the receipt lists what was handed to the chooser, and
+   the copies stay until the space ends, as for a file input. *)
+let test_an_upload_through_a_file_chooser_answers_what_it_handed () =
+  let directory = Unix.realpath (capture_directory ()) in
+  let snapshot = match Lane.Upload_lease.prepare_files ~temp_dir:directory ~files:["note.txt",(fun () -> Ok "hello")] () with
+    | Ok snapshot -> snapshot
+    | Error (Lane.Upload_lease.Read_failed _ | Lane.Upload_lease.Snapshot_failed _) -> fail "the batch was not prepared" in
+  let paths = Lane.Upload_lease.paths snapshot in
+  let reply = ref (fun _ -> fail "no reply was set") and asked = ref [] in
+  let peer = opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.choose_files" -> asked := sent.args :: !asked; !reply sent
+    | "space.finish" -> answered `Null
+    | other -> failf "unexpected step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let choose ?actor ?(opener="#attach") paths = dispatch ?actor peer Live.Page_act
+      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener opener;paths}})) in
+  let row = obj ["url",str "https://app.slack.com/";"title",str "Slack"] in
+  let last () = List.hd !asked in
+  reply := (fun _ -> answered (obj ["error",`Null;"dialog",`Null;"tab",row]));
+  (match choose paths with
+   | Ok receipt -> check string "the files handed to the chooser"
+       {|{"tabId":1,"action":"upload","chosen":[{"name":"note.txt","size":5}],"url":"https://app.slack.com/","title":"Slack"}|}
+       (Yojson.Safe.to_string receipt)
+   | other -> failf "the upload was %s" (failure_kind other));
+  check (list string) "ego was given the copies" paths
+    (List.map text (Yojson.Safe.Util.to_list (field "paths" (last ()))));
+  check string "and the opener as given" "#attach" (text (field "opener" (last ())));
+  check string "whose click is labelled" "MASC · agent · upload" (text (field "cursor" (last ())));
+  ignore (choose ~actor:"keeper/sangsu" paths);
+  check string "with the actor when there is one" "MASC · keeper/sangsu · upload" (text (field "cursor" (last ())));
+  Lane.Upload_lease.release snapshot;
+  check bool "the copies outlive the upload's own scope" true (List.for_all Sys.file_exists paths);
+  reply := (fun _ -> answered (obj ["error",`Null;"dialog",ego_dialog "alert" "uploaded";"tab",row]));
+  (match choose paths with
+   | Ok receipt -> check bool "a dialog the files opened is in the receipt" true
+       (String_util.contains_substring (Yojson.Safe.to_string receipt) {|"dialog":{"type":"alert","message":"uploaded"}|})
+   | other -> failf "an upload that opened a dialog was %s" (failure_kind other));
+  reply := (fun _ -> answered (obj ["error",str "the opener opened no file chooser: page.waitForFileChooser timed out after 5000ms";"dialog",`Null;"tab",row]));
+  (match choose paths with
+   | Error (Live.Outcome_unknown detail) ->
+     check bool "a chooser that did not open is reported after the click" true (String_util.contains_substring detail "opened no file chooser")
+   | other -> failf "a click that opened no chooser was %s" (failure_kind other));
+  reply := (fun _ -> refused "no element matches the upload opener");
+  check string "an opener that names nothing" "before effect" (failure_kind (choose ~opener:"#none" paths));
+  let runs = List.length !asked in
+  check bool "a missing file is refused" true
+    (String_util.contains_substring (before_effect "a missing file" (choose [Filename.concat directory "absent.txt"])) "absent.txt");
+  check int "without running ego" runs (List.length !asked);
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check bool "the space's end lets the copies go" false (List.exists Sys.file_exists paths)
 
@@ -1552,7 +1608,7 @@ let test_the_upload_script_runs_in_node () =
     | Some line -> Yojson.Safe.Util.(to_list (Yojson.Safe.from_string (after ~prefix:"seen " line)) |> List.map to_string)
     | None -> fail "the stand-in did not say what it saw" in
   let upload ?(selector="#file") paths = dispatch peer Live.Page_act
-      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {selector;paths}})) in
+      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.File_input selector;paths}})) in
   (match upload [path] with
    | Ok receipt -> check string "what the input now holds" {|[{"name":"note.txt","size":5}]|} (Yojson.Safe.to_string (field "files" receipt))
    | other -> failf "the upload was %s" (failure_kind other));
@@ -1567,6 +1623,97 @@ let test_the_upload_script_runs_in_node () =
    | Ok receipt -> check string "the dialog it opened" {|{"type":"alert","message":"too big"}|} (Yojson.Safe.to_string (field "dialog" receipt))
    | other -> failf "an upload that opened a dialog was %s" (failure_kind other));
   check (list string) "no page script after the dialog opened" ["evaluate";"set loc=css:#file 1"] (seen ())
+
+(* The chooser script in node, against a stand-in for ego whose page has one
+   #attach button and two elements matching "button". The stand-in's click
+   opens a file chooser when [opens] holds, one that takes several files when
+   [multiple] does; its setFiles answers [set], or throws when [fails] holds.
+   setFiles([]) closes the chooser. *)
+let chooser_stand_in ~opens ~multiple ~set ~fails = Printf.sprintf {js|
+const fs = await import("node:fs");
+const nodePath = await import("node:path");
+const seen = [];
+process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
+const elements = {"#attach": [{localName: "button"}], "button": [{localName: "button"}, {localName: "button"}]};
+globalThis.document = {title: "Form", querySelectorAll: selector => elements[selector] ?? []};
+globalThis.location = {href: "https://example.test/"};
+let waiting = null;
+const chooser = {
+  isMultiple: async () => %b,
+  setFiles: async paths => {
+    if (paths.length === 0) { seen.push("closed"); return {}; }
+    if (%b) throw new Error("Target closed");
+    seen.push("chosen " + paths.map(path => nodePath.basename(path) + "/" + fs.statSync(path).size).join(",")); return %s;
+  },
+};
+const page = {
+  info: async () => ({url: "https://example.test/", title: "Form", w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600}),
+  evaluate: async expression => { seen.push("evaluate"); return (0, eval)(expression); },
+  waitForFileChooser: options => { seen.push("wait " + options.timeout); return new Promise((resolve, reject) => { waiting = {resolve, reject}; }); },
+  click: async (selector, options) => {
+    seen.push("click " + selector + " " + options.label);
+    if (waiting !== null) { if (%b) waiting.resolve(chooser); else waiting.reject(new Error("page.waitForFileChooser timed out after 5000ms")); }
+    return {};
+  },
+};
+const taskSpace = async () => ({
+  ownership: "agent",
+  tabs: async () => [{label: "p1", openedBy: "agent", url: "https://example.test/", title: "Form", targetId: "T1", active: true}],
+  page: () => page,
+});
+|js} multiple fails (Yojson.Safe.to_string set) opens
+
+let test_the_chooser_script_runs_in_node () =
+  let directory = Unix.realpath (capture_directory ()) in
+  let path = Filename.concat directory "note.txt" and other = Filename.concat directory "two.txt" in
+  Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel "hello");
+  Out_channel.with_open_bin other (fun channel -> Out_channel.output_string channel "second");
+  let opens = ref true and multiple = ref false and set = ref (obj []) and fails = ref false and output = ref "" in
+  let run ~window_s script =
+    let sent = sent_of ~window_s script in
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Form" ~url:"https://example.test/" ~active:true ()])
+    | "page.choose_files" -> output := in_node (chooser_stand_in ~opens:!opens ~multiple:!multiple ~set:!set ~fails:!fails ^ script); Ok !output
+    | other -> failf "unexpected step %s" other in
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+    | Ok peer -> peer | Error detail -> fail detail in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.Util.(to_list (Yojson.Safe.from_string (after ~prefix:"seen " line)) |> List.map to_string)
+    | None -> fail "the stand-in did not say what it saw" in
+  let choose ?(opener="#attach") paths = dispatch peer Live.Page_act
+      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener opener;paths}})) in
+  let unknown label result = match result with
+    | Error (Live.Outcome_unknown detail) -> detail
+    | other -> failf "%s was %s" label (failure_kind other) in
+  (match choose [path] with
+   | Ok receipt -> check string "what the chooser was handed" {|[{"name":"note.txt","size":5}]|} (Yojson.Safe.to_string (field "chosen" receipt))
+   | other -> failf "the upload was %s" (failure_kind other));
+  check (list string) "checked in the page, armed, clicked with its label, then chosen"
+    ["evaluate";"wait 5000";"click loc=css:#attach MASC · agent · upload";"chosen note.txt/5"] (seen ());
+  check bool "a chooser that takes one file gets none of two" true
+    (String_util.contains_substring (unknown "two files" (choose [path; other])) "takes one file");
+  check bool "and nothing was chosen" false (List.exists (String.starts_with ~prefix:"chosen") (seen ()));
+  check bool "the chooser is closed so the next one can open" true (List.mem "closed" (seen ()));
+  fails := true;
+  check bool "a setFiles that fails is reported after the click" true
+    (String_util.contains_substring (unknown "a failed setFiles" (choose [path])) "ego did not set the files");
+  check bool "and that chooser is closed too" true (List.mem "closed" (seen ()));
+  fails := false;
+  multiple := true;
+  ignore (choose [path; other]);
+  check bool "a multiple chooser gets both" true (List.mem "chosen note.txt/5,two.txt/6" (seen ()));
+  check string "an opener must match one element" "the upload opener matches 2 elements" (before_effect "two matches" (choose ~opener:"button" [path]));
+  check (list string) "and nothing is clicked" ["evaluate"] (seen ());
+  check string "or any" "no element matches the upload opener" (before_effect "no match" (choose ~opener:"#none" [path]));
+  set := obj ["dialog",ego_dialog "alert" "too big"];
+  (match choose [path] with
+   | Ok receipt -> check string "the dialog the files opened" {|{"type":"alert","message":"too big"}|} (Yojson.Safe.to_string (field "dialog" receipt))
+   | other -> failf "an upload that opened a dialog was %s" (failure_kind other));
+  opens := false;
+  check bool "a click that opens no chooser is reported after the click" true
+    (String_util.contains_substring (unknown "no chooser" (choose [path])) "opened no file chooser")
 
 let () =
   run "browser_ego_peer" [
@@ -1596,4 +1743,6 @@ let () =
       test_case "the download wait runs against a stand-in in node" `Quick test_the_download_wait_runs_in_node;
       test_case "an upload keeps its files until the space ends" `Quick test_an_upload_keeps_its_files_until_the_space_ends;
       test_case "the upload script runs against a stand-in in node" `Quick test_the_upload_script_runs_in_node;
+      test_case "an upload through a file chooser answers what it handed" `Quick test_an_upload_through_a_file_chooser_answers_what_it_handed;
+      test_case "the chooser script runs against a stand-in in node" `Quick test_the_chooser_script_runs_in_node;
       test_case "the peer serves what the lane table says" `Quick test_the_peer_serves_what_the_lane_table_says ] ]

@@ -311,8 +311,9 @@ not duplicated in the export. Capture failures remain visible and retain their
 files. See the [native protocol](native/README.md) for clock and failure semantics.
 
 This view records and auditions a simultaneous take. Use the
-[arrangement editor](ARRANGEMENT.md) for multi-take placement, mixing and overdub,
-and the [practice workflow](PRACTICE.md) for phrase practice. Live input monitoring
+[arrangement editor](ARRANGEMENT.md) for multi-take placement and mixing,
+[record into an arrangement](#choose-correction-for-new-arrangement-recordings),
+or [practice an arrangement range](#continuous-arrangement-range-practice). Live input monitoring
 is a [separate workflow](INPUT-MONITORING.md); the take view does not enable it.
 The existing score playback remains available when returning to the score view.
 

@@ -15,7 +15,11 @@ and task space name as arguments (`--live-ego-command`, `--live-ego-space`),
 not through the cleanup descriptor, because nothing of it needs cleanup after
 the worker. It reads `ego-browser --version`, opens or resumes the task space
 by name, and registers one client. Each command runs `ego-browser nodejs`
-once, stopped with its process group if it outlives the read window.
+once and answers within the window the server waits for that command, less
+two seconds to deliver the answer; a run that would not is stopped with its
+process group. A stopped effect is answered as an unknown outcome, and a
+result the server no longer waits for is dropped. Either way the connection
+stays, and the Keeper reads that tab again.
 Screenshots pass through a private directory that run creates and removes.
 Detaching ends the task space, which closes the pages it manages and keeps the
 tabs the operator opened there. An ego that cannot start, or a task space name

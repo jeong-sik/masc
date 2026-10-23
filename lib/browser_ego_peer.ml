@@ -6,7 +6,17 @@ let str value = `String value
 
 type run_failure = Exited of { code : int; output : string } | Signaled of int | Timed_out | Output_exceeded
   | Unobserved of string | Unstarted of string
-type runner = string -> (string, run_failure) result
+type runner = window_s:float -> string -> (string, run_failure) result
+
+(* The server waits Browser_lane.reply_timeout_sec for a command's answer,
+   counted from when it was issued. A runner gets that less this margin for
+   the delivery, so a stopped run's failure usually still arrives in time;
+   one that does not is dropped by the connection. *)
+let delivery_margin_s = 2.
+let window_s verb = Browser_lane.reply_timeout_sec verb -. delivery_margin_s
+(* Every read the server sends waits the same; opening and ending the space
+   answer no command and get a read's window too. *)
+let read_window_s = window_s Browser_lane.Tabs_list
 
 (* The same answers as the BiDi connection: what a page script reads on one
    live connection it reads on the other. ego 0.6.0.16 carried a 3,000,003
@@ -76,12 +86,13 @@ let remember t page = match List.assoc_opt page t.pages with
   | Some id -> id
   | None -> t.next_tab <- t.next_tab + 1; t.pages <- (page, t.next_tab) :: t.pages; t.next_tab
 
-(* A run that ended without an answer, an answer that is not the frame's,
-   and ego's own refusal inside the frame. *)
-type step_failure = Unanswered of run_failure | Unreadable of string | Refused of string
+(* A run that ended without an answer, an answer that is not the frame's, a
+   refusal the script made before it acted ([before: true]), and an error
+   thrown at a point the script does not know, caught by the frame. *)
+type step_failure = Unanswered of run_failure | Unreadable of string | Refused of string | Failed of string
 let step_failure_message = function
   | Unanswered failure -> run_failure_message failure
-  | Unreadable detail | Refused detail -> detail
+  | Unreadable detail | Refused detail | Failed detail -> detail
 
 (* Every script has the same frame. [args] is written into it as JSON: ego's
    Node does not see the caller's environment. It writes exactly one answer
@@ -109,20 +120,23 @@ let answer output =
   | [line] ->
     match Yojson.Safe.from_string line with
     | exception Yojson.Json_error _ -> Error (Unreadable "ego-browser nodejs answered unreadable JSON")
-    | json -> match field "ok" json, field "value" json, field "error" json with
-      | Some (`Bool true), Some value, None -> Ok value
-      | Some (`Bool false), None, Some (`String error) -> Error (Refused (head error))
+    | json -> match field "ok" json, field "value" json, field "error" json, field "before" json with
+      | Some (`Bool true), Some value, None, None -> Ok value
+      | Some (`Bool false), None, Some (`String error), Some (`Bool true) -> Error (Refused (head error))
+      | Some (`Bool false), None, Some (`String error), None -> Error (Failed (head error))
       | _ -> Error (Unreadable "ego-browser nodejs answered outside its answer frame")
 
-let asked run ~step ~space ~args body = match run (script ~step ~space ~args body) with
+let asked run ~window_s ~step ~space ~args body = match run ~window_s (script ~step ~space ~args body) with
   | Error failure -> Error (Unanswered failure)
   | Ok output -> answer output
+let run_step t ~window_s ~step ~args body = asked t.run ~window_s ~step ~space:(`Int t.space_id) ~args body
+(* A read has no effect, so however it failed, nothing happened. *)
 let ask t ~step ~args body =
-  asked t.run ~step ~space:(`Int t.space_id) ~args body |> Result.map_error step_failure_message
+  run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
 
 let open_space ~run ~space ~version ~capture_directory =
   let* () = if String.trim space = "" then Error "the ego task space needs a name" else Ok () in
-  let* opened = asked run ~step:"space.open" ~space:(str space) ~args:`Null
+  let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:(str space) ~args:`Null
       "  emit({ok: true, value: {spaceId: task.spaceId, ownership: task.ownership}});"
     |> Result.map_error step_failure_message in
   match field "spaceId" opened, field "ownership" opened with
@@ -182,8 +196,8 @@ let on_page body = String.concat "\n" [
   "  const pageCall = (fn, input) => \"(function(){ try { return {answer: (\" + fn + \")(\" + JSON.stringify(input) + \")}; } catch (error) { return {pageError: String(error && error.message || error)}; } })()\";";
   "  const tabs = await task.tabs();";
   "  const tab = args.label === null ? tabs.find(item => item.active) : tabs.find(item => item.label === args.label);";
-  "  if (tab === undefined) emit({ok: false, error: args.label === null ? \"no tab is active in the ego task space\" : \"browser tab is no longer present\"});";
-  "  else if (!tab.label) emit({ok: false, error: " ^ Yojson.Safe.to_string (str ("the active tab " ^ unmanaged_refused)) ^ "});";
+  "  if (tab === undefined) emit({ok: false, before: true, error: args.label === null ? \"no tab is active in the ego task space\" : \"browser tab is no longer present\"});";
+  "  else if (!tab.label) emit({ok: false, before: true, error: " ^ Yojson.Safe.to_string (str ("the active tab " ^ unmanaged_refused)) ^ "});";
   "  else {";
   "    const page = task.page(tab.label);";
   body;
@@ -280,6 +294,134 @@ let capture t args =
       "data",str (Base64.encode_string image);"viewport",viewport])
   | _ -> Error "the capture state lacks the page URL, title or viewport"
 
+(* Effects. Only a page the space manages and an agent opened takes one: ego
+   marks a tab the operator opened, or one adopted from them, otherwise. The
+   page's own row is checked in the same run that acts, before acting. *)
+let not_agent_refused = "was not opened by an agent in the ego task space; this connection moves and closes only the pages its space opened"
+let agent_page = String.concat "\n" [
+  "  const tab = (await task.tabs()).find(item => item.label === args.label);";
+  "  if (tab === undefined) emit({ok: false, before: true, error: \"browser tab is no longer present\"});";
+  "  else if (tab.openedBy !== \"agent\") emit({ok: false, before: true, error: \"tab \" + args.tabId + \" \" + " ^ Yojson.Safe.to_string (str not_agent_refused) ^ "});";
+  "  else {" ]
+let message = "error => String(error && error.message || error)"
+(* After a step that may have moved the page, its row in the space says where it is. *)
+let row_after = "(await task.tabs()).find(item => item.label === args.label)"
+
+let http_url url =
+  let refused = Error (Live.Before_effect "an ego connection opens and moves to absolute HTTP(S) URLs only") in
+  match Uri.of_string url with
+  | uri -> (match Uri.scheme uri, Uri.host uri with
+      | Some ("http" | "https"), Some host when host <> "" -> Ok ()
+      | (None | Some _), (None | Some _) -> refused)
+  | exception Failure _ -> refused
+
+(* What a failed effect says: refused before it acted, never started, or
+   unknown, with what to do about the unknown. *)
+let effect_failure ~unknown = function
+  | Refused detail | Unanswered (Unstarted detail) -> Live.Before_effect detail
+  | Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _ as failure) ->
+    Live.Outcome_unknown (run_failure_message failure ^ "; " ^ unknown)
+  | Unreadable detail | Failed detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown)
+
+let label_of t id = match List.find_opt (fun (_, known) -> known = id) t.pages with
+  | Some (Managed label, _) -> Ok label
+  | Some (Unmanaged _, _) -> Error (Live.Before_effect (Printf.sprintf "tab %d %s" id unmanaged_refused))
+  | None -> Error (Live.Before_effect "browser tab is no longer present")
+
+let tab_fields = function
+  | Some (`Assoc row) -> List.filter (fun (name, _) -> List.mem name ["url";"title";"active"]) row
+  | Some _ | None -> []
+
+(* ego answers a new page with p<n> active. *)
+let open_tab t url =
+  let* () = http_url url in
+  let unknown = "a tab may have been opened: list this connection's tabs before opening another" in
+  match run_step t ~window_s:(window_s (Browser_lane.Page_act (Browser_lane.Action.Open_tab url)))
+          ~step:"page.open" ~args:(obj ["url",str url]) (String.concat "\n" [
+      "  const reason = " ^ message ^ ";";
+      "  let page;";
+      "  let refused = null;";
+      "  try { page = await task.newPage(); } catch (error) { refused = reason(error); }";
+      "  if (page === undefined) emit({ok: false, before: true, error: refused});";
+      "  else {";
+      "    args.label = page.label;";
+      "    let failure = null;";
+      "    try { await page.goto(args.url); } catch (error) { failure = reason(error); }";
+      "    const tab = " ^ row_after ^ ";";
+      "    emit({ok: true, value: {label: page.label, error: failure, tab: tab === undefined ? null : {url: tab.url, title: tab.title, active: tab.active}}});";
+      "  }" ]) with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value ->
+    match field "label" value with
+    | Some (`String label) ->
+      let id = remember t (Managed label) in
+      let created = ["tabId",`Int id;"action",str "open_tab";"created",`Bool true] in
+      (match field "error" value, field "tab" value with
+       | Some `Null, Some (`Assoc _ as tab) -> Ok (obj (created @ tab_fields (Some tab)))
+       | Some (`String error), _ ->
+         Error (Live.Partial_failure {tab_id = id; receipt = obj created;
+           message = Printf.sprintf "New tab was opened as tabId %d on this connection. %s. Do not open another tab to retry; inspect it with this clientId and tabId." id error})
+       | Some `Null, (None | Some _) ->
+         Error (Live.Partial_failure {tab_id = id; receipt = obj created;
+           message = Printf.sprintf "New tab was opened as tabId %d on this connection and was not listed afterwards; inspect it with this clientId and tabId." id})
+       | (None | Some _), _ -> Error (Live.Outcome_unknown ("ego answered the new tab outside its answer frame; " ^ unknown)))
+    | Some _ | None -> Error (Live.Outcome_unknown ("ego answered the new tab without its page label; " ^ unknown))
+
+let goto t args =
+  let* url = match field "url" args with
+    | Some (`String url) -> Ok url
+    | Some _ | None -> Error (Live.Before_effect "page.goto requires an absolute HTTP(S) URL") in
+  let* () = http_url url in
+  let* id = match field "tabId" args with
+    | Some (`Int id) -> Ok id
+    | Some _ | None -> Error (Live.Before_effect "page.goto on an ego connection needs the tabId of a page its space opened") in
+  let* label = label_of t id in
+  let unknown = Printf.sprintf "list this connection's tabs and read tab %d before another step" id in
+  match run_step t ~window_s:(window_s (Browser_lane.Page_goto {url; tab_id = Some id}))
+          ~step:"page.goto" ~args:(obj ["label",str label;"url",str url;"tabId",`Int id]) (String.concat "\n" [
+      "  const reason = " ^ message ^ ";";
+      agent_page;
+      "    let failure = null;";
+      "    try { await task.page(args.label).goto(args.url); } catch (error) { failure = reason(error); }";
+      "    const after = " ^ row_after ^ ";";
+      "    emit({ok: true, value: {error: failure, tab: after === undefined ? null : {url: after.url, title: after.title}}});";
+      "  }" ]) with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value ->
+    let receipt tab = obj (["tabId",`Int id;"action",str "goto"] @ tab_fields tab) in
+    match field "error" value, field "tab" value with
+    | Some `Null, Some (`Assoc _ as tab) -> Ok (receipt (Some tab))
+    | Some (`String error), Some (`Assoc _ as tab) ->
+      Error (Live.Partial_failure {tab_id = id; message = error; receipt = receipt (Some tab)})
+    | Some (`String error), (None | Some _) -> Error (Live.Outcome_unknown (error ^ "; " ^ unknown))
+    | (None | Some _), _ -> Error (Live.Outcome_unknown ("ego answered the move outside its answer frame; " ^ unknown))
+
+let close_tab t id =
+  let* label = label_of t id in
+  match run_step t ~window_s:(window_s (Browser_lane.Page_act (Browser_lane.Action.On_tab {tab_id = id; frame_path = []; interaction = Browser_lane.Action.Close_tab})))
+          ~step:"page.close" ~args:(obj ["label",str label;"tabId",`Int id]) (String.concat "\n" [
+      agent_page;
+      "    await task.page(args.label).close();";
+      "    emit({ok: true, value: {closed: true}});";
+      "  }" ]) with
+  | Error failure ->
+    Error (effect_failure ~unknown:(Printf.sprintf "tab %d may have closed: list this connection's tabs" id) failure)
+  | Ok _ ->
+    t.pages <- List.filter (fun (_, known) -> known <> id) t.pages;
+    Ok (obj ["tabId",`Int id;"action",str "close_tab";"closed",`Bool true])
+
+let act t args =
+  match Browser_lane.Action.parse args with
+  | Error detail -> Error (Live.Before_effect detail)
+  | Ok (Browser_lane.Action.Open_tab url) -> open_tab t url
+  | Ok (Browser_lane.Action.On_tab {frame_path = _ :: _; _}) ->
+    Error (Live.Before_effect "an ego connection does not act inside frames")
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Close_tab}) -> close_tab t tab_id
+  | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Upload _
+      | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog
+      | Browser_lane.Action.Back | Browser_lane.Action.Forward | Browser_lane.Action.Reload); _}) ->
+    Error (Live.Before_effect "an ego connection's page.act serves open_tab and close_tab only")
+
 let dispatch t ~verb args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in
   match (verb : Live.verb) with
@@ -289,5 +431,6 @@ let dispatch t ~verb args =
   | Page_elements -> pre (elements t args)
   | Page_scene -> pre (scene t args)
   | Page_capture -> pre (capture t args)
-  | Page_interact | Page_act | Page_goto ->
-    Error (Live.Before_effect (Live.verb_to_wire verb ^ " is not served by an ego connection"))
+  | Page_goto -> goto t args
+  | Page_act -> act t args
+  | Page_interact -> Error (Live.Before_effect "page.interact is not served by an ego connection")

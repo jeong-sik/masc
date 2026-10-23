@@ -75,6 +75,20 @@ let test_a_run_answers_both_streams_or_why_not () =
      | Error (Peer.Unstarted _) -> ()
      | Ok _ | Error _ -> fail "a missing command started"))
 
+let test_a_stopped_run_answers_within_the_peers_window () =
+  let root = Unix.realpath (Filename.temp_dir ~perms:0o700 "owned-live-ego-" "") in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let command = Filename.concat root "ego-browser" in
+    write command "#!/bin/sh\nexec sleep 30\n"; Unix.chmod command 0o700;
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let window_s = 2.5 in
+      let started = Eio.Time.now clock in
+      check string "the run" "timed out" (match Ego.runner ~env ~command ~window_s "" with
+        | Ok _ -> "answered" | Error failure -> failure_name failure);
+      (* Stopping it spends the stop grace inside the window, not after it. *)
+      check bool "within the window" true (Eio.Time.now clock -. started < window_s +. 0.5)))
+
 (* ego-browser as the worker runs it: [--version], and [nodejs] with one
    fixed script on stdin, answered by the step its first line names. *)
 let ego = {|#!/usr/bin/env python3
@@ -110,6 +124,10 @@ elif step=='page.read':
     # late: done after the caller stopped waiting; retire: still running when the worker retires.
     time.sleep({'late':2.5,'retire':30}.get(mode,0))
     answer({'label':'p1','answer':{'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','text':'hi','chars':2,'truncated':False})}})
+elif step=='page.open':
+    answer({'label':'p2','error':None,'tab':{'url':args['url'],'title':'Opened','active':True}})
+elif step=='page.goto':
+    answer({'error':None,'tab':{'url':args['url'],'title':'Moved'}})
 elif step=='space.finish':answer(None)
 else:answer(error='unexpected step '+step)
 |}
@@ -172,6 +190,10 @@ let scenario mode =
         let shot = answered (issue (B.Page_capture {tab_id=1})) in
         check string "the screenshot" (Base64.encode_string "\137PNG\r\n\026\nfixture")
           Yojson.Safe.Util.(shot |> member "data" |> member "data" |> to_string);
+        check string "a new tab" {|{"ok":true,"data":{"tabId":2,"action":"open_tab","created":true,"url":"https://fixture.test/channel","title":"Opened","active":true}}|}
+          (Yojson.Safe.to_string (answered (issue (B.Page_act (B.Action.Open_tab "https://fixture.test/channel")))));
+        check string "a move on it" {|{"ok":true,"data":{"tabId":2,"action":"goto","url":"https://fixture.test/next","title":"Moved"}}|}
+          (Yojson.Safe.to_string (answered (issue (B.Page_goto {url="https://fixture.test/next";tab_id=Some 2}))));
         check bool "an input the table refuses never reaches ego" true
           (match issue (B.Page_interact {tab_id=1;expected_url=None;frame_path=[];action=B.Click "#send"}) with
            | W.Issue_result (Error (B.Transport_unsupported _)) -> true
@@ -196,7 +218,7 @@ let scenario mode =
     match mode with
     | "normal" ->
       check bool "caller work ran" true !entered;
-      check (list string) "steps" ["space.open"; "tabs.list"; "page.capture"; "space.finish"] steps;
+      check (list string) "steps" ["space.open"; "tabs.list"; "page.capture"; "page.open"; "page.goto"; "space.finish"] steps;
       check bool "the screenshot directory is removed, with what a stopped capture left" false
         (Sys.file_exists (read (Filename.concat root "captures")))
     | "late" ->
@@ -226,6 +248,7 @@ let () =
     "ego", [
       test_case "the table names a command and a space" `Quick test_the_table_names_a_command_and_a_space;
       test_case "a run answers both streams, or why not" `Quick test_a_run_answers_both_streams_or_why_not;
+      test_case "a stopped run answers within the peer's window" `Quick test_a_stopped_run_answers_within_the_peers_window;
       test_case "the worker serves the space until retirement" `Quick (child "normal");
       test_case "a result delivered after the caller stopped waiting does not end the connection" `Quick (child "late");
       test_case "retirement stops a running command and ends the space" `Quick (child "retire");

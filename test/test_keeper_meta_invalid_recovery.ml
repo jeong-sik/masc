@@ -385,6 +385,23 @@ let test_gate_verdict_matches_runtime_read () =
   | Ok (Some _) -> fail "runtime served truncated JSON"
 ;;
 
+let test_gate_refuses_a_non_directory_parent () =
+  with_temp_workspace @@ fun config ->
+  let missing = Filename.concat config.Workspace.base_path "missing-meta.json" in
+  check bool "an absent file under a real directory is accepted" true
+    (Result.is_ok (Keeper_meta_store.validate_current_meta_file_result missing));
+  let parent = Filename.concat config.Workspace.base_path "blocked-meta-parent" in
+  let bytes = "a regular file cannot contain a metadata snapshot" in
+  write_file parent bytes;
+  let path = Filename.concat parent "keeper.json" in
+  (match Keeper_meta_store.validate_current_meta_file_result path with
+   | Error (Keeper_meta_store.Unreadable _) -> ()
+   | Error (Keeper_meta_store.Invalid_json _ | Keeper_meta_store.Not_current _) ->
+     fail "a non-directory parent was classified as rejected content"
+   | Ok () -> fail "a failed metadata lookup was accepted as file absence");
+  check string "the obstructing file is untouched" bytes (Masc_test_deps.read_file parent)
+;;
+
 (* The parser reads a label back as its outcome only while every outcome has
    its own label: with two outcomes on one label, the second would read back
    as the first. *)
@@ -432,6 +449,10 @@ let () =
             "gate verdict matches the runtime read on the current-schema corpus"
             `Quick
             test_gate_verdict_matches_runtime_read
+        ; test_case
+            "a non-directory parent is unreadable, not absent"
+            `Quick
+            test_gate_refuses_a_non_directory_parent
         ] )
     ]
 ;;

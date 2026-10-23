@@ -121,12 +121,14 @@ type attempt_observation =
   | Raw_response of { runtime_id : string; text : string }
 
 type runner =
-  runtime_id:string
+  runtime:Runtime_instance.t
   -> system_prompt:string
   -> output_schema:Yojson.Safe.t
   -> prompt:string
   -> (string, Fusion_official_client.failure) result
-(** The effectful edge, injectable for tests. The default wraps
+(** The effectful edge, injectable for tests. [runtime] is the exact object
+    admitted by [run], retained across observer callbacks and catalog reloads.
+    The default wraps
     {!Fusion_official_client.run_with_images} and preserves its typed failures.
 
     [output_schema] is the caller's own domain schema, handed to whatever
@@ -152,7 +154,9 @@ val run
     [runtime_id] and parse the answer as a single JSON value. *)
 
 val order_slots : string list -> string list
-(** Stable quota ordering for the remaining declared CLI candidates. Reapply
+(** Stable quota and candidate rate-rest ordering for declared CLI candidates.
+    Both observations come from one resolved runtime per declared entry; an
+    unknown entry is preserved for [run] to report. Reapply
     before dispatch and after a failed candidate; exhausted scopes move to the
     tail, but every declared candidate remains eligible. Shared with the HITL
     walker, whose release/bind transitions must precede each dispatch. *)

@@ -2819,7 +2819,7 @@ let test_cli_bind_rejection_after_release_settles_the_entry () =
              ~plan_fingerprint
              ~request_body_sha256
        in
-       let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+       let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
          failf "no cli slot may run without a durable binding (%s)" runtime_id
        in
        Worker.For_testing.execute_prepared_flow_with_queue_ops
@@ -2871,7 +2871,7 @@ let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
           | Error detail -> fail detail);
        let entry = pending_entry ~base_path () in
        let seen_runtime = ref None in
-       let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+       let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt =
          seen_runtime := Some runtime_id;
          check bool
            "the cli prompt carries the judgment contract"
@@ -2931,7 +2931,7 @@ let test_invalid_provider_response_runs_cli () =
          | None, _ -> fail "HTTP dispatch must have a durable binding"
        in
        let cli_calls = ref 0 in
-       let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+       let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
          incr cli_calls;
          Ok (Yojson.Safe.to_string (judgment_json "approve"))
        in
@@ -2975,7 +2975,7 @@ let test_cli_walk_advances_past_domain_invalid_output () =
          ~cli_slot_ids:[ cli_primary; cli_secondary ]
          ~source:"hitl-cli-advance" ();
        let entry = pending_entry ~base_path () in
-       let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+       let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
          if String.equal runtime_id cli_primary
          then Ok "{}" (* valid JSON, invalid judgment domain *)
          else Ok (Yojson.Safe.to_string (judgment_json "require_human"))
@@ -3024,7 +3024,7 @@ let test_cli_quota_order_keeps_durable_dispatch_identity () =
        let dispatched_call_ids = ref [] in
        let execute input_tag =
          let entry = pending_entry ~base_path ~input_tag () in
-         let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+         let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
            (match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
             | Some { exact_attempt = QT.Exact_bound { slot_id; call_id; _ }; _ } ->
               check string "dispatch names the durable bound slot" runtime_id slot_id;
@@ -3075,7 +3075,7 @@ let test_cli_walk_exhaustion_quarantines_the_last_cli_identity () =
          ~cli_slot_ids:[ cli_primary; cli_secondary ]
          ~source:"hitl-cli-exhausted" ();
        let entry = pending_entry ~base_path () in
-       let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+       let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
          Error (Masc.Fusion_official_client.Setup_failure "subscription window exhausted")
        in
        Worker.For_testing.execute_prepared_flow_with_queue_ops

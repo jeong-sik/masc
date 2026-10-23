@@ -138,7 +138,7 @@ type walk_owner =
     (#38174). Failed attempts other Keepers recorded still demote.
     [Every_mark_demotes]: a failed turn's deferred suffix, a rotation inside a
     walk, or a one-shot walk. Every failed attempt demotes. *)
-type walk_start =
+type walk_start = Runtime_candidate_standing.walk_start =
   | Fresh_walk_by of Runtime_candidate_backpressure.recorder
   | Every_mark_demotes
 

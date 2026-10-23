@@ -175,7 +175,7 @@ let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
     ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
     ~source:"librarian cli fallback" ();
   let seen = ref None in
-  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt =
     seen := Some runtime_id;
     check bool
       "the cli prompt is the fitted librarian prompt"
@@ -212,7 +212,7 @@ let test_domain_invalid_cli_answer_keeps_the_terminal () =
     ~cli_slot_ids:[ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
     ~source:"librarian cli invalid" ();
   let attempts = ref [] in
-  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     attempts := !attempts @ [ runtime_id ];
     Ok "{}" (* valid JSON, invalid selection domain *)
   in
@@ -239,7 +239,7 @@ let test_domain_invalid_cli_answer_advances_to_valid_selection () =
     ~cli_slot_ids:[ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
     ~source:"librarian cli domain failover" ();
   let attempts = ref [] in
-  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     attempts := !attempts @ [runtime_id];
     if String.equal runtime_id Fixture.cli_primary_runtime then Ok "{}"
     else Ok (Yojson.Safe.to_string valid_selection_json)
@@ -264,7 +264,7 @@ let test_projection_refusal_tries_cli_slots () =
     ~cli_slot_ids:[ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
     ~source:"librarian projection refusal" ();
   let attempts = ref [] in
-  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     attempts := !attempts @ [runtime_id];
     if String.equal runtime_id Fixture.cli_primary_runtime then Ok "{}"
     else Ok (Yojson.Safe.to_string valid_selection_json)
@@ -289,7 +289,7 @@ let test_projection_refusal_survives_failed_cli_slots () =
     ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
     ~source:"librarian projection refusal without a valid CLI answer" ();
   let attempts = ref [] in
-  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     attempts := runtime_id :: !attempts;
     Ok "{}"
   in
@@ -328,7 +328,7 @@ let test_domain_failure_kind_survives_failed_cli_slot () =
           [ { Fixture.id = "librarian-domain-invalid"; base_url = server.base_url } ])
       : Runtime_exact_output_registry.t);
   let attempts = ref 0 in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr attempts;
     Error (Masc.Fusion_official_client.Setup_failure "synthetic bridge failure")
   in
@@ -372,7 +372,7 @@ let test_invalid_provider_response_runs_cli ?(requires_token_measurement = false
             } ])
       : Runtime_exact_output_registry.t);
   let cli_calls = ref 0 in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr cli_calls;
     Ok (Yojson.Safe.to_string valid_selection_json)
   in
@@ -419,7 +419,7 @@ let test_a_walk_that_sent_before_it_failed_reports_the_send () =
           ; { Fixture.id = "librarian-never-connected"; base_url = "http://127.0.0.1:1" }
           ])
       : Runtime_exact_output_registry.t);
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     fail "no CLI slot is declared, so none may run"
   in
   let result = execute ~net ~clock ~base_path ~runner in
@@ -449,7 +449,7 @@ let test_failure_reaches_journal
   let keepers_dir = Filename.concat base_path "keepers" in
   Unix.mkdir keepers_dir 0o700;
   let attempts = ref 0 in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr attempts;
     answer
   in
@@ -486,7 +486,7 @@ let test_cli_prompt_drift_is_not_reported_as_no_cli_declaration () =
     ~source:"librarian cli prompt drift"
     ();
   let calls = ref 0 in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr calls;
     Error (Masc.Fusion_official_client.Setup_failure "must not run")
   in
@@ -556,7 +556,7 @@ let test_body_timeout_reaches_http_successor ~with_cli () =
         { Fixture.id = second_id; base_url = second.base_url }])
     : Runtime_exact_output_registry.t);
   let cli_calls = ref [] in
-  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     cli_calls := runtime_id :: !cli_calls;
     Ok (Yojson.Safe.to_string valid_selection_json)
   in
@@ -605,7 +605,7 @@ let test_complete_domain_rejection_reaches_http_successor () =
         { Fixture.id = "librarian-http-successor"; base_url = second.base_url }])
     : Runtime_exact_output_registry.t);
   let cli_calls = ref 0 in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr cli_calls;
     Ok (Yojson.Safe.to_string valid_selection_json)
   in
@@ -666,7 +666,7 @@ let test_admission_worker_requires_actual_input_capacity () =
     publish_unreachable_lane ~cli_only:true ~cli_slot_ids:(List.map fst answers)
       ~source:"admission capacity evidence fixture" ();
     let calls = ref 0 and sizes = ref [] and reports = ref [] in
-    let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
       incr calls; List.assoc runtime_id answers in
     let judge admission =
       sizes := List.length (Queue.candidates admission) :: !sizes;
@@ -756,7 +756,7 @@ let test_native_capacity_message_descent native () =
     publish_unreachable_lane ~cli_only:true ~cli_slot_ids:(List.map fst answers)
       ~source:"native Memory message descent fixture" ();
     let calls = ref [] in
-    let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
       calls := runtime_id :: !calls;
       List.assoc runtime_id answers in
     (match Runtime.infer_memory_step ~cli_runner:runner ~base_path ~keepers_dir ~keeper_id
@@ -820,7 +820,7 @@ let test_absorb_gate_capacity_refusal_splits_the_admission_batch () =
   List.iter (fun request_id -> ignore (Queue.append ~keepers_dir ~keeper_id ~request_id
     (fact ~claim:(request_id ^ " " ^ String.make candidate_bytes 'x')) |> Result.map_error Queue.append_error_to_string |> require)) request_ids;
   let merged = "keep A together with B" in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     let present = List.filter (fun affix -> Astring.String.is_infix ~affix prompt) request_ids in
     Ok (Yojson.Safe.to_string (`Assoc
       [ "memory", `Assoc
@@ -884,7 +884,7 @@ let test_explicit_admission_envelope ?(transport_failure=false) ~deferred () =
     | Some batch -> batch | None -> fail "missing candidate" in
   let requests = ref 0 in
   let held = deferred || transport_failure in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema ~prompt =
     incr requests;
     let properties = Yojson.Safe.Util.member "properties" output_schema in
     check bool "provider schema requires candidate judgments" true
@@ -968,7 +968,7 @@ let test_admission_retirement_evidence ~reobserved () =
   check int "both facts retired before model" 0 (List.length snapshot.facts);
   let current_before = Fs_compat.load_file (Current.path_for_keepers_dir ~keepers_dir ~keeper_id) in
   let captured = ref [] in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     captured := prompt :: !captured;
     let claims = if reobserved then [`Assoc ["claim",`String policy.claim;
       "category",`String "fact"; "supersedes",`Null; "absorbs",`List []]] else [] in
@@ -1044,7 +1044,7 @@ let test_admission_unavailable_retirement_history () =
   let current_before = Fs_compat.load_file current_path in
   let queue_before = Fs_compat.load_file queue_path in
   let captured = ref [] and committed = ref 0 and deferred = ref 0 in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     captured := prompt :: !captured;
     Ok (Yojson.Safe.to_string (`Assoc ["memory",`Assoc ["new_claims",`List [];
       "dropped",`List []; "working_contexts",`List []];
@@ -1113,7 +1113,7 @@ let test_mixed_admission ~depends_on_deferred () =
   let before_current = Fs_compat.load_file current_path in
   let before_queue = Fs_compat.load_file queue_path in
   let requests = ref 0 and committed = ref 0 in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr requests;
     Ok (Yojson.Safe.to_string (`Assoc [
       "memory",`Assoc ["new_claims",`List [`Assoc ["claim",`String confirmed_claim;
@@ -1206,7 +1206,7 @@ let test_memory_inference_retains_gated_decision () =
   let paths = inference_store_paths ~keepers_dir ~keeper_id in
   let before = List.map Fs_compat.load_file_opt paths in
   let captured = ref [] in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     captured := prompt :: !captured;
     Ok (Yojson.Safe.to_string inference_answer) in
   let selected_input = {(input ()) with
@@ -1326,7 +1326,7 @@ let with_memory_plan_fixture initial_facts f =
   let plan = Memory_plan.create ~keeper_id:source.keeper_id ~turn_ref:source.turn_ref ~snapshot
     |> require_plan in
   let infer source answer =
-    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
       Ok (Yojson.Safe.to_string answer) in
     match Runtime.infer_memory_step ~cli_runner:runner ~base_path ~keepers_dir ~keeper_id
       ~previous_state:None ~unread_messages:[] source with
@@ -1599,7 +1599,7 @@ let test_memory_inference_failure_keeps_pending_publication failure () =
   let prior_runs = List.map (fun (run : Registry.run) -> run.run_id) (Registry.list_runs registry) in
   let unsubscribe = Masc.Keeper_memory_commit_notifications.subscribe (fun _ -> incr wakes) in
   Fun.protect ~finally:unsubscribe @@ fun () ->
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = match failure with
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = match failure with
     | Invalid_memory_answer -> Ok {|{"working_state":"not a Memory decision"}|}
     | Gate_unavailable -> Ok (Yojson.Safe.to_string inference_answer)
     | Opaque_cli_failure -> Error (Masc.Fusion_official_client.Setup_failure "opaque inference failure")
@@ -1685,7 +1685,7 @@ let test_memory_inference_exhaustion case () =
       [{Fixture.id=named_id;base_url=named.base_url};
        {Fixture.id=other_id;base_url=other_url}]) : Runtime_exact_output_registry.t);
   let cli_calls = ref 0 in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr cli_calls;
     Error (Masc.Fusion_official_client.Setup_failure "opaque CLI tail") in
   let keeper_id = "memory-floor-evidence" in

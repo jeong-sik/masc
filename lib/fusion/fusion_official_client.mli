@@ -74,8 +74,8 @@ val run_panelist
     The panel route sums failed-attempt usage into a later answer or the failed
     seat when every candidate is exhausted. Judge errors retain it too.
 
-    Typed Claude quota rejections update {!Runtime_quota_window} before error
-    rendering. The scope is captured from the resolved runtime before dispatch,
+    Typed account quota and candidate rate rejections update the shared
+    standing before error rendering. The scope is captured from the resolved runtime before dispatch,
     so catalog reloads cannot reattribute an in-flight result. Every official
     client transport success clears an observed exhaustion before the caller's
     output validation; provider-stated reset windows remain intact.
@@ -186,7 +186,12 @@ val run_with_images
   -> unit
   -> (response, failure) result
 (** Stateless official-client turn using the same admission, quota accounting,
-    deadlines and output-schema channels as [run_panelist]. Codex and Claude
+    deadlines and output-schema channels as [run_panelist]. Candidate and quota
+    observations belong to the supplied runtime object, including across catalog
+    reloads. An answer clears candidate evidence and undated quota before final
+    usage callbacks and caller validation; dated provider resets survive. Typed
+    Codex rate refusals mark only this candidate, never sibling quota or a new
+    Fleet failure recorder. Codex and Claude
     execute the admitted runtime snapshot and carry the supplied image bytes
     through their native transports. Antigravity rejects nonempty image input
     and, having no system-prompt channel, gets a nonempty [system_prompt]

@@ -1,0 +1,56 @@
+{
+  "scope": "Run actual Standing/Quota/Backpressure source under explicit identity ports.\n\nDoes not exercise SDK classification, account-home resolution, provider hint\nvalidation, product path-rest calculation, runtime registry or adapter dispatch.\nThis is a bounded algorithm check, not a native integration test or full build.\n",
+  "actual_source_sha256": {
+    "lib/runtime/runtime_candidate_backpressure_state.mli": "794a2922636189acbcb4d49dd27e5a98700b46db3fcbf17315483c4e3e5ccbed",
+    "lib/runtime/runtime_candidate_backpressure_state.ml": "87f685c299cfc03bb9b5a425e671bd27c9aefb2d67b707d8ace65835aafd2c8b",
+    "lib/runtime/runtime_candidate_backpressure.mli": "faa5f0b17f55a818e67a3f60fdaee360183a25c989029c92d75cf69827396ea7",
+    "lib/runtime/runtime_candidate_backpressure.ml": "921011e9fa2d87024cd406f6ee26a1a5ea7753a8a36f90db3521ba8f8cb5019b",
+    "lib/runtime/runtime_quota_window.mli": "3bb39e71ec2513995f07b53e457de7fd8c72274153de58438268fa395883429d",
+    "lib/runtime/runtime_quota_window.ml": "57ec532d733939414d33935b1a3f15e27fa748dbd6b3b63a345d886db48bdc1f",
+    "lib/runtime/runtime_candidate_standing.mli": "20facdc7cbc30ed18b42a6ff1a0f7b227a83a4a4fb3811c036889f73062909b0",
+    "lib/runtime/runtime_candidate_standing.ml": "2fb88964beb0c4b76bb760e2348ce01af2821bdd1f7ecbfb2f683cb88f91b9da"
+  },
+  "source_unchanged_during_execution": {
+    "lib/runtime/runtime_candidate_backpressure_state.mli": true,
+    "lib/runtime/runtime_candidate_backpressure_state.ml": true,
+    "lib/runtime/runtime_candidate_backpressure.mli": true,
+    "lib/runtime/runtime_candidate_backpressure.ml": true,
+    "lib/runtime/runtime_quota_window.mli": true,
+    "lib/runtime/runtime_quota_window.ml": true,
+    "lib/runtime/runtime_candidate_standing.mli": true,
+    "lib/runtime/runtime_candidate_standing.ml": true
+  },
+  "harness_sha256": {
+    "boundary_ports.ml": "f2d0041f0b02b0f0f3c76cf2b53ea4fa640dd8617c0f36e59bf9e1f0d084115f",
+    "cases.ml": "655c603aed38145fef19a5bfd8511deba67707b95cf58e9853e8f8b1912c5128",
+    "reproduce.py": "d61b2ec6c16c0f1a2075b8d9cd909d652c77a1cce725ce573f1d2d1c4d9534b5"
+  },
+  "commands": [
+    {
+      "argv": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlopt",
+        "-I",
+        "+unix",
+        "-w",
+        "+4+32+69",
+        "-warn-error",
+        "+a",
+        "unix.cmxa",
+        "check.ml",
+        "-o",
+        "check.exe"
+      ],
+      "exit": 0
+    },
+    {
+      "argv": [
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-standing-check-m9dx_h0x/check.exe"
+      ],
+      "exit": 0
+    }
+  ],
+  "cases_passed": 9
+}

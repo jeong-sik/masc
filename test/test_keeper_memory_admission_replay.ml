@@ -287,7 +287,7 @@ let replay filename () =
     && String.equal (json_string "system_prompt_sha256" hashes) (sha256 system_prompt)
     && String.equal (json_string "schema_sha256" hashes) (hash_json output_schema) in
   let injected = ref false in
-  let runner ~runtime_id ~system_prompt ~output_schema ~prompt =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt ~output_schema ~prompt =
     incr calls;
     let request = runtime_id, system_prompt, output_schema, prompt in
     captured_request := Some request;
@@ -498,7 +498,7 @@ let replay filename () =
       | Some bytes -> `Assoc ["present",`Bool true;"bytes",`String bytes;
           "sha256",`String (sha256 bytes)]) before) in
     let captured = ref [] and followup_commits = ref 0 and deferred = ref 0 in
-    let runner ~runtime_id ~system_prompt ~output_schema ~prompt =
+    let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt ~output_schema ~prompt =
       captured := (runtime_id,system_prompt,output_schema,prompt) :: !captured;
       Ok (Yojson.Safe.to_string (`Assoc ["memory",`Assoc ["working_contexts",`List [];
         "new_claims",`List [];"dropped",`List []];"change_support",`List [];

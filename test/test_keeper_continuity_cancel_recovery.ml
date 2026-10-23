@@ -65,7 +65,7 @@ let test_cancelled_memory_commit_resumes_without_reapplication () =
   let prepared=P.prepare ~config ~keeper_name ~trace_id () |> get |> some in
   let expected_receipt=P.memory_range_id ~config ~keeper_name prepared |> get in
   let first_calls=ref 0 and notifications=ref [] in
-  let initial_runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let initial_runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr first_calls;
     Ok {|{"new_claims":[{"claim":"The project is called Meridian.","category":"fact","board_post_id":null,"board_comment_id":null,"supersedes":null,"absorbs":[]}],"dropped":[],"working_contexts":[],"working_state":"Meridian is awaiting publication approval."}|} in
   let physical_keepers_dir=Unix.realpath keepers_dir in
@@ -100,7 +100,7 @@ let test_cancelled_memory_commit_resumes_without_reapplication () =
   let resumed_calls=ref 0 in
   (* Memory for this range is committed, so the resumed pass is Context-only
      and asks for the working state alone (#38184). *)
-  let resumed_runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt:_ =
+  let resumed_runner ~runtime:_ ~system_prompt:_ ~output_schema ~prompt:_ =
     incr resumed_calls;
     check bool "resumed pass asks for no Memory field" true
       (Yojson.Safe.Util.(output_schema |> member "properties" |> member "new_claims") = `Null);

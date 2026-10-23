@@ -4131,9 +4131,41 @@ let test_payment_required_402_refusal_advances_once_to_successor () =
       , {|{"error":{"message":"Insufficient Balance"}}|} )
     ~assert_cause:(function
       | EO.Provider_response_refused
-          { http_status = 402; refusal = EO.Payment_required; _ } -> ()
+          { http_status = 402; refusal = EO.Payment_required; retry_after_s = None } -> ()
       | _ -> fail "HTTP 402 lost its typed payment-required cause")
     ()
+;;
+
+(* The account reset accompanies the actual 402 response. It must reach the
+   advance callback without being discarded by the collapsed PaymentRequired
+   classification; a JSON-body hint has the existing priority over a header. *)
+let test_payment_required_402_keeps_retry_after_body_header_priority () =
+  List.iter
+    (fun (label, headers, body, expected) ->
+       assert_typed_capacity_refusal_advances_once
+         ~first_response_headers:headers
+         ~refused_kind:"openai_compat"
+         ~label
+         ~first_response:(Cohttp.Code.status_of_code 402, body)
+         ~assert_cause:(function
+           | EO.Provider_response_refused
+               { http_status; refusal; retry_after_s } ->
+             check int (label ^ " keeps the HTTP status") 402 http_status;
+             check bool (label ^ " keeps the typed payment refusal") true
+               (refusal = EO.Payment_required);
+             check (option (float 0.0)) (label ^ " preserves the actual account reset")
+               expected retry_after_s
+           | EO.Completion_failed _ | EO.Response_body_deadline_exceeded
+           | EO.Output_limit_reached | EO.Incomplete_output | EO.Missing_output
+           | EO.Ambiguous_output _ | EO.Unexpected_output_content | EO.Invalid_json_output ->
+             fail "HTTP 402 lost its typed payment-required cause")
+         ())
+    [ ( "payment-body-hint", [], {|{"error":{"retry_after":90}}|}, Some 90.0 )
+    ; ( "payment-header-hint", ["retry-after", "30"],
+        {|{"error":{"message":"Insufficient Balance"}}|}, Some 30.0 )
+    ; ( "payment-body-over-header", ["retry-after", "30"],
+        {|{"error":{"retry_after":90}}|}, Some 90.0 )
+    ]
 ;;
 
 let test_server_refusal_advances_once_to_successor status =
@@ -5524,6 +5556,10 @@ let () =
             "HTTP 402 payment required advances with one dispatch per candidate"
             `Quick
             test_payment_required_402_refusal_advances_once_to_successor
+        ; test_case
+            "HTTP 402 preserves body and header reset priority"
+            `Quick
+            test_payment_required_402_keeps_retry_after_body_header_priority
         ; test_case "a window refusal advances once to the declared successor" `Quick
             test_context_overflow_refusal_advances_once_to_successor
         ; test_case "a GLM quota code is a hard quota that advances once" `Quick

@@ -525,7 +525,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   let max_chars = Masc.Keeper_lane_cli_oneshot.prompt_with_schema ~requirement ~prompt |> chars in
   let oversized = ref 0 and final_calls = ref 0 and alternative_bytes = ref None in
   let answer = {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"s"}|} in
-  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt =
     let actual_chars = chars prompt in
     if String.equal runtime_id F.cli_secondary_runtime then
       match P.read ~config ~keeper_name |> get with
@@ -561,7 +561,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   let extended = source @ next_turn in
   save extended; boundary ~fresh:false 2 extended;
   let rejected_calls = ref 0 in
-  let rejected ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+  let rejected ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     incr rejected_calls;
     check bool "actual runtime dispatch is visibly running" true
       ((observation ()).state = O.Running);
@@ -578,7 +578,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   check int "refused range keeps committed frontier" 4
     (P.read ~config ~keeper_name |> get |> some).end_atom;
   let resumed_calls = ref 0 in
-  let resumed ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+  let resumed ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     incr resumed_calls;
     check bool "terminal reason is cleared at real resumed dispatch" true
       ((observation ()).state = O.Running && (observation ()).stop_reason = None);
@@ -600,7 +600,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   save after_forget; boundary ~fresh:false 3 after_forget;
   Masc.Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name;
   let forgotten_calls = ref 0 in
-  let forgotten ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+  let forgotten ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     incr forgotten_calls;
     check bool "forget removes the learned ceiling instead of retaining stale knowledge" true
       (chars prompt > max_chars);
@@ -611,7 +611,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   check int "failed request after forget does not advance coverage" 8
     (P.read ~config ~keeper_name |> get |> some).end_atom;
   (try Eio.Cancel.sub (fun cancellation ->
-     let cancelled ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+     let cancelled ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
        check bool "cancelling runtime was running" true ((observation ()).state = O.Running);
        Eio.Cancel.cancel cancellation Exit;
        Eio.Fiber.check ();
@@ -939,7 +939,7 @@ let test_a_memory_pass_carries_the_counterparts_of_its_turn () =
   let counterpart = "counterpart-promised-the-release-notes-by-friday" in
   with_counterpart_turn ~counterpart @@ fun ~config ~continuity ->
   let prompts = ref [] in
-  continuity (fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt ->
+  continuity (fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt ->
     prompts := !prompts @ [prompt];
     Ok memory_answer);
   (match !prompts with
@@ -967,7 +967,7 @@ let test_a_turn_too_large_with_its_counterparts_is_left_to_the_durable_pass () =
   let counterpart = "counterpart-marker-" ^ String.make 4000 'x' in
   with_counterpart_turn ~counterpart @@ fun ~config ~continuity ->
   let refused_prompts = ref [] in
-  continuity (fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt ->
+  continuity (fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt ->
     refused_prompts := !refused_prompts @ [prompt];
     let actual_chars = Codex.prompt_char_count prompt |> get in
     Error (Masc.Fusion_official_client.Codex_failure (Codex.Rpc_error
@@ -1003,7 +1003,7 @@ let test_a_turn_too_large_with_its_counterparts_is_left_to_the_durable_pass () =
        | Error detail -> fail detail));
   check bool "with the counterpart the continuity pass could not carry" true
     (List.mem counterpart !received);
-  continuity (fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+  continuity (fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
     Ok {|{"working_state":"s"}|});
   check (option int) "the next continuity pass publishes the turn Context-only" (Some 1)
     (Option.map (fun (saved : S.t) -> saved.end_atom) (P.read ~config ~keeper_name |> get))
@@ -1117,7 +1117,7 @@ let test_volatile_message_floor ?native ~failure () =
       (`Assoc ["working_state", `String state]) in
   let refusal status = status,
       {|{"error":{"type":"invalid_request_error","message":"fixture refusal"}}|} in
-  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt =
     check string "the native slot serves the real Memory-covered context pass" Exact_output_fixture.cli_primary_runtime runtime_id;
     (!before_answer) ();
     let position = List.length !requests in
@@ -1282,7 +1282,7 @@ let test_context_only_api_holes case () =
   let observer = Http.create (fun event -> http_events := event :: !http_events; Ok ()) in
   let before_dispatch = ref (fun () -> ()) and before_final = ref (fun () -> ()) in
   let last_index = List.length plan-1 in
-  let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+  let cli_runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt =
     check string "the declared real CLI tail is visited" Exact_output_fixture.cli_primary_runtime runtime_id;
     (!before_dispatch) ();
     cli_requests := !cli_requests @ [prompt];
@@ -1550,7 +1550,7 @@ let test_uncommitted_memory_message_floor ?native case () =
         "supersedes", `Null; "absorbs", `List []]] else `List []);
      "dropped", `List []; "working_contexts", `List [];
      "working_state", `String (if first then "volatile-call-read" else "complete-call-and-result")]) in
-  let runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema ~prompt =
     let blocked = Option.fold ~none:false ~some:(fun mode -> not (queue_native_succeeds mode)) native in
     let native_answers = Option.fold ~none:[] ~some:(queue_native_answers ~prompt) native in
     let position = if blocked then List.length !requests mod List.length native_answers else List.length !requests mod 3 in
@@ -2162,7 +2162,7 @@ let test_an_api_commit_releases_the_cli_limit () =
   let module F = Exact_output_fixture in
   let module Codex = Runtime_codex_app_server in
   let api_up = ref false and cli_calls = ref 0 in
-  let cli_runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+  let cli_runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     incr cli_calls;
     match !cli_calls with
     | 1 ->

@@ -161,7 +161,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     {unread_messages=[];receipt_scope="preflight-fixture";trace_id=name;history_start_boundary_line=1;
      start_atom=0;end_atom=1;last_atom_digest=String.make 64 'a';
      end_boundary_line=2;boundary_lines_seen=2} in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr llm_calls;
     Ok (if maintenance || budget <> Within_budget then drop_first_fact
       else if context_only then {|{"working_contexts":[]}|} else generated) in

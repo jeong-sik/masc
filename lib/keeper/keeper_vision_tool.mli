@@ -68,9 +68,9 @@ val sniff_image_media_type : string -> (string, string) result
 
 val vision_runtime_ids : now:float -> string list
 (** Ordered image-capable runtime ids: [\[runtime\].media_failover] order,
-    with every candidate whose quota scope has
-    an active window at [now] ({!Runtime_quota_window}) moved behind the rest in
-    the same relative order. The handler tries these candidates in order
+    with shared quota and candidate rate-limit rest from
+    {!Runtime_candidate_standing} moved behind the rest in the same relative
+    order. Fleet failed-attempt marks are not created by this ownerless call. The handler tries these candidates in order
     for timeout/provider failures and output-token truncation. Capacity and
     output-token failures advance immediately; transient failures retain the
     configured backoff. There is no tool-owned cumulative deadline. *)
@@ -173,7 +173,7 @@ val run_vision
     contract as the API answer.
 
     [exclude_runtime_ids] drops candidates the caller's own walk already spent
-    this turn. The quota window moves a candidate that answered a hard
+    this turn. Shared quota/rate standing moves a candidate that answered a hard
     rejection behind the live ones but keeps it in the list, so a delegation
     from a lane walk that just collected 402s would ask those accounts once
     more before the text fallback starts (#34829). Excluding every capable

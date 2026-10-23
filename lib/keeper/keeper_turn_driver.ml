@@ -216,7 +216,7 @@ type walk_owner =
    the head), which renews or clears the mark. In every other walk -- another
    Keeper's, a one-shot walk, the retry of the failed turn, a rotation inside
    a walk -- every mark sends its candidate back (RFC-0458 §3.4, 2026-09-23). *)
-type walk_start =
+type walk_start = Runtime_candidate_standing.walk_start =
   | Fresh_walk_by of Runtime_candidate_backpressure.recorder
   | Every_mark_demotes
 
@@ -224,69 +224,12 @@ let fresh_walk_of = function
   | Fleet_keeper_turn recorder -> Fresh_walk_by recorder
   | One_shot_walk -> Every_mark_demotes
 
-type demotion =
-  | Not_demoted
-  | Failed_without_rest
-  | Told_to_rest
-
-(* Three places, declared order kept within each. A path told to rest -- an
-   exhausted quota or a rate limit -- goes behind a path that only failed
-   without answering: the failed one can be dispatched now, and behind a resting
-   head it would make the next dispatch wait for that head's release
-   (RFC-0458 §3.4). It is also what keeps a released rate limit promoting its
-   path past the ones still resting, even while a failed attempt keeps it
-   behind the ones that answered. *)
-let demote_unavailable_candidates ~now ~walk ~quota_scope_of ~candidate_backpressure_of candidates =
-  let demotion candidate =
-    let quota_exhausted =
-      Option.fold ~none:false
-        ~some:(fun scope -> Runtime_quota_window.is_exhausted ~scope ~now)
-        (quota_scope_of candidate)
-    in
-    let observed =
-      Option.bind (candidate_backpressure_of candidate) (fun candidate ->
-        Runtime_candidate_backpressure.candidate_backpressure ~now ~candidate)
-    in
-    match quota_exhausted, observed with
-    | true, (Some _ | None)
-    | false, Some { Runtime_candidate_backpressure.rate_limit = Some _; failed_attempt = _ } ->
-      Told_to_rest
-    | false,
-      Some
-        { Runtime_candidate_backpressure.rate_limit = None
-        ; failed_attempt =
-            Some (Runtime_candidate_backpressure.Failed_attempt { recorded_by; _ })
-        } ->
-      (match walk with
-       | Fresh_walk_by walker
-         when Runtime_candidate_backpressure.same_recorder walker recorded_by ->
-         Not_demoted
-       | Fresh_walk_by _ | Every_mark_demotes -> Failed_without_rest)
-    | false, Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = None }
-    | false, None ->
-      Not_demoted
-  in
-  let placed = List.map (fun candidate -> demotion candidate, candidate) candidates in
-  let in_place wanted =
-    List.filter_map
-      (fun (demotion, candidate) ->
-         match wanted, demotion with
-         | Not_demoted, Not_demoted
-         | Failed_without_rest, Failed_without_rest
-         | Told_to_rest, Told_to_rest -> Some candidate
-         | Not_demoted, (Failed_without_rest | Told_to_rest)
-         | Failed_without_rest, (Not_demoted | Told_to_rest)
-         | Told_to_rest, (Not_demoted | Failed_without_rest) -> None)
-      placed
-  in
-  in_place Not_demoted @ in_place Failed_without_rest @ in_place Told_to_rest
-;;
-
 let quota_ordered_runtime_ids ~now ~walk runtime_ids =
   (* Resolve once so both kinds of ordering evidence use the same catalog row. *)
   let resolved = List.map (fun id -> id, Runtime.get_runtime_by_id id) runtime_ids in
   let resolvable, unresolvable = List.partition (fun (_, rt) -> Option.is_some rt) resolved in
-  let ordered = demote_unavailable_candidates ~now ~walk
+  let ordered = Runtime_candidate_standing.order ~now
+    ~policy:(Runtime_candidate_standing.Keeper_walk walk)
     ~quota_scope_of:(fun (_, rt) -> Option.map Runtime_instance.quota_scope_of_runtime rt)
     ~candidate_backpressure_of:(fun (_, rt) ->
       Option.map (fun (rt : Runtime_instance.t) -> rt.candidate_backpressure) rt)
@@ -756,9 +699,9 @@ let attempt_runtime_candidates
     let dispatchable, undispatchable =
       List.partition candidate_dispatchable rest
     in
-    demote_unavailable_candidates
+    Runtime_candidate_standing.order
       ~now:(Unix.gettimeofday ())
-      ~walk:Every_mark_demotes
+      ~policy:(Runtime_candidate_standing.Keeper_walk Every_mark_demotes)
       ~quota_scope_of ~candidate_backpressure_of
       dispatchable
     @ undispatchable
@@ -837,18 +780,11 @@ let attempt_runtime_candidates
        response to the replacement catalog row. *)
     let attempt_quota_scope = quota_scope_of candidate in
     let attempt_candidate_backpressure = candidate_backpressure_of candidate in
+    let observe_standing observation =
+      Runtime_candidate_standing.observe ~candidate:attempt_candidate_backpressure
+        ~quota_scope:attempt_quota_scope observation in
     let clear_answered_candidate_evidence () =
-      Option.iter
-        (fun candidate ->
-           Runtime_candidate_backpressure.note_candidate_success ~candidate)
-        attempt_candidate_backpressure;
-      (* A call getting through is the only evidence a quota came back that
-         a provider stating no reset time leaves available, so it is what
-         clears the observation. A stated window is left alone: it names a
-         time, and one answer inside it does not make that untrue. *)
-      match attempt_quota_scope with
-      | Some scope -> Runtime_quota_window.note_succeeded ~scope
-      | None -> ()
+      observe_standing Runtime_candidate_standing.Answered
     in
     emit_runtime_manifest
       ~status:"attempt"
@@ -885,20 +821,13 @@ let attempt_runtime_candidates
             scope already carried ([Runtime_quota_window]), leaving the scope
             looking available. The rule for reading a hint is the one
             [path_rest_sec] and [route_resumes_on_same_path] read. *)
-         match attempt_quota_scope, Keeper_runtime_failure_route.usable_retry_after retry_after with
-         | None, _ -> ()
-         | Some scope, Some retry_after_s ->
-           Runtime_quota_window.note_exhausted
-             ~scope
-             (* NDT-OK: convert the provider's relative reset at ingress. *)
-             ~resets_at:(Unix.gettimeofday () +. retry_after_s)
-         | Some scope, None ->
-           Runtime_quota_window.note_observed_exhausted ~scope
+         let resets_at = Option.map
+           (fun retry_after_s -> Unix.gettimeofday () +. retry_after_s)
+           (Keeper_runtime_failure_route.usable_retry_after retry_after) in
+         observe_standing (Runtime_candidate_standing.Hard_quota {resets_at})
        in
        let note_rate_limit retry_after =
-         Option.iter
-           (fun candidate -> Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after)
-           attempt_candidate_backpressure
+         observe_standing (Runtime_candidate_standing.Rate_limited {retry_after})
        in
        (* The route calls every timeout a provider timeout, including one that
           expired in MASC's own admission -- a permit queue or local capacity
@@ -1289,7 +1218,7 @@ let dedupe_runtimes_preserve_order runtimes =
    candidate takes the image, the decision is [No_capable_runtime] and the
    per-attempt projection turns the image into a reading for the runtime that
    runs the turn. The set is held in the same quota and backpressure order the
-   lane itself uses ([demote_unavailable_candidates]), and a candidate whose
+   lane itself uses ([Runtime_candidate_standing.order]), and a candidate whose
    path rests until a known time ([path_rest_parts]: a rate limit, or a quota
    window its provider or usage read dated) is left out until that time: the
    reroute and the image walk lead with a serving candidate, and when no
@@ -1310,9 +1239,9 @@ let modality_reroute_candidates ~now ~walk ~deferred_runtime_lane ~first_candida
   | Some _ -> []
   | None ->
     dedupe_runtimes_preserve_order (first_candidate :: remaining_runtimes)
-    |> demote_unavailable_candidates
+    |> Runtime_candidate_standing.order
          ~now
-         ~walk
+         ~policy:(Runtime_candidate_standing.Keeper_walk walk)
          ~quota_scope_of:(fun (runtime : Runtime_instance.t) ->
            Some (Runtime_instance.quota_scope_of_runtime runtime))
          ~candidate_backpressure_of:(fun (runtime : Runtime_instance.t) ->

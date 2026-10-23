@@ -352,7 +352,7 @@ let test_cli_slot_answers () =
   in
   let calls = ref [] in
   let cli_runner : Keeper_lane_cli_oneshot.runner =
-    fun ~runtime_id ~system_prompt ~output_schema:_ ~prompt ->
+    fun ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt ~output_schema:_ ~prompt ->
     calls := (runtime_id, system_prompt, prompt) :: !calls;
     Ok (Yojson.Safe.to_string answer)
   in
@@ -396,7 +396,7 @@ let test_cli_slot_answers () =
 let test_cli_slot_follows_failed_http_slot () =
   let _, progress, _ = Lazy.force recorded_params in
   let cli_runner : Keeper_lane_cli_oneshot.runner =
-    fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+    fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
     Ok (Yojson.Safe.to_string progress_answer)
   in
   F.with_official_client_runtimes

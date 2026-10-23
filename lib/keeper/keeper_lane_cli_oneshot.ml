@@ -312,21 +312,18 @@ type attempt_observation =
   | Raw_response of { runtime_id : string; text : string }
 
 type runner =
-  runtime_id:string
+  runtime:Runtime_instance.t
   -> system_prompt:string
   -> output_schema:Yojson.Safe.t
   -> prompt:string
   -> (string, Fusion_official_client.failure) result
 
 let default_runner ~base_dir : runner =
-  fun ~runtime_id ~system_prompt ~output_schema ~prompt ->
-  match Runtime.get_runtime_by_id runtime_id with
-  | None -> Error (Fusion_official_client.Setup_failure "runtime is not configured")
-  | Some runtime ->
-    let output_schema = output_schema_for_runtime runtime output_schema in
-    Fusion_official_client.run_with_images ~images:[]
-      ~base_dir ~runtime ~system_prompt ?output_schema ~prompt ()
-    |> Result.map (fun (response : Fusion_official_client.response) -> response.text)
+  fun ~runtime ~system_prompt ~output_schema ~prompt ->
+  let output_schema = output_schema_for_runtime runtime output_schema in
+  Fusion_official_client.run_with_images ~images:[]
+    ~base_dir ~runtime ~system_prompt ?output_schema ~prompt ()
+  |> Result.map (fun (response : Fusion_official_client.response) -> response.text)
 ;;
 
 let prompt_with_schema ~requirement ~prompt =
@@ -387,7 +384,7 @@ let run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prom
        Option.iter (fun f -> f (Dispatching {runtime_id})) observe;
        (match
           runner
-            ~runtime_id
+            ~runtime
             ~system_prompt
             ~output_schema:(Exact_output.domain_schema requirement)
             ~prompt
@@ -403,10 +400,21 @@ let run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prom
 ;;
 
 let order_slots slots =
-  Runtime_quota_window.demote_order
-    ~now:(Time_compat.now ())
-    ~quota_scope_of:Runtime.quota_scope_of_runtime_id
-    slots
+  let rows = List.map (fun id -> id, Runtime.get_runtime_by_id id) slots in
+  let policy = Runtime_candidate_standing.Rate_rest_only
+    { rest_sec = (fun ~retry_after ->
+        Keeper_runtime_failure_route.path_rest_sec
+          ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+          ~retry_class:Keeper_runtime_failure_route.Rate_limited
+          ~retry_after_hint:retry_after) } in
+  Runtime_candidate_standing.order
+    ~now:(Time_compat.now ()) ~policy
+    ~quota_scope_of:(fun (_, runtime) ->
+      Option.map Runtime_instance.quota_scope_of_runtime runtime)
+    ~candidate_backpressure_of:(fun (_, runtime) ->
+      Option.map (fun runtime -> runtime.Runtime_instance.candidate_backpressure) runtime)
+    rows
+  |> List.map fst
 ;;
 
 let walk ?runner ?observe ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate ~on_failure () =

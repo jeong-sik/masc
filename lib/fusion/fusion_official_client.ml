@@ -544,19 +544,22 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
      runtime catalog reload may change the credential alias under this id. *)
   let execution = runtime.Runtime_instance.execution in
   let quota_scope = Runtime_instance.quota_scope_of_runtime runtime in
+  let observe observation =
+    Runtime_candidate_standing.observe
+      ~candidate:(Some runtime.candidate_backpressure)
+      ~quota_scope:(Some quota_scope) observation
+  in
   let succeeded (text : response) =
+    observe Runtime_candidate_standing.Answered;
     on_usage text.usage;
-    Runtime_quota_window.note_succeeded ~scope:quota_scope;
     Ok text
   in
   let claude_failed ~admission error =
     (match error with
      | Runtime_claude_code.Quota_blocked { rate_limit; _ } ->
-       (match Option.bind rate_limit (fun limit -> limit.Runtime_claude_code.resets_at) with
-        | Some resets_at ->
-          Runtime_quota_window.note_exhausted
-            ~scope:quota_scope ~resets_at:(float_of_int resets_at)
-        | None -> Runtime_quota_window.note_observed_exhausted ~scope:quota_scope)
+       let resets_at = Option.bind rate_limit
+         (fun limit -> Option.map float_of_int limit.Runtime_claude_code.resets_at) in
+       observe (Runtime_candidate_standing.Hard_quota {resets_at})
      | Runtime_claude_code.Invalid_config _ | Runtime_claude_code.Spawn_failed _
      | Runtime_claude_code.Protocol_error _ | Runtime_claude_code.Subscription_required _
      | Runtime_claude_code.Unsupported_control_request _
@@ -567,17 +570,32 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
      | Runtime_claude_code.Timeout _ -> ());
     Error (if admission then Claude_admission_failure error else Claude_failure error)
   in
-  (* A Codex account out of usage is the fact a Keeper turn already records
-     for this scope: [Keeper_codex_runtime] reads the refusal as a hard quota
-     with no reset, and the turn driver writes it as an exhaustion with no end.
-     A one-shot turn recorded nothing, so an exact lane's CLI walk sent the
-     next judgment to the spent account first again (2026-09-25: 3,135
-     usageLimitExceeded refusals on codex_subscription.gpt-5.6-luna and 739
-     on codex-gpt-6-luna-xhigh). The next answer on this scope clears the
-     record through [succeeded]. *)
+  (* Spent usage belongs to the account scope. A typed rate refusal belongs
+     only to the dispatched candidate; overload and transport failures do not
+     create or replace a Fleet-owned failed-attempt observation. *)
   let codex_failed error =
     if Runtime_codex_app_server.refused_for_spent_usage error
-    then Runtime_quota_window.note_observed_exhausted ~scope:quota_scope;
+    then observe (Runtime_candidate_standing.Hard_quota {resets_at=None})
+    else (
+      match error with
+      | Runtime_codex_app_server.Turn_failed
+          {codex_error_info=Some Runtime_codex_app_server.Codex_error_info.Rate_limit_exceeded; _} ->
+        observe (Runtime_candidate_standing.Rate_limited {retry_after=None})
+      | Runtime_codex_app_server.Turn_failed {codex_error_info=None; _}
+      | Runtime_codex_app_server.Turn_failed
+          {codex_error_info=Some
+            (Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+            | Session_budget_exceeded | Cyber_policy | Misalignment_policy_violation
+            | Internal_server_error | Unauthorized | Bad_request | Thread_rollback_failed
+            | Sandbox_error | Server_overloaded | Other | Http_connection_failed _
+            | Response_stream_connection_failed _ | Response_stream_disconnected _
+            | Response_too_many_failed_attempts _ | Active_turn_not_steerable _
+            | Unrecognized _); _}
+      | Runtime_codex_app_server.Invalid_config _ | Spawn_failed _
+      | Reasoning_effort_admission_failed _ | Turn_input_write_failed _
+      | Protocol_error _ | Rpc_error _ | Subscription_required _
+      | Unsupported_server_request _ | Context_window_exceeded _ | Stopped_by_host _
+      | Turn_interrupted | Runtime_shutting_down | Process_exited _ | Timeout _ -> ());
     Error (Codex_failure error)
   in
   let* env, clock = eio_context ()

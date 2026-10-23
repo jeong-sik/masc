@@ -1,6 +1,6 @@
 module Exact = Agent_core.Exact_output
 module Registry = Runtime_exact_output_registry
-module Backpressure = Runtime_candidate_backpressure
+module Standing = Runtime_candidate_standing
 
 let observation_of_slot (resolved : Registry.resolved_lane) slot_id =
   Option.bind
@@ -9,61 +9,30 @@ let observation_of_slot (resolved : Registry.resolved_lane) slot_id =
     (fun slot -> slot.Registry.runtime_observation)
 ;;
 
-let candidate_of_slot ~resolved slot_id =
-  Option.map (fun (observation : Registry.runtime_observation) -> observation.candidate)
+let observe_slot ~resolved ~slot_id observation =
+  Option.iter
+    (fun (runtime : Registry.runtime_observation) ->
+      Standing.observe ~candidate:(Some runtime.candidate)
+        ~quota_scope:(Some runtime.quota_scope) observation)
     (observation_of_slot resolved slot_id)
 ;;
 
-(* The same two stores the Keeper walk reads to demote a path
-   ([Keeper_turn_driver.demote_unavailable_candidates]): a quota window the
-   provider reported exhausted, and a rate limit this process observed. A
-   failed attempt that is not a rate limit carries no rest and does not move a
-   slot here.
-
-   A rate limit rests the slot for the Keeper walk's own path rest
-   ([Keeper_runtime_failure_route.path_rest_sec]): the provider's Retry-After
-   when it sent one, the configured fallback when it did not. The Keeper
-   walk keeps an unhinted rate limit demoted until
-   the path answers, because a later rotation still reaches it; an Exact lane
-   whose siblings keep answering never would, so here the rest ends and the
-   slot is tried in its declared place again. *)
-let resting ~now (slot : Registry.selected_slot) =
-  match slot.runtime_observation with
-  | None -> false
-  | Some (observation : Registry.runtime_observation) ->
-    let quota_exhausted =
-      Runtime_quota_window.is_exhausted
-        ~scope:observation.quota_scope
-        ~now
-    in
-    let rate_limited =
-      match
-        Backpressure.candidate_backpressure ~now ~candidate:observation.candidate
-      with
-      | Some
-          { Backpressure.rate_limit =
-              Some (Backpressure.Unknown_scope_rate_limit { noted_at; retry_after })
-          ; failed_attempt = _
-          } ->
-        let rest_sec =
-          Keeper_runtime_failure_route.path_rest_sec
-            ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
-            ~retry_class:Keeper_runtime_failure_route.Rate_limited
-            ~retry_after_hint:retry_after
-        in
-        Float.compare now (noted_at +. rest_sec) < 0
-      | Some { Backpressure.rate_limit = None; failed_attempt = _ } | None -> false
-    in
-    quota_exhausted || rate_limited
-;;
-
 let order_at ~now (resolved : Registry.resolved_lane) =
-  let serving, resting =
-    List.partition
-      (fun (slot : Registry.selected_slot) -> not (resting ~now slot))
-      resolved.selected_slots
-  in
-  { resolved with selected_slots = serving @ resting }
+  let policy = Standing.Rate_rest_only
+    { rest_sec = (fun ~retry_after ->
+        Keeper_runtime_failure_route.path_rest_sec
+          ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+          ~retry_class:Keeper_runtime_failure_route.Rate_limited
+          ~retry_after_hint:retry_after) } in
+  let selected_slots = Standing.order ~now ~policy
+    ~quota_scope_of:(fun (slot : Registry.selected_slot) ->
+      Option.map (fun (observation : Registry.runtime_observation) -> observation.quota_scope)
+        slot.runtime_observation)
+    ~candidate_backpressure_of:(fun (slot : Registry.selected_slot) ->
+      Option.map (fun (observation : Registry.runtime_observation) -> observation.candidate)
+        slot.runtime_observation)
+    resolved.selected_slots in
+  { resolved with selected_slots }
 ;;
 
 let order resolved =
@@ -75,19 +44,30 @@ let order resolved =
 let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
   match cause with
   | Exact.Provider_response_refused { refusal = Exact.Rate_limited; retry_after_s; _ } ->
+    observe_slot ~resolved ~slot_id (Standing.Rate_limited {retry_after=retry_after_s})
+  | Exact.Provider_response_refused {refusal=Exact.Payment_required; retry_after_s; _} ->
+    (* NDT-OK: convert the provider's relative reset at observation ingress. *)
+    let resets_at = Option.map (fun seconds -> Unix.gettimeofday () +. seconds)
+      (Keeper_runtime_failure_route.usable_retry_after retry_after_s) in
+    observe_slot ~resolved ~slot_id (Standing.Hard_quota {resets_at})
+  | Exact.Completion_failed {error; dispatch=Exact.Generation_dispatch_started} ->
     Option.iter
-      (fun candidate -> Backpressure.note_rate_limit ~candidate ~retry_after:retry_after_s)
-      (candidate_of_slot ~resolved slot_id)
+      (fun (runtime : Registry.runtime_observation) ->
+        (* NDT-OK: only the actual dispatched attempt's frozen identity owns
+           this provider observation, including a relative quota reset. *)
+        Standing.observe_http_error ~now:(Unix.gettimeofday ())
+          ~candidate:runtime.candidate ~quota_scope:runtime.quota_scope error)
+      (observation_of_slot resolved slot_id)
   | Exact.Provider_response_refused
       { refusal =
           ( Exact.Request_body_refused | Exact.Refusal_body_not_received | Exact.Overloaded
           | Exact.Server_error | Exact.Auth_failed | Exact.Authorization_refused
-          | Exact.Payment_required | Exact.Invalid_request | Exact.Not_found
+          | Exact.Invalid_request | Exact.Not_found
           | Exact.Context_overflow | Exact.Input_capacity | Exact.Network_error
           | Exact.Timeout )
       ; _
       }
-  | Exact.Completion_failed _
+  | Exact.Completion_failed {dispatch=Exact.No_generation_dispatch; _}
   | Exact.Response_body_deadline_exceeded
   | Exact.Output_limit_reached
   | Exact.Incomplete_output
@@ -99,9 +79,7 @@ let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
 
 let note_answered ~resolved (success : Exact.flow_success) =
   let answered = Exact.flow_success_candidate success in
-  Option.iter
-    (fun candidate -> Backpressure.note_candidate_success ~candidate)
-    (candidate_of_slot ~resolved answered.visit.identity.candidate_id)
+  observe_slot ~resolved ~slot_id:answered.visit.identity.candidate_id Standing.Answered
 ;;
 
 (* A refusal that advanced the flow is kept in its evidence; the one that

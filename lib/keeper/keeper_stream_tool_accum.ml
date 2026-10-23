@@ -1094,9 +1094,6 @@ let on_event t (evt : Agent_core.Types.sse_event) =
   | Agent_core.Types.SSEUnknownEventType _
   | Agent_core.Types.SSEUnsupportedPart _
   | Agent_core.Types.SSEUnsupportedResponse _
-  (* A repeat ends the generation, not just its tool blocks: the text this
-     scope carries is the repetition itself. *)
-
   (* A liveness timeout ends the attempt the same way; the bridge quarantines
      the scope's open tool blocks under [Sse_timeout]. *)
   | Agent_core.Types.Timeout _ -> invalidate_current_scope t

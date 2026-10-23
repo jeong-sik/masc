@@ -144,8 +144,8 @@ let test_accumulate_content_block_start_tool () =
 (* Repeated content remains deliverable until an authoritative terminal. *)
 let test_repeated_text_and_reasoning_reach_provider_terminal () =
   List.iter
-    (fun content_type ->
-  let acc = Streaming.create_stream_acc () in
+    (fun (content_type, make_delta) ->
+       let acc = Streaming.create_stream_acc () in
        let repeated = "The proof carries this premise into each independent case.\n" in
        let chunks = List.init 96 (fun _ -> repeated) @ [ "The next step resolves the case.\n" ] in
        Streaming.accumulate_event acc

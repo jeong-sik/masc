@@ -612,10 +612,13 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (transport.kind !== 'stopped') { stopPlayback(); draw(); return }
     const midiRoute = selectedMidiOutput !== undefined || portBindings.length > 0
     if (!midiRoute && audioInstrument().kind === 'unselected') { openInstrumentPicker(fromCursor ? { fromCursor, tick } : null); return }
-    const playback = admitted ?? editorPlayback(editor, { loop })
+    preparePlayback(admitted ?? editorPlayback(editor, { loop }))
+  }
+  function preparePlayback(playback) {
+    const midiRoute = selectedMidiOutput !== undefined || portBindings.length > 0
     const id = ++generation, options = { ...playback.options, midiOutput: selectedMidiOutput, portBindings }
     const result = midiRoute ? render(playback.project, { ...options, format: 'midi' }) : renderAudio(playback.project, options)
-    transport = { kind: 'rendering', cancel: result.cancel, native: result.native }
+    transport = { kind: 'rendering', cancel: result.cancel, native: result.native, playback }
     if (result.native && audioInstrument().kind === 'vst') observe({ state: 'rendering', selection: audioInstrument().selection, render: null })
     result.promise.then(wave => startPlayer(wave, id, playback.range)).catch(error => {
       if (!closed && id === generation) { transport = { kind: 'stopped' }; status = failure(error.message +
@@ -627,6 +630,29 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function restart() {
     if (!accepting || suspended || childTask) return
     if (stepInput) throw new Error('Use :step-stop before playback')
+    if (transport.kind === 'rendering') {
+      const playback = transport.playback
+      stopPlayback()
+      preparePlayback(playback)
+      return
+    }
+    if (transport.kind === 'starting') {
+      const { handle } = transport, id = generation
+      // The player rejects seek before its first playing acknowledgement.
+      // Keep this request on the same owner and retire it on stop/replacement.
+      handle.ready.then(() => {
+        task = task.then(() => {
+          if (!accepting || closed || id !== generation || transport.handle !== handle) return
+          handle.seek(0)
+          if (transport.kind === 'paused') handle.resume()
+        }).catch(error => {
+          if (!closed && id === generation) status = failure(error.message)
+        }).finally(draw)
+      }).catch(error => {
+        if (!closed && id === generation) { status = failure(error.message); draw() }
+      })
+      return
+    }
     if (transport.kind === 'playing' || transport.kind === 'paused') {
       transport.handle.seek(0)
       if (transport.kind === 'paused') transport.handle.resume()

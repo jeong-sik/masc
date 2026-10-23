@@ -1430,7 +1430,8 @@ end of the document (or the enabled loop range). If repetition is enabled,
 that temporary cursor-to-end window repeats; saved loop locators stay intact.
 The cursor must be inside the active range. Space pauses/resumes the current
 audition; `0` restarts its actual start, and `:seek` accepts positions inside
-that audition window. Imported MIDI keeps its selected pattern and native
+that audition window. `0` retains that start while preparing or opening the
+player too; stop cancels an unfinished restart. Imported MIDI keeps its selected pattern and native
 PPQ/SMPTE timing. MIDI output reconstructs the entry state through the existing
 region player; FluidSynth and VST retain the complete source render and play
 its PCM window, including pre-cut pedal and instrument history.

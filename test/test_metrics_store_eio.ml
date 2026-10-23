@@ -31,6 +31,12 @@ let with_temp_masc_dir f =
     rm_rf base;
     raise e
 
+let record_ok config metric =
+  match Metrics_store_eio.record config metric with
+  | Ok Metrics_store_eio.Written -> ()
+  | Ok Enqueued -> Metrics_store_eio.flush_pending ()
+  | Error error -> failwith (Metrics_store_eio.record_error_to_string error)
+
 let test_create_metric () =
   let metric = Metrics_store_eio.create_metric
     ~agent_id:"claude"
@@ -74,7 +80,7 @@ let test_record_and_get () =
       ()
     in
     let completed = Metrics_store_eio.complete_metric metric ~success:true () in
-    Metrics_store_eio.record config completed;
+    record_ok config completed;
 
     (* Get recent metrics *)
     let recent = read_ok (Metrics_store_eio.get_recent config ~agent_id:"claude" ~days:1) in
@@ -97,7 +103,7 @@ let test_calculate_agent_metrics () =
       in
       let success = (i mod 2 = 0) in  (* Alternate success/fail *)
       let completed = Metrics_store_eio.complete_metric metric ~success () in
-      Metrics_store_eio.record config completed
+      record_ok config completed
     done;
 
     (* Calculate aggregated metrics *)
@@ -124,7 +130,7 @@ let test_get_all_agents () =
         ()
       in
       let completed = Metrics_store_eio.complete_metric metric ~success:true () in
-      Metrics_store_eio.record config completed
+      record_ok config completed
     ) agents;
 
     (* Get all agents *)
@@ -143,7 +149,7 @@ let test_collaborators () =
       ()
     in
     let completed = Metrics_store_eio.complete_metric metric ~success:true () in
-    Metrics_store_eio.record config completed;
+    record_ok config completed;
 
     match read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1) with
     | Some metrics ->
@@ -163,7 +169,7 @@ let test_handoff_tracking () =
       ()
     in
     let c1 = Metrics_store_eio.complete_metric m1 ~success:true () in
-    Metrics_store_eio.record config c1;
+    record_ok config c1;
 
     let m2 = Metrics_store_eio.create_metric
       ~agent_id:"claude"
@@ -171,7 +177,7 @@ let test_handoff_tracking () =
       ()
     in
     let c2 = Metrics_store_eio.complete_metric m2 ~success:true ~handoff_to:"codex" () in
-    Metrics_store_eio.record config c2;
+    record_ok config c2;
 
     match read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1) with
     | Some metrics ->
@@ -185,12 +191,10 @@ let test_source_observations () =
   with_temp_masc_dir (fun config ->
     assert (read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:"absent" ~days:1) = None);
     let metric = Metrics_store_eio.create_metric ~agent_id:"Exact" ~task_id:"observed" () in
-    Metrics_store_eio.record config metric;
+    record_ok config metric;
     assert (Option.is_some (read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:"Exact" ~days:1)));
     assert (read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:" Exact " ~days:1) = None);
-    (match Metrics_store_eio.get_recent config ~agent_id:"../Exact" ~days:1 with
-     | Error (Metrics_store_eio.Invalid_agent_id _) -> ()
-     | Error _ | Ok _ -> failwith "path identity was accepted");
+    assert (read_ok (Metrics_store_eio.get_recent config ~agent_id:"../Exact" ~days:1) = []);
     let dir = Metrics_store_eio.agent_metrics_dir config "Exact" in
     let file = Filename.concat dir "corrupt.jsonl" in
     Fs_compat.save_file file "not-json\n";
@@ -208,6 +212,59 @@ let test_source_observations () =
      | Error (Metrics_store_eio.Source_unavailable _) -> ()
      | Error _ | Ok _ -> failwith "unreadable captured file became absence");
     Unix.unlink file)
+
+let test_exact_storage_identity () =
+  with_temp_masc_dir (fun config ->
+    let names = ["team/agent"; "Exact"; "exact"; " Exact "; "../outside";
+      "/absolute/name"; "한글/에이전트"; "é"; "e\204\129"; String.make 1024 'x'; "nul\000name"] in
+    List.iter (fun agent_id ->
+      record_ok config (Metrics_store_eio.create_metric ~agent_id ~task_id:"real-record" ());
+      let rows = read_ok (Metrics_store_eio.get_recent config ~agent_id ~days:1) in
+      assert (List.length rows = 1);
+      assert (List.for_all (fun (row : Metrics_store_eio.task_metric) -> row.agent_id = agent_id) rows);
+      assert (Filename.dirname (Metrics_store_eio.agent_metrics_dir config agent_id)
+        = Filename.concat (Workspace.masc_dir config) "metrics")
+    ) names;
+    assert (read_ok (Metrics_store_eio.get_all_agents config) = List.sort_uniq String.compare names);
+    let identity = Filename.concat (Metrics_store_eio.agent_metrics_dir config "Exact") "identity.json" in
+    let corrupt = "{\"schema\":\"masc.agent-metric-identity/v1\",\"agent_id\":\"Other\"}\n" in
+    Fs_compat.save_file identity corrupt;
+    (match Metrics_store_eio.get_recent config ~agent_id:"Exact" ~days:1 with
+     | Error (Metrics_store_eio.Source_unavailable _) -> ()
+     | Error _ | Ok _ -> failwith "foreign identity binding became success");
+    (match Metrics_store_eio.record config (Metrics_store_eio.create_metric ~agent_id:"Exact" ~task_id:"must-not-append" ()) with
+     | Error (Metrics_store_eio.Metric_store_failure _) -> ()
+     | Error _ | Ok _ -> failwith "conflicting binding was overwritten");
+    assert (Fs_compat.load_file identity = corrupt))
+
+let test_unbound_store_is_not_adopted () =
+  with_temp_masc_dir (fun config ->
+    let metrics_root = Filename.concat (Workspace.masc_dir config) "metrics" in
+    Fs_compat.mkdir_p (Filename.concat metrics_root "unbound-agent");
+    (match Metrics_store_eio.get_recent config ~agent_id:"unbound-agent" ~days:1 with
+     | Error (Metrics_store_eio.Source_unavailable _) -> ()
+     | Error _ | Ok _ -> failwith "unbound nonempty store became absence");
+    (match Metrics_store_eio.record config (Metrics_store_eio.create_metric ~agent_id:"unbound-agent" ~task_id:"task" ()) with
+     | Error (Metrics_store_eio.Metric_store_failure _) -> ()
+     | Error _ | Ok _ -> failwith "unbound nonempty store was adopted");
+    assert (not (Fs_compat.file_exists (Filename.concat metrics_root "store.json"))))
+
+let test_concurrent_first_records () =
+  with_temp_masc_dir (fun config ->
+    let agent_id = "concurrent/agent" in
+    let record task_id () =
+      record_ok config (Metrics_store_eio.create_metric ~agent_id ~task_id ()) in
+    Eio.Fiber.both (record "first") (record "second");
+    let rows = read_ok (Metrics_store_eio.get_recent config ~agent_id ~days:1) in
+    assert (List.sort String.compare (List.map (fun (row : Metrics_store_eio.task_metric) -> row.task_id) rows)
+      = ["first"; "second"]);
+    assert (read_ok (Metrics_store_eio.get_all_agents config) = [agent_id]);
+    let path = Filename.concat (Metrics_store_eio.agent_metrics_dir config agent_id) "identity.json" in
+    Fs_compat.save_file path "";
+    (match Metrics_store_eio.record config (Metrics_store_eio.create_metric ~agent_id ~task_id:"rejected" ()) with
+     | Error (Metrics_store_eio.Metric_store_failure _) -> ()
+     | Error _ | Ok _ -> failwith "an empty existing binding was adopted");
+    assert (Fs_compat.load_file path = ""))
 
 let test_generate_id () =
   let ids = List.init 128 (fun _ -> Metrics_store_eio.generate_id ()) in
@@ -249,6 +306,9 @@ let () =
   test_collaborators ();
   test_handoff_tracking ();
   test_source_observations ();
+  test_exact_storage_identity ();
+  test_unbound_store_is_not_adopted ();
+  test_concurrent_first_records ();
   test_generate_id ();
   test_filter_recent_month_filenames ();
   print_endline "\n✅ All Metrics_store_eio tests passed!\n"

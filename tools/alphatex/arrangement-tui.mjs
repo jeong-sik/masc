@@ -562,7 +562,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         const bindings = (route.portBindings ?? []).filter(binding => binding.asset === asset).map(({ port, destination }) => ({ port, destination }))
         const midiOutput = document.kind === 'midi-source' ? route.midiOutput : bindings.find(binding => binding.port === 0)?.destination ?? route.midiOutput
         const edited = await viewSequencer({ initialDocument: document, root: join(sourceRoot, 'phrases'),
-          embedded: true, signal: controller.signal, pattern: pattern ?? (clip?.asset === asset ? clip.pattern : undefined),
+          embedded: true, signal: controller.signal, pattern: pattern ?? (clip?.asset === asset ? clip?.pattern : undefined),
           output: midiOutput === undefined && !bindings.length ? route.output : undefined, midiOutput,
           initialPortBindings: document.kind === 'midi-source' ? bindings : [], stateDirectory })
         if (!accepting || controller.signal.aborted || generation !== expected || editor.project !== project || !edited?.changed) return

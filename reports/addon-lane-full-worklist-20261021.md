@@ -14,7 +14,7 @@
 | 원래 범위 | 영속 Task | 이어서 구현·검증할 실제 경계 |
 | --- | --- | --- |
 | E04–E05 | task-2523 | Required Judge/Board 서비스 의무·승계, 원래 per-attempt callback과 durable 후보를 유지하는 worker 실행 |
-| E06 | task-2524 | Native Stack #45472의 Task worker/endpoint 및 원본·dispatch·판정·host commit 복구 #45573 구현 중. exact8d4e run39940095424는 fixture Verification alias와 owner warning4로 aggregate compile 실패, 선택5 suite 모두 미실행. alias 수리9ede4d 및 남은 owner 수리의 독립 리뷰·실행 필요. Goal proof는 기존 경로이며 전체 E06 완료 아님. |
+| E06 | task-2524 | Native Stack #45472의 Task worker/endpoint 및 원본·dispatch·판정·host commit 복구 #45573 구현 중. exact8d4e run39940095424는 fixture Verification alias와 owner warning4로 aggregate compile 실패, 선택5 suite 모두 미실행. 두 차단 오류를 수리한 adff97c4 독립 SOURCE PASS; 선택5 suite run39942467140 요청, 실행 결과 미확인. Goal proof는 기존 경로이며 전체 E06 완료 아님. |
 | E03 후속 | task-2525 | history 용량·실패 descent, continuity/working-context/maintenance 목적과 실제 Keeper 기억 연속성 |
 | E09 | task-2526 | Realtime 세션 보존·실제 Keeper 활동 응답5파일 수리 #45448 main 병합. 최초 P2 FAIL·수리 뒤 독립 SOURCE PASS·parser5 보존. 선택 실행은 compile 실패로 미실행. TTS/STT/player/device의 Addon 추출·실제 입출력/해제 기준은 그대로 남음 |
 | E10–E11 | task-2527 | Connector polling/socket/cursor와 Search fallback/cache/cancel의 실제 실행; host credential·송신 권한 보존 |
@@ -147,7 +147,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | #45095 원래16층과 terminal-unknown source 수리 #45451이 main 병합됨. checkpoint·absorption·Memory lineage·pending 전체 기준 유지. actual unknown 뒤 새 UUID/provider를 만들지 않는 독립 SOURCE PASS; 후속 selected 회귀는 compile 실패로 미실행이며 Keeper 실제 기억 연속성·운영 설치는 남음 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | Required attestation+#45365 original+#45369 durable owner는 main. production prepare/retain caller 검색상 없음. 기존 범위의 근거와 원래 완료 기준은 유지. | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | Required registry는 Board에도 기반. Board-specific original/worker bridge는 직접 확인 안 함. 기존 범위의 근거와 원래 완료 기준은 유지. | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
-| E06 | Verifier 실행의 Addon 경계 검토·추출 | Native Stack #45472의 Task worker/endpoint 및 원본·dispatch·판정·host commit 복구 #45573 구현 중. exact8d4e run39940095424는 fixture Verification alias와 owner warning4로 aggregate compile 실패, 선택5 suite 모두 미실행. alias 수리9ede4d 및 남은 owner 수리의 독립 리뷰·실행 필요. Goal proof는 기존 경로이며 전체 E06 완료 아님. | 증거 검증과 Goal/Task 최종 전이를 분리하고 위조·이전 실행 증거 오적용 없이 재개 |
+| E06 | Verifier 실행의 Addon 경계 검토·추출 | Native Stack #45472의 Task worker/endpoint 및 원본·dispatch·판정·host commit 복구 #45573 구현 중. exact8d4e run39940095424는 fixture Verification alias와 owner warning4로 aggregate compile 실패, 선택5 suite 모두 미실행. 두 차단 오류를 수리한 adff97c4 독립 SOURCE PASS; 선택5 suite run39942467140 요청, 실행 결과 미확인. Goal proof는 기존 경로이며 전체 E06 완료 아님. | 증거 검증과 Goal/Task 최종 전이를 분리하고 위조·이전 실행 증거 오적용 없이 재개 |
 | E07 | Fusion compute/results/report의 실제 조합 사용 검증 | 패키지 존재 | native/container/provider 계산·원래 run·immutable 결과 연결·명시적 전달·실제 Agent 읽기 확인 |
 | E08 | MSX/DOS의 설치·상태 복원·실제 게임 사용 검증 | 별도 worker·image 검증 있음 | `msx-machine`·`dos-machine`·`dos-world`의 설치 On/Off/교체·명시적 checkpoint 복원·기존 media/save 보존과 실제 화면/입력 확인 |
 | E09 | Voice·VST 실행 소유 경계 분리 | Realtime bridge 설정 소실 시 원래 모드·ID·voice·턴 이력을 Suspended로 보존하고 Keeper 응답을 typed Active로 계산하는5파일 수리 #45448 main 병합 확인. 최초 P2 FAIL·수리 뒤 독립 SOURCE PASS·parser5 보존. 선택 실행은 공유 Runtime compile 오류로 미실행. TTS/STT/player/device Addon 추출·실제 입출력/해제는 남음 | TTS/STT/realtime/session/player/device 수명과 결과·오류를 분리; 실제 입출력과 해제 정리 확인 |

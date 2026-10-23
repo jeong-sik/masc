@@ -107,6 +107,8 @@ let test_a_tab_that_left_the_listing_loses_its_number () =
     check string (Printf.sprintf "tab %d" id) "browser tab is no longer present"
       (before_effect "a tab that left" (dispatch peer Live.Page_read (obj ["tabId",`Int id]))))
     [2; 3];
+  ignore (before_effect "an unsupported browser window" (dispatch peer Live.Page_act
+    (Lane.Action.to_json (Lane.Action.Open_window "https://example.test/window"))));
   check (list string) "no script ran" [] !ran
 
 (* What ego threw reaches the Keeper cut, where a character starts. *)

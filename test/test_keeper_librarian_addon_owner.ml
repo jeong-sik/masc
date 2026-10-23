@@ -344,6 +344,28 @@ let test_actual_happy_path ()=with_fixture (fun ~sw:_ fixture ->
   let before=List.map (fun (_,capture) -> Capture.request capture |> get |> Lane_addon_exact.request_to_json)
     (observed_originals fixture) in
   check bool "the actual owner retains its complete immutable original" true (before<>[]);
+  let record,capture=List.hd (observed_originals fixture) in
+  let history_input={(Capture.input capture) with Keeper_librarian.messages=[Agent_core.Types.user_msg "Original history"]} in
+  let retained_input=Keeper_librarian_input_capture.to_json history_input in
+  check bool "the shared data codec retains nonempty history" true
+    (Keeper_librarian_input_capture.of_json retained_input=Ok history_input);
+  let request=match record.Owner.request with
+    | `Assoc fields -> `Assoc (("input_text",`String (Yojson.Safe.to_string retained_input))
+        ::List.remove_assoc "input_text" fields)
+    | _ -> fail "the actual retained capture must be an object" in
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let restored=io (fun () ->
+    let store=Store.create ~root:(Filename.concat fixture.base_path "history-purpose-check") in
+    Owner.retain ~store ~scope:record.scope ~request_id:record.request_id
+      ~installation_id:record.installation_id ~package_id:record.package_id
+      ~tool:record.tool ~request |> owned;
+    let retained=match Owner.load ~store ~scope:record.scope ~request_id:record.request_id |> owned with
+      | Some retained -> retained | None -> fail "the altered history capture was not retained" in
+    Capture.restore ~owner ~load_parent:(fun ~request_id:_ -> Ok (Capture.batch capture)) retained) in
+  check bool "complete data restoration grants no admission authority over history" true
+    (match restored with Error detail ->
+       detail="Explicit-candidate execution cannot replace another Librarian pass's original input"
+     | Ok _ -> false);
   let original_limit=Env_config.KeeperMemoryOs.facts_max_bytes () in
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key
     (Some (if original_limit=1 then "2" else "1")) (fun () ->

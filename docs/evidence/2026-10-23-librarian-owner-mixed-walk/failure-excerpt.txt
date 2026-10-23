@@ -1,0 +1,9 @@
+test suite	Test	2026-10-23T00:44:27.1722616Z │ [FAIL]        production          4   actual capacity plus quota preserv...  │
+test suite	Test	2026-10-23T00:44:27.1723096Z └──────────────────────────────────────────────────────────────────────────────┘
+test suite	Test	2026-10-23T00:44:27.1723447Z File "test/test_keeper_librarian_addon_owner.ml", line 459, character 2:
+test suite	Test	2026-10-23T00:44:27.1723830Z FAIL whole-walk production classifier rejects recursive partition
+test suite	Test	2026-10-23T00:44:27.1724066Z
+test suite	Test	2026-10-23T00:44:27.1724140Z    Expected: `false'
+test suite	Test	2026-10-23T00:44:27.1724315Z    Received: `true'
+test suite	Test	2026-10-23T00:44:27.1724420Z
+test suite	Test	2026-10-23T00:44:27.1724670Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19

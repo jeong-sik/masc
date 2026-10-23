@@ -143,58 +143,16 @@ let destination_of_json json =
   let+ configuration_revision=nonblank (value "configuration_revision" fields) in
   {installation_id;package_id;tool;source_revision;configuration_revision}
 
-let goal_of_json json =
-  let* all=match json with `Assoc fields -> Ok fields | _ -> Error "Original goal context is not an object" in
-  let* status=nonblank (match List.assoc_opt "status" all with Some value -> value | None -> `Null) in
-  match status with
-  | "no_task" -> let+ _=object_fields ["status"] json in L.No_task
-  | "unavailable" ->
-    let* fields=object_fields ["task_id";"status";"detail"] json in
-    let* task_id=nonblank (value "task_id" fields) in
-    let+ detail=text (value "detail" fields) in L.Task_goals {task_id;criteria=Error detail}
-  | "available" ->
-    let* fields=object_fields ["task_id";"status";"goals"] json in
-    let* task_id=nonblank (value "task_id" fields) in
-    let+ goals=list (fun json ->
-      let* fields=object_fields ["goal_id";"phase";"criterion"] json in
-      let* goal_id=nonblank (value "goal_id" fields) in
-      let* phase=Goal_phase.of_yojson (value "phase" fields) in
-      let+ criterion=Goal_store.criterion_of_yojson (value "criterion" fields) in goal_id,phase,criterion)
-      (value "goals" fields) in L.Task_goals {task_id;criteria=Ok goals}
-  | _ -> Error "Unknown original goal-context status"
-let current_json = optional (fun (current:L.current_selection) ->
-  `Assoc ["facts",`List (List.map Types.fact_to_json current.facts)])
-let current_of_json = option (fun json ->
-  let* fields=object_fields ["facts"] json in
-  let+ facts=list (fun json -> Types.fact_of_json json |> wire) (value "facts" fields) in
-  ({L.facts}:L.current_selection))
-let input_json (input:L.input) = `Assoc [
-  "keeper_id",`String (Keeper_identity.Keeper_id.to_string input.keeper_id);
-  "keeper_instructions",`String input.keeper_instructions;"turn_ref",Ids.Turn_ref.to_yojson input.turn_ref;
-  "goal_context",L.goal_context_to_json input.goal_context;"current",current_json input.current;
-  "historical_task_contexts",Keeper_librarian_task_context.to_json input.historical_task_contexts;
-  "working_context",`Assoc ["sources",`List [];"previous",`Null;"unavailable",`List [];"execution_basis",`Null];
-  "messages",`List [];"tool_observations",`List [];"counterpart_observations",`List []]
+let input_json = Keeper_librarian_input_capture.to_json
 let check_pending_input (input:L.input) =
   if input.historical_task_contexts=[] && input.working_context=Keeper_librarian_context.empty
     && input.messages=[] && input.tool_observations=[] && input.counterpart_observations=[]
   then Ok () else Error "Explicit-candidate execution cannot replace another Librarian pass's original input"
 let input_of_json json =
-  let* fields=object_fields ["keeper_id";"keeper_instructions";"turn_ref";"goal_context";"current";
-    "historical_task_contexts";"working_context";"messages";"tool_observations";"counterpart_observations"] json in
-  let* keeper_name=nonblank (value "keeper_id" fields) in
-  let* keeper_id=match Keeper_identity.Keeper_id.of_string keeper_name with
-    | Some id when Keeper_identity.Keeper_id.to_string id=keeper_name -> Ok id
-    | Some _ | None -> Error "Original input Keeper ID is noncanonical" in
-  let* keeper_instructions=text (value "keeper_instructions" fields) in
-  let* turn_ref=Ids.Turn_ref.of_yojson (value "turn_ref" fields) in
-  let* goal_context=goal_of_json (value "goal_context" fields) in
-  let* current=current_of_json (value "current" fields) in
-  let input={L.keeper_id;keeper_instructions;turn_ref;goal_context;current;
-    historical_task_contexts=[];working_context=Keeper_librarian_context.empty;
-    messages=[];tool_observations=[];counterpart_observations=[]} in
+  let* input=Keeper_librarian_input_capture.of_json json in
+  let* ()=check_pending_input input in
   let* same=same_json json (input_json input) in
-  if same then Ok input else Error "Original pending-candidate input has extra evidence or noncanonical typed content"
+  if same then Ok input else Error "Original pending-candidate input has noncanonical typed content"
 
 let retirement_json = function
   | Judgment.Unavailable detail -> `Assoc ["kind",`String "unavailable";"detail",`String detail]

@@ -132,6 +132,26 @@ type final =
   | Not_allowed of { reason : string }
   | Request_id_reused
 
+type unknown_cause = Interrupted | Cut | Raised
+type retained_final =
+  | Retained_call of call_final
+  | Retained_unknown of unknown_cause
+  | Retained_not_allowed of { reason : string }
+  | Retained_request_id_reused
+
+let delivered = function
+  | Retained_call final -> Call_final final
+  | Retained_unknown (Interrupted | Cut | Raised) -> Outcome_unknown
+  | Retained_not_allowed {reason} -> Not_allowed {reason}
+  | Retained_request_id_reused -> Request_id_reused
+
+let cause_to_string = function Interrupted -> "interrupted" | Cut -> "cut" | Raised -> "raised"
+let cause_of_json = function
+  | `String "interrupted" -> Ok Interrupted
+  | `String "cut" -> Ok Cut
+  | `String "raised" -> Ok Raised
+  | _ -> Error "unknown Exact outcome requires interrupted, cut or raised cause"
+
 type lane_unavailable =
   | Lane_unconfigured
   | Lane_off
@@ -185,7 +205,7 @@ let final_to_json = function
 
 (* The retained record reads back only what this module wrote; anything else is
    an unreadable record, not a guess. *)
-let retained_final_of_json json =
+let worker_final_shape json =
   let field key = match json with `Assoc fields -> List.assoc_opt key fields | _ -> None in
   let text key = match field key with Some (`String value) -> Ok value | _ -> Error ("final " ^ key) in
   let* status = text "status" in
@@ -217,7 +237,7 @@ let retained_final_of_json json =
 
 let final_shape_of_json json =
   let* normalized = Lane_addon_action.canonical json in
-  let* final = retained_final_of_json normalized in
+  let* final = worker_final_shape normalized in
   let* encoded = Lane_addon_action.canonical (final_to_json final) in
   let* () = if encoded = normalized then Ok () else Error "invalid or unknown final result fields" in
   Ok final
@@ -229,6 +249,40 @@ let final_of_json ~schema json =
       let* output = Lane_addon_action.validate_input ~schema ~name:"model result" output in
       Ok (Call_final (Answered {output;slot;usage}))
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok final
+
+let retained_final_to_json = function
+  | Retained_unknown cause ->
+      `Assoc ["status", `String "outcome_unknown"; "cause", `String (cause_to_string cause)]
+  | (Retained_call _ | Retained_not_allowed _ | Retained_request_id_reused) as retained ->
+      final_to_json (delivered retained)
+
+let host_final_shape_of_json json =
+  let* normalized = Lane_addon_action.canonical json in
+  match normalized with
+  | `Assoc fields when List.assoc_opt "status" fields = Some (`String "outcome_unknown") ->
+      let* cause = match List.assoc_opt "cause" fields with
+        | Some cause -> cause_of_json cause
+        | None -> Error "unknown Exact outcome has no host cause" in
+      let retained = Retained_unknown cause in
+      let* encoded = Lane_addon_action.canonical (retained_final_to_json retained) in
+      if Yojson.Safe.equal encoded normalized then Ok retained
+      else Error "invalid or unknown retained final fields"
+  | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      let* final = final_shape_of_json normalized in
+      (match final with
+       | Call_final final -> Ok (Retained_call final)
+       | Not_allowed {reason} -> Ok (Retained_not_allowed {reason})
+       | Request_id_reused -> Ok Retained_request_id_reused
+       | Outcome_unknown -> Error "unknown Exact outcome has no host cause")
+
+let retained_final_of_json ~schema json =
+  let* retained = host_final_shape_of_json json in
+  match retained with
+  | Retained_call (Answered {output;slot;usage}) ->
+      let* output = Lane_addon_action.validate_input ~schema ~name:"model result" output in
+      Ok (Retained_call (Answered {output;slot;usage}))
+  | Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+  | Retained_unknown (Interrupted | Cut | Raised) | Retained_not_allowed _ | Retained_request_id_reused -> Ok retained
 
 let not_final_to_json = function
   | Lane_unavailable Lane_unconfigured -> `Assoc [ "reason", `String "lane_unconfigured" ]
@@ -276,13 +330,63 @@ type dispatch_guard = unit -> (unit, string) result
 type runner = before_dispatch:dispatch_guard -> admission_class:Agent_core.Llm_provider.Admission_class.t ->
   lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
 
-(* One record per declaration and request: the request, its digest, every
-   attempt in order (an attempt with no outcome was started and never
-   finished) and the final result once there is one. *)
+type recorded_attempt =
+  | Started of string
+  | Deferred of not_final
+  | Completed_call of call_final
+  | Unknown_interrupted
+  | Unknown_cut
+  | Unknown_raised of string
+  | Delivery_refused of { reason : string }
+  | Reused
+
+let recorded_attempt_to_json = function
+  | Started incarnation -> `Assoc ["started", `String incarnation]
+  | Deferred reason -> not_final_to_json reason
+  | Completed_call final -> final_to_json (Call_final final)
+  | Unknown_interrupted -> retained_final_to_json (Retained_unknown Interrupted)
+  | Unknown_cut -> retained_final_to_json (Retained_unknown Cut)
+  | Unknown_raised text ->
+      `Assoc ["status", `String "outcome_unknown"; "cause", `String "raised"; "exception", `String text]
+  | Delivery_refused {reason} -> final_to_json (Not_allowed {reason})
+  | Reused -> final_to_json Request_id_reused
+
+let recorded_attempt_of_json json =
+  let* normalized = Lane_addon_action.canonical json in
+  let* attempt = match normalized with
+    | `Assoc ["started", `String incarnation]
+        when String.length incarnation = 32 && String.for_all (function
+          | '0'..'9' | 'a'..'f' -> true | _ -> false) incarnation -> Ok (Started incarnation)
+    | `Assoc fields when List.assoc_opt "status" fields = Some (`String "outcome_unknown") ->
+        let* cause = match List.assoc_opt "cause" fields with
+          | Some cause -> cause_of_json cause
+          | None -> Error "unknown Exact attempt has no host cause" in
+        (match cause, List.assoc_opt "exception" fields with
+         | Interrupted, None -> Ok Unknown_interrupted
+         | Cut, None -> Ok Unknown_cut
+         | Raised, Some (`String text) when String.trim text <> "" -> Ok (Unknown_raised text)
+         | (Interrupted | Cut), Some _ | Raised, (None | Some _) ->
+             Error "only a raised Exact attempt requires nonblank exception evidence")
+    | `Assoc fields when List.mem_assoc "status" fields ->
+        let* final = final_shape_of_json normalized in
+        (match final with
+         | Call_final final -> Ok (Completed_call final)
+         | Not_allowed {reason} -> Ok (Delivery_refused {reason})
+         | Request_id_reused -> Ok Reused
+         | Outcome_unknown -> Error "unknown Exact attempt has no host cause")
+    | `Assoc _ -> let* reason = not_final_of_json normalized in Ok (Deferred reason)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        Error "retained Exact attempt requires an outcome or incarnation marker" in
+  let* encoded = Lane_addon_action.canonical (recorded_attempt_to_json attempt) in
+  if Yojson.Safe.equal encoded normalized then Ok attempt
+  else Error "retained Exact attempt has unknown or inconsistent fields"
+
+(* Final wire values remain worker-shaped. The cause and raised text belong
+   to the typed attempt that established that final. *)
 type record =
   { digest : string
   ; request : Yojson.Safe.t
-  ; attempts : Yojson.Safe.t option list
+  ; attempts : recorded_attempt list
   ; final : final option
   }
 
@@ -292,7 +396,7 @@ let record_to_json ~declaration_id ~request_id record =
     ; "request_id", `String request_id
     ; "digest", `String record.digest
     ; "request", record.request
-    ; "attempts", `List (List.map (function None -> `Null | Some outcome -> outcome) record.attempts)
+    ; "attempts", `List (List.map recorded_attempt_to_json record.attempts)
     ; "final", (match record.final with None -> `Null | Some final -> final_to_json final)
     ]
 
@@ -304,13 +408,15 @@ let record_of_json = function
     let* request = Option.to_result ~none:"record request" (List.assoc_opt "request" fields) in
     let* attempts =
       match List.assoc_opt "attempts" fields with
-      | Some (`List values) -> Ok (List.map (function `Null -> None | outcome -> Some outcome) values)
+      | Some (`List values) -> List.fold_right (fun value result ->
+          let* attempt = recorded_attempt_of_json value in
+          let* rest = result in Ok (attempt :: rest)) values (Ok [])
       | _ -> Error "record attempts"
     in
     let* final =
       match List.assoc_opt "final" fields with
       | Some `Null -> Ok None
-      | Some final -> retained_final_of_json final |> Result.map Option.some
+      | Some final -> final_shape_of_json final |> Result.map Option.some
       | None -> Error "record final"
     in
     Ok { digest; request; attempts; final }
@@ -332,7 +438,7 @@ let bound_record ~declaration_id request wire =
       else Error "retained Exact record differs from the original request or digest" in
     Ok record
 
-type retained_observation = Retained_absent | Retained_open | Retained_terminal of final
+type retained_observation = Retained_absent | Retained_open | Retained_terminal of retained_final
 let original_schema ~declaration_id ~schema request =
   let* _ = Runtime_schema.addon_lane ~declaration_id ~output:request.output in
   let* schema = Lane_addon_action.canonical schema in
@@ -344,30 +450,52 @@ let original_schema ~declaration_id ~schema request =
   Ok schema
 
 let validate_record ~schema record =
-    let decode_final = match schema with
-      | None -> final_shape_of_json
-      | Some schema -> final_of_json ~schema in
-    let attempt = function
-      | None -> Ok ()
-      | Some (`Assoc fields as json) ->
-        let* outcome = match List.assoc_opt "exception" fields with
-          | None -> Ok json
-          | Some (`String detail) when String.trim detail<>"" ->
-            let remaining=List.remove_assoc "exception" fields in
-            if Yojson.Safe.equal (`Assoc remaining) (final_to_json Outcome_unknown) then Ok (`Assoc remaining)
-            else Error "only an unknown Exact outcome can retain exception evidence"
-          | Some _ -> Error "invalid retained Exact exception evidence" in
-        (match List.assoc_opt "status" fields,List.assoc_opt "reason" fields with
-         | Some _,(None | Some _) -> let* _ = decode_final outcome in Ok ()
-         | None,Some _ -> let* _ = not_final_of_json outcome in Ok ()
-         | None,None -> Error "invalid retained Exact attempt outcome")
-      | Some _ -> Error "retained Exact attempt must be an outcome object or started marker" in
-    let* () = List.fold_left (fun state value -> let* () = state in attempt value) (Ok ()) record.attempts in
-    match record.final with
-    | None -> Ok Retained_open
-    | Some final ->
+  let decode_final = match schema with
+    | None -> final_shape_of_json
+    | Some schema -> final_of_json ~schema in
+  let rec deferred_only = function
+    | [] -> Ok ()
+    | Deferred _ :: rest -> deferred_only rest
+    | (Started _ | Completed_call _ | Unknown_interrupted | Unknown_cut | Unknown_raised _
+      | Delivery_refused _ | Reused) :: _ -> Error "original Exact request has inconsistent attempt order" in
+  let retained = function
+    | Completed_call final -> Ok (Retained_call final)
+    | Unknown_interrupted -> Ok (Retained_unknown Interrupted)
+    | Unknown_cut -> Ok (Retained_unknown Cut)
+    | Unknown_raised _ -> Ok (Retained_unknown Raised)
+    | Delivery_refused {reason} -> Ok (Retained_not_allowed {reason})
+    | Reused -> Ok Retained_request_id_reused
+    | Started _ | Deferred _ -> Error "original Exact final has no completed determining attempt" in
+  let rec without_delivery_refusals = function
+    | Delivery_refused _ :: rest -> without_delivery_refusals rest
+    | ([] | (Started _ | Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut
+        | Unknown_raised _ | Reused) :: _) as attempts -> attempts in
+  match record.final with
+  | None ->
+      let* () = match List.rev record.attempts with
+        | Started _ :: earlier -> deferred_only earlier
+        | ([] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut | Unknown_raised _
+            | Delivery_refused _ | Reused) :: _) as attempts -> deferred_only attempts in
+      Ok Retained_open
+  | Some final ->
       let* final = decode_final (final_to_json final) in
-      Ok (Retained_terminal final)
+      let attempts = match final with
+        | Call_final _ | Outcome_unknown | Request_id_reused ->
+            without_delivery_refusals (List.rev record.attempts)
+        | Not_allowed _ -> List.rev record.attempts in
+      let* observed = match attempts, final with
+        | (Completed_call _ | Unknown_interrupted | Unknown_cut | Unknown_raised _
+          | Delivery_refused _ | Reused as decisive) :: earlier, _ ->
+            let* () = deferred_only earlier in retained decisive
+        | ([], Not_allowed {reason}) | (Deferred _ :: _, Not_allowed {reason}) ->
+            let* () = deferred_only attempts in Ok (Retained_not_allowed {reason})
+        | [], (Call_final _ | Outcome_unknown | Request_id_reused)
+        | (Started _ :: _), _ | (Deferred _ :: _), (Call_final _ | Outcome_unknown | Request_id_reused) ->
+            Error "original Exact final has no completed determining attempt" in
+      let* actual = Lane_addon_action.canonical (final_to_json (delivered observed)) in
+      let* expected = Lane_addon_action.canonical (final_to_json final) in
+      if Yojson.Safe.equal actual expected then Ok (Retained_terminal observed)
+      else Error "original Exact final differs from its determining attempt"
 
 (* The reads [run] applies to a retained record before it reuses it, with the
    declaration and the original request the record names. *)
@@ -502,9 +630,10 @@ let selected_proof ~attempt_ordinal proofs =
 let proof_matches_attempt record (ordinal,_schema,execution) =
   match List.nth_opt record.attempts (ordinal-1) with
   | None -> Error "original execution proof has no matching started attempt"
-  | Some None -> Ok ()
-  | Some (Some original) ->
-    let* original=Lane_addon_action.canonical original in
+  | Some (Started _) -> Ok ()
+  | Some (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut | Unknown_raised _
+    | Delivery_refused _ | Reused as original) ->
+    let* original=Lane_addon_action.canonical (recorded_attempt_to_json original) in
     let* outcome=Lane_addon_action.canonical (outcome_to_json execution.outcome) in
     let* ()=if Yojson.Safe.equal original outcome then Ok ()
       else Error "original attempt differs from its retained execution proof" in
@@ -602,6 +731,19 @@ let claim key =
 
 let release key = Mutex.protect in_flight_lock (fun () -> Hashtbl.remove in_flight key)
 
+(* Created once before the first started marker, shared by all roots and
+   domains in this process. The lock guards only this short initialization;
+   no Eio operation or caller-supplied function runs under it. *)
+let incarnation_lock = Mutex.create ()
+let process_incarnation = ref None
+let incarnation () = Mutex.protect incarnation_lock (fun () ->
+  match !process_incarnation with
+  | Some incarnation -> incarnation
+  | None ->
+      let incarnation = Random_id.hex ~bytes:16 in
+      process_incarnation := Some incarnation;
+      incarnation)
+
 type output_validator = Yojson.Safe.t -> (unit, string) result
 type execution_scope = (unit -> (attempt, string) result) -> (attempt, string) result
 type request_authorization = {
@@ -651,26 +793,29 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
       let finish prior outcome =
         match outcome with
         | Call_ended final ->
-            {prior with attempts=prior.attempts @ [Some (final_to_json (Call_final final))];
+            {prior with attempts=prior.attempts @ [Completed_call final];
               final=Some (Call_final final)}
         | Call_refused refusal ->
-            {prior with attempts=prior.attempts @ [Some (not_final_to_json (Provider_refused refusal))]} in
+            {prior with attempts=prior.attempts @ [Deferred (Provider_refused refusal)]} in
       let* previous, recovered = match previous.final with
-        | None when List.exists Option.is_none previous.attempts ->
+        | None ->
             (match List.rev previous.attempts with
-             | None :: earlier when not (List.exists Option.is_none earlier) ->
+             | Started started_by :: earlier ->
                let attempt_ordinal=List.length previous.attempts in
                (match selected_proof ~attempt_ordinal proofs with
                 | None ->
-                  let unknown={previous with final=Some Outcome_unknown} in
+                  let cause = if String.equal started_by (incarnation ())
+                    then Unknown_cut else Unknown_interrupted in
+                  let unknown={previous with attempts=List.rev earlier @ [cause]; final=Some Outcome_unknown} in
                   let* ()=save unknown in Ok (unknown,None)
                 | Some (_original_schema, execution) ->
                   Eio.Cancel.protect (fun () ->
                     let finished=finish {previous with attempts=List.rev earlier} execution.outcome in
                     let* ()=save finished in
                     Ok (finished,Some (attempt_of_outcome execution.outcome))))
-             | [] | Some _ :: _ | None :: _ -> Error "original Exact request has inconsistent started attempts")
-        | None | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused) -> Ok (previous,None) in
+             | [] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut | Unknown_raised _
+                 | Delivery_refused _ | Reused) :: _ -> Ok (previous,None))
+        | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused) -> Ok (previous,None) in
       let deny reason =
         let refusal = Not_allowed {reason} in
         let record = match previous.final with
@@ -678,7 +823,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
           | Some (Not_allowed _) -> previous
           | Some (Call_final _ | Outcome_unknown | Request_id_reused) ->
               (* A selection change cannot erase the original provider result. *)
-              {previous with attempts = previous.attempts @ [Some (final_to_json refusal)]} in
+              {previous with attempts = previous.attempts @ [Delivery_refused {reason}]} in
         let* () = save record in
         Ok (Final refusal) in
       match List.find_opt
@@ -716,21 +861,22 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
           match runner ~before_dispatch:authorization.before_dispatch ~admission_class:authorization.admission_class ~lane_key ~schema request with
           | Error unavailable ->
             let reason = Lane_unavailable unavailable in
-            let* () = save {previous with attempts = previous.attempts @ [Some (not_final_to_json reason)]} in
+            let* () = save {previous with attempts = previous.attempts @ [Deferred reason]} in
             Ok (Not_final reason)
           | Ok call ->
-            let* () = save {previous with attempts = previous.attempts @ [None]} in
+            let* () = save {previous with attempts = previous.attempts @ [Started (incarnation ())]} in
             (* The save yields. A retiring incarnation must not start a call
                after it returns. A cancelled started attempt remains unknown. *)
             Eio.Fiber.check ();
-            let attempt, raised, execution =
+            let attempt, recorded, execution =
               match call ~validate with
-              | execution -> attempt_of_outcome execution.outcome, None, Some execution
+              | execution ->
+                  let recorded = match execution.outcome with
+                    | Call_ended final -> Completed_call final
+                    | Call_refused refusal -> Deferred (Provider_refused refusal) in
+                  attempt_of_outcome execution.outcome, recorded, Some execution
               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-              | exception exn -> Final Outcome_unknown, Some (Printexc.to_string exn), None in
-            let with_raised = function
-              | `Assoc fields -> `Assoc (fields @ match raised with None -> [] | Some text -> ["exception", `String text])
-              | json -> json in
+              | exception exn -> Final Outcome_unknown, Unknown_raised (Printexc.to_string exn), None in
             Eio.Cancel.protect (fun () ->
               let* () = match execution with
                 | None -> Ok ()
@@ -739,8 +885,8 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                       ~attempt_ordinal:(List.length previous.attempts + 1) execution) in
               let finished = match attempt with
                 | Final final ->
-                    {previous with attempts = previous.attempts @ [Some (with_raised (final_to_json final))]; final = Some final}
-                | Not_final reason ->
-                    {previous with attempts = previous.attempts @ [Some (not_final_to_json reason)]} in
+                    {previous with attempts = previous.attempts @ [recorded]; final = Some final}
+                | Not_final _ ->
+                    {previous with attempts = previous.attempts @ [recorded]} in
               let* () = save finished in
               Ok attempt)))

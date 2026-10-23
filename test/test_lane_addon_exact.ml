@@ -111,6 +111,13 @@ let attempts store id =
   | Some json -> Yojson.Safe.Util.(json |> member "attempts" |> to_list)
   | None -> []
 
+let other_process_marker = `Assoc ["started", `String (String.make 32 '0')]
+let one_started_marker = function
+  | [`Assoc ["started", `String incarnation]] -> String.length incarnation = 32
+  | _ -> false
+let observe store request = Eio_unix.run_in_systhread (fun () ->
+  Exact.observe_retained ~store ~declaration_id ~schema request)
+
 (* The run republishes its record while an observer reads it (#45134). The
    seam republishes a larger record once, after the reader opened the old one
    and before it confirms the path still names that file. *)
@@ -144,7 +151,7 @@ let test_retained_before_the_call_and_replayed () =
      | [ (lane_key, Ok (Some json)) ] ->
        check string "the call runs on the installation's add-on lane" "quiz/author" lane_key;
        check bool "the request was retained with a started attempt before the call" true
-         (Yojson.Safe.Util.(json |> member "attempts" |> to_list) = [ `Null ])
+         (one_started_marker Yojson.Safe.Util.(json |> member "attempts" |> to_list))
      | _ -> fail "the runner saw no retained request");
     let restarted = Store.create ~root in
     check bool "after a restart the retained result is delivered" true
@@ -205,18 +212,24 @@ let test_a_started_attempt_without_outcome_is_unknown () =
          (`Assoc
             [ "declaration_id", `String declaration_id; "request_id", `String "r4"
             ; "digest", `String (Exact.digest pending); "request", Exact.request_to_json pending
-            ; "attempts", `List [ `Null ]; "final", `Null ]));
+            ; "attempts", `List [ other_process_marker ]; "final", `Null ]));
     let runner, sends, _ = counting_runner store (ref []) in
     check bool "the host cannot tell whether the provider got it" true
       (run_request store runner pending = Exact.Final Exact.Outcome_unknown);
     check int "so it does not send again" 0 !sends;
-    check bool "and the verdict is retained" true (run_request store runner pending = Exact.Final Exact.Outcome_unknown))
+    check bool "and the verdict is retained" true (run_request store runner pending = Exact.Final Exact.Outcome_unknown);
+    check bool "a different server incarnation is interrupted" true
+      (require (observe store pending)=Exact.Retained_terminal (Exact.Retained_unknown Exact.Interrupted));
+    check bool "recovery replaces the start with its cause" true
+      (attempts store pending.request_id=[Exact.retained_final_to_json (Exact.Retained_unknown Exact.Interrupted)]))
 
 let test_an_exception_ends_the_request_as_unknown () =
   with_root (fun root ->
     let store = Store.create ~root in
     let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ -> failwith "connection reset after send") in
     check bool "an exception is Outcome_unknown" true (run_request store runner (request "r5") = Exact.Final Exact.Outcome_unknown);
+    check bool "the host preserves the raised cause" true
+      (require (observe store (request "r5"))=Exact.Retained_terminal (Exact.Retained_unknown Exact.Raised));
     match attempts store "r5" with
     | [ attempt ] ->
       check bool "its text stays in the attempt" true
@@ -284,7 +297,7 @@ let test_a_request_in_flight_is_not_run_twice () =
         other_root := Some (run_request elsewhere answering (request "r7"));
         Eio.Promise.resolve release ());
     check bool "the second run waits" true (!second = Some (Exact.Not_final Exact.Attempt_in_progress));
-    check bool "and leaves the started attempt alone" true (!during = [ `Null ]);
+    check bool "and leaves the started attempt alone" true (one_started_marker !during);
     check bool "the first run answers" true (Option.fold ~none:false ~some:(answered_with question) !first);
     check bool "the same ids under another root run" true (Option.fold ~none:false ~some:(answered_with question) !other_root))
 
@@ -295,13 +308,15 @@ let test_a_cancelled_call_leaves_its_attempt_started () =
     (match Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:cancelled (request "r10") with
      | _ -> fail "a cancellation must reach the caller"
      | exception Eio.Cancel.Cancelled _ -> ());
-    check bool "the started attempt stays" true (attempts store "r10" = [ `Null ]);
+    check bool "the started attempt stays" true (one_started_marker (attempts store "r10"));
     let runner, sends, _ = counting_runner store (ref []) in
     check bool "disabled output refuses delivery of an unresolved attempt" true
       (match require (Exact.run ~authorize_request ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner (request "r10")) with
        | Exact.Final (Exact.Not_allowed _) -> true | _ -> false);
     check bool "the next run reads it as unknown, so the claim was released" true
       (run_request store runner (request "r10") = Exact.Final Exact.Outcome_unknown);
+    check bool "recovery in this process retains cut even after a delivery denial" true
+      (require (observe store (request "r10"))=Exact.Retained_terminal (Exact.Retained_unknown Exact.Cut));
     check int "without a send" 0 !sends)
 
 let test_a_retained_answer_is_checked_against_the_schema_declared_now () =
@@ -341,8 +356,17 @@ let test_confirmed_proof_recovers_lost_outcome_publication () =
     let result = Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:locking (request "r12") in
     Unix.chmod directory 0o700;
     check bool "the run reports the failed write" true (Result.is_error result);
+    let wire=Option.get (require (Store.load_exact_request store ~declaration_id ~request_id:"r12")) in
+    let from_another_process=match wire with
+      | `Assoc fields -> `Assoc (("attempts",`List [other_process_marker])::List.remove_assoc "attempts" fields)
+      | _ -> fail "original Exact record expected" in
+    require (Store.save_exact_request store ~declaration_id ~request_id:"r12" from_another_process);
     let runner, sends, _ = counting_runner store (ref []) in
     check bool "the original answer is published without another send" true (answered_with question (run_request store runner (request "r12")));
+    check bool "completed proof wins over another process's marker" true
+      (match require (observe store (request "r12")) with
+       | Exact.Retained_terminal (Exact.Retained_call (Exact.Answered _)) -> true
+       | _ -> false);
     check int "without a send" 0 !sends)
 
 let original_execution store ?(attempt_ordinal=1) original =
@@ -428,6 +452,8 @@ let test_proof_publication_failure_never_exposes_an_answer () =
     let unused,_,_=counting_runner store (ref []) in
     check bool "missing proof preserves unknown without replay" true
       (run_request store unused original=Exact.Final Exact.Outcome_unknown);
+    check bool "proof publication failure in this incarnation retains cut" true
+      (require (observe store original)=Exact.Retained_terminal (Exact.Retained_unknown Exact.Cut));
     check bool "an old generic unknown grants no execution proof" true
       (require (original_execution store original)=Exact.No_completed_original);
     check int "the original call ran once" 1 !sends)
@@ -486,8 +512,10 @@ let test_recovery_refuses_malformed_earlier_attempt () =
     Unix.chmod directory 0o700;
     check bool "second final publication failed after its proof" true (Result.is_error result);
     let original_wire=Option.get (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)) in
+    let started=match attempts store original.request_id with
+      | [_;started] -> started | _ -> fail "expected earlier refusal followed by the actual started marker" in
     let broken=match original_wire with
-      | `Assoc fields -> `Assoc (("attempts",`List [`String "not an original outcome";`Null])::List.remove_assoc "attempts" fields)
+      | `Assoc fields -> `Assoc (("attempts",`List [`String "not an original outcome";started])::List.remove_assoc "attempts" fields)
       | _ -> fail "expected original record" in
     require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id broken);
     let unused,_,_=counting_runner store (ref []) in
@@ -672,15 +700,13 @@ let test_unknown_is_preserved_before_schema_grant_refusal () =
     require (Store.save_exact_request store ~declaration_id ~request_id:pending.request_id
       (`Assoc ["declaration_id",`String declaration_id;"request_id",`String pending.request_id;
         "digest",`String (Exact.digest pending);"request",Exact.request_to_json pending;
-        "attempts",`List [`Null];"final",`Null]));
+        "attempts",`List [other_process_marker];"final",`Null]));
     let runner,sends,_=counting_runner store (ref []) in
     ignore (run_request store runner pending);
     check bool "grant restoration cannot replay an uncertain call" true
       (consumer_run store runner pending=Exact.Final Exact.Outcome_unknown);
     check int "provider never re-entered" 0 !sends)
 
-let observe store request = Eio_unix.run_in_systhread (fun () ->
-  Exact.observe_retained ~store ~declaration_id ~schema request)
 let test_observe_missing_and_original_terminal_without_another_call ()=with_root (fun root ->
   let store=Store.create ~root in
   let original=request "readonly-original" in
@@ -690,7 +716,7 @@ let test_observe_missing_and_original_terminal_without_another_call ()=with_root
   ignore (run_request store runner original);
   let before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
   let read store=match require (observe store original) with
-    | Exact.Retained_terminal (Exact.Call_final (Exact.Answered {output;_})) ->
+    | Exact.Retained_terminal (Exact.Retained_call (Exact.Answered {output;_})) ->
       check bool "original answer is observed" true (Exact.checked_json output=question)
     | _ -> fail "terminal observation did not preserve the original result" in
   read store;read (Store.create ~root);
@@ -717,14 +743,14 @@ let test_observe_exception_and_later_denial_preserves_original ()=with_root (fun
   let hidden={package with exact_outputs=[]} in
   ignore (require (Exact.run ~authorize_request ~store ~declaration_id ~package:hidden ~runner original));
   check bool "exception evidence and denial audit do not replace the original unknown" true
-    (require (observe (Store.create ~root) original)=Exact.Retained_terminal Exact.Outcome_unknown);
+    (require (observe (Store.create ~root) original)=Exact.Retained_terminal (Exact.Retained_unknown Exact.Raised));
   let valid=request "readonly-denied-answer" in
   let answer,_,_=counting_runner store (ref [Answer question]) in
   ignore (run_request store answer valid);
   ignore (require (Exact.run ~authorize_request ~store ~declaration_id ~package:hidden ~runner:answer valid));
   check bool "host observation is the original answer, not package redelivery" true
     (match require (observe store valid) with
-     | Exact.Retained_terminal (Exact.Call_final (Exact.Answered {output;_})) -> Exact.checked_json output=question
+     | Exact.Retained_terminal (Exact.Retained_call (Exact.Answered {output;_})) -> Exact.checked_json output=question
      | _ -> false))
 let test_observe_interrupted_attempt_with_later_denial ()=with_root (fun root ->
   let store=Store.create ~root in
@@ -732,12 +758,12 @@ let test_observe_interrupted_attempt_with_later_denial ()=with_root (fun root ->
   require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id (`Assoc [
     "declaration_id",`String declaration_id;"request_id",`String original.request_id;
     "digest",`String (Exact.digest original);"request",Exact.request_to_json original;
-    "attempts",`List [`Null];"final",`Null]));
+    "attempts",`List [other_process_marker];"final",`Null]));
   check bool "read alone leaves the interrupted attempt open" true (require (observe store original)=Exact.Retained_open);
   let runner,sends,_=counting_runner store (ref []) in
   ignore (require (Exact.run ~authorize_request ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner original));
-  check bool "existing producer can retain unknown with a later denial after the null attempt" true
-    (require (observe store original)=Exact.Retained_terminal Exact.Outcome_unknown);
+  check bool "recovered cause survives later delivery denial" true
+    (require (observe store original)=Exact.Retained_terminal (Exact.Retained_unknown Exact.Interrupted));
   check int "observing recovery never sends again" 0 !sends)
 let test_observe_rejects_malformed_identity_attempts_and_schema ()=with_root (fun root ->
   let store=Store.create ~root in
@@ -905,7 +931,7 @@ let test_execution_guard_is_not_retained_delivery_authority () =
     check int "the original provider was called once" 1 !sends;
     check bool "local observation still sees the original terminal while dispatch is forbidden" true
       (match require (Exact.observe_retained ~store ~declaration_id ~schema original) with
-       | Exact.Retained_terminal (Call_final (Answered _)) -> true
+       | Exact.Retained_terminal (Retained_call (Answered _)) -> true
        | Retained_absent | Retained_open | Retained_terminal _ -> false);
     check bool "execution authority changes preserve original bytes" true
       (retained=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)))
@@ -919,10 +945,62 @@ let test_worker_cannot_select_admission_policy () =
       (Result.is_error (Exact.request_of_json (`Assoc ((field,`String "background")::fields)))))
     ["priority";"admission_class"]
 
+let test_host_cause_codec_keeps_worker_wire () =
+  List.iter (fun cause ->
+    let retained=Exact.Retained_unknown cause in
+    let wire=Exact.retained_final_to_json retained in
+    check bool "host evidence round-trips its cause" true
+      (require (Exact.retained_final_of_json ~schema wire)=retained);
+    check bool "worker receives the unchanged unknown shape" true
+      (Exact.final_to_json (Exact.delivered retained)=`Assoc ["status",`String "outcome_unknown"]);
+    check bool "worker decoder cannot accept host-only cause" true
+      (Result.is_error (Exact.final_of_json ~schema wire))) [Exact.Interrupted;Exact.Cut;Exact.Raised];
+  List.iter (fun wire ->
+    check bool "host evidence refuses missing, unknown, extra and duplicate causes" true
+      (Result.is_error (Exact.retained_final_of_json ~schema wire)))
+    [`Assoc ["status",`String "outcome_unknown"];
+     `Assoc ["status",`String "outcome_unknown";"cause",`String "other"];
+     `Assoc ["status",`String "outcome_unknown";"cause",`String "cut";"exception",`String "no"];
+     `Assoc ["status",`String "outcome_unknown";"cause",`String "cut";"cause",`String "raised"]]
+
+let test_host_record_hard_cut_and_attempt_order ()=with_root (fun root ->
+  let store=Store.create ~root in
+  let original=request "strict-host-attempts" in
+  let raised,_,_=counting_runner store (ref [Answer question]) in
+  ignore (run_request store raised original);
+  let base=Option.get (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)) in
+  let record attempts final=match base with
+    | `Assoc fields -> `Assoc (("attempts",`List attempts)::("final",final)::
+        (fields |> List.remove_assoc "attempts" |> List.remove_assoc "final"))
+    | _ -> fail "original Exact object expected" in
+  let unknown=`Assoc ["status",`String "outcome_unknown"] in
+  let interrupted=Exact.retained_final_to_json (Exact.Retained_unknown Exact.Interrupted) in
+  let cut=Exact.retained_final_to_json (Exact.Retained_unknown Exact.Cut) in
+  let raised=`Assoc ["status",`String "outcome_unknown";"cause",`String "raised";"exception",`String "original error"] in
+  List.iter (fun wire -> check bool "preflight decoder accepts new host attempt shapes" true
+    (Result.is_ok (Exact.check_retained_record wire)))
+    [record [other_process_marker] `Null;record [interrupted] unknown;record [cut] unknown;record [raised] unknown];
+  let answered=Yojson.Safe.Util.member "final" base in
+  List.iter (fun wire ->
+    check bool "preflight decoder rejects old or inconsistent attempt evidence" true
+      (Result.is_error (Exact.check_retained_record wire));
+    require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id wire);
+    check bool "read-only host observation refuses the same malformed record" true
+      (Result.is_error (observe store original)))
+    [record [`Null] `Null; record [`Null] unknown; record [unknown] unknown;
+     record [interrupted] `Null;record [interrupted] answered;
+     record [other_process_marker;cut] unknown;record [other_process_marker] unknown;
+     record [`Assoc ["started",`String "not-an-incarnation"]] `Null;
+     record [`Assoc ["status",`String "outcome_unknown";"cause",`String "raised"]] unknown;
+     record [`Assoc ["status",`String "outcome_unknown";"cause",`String "raised";"exception",`String " "]] unknown;
+     record [`Assoc ["status",`String "outcome_unknown";"cause",`String "cut";"exception",`String "not raised"]] unknown])
+
 let () =
   run "lane add-on exact requests"
     [ ( "retention"
-      , [ test_case "a record republished during a read is read again" `Quick test_republished_record_is_read_again
+      , [ test_case "host cause codec preserves worker wire" `Quick test_host_cause_codec_keeps_worker_wire
+        ; test_case "host hard cut validates attempt order and cause evidence" `Quick test_host_record_hard_cut_and_attempt_order
+        ; test_case "a record republished during a read is read again" `Quick test_republished_record_is_read_again
         ; test_case "retained before the call and replayed after a restart" `Quick test_retained_before_the_call_and_replayed
         ; test_case "an unavailable lane sends nothing and survives a restart" `Quick
             test_an_unavailable_lane_sends_nothing_and_survives_a_restart

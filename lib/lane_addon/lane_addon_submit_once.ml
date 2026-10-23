@@ -187,7 +187,7 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
       Exact.observe_retained ~store ~declaration_id ~schema request)
       |> Result.map_error (fun detail -> Unavailable detail) in
     (match retained with
-     | Exact.Retained_terminal result -> finish original result
+     | Exact.Retained_terminal result -> finish original (Exact.delivered result)
      | Exact.Retained_absent | Exact.Retained_open ->
        match invoke read with
        | Ok (state, evidence) -> received original ~submission:false state evidence

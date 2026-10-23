@@ -95,6 +95,28 @@ type final =
           answer intact; it can be delivered when the output is selected again. *)
   | Request_id_reused
 
+(** Why a started call has no retained outcome. Only host code sees this;
+    workers continue receiving [Outcome_unknown] without a cause. *)
+type unknown_cause = Interrupted | Cut | Raised
+(** [Interrupted] means another server incarnation left the started marker;
+    [Cut] means this process no longer runs its own started attempt; [Raised]
+    means the call raised. Same-process recovery during graceful shutdown is
+    still [Cut]. A completed original proof takes priority over either marker
+    cause. The incarnation is a process-wide, memory-only random 128-bit value. *)
+
+type retained_final =
+  | Retained_call of call_final
+  | Retained_unknown of unknown_cause
+  | Retained_not_allowed of { reason : string }
+  | Retained_request_id_reused
+
+val delivered : retained_final -> final
+(** Remove host-only cause evidence for worker delivery. *)
+val retained_final_to_json : retained_final -> Yojson.Safe.t
+val retained_final_of_json : schema:Yojson.Safe.t -> Yojson.Safe.t -> (retained_final, string) result
+(** Strict host evidence codec. Unknown outcomes require one of [interrupted],
+    [cut], [raised]; cause-less worker results are not host evidence. *)
+
 (** Why the add-on lane could not take a call. Nothing was sent. *)
 type lane_unavailable =
   | Lane_unconfigured
@@ -215,9 +237,14 @@ val check_retained_record : Yojson.Safe.t -> (unit, string) result
 (** Decode one retained record of the Exact store with the reads {!run}
     applies before reusing it: the record envelope, its original request, the
     declaration and request identity it names, and every attempt and final.
-    Reads nothing else and writes nothing. *)
+    Started markers are exactly [{"started":"<32 lowercase hex>"}] and only
+    occur last in an open record. Unknown terminal attempts require their
+    cause, and [raised] requires nonblank exception evidence. Old null markers
+    and cause-less unknown attempts are refused: deployment requires a hard
+    cut of those records and their consumer originals. Reads nothing else and
+    writes nothing. *)
 
-type retained_observation = Retained_absent | Retained_open | Retained_terminal of final
+type retained_observation = Retained_absent | Retained_open | Retained_terminal of retained_final
 
 type original_execution =
   | No_completed_original

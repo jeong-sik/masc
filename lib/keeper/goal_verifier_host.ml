@@ -158,6 +158,8 @@ let before_record json =
 
 let commit_proof ~config ~store ~registry retained =
   let original = W.original retained in
+  let* () = if String.equal config.Workspace.base_path (V.base_path original) then Ok ()
+    else Error (Conflict "Goal judgment belongs to another captured workspace") in
   let subject = V.subject original in
   let run = W.run_identity retained in
   let* outcome, decision, evidence = original_verdict retained in

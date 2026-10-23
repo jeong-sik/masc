@@ -367,7 +367,7 @@ let transition config goal_id action =
     ~start_time:(Tool_timing.start ()) ctx
     (`Assoc ["goal_id", `String goal_id; "action", `String action; "note", `String "fixture actor request"]) in
   if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result)
-let actual_approve calls =
+let actual_review verdict calls =
   fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
       ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
@@ -376,7 +376,8 @@ let actual_approve calls =
     let result = lookup.AR.dispatch ~name:"tool_read_file" ~args:input in
     if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
     on_tool_result ~input result;
-    Ok {AR.selected_runtime_id="goal-reviewer"; verdict=Some (AR.Approve "actual target measured")}
+    Ok {AR.selected_runtime_id="goal-reviewer"; verdict=Some verdict}
+let actual_approve calls = actual_review (AR.Approve "actual target measured") calls
 
 let test_actual_agent_restores_before_lookup_and_registry () = with_workspace (fun config store root ->
   let authority, retained = host_prepared config store in
@@ -411,35 +412,76 @@ let test_actual_agent_restores_before_lookup_and_registry () = with_workspace (f
     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
     | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Alcotest.fail "actual host did not confirm its original commit"))
 
-let test_actual_partial_proof_and_nonverifying_boot () = with_workspace (fun config store _ ->
+let test_actual_partial_proof_and_nonverifying_boot () =
+  let exercise rejected suspension = with_workspace (fun config store _ ->
+    let authority, retained = host_prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    let reason = "actual target measured" in
+    let decision = if rejected then AR.Reject reason else AR.Approve reason in
+    let outcome = if rejected then Goal_verification.Refuted {reason} else Goal_verification.Proven in
+    with_reviewer (actual_review decision calls) (fun () ->
+      let receipt = checked (run store retained authority) in
+      let verdict : Goal_verification.verdict = {outcome;
+        request_id=subject.request_id; criterion=subject.criterion; verification_run_id=receipt.run.run_id;
+        authority=Workspace_goals.verifier_authority; evidence=reason; recorded_at=Masc_domain.now_iso ()} in
+      ignore (stored (Goal_store.transact_goal config ~goal_id:subject.goal_id (fun goal ->
+        Result.map (fun record -> goal, record) (Goal_verification.record_proof_verdict
+          ~before_commit:(fun () -> Candle_snapshot.before_proof_commit config goal verdict)
+          config ~goal_id:subject.goal_id verdict))));
+      Alcotest.(check bool) "real ledger-before-phase crash" true (phase config subject.goal_id=Goal_phase.Verifying);
+      (match suspension with
+       | None -> hosted (H.commit_proof ~config ~store ~registry:(R.global ()) (host_load store original))
+       | Some action ->
+         ignore (stored (Workspace_goals.reconcile_committed_proof config ~goal_id:subject.goal_id));
+         transition config subject.goal_id action);
+      (* In the suspended cases no Host call or final owner ACK happened: the
+         actual scan must find Judged even outside Verifying, without a model. *)
+      drain config;
+      Alcotest.(check int) "phase-moved boot recovery makes no model call" 1 !calls;
+      let expected_phase = match suspension, rejected with
+        | None, false -> Goal_phase.Awaiting_confirmation
+        | None, true -> Goal_phase.Executing
+        | Some "pause", false -> Goal_phase.Paused Resume_awaiting_confirmation
+        | Some "pause", true -> Goal_phase.Paused Resume_executing
+        | Some _, false -> Goal_phase.Blocked Resume_awaiting_confirmation
+        | Some _, true -> Goal_phase.Blocked Resume_executing in
+      Alcotest.(check bool) "post-commit operator suspension remains intact" true
+        (phase config subject.goal_id=expected_phase);
+      (match R.get (R.global ()) ~run_id:receipt.run.run_id with
+       | Some (R.Review {status=R.Completed {outcome=R.Committed; _}; _}) -> ()
+       | None | Some (R.Review _ | R.Scan_skipped _) -> Alcotest.fail "phase-moved original missing from actual boot recovery");
+      match get (Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id) with
+      | Some {completion=(Goal_verification.Proof_proven stored | Proof_refuted stored); _} ->
+        Alcotest.(check string) "original proof timestamp was not rewritten" verdict.recorded_at stored.recorded_at
+      | None | Some _ -> Alcotest.fail "real proof was lost")) in
+  exercise false None;
+  exercise true None;
+  List.iter (fun action -> exercise false (Some action); exercise true (Some action)) ["pause"; "block"]
+
+let test_cloned_workspace_cannot_commit_original () = with_workspace (fun config store _ ->
   let authority, retained = host_prepared config store in
   let original = W.original retained in
   let subject = V.subject original in
   let calls = ref 0 in
   with_reviewer (actual_approve calls) (fun () ->
-    let receipt = checked (run store retained authority) in
-    let verdict : Goal_verification.verdict = {outcome=Goal_verification.Proven;
-      request_id=subject.request_id; criterion=subject.criterion; verification_run_id=receipt.run.run_id;
-      authority=Workspace_goals.verifier_authority; evidence="actual target measured";
-      recorded_at=Masc_domain.now_iso ()} in
-    ignore (stored (Goal_store.transact_goal config ~goal_id:subject.goal_id (fun goal ->
-      Result.map (fun record -> goal, record) (Goal_verification.record_proof_verdict
-        ~before_commit:(fun () -> Candle_snapshot.before_proof_commit config goal verdict)
-        config ~goal_id:subject.goal_id verdict))));
-    Alcotest.(check bool) "real ledger-before-phase crash" true (phase config subject.goal_id=Goal_phase.Verifying);
-    let isolated_registry = R.create ~path:(Filename.concat (Workspace.masc_dir config) "partial-proof-runs.jsonl") () in
-    hosted (H.commit_proof ~config ~store ~registry:isolated_registry (host_load store original));
-    Alcotest.(check bool) "partial commit converged through real Goal reconciliation" true
-      (phase config subject.goal_id=Goal_phase.Awaiting_confirmation);
-    drain config;
-    Alcotest.(check int) "non-Verifying boot recovery makes no model call" 1 !calls;
-    (match R.get (R.global ()) ~run_id:receipt.run.run_id with
-     | Some (R.Review {status=R.Completed {outcome=R.Committed; _}; _}) -> ()
-     | None | Some (R.Review _ | R.Scan_skipped _) -> Alcotest.fail "phase-moved original missing from actual boot recovery");
-    match get (Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id) with
-    | Some {completion=Goal_verification.Proof_proven stored; _} ->
-      Alcotest.(check string) "original proof timestamp was not rewritten" verdict.recorded_at stored.recorded_at
-    | None | Some _ -> Alcotest.fail "real proof was lost"))
+    ignore (checked (run store retained authority));
+    let other = Workspace.default_config (Filename.concat config.base_path "cloned-workspace") in
+    let copy source target =
+      Fs_compat.mkdir_p (Filename.dirname target);
+      let bytes = In_channel.with_open_bin source In_channel.input_all in
+      Out_channel.with_open_bin target (fun out -> output_string out bytes) in
+    copy (Goal_store.goals_path config) (Goal_store.goals_path other);
+    copy (Goal_verification.verifications_path config) (Goal_verification.verifications_path other);
+    (match get (Goal_verification.get_record_authoritative other ~goal_id:subject.goal_id) with
+     | Some {completion=Goal_verification.Proof_pending pending; _} ->
+       Alcotest.(check string) "actual cloned request ID is identical" subject.request_id pending.request_id
+     | None | Some _ -> Alcotest.fail "cloned primary proof was not readable");
+    (match H.commit_proof ~config:other ~store ~registry:(R.global ()) (host_load store original) with
+     | Error (H.Conflict _) -> () | Ok () | Error _ -> Alcotest.fail "another workspace accepted the retained proof");
+    Alcotest.(check bool) "neither original nor clone changed phase" true
+      (phase config subject.goal_id=Goal_phase.Verifying && phase other subject.goal_id=Goal_phase.Verifying)))
 
 let test_actual_explicit_retry_and_unknown_fence () =
   let exercise unknown = with_workspace (fun config store _ ->
@@ -496,4 +538,5 @@ let () = Alcotest.run "retained Goal worker" ["execution", [
   Alcotest.test_case "actual agent restores before lookup and registry" `Quick test_actual_agent_restores_before_lookup_and_registry;
   Alcotest.test_case "actual proof partial write and phase-moved boot" `Quick test_actual_partial_proof_and_nonverifying_boot;
   Alcotest.test_case "actual explicit retry and unknown fence" `Quick test_actual_explicit_retry_and_unknown_fence;
-  Alcotest.test_case "actual bound suspend and drop" `Quick test_actual_bound_suspend_and_drop]]
+  Alcotest.test_case "actual bound suspend and drop" `Quick test_actual_bound_suspend_and_drop;
+  Alcotest.test_case "cloned workspace refuses the original judgment" `Quick test_cloned_workspace_cannot_commit_original]]

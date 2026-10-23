@@ -780,6 +780,16 @@ let guided_installation () =
     (Result.is_error (Install.accept_preview (preview (`Assoc ["kind",`String "unknown"]))));
   check bool "container preview requires its image receipt" true
     (Result.is_error (Install.accept_preview (preview (`Assoc ["kind",`String "container"]))));
+  let with_package extra = match preview (container unverified) with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "package", `Assoc package -> "package", `Assoc (package @ extra) | field -> field) fields)
+    | json -> json in
+  check bool "declared browser service and role are accepted as declared" true
+    (Result.is_ok (Install.accept_preview (with_package ["service",`String "browser";"ui_category",`String "browser"])));
+  check bool "unknown service is refused, not guessed from the role" true
+    (Result.is_error (Install.accept_preview (with_package ["service",`String "engine";"ui_category",`String "browser"])));
+  check bool "unknown role is refused, not replaced by the service" true
+    (Result.is_error (Install.accept_preview (with_package ["service",`String "browser";"ui_category",`String "nonsense"])));
   let module Catalog = Masc.Lane_addon_catalog in
   let catalog=Catalog.{directory="/packages";parent=None;
     entries=[Package {manifest_path="/packages/arbitrary/lane.toml";

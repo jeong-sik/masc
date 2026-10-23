@@ -3,6 +3,8 @@ type event = Updated of t | Browse of string option | Preview of string | Manual
 (** [Declare] asks for the raw TOML declaration editor. *)
 val create : ?directory:string -> unit -> t
 val directory : t -> string option
+val category_label : Masc.Lane_addon_category.t option -> string
+(** The role heading text; [None] reads "Unclassified". *)
 val receive : Yojson.Safe.t -> t -> (t, string) result
 val selected_manifest : t -> string option
 val handle : key:string -> t -> (event, string) result

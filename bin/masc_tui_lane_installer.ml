@@ -12,7 +12,9 @@ let object_schema properties = `Assoc ["type",`String "object";"properties",`Ass
   "required",`List (List.map (fun (key,_) -> `String key) properties);"additionalProperties",`Bool false]
 type inspection = Available of string | Unverified of string
 type execution = Host_process | Container of {image_name:string;inspection:inspection}
-type preview = {path:string;title:string;revision:string;execution:execution}
+type service = Mcp_tools | Browser_service
+type preview = {path:string;title:string;revision:string;execution:execution;
+  service:service;role:Masc.Lane_addon_category.t option}
 type t = Path of Form.t | Pending of int * string * t | Binding of preview * Form.t
   | Catalog of Browser.t | Catalog_pending of int * string option * Browser.t * Form.t option
   | Directory of Form.t * Browser.t
@@ -54,11 +56,25 @@ let accept_preview json =
           | _ -> Error "unknown image inspection state" in
         Ok (Container {image_name;inspection})
     | _ -> Error "unknown package execution kind" in
+  (* The declared worker service and role are read as declared. Neither is
+     inferred from the other or from the execution kind. *)
+  let optional_field name = match package with
+    | `Assoc fields -> (match List.filter (fun (key,_) -> key=name) fields with
+        | [] -> Ok None | [_,value] -> Ok (Some value)
+        | _ :: _ :: _ -> Error ("duplicate " ^ name))
+    | _ -> Error "expected object" in
+  let* service = let* declared = optional_field "service" in match declared with
+    | None -> Ok Mcp_tools
+    | Some (`String "browser") -> Ok Browser_service
+    | Some _ -> Error "unknown package service" in
+  let* role = let* declared = optional_field "ui_category" in match declared with
+    | None -> Ok None
+    | Some value -> Masc.Lane_addon_category.of_json value |> Result.map Option.some in
   let* binding_schema = field "binding_schema" package in
   if binding_schema=`Null then Ok None else
   let* form = Form.create ~schema:(object_schema ["installation_id",string_schema;"run_id",string_schema;"binding",binding_schema])
       ~initial:(`Assoc []) in
-  Ok (Some (Binding ({path;title;revision;execution},form)))
+  Ok (Some (Binding ({path;title;revision;execution;service;role},form)))
 (* The refusal names the key that works where the preview returns. Only the
    package browser answers n; a text input takes it as a letter, and Esc leads
    from each input back to the Plugins list, where n also opens the editor. *)
@@ -170,6 +186,10 @@ let lines ?(height=24) ?(render=fun line -> [line]) state =
             ["Image: " ^ image_name;match inspection with
               | Available digest -> "Available: " ^ digest
               | Unverified detail -> "Image unverified: " ^ detail] in
+      let role = "Role: " ^ Browser.category_label preview.role in
+      let service = match preview.service with
+        | Mcp_tools -> "Worker service: MCP tools"
+        | Browser_service -> "Worker service: browser" in
       render_lines (["Install " ^ preview.title ^ " · revision " ^ preview.revision;
-       "Manifest: " ^ preview.path] @ execution @
+       "Manifest: " ^ preview.path; role; service] @ execution @
        ["Preview does not start a worker. Enter after review creates a local TOML draft."] @ Form.lines form)

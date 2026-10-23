@@ -1,4 +1,17 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { RouteState } from './types'
+
+const directRoutes: Pick<RouteState, 'tab' | 'params'>[] = [
+  { tab: 'workspace', params: { section: 'artifacts', artifact: 'fixture-report' } },
+  { tab: 'monitoring', params: { section: 'skills' } },
+  { tab: 'monitoring', params: { section: 'lane-inventory' } },
+  { tab: 'monitoring', params: { section: 'lane-addons' } },
+  { tab: 'monitoring', params: { section: 'runtime', view: 'config' } },
+  { tab: 'settings', params: { section: 'runtime' } },
+  { tab: 'settings', params: { section: 'routing' } },
+  { tab: 'settings', params: { section: 'paths' } },
+  { tab: 'settings', params: { section: 'runtimes' } },
+]
 
 beforeEach(() => { vi.resetModules(); vi.useFakeTimers() })
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.resetModules() })
@@ -13,7 +26,7 @@ function execution(workspaceRoot: string | null) {
   }
 }
 
-it('obtains workspace authority on a direct artifact route without visiting Work', async () => {
+it.each(directRoutes)('obtains workspace authority on direct $tab/$params.section entry without visiting Work', async route => {
   const fetch = vi.fn(async (_input: string) => new Response(JSON.stringify(execution('/fixture/workspace')), {
     headers: { 'content-type': 'application/json' },
   }))
@@ -22,11 +35,12 @@ it('obtains workspace authority on a direct artifact route without visiting Work
   const { refreshForRoute } = await import('./tab-refresh')
   expect(executionWorkspaceAuthority.peek()).toBeNull()
 
-  refreshForRoute({ tab: 'workspace', params: { section: 'artifacts', artifact: 'fixture-report' } })
+  refreshForRoute(route)
   await vi.advanceTimersByTimeAsync(300)
   await vi.waitFor(() => expect(executionWorkspaceAuthority.peek()?.workspaceRoot).toBe('/fixture/workspace'))
-  expect(fetch).toHaveBeenCalledTimes(1)
-  expect(fetch.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/execution')
+  expect(fetch.mock.calls.filter(([path]) => path === '/api/v1/dashboard/execution')).toHaveLength(1)
+  const { dashboardSlicesForRoute } = await import('./dashboard-ws')
+  expect(dashboardSlicesForRoute(route)).toContain('execution')
 })
 
 it('keeps artifact access unverified when the execution response lacks a workspace', async () => {

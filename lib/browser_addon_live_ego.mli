@@ -1,7 +1,7 @@
 (** The ego lite task space a browser Add-on worker serves as one live
     connection (RFC-browser-live-ego). The worker owns no browser process:
-    each command runs [ego-browser nodejs] once, and the task space is what
-    lasts. *)
+    one [ego-browser nodejs] process runs the connection's commands, one at
+    a time, and the task space is what lasts. *)
 
 (** The worker's arguments that carry [configuration]. Nothing in an ego
     connection needs cleanup after the worker, so it rides the command line
@@ -15,10 +15,22 @@ val arguments : Browser_configuration.live_ego -> string list
 val run_command : env:Eio_unix.Stdenv.base -> timeout_s:float -> stdin:string -> command:string ->
   string list -> (string, Browser_ego_peer.run_failure) result
 
-(** Runs one script as [command nodejs] and answers within the window the
-    peer gives, stop included. A window no longer than the stop is refused
-    before the run starts. *)
-val runner : env:Eio_unix.Stdenv.base -> command:string -> Browser_ego_peer.runner
+(** The [command nodejs] process that runs a connection's scripts. It is
+    started by the first command, under [sw], and connects back to a socket
+    in [directory], which only this connection may write to. *)
+type session
+val session : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> command:string -> directory:string -> session
+
+(** Runs one script in the session's process and answers within the window
+    the peer gives, stop included. A script that does not answer in time,
+    writes past {!Browser_ego_peer.output_limit_bytes} or is cancelled stops
+    the process with its group, and the next script starts another. A window
+    no longer than the stop is refused before anything runs. *)
+val runner : session -> Browser_ego_peer.runner
+
+(** Closes the session's socket, so its process leaves its loop and exits,
+    and stops what is left of it. *)
+val end_session : session -> unit
 
 (** Read ego lite's version, open the task space, register one client and
     serve its commands until the owner retires; then end the task space. The

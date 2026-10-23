@@ -50,14 +50,191 @@ let run_command ~env ~timeout_s ~stdin ~command arguments =
       | Ok (Some (`Exited code)) -> Error (Peer.Exited {code; output = Buffer.contents output})
       | Ok (Some (`Signaled signal)) -> Error (Peer.Signaled signal))
 
+(* One ego-browser nodejs process serves every command of a connection.
+   ego's SDK keeps a page's dialog and event state in the process, and a
+   page blocked on a dialog that outlived the process that opened it answers
+   no later process: on ego lite 0.6.0.16 every command to it timed out, as
+   ego-lite's docs/native-javascript-dialog-requirement.md says. ego hands
+   back a process's own output only once it exits, and its console.log is
+   read-only, so the process connects back to a Unix socket in the
+   connection's private directory, runs each script it receives as an async
+   function whose console keeps the lines it writes, and answers them over
+   the socket. A command that does not answer within its window, writes past
+   the output limit or is cancelled stops the process with its group, as a
+   one-run command was stopped; the next command starts another. *)
+(* sun_path is 104 bytes on macOS, NUL included; Linux allows 108. The
+   directory is the system's temporary one, 49 bytes on macOS, so the name
+   is one byte. *)
+let socket_name = "s"
+let socket_path_limit_bytes = 103
+
+let session_loop ~socket = String.concat "\n" [
+  "const net = await import(\"node:net\");";
+  "const AsyncFunction = (async () => {}).constructor;";
+  "const socket = net.createConnection(" ^ Yojson.Safe.to_string (`String socket) ^ ");";
+  "socket.setEncoding(\"utf8\");";
+  "const received = [];";
+  "let pending = \"\", closed = false, wake = () => {};";
+  "socket.on(\"data\", chunk => { pending += chunk; let end; while ((end = pending.indexOf(\"\\n\")) >= 0) { received.push(pending.slice(0, end)); pending = pending.slice(end + 1); } wake(); });";
+  "socket.on(\"close\", () => { closed = true; wake(); });";
+  "socket.on(\"error\", () => { closed = true; wake(); });";
+  "while (true) {";
+  "  while (received.length === 0 && !closed) await new Promise(resolve => { wake = resolve; });";
+  "  if (received.length === 0) break;";
+  "  const command = JSON.parse(received.shift());";
+  "  const lines = [];";
+  "  const log = (...parts) => { lines.push(parts.map(String).join(\" \")); };";
+  "  try { await new AsyncFunction(\"console\", command.script)({log}); }";
+  "  catch (error) { lines.push(\"the script threw outside its frame: \" + String(error && error.message || error)); }";
+  "  socket.write(JSON.stringify({id: command.id, lines}) + \"\\n\");";
+  "}";
+  "socket.destroy();" ]
+
+(* A started process: [ask] sends one script and reads its answer, and
+   stops the process with its group when it does not answer; [close] closes
+   its socket, so a process that leaves its loop exits by itself, then stops
+   what is left. Both return once the process has ended. *)
+type session_process = {
+  ask : timeout_s:float -> id:int -> string -> (string, Peer.run_failure) result;
+  close : unit -> unit }
+type session = { sw : Eio.Switch.t; env : Eio_unix.Stdenv.base; command : string; socket : string;
+  mutable current : session_process option; mutable next_id : int }
+
+let session ~sw ~env ~command ~directory =
+  { sw; env; command; socket = Filename.concat directory socket_name; current = None; next_id = 0 }
+
+let remove_socket path = match Unix.unlink path with
+  | () | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+
+let answer_of ~id line = match Yojson.Safe.from_string line with
+  | exception Yojson.Json_error _ -> Error (Peer.Unobserved "the ego session answered unreadable JSON")
+  | `Assoc fields ->
+    (match List.assoc_opt "id" fields, List.assoc_opt "lines" fields with
+     | Some (`Int answered), Some (`List lines) when answered = id ->
+       let rec texts acc = function
+         | [] -> Ok (String.concat "" (List.rev acc))
+         | `String line :: rest -> texts ((line ^ "\n") :: acc) rest
+         | _ :: _ -> Error (Peer.Unobserved "the ego session answered a line that is not text") in
+       texts [] lines
+     | Some (`Int _), Some (`List _) -> Error (Peer.Unobserved "the ego session answered another command")
+     | _ -> Error (Peer.Unobserved "the ego session answered outside its frame"))
+  | _ -> Error (Peer.Unobserved "the ego session answered outside its frame")
+
+(* The process runs under its own switch in a fiber of the connection's
+   switch, so it outlives each command and ends with the connection. *)
+let start_session t ~timeout_s =
+  let clock = Eio.Stdenv.clock t.env in
+  if String.length t.socket > socket_path_limit_bytes then
+    Error (Peer.Unstarted (Printf.sprintf "the ego session socket path %s is longer than %d bytes" t.socket socket_path_limit_bytes))
+  else
+    let ready, set_ready = Eio.Promise.create () in
+    let stop_requested, request_stop = Eio.Promise.create () in
+    let ended, set_ended = Eio.Promise.create () in
+    let stop () = ignore (Eio.Promise.try_resolve request_stop ()); Eio.Promise.await ended in
+    Eio.Fiber.fork ~sw:t.sw (fun () ->
+      Fun.protect ~finally:(fun () ->
+          ignore (Eio.Promise.try_resolve set_ready (Error (Peer.Unstarted "the ego session ended before it connected")));
+          Eio.Promise.resolve set_ended ()) (fun () ->
+        match Eio.Switch.run (fun process_sw ->
+          remove_socket t.socket;
+          Eio.Switch.on_release process_sw (fun () -> remove_socket t.socket);
+          let listening = Eio.Net.listen ~sw:process_sw ~backlog:1 (Eio.Stdenv.net t.env) (`Unix t.socket) in
+          let manager = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:stop_grace_s in
+          let input_read, input_write = Eio_unix.pipe process_sw in
+          let output_read, output_write = Eio_unix.pipe process_sw in
+          match Eio.Process.spawn ~sw:process_sw manager ~stdin:input_read ~stdout:output_write ~stderr:output_write
+                  [t.command; "nodejs"; "-e"; session_loop ~socket:t.socket] with
+          | exception (Eio.Io _ as exn) -> ignore (Eio.Promise.try_resolve set_ready (Error (Peer.Unstarted (Printexc.to_string exn))))
+          | exception Unix.Unix_error (code, _, _) ->
+            ignore (Eio.Promise.try_resolve set_ready (Error (Peer.Unstarted (Unix.error_message code))))
+          | process ->
+            Eio.Flow.close input_read; Eio.Flow.close input_write; Eio.Flow.close output_write;
+            (* What the process writes reaches ego only when it exits; the
+               start of it says why a process ended early. *)
+            let written = Buffer.create read_chunk_bytes and chunk = Cstruct.create read_chunk_bytes in
+            let drained, set_drained = Eio.Promise.create () in
+            (* A daemon, so a switch that is leaving stops the process
+               instead of waiting for its output to end. *)
+            Eio.Fiber.fork_daemon ~sw:process_sw (fun () ->
+              let rec drain () = match Eio.Flow.single_read output_read chunk with
+                | read ->
+                  if Buffer.length written + read <= Peer.output_limit_bytes then
+                    Buffer.add_string written (Cstruct.to_string ~len:read chunk);
+                  drain ()
+                | exception (End_of_file | Eio.Io _) -> Eio.Promise.resolve set_drained (); `Stop_daemon in
+              drain ());
+            let ended_early status = match status with
+              | `Exited code -> Peer.Exited {code; output = Buffer.contents written}
+              | `Signaled signal -> Peer.Signaled signal in
+            match Eio.Time.with_timeout clock timeout_s (fun () ->
+              Eio.Fiber.first
+                (fun () -> Ok (`Connected (fst (Eio.Net.accept ~sw:process_sw listening))))
+                (fun () -> Ok (`Ended (Eio.Process.await process)))) with
+            | Error `Timeout -> ignore (Eio.Promise.try_resolve set_ready (Error Peer.Timed_out))
+            | Ok (`Ended status) -> ignore (Eio.Promise.try_resolve set_ready (Error (ended_early status)))
+            | Ok (`Connected flow) ->
+              Eio.Net.close listening; remove_socket t.socket;
+              let reader = Eio.Buf_read.of_flow flow ~initial_size:read_chunk_bytes ~max_size:Peer.output_limit_bytes in
+              let ended_now () =
+                (* The socket closed: the process is ending, and its status says how. *)
+                match Eio.Time.with_timeout clock stop_grace_s (fun () ->
+                  let status = Eio.Process.await process in Eio.Promise.await drained; Ok status) with
+                | Ok status -> ended_early status
+                | Error `Timeout -> Peer.Unobserved "the ego session closed its socket and did not exit" in
+              let ask ~timeout_s ~id script =
+                let failed failure = Eio.Cancel.protect stop; Error failure in
+                match Eio.Time.with_timeout clock timeout_s (fun () ->
+                  Eio.Flow.copy_string (Yojson.Safe.to_string (`Assoc ["id",`Int id;"script",`String script]) ^ "\n") flow;
+                  Ok (Eio.Buf_read.line reader)) with
+                | Ok line -> (match answer_of ~id line with Ok output -> Ok output | Error failure -> failed failure)
+                | Error `Timeout -> failed Peer.Timed_out
+                | exception Eio.Buf_read.Buffer_limit_exceeded -> failed Peer.Output_exceeded
+                | exception End_of_file -> let failure = ended_now () in failed failure
+                | exception (Eio.Io _ as exn) -> failed (Peer.Unobserved (Printexc.to_string exn))
+                | exception (Eio.Cancel.Cancelled _ as exn) -> Eio.Cancel.protect stop; raise exn in
+              let close () =
+                (try Eio.Flow.shutdown flow `All with Eio.Io _ -> ());
+                ignore (Eio.Time.with_timeout clock stop_grace_s (fun () -> Ok (Eio.Process.await process)));
+                stop () in
+              ignore (Eio.Promise.try_resolve set_ready (Ok {ask; close}));
+              Eio.Promise.await stop_requested) with
+        | () -> ()
+        | exception (Eio.Io _ as exn) ->
+          ignore (Eio.Promise.try_resolve set_ready (Error (Peer.Unstarted (Printexc.to_string exn))))));
+    (* A start that failed has stopped its process by the time it answers. *)
+    match Eio.Promise.await ready with
+    | Ok process -> Ok process
+    | Error failure -> Eio.Promise.await ended; Error failure
+
 (* Stopping a run spends the stop grace, so it is taken out of the window
-   the peer gives. *)
-let runner ~env ~command : Peer.runner = fun ~window_s script ->
+   the peer gives. Commands come one at a time: the connection's fiber
+   answers one before it takes the next. *)
+let runner t : Peer.runner = fun ~window_s script ->
+  let clock = Eio.Stdenv.clock t.env in
   let timeout_s = window_s -. stop_grace_s in
   if timeout_s <= 0. then
     Error (Peer.Unstarted (Printf.sprintf "%.1f s were left of the command's window, and stopping a run takes %.0f s"
       window_s stop_grace_s))
-  else run_command ~env ~timeout_s ~stdin:script ~command ["nodejs"]
+  else
+    let deadline = Eio.Time.now clock +. timeout_s in
+    let started = match t.current with
+      | Some process -> Ok process
+      | None -> start_session t ~timeout_s in
+    match started with
+    | Error failure -> Error failure
+    | Ok process ->
+      t.current <- Some process;
+      t.next_id <- t.next_id + 1;
+      (* A failed or cancelled command has stopped the process. *)
+      match process.ask ~timeout_s:(Float.max 0. (deadline -. Eio.Time.now clock)) ~id:t.next_id script with
+      | Ok _ as answered -> answered
+      | Error _ as failed -> t.current <- None; failed
+      | exception (Eio.Cancel.Cancelled _ as exn) -> t.current <- None; raise exn
+
+(* The connection's end: the process leaves its loop once its socket closes. *)
+let end_session t = match t.current with
+  | None -> ()
+  | Some process -> t.current <- None; process.close ()
 
 let version ~env ~command =
   let* output = run_command ~env ~timeout_s:version_timeout_s ~stdin:"" ~command ["--version"]
@@ -70,7 +247,8 @@ let capture_directory () = Eio_unix.run_in_systhread (fun () ->
   | exception Sys_error detail -> Error detail)
 
 (* Only ego writes into this run's directory, and only screenshots, which the
-   peer removes once read; a stopped capture leaves its file behind. *)
+   peer removes once read; a stopped capture leaves its file behind. The
+   session's socket is there only until its process connects. *)
 let remove_capture_directory directory = Eio_unix.run_in_systhread (fun () ->
   let unix_error path code = Error (path ^ ": " ^ Unix.error_message code) in
   match Sys.readdir directory with
@@ -93,10 +271,13 @@ let run ~env ~owner (configuration : Browser_configuration.live_ego) work =
   let command = configuration.command in
   let startup, started = Eio.Promise.create () and stopping, stop = Eio.Promise.create ()
   and stopped, finish = Eio.Promise.create () in
-  let serve_space directory ~version ~engine_version =
+  let serve_space directory ~version ~engine_version = Eio.Switch.run (fun sw ->
+    let session = session ~sw ~env ~command ~directory in
+    let ended outcome = Eio.Cancel.protect (fun () -> end_session session); outcome in
+    ended @@
     let* peer = Peer.open_space ~space:configuration.space ~version ~capture_directory:directory
         ~now:(fun () -> Eio.Time.now (Eio.Stdenv.clock env))
-        ~run:(runner ~env ~command) in
+        ~run:(runner session) in
     let client_id = Uuidm.v4_gen (Random.State.make_self_init ()) () in
     let client = {B.client_id; browser = B.Ego_lite; version; engine_version; transport = B.Ego_task_space} in
     let poll window_sec = Browser_addon_owner.poll_live owner ~client ~window_sec in
@@ -133,7 +314,7 @@ let run ~env ~owner (configuration : Browser_configuration.live_ego) work =
     match served, finished with
     | Error detail, (Ok () | Error _) -> Error detail
     | Ok (), Error detail -> Error ("the ego task space did not end: " ^ detail)
-    | Ok (), Ok () -> Ok () in
+    | Ok (), Ok () -> Ok ()) in
   let connect () =
     let* version, engine_version = version ~env ~command in
     let* directory = capture_directory () in

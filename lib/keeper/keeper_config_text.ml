@@ -12,13 +12,6 @@ open Tool_args
 
 (* ── Bool / string parsing ──────────────────────────────────── *)
 
-let bool_default_true_of_env name =
-  match Env_config_core.raw_value_opt name with
-  | None -> true
-  | Some v ->
-      let v = String.trim v |> String.lowercase_ascii in
-      not (v = "0" || v = "false" || v = "no" || v = "n")
-
 let bool_of_string raw =
   let v = String.trim raw |> String.lowercase_ascii in
   if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then Some true

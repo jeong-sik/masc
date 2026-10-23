@@ -1600,7 +1600,6 @@
 (tests
  (names
   test_pbt_validation
-  test_pbt_text_processing
   test_pbt_context_overflow
   test_keeper_state_machine_pbt
   test_telemetry_eio_pbt
@@ -1611,7 +1610,6 @@
   test_board_metrics_labels)
  (modules
   test_pbt_validation
-  test_pbt_text_processing
   test_pbt_context_overflow
   test_keeper_state_machine_pbt
   test_telemetry_eio_pbt

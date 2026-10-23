@@ -22,8 +22,6 @@ val validate_max_context_override_value : int -> (int, string) result
 
 (** {1 Environment Variable Parsing} *)
 
-(** Parse a boolean env var where the default is [true] when unset. *)
-val bool_default_true_of_env : string -> bool
 
 (** Parse a boolean env var with an explicit default.
     Recognizes 1/true/yes/y/on and 0/false/no/n/off. *)

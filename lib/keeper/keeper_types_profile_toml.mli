@@ -1,5 +1,4 @@
 val default_runtime_id : unit -> string
-val bool_default_true_of_env : string -> bool
 val bool_of_env_default : string -> default:bool -> bool
 val bool_of_env_opt : string -> bool option
 val bool_of_string : string -> bool option

@@ -11,7 +11,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
-open Keeper_execution
 
 include Keeper_supervisor_launch
 

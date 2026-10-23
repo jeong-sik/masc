@@ -1,4 +1,4 @@
-(** Keeper_prompt — System prompts, Keeper instructions, and text processing
+(** Keeper_prompt — System prompts and Keeper instructions
     for keeper agents. AGENT_CORE-aligned: these functions define agent identity and
     text output. *)
 
@@ -26,9 +26,3 @@ val build_keeper_system_prompt :
     [constitution] is the world's own articles, already rendered
     ({!World_constitution_render.articles}); an empty one renders nothing at
     all. *)
-
-(** {1 Text Processing}
-
-    Re-exported from [Keeper_text_processing]. *)
-
-include module type of Keeper_text_processing

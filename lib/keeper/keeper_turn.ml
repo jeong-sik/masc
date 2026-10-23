@@ -18,7 +18,6 @@ open Keeper_types_profile
 open Keeper_memory
 open Keeper_alerting
 open Keeper_keepalive
-open Keeper_execution
 open Keeper_turn_setup
 open Otel_spans
 
@@ -1156,7 +1155,7 @@ let run_keeper_invocation_turn_admitted
         Keeper_registry.mark_turn_finished ~observation_token ~base_path name)
     with
     | exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect, so the ambient cancellation cannot fire inside it. *)
-      log_keeper_exn ~label:"mark_turn_finished in chat turn cleanup" exn
+      Keeper_context_core.log_keeper_exn ~label:"mark_turn_finished in chat turn cleanup" exn
   in
   match
     run_keeper_invocation_turn_admitted_inner

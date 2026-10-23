@@ -9,7 +9,6 @@ open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_memory
-open Keeper_execution
 
 module Board_wake = Keeper_world_observation_board_signal
 

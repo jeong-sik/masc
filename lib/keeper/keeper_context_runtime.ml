@@ -1,11 +1,5 @@
-(** Keeper_context_runtime — facade that re-exports from domain sub-modules.
-
-    Working context types live in {!Keeper_types}.
-    Pure context operations are in {!Keeper_context_core}.
-    Post-turn lifecycle is in {!Keeper_post_turn}.
-
-    This module preserves the original public API so that callers
-    do not need updating. *)
+(** Keeper context capacity resolution, checkpoint access, system prompts
+    and lifecycle dispatch. Working context types live in {!Keeper_types}. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -214,7 +208,3 @@ let resolve_max_context_resolution_for_runtime_id
 
 (* Delegate to Keeper_prompt — single source of truth for keeper prompts. *)
 let build_keeper_system_prompt = Keeper_prompt.build_keeper_system_prompt
-
-
-
-include Keeper_text_processing

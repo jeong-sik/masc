@@ -18,7 +18,6 @@ module Keeper_microvm_backend = Masc.Keeper_microvm_backend
 module Keeper_config = Masc.Keeper_config
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_memory = Masc.Keeper_memory
-module Keeper_execution = Masc.Keeper_execution
 module Keeper_runtime = Masc.Keeper_runtime
 module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
 module Keeper_sandbox_image_catalog = Masc.Keeper_sandbox_image_catalog

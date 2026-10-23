@@ -7,7 +7,6 @@
 
 (* ── Bool / string parsing ──────────────────────────────────── *)
 
-val bool_default_true_of_env : string -> bool
 
 val bool_of_string : string -> bool option
 

@@ -1,10 +1,5 @@
-(** Keeper_context_runtime — shared keeper context utilities: working context,
-    checkpoint management, system prompts,
-    text processing, proactive prompt helpers, and proactive generation.
-
-    Working context types live in {!Keeper_types}.
-    Pure context operations (previously in Keeper_working_context)
-    are provided directly by this module. *)
+(** Keeper context capacity resolution, checkpoint access, system prompts
+    and lifecycle dispatch. Working context types live in {!Keeper_types}. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -153,8 +148,6 @@ val context_budget_json_of_resolution
   -> max_context_resolution
   -> Yojson.Safe.t
 
-(** {1 Mention Detection} *)
-(** {1 Mention Detection} *)
 
 (** {1 Prompt Delegation} *)
 
@@ -165,5 +158,3 @@ val build_keeper_system_prompt
   -> ?constitution:string
   -> unit
   -> string
-
-(** {1 Fragment Detection (used by dashboard)} *)

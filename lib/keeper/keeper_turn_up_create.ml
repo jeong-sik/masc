@@ -9,7 +9,6 @@ open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_keepalive
-open Keeper_execution
 open Keeper_turn_up_args
 
 
@@ -294,7 +293,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn ->
-                 log_keeper_exn
+                 Keeper_context_core.log_keeper_exn
                    ~label:"save_agent_core_checkpoint (init) exception"
                    exn;
                  Error (Printexc.to_string exn)

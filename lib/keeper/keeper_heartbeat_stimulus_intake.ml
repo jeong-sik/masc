@@ -12,7 +12,6 @@
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-open Keeper_execution
 
 let stimulus_urgency_to_string = function
   | Keeper_event_queue.Immediate -> "immediate"

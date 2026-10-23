@@ -11,7 +11,6 @@ module Keeper_tool_surface = Keeper_tool_surface
 module Keeper_types = Keeper_types
 module Keeper_alerting = Keeper_alerting
 module Keeper_memory = Keeper_memory
-module Keeper_execution = Keeper_execution
 module Keeper_runtime = Keeper_runtime
 module Ag_ui = Ag_ui
 module Tool_operator = Tool_operator

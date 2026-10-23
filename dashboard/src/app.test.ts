@@ -15,6 +15,7 @@ import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolu
 import { activeKeeperName } from './keeper-state'
 import type { Keeper } from './types'
 import { commandPaletteRequested } from './components/common/command-palette-state'
+import { dashboardFocusMode } from './components/focus-mode-toggle'
 
 describe('App v2 header chrome', () => {
   let container: HTMLDivElement
@@ -31,6 +32,7 @@ describe('App v2 header chrome', () => {
     shellCounts.value = null
     shellRuntimeResolution.value = null
     activeKeeperName.value = ''
+    dashboardFocusMode.value = false
   })
 
   afterEach(() => {
@@ -44,6 +46,7 @@ describe('App v2 header chrome', () => {
     shellCounts.value = null
     shellRuntimeResolution.value = null
     activeKeeperName.value = ''
+    dashboardFocusMode.value = false
   })
 
   function renderApp() {
@@ -358,6 +361,24 @@ describe('App v2 header chrome', () => {
 
     expect(container.querySelector('[data-testid="dashboard-status-tray"]')).toBeNull()
     expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).toBeNull()
+  })
+
+  it('can leave a retained focus-mode state from a primary route', async () => {
+    dashboardFocusMode.value = true
+    await act(async () => { renderApp() })
+
+    const exit = container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')
+    expect(exit).not.toBeNull()
+    await act(async () => { fireEvent.click(exit as Element) })
+    expect(dashboardFocusMode.value).toBe(false)
+  })
+
+  it('can leave retained focus mode with its keyboard shortcut on a primary route', async () => {
+    dashboardFocusMode.value = true
+    await act(async () => { renderApp() })
+
+    await act(async () => { fireEvent.keyDown(document, { key: 'F11' }) })
+    expect(dashboardFocusMode.value).toBe(false)
   })
 
   it('keeps the command palette chunk out of the initial dashboard render', () => {

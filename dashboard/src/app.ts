@@ -377,8 +377,10 @@ export function App() {
         : null}
       ${suppressFloatingChrome ? null : html`
         <${DashboardStatusTray} sideRailCollapsed=${sidebarCollapsed.value} />
-        <${DashboardFocusModeToggle} />
       `}
+      ${dashboardFocusMode.value || !suppressFloatingChrome
+        ? html`<${DashboardFocusModeToggle} />`
+        : null}
       <${ToastContainer} />
       <${ConfirmDialogOverlay} />
       <${BundleStalenessBanner} />

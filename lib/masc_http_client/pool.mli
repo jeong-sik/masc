@@ -244,6 +244,9 @@ val stats : t -> stats
     config defaults) without requiring piaf integration. Do not call
     from production code. *)
 module For_testing : sig
+  (** The same ownership handoff used by buffered and streaming requests. *)
+  module Lease : module type of Pool_client_lease
+
   val request_body : string -> Piaf.Body.t
   (** The same finite request body used by buffered and streaming calls. *)
   (** The request window [request] arms, on its own: a result the work

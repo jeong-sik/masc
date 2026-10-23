@@ -1124,6 +1124,8 @@ let stats t : stats =
 (* ── Test-only ─────────────────────────────────────────────────── *)
 
 module For_testing = struct
+  module Lease = Pool_client_lease
+
   let request_body = request_body
   let with_request_timeout ~clock ~timeout_seconds f =
     with_optional_timeout ~clock ~timeout_seconds f

@@ -361,7 +361,7 @@ let test_total_timeout_reports_progress_snapshot () =
   | Ok (_, _) ->
     Alcotest.fail "expected total timeout, got Ok"
 
-module Lease = Masc_http_client.Pool_client_lease
+module Lease = Masc_http_client.Pool.For_testing.Lease
 
 exception Request_failed
 

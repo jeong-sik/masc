@@ -1,0 +1,29 @@
+Testing `Dashboard_eval_feed'.
+This run has ID `UGOEHGCD'.
+
+  [OK]          owned_boundary           0   parent component cannot select s...
+  [OK]          owned_boundary           1   linked agent is neither read nor...
+  [OK]          owned_boundary           2   linked JSON cannot supply a snap...
+  [OK]          owned_boundary           3   linked eval root is refused.
+  [OK]          owned_boundary           4   linked agent-core ancestor is re...
+  [OK]          owned_boundary           5   dash and Unicode names remain li...
+  [OK]          owned_boundary           6   relative workspace roots preserv...
+  [OK]          owned_boundary           7   fresh-boot absence remains quiet.
+  [OK]          verdict_parsing          0   valid verdict.
+  [OK]          verdict_parsing          1   wrong schema_version.
+  [OK]          verdict_parsing          2   missing schema_version.
+  [OK]          verdict_parsing          3   empty layer_results.
+  [OK]          verdict_parsing          4   missing required field.
+  [OK]          verdict_parsing          5   wrong-typed required field.
+  [OK]          verdict_parsing          6   layer missing name.
+  [OK]          read_latest              0   list_agents nonexistent directory.
+  [OK]          read_latest              1   list_agents with dirs.
+  [OK]          read_latest              2   empty directory.
+  [OK]          read_latest              3   nonexistent directory.
+  [OK]          read_latest              4   with files.
+  [OK]          read_latest              5   with limit.
+  [OK]          serialization            0   snapshot roundtrip.
+  [OK]          serialization            1   verdict_to_json.
+
+Full test results in `/private/tmp/masc-eval-feed-cache-selection-20261023/_build/_tests/Dashboard_eval_feed'.
+Test Successful in 0.021s. 23 tests run.

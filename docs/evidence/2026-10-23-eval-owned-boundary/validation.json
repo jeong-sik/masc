@@ -1,0 +1,95 @@
+{
+  "scope": "isolated real snapshot files and HTTP router; no production filesystem traversal",
+  "parent": "dd1926479764c62f2fcce4e35676f85df6fd012d",
+  "candidate_source_sha256": {
+    "lib/dashboard_eval_feed/dashboard_eval_feed.ml": "b167328862c6685e889fb5f56a754c130dc9ffefa3c092af8e962b66d9ef99bd",
+    "lib/dashboard_eval_feed/dashboard_eval_feed.mli": "d00dbb2c17ed697dcf916549c8158a3460e035441b625b105da169c60ee500ed",
+    "lib/dashboard_eval_feed/dune": "fb0bab02dfe050e9c31269f67cf7b0951d29978d3c4534342e69a39b5c50624f",
+    "test/test_dashboard_http_core.ml": "a58baeb3308742858cee45f746d4c7184a0f8d7b62e6dfc91a224ffcfcbb1785",
+    "test/test_eval_feed.ml": "4b7767250c2a65a743d751959c764072506d7d2a1798311196fe3b333b887598"
+  },
+  "baseline_production_sha256": {
+    "lib/dashboard_eval_feed/dashboard_eval_feed.ml": "02cced4ad447105c01d363e1f314e91fea904db306e9dc8dccb744df5a5fa105",
+    "lib/dashboard_eval_feed/dashboard_eval_feed.mli": "e94339e663415ac5d6d89aa80f1634af5d286a8002ceaba832960646f86039ea",
+    "lib/dashboard_eval_feed/dune": "2220f7a53040dfca2dfcef163390081d735473af2b17b206bff6ccf7dd7dbf5d"
+  },
+  "baseline_test_source_sha256": {
+    "test/test_eval_feed.ml": "4b7767250c2a65a743d751959c764072506d7d2a1798311196fe3b333b887598",
+    "test/test_dashboard_http_core.ml": "99c534f220302b0f56f71dad26dfeb409dec0dd812de883e17e03c6df9a753de"
+  },
+  "runner_delta": "baseline-to-candidate-runner.patch moves cleanup guard before prepare; scenario bodies/fixtures unchanged. Final candidate build/tests ran after that move.",
+  "baseline": [
+    {
+      "group": "owned_boundary",
+      "failed": 5,
+      "passed": 3
+    },
+    {
+      "group": "eval_feed_owned_boundary",
+      "failed": 3,
+      "passed": 1
+    }
+  ],
+  "candidate_checks": [
+    {
+      "command": "_build/default/test/test_eval_feed.exe",
+      "log": "candidate-eval-feed-leaf.log",
+      "exit_code": 0,
+      "tests": 23
+    },
+    {
+      "command": "_build/default/test/test_dashboard_http_core.exe test eval_feed_owned_boundary",
+      "log": "candidate-eval_feed_owned_boundary.log",
+      "exit_code": 0,
+      "tests": 4
+    },
+    {
+      "command": "_build/default/test/test_dashboard_http_core.exe test eval_feed_cache_selection",
+      "log": "candidate-eval_feed_cache_selection.log",
+      "exit_code": 0,
+      "tests": 3
+    },
+    {
+      "command": "_build/default/test/test_dashboard_http_core.exe test effective_tool_quality_sampling",
+      "log": "candidate-effective_tool_quality_sampling.log",
+      "exit_code": 0,
+      "tests": 3
+    },
+    {
+      "command": "_build/default/test/test_dashboard_http_core.exe test exact_query_cache_identity",
+      "log": "candidate-exact_query_cache_identity.log",
+      "exit_code": 0,
+      "tests": 5
+    }
+  ],
+  "build_receipts": [
+    {
+      "command": "opam exec --switch=5.5.1 -- dune build test/test_eval_feed.exe test/test_dashboard_http_core.exe",
+      "exit_code": 0,
+      "parent": "dd1926479764c62f2fcce4e35676f85df6fd012d"
+    },
+    {
+      "command": "opam exec --switch=5.5.1 -- dune build test/test_eval_feed.exe test/test_dashboard_http_core.exe",
+      "exit_code": 0
+    }
+  ],
+  "log_sha256": {
+    "baseline-owned_boundary.log": "6f7cdcc4e2d23470fcbdc9e7494c53a926e11ac2f4085626ad629338f5ed30d2",
+    "baseline-eval_feed_owned_boundary.log": "7ba7b12a2becf6aa91fc834bdccb7aaf37518363097c96427bec615b3bef57b9",
+    "candidate-eval-feed-leaf.log": "3c77c3123fc129b545e555a28d75d8fed05c6532d373ef3dd2f2d7d964356fe1",
+    "candidate-eval_feed_owned_boundary.log": "9f4ece030f00a1232beaf639f23ca622df5d1dbc131f97ef26f6422350cecb54",
+    "candidate-eval_feed_cache_selection.log": "4dd9c39db462d6107d917b191f9abfc4312a112cb88ba27564881f6829402daa",
+    "candidate-effective_tool_quality_sampling.log": "a1b7c9a00a2747e0c3353b32fc3207ed8dad4a89732922fdbd58e9150b9d7f69",
+    "candidate-exact_query_cache_identity.log": "1c1a2287d45c069a505071d43e27acaa29af2999965d20eb11dc9e1ded90a0f6"
+  },
+  "candidate_executable_sha256": {
+    "test_eval_feed.exe": "2ffe4bfad26618b243509d2a9d634e3839e90727e0a9be0c554cef044cff7358",
+    "test_dashboard_http_core.exe": "712d11363af5d139671b2172f8e9fa6bb8b0b202ac784c489d80aa69e2414bd2"
+  },
+  "full_regression": "not run; latest full regression identity not inspected",
+  "ci": "not run",
+  "installed_runtime": "unchanged by this repair",
+  "ui_and_latency": "not measured",
+  "race_stress": "coordinated concurrent replacement stress not run; shared owned-reader validation reused",
+  "raw_patch_whitespace": "Verbatim unified patch blank context line is intentionally preserved; diff --check flags that evidence line."
+}

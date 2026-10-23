@@ -301,6 +301,84 @@ let test_read_latest_with_limit () =
   in
   check int "limited to 2" 2 (List.length results)
 
+let with_owned_boundary_fixture f =
+  let top = tmpdir "eval_owned_boundary" in
+  let base = Filename.concat top "workspace" in
+  let root = Filename.concat (Filename.concat base ".agent_core") "eval" in
+  let outside = Filename.concat top "outside" in
+  mkdir_p (Filename.concat root "local");
+  mkdir_p outside;
+  write_file (Filename.concat outside "999.json") valid_snapshot_json;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree top)
+    (fun () -> f ~base ~root ~outside)
+
+let check_no_snapshots ~base name =
+  check int "foreign snapshots are not read" 0
+    (List.length (Eval_feed.read_latest ~base_path:base ~agent_name:name ~limit:10))
+
+let test_owned_boundary_parent_component () =
+  with_owned_boundary_fixture @@ fun ~base ~root:_ ~outside:_ ->
+  let sibling = Filename.concat (Filename.concat base ".agent_core") "outside" in
+  mkdir_p sibling;
+  write_file (Filename.concat sibling "999.json") valid_snapshot_json;
+  check_no_snapshots ~base "../outside"
+
+let test_owned_boundary_linked_agent () =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside ->
+  Unix.symlink outside (Filename.concat root "linked");
+  check_no_snapshots ~base "linked";
+  check (list string) "linked agent is not advertised" ["local"]
+    (Eval_feed.list_agents ~base_path:base)
+
+let test_owned_boundary_linked_json () =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside ->
+  let dir = Filename.concat root "local" in
+  write_file (Filename.concat dir "001.json") valid_snapshot_json;
+  Unix.symlink (Filename.concat outside "999.json") (Filename.concat dir "999.json");
+  check int "only the retained regular snapshot is read" 1
+    (List.length (Eval_feed.read_latest ~base_path:base ~agent_name:"local" ~limit:10))
+
+let check_owned_boundary_linked_root parent =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside ->
+  let target = if parent then Filename.dirname root else root in
+  Fs_compat.remove_tree target;
+  let external_root = if parent then Filename.concat outside "eval" else outside in
+  mkdir_p (Filename.concat external_root "local");
+  write_file (Filename.concat (Filename.concat external_root "local") "999.json") valid_snapshot_json;
+  Unix.symlink outside target;
+  check_no_snapshots ~base "local";
+  check (list string) "linked storage root is not enumerated" []
+    (Eval_feed.list_agents ~base_path:base)
+
+let test_owned_boundary_literal_names () =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside:_ ->
+  List.iter (fun name ->
+    let dir = Filename.concat root name in mkdir_p dir;
+    write_file (Filename.concat dir "001.json") valid_snapshot_json;
+    check int "literal single-component agent remains readable" 1
+      (List.length (Eval_feed.read_latest ~base_path:base ~agent_name:name ~limit:1)))
+    ["-"; "에이전트"]
+
+let test_owned_boundary_relative_base () =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside:_ ->
+  write_file (Filename.concat (Filename.concat root "local") "001.json") valid_snapshot_json;
+  let previous = Sys.getcwd () in
+  Fun.protect ~finally:(fun () -> Sys.chdir previous) (fun () ->
+    Sys.chdir (Filename.dirname base);
+    check (list string) "relative base preserves the same agents" ["local"]
+      (Eval_feed.list_agents ~base_path:"workspace");
+    check int "relative base preserves retained snapshots" 1
+      (List.length (Eval_feed.read_latest ~base_path:"workspace" ~agent_name:"local" ~limit:10)))
+
+let test_owned_boundary_missing_is_quiet () =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside:_ ->
+  Fs_compat.remove_tree root;
+  let cursor = (Log.Ring.bounds ()).total - 1 in
+  check (list string) "fresh workspace has no eval agents" [] (Eval_feed.list_agents ~base_path:base);
+  check_no_snapshots ~base "local";
+  check int "fresh-boot absence emits no warning" 0
+    (List.length (Log.Ring.recent ~since_seq:cursor ~module_filter:"Dashboard" ()))
+
 (* ── Serialization roundtrip ─────────────────────────────────────── *)
 
 let test_snapshot_json_roundtrip () =
@@ -358,6 +436,16 @@ let test_verdict_to_json () =
 let () =
   run "Dashboard_eval_feed"
     [
+      ( "owned_boundary", [
+          test_case "parent component cannot select sibling" `Quick test_owned_boundary_parent_component;
+          test_case "linked agent is neither read nor listed" `Quick test_owned_boundary_linked_agent;
+          test_case "linked JSON cannot supply a snapshot" `Quick test_owned_boundary_linked_json;
+          test_case "linked eval root is refused" `Quick (fun () -> check_owned_boundary_linked_root false);
+          test_case "linked agent-core ancestor is refused" `Quick (fun () -> check_owned_boundary_linked_root true);
+          test_case "dash and Unicode names remain literal" `Quick test_owned_boundary_literal_names;
+          test_case "relative workspace roots preserve reads" `Quick test_owned_boundary_relative_base;
+          test_case "fresh-boot absence remains quiet" `Quick test_owned_boundary_missing_is_quiet;
+        ] );
       ( "verdict_parsing",
         [
           test_case "valid verdict" `Quick test_parse_valid_verdict;

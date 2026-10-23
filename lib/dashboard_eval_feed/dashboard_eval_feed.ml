@@ -132,87 +132,82 @@ let read_snapshot_json ~agent_name (json : Yojson.Safe.t)
 let eval_base ~base_path =
   Filename.concat (Filename.concat base_path ".agent_core") "eval"
 
-let eval_dir ~base_path ~agent_name =
-  Filename.concat (eval_base ~base_path) agent_name
-
-let path_kind path =
-  try
-    if Sys.file_exists path then
-      if Sys.is_directory path then `Directory else `Other
-    else `Missing
-  with Sys_error msg -> `Unreadable msg
-
 let warn_unreadable ~op ~path msg =
   Log.Dashboard.warn "[eval_feed.%s] path unreadable at %s: %s" op path msg
 
-let warn_not_directory ~op ~path =
-  Log.Dashboard.warn "[eval_feed.%s] expected directory at %s" op path
+let warn_owned_error ~op ~path (error : Fs_compat.owned_regular_file_read_error) =
+  let initial_missing =
+    match error.failure with
+    | Fs_compat.Owned_file_operation_failed { cause = Unix.Unix_error (code, _, _); _ } ->
+      code = Unix.ENOENT && Option.is_none error.close_failure
+    | Fs_compat.Owned_file_operation_failed _
+    | Fs_compat.Ownership_boundary_rejected _
+    | Fs_compat.Path_is_not_regular_file _
+    | Fs_compat.Filesystem_identity_changed _
+    | Fs_compat.Owned_path_owner_mismatch _
+    | Fs_compat.Owned_path_writable_by_others _ -> false
+  in
+  if not initial_missing then
+    warn_unreadable ~op ~path (Fs_compat.owned_regular_file_read_error_to_string error)
 
-let sorted_json_files dir =
+let with_workspace_root ~op ~base_path read =
   try
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter (fun f -> Filename.check_suffix f ".json")
-    |> List.sort (fun a b -> String.compare b a)
-  with Sys_error msg ->
-    warn_unreadable ~op:"read_latest" ~path:dir msg;
+    let base_path = if Filename.is_relative base_path
+      then Filename.concat (Sys.getcwd ()) base_path else base_path in
+    read base_path
+  with
+  | (Unix.Unix_error _ | Sys_error _ | Eio.Io _) as error ->
+    warn_unreadable ~op ~path:base_path (Printexc.to_string error);
     []
 
+let directory_names ~op ~base_path path =
+  match Fs_compat.read_owned_directory ~ownership_root:base_path path with
+  | Ok names -> names
+  | Error error -> warn_owned_error ~op ~path error; []
+
 let list_agents ~base_path =
-  let dir = eval_base ~base_path in
-  match path_kind dir with
-  | `Missing -> []
-  | `Other ->
-      warn_not_directory ~op:"list_agents" ~path:dir;
-      []
-  | `Unreadable msg ->
-      warn_unreadable ~op:"list_agents" ~path:dir msg;
-      []
-  | `Directory -> (
-      try
-        Sys.readdir dir
-        |> Array.to_list
-        |> List.filter (fun name ->
-             match path_kind (Filename.concat dir name) with
-             | `Directory -> true
-             | `Missing | `Other -> false
-             | `Unreadable msg ->
-                 warn_unreadable ~op:"list_agents"
-                   ~path:(Filename.concat dir name) msg;
-                 false)
-        |> List.sort String.compare
-      with Sys_error msg ->
-        warn_unreadable ~op:"list_agents" ~path:dir msg;
-        [])
+  with_workspace_root ~op:"list_agents" ~base_path (fun base_path ->
+    let dir = eval_base ~base_path in
+    directory_names ~op:"list_agents" ~base_path dir
+    |> List.filter (fun name ->
+      let path = Filename.concat dir name in
+      match Fs_compat.exact_path_kind ~follow:false path with
+      | Fs_compat.Exact_kind Unix.S_DIR -> true
+      | Fs_compat.Exact_kind (Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK)
+      | Fs_compat.Exact_missing | Fs_compat.Exact_unknown -> false
+      | exception ((Unix.Unix_error _ | Sys_error _ | Eio.Io _) as error) ->
+        warn_unreadable ~op:"list_agents" ~path (Printexc.to_string error);
+        false))
 
 let read_latest ~base_path ~agent_name ~limit =
-  let dir = eval_dir ~base_path ~agent_name in
-  let files =
-    match path_kind dir with
-    | `Missing -> []
-    | `Other ->
-        warn_not_directory ~op:"read_latest" ~path:dir;
-        []
-    | `Unreadable msg ->
-        warn_unreadable ~op:"read_latest" ~path:dir msg;
-        []
-    | `Directory -> sorted_json_files dir
-  in
-  let rec collect acc remaining = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | filename :: rest ->
-        let path = Filename.concat dir filename in
-        let snapshot =
-          match Safe_ops.read_json_file_safe path with
-          | Error _ -> None
-          | Ok json -> read_snapshot_json ~agent_name json
-        in
-        (match snapshot with
-        | Some s -> collect (s :: acc) (remaining - 1) rest
-        | None -> collect acc remaining rest)
-  in
-  collect [] limit files
+  match Fs_compat.owned_relative_path [agent_name] with
+  | Error _ -> []
+  | Ok relative ->
+    with_workspace_root ~op:"read_latest" ~base_path (fun base_path ->
+      let dir = Filename.concat (eval_base ~base_path)
+        (Fs_compat.owned_relative_path_to_string relative) in
+      let files = directory_names ~op:"read_latest" ~base_path dir
+        |> List.filter (fun name -> Filename.check_suffix name ".json")
+        |> List.sort (fun a b -> String.compare b a) in
+      let rec collect acc remaining = function
+        | [] -> List.rev acc
+        | _ when remaining <= 0 -> List.rev acc
+        | filename :: rest ->
+          let path = Filename.concat dir filename in
+          let snapshot =
+            match Fs_compat.load_owned_regular_file ~ownership_root:base_path path with
+            | Ok None -> None
+            | Error error -> warn_owned_error ~op:"read_latest" ~path error; None
+            | Ok (Some contents) ->
+              (match Yojson.Safe.from_string contents with
+               | json -> read_snapshot_json ~agent_name json
+               | exception Yojson.Json_error _ -> None)
+          in
+          (match snapshot with
+           | Some snapshot -> collect (snapshot :: acc) (remaining - 1) rest
+           | None -> collect acc remaining rest)
+      in
+      collect [] limit files)
 
 (* ── JSON serialization ──────────────────────────────────────────── *)
 

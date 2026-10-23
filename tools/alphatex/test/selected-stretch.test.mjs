@@ -91,7 +91,8 @@ test('invalid ratios, positions, document bounds and port transitions reject the
       assert.throws(()=>command(editor,line),line);assert.deepEqual(editor,before)
     }
   }
-  const phrase=editors[0];assert.throws(()=>command(phrase,'stretch-notes 2'));assert.deepEqual(phrase,editors[0])
+  const phrase=editors[0],snapshot=structuredClone(phrase)
+  assert.throws(()=>command(phrase,'stretch-notes 2'));assert.deepEqual(phrase,snapshot)
   const routed=commands(newEditor(source({portChange:true})),['channel 1','select-notes 1/7 2/7']),before=structuredClone(routed)
   assert.throws(()=>command(routed,'stretch-notes 2'),/source port/);assert.deepEqual(routed,before)
   assert.throws(()=>command(newEditor(),'stretch-notes 2'),/Select notes/)

@@ -232,3 +232,41 @@ test('a real child response is bounded by UTF-8 bytes, not decoded string length
     assert.match(result.error?.message ?? '', /protocol memory bound/)
   } finally { await owner.close() }
 })
+
+test('a real malformed child response retains its stderr in the failed job', async () => {
+  const script = "process.stdin.once('data',()=>process.stderr.write('native loader context\\n',()=>process.stdout.write('not json\\n')));process.stdin.resume()"
+  const owner = openVstSession({ command: process.execPath, args: ['-e', script, '--'] })
+  try {
+    const { error } = await completion(owner.run({ operation: 'snapshot' }))
+    assert.match(error.message, /invalid reply/)
+    assert.match(error.message, /native loader context/)
+  } finally { await owner.close() }
+})
+
+test('failure diagnostics preserve the original error, code, cause and bounded stderr tail', async () => {
+  const { owner, children } = controlledSession()
+  const result = completion(owner.run({ operation: 'snapshot' }))
+  const cause = new Error('original native cause')
+  const failure = Object.assign(new Error('native host failed', { cause }), { code: 'ENOENT' })
+  children[0].stderr.write('discarded prefix' + 'x'.repeat(64 * 1024))
+  children[0].emit('error', failure)
+  children[0].stderr.write('late diagnostic')
+  children[0].stdout.write(reply(1, { late: true }))
+  children[0].emit('close', null, 'SIGKILL')
+  await owner.close()
+  const { error } = await result
+  assert.equal(error, failure)
+  assert.equal(error.code, 'ENOENT')
+  assert.equal(error.cause, cause)
+  assert.equal(error.message, 'native host failed\n' + 'x'.repeat(64 * 1024 - 'late diagnostic'.length) + 'late diagnostic')
+})
+
+test('stderr does not change a successful completion', async () => {
+  const { owner, children } = controlledSession()
+  const result = completion(owner.run({ operation: 'echo' }))
+  children[0].stderr.write('native warning\n')
+  children[0].stdout.write(reply(1, { unchanged: true }))
+  children[0].emit('close', 0, null)
+  await owner.close()
+  assert.deepEqual(await result, { value: { unchanged: true } })
+})

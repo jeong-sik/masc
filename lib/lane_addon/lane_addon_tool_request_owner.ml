@@ -133,7 +133,7 @@ let discover ~store ~scope =
       let* record = decode ~scope ~request_id json |> unavailable in
       decode_all (record :: records) rest in
   decode_all [] rows
-let check_published ~read_body ~directory_name ~file_name json =
+let decode_published ~directory_name ~file_name json =
   let field key = match json with
     | `Assoc fields -> (match List.assoc_opt key fields with
         | Some (`String value) when String.trim value <> "" -> Ok value
@@ -142,13 +142,28 @@ let check_published ~read_body ~directory_name ~file_name json =
   let* scope = field "scope" in
   let* request_id = field "request_id" in
   let* record = decode ~scope ~request_id json in
-  let* bytes = read_body ~scope ~request_digest:record.request_digest in
-  let* _ = request_of_body ~request_digest:record.request_digest bytes in
   if not (String.equal directory_name (Lane_addon_store.digest scope))
   then Error "original request directory does not match its scope"
   else if not (String.equal file_name (Lane_addon_store.digest request_id ^ ".json"))
   then Error "original request filename does not match its ID"
-  else Ok ()
+  else Ok record
+let check_published ~read_body ~directory_name ~file_name json =
+  let* record = decode_published ~directory_name ~file_name json in
+  let* bytes = read_body ~scope:record.Record.scope ~request_digest:record.request_digest in
+  let* _ = request_of_body ~request_digest:record.request_digest bytes in
+  Ok ()
+let discover_all ~store =
+  let* rows = Lane_addon_store.tool_request_owner_inventory_all store |> unavailable in
+  let rec restore records = function
+    | [] -> Ok (List.rev records)
+    | (directory_name,file_name,json)::rest ->
+      let* record = decode_published ~directory_name ~file_name json |> unavailable in
+      let* original = load ~store ~scope:record.Record.scope ~request_id:record.request_id in
+      let* original = match original with
+        | Some original -> Ok original
+        | None -> Error (Store_unavailable "an inventoried original disappeared") in
+      restore (original::records) rest in
+  restore [] rows
 let retain ~store ~scope ~request_id ~installation_id ~package_id ~tool ~summary ~request =
   let* () = validate_identity ["scope", scope; "request_id", request_id;
     "installation_id", installation_id; "package_id", package_id; "tool", tool] in

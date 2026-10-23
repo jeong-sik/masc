@@ -59,6 +59,10 @@ val discover : store:Lane_addon_store.t -> scope:string -> (Record.t list, error
     requests or dispatches are created. Results are observations; load/advance
     and actual workspace authority must be revalidated by the original
     serialized owner. *)
+val discover_all : store:Lane_addon_store.t -> (retained list, error) result
+(** Validate the directory and record identity of each published scope, then
+    strictly load each original body. This observation is not an atomic
+    cross-scope snapshot or permission for effects. *)
 val check_published :
   read_body:(scope:string -> request_digest:string -> (string option, string) result) ->
   directory_name:string -> file_name:string -> Yojson.Safe.t -> (unit, string) result

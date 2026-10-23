@@ -353,7 +353,41 @@ let test_a_settle_refuses_a_date_that_is_not_a_day_and_a_missing_original () = w
   | Error (Owner.Settle_unavailable _) -> ()
   | Error Owner.Settle_changed | Ok () -> Alcotest.fail "an original in neither place was settled")
 
+let test_all_scopes_survive_restart_without_metadata () = with_store (fun root store ->
+  retain store "original-a";
+  retain ~scope:"history-physical-owner" store "original-b";
+  let records=owned (Owner.discover_all ~store:(Store.create ~root)) in
+  Alcotest.(check (list string)) "every actual scope is discovered without a Keeper/profile index"
+    ["original-a";"original-b"]
+    (List.map (fun (record:Owner.retained) -> record.request_id) records |> List.sort String.compare);
+  List.iter (fun (record:Owner.retained) ->
+    Alcotest.check json "original evidence and destination survive the sweep" request record.request;
+    Alcotest.(check bool) "the original scope remains its own binding" true
+      (record.scope=(if record.request_id="original-a" then scope else "history-physical-owner"))) records)
+
+let test_all_scope_refusals_never_become_partial_success () =
+  with_store (fun root store ->
+    Alcotest.(check int) "initial absence is read-only" 0 (List.length (owned (Owner.discover_all ~store)));
+    Alcotest.(check bool) "the sweep creates no store" false (Sys.file_exists root);
+    retain store "valid";
+    retain ~scope:"another-scope" store "bad";
+    let namespace=Filename.concat root Store.tool_request_owners_directory in
+    let other=Filename.concat namespace (Store.digest "another-scope") in
+    let original=Filename.concat other (Store.digest "bad" ^ ".json") in
+    let wrong=Filename.concat other (Store.digest "another-id" ^ ".json") in
+    Unix.rename original wrong;
+    fail_inventory (Owner.discover_all ~store);
+    Unix.rename wrong original;
+    let moved=Filename.concat (Filename.dirname root) "original-scope-moved" in
+    Unix.rename other moved;
+    Unix.symlink moved other;
+    fail_inventory (Owner.discover_all ~store))
+
 let () = Alcotest.run "Original Add-on request discovery" ["inventory",[
+  Alcotest.test_case "all original scopes survive restart without a metadata index" `Quick
+    test_all_scopes_survive_restart_without_metadata;
+  Alcotest.test_case "all-scope key and symlink refusals never return partial success" `Quick
+    test_all_scope_refusals_never_become_partial_success;
   Alcotest.test_case "owned relative paths are names only" `Quick test_owned_relative_path_refuses_non_names;
   Alcotest.test_case "a held root reached through a symlink reads by relative path" `Quick
     test_held_root_through_a_symlink_reads_entries_by_relative_path;

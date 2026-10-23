@@ -97,7 +97,7 @@ describe('optional Lane Add-on surface', () => {
       ] }, instances: [],
     }))
     const view = render(html`<${LaneAddonsPanel} />`)
-    expect(await view.findByRole('button', { name: `Edit TOML ${sourcePath}`, exact: true })).toBeTruthy()
+    expect(await view.findByRole('button', { name: `Edit TOML ${sourcePath}` })).toBeTruthy()
   })
   it('renders the owning package display contract in order while retaining raw fields and binding schema', async () => {
     const bindingSchema = { type: 'object', properties: { sources: { type: 'array' } }, required: ['sources'] }
@@ -435,7 +435,7 @@ describe('optional Lane Add-on surface', () => {
     expect(screen.getByRole('alert').textContent).toContain('/workspace/.masc/config/lane-addons/site.toml — Invalid TOML string')
     expect(screen.getByText('observing')).toBeTruthy()
     expect(within(screen.getByLabelText('Configuration for instance-1')).getByText('Installed configuration: configuration-1')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Edit TOML for instance-1', exact: true })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Edit TOML for instance-1' })).toBeTruthy()
     expect(api.detachLaneAddon).not.toHaveBeenCalled()
   })
   it('keeps detached history without offering edits to absent or differently owned files', async () => {
@@ -449,23 +449,23 @@ describe('optional Lane Add-on surface', () => {
     const screen = render(html`<${LaneAddonsPanel} />`)
     await screen.findByText('No readable TOML declarations.')
     expect(screen.getByLabelText('Configuration for instance-1').textContent).toContain('configuration-1')
-    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1', exact: true })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1' })).toBeNull()
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
       configuration: { directory, complete: true, issues: [], declarations: [{ id: 'replacement-owner', source_path: sourcePath,
         enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'configuration-2', applied_revision: null, instance_id: null }] }, instances: [historical],
     }))
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     await screen.findByText('replacement-owner')
-    expect(screen.getByRole('button', { name: `Edit TOML ${sourcePath}`, exact: true })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1', exact: true })).toBeNull()
+    expect(screen.getByRole('button', { name: `Edit TOML ${sourcePath}` })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1' })).toBeNull()
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
       configuration: { directory, complete: true, declarations: [], issues: [{ source_path: sourcePath, id: null,
         message: 'Current file needs repair' }] }, instances: [historical],
     }))
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     await screen.findByText('No readable TOML declarations.')
-    expect(screen.getByRole('button', { name: `Edit TOML ${sourcePath}`, exact: true })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1', exact: true })).toBeNull()
+    expect(screen.getByRole('button', { name: `Edit TOML ${sourcePath}` })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1' })).toBeNull()
   })
   it('allows detaching while observation is in progress without waiting for observe', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))
@@ -513,7 +513,7 @@ describe('optional Lane Add-on surface', () => {
     fireEvent.input(screen.getByLabelText('Run filter'), { target: { value: 'run-2' } })
     fireEvent.input(screen.getByLabelText('Lane filter'), { target: { value: 'unregistered-domain' } })
     fireEvent.input(screen.getByLabelText('Since (Unix seconds)'), { target: { value: '0' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
     await screen.findByText('Slice: partial')
     expect(api.fetchLaneAddonSlice).toHaveBeenCalledWith({ run_id: 'run-2', lane_id: 'unregistered-domain', since: 0, until: undefined }, expect.any(AbortSignal))
     fireEvent.click(screen.getByRole('radio'))
@@ -541,7 +541,7 @@ describe('optional Lane Add-on surface', () => {
     fireEvent.input(screen.getByLabelText('Manifest path'), { target: { value: '/packages/user-layer/manifest.json' } })
     fireEvent.input(screen.getByLabelText('Run ID'), { target: { value: 'run-custom' } })
     fireEvent.input(screen.getByLabelText('Binding JSON'), { target: { value: '{"subject_id":"existing-target"}' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Attach', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Attach' }))
     await waitFor(() => expect(api.attachLaneAddon).toHaveBeenCalledWith('/packages/user-layer/manifest.json', 'run-custom', { subject_id: 'existing-target' }))
   })
   it('selects a cross-lane time range by dragging and submits that exact query window', async () => {
@@ -558,7 +558,7 @@ describe('optional Lane Add-on surface', () => {
     fireEvent.pointerUp(svg, { pointerId: 7, button: 0, isPrimary: true, clientX: 770 })
     expect((screen.getByLabelText('Since (Unix seconds)') as HTMLInputElement).value).toBe('1250')
     expect((screen.getByLabelText('Until (Unix seconds)') as HTMLInputElement).value).toBe('1750')
-    fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
     await waitFor(() => expect(api.fetchLaneAddonSlice).toHaveBeenCalledWith(
       { run_id: '', lane_id: '', since: 1250, until: 1750 }, expect.any(AbortSignal)))
   })
@@ -568,7 +568,7 @@ describe('optional Lane Add-on surface', () => {
     api.fetchLaneAddonSlice.mockImplementation(() => new Promise(resolve => { finish = resolve }))
     const screen = render(html`<${LaneAddonsPanel} />`)
     await screen.findByText('User supplied layer')
-    fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
     const signal = api.fetchLaneAddonSlice.mock.calls[0]?.[1] as AbortSignal
     fireEvent.click(screen.getByRole('button', { name: 'Clear slice' }))
     expect(signal.aborted).toBe(true)
@@ -605,7 +605,7 @@ describe('optional Lane Add-on surface', () => {
     expect(request.request_id).toMatch(/^[0-9a-f-]{36}$/)
     expect((screen.getByRole('button', { name: 'Send new request' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Remove worker' }) as HTMLButtonElement).disabled).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
     await screen.findByText('Slice: partial')
     expect(api.fetchLaneAddonSlice).toHaveBeenCalledTimes(1)
     accept?.(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: request.request_id }))
@@ -641,7 +641,7 @@ describe('optional Lane Add-on surface', () => {
     api.fetchLaneAddonAction.mockImplementation(() => new Promise(() => {}))
     fireEvent.click(screen.getByRole('button', { name: 'Check request status' }))
     await screen.findByRole('button', { name: 'Checking request status…' })
-    fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
     await screen.findByText('Slice: partial')
     const statusSignal = api.fetchLaneAddonAction.mock.calls[0]?.[1] as AbortSignal
     expect(statusSignal.aborted).toBe(false)
@@ -701,10 +701,10 @@ describe('optional Lane Add-on surface', () => {
     const original = api.requestLaneAddonAction.mock.calls[0]![0]
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...actionSnapshot,
       instances: [{ ...actionSnapshot.instances[0], runtime_presence: 'retained' }] }))
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     await waitFor(() => expect(screen.queryByLabelText('Action instance')).toBeNull())
     expect(screen.queryByRole('button', { name: 'Send new request' })).toBeNull()
-    expect((screen.getByRole('button', { name: 'Observe', exact: true }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Observe' }) as HTMLButtonElement).disabled).toBe(true)
     api.fetchLaneAddonAction.mockResolvedValue(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: original.request_id, state: 'confirmed' }))
     fireEvent.click(screen.getByRole('button', { name: 'Check request status' }))
     await screen.findByText('Package confirmed returned result')

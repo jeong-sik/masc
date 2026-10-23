@@ -50,7 +50,7 @@ describe('Web package on/off without deleting configuration', () => {
     let finishSlice!: (value: { complete: boolean; rows: []; coverage: [] }) => void
     lane.fetchLaneAddonSlice.mockReturnValue(new Promise(resolve => { finishSlice = resolve }))
     const screen = render(html`<${LaneAddonsPanel} />`); await open(screen)
-    fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
     const signal = lane.fetchLaneAddonSlice.mock.calls[0]![1] as AbortSignal
     const reads = lane.fetchLaneAddons.mock.calls.length
     fireEvent.click(toggle(screen)); await save(screen)

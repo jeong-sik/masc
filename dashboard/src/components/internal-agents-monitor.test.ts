@@ -394,7 +394,7 @@ describe('InternalAgentsMonitor', () => {
     api.fetchStandaloneLanes.mockResolvedValue(snapshot)
     render(html`<${InternalAgentsMonitor} />`)
     expect(await screen.findByText(purpose)).toBeTruthy()
-    expect(screen.getByRole('heading', { name: 'Lanes', exact: true })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Lanes' })).toBeTruthy()
     expect(screen.getByText('Config: unconfigured')).toBeTruthy()
     expect(screen.getByText(/Observed ·/)).toBeTruthy()
 

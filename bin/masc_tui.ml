@@ -7813,6 +7813,22 @@ let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     report_action state "error"
       "Chat requires a matching workspace and a current Keeper roster"
 
+let prepare_item_request state ~mailbox ~drain_queue =
+  match selected_keeper state, selected_browser_item state with
+  | Some keeper, Some item ->
+    (match Masc_tui_keeper_items.request ~account:(selected_item_account state) item with
+     | Error reason -> report_action state "error" reason
+     | Ok request ->
+       enter_keeper_chat state ~mailbox ~keeper_name:keeper.k_name ~drain_queue;
+       if state.view = Keepers Keeper_message
+          && state.msg_target_keeper_name = Some keeper.k_name then
+         if keeper_message_draft_empty state then
+           set_composer_text state (Masc_tui_keeper_items.request_draft request)
+         else report_action state "info"
+           "Your existing chat draft is preserved. Send or save it before preparing an Item request.")
+  | (Some _ | None), None | None, Some _ ->
+    report_action state "info" "Select an item before preparing a Keeper request"
+
 (* Copy reads the stored reply again, before the display layer scrubs control
    bytes or wraps lines. A separate read leaves the visible history cache and
    its pagination untouched. *)
@@ -14635,7 +14651,11 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
 let enter_keeper_detail_tab state ~mailbox tab =
   state.detail_tab <- tab;
   state.detail_scroll <- 0;
-  if tab = Detail_items then state.item_cursor <- 0;
+  if tab = Detail_items then begin
+    state.item_cursor <- 0;
+    state.item_filter <- Masc_tui_keeper_items.All;
+    state.item_preview <- true
+  end;
   match selected_keeper state with
   | Some keeper -> launch_detail_tab_reading state ~mailbox keeper
   | None -> ()
@@ -19318,8 +19338,10 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
              | Invalid _ | Absent -> false) then
         match result with
         | Ok account ->
+            let selected = selected_browser_item state in
             state.item_account <- Some (request.drr_keeper, account);
-            state.item_account_error <- None
+            state.item_account_error <- None;
+            retain_item_browser_selection state selected
         | Error detail ->
             state.item_account <- None;
             state.item_account_error <- Some detail)
@@ -30578,6 +30600,13 @@ and is loaded on demand through keeper_skill.
               state.keeper_sandbox_logs_error <- None;
               launch_keeper_sandbox_logs state ~mailbox:async_messages
                 keeper.k_name)
+       | Some "v" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
+           cycle_item_browser state
+       | Some " " when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
+           state.item_preview <- not state.item_preview
+       | Some "a" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
+           prepare_item_request state ~mailbox:async_messages
+             ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox:async_messages)
        (* Absolute Sandbox intent; the owned save supplies a fresh revision. *)
        | Some "d" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
            set_sandbox_backend ~profile:Keeper_sandbox_config.Docker
@@ -30792,7 +30821,7 @@ and is loaded on demand through keeper_skill.
               && state.detail_tab = Detail_items ->
            state.item_cursor <-
              if key = Some "home" then 0
-             else List.length Keeper_portrait_item.all - 1;
+             else max 0 (List.length (item_browser_items state) - 1);
            state.detail_scroll <- 0
        (* Reading a post with the list pane focused: j/k and the page keys move
           the list and open what they land on, so the edge keys reach the first
@@ -31021,11 +31050,7 @@ and is loaded on demand through keeper_skill.
                drawing pulled straight back to the selected run, which is the
                same reason the edge keys had to move the cursor. *)
             | Keepers Keeper_detail when state.detail_tab = Detail_items ->
-                state.item_cursor <-
-                  Masc_tui_scroll.cursor_move
-                    ~count:(List.length Keeper_portrait_item.all)
-                    ~delta:(direction * page) state.item_cursor;
-                state.detail_scroll <- 0
+                move_item_browser state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
                 move_list_by_rows state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
@@ -31770,11 +31795,7 @@ and is loaded on demand through keeper_skill.
                     ~mailbox:async_messages
                 end
                 else if state.detail_tab = Detail_items then begin
-                  state.item_cursor <-
-                    Masc_tui_scroll.cursor_down
-                      ~count:(List.length Keeper_portrait_item.all)
-                      state.item_cursor;
-                  state.detail_scroll <- 0
+                  move_item_browser state ~delta:1
                 end
                 else if state.detail_tab = Detail_identity then
                   move_identity_cursor state ~delta:1
@@ -32114,11 +32135,7 @@ and is loaded on demand through keeper_skill.
                     ~mailbox:async_messages
                 end
                 else if state.detail_tab = Detail_items then begin
-                  state.item_cursor <-
-                    Masc_tui_scroll.cursor_up
-                      ~count:(List.length Keeper_portrait_item.all)
-                      state.item_cursor;
-                  state.detail_scroll <- 0
+                  move_item_browser state ~delta:(-1)
                 end
                 else if state.detail_tab = Detail_identity then
                   move_identity_cursor state ~delta:(-1)

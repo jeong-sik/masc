@@ -8609,6 +8609,8 @@ type state = {
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable item_cursor: int;
+  mutable item_filter: Masc_tui_keeper_items.filter;
+  mutable item_preview: bool;
   mutable item_account: (string * (string option * Masc_tui_keeper_items.t)) option;
   mutable item_account_error: string option;
   mutable keeper_run_cursor: int;
@@ -13989,6 +13991,40 @@ let detail_read_waiting state ~tab ~keeper =
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+let selected_item_account state =
+  match selected_keeper state, state.item_account with
+  | Some keeper, Some (name, (_, account)) when String.equal keeper.k_name name -> Some account
+  | (Some _ | None), (Some _ | None) -> None
+
+let item_browser_items state =
+  Masc_tui_keeper_items.items ~filter:state.item_filter
+    ~account:(selected_item_account state)
+
+let selected_browser_item state =
+  let items = item_browser_items state in
+  List.nth_opt items (Masc_tui_keeper_items.cursor ~items state.item_cursor)
+
+let move_item_browser state ~delta =
+  let items = item_browser_items state in
+  state.item_cursor <- Masc_tui_keeper_items.move ~items ~cursor:state.item_cursor ~delta;
+  state.detail_scroll <- 0
+
+let retain_item_browser_selection state selected =
+  let items = item_browser_items state in
+  state.item_cursor <-
+    (match selected with
+     | None -> 0
+     | Some item ->
+       (match List.find_index (fun current -> current = item) items with
+        | Some index -> index
+        | None -> 0))
+
+let cycle_item_browser state =
+  let selected = selected_browser_item state in
+  state.item_filter <- Masc_tui_keeper_items.next_filter state.item_filter;
+  retain_item_browser_selection state selected;
+  state.detail_scroll <- 0
+
 let remember_keeper_detail_focus state =
   match state.view with
   | Keepers Keeper_detail ->
@@ -15517,6 +15553,8 @@ let create_state
   config_scroll = 0;
   detail_tab = Detail_info;
   item_cursor = 0;
+  item_filter = Masc_tui_keeper_items.All;
+  item_preview = true;
   item_account = None;
   item_account_error = None;
   keeper_run_cursor = 0;

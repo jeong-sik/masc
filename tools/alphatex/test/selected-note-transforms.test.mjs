@@ -133,3 +133,48 @@ test('selected quantize refuses invalid grids, collisions and source port change
   assert.throws(() => command(routed, 'quantize-notes 1'), /source port/)
   assert.deepEqual(routed, original)
 })
+
+test('selected phrase dynamics keep the contour, other notes and tracks; each edit is one undo/redo step', () => {
+  let editor = commands(newEditor(), ['note C4 0 1 70', 'note E4 1 1 99', 'note G4 3 1 80',
+    'track-add Other', 'note C3 0 1 50', 'track 1', 'select-notes 0 2'])
+  const before = structuredClone(editor), history = editor.undo.length
+  editor = command(editor, 'velocity-add-notes -10')
+  assert.deepEqual(selectedNotes(editor).map(n => n.velocity), [60, 89])
+  assert.equal(editor.undo.length, history + 1)
+  assert.deepEqual(editor.project.tracks[1], before.project.tracks[1])
+  assert.deepEqual(editor.project.tracks[0].notes.find(n => n.pitch === 67), before.project.tracks[0].notes.find(n => n.pitch === 67))
+  const softer = editor.project
+  editor = command(editor, 'velocity-notes 80')
+  assert.deepEqual(selectedNotes(editor).map(n => n.velocity), [80, 80])
+  editor = command(editor, 'undo'); assert.deepEqual(editor.project, softer)
+  editor = command(editor, 'undo'); assert.deepEqual(editor.project, before.project)
+  editor = command(editor, 'redo'); assert.deepEqual(editor.project, softer)
+})
+
+test('PPQ and SMPTE selected dynamics retain release velocity/form, original time and expression in exported MIDI', () => {
+  for (const smpte of [false, true]) {
+    let editor = commands(newEditor(importMidiSource(sourceBytes({ smpte }))), ['channel 1', 'select-all'])
+    const before = structuredClone(editor), targets = new Set(selectedNotes(editor).map(n => n.id))
+    editor = command(editor, 'velocity-add-notes 7')
+    assert.deepEqual(editor.performance.events.filter(e => !targets.has(e.id)), before.performance.events.filter(e => !targets.has(e.id)))
+    const file = importMidiSource(projectMidi(editor.project)), exported = midiSourcePattern(file)
+    const rows = exported.notes.filter(n => n.track === 0 && n.channel === 0)
+    const events = new Map(exported.events.map(e => [e.id, e]))
+    assert.deepEqual(rows.map(n => [n.start, n.duration, n.velocity, events.get(n.off).bytes]),
+      [[130, 300, 87, [0x80, 60, 45]], [760, 250, 106, [0x90, 64, 0]]])
+    assert.deepEqual(exported.timing, editor.performance.timing)
+    assert.deepEqual(command(editor, 'undo').project, before.project)
+  }
+})
+
+test('invalid absolute/relative dynamics leave the whole selection unchanged', () => {
+  for (const editor of [commands(newEditor(), ['note C4 0 1 70', 'note E4 1 1 99', 'select-all']),
+    commands(newEditor(importMidiSource(sourceBytes())), ['channel 1', 'select-all'])]) {
+    const before = structuredClone(editor)
+    for (const line of ['velocity-notes 0', 'velocity-notes 128', 'velocity-notes 1.5', 'velocity-notes NaN',
+      'velocity-add-notes -80', 'velocity-add-notes 40', 'velocity-add-notes Infinity', 'velocity-add-notes 1 extra']) {
+      assert.throws(() => command(editor, line)); assert.deepEqual(editor, before)
+    }
+  }
+  assert.throws(() => command(newEditor(), 'velocity-notes 80'), /Select notes/)
+})

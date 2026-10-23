@@ -369,6 +369,11 @@ new same-key overlaps, source routing changes or document bounds refuse the enti
 An original MIDI overlap may remain; quantization cannot introduce a new one.
 The selection anchor follows the grid so later copy/paste retains its timing.
 The existing `:quantize` command still addresses the selected track/channel.
+Use `:velocity-notes 80` to give the selected attacks one velocity, or
+`:velocity-add-notes -10` to soften them while retaining their relative dynamics.
+Each command is one undoable edit. Every resulting attack must remain in
+MIDI1 range 1–127; an invalid value refuses the entire selection without clipping.
+Note lengths, release velocities/forms, routing and unselected events stay intact.
 
 From `/score`, press **p** to open the piano-roll editor. It also opens directly
 with `masc-alphatex --sequence`; reopen a saved document with `--project song.json`.

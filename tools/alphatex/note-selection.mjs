@@ -137,6 +137,14 @@ export function noteSelectionCommand(editor, command, args) {
       const next = apply(editor, quantizedNotes(editor, chosen(editor), snap))
       return { ...next, noteSelection: { ...next.noteSelection, origin: snap(editor.noteSelection.origin) } }
     }
+    case 'velocity-notes': case 'velocity-add-notes': {
+      count(1)
+      const value = integer(Number(args[0]), 'note velocity')
+      return apply(editor, chosen(editor).map(note => ({
+        kind: source(editor) ? 'change' : 'change-note', id: note.id,
+        velocity: command === 'velocity-notes' ? value : note.velocity + value,
+      })))
+    }
     case 'paste-notes': {
       count(0, 2)
       const copied = editor.noteClipboard

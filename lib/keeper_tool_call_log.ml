@@ -214,7 +214,7 @@ let execution_evidence_metadata fields =
 
 (* A Gate-authorized result keeps its producer's metadata under "producer"
    ([Keeper_gate.authorization_metadata]); read through it the way
-   [Tool_bridge.artifact_manifest_from_metadata] does. *)
+   [Tool_projection.artifact_manifest_from_metadata] does. *)
 let execution_evidence_of_metadata metadata =
   let rec find = function
     | `Assoc fields ->

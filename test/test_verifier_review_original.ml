@@ -91,6 +91,28 @@ let test_other_verification_original_is_rejected () =
     assert (not (String.equal (V.verification_id other) (V.verification_id original)))
   | Error detail -> failwith ("of_json rejected retagged original: " ^ detail)
 
+let test_round_trip_with_blank_notes () =
+  (* the runtime can carry an empty completion_notes, so a stored original
+     must read back the same blank string rather than reject it. *)
+  let blank_request : AR.review_request = { sample_request with completion_notes = "" } in
+  let original =
+    match
+      V.prepare
+        ~verification_id:"vrf-blank"
+        ~attempt:0
+        ~question:sample_question
+        ~lookup_root:sample_root
+        ~lookup_schemas:sample_schemas
+        blank_request
+    with
+    | Ok original -> original
+    | Error detail -> failwith ("prepare with blank notes failed: " ^ detail)
+  in
+  match V.of_json (V.to_json original) with
+  | Ok restored ->
+    assert ((V.review_request restored).completion_notes = "")
+  | Error detail -> failwith ("blank completion_notes must round trip: " ^ detail)
+
 let test_unknown_field_rejected () =
   let original = make_original ~verification_id:"vrf-cccc" ~attempt:0 in
   let json = match V.to_json original with
@@ -126,6 +148,7 @@ let test_empty_lookup_schemas_rejected () =
 
 let () =
   test_round_trip_preserves_lookup_and_image ();
+  test_round_trip_with_blank_notes ();
   test_other_verification_original_is_rejected ();
   test_unknown_field_rejected ();
   test_missing_field_rejected ();

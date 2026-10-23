@@ -32,6 +32,16 @@ let field key fields : (Yojson.Safe.t, string) result =
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "missing field %s" key)
 
+(* A string field that may legitimately be blank. [build_prompt] renders
+   [review_request.task_description] and [review_request.completion_notes]
+   with no non-blank check, so decode accepts the same blank strings prepare
+   accepts and a stored original always reads back. *)
+let field_string key fields : (string, string) result =
+  let* value = field key fields in
+  match value with
+  | `String value -> Ok value
+  | _ -> Error (Printf.sprintf "field %s must be a string" key)
+
 (* The output contract is a single sentence naming the verdict tool and the
    exact verdict vocabulary the review accepts, so a worker that reads the
    contract from this module and one that reads it from the prompt see the
@@ -206,9 +216,14 @@ let review_request_of_json (json : Yojson.Safe.t) : (AR.review_request, string) 
         ~expected:[ "task_title"; "task_description"; "completion_notes"; "agent_name"; "task_id"; "evidence_refs"; "evidence_images" ]
         fields
     in
+    (* [build_prompt] renders task_description and completion_notes without
+       any non-blank check, and the runtime can legitimately carry an empty
+       completion_notes; decode accepts the same blank strings prepare accepts
+       so a stored original always reads back. Only the identity fields
+       (task_title, agent_name, task_id) require non-blank. *)
     let* task_title = text "task_title" fields in
-    let* task_description = text "task_description" fields in
-    let* completion_notes = text "completion_notes" fields in
+    let* task_description = field_string "task_description" fields in
+    let* completion_notes = field_string "completion_notes" fields in
     let* agent_name = text "agent_name" fields in
     let* task_id = text "task_id" fields in
     let* evidence_refs = string_list "evidence_refs" fields in

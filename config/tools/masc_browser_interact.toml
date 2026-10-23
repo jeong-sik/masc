@@ -55,6 +55,12 @@ type = "string"
 description = "select_option only: the value attribute of the one option to select in a single-choice select. A select with several matching options, a disabled option or a multiple select is refused before any effect. The select gets input and change events; this is not a trusted click on the list."
 
 [[params]]
+name = "values"
+type = "array"
+items = { type = "string" }
+description = "select_option only, instead of value: distinct option values for a multiple select; [] clears its selection. Every value must name exactly one enabled option. All values are checked before any selection changes. The whole selection is replaced, input/change fire once, and selectedValues reports the result after page handlers. This is DOM selection, not trusted pointer input."
+
+[[params]]
 name = "x"
 type = "integer"
 description = "scroll/scroll_at horizontal CSS-pixel delta."

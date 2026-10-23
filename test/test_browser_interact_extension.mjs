@@ -21,10 +21,12 @@ const note = new Textarea(), count = new Input('number');
 count.stored = '12';
 class Select {
   constructor(values, multiple = false) {
-    this.multiple = multiple; this.selectedIndex = 0;
-    this.options = values.map((value, index) => ({value, index, disabled: value === 'off', matches(selector) { assert.equal(selector, ':disabled'); return this.disabled; }}));
+    this.multiple = multiple; this.isConnected = true;
+    this.options = values.map((value, index) => ({value, index, selected: index === 0, disabled: value === 'off', matches(selector) { assert.equal(selector, ':disabled'); return this.disabled; }}));
   }
-  get value() { return this.options[this.selectedIndex].value; }
+  get selectedIndex() { return this.options.findIndex(option => option.selected); }
+  set selectedIndex(index) { this.options.forEach(option => { option.selected = option.index === index; }); }
+  get value() { return this.options[this.selectedIndex]?.value ?? ''; }
   getClientRects() { return [{}]; }
   matches(selector) { assert.equal(selector, ':disabled'); return false; }
   dispatchEvent(event) { events.push(event.type); }
@@ -37,7 +39,7 @@ class Editable {
   dispatchEvent(event) { events.push(event.type); }
 }
 const editable = new Editable(); let editMode = 'accept';
-const choice = new Select(['a', 'b', 'dup', 'dup', 'off', '']), several = new Select(['a', 'b'], true);
+const choice = new Select(['a', 'b', 'dup', 'dup', 'off', '']), several = new Select(['a', 'b', 'c', 'off', 'dup', 'dup'], true);
 const extra = {'#choice': [choice], '#several': [several], '#editable': [editable]};
 const button = {getClientRects: () => [{}], matches: () => false, click: () => clicked++};
 const page = vm.createContext({HTMLInputElement: Input, HTMLTextAreaElement: Textarea, HTMLSelectElement: Select,
@@ -108,7 +110,7 @@ for (const [label, args, error] of [
   ['a value no option has', {selector: '#choice', value: 'zzz'}, 'option_not_found'],
   ['a value two options share', {selector: '#choice', value: 'dup'}, 'option_is_ambiguous'],
   ['a disabled option', {selector: '#choice', value: 'off'}, 'option_disabled'],
-  ['a multiple select', {selector: '#several', value: 'a'}, 'multiple_select_is_unsupported'],
+  ['a multiple select needs values', {selector: '#several', value: 'a'}, 'multiple_select_requires_values'],
   ['an element that is not a select', {selector: '#button', value: 'a'}, 'element_is_not_a_select'],
   ['a missing value', {selector: '#choice'}, 'option_value_required']]) {
   const refused = await command({tabId: 7, action: 'select_option', ...args});
@@ -116,6 +118,38 @@ for (const [label, args, error] of [
 }
 assert.equal(choice.selectedIndex, 1, 'a refused choice leaves the selection as it was');
 assert.deepEqual(events, [], 'a refused choice sends no event');
+const selection = () => several.options.filter(option => option.selected).map(option => option.value);
+events.length = 0;
+const many = await command({tabId:7,action:'select_option',selector:'#several',values:['c','a']});
+assert.equal(many.ok, true);
+assert.deepEqual(selection(), ['a','c'], 'selection replaces the whole set in DOM order');
+assert.deepEqual(Array.from(many.data.selectedValues), ['a','c']);
+assert.deepEqual(events, ['input','change'], 'one input/change pair for the complete selection');
+events.length = 0;
+for (const [values,error] of [
+  [['b','missing'],'option_not_found'], [['b','off'],'option_disabled'],
+  [['b','dup'],'option_is_ambiguous'], [['b','b'],'option_values_are_not_distinct'],
+  [['b',1],'option_value_required']]) {
+  const result = await command({tabId:7,action:'select_option',selector:'#several',values});
+  assert.equal(result.error,error);
+  assert.deepEqual(selection(), ['a','c'], 'validate every option before changing any option');
+  assert.deepEqual(events, [], 'invalid multi selection dispatches no input/change');
+}
+assert.equal((await command({tabId:7,action:'select_option',selector:'#choice',values:['a']})).error,'element_is_not_a_multiple_select');
+assert.equal((await command({tabId:7,action:'select_option',selector:'#several',value:'a',values:[]})).error,'option_selection_conflict');
+const cleared = await command({tabId:7,action:'select_option',selector:'#several',values:[]});
+assert.equal(cleared.ok,true); assert.deepEqual(selection(),[]); assert.deepEqual(Array.from(cleared.data.selectedValues),[]);
+const dispatchBefore = several.dispatchEvent;
+several.dispatchEvent = function(event) { events.push(event.type); if(event.type === 'change') this.options[0].selected = true; };
+const changed = await command({tabId:7,action:'select_option',selector:'#several',values:['b']});
+assert.equal(changed.ok,false); assert.equal(changed.error,'select_changed_during_events');
+assert.deepEqual(selection(),['a','b'],'a handler effect is preserved rather than rolled back or replayed');
+several.dispatchEvent = dispatchBefore;
+several.dispatchEvent = function(event) { events.push(event.type); if(event.type === 'change') this.options[1].value = 'rewritten'; };
+const rewritten = await command({tabId:7,action:'select_option',selector:'#several',values:['b']});
+assert.equal(rewritten.ok,false); assert.equal(rewritten.error,'select_changed_during_events');
+assert.deepEqual(selection(),['rewritten'],'a handler value rewrite is a partial effect, not success or rollback');
+several.options[1].value = 'b'; several.dispatchEvent = dispatchBefore;
 events.length = 0;
 const scroll = await command({tabId: 7, action: 'scroll', x: 0, y: 300});
 assert.equal(scroll.ok, true); assert.equal(scroll.data.scrollY, 300);

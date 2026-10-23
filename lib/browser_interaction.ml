@@ -3,7 +3,7 @@ type request = { route : Browser_selection.preference; tab_id : int; frame_path 
   expected_url : string option; action : Browser_lane.interaction }
 let ( let* ) = Result.bind
 let route_names = ["lane"; "clientId"]
-let wire_fields = ["tabId"; "framePath"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"; "width"; "height"; "value"; "target"]
+let wire_fields = ["tabId"; "framePath"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"; "width"; "height"; "value"; "values"; "target"]
 let parse = function
   | `Assoc fields ->
     let allowed = route_names @ wire_fields in
@@ -60,7 +60,7 @@ let parse = function
         | _ -> "width" :: "height" :: keys in
       let keys = match List.assoc_opt "action" fields with
         | Some (`String "select_option") -> keys
-        | _ -> "value" :: keys in
+        | _ -> "value" :: "values" :: keys in
       let keys = match List.assoc_opt "action" fields with
         | Some (`String ("click" | "fill")) -> keys
         | _ -> "target" :: keys in
@@ -201,9 +201,17 @@ let parse = function
       | Some (`String "select_option") ->
         let* () = excludes ["text"; "documentId"; "nodeId"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
         let* selector = selector () in
-        (match List.assoc_opt "value" fields with
-         | Some (`String value) -> Ok (Browser_lane.Select_option {selector;value})
-         | _ -> Error "select_option requires the string value of one option (an empty value selects the option whose value is empty)")
+        let* selection = match List.assoc_opt "value" fields, List.assoc_opt "values" fields with
+          | Some (`String value), None -> Ok (Browser_lane.Single_option value)
+          | None, Some (`List values) ->
+            let rec strings acc = function
+              | [] -> Ok (Browser_lane.Multiple_options (List.rev acc))
+              | `String value :: rest when not (List.mem value acc) -> strings (value :: acc) rest
+              | `String _ :: _ -> Error "select_option values must be distinct"
+              | _ :: _ -> Error "select_option values must contain only strings" in
+            strings [] values
+          | _ -> Error "select_option requires exactly one of string value or string array values ([] clears a multiple select)" in
+        Ok (Browser_lane.Select_option {selector;selection})
       | Some (`String "scroll") ->
         let* () = excludes ["selector"; "text"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"] in
         let* x = integer "x" in let* y = integer "y" in Ok (Browser_lane.Scroll {x; y})
@@ -299,6 +307,7 @@ let perform request =
 
 let script = {js|function interactInPage(args) {
   let effectStarted = false;
+  let selectedValues;
   try {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
     throw new Error("page_url_changed");
@@ -469,21 +478,40 @@ let script = {js|function interactInPage(args) {
       element.click();
     } else if (args.action === "select_option") {
       if (!(element instanceof HTMLSelectElement)) throw new Error("element_is_not_a_select");
-      if (element.multiple) throw new Error("multiple_select_is_unsupported");
-      if (typeof args.value !== "string") throw new Error("option_value_required");
-      const matches = Array.from(element.options).filter(option => option.value === args.value);
-      if (matches.length !== 1) throw new Error(matches.length === 0 ? "option_not_found" : "option_is_ambiguous");
-      if (matches[0].matches(":disabled")) throw new Error("option_disabled");
-      const previousIndex = element.selectedIndex;
+      const multiple = args.values !== undefined;
+      if (multiple && args.value !== undefined) throw new Error("option_selection_conflict");
+      if (multiple && !element.multiple) throw new Error("element_is_not_a_multiple_select");
+      if (!multiple && element.multiple) throw new Error("multiple_select_requires_values");
+      const requested = multiple ? args.values : [args.value];
+      if (!Array.isArray(requested) || requested.some(value => typeof value !== "string"))
+        throw new Error("option_value_required");
+      if (new Set(requested).size !== requested.length) throw new Error("option_values_are_not_distinct");
+      const options = Array.from(element.options);
+      const chosen = requested.map(value => {
+        const matches = options.filter(option => option.value === value);
+        if (matches.length !== 1) throw new Error(matches.length === 0 ? "option_not_found" : "option_is_ambiguous");
+        if (matches[0].matches(":disabled")) throw new Error("option_disabled");
+        return matches[0];
+      });
+      const desired = new Set(chosen), previous = options.map(option => option.selected);
+      const expectedValues = new Map(chosen.map((option, index) => [option, requested[index]]));
+      const selected = () => Array.from(element.options).filter(option => option.selected);
+      const applied = () => {
+        const observed = selected();
+        return observed.length === desired.size
+          && observed.every(option => desired.has(option) && option.value === expectedValues.get(option));
+      };
     effectStarted = true;
-      element.selectedIndex = matches[0].index;
-      if (element.value !== args.value) {
-        element.selectedIndex = previousIndex;
+      if (multiple) options.forEach(option => { option.selected = desired.has(option); });
+      else element.selectedIndex = chosen[0].index;
+      if (!applied()) {
+        options.forEach((option, index) => { option.selected = previous[index]; });
         throw new Error("select_rejected_value");
       }
       element.dispatchEvent(new Event("input", {bubbles: true}));
       element.dispatchEvent(new Event("change", {bubbles: true}));
-      if (element.value !== args.value) throw new Error("select_changed_during_events");
+      if (!element.isConnected || !applied()) throw new Error("select_changed_during_events");
+      selectedValues = selected().map(option => option.value);
     } else {
       if (typeof args.text !== "string") throw new Error("fill_text_required");
       const input = element instanceof HTMLInputElement;
@@ -521,7 +549,8 @@ let script = {js|function interactInPage(args) {
     }
   } else throw new Error("unknown_interaction_action");
   return {action: args.action, urlBefore: before, url: location.href,
-    title: document.title, scrollX: window.scrollX, scrollY: window.scrollY};
+    title: document.title, scrollX: window.scrollX, scrollY: window.scrollY,
+    ...(selectedValues === undefined ? {} : {selectedValues})};
   } catch (error) {
     return {interactionFailure:{message:String(error?.message ?? error),effectStarted}};
   }

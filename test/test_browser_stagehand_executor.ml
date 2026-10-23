@@ -486,7 +486,7 @@ let test_select_option () =
   let tabs = Executor.Tabs.create () and fake = fake [ shop () ] ~active:(Some "P2") in
   ignore (listed tabs fake);
   let expected_url = Some "http://127.0.0.1:1/shop" in
-  let action = Lane.Select_option {selector="#plan";value="pro"} in
+  let action = Lane.Select_option {selector="#plan";selection=Lane.Single_option "pro"} in
   fake.sent <- [];
   fake.evaluated <- Some
     (`Assoc

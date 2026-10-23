@@ -3,7 +3,7 @@ import { assertMidiTimingOrder, assertNoNewNoteOverlaps } from './note-overlap.m
 import { pitch, editProject } from './sequencer-project.mjs'
 import { editMidiSourceNotes } from './midi-source.mjs'
 import { sourceEditor } from './midi-source-editor.mjs'
-import { tickUnits } from './tick-units.mjs'
+import { tickUnits, scaleTicks } from './tick-units.mjs'
 
 const source = editor => editor.project.kind === 'midi-source'
 const view = editor => editor.view ?? editor.project
@@ -111,6 +111,19 @@ export function noteSelectionCommand(editor, command, args) {
         id: note.id, start: starts.get(note.id) })))
       if (source(editor)) assertMidiTimingOrder(editor.performance,next.performance)
       return { ...next, noteSelection: { ...next.noteSelection, origin: quantizeTick(editor.noteSelection.origin, grid) } }
+    }
+    case 'stretch-notes': {
+      count(1, 2)
+      const notes = chosen(editor), anchor = args.length === 2 ? units(editor, args[1]) : editor.noteSelection.origin
+      const at = tick => integer(anchor + scaleTicks(integer(tick - anchor, 'stretch distance'), args[0]), 'stretched position')
+      const origin = at(editor.noteSelection.origin)
+      if (origin < 0) throw new Error('Stretch places the selection anchor before zero')
+      const changes = notes.map(note => ({ kind: source(editor) ? 'change' : 'change-note', id: note.id,
+        start: at(note.start), duration: scaleTicks(note.duration, args[0]) }))
+      if (!source(editor)) assertNoNewNoteOverlaps(track(editor).notes, changes)
+      const next = apply(editor, changes)
+      if (source(editor)) assertMidiTimingOrder(editor.performance, next.performance)
+      return { ...next, noteSelection: { ...next.noteSelection, origin } }
     }
     case 'duration-notes': case 'duration-add-notes': {
       count(1)

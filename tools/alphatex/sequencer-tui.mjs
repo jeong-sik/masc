@@ -48,6 +48,7 @@ const help = [
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',
   ':select-notes START END [LOW HIGH] selects onsets; :select-all; Esc clears selection',
   ':duration-notes LENGTH sets selected gates; :duration-add-notes OFFSET changes their lengths together',
+  ':stretch-notes RATIO [ANCHOR] scales selected spacing and lengths about their selection origin or an explicit position',
   'Ctrl+A: select all; Alt+C/X/V: copy/cut/paste notes; Shift+arrows and x/Delete act on selected notes',
   ':copy-notes :cut-notes :paste-notes [AT [SEMITONES]] :delete-notes :move-notes OFFSET SEMITONES',
   ':quantize-notes GRID snaps selected attacks only; lengths, dynamics and other notes remain intact.',

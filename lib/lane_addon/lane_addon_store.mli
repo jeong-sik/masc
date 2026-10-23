@@ -14,6 +14,8 @@ val blob_reference : string -> Lane_addon_types.evidence
 (** Content-addressed reference without writing. It may be used to measure a
     complete acquisition envelope; publish it only after [write_blob] succeeds. *)
 val write_blob : t -> string -> (Lane_addon_types.evidence, string) result
+(** Publish every original byte durably; the returned address uses the digest
+    already computed for the published leaf. *)
 val write_sampling_blob : t -> string -> (Lane_addon_types.evidence, string) result
 (** Publish a terminal sampling blob, using an independently writable recovery
     directory if the ordinary blob location fails. Both readers resolve the

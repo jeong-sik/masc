@@ -790,6 +790,25 @@ let guided_installation () =
     (Result.is_error (Install.accept_preview (with_package ["service",`String "engine";"ui_category",`String "browser"])));
   check bool "unknown role is refused, not replaced by the service" true
     (Result.is_error (Install.accept_preview (with_package ["service",`String "browser";"ui_category",`String "nonsense"])));
+  let host = `Assoc ["kind",`String "host_process"] in
+  let with_runtime execution runtime = match preview execution with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "package", `Assoc package -> "package", `Assoc (package @ runtime) | field -> field) fields)
+    | json -> json in
+  check bool "Docker is the omitted runtime of a container" true
+    (Result.is_ok (Install.accept_preview (with_runtime (container unverified) [])));
+  check bool "an explicit Apple container runtime matches a container" true
+    (Result.is_ok (Install.accept_preview (with_runtime (container unverified) ["runtime",`String "apple_container"])));
+  check bool "an explicit docker value is not the wire form and is refused" true
+    (Result.is_error (Install.accept_preview (with_runtime (container unverified) ["runtime",`String "docker"])));
+  check bool "host_process execution needs the explicit host_process runtime" true
+    (Result.is_ok (Install.accept_preview (with_runtime host ["runtime",`String "host_process"])));
+  check bool "host_process execution without its runtime is refused" true
+    (Result.is_error (Install.accept_preview (with_runtime host [])));
+  check bool "a container cannot carry the host_process runtime" true
+    (Result.is_error (Install.accept_preview (with_runtime (container unverified) ["runtime",`String "host_process"])));
+  check bool "a host process cannot carry a container runtime" true
+    (Result.is_error (Install.accept_preview (with_runtime host ["runtime",`String "apple_container"])));
   let module Catalog = Masc.Lane_addon_catalog in
   let catalog=Catalog.{directory="/packages";parent=None;
     entries=[Package {manifest_path="/packages/arbitrary/lane.toml";

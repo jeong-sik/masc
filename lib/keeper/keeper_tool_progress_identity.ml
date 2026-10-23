@@ -423,57 +423,16 @@ type history_pair =
   ; output_text : string
   }
 
-(* [Keeper_run_tools_setup.seed_tool_calls_from_history] asks for every matched
-   pair of a keeper's history at the start of every turn. One live keeper held
-   8,660 pairs with 30.2 MB of output and 3.5 MB of input (2026-09-15), several
-   times what [Io_memo] retains for every keeper together, so most of each walk
-   was parsed and hashed again.
-
-   A history memo keeps the pairs of one keeper's previous walk. A walk looks a
-   pair up there, asks [digest_tool_io] for a pair it does not hold (a call the
-   keeper made live last turn is still in [Io_memo]), and publishes the pairs
-   it walked as the next generation. The memo is as large as the history the
-   keeper already holds, and a pair that left the history, such as a purged
-   body, leaves the memo with the next walk. The key is still the bytes, so a
-   rewritten body misses. A published table is never written again: two walks
-   of one keeper each read a finished table and the later publication wins,
-   with the same answers. *)
+(* A history walk memoizes exact pair bytes. A rewritten body misses, and
+   pairs absent from the next walk leave the memo. Published tables are never
+   mutated, so concurrent readers observe a complete generation. *)
 module History_memo = struct
-  type ledger_call =
-    { position : Keeper_tool_call_index.position
-    ; tool_use_id : string option
-    ; tool_name : string
-    ; fingerprints : io_fingerprints
-    }
-  type ledger_seed =
-    { ledger_dir : string
-    ; judged : Keeper_tool_call_index.frontier
-    ; through : Keeper_tool_call_index.frontier
-    ; calls : ledger_call list
-    }
   type t =
-    { digests : io_fingerprints option Io_memo.Table.t Atomic.t
-    ; ledger : ledger_seed option Atomic.t
-    }
+    { digests : io_fingerprints option Io_memo.Table.t Atomic.t }
 
   let create () : t =
-    { digests = Atomic.make (Io_memo.Table.create 0); ledger = Atomic.make None }
-  let ledger_seed memo = Atomic.get memo.ledger
-  let hold_ledger_seed memo seed = Atomic.set memo.ledger (Some seed)
+    { digests = Atomic.make (Io_memo.Table.create 0) }
 end
-
-let history_memos : (string * string, History_memo.t) Hashtbl.t = Hashtbl.create 16
-let history_memos_lock = Stdlib.Mutex.create ()
-
-let history_memo ~base_path ~keeper_name =
-  Stdlib.Mutex.protect history_memos_lock (fun () ->
-    match Hashtbl.find_opt history_memos (base_path, keeper_name) with
-    | Some memo -> memo
-    | None ->
-      let memo = History_memo.create () in
-      Hashtbl.replace history_memos (base_path, keeper_name) memo;
-      memo)
-;;
 
 let digest_history_pairs ?base_path (memo : History_memo.t) pairs =
   let previous = Atomic.get memo.History_memo.digests in

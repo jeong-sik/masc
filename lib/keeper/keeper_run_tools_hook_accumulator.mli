@@ -1,19 +1,10 @@
 (** Hook accumulator for Agent_core.Agent.run callbacks. The hooks write it
     during the run; the turn reads its fields after the run returns. *)
 
-(** Whether the historical calls form one observed sequence. Independent
-    checkpoint and ledger streams cannot prove adjacency to one another. *)
-type historical_order = Ordered | Unordered
-
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : Keeper_agent_result.tool_call_detail list
-    (** This invocation's executed calls only, newest first. Checkpoint
-        history ([historical_tool_calls]) is never execution evidence for a
-        new invocation; it only feeds the repetition checks below. *)
-  ; historical_tool_calls : Keeper_agent_result.tool_call_detail list
-  ; historical_order : historical_order
-  ; history_pairs_at_setup : int option
+    (** This invocation's executed calls only, newest first. *)
   ; mutable current_turn : int
   ; mutable tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -28,10 +19,6 @@ type hook_accumulator =
     (** The renderer-issued proof from the latest assembly. [None] means the
         assembly hook has not produced a value yet. Prefix coverage and empty
         carrier presence are preserved inside the immutable proof. *)
-  ; mutable assistant_turn_texts : string list
-    (** One entry per completed provider turn, newest first: the turn's [Text]
-        blocks concatenated in emission order, "" when the turn emitted none.
-        Thinking, reasoning, and tool blocks are excluded. *)
   ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
     (** Sum of the turn's provider responses' wire [cache_n] / [prompt_n]. *)
   }
@@ -39,31 +26,11 @@ type hook_accumulator =
 val create :
   meta:Keeper_meta_contract.keeper_meta ->
   tool_surface:Keeper_agent_tool_surface.tool_surface_metrics ->
-  historical_tool_calls:Keeper_agent_result.tool_call_detail list ->
-  historical_order:historical_order ->
-  history_pairs_at_setup:int option ->
   hook_accumulator
-(** Begin a new invocation, retaining checkpoint calls only for repetition.
-    [history_pairs_at_setup] is the checkpoint history's matched pair count
-    on the lane that seeds from it, [None] on a scope-bound lane. *)
-
-(** Current calls followed by historical evidence for exact input/output
-    repetition counts. Historical evidence may contain disjoint streams. *)
-val tool_calls_for_repetition :
-  hook_accumulator -> Keeper_agent_result.tool_call_detail list
-
-(** Consecutive-input detection requires observed adjacency. With disjoint
-    historical streams only this invocation's observations prove a streak. *)
-val tool_calls_for_input_repetition :
-  hook_accumulator -> Keeper_agent_result.tool_call_detail list
+(** Begin a new invocation with no executed calls. *)
 
 val record_requested_tool_names :
   hook_accumulator -> string list -> unit
-
-(** Append the provider turn's assistant text (see [assistant_turn_texts])
-    from the after_turn hook's response. *)
-val record_assistant_turn_text :
-  hook_accumulator -> Agent_core.Types.api_response -> unit
 
 (** Add the after_turn hook's response's wire [cache_n] / [prompt_n] to
     [wire_prompt_tokens]. A response that does not report both adds nothing. *)

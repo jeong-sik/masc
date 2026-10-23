@@ -60,11 +60,9 @@ type cooperative_yield_probe =
     [Yielded_to_durable_stimulus] fires after at least one provider turn when
     another durable event is waiting behind the event currently leased by the
     cycle.
-    [Yielded_after_repeated_tool_call] fires only after repeated exact tool
-    input and output prove that the provider loop is not advancing.
-    [Yielded_after_repeated_assistant_text] fires when the trailing provider
-    turns each emitted the same non-blank assistant text — the loop signal
-    that appears before tool fingerprints repeat.
+    Repeat-related variants carry an explicit runtime/host stop. Equality of
+    tool inputs, receipts or assistant text does not establish absence of world
+    progress and is not itself a Keeper stop condition.
     [InputRequired] means Agent Core returned a typed elicitation request whose
     question and checkpoint must be surfaced without provider fallback. These
     typed non-completion stops persist checkpoints rather than claiming a

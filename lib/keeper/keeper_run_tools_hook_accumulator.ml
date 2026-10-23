@@ -12,20 +12,9 @@ open Keeper_types_profile
 open Keeper_agent_tool_surface
 open Keeper_agent_result
 
-type historical_order = Ordered | Unordered
-
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
-  ; historical_tool_calls : tool_call_detail list
-  ; historical_order : historical_order
-  ; history_pairs_at_setup : int option
-    (* How many matched tool-call pairs the checkpoint history held when this
-       run was set up, on the autonomous lane -- the lane whose seed is read
-       from that history. [None] on a lane whose seed is scope-bound, which
-       has no history count to move a boundary to. Read by
-       the repetition boundary when an official-client yield advances only
-       the ledger. Agent Core yields count their actual checkpoint pairs. *)
   ; mutable current_turn : int
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -48,26 +37,14 @@ type hook_accumulator =
     (** The renderer-issued proof from the latest assembly. [None] means the
         assembly hook has not produced a value yet. Prefix coverage and empty
         carrier presence are preserved inside the immutable proof. *)
-  ; mutable assistant_turn_texts : string list
-    (* One entry per completed provider turn, newest first, written by the
-       after_turn hook and read by the cooperative-yield probe's
-       repeated-assistant-text detector. Each entry is the turn's [Text]
-       blocks concatenated in emission order with no separator and no other
-       transformation; thinking, reasoning, and tool blocks are excluded. A
-       turn without a [Text] block contributes "" so positions stay aligned
-       with provider turns — blank entries never satisfy the detector, they
-       only break a streak. *)
   ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
     (* Sum of the turn's provider responses' wire [cache_n] / [prompt_n],
        written by the after_turn hook. *)
   }
 
-let create ~meta ~tool_surface ~historical_tool_calls ~historical_order ~history_pairs_at_setup =
+let create ~meta ~tool_surface =
   { meta
   ; tool_calls = []
-  ; historical_tool_calls
-  ; historical_order
-  ; history_pairs_at_setup
   ; current_turn = 0
   ; tool_surface
   ; requested_tool_names = []
@@ -78,44 +55,12 @@ let create ~meta ~tool_surface ~historical_tool_calls ~historical_order ~history
   ; extra_system_context_digest = None
   ; extra_system_context_size = None
   ; extra_system_context_assembly = None
-  ; assistant_turn_texts = []
   ; wire_prompt_tokens = None
   }
 ;;
 
-let tool_calls_for_repetition (acc : hook_accumulator) =
-  acc.tool_calls @ acc.historical_tool_calls
-;;
-
-let tool_calls_for_input_repetition (acc : hook_accumulator) =
-  match acc.historical_order with
-  | Ordered -> tool_calls_for_repetition acc
-  | Unordered -> acc.tool_calls
-;;
-
 let record_requested_tool_names (acc : hook_accumulator) requested =
   acc.requested_tool_names <- requested
-;;
-
-let record_assistant_turn_text
-      (acc : hook_accumulator)
-      (response : Agent_core.Types.api_response)
-  =
-  let turn_text =
-    response.Agent_core.Types.content
-    |> List.filter_map (function
-      | Agent_core.Types.Text text -> Some text
-      | Agent_core.Types.Thinking _
-      | Agent_core.Types.ReasoningDetails _
-      | Agent_core.Types.RedactedThinking _
-      | Agent_core.Types.ToolUse _
-      | Agent_core.Types.ToolResult _
-      | Agent_core.Types.Image _
-      | Agent_core.Types.Document _
-      | Agent_core.Types.Audio _ -> None)
-    |> String.concat ""
-  in
-  acc.assistant_turn_texts <- turn_text :: acc.assistant_turn_texts
 ;;
 
 let record_wire_prompt_tokens

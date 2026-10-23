@@ -19,9 +19,6 @@ open Keeper_agent_prompt_metrics
 type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
-  ; historical_tool_calls : tool_call_detail list
-  ; historical_order : Keeper_run_tools_hook_accumulator.historical_order
-  ; history_pairs_at_setup : int option
   ; mutable current_turn : int
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -33,7 +30,6 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
   ; mutable extra_system_context_assembly : Keeper_context_assembly.t option
-  ; mutable assistant_turn_texts : string list
   ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
   }
 

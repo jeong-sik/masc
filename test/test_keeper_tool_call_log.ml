@@ -2392,7 +2392,7 @@ let test_async_append_guard_commit_boundary env =
             && Safe_ops.json_string_opt "tool" row = Some "masc_status") in
           Alcotest.(check int) "exactly one tool-call row survives" 1 (List.length rows))))
 
-let test_repetition_flush_distinguishes_post_commit_failure ~pending_failure env =
+let test_committed_flush_distinguishes_post_commit_failure ~pending_failure env =
   with_tmp_log_dir (fun _dir ->
     Eio.Switch.run (fun sw ->
       Keeper_tool_call_log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
@@ -2409,7 +2409,11 @@ let test_repetition_flush_distinguishes_post_commit_failure ~pending_failure env
                && Keeper_tool_call_log.committed_revision ~keeper_name > 0
             then ()
             else (run (); raise Post_commit_guard_failure));
-          let flushed = Keeper_run_tools_setup.flush_ledger () in
+          let flushed =
+            try Ok (Keeper_tool_call_log.flush_committed ()) with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error exn
+          in
           if pending_failure then (
             Alcotest.(check bool) "uncommitted row prevents a completed receipt" true
               (Result.is_error flushed);
@@ -2420,15 +2424,10 @@ let test_repetition_flush_distinguishes_post_commit_failure ~pending_failure env
               (Result.is_ok flushed);
             Alcotest.(check int) "drain continues beyond post-commit failure" 0
               (Keeper_tool_call_log.queued_count_for_testing ());
-            let judged = match Keeper_tool_call_log.current_frontier ~keeper_name with
-              | Ok frontier -> frontier
-              | Error (Index_unavailable detail) -> Alcotest.fail detail in
-            Dated_jsonl.set_append_guard (fun run -> run ());
-            let seeded = Keeper_run_tools_setup.seed_tool_calls_from_ledger
-                ~history_memo:(Keeper_tool_progress_identity.History_memo.create ())
-                ~judged ~history_tool_use_ids:[] ~keeper_name () in
-            Alcotest.(check int) "already-judged committed rows do not repeat next cycle"
-              0 (List.length seeded));
+            match flushed with
+            | Ok (All_committed_with_post_commit_failures _) -> ()
+            | Ok All_committed -> Alcotest.fail "maintenance failure must remain observable"
+            | Error exn -> raise exn);
           Dated_jsonl.set_append_guard (fun run -> run ());
           Keeper_tool_call_log.flush_now ();
           Alcotest.(check int) "both rows persist once after recovery" 2
@@ -3447,10 +3446,10 @@ let () =
             test_read_index_rejects_unlistable_month
         ] )
     ; ( "async_append",
-        [ eio_env_test "repetition flush advances past committed maintenance failures"
-            (test_repetition_flush_distinguishes_post_commit_failure ~pending_failure:false)
-        ; eio_env_test "repetition flush does not advance past an uncommitted row"
-            (test_repetition_flush_distinguishes_post_commit_failure ~pending_failure:true)
+        [ eio_env_test "committed flush reports maintenance failures after draining"
+            (test_committed_flush_distinguishes_post_commit_failure ~pending_failure:false)
+        ; eio_env_test "committed flush fails with an uncommitted row"
+            (test_committed_flush_distinguishes_post_commit_failure ~pending_failure:true)
         ; eio_env_test "append guard preserves commit and queue boundaries"
             test_async_append_guard_commit_boundary
         ; eio_env_test "append queues until flush when async fiber is active"

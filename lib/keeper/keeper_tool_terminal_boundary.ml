@@ -8,9 +8,8 @@ let decision = function
      the operator got a turn that parked a call and then stopped, with the
      model's own words for that turn arriving as a bare status line. The
      parked call is replayed by the host when the approval resolves
-     (Keeper_tools_agent_core_bundle), and a model that re-issues the
-     identical call is stopped by the repeated-tool-call yield, so the turn
-     needs no boundary here. *)
+     (Keeper_tools_agent_core_bundle). A repeated request is not evidence that
+     the whole turn must stop; explicit Gate/effect authority owns the call. *)
   | Keeper_tools_agent_core.External_effect_deferred -> Ok Runtime_agent.Continue
   | Keeper_tools_agent_core.Terminal_effect_completed _ ->
     Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)

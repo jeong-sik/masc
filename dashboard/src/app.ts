@@ -303,7 +303,7 @@ export function App() {
   // a single 1fr column — the nav becomes a fixed bottom tab bar (.v2-nav.is-mnav),
   // out of grid flow. (The keepers 4-column roster|chat|ctx grid is provided by
   // the keeper-workspace layout, not here.)
-  const cols = isMobile ? '1fr' : '58px minmax(0,1fr)'
+  const cols = isMobile || compactChromeMode ? 'minmax(0,1fr)' : '58px minmax(0,1fr)'
 
   return html`
     <div

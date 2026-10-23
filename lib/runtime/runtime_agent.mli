@@ -213,6 +213,8 @@ val runtime_observation_for_terminal_config :
   ?usage_scope:Runtime_usage_scope.t ->
   config ->
   Runtime_observation.runtime_observation
+(** A completed runtime owns its terminal attempt. If [error] is present,
+    retain an uncaptured boundary failure without inventing an attempt. *)
 
 (** {1 RFC-0265 — capability-driven proactive runtime reroute} *)
 

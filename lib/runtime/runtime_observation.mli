@@ -47,11 +47,19 @@ type host_acceptance =
   | Rejected of string
 (** The host's response contract decision, separate from runtime execution. *)
 
+type execution_evidence =
+  | Captured_execution
+  | Uncaptured_failure of string
+(** [Uncaptured_failure] retains the runtime boundary's failure when its
+    result carries no execution capture. It cannot identify provider attempts. *)
+
 type runtime_observation = {
   observation_id : string;
-      (** Producer-owned identity shared by execution and host-acceptance events. *)
+      (** Producer-owned identity shared by captured execution and host-acceptance
+          events. An uncaptured failure has its own gap-observation identity. *)
   host_acceptance : host_acceptance option;
       (** [None] until the host applies its response contract. *)
+  execution_evidence : execution_evidence;
   runtime_id : string;
   selected_model : string option;
       (** The model the runtime answered with, unredacted. The redacted
@@ -156,3 +164,16 @@ val record_host_acceptance :
     a rejected deliverable is not a fabricated provider failure. *)
 
 val host_acceptance_to_json : host_acceptance option -> Yojson.Safe.t
+
+val observe_uncaptured_failure :
+  runtime_id:string ->
+  ?keeper_name:string ->
+  ?turn_id:int ->
+  error:string ->
+  unit ->
+  runtime_observation
+(** Retain the boundary failure with no fabricated provider attempt. Emits an
+    [observation_gap] event under its own observation identity, never an
+    execution terminal or a host acceptance decision. *)
+
+val execution_evidence_to_json : execution_evidence -> Yojson.Safe.t

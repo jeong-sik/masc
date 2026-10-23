@@ -486,15 +486,13 @@ module For_testing : sig
     keeper_name:string ->
     ?turn_id:int ->
     runtime_id:string ->
-    model_id:string ->
     prompt_sent_at:float option ->
-    now:float ->
     execution_result:(Runtime_agent.run_result, Agent_core.Error.t) result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result ->
     Runtime_observation.runtime_observation option
   (** A successful execution retains its identity and attempts when the host
-      accepts or rejects it. An execution failure is observed only after the
-      official client has reported transmitting the prompt. *)
+      accepts or rejects it. After prompt transmission, a failure without a
+      retained capture is explicit missing evidence, never another attempt. *)
 
   val apply_official_client_accept :
     runtime_id:string ->

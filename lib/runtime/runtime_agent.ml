@@ -264,22 +264,23 @@ let runtime_id_of_config (config : config) =
 let runtime_observation_for_terminal_config ~total_duration_ms ?error
     ?(usage_scope = Runtime_usage_scope.Usage_scope_unavailable)
     (config : config) =
-  let latency_ms = Some (int_of_float total_duration_ms) in
-  let capture, _metrics =
-    Runtime_observation.runtime_metrics_for_candidates
-      ~runtime_id:(runtime_id_of_config config) ()
-  in
-  Runtime_observation.record_attempt_terminal capture ~model_id:config.model_id
-    ~latency_ms ~error;
-  Runtime_observation.runtime_observation_with_metrics
-    ~selected_model:(Some config.model_id)
-    ~capture
-    ~attempt_details_source:
-      (match error with
-       | None -> "runtime_agent_terminal"
-       | Some _ -> "runtime_agent_terminal_error")
-    ~usage_scope
-    ()
+  match error with
+  | Some error -> Runtime_observation.observe_uncaptured_failure
+      ~runtime_id:(runtime_id_of_config config) ~error ()
+  | None ->
+    let latency_ms = Some (int_of_float total_duration_ms) in
+    let capture, _metrics =
+      Runtime_observation.runtime_metrics_for_candidates
+        ~runtime_id:(runtime_id_of_config config) ()
+    in
+    Runtime_observation.record_attempt_terminal capture ~model_id:config.model_id
+      ~latency_ms ~error:None;
+    Runtime_observation.runtime_observation_with_metrics
+      ~selected_model:(Some config.model_id)
+      ~capture
+      ~attempt_details_source:"runtime_agent_terminal"
+      ~usage_scope
+      ()
 
 let runtime_observation_for_completed_config ~total_duration_ms ~usage_scope config =
   runtime_observation_for_terminal_config ~total_duration_ms ~usage_scope config

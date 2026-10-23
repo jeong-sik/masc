@@ -129,10 +129,11 @@ let run_result_answered (run_result : Runtime_agent.run_result) =
 
 (* The prompt-sent callback is the invocation boundary, including resumed
    conversations. Configuration/admission errors before that boundary must not
-   invent a provider attempt. Failed invocations have no successful run_result
-   from which the receipt could otherwise obtain an observation. *)
-let official_client_observation ~keeper_name ?turn_id ~runtime_id ~model_id
-    ~prompt_sent_at ~now ~execution_result result =
+   invent a provider attempt. An Error carries no run_result capture; retain
+   that missing evidence explicitly even if an inner host-stop producer had
+   already recorded an execution before a later session commit failed. *)
+let official_client_observation ~keeper_name ?turn_id ~runtime_id
+    ~prompt_sent_at ~execution_result result =
   match execution_result with
   | Ok (execution : Runtime_agent.run_result) ->
     Option.map (fun observation ->
@@ -142,16 +143,9 @@ let official_client_observation ~keeper_name ?turn_id ~runtime_id ~model_id
       Runtime_observation.record_host_acceptance ~keeper_name ?turn_id
         observation acceptance) execution.runtime_observation
   | Error error ->
-    Option.map (fun started_at ->
-      let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates
-        ~runtime_id ~keeper_name ?turn_id () in
-      Runtime_observation.record_attempt_terminal capture ~model_id
-        ~latency_ms:(Some (int_of_float (max 0.0 (now -. started_at) *. 1000.0)))
-        ~error:(Some (Agent_core.Error.to_string error));
-      Runtime_observation.runtime_observation_with_metrics
-        ~selected_model:None ~capture
-        ~attempt_details_source:"official_client_terminal_error"
-        ~agent_core_internal_runtime_allowed:false ()) prompt_sent_at
+    Option.map (fun _ -> Runtime_observation.observe_uncaptured_failure
+      ~runtime_id ~keeper_name ?turn_id ~error:(Agent_core.Error.to_string error) ())
+      prompt_sent_at
 ;;
 
 let apply_official_client_accept ~runtime_id ~accept ~terminal_effect_state
@@ -2378,8 +2372,7 @@ let run_named
           ?turn_id:(Option.bind runtime_manifest_context (fun context ->
             context.Keeper_runtime_manifest.manifest_keeper_turn_id))
           ~runtime_id:attempt_runtime_id
-          ~model_id:runtime.model.api_name ~prompt_sent_at:!official_prompt_sent_at
-          ~now:(Time_compat.now ()) ~execution_result result in
+          ~prompt_sent_at:!official_prompt_sent_at ~execution_result result in
         Option.iter (fun observe -> Option.iter observe observation) on_runtime_observation;
         Result.map (fun (run_result : Runtime_agent.run_result) ->
           { run_result with runtime_observation = observation }) result

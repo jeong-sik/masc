@@ -20,10 +20,12 @@ type request_context = {
 }
 
 type host_acceptance = Accepted | Rejected of string
+type execution_evidence = Captured_execution | Uncaptured_failure of string
 
 type runtime_observation = {
   observation_id : string;
   host_acceptance : host_acceptance option;
+  execution_evidence : execution_evidence;
   runtime_id : string;
   selected_model : string option;
   attempts : runtime_attempt list;
@@ -76,6 +78,7 @@ let runtime_observation_of_candidates ~observation_id ~runtime_id
   {
     observation_id;
     host_acceptance = None;
+    execution_evidence = Captured_execution;
     runtime_id;
     selected_model;
     attempts;
@@ -138,15 +141,17 @@ let record_attempt_start (capture : runtime_metrics_capture) ~model_id:_ =
     }
     :: capture.attempts_rev
 
-type observation_stage = Runtime_execution | Host_acceptance
+type observation_stage = Runtime_execution | Host_acceptance | Observation_gap
 
 let stage_name = function
   | Runtime_execution -> "runtime_execution"
   | Host_acceptance -> "host_acceptance"
+  | Observation_gap -> "observation_gap"
 
 let event_name = function
   | Runtime_execution -> "runtime_execution_terminal"
   | Host_acceptance -> "runtime_host_acceptance"
+  | Observation_gap -> "runtime_observation_gap"
 
 let identity_fields stage ~observation_id ~runtime_id =
   [ "event", `String (event_name stage)
@@ -201,6 +206,23 @@ let host_acceptance_to_json = function
   | Some Accepted -> `Assoc [ "outcome", `String "accepted" ]
   | Some (Rejected error) ->
     `Assoc [ "outcome", `String "rejected"; "error_message", `String error ]
+
+let execution_evidence_to_json = function
+  | Captured_execution -> `Assoc ["status", `String "captured"]
+  | Uncaptured_failure error ->
+    `Assoc ["status", `String "uncaptured_failure"; "error_message", `String error]
+
+let observe_uncaptured_failure ~runtime_id ?keeper_name ?turn_id ~error () =
+  let observation_id = Agent_core.Event_bus.fresh_id () in
+  let execution_evidence = Uncaptured_failure error in
+  let observation = runtime_observation_of_candidates ~observation_id ~runtime_id
+    ~selected_model:None ~attempt_details_source:"runtime_failure_without_capture" () in
+  let details = `Assoc
+    (identity_fields Observation_gap ~observation_id ~runtime_id
+     @ ["execution_evidence", execution_evidence_to_json execution_evidence]) in
+  Log.Telemetry.emit Log.Warn ?keeper_name ?turn_id ~details
+    (Printf.sprintf "runtime failure without execution capture: observation=%s" observation_id);
+  { observation with execution_evidence }
 
 let record_host_acceptance ?keeper_name ?turn_id
     (observation : runtime_observation) acceptance =

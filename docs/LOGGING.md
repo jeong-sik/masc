@@ -65,6 +65,7 @@ resolved `runtime_id`:
 |---|---|---|
 | `runtime_execution_terminal` | `runtime_execution` | `success` or `failure`, with `attempt_index`, latency and execution error |
 | `runtime_host_acceptance` | `host_acceptance` | `accepted` or `rejected`, with the host's rejection detail |
+| `runtime_observation_gap` | `observation_gap` | `execution_evidence.status=uncaptured_failure`, with the runtime boundary error |
 
 A runtime can yield successfully and then fail the host's response contract.
 That produces one execution terminal and one host decision, not two runtime
@@ -72,6 +73,13 @@ terminals. The observation snapshot keeps the original attempt facts and adds
 its typed `host_acceptance`; receipts still mark host rejection as failed.
 Execution success is not a Task completion or delivered-result claim. The model
 label retains the existing public redaction policy.
+
+An error returned without its execution capture has typed `Uncaptured_failure`
+evidence, an empty attempt list, and `attempt_details_available=false`. Its gap
+event has its own observation identity because the original capture cannot be
+joined. This can happen after a client produces a host-stop result but its
+completion hook or session save fails. The receipt retains the failure while
+the original execution terminal remains unchanged.
 
 Native agent events pass their payload's agent identity into `keeper_name` and
 use the producer's Keeper scope for `turn_id`. An absent Keeper scope stays null;

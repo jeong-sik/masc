@@ -2396,11 +2396,6 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
        no-progress ceiling on this whole attempt, armed below on every
        attempt. No per-lane capacity gate — provider load is managed by
        operator adjusting keeper count. *)
-    let run_started_at =
-      Unix.gettimeofday ()
-      (* NDT-OK: provider-attempt latency telemetry only; dispatch/control
-         decisions do not branch on this timestamp. *)
-    in
     (* Tools and recovery judgment run after the main provider releases its
        inference lease. Observe that boundary synchronously: direct chat can
        lack the unified turn's asynchronous tool-count mirror. Its absence
@@ -2620,12 +2615,11 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
       | None, Ok run_result -> run_result.Runtime_agent.runtime_observation
       | None, Error err ->
         Option.map (fun _emit ->
-          let total_duration_ms =
-            (Unix.gettimeofday ()
-             (* NDT-OK: closes this runtime execution's latency sample. *)
-             -. run_started_at) *. 1000.0 in
-          Runtime_agent.runtime_observation_for_terminal_config
-            ~total_duration_ms ~error:(Agent_core.Error.to_string err) config)
+          Runtime_observation.observe_uncaptured_failure
+            ~runtime_id:ctx.runtime_id ~keeper_name:ctx.keeper_name
+            ?turn_id:(Option.bind ctx.runtime_manifest_context (fun context ->
+              context.Keeper_runtime_manifest.manifest_keeper_turn_id))
+            ~error:(Agent_core.Error.to_string err) ())
           ctx.on_runtime_observation
     in
     Option.iter (fun emit -> Option.iter emit observation) ctx.on_runtime_observation;

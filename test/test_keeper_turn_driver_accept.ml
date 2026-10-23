@@ -2323,8 +2323,8 @@ let test_official_failure_observation_reaches_receipt () =
          detail = "successful result response has no deliverable content" }) in
   let observe prompt_sent_at =
     Masc.Keeper_turn_driver.For_testing.official_client_observation
-      ~keeper_name:"test-keeper" ~runtime_id:"antigravity.test" ~model_id:"test-model"
-      ~prompt_sent_at ~now:12.0 ~execution_result:(Error error) (Error error) in
+      ~keeper_name:"test-keeper" ~runtime_id:"antigravity.test"
+      ~prompt_sent_at ~execution_result:(Error error) (Error error) in
   Alcotest.(check bool) "pre-admission error invents no invocation" true
     (Option.is_none (observe None));
   let observation = observe (Some 10.0) in
@@ -2337,12 +2337,15 @@ let test_official_failure_observation_reaches_receipt () =
     Alcotest.(check string) "runtime identity" "antigravity.test" observed.runtime_id;
     Alcotest.(check bool) "no model response invented" true
       (Option.is_none observed.selected_model);
-    match observed.attempts with
-    | [attempt] ->
-      Alcotest.(check (option int)) "measured duration" (Some 2000) attempt.latency_ms;
-      Alcotest.(check (option string)) "terminal error retained"
-        (Some (Agent_core.Error.to_string error)) attempt.error
-    | _ -> Alcotest.fail "expected exactly one transmitted invocation"
+    Alcotest.(check int) "missing capture invents no provider attempt" 0
+      (List.length observed.attempts);
+    Alcotest.(check bool) "attempt detail availability remains honest" false
+      observed.attempt_details_available;
+    match observed.execution_evidence with
+    | Runtime_observation.Uncaptured_failure detail ->
+        Alcotest.(check string) "runtime boundary failure retained"
+          (Agent_core.Error.to_string error) detail
+    | Captured_execution -> Alcotest.fail "raw Error cannot supply an execution capture"
 
 let test_official_success_observation_is_preserved () =
   let open Masc in
@@ -2350,8 +2353,8 @@ let test_official_success_observation_is_preserved () =
   let observed = Runtime_observation.runtime_observation_with_metrics ~selected_model:None ~capture () in
   let result = { (run_result ()) with Runtime_agent.runtime_observation = Some observed } in
   let actual = Masc.Keeper_turn_driver.For_testing.official_client_observation
-    ~keeper_name:"test-keeper" ~runtime_id:"official.test" ~model_id:"test-model"
-    ~prompt_sent_at:(Some 10.0) ~now:12.0 ~execution_result:(Ok result) (Ok result) in
+    ~keeper_name:"test-keeper" ~runtime_id:"official.test"
+    ~prompt_sent_at:(Some 10.0) ~execution_result:(Ok result) (Ok result) in
   Alcotest.(check bool) "successful provider observation stays authoritative" true
     (actual = Some { observed with host_acceptance = Some Runtime_observation.Accepted })
 
@@ -2370,8 +2373,8 @@ let test_host_rejection_keeps_execution_identity_and_outcome () =
     ~runtime_id:"official.test" ~accept:(fun _ -> false) result in
   Alcotest.(check bool) "host refused the deliverable" true (Result.is_error rejected);
   let observed = Keeper_turn_driver.For_testing.official_client_observation
-    ~keeper_name:"test-keeper" ~turn_id:73 ~runtime_id:"official.test" ~model_id:"test-model"
-    ~prompt_sent_at:(Some 10.0) ~now:12.0 ~execution_result:(Ok result) rejected
+    ~keeper_name:"test-keeper" ~turn_id:73 ~runtime_id:"official.test"
+    ~prompt_sent_at:(Some 10.0) ~execution_result:(Ok result) rejected
     |> Option.get in
   Alcotest.(check string) "host stage keeps execution identity"
     execution.observation_id observed.observation_id;
@@ -2399,11 +2402,50 @@ let test_host_rejection_keeps_execution_identity_and_outcome () =
     Alcotest.(check (option string)) "event keeper" (Some "test-keeper") row.keeper_name;
     Alcotest.(check (option int)) "event Keeper turn" (Some 73) row.turn_id) rows
 
+let test_lost_capture_failure_does_not_log_another_execution () =
+  let open Masc in
+  Log.set_level Log.Info;
+  let since_seq = (Log.Ring.bounds ()).total - 1 in
+  let projected = Keeper_official_client_host.host_stop_result
+    ~runtime_id:"official.test" ~model:"test-model" ~session_id:"session-observation"
+    ~turn_id:"vendor-turn-observation" ~turns_used:1 ~latency_ms:(Some 12)
+    ~request_context:None
+    (Keeper_official_client_host.Terminal_tool_boundary
+       {outcome=Terminal_completed; tool_name="test"}) in
+  let captured = (Result.get_ok projected).Runtime_agent.runtime_observation |> Option.get in
+  (* The official adapter may fail its completion hook or session commit
+     after constructing the host-stop result and return only that error. *)
+  let error = Agent_core.Error.Internal "session commit rejected" in
+  let observed = Keeper_turn_driver.For_testing.official_client_observation
+    ~keeper_name:"test-keeper" ~turn_id:73 ~runtime_id:"official.test"
+    ~prompt_sent_at:(Some 10.) ~execution_result:(Error error) (Error error)
+    |> Option.get in
+  Alcotest.(check int) "no replacement provider attempt" 0 (List.length observed.attempts);
+  Alcotest.(check bool) "the failed boundary remains visible to the receipt" true
+    (Keeper_agent_error.runtime_outcome_of_observation ~lane_failover_applied:false
+       (Some observed) = Keeper_execution_receipt.Runtime_failed);
+  let rows = Log.Ring.recent ~since_seq ~module_filter:"Telemetry" ~order:`Oldest_first () in
+  let field key (row : Log.Ring.entry) = Yojson.Safe.Util.member key row.details in
+  Alcotest.(check bool) "lost capture is a gap, not a second execution terminal" true
+    (List.map (field "stage") rows = [`String "runtime_execution"; `String "observation_gap"]);
+  match rows with
+  | [terminal; gap] ->
+      Alcotest.(check bool) "the original terminal remains identifiable" true
+        (field "observation_id" terminal = `String captured.observation_id);
+      Alcotest.(check bool) "the gap does not claim the lost capture identity" true
+        (field "observation_id" gap <> field "observation_id" terminal);
+      Alcotest.(check bool) "the gap exposes typed failure evidence" true
+        (field "execution_evidence" gap =
+           Runtime_observation.execution_evidence_to_json observed.execution_evidence)
+  | _ -> Alcotest.fail "expected the original terminal and one missing-capture diagnostic"
+
 let () =
   Alcotest.run "keeper_turn_driver_accept"
     [
       ( "accept"
       , [
+          Alcotest.test_case "lost execution capture never fabricates a second attempt" `Quick
+            test_lost_capture_failure_does_not_log_another_execution;
           Alcotest.test_case "host rejection preserves execution evidence and stage identity" `Quick
             test_host_rejection_keeps_execution_identity_and_outcome;
           Alcotest.test_case "official failure reaches receipt after prompt transmission" `Quick

@@ -352,9 +352,11 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id =
          let* parent=advance ~store parent (Progress.Successor_intended successor) in
          let* child=retain_child parent successor child in Ok (V.attempt child.original))
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _),[] -> Ok (V.attempt parent.original)
+      | Commit_unknown _ | Finished _ | Conflicted _
+      | Rejected {stage=Progress.Before_dispatch;_}),[] -> Ok (V.attempt parent.original)
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _),_::_ ->
+      | Commit_unknown _ | Finished _ | Conflicted _
+      | Rejected {stage=(Progress.Before_dispatch | Progress.Execution);_}),_::_ ->
       Error (Corrupt_original "verifier child exists without its original successor intent") in
   match related with
   | [] -> Ok 0

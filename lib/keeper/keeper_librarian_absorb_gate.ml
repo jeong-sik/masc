@@ -897,6 +897,41 @@ type replay_authority =
   | Gate_available of Typesafeai_client.destination_id * Typesafeai_client.destination_id list
   | Gate_unavailable of Typesafeai_config.unavailable_reason
 
+type live_authority =
+  { keeper_id : string
+  ; armed_destinations : (Typesafeai_config.destinations, Typesafeai_config.unavailable_reason) result
+  }
+
+let resolve ~keeper_id : live_authority =
+  { keeper_id; armed_destinations = Typesafeai_config.absorb_gate_destinations ~keeper_id }
+;;
+
+let keeper_of_authority (authority : live_authority) = authority.keeper_id
+
+let replay_authority (authority : live_authority) =
+  match authority.armed_destinations with
+  | Error reason -> Gate_unavailable reason
+  | Ok (first, rest) ->
+    Gate_available (Typesafeai_client.identify first, List.map Typesafeai_client.identify rest)
+;;
+
+let replay_authority_to_yojson (authority : replay_authority) : Yojson.Safe.t =
+  match authority with
+  | Gate_available (first, rest) ->
+    `Assoc
+      [ "version", `Int 1
+      ; "status", `String "available"
+      ; "destinations", `List
+          (List.map Typesafeai_client.destination_id_to_yojson (first :: rest))
+      ]
+  | Gate_unavailable reason ->
+    `Assoc
+      [ "version", `Int 1
+      ; "status", `String "unavailable"
+      ; "reason", `String (Typesafeai_config.unavailable_reason_to_string reason)
+      ]
+;;
+
 type retained_evaluation =
   { request : Yojson.Safe.t
   ; returned : Yojson.Safe.t option
@@ -1073,7 +1108,45 @@ module Replay = struct
     evaluation
 end
 
-let restore ~authority ~new_observations ~facts ~new_claims ~superseding ~absorbed ~evaluations =
+let replay_authority_of_yojson (json : Yojson.Safe.t) : (replay_authority, string) result =
+  let index = 0 in
+  try
+    Replay.require index
+      ((Replay.field index "version" json |> Replay.integer index) = 1)
+      "unsupported gate authority version";
+    let authority =
+      match Replay.field index "status" json |> Replay.string index with
+      | "available" ->
+        (match Replay.field index "destinations" json |> Replay.list index with
+         | [] -> Replay.reject index "empty gate destination walk"
+         | first :: rest ->
+           Gate_available
+             (Replay.destination index first, List.map (Replay.destination index) rest))
+      | "unavailable" ->
+        let reason =
+          match Replay.field index "reason" json |> Replay.string index with
+          | "lane_disabled" -> Typesafeai_config.Lane_disabled
+          | "no_armed_destination" -> Typesafeai_config.No_armed_destination
+          | "absorb_gate_disabled" -> Typesafeai_config.Absorb_gate_disabled
+          | "board_attention_disabled" -> Typesafeai_config.Board_attention_disabled
+          | "context_review_disabled" -> Typesafeai_config.Context_review_disabled
+          | "skill_applicability_disabled" -> Typesafeai_config.Skill_applicability_disabled
+          | "librarian_preflight_disabled" -> Typesafeai_config.Librarian_preflight_disabled
+          | "workspace_memory_selection_disabled" -> Typesafeai_config.Workspace_memory_selection_disabled
+          | "keeper_excluded" -> Typesafeai_config.Keeper_excluded
+          | _ -> Replay.reject index "unknown gate unavailable reason"
+        in
+        Gate_unavailable reason
+      | _ -> Replay.reject index "unknown gate authority status"
+    in
+    Replay.canonical index json (replay_authority_to_yojson authority);
+    Ok authority
+  with
+  | Replay.Rejected error -> Error (replay_error_to_string error)
+  | Yojson.Json_error detail -> Error ("invalid gate authority JSON value: " ^ detail)
+;;
+
+let restore_with ~missing ~authority ~new_observations ~facts ~new_claims ~superseding ~absorbed ~evaluations =
   try
     let remaining = ref evaluations in
     let completed = ref [] in
@@ -1096,15 +1169,16 @@ let restore ~authority ~new_observations ~facts ~new_claims ~superseding ~absorb
       List.iter (fun destination -> ignore (Replay.destination 0 (Typesafeai_client.destination_id_to_yojson destination))) destinations;
       let evaluate direction ~state ~questions =
         let index = !count in
-        let retained = match !remaining with
-          | [] -> raise (Replay.Rejected (Missing_evaluation index))
-          | first :: rest -> remaining := rest; first in
         let request = evaluation_request_to_yojson ~direction ~destinations ~state ~questions in
-        Replay.require index (Replay.same retained.request request) "pre-dispatch request differs from original inputs";
-        let returned = match retained.returned with
-          | None -> raise (Replay.Rejected (Incomplete_evaluation index))
-          | Some json -> json in
-        let evaluation = Replay.returned index ~direction ~destinations ~state ~questions returned in
+        let evaluation = match !remaining with
+          | [] -> missing index ~direction ~destinations ~state ~questions
+          | retained :: rest ->
+            remaining := rest;
+            Replay.require index (Replay.same retained.request request) "pre-dispatch request differs from original inputs";
+            let returned = match retained.returned with
+              | None -> raise (Replay.Rejected (Incomplete_evaluation index))
+              | Some json -> json in
+            Replay.returned index ~direction ~destinations ~state ~questions returned in
         incr count;
         completed := evaluation :: !completed;
         Result.map (fun evaluated -> evaluated.Typesafeai_client.response) evaluation.result
@@ -1116,6 +1190,12 @@ let restore ~authority ~new_observations ~facts ~new_claims ~superseding ~absorb
   with
   | Replay.Rejected error -> Error error
   | Yojson.Json_error detail -> Error (Invalid_evidence { index = 0; detail = "invalid JSON value: " ^ detail })
+;;
+
+let restore ~authority ~new_observations ~facts ~new_claims ~superseding ~absorbed ~evaluations =
+  restore_with ~authority ~new_observations ~facts ~new_claims ~superseding ~absorbed ~evaluations
+    ~missing:(fun index ~direction:_ ~destinations:_ ~state:_ ~questions:_ ->
+      raise (Replay.Rejected (Missing_evaluation index)))
 ;;
 
 let evaluation_to_yojson { direction; destinations; state; questions; result } =
@@ -1303,13 +1383,13 @@ let log_copy_checks ~keeper_id checks =
       checks
 ;;
 
-let run
+let run_resolved
     ?observe
     ?before_evaluate
     ?after_evaluate
     ?on_evaluation_aborted
     ?clock
-    ~keeper_id
+    ~resolve_authority
     ~new_observations
     ~facts
     ~new_claims
@@ -1321,7 +1401,9 @@ let run
   match absorbed with
   | [] -> complete (Skipped { reason = No_absorptions; absorbed })
   | _ :: _ ->
-    (match Typesafeai_config.absorb_gate_destinations ~keeper_id with
+    let authority : live_authority = resolve_authority () in
+    let keeper_id = authority.keeper_id in
+    (match authority.armed_destinations with
      | Error
          ((Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Keeper_excluded) as reason)
        ->
@@ -1432,4 +1514,82 @@ let run
             (shas ()));
        log_copy_checks ~keeper_id copy_checks;
        complete (Evaluated { outcome; copy_checks; evaluations }))
+;;
+
+(* Keep the existing no-absorption path before configuration resolution. Both
+   entrypoints otherwise share the exact evaluation and terminal-hook order. *)
+let run_captured
+    (authority : live_authority)
+    ?observe
+    ?before_evaluate
+    ?after_evaluate
+    ?on_evaluation_aborted
+    ?clock
+    ~new_observations
+    ~facts
+    ~new_claims
+    ~superseding
+    ~absorbed
+    () =
+  run_resolved
+    ?observe ?before_evaluate ?after_evaluate ?on_evaluation_aborted ?clock
+    ~resolve_authority:(fun () -> authority)
+    ~new_observations ~facts ~new_claims ~superseding ~absorbed ()
+;;
+
+let continue_captured ~keeper_id ~authority ~live_authority ~evaluations
+    ~before_evaluate ~after_evaluate ~on_evaluation_aborted
+    ~new_observations ~facts ~new_claims ~superseding ~absorbed () =
+  let missing index ~direction ~destinations ~state ~questions =
+    let live = match live_authority with
+      | None -> raise (Replay.Rejected (Missing_evaluation index))
+      | Some live -> live in
+    Replay.require index (live.keeper_id = keeper_id) "live gate belongs to another Keeper";
+    Replay.require index
+      (Replay.same (replay_authority_to_yojson authority)
+         (replay_authority_to_yojson (replay_authority live)))
+      "live gate authority differs from the original captured authority";
+    let armed = match live.armed_destinations with
+      | Ok armed -> armed
+      | Error _ -> Replay.reject index "original available gate has no live destinations" in
+    let evaluation_id = before_evaluate ~direction ~destinations ~state ~questions in
+    let result =
+      try
+        Eio.Fiber.check ();
+        Typesafeai_client.evaluate ~destinations:armed ~state ~questions ()
+      with
+      | Eio.Cancel.Cancelled _ as exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        Eio.Cancel.protect (fun () -> on_evaluation_aborted ~evaluation_id `Cancelled);
+        Printexc.raise_with_backtrace exn backtrace
+      | exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        Eio.Cancel.protect (fun () ->
+          on_evaluation_aborted ~evaluation_id (`Failed (Printexc.to_string exn)));
+        Eio.Fiber.check ();
+        Printexc.raise_with_backtrace exn backtrace in
+    let evaluation = {direction;destinations;state;questions;result} in
+    Eio.Cancel.protect (fun () -> after_evaluate ~evaluation_id evaluation);
+    Eio.Fiber.check ();
+    evaluation in
+  restore_with ~missing ~authority ~new_observations ~facts ~new_claims ~superseding ~absorbed ~evaluations
+;;
+
+let run
+    ?observe
+    ?before_evaluate
+    ?after_evaluate
+    ?on_evaluation_aborted
+    ?clock
+    ~keeper_id
+    ~new_observations
+    ~facts
+    ~new_claims
+    ~superseding
+    ~absorbed
+    () =
+  run_resolved
+    ?observe ?before_evaluate ?after_evaluate ?on_evaluation_aborted ?clock
+    ~resolve_authority:(fun () -> resolve ~keeper_id)
+    ~new_observations ~facts ~new_claims ~superseding ~absorbed ()
 ;;

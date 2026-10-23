@@ -207,3 +207,66 @@ The new Store failure/recovery and actual runner/classifier scenarios require
 selected compiled verification on their own frozen source. Parser checks and
 synthetic broker publication fixtures do not prove real provider capture, UI,
 operator installation or completion of E03 or the original54 work items.
+
+## Explicit-candidate owner implementation in progress
+
+The successor implementation is not a worker cutover yet. The actual production
+trigger remains `Keeper_librarian_queue_refresh.run_explicit_admission` followed
+by `Keeper_memory_admission_worker.run`. Keep that caller intact until its whole
+replacement includes original discovery, worker execution, absorption, locked
+Memory disposition, verified receipt recovery, candidate ACK and both children
+of a whole-input partition. Do not publish the intermediate ports as extraction
+completion.
+
+The immutable execution capture binds the actual workspace and flat keepers
+root path/device/inode, canonical Keeper ID and existing Memory incarnation
+epoch. There is no per-Keeper subdirectory inode to invent. Root preparation
+uses the existing `Current.capture_program_anchor` before observing that epoch;
+observation itself does not create it. An owner-specific original Store scope
+and a host-minted tagged request identity make complete discovery independent
+of other Keepers and older epochs, without a new index. Incoming Exact requests
+can derive only the lookup scope from that identity and must still restore the
+full original physical capture and acknowledged part ancestry.
+
+Original prompt preservation includes the resolved main template and fragment,
+the actual advisory Memory limits, ordered variables, substitution JSON byte
+strings, full rendered prompt/schema and stable parsing time. Restore uses those
+captured values; a later prompt override or advisory environment change cannot
+reconstruct an old request. Other Librarian purposes are refused by this explicit
+candidate capture rather than replacing their conversation/context with empties.
+
+The common configured tool-call port retains the original logical installation,
+package/tool and semantic configuration revision while the existing configuration
+and action serializers cover fresh complete declaration confirmation through the
+worker RPC. Local original publication is cancellation-protected; the actual RPC
+remains cancellable. A source review caught a shield extending across RPC and it
+was repaired before this unit's freeze. Cancellation execution tests remain
+required. Raw source revision is provenance, not a reason to transfer or rewrite
+an existing request after an otherwise equivalent configuration edit.
+
+The absorption journal must replay returned evaluations through the gate's
+existing derivation before continuing only the next not-yet-intended question.
+An intended request without its returned evidence remains unknown. The actual
+captured authority, raw proposal, parent input and before/after transcripts are
+joined again before any decision; observer JSON and a worker judgment cannot
+replace them. A known unsuccessful complete gate may have a separately retained
+successor attempt on an explicit host trigger. Restore errors do not grant that
+successor.
+
+A remaining mandatory boundary is terminal-frontier supersession. Suppose an
+original candidate is semantically deferred, then new candidates or material
+Memory changes arrive. The current worker judges the pending input again; an
+immutable root must not permanently lock those deferred candidates out. The new
+owner must retain the complete changed input and the qualified original terminal
+frontier it supersedes, preserve both histories, and prevent unchanged wakes from
+minting another root. Unknown or failed prior work cannot silently become a
+retry grant. Recursive parts also need their original left-before-right traversal
+and fresh Memory capture at the moment each sibling is actually evaluated.
+
+The Python request worker has a bounded process-level persistence probe: ten
+actual MCP frames cover retained submission, full original role/schema listing,
+rebound-input refusal, terminal retention and process restart. Its host result is
+synthetic, so it proves neither semantic authority nor OCaml host execution,
+provider capture, absorption, Memory or ACK. The complete production owner and
+actual Runtime/Store/failure tests remain required before this unit can be called
+implemented and before E03 can advance to end-to-end qualification.

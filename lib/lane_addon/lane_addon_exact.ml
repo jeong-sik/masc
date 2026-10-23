@@ -566,6 +566,29 @@ let read_original_execution ~store ~declaration_id ~schema ~attempt_ordinal requ
          if Yojson.Safe.equal schema retained_schema then Ok (Completed_original execution)
          else Error "original execution proof differs from the supplied original schema")
 
+type latest_original_execution =
+  | No_completed_latest
+  | Completed_latest of { attempt_ordinal : int; execution : execution_result }
+
+let read_latest_original_execution ~store ~declaration_id ~schema request =
+  let* schema=original_schema ~declaration_id ~schema request in
+  let* wire=Lane_addon_store.load_exact_request store ~declaration_id ~request_id:request.request_id in
+  match wire with
+  | None ->
+    let* proofs=load_proofs ~store ~declaration_id request in
+    if proofs=[] then Ok No_completed_latest
+    else Error "original execution proof has no original Exact request"
+  | Some wire ->
+    let* record=bound_record ~declaration_id request wire in
+    let* _=validate_record ~schema:None record in
+    let* proofs=bound_proofs ~store ~declaration_id request record in
+    let attempt_ordinal=List.length record.attempts in
+    match selected_proof ~attempt_ordinal proofs with
+    | None -> Ok No_completed_latest
+    | Some (retained_schema,execution) ->
+      if Yojson.Safe.equal schema retained_schema then Ok (Completed_latest {attempt_ordinal;execution})
+      else Error "original execution proof differs from the supplied original schema"
+
 (* Requests this process is running, by store root, declaration and request.
    Only the base-path lease holder runs requests (see the interface), so a
    started attempt that is not here was cut off by a crash or a cancellation. *)

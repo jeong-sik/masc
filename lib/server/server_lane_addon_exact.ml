@@ -3,6 +3,7 @@ module Addon = Lane_addon_exact
 module Failure = Exact_lane_failure
 module Registry = Runtime_exact_output_registry
 module Receipt = Keeper_exact_walk_receipt
+let ( let* ) = Result.bind
 
 (* What one tried slot said. Every slot the call reached leaves one. *)
 type slot_failure =
@@ -250,10 +251,16 @@ let runner_with ~cli_runner ~base_path : Addon.runner =
 
 let runner ~base_path = runner_with ~cli_runner:None ~base_path
 let authorize_request ~base_path ~store ~declaration_id ~package request =
-  Result.map
-    (fun validate_output ->
-      {Addon.admission_class=Agent_core.Llm_provider.Admission_class.Standard; validate_output})
-    (Server_workspace_memory_addon_validation.authorize ~base_path ~store ~declaration_id ~package request)
+  let* curator=Server_workspace_memory_addon_validation.authorize
+    ~base_path ~store ~declaration_id ~package request in
+  let* librarian=Server_librarian_addon_validation.authorize
+    ~base_path ~store ~declaration_id ~package request in
+  match librarian with
+  | None -> Ok {Addon.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
+      validate_output=curator}
+  | Some librarian ->
+    Ok {Addon.admission_class=Agent_core.Llm_provider.Admission_class.Background;
+      validate_output=(fun answer -> let* ()=curator answer in librarian answer)}
 
 module For_testing = struct
   let runner ~base_path ~cli_runner = runner_with ~cli_runner:(Some cli_runner) ~base_path

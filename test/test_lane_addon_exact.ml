@@ -378,6 +378,36 @@ let test_original_execution_is_bound_to_one_attempt () =
       (Result.is_error (Exact.read_original_execution ~store ~declaration_id ~schema:(`Assoc []) ~attempt_ordinal:2 original));
     check bool "read refuses a zero ordinal" true (Result.is_error (original_execution store ~attempt_ordinal:0 original)))
 
+let test_latest_execution_never_borrows_an_earlier_proof () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request "latest-original-proof" in
+    let busy=Exact.Provider_unavailable {detail="original refusal"} in
+    let runner,sends,_=counting_runner store
+      (ref [Refused busy;Unavailable Exact.Lane_off;Answer question]) in
+    let latest ()=require (Exact.read_latest_original_execution ~store:(Store.create ~root)
+      ~declaration_id ~schema original) in
+    check bool "absent original has no latest proof" true (latest ()=Exact.No_completed_latest);
+    ignore (run_request store runner original);
+    (match latest () with
+     | Exact.Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_refused refusal;_}} ->
+       check int "actual refusal ordinal" 1 attempt_ordinal;
+       check bool "actual original refusal" true (refusal=busy)
+     | Exact.No_completed_latest | Exact.Completed_latest _ -> fail "latest refusal is missing");
+    ignore (run_request store runner original);
+    check bool "a later unstarted attempt cannot borrow a completed predecessor" true
+      (latest ()=Exact.No_completed_latest);
+    check bool "the earlier proof remains separately readable" true
+      (match require (original_execution store original) with
+       | Exact.Completed_original _ -> true | Exact.No_completed_original -> false);
+    check bool "a later explicit trigger can answer" true
+      (answered_with question (run_request store runner original));
+    (match latest () with
+     | Exact.Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended (Exact.Answered _);_}} ->
+       check int "the reader reports the real ordinal including the unsent attempt" 3 attempt_ordinal
+     | Exact.No_completed_latest | Exact.Completed_latest _ -> fail "latest answer is missing");
+    check int "proof reads never dispatch" 2 !sends)
+
 let test_proof_publication_failure_never_exposes_an_answer () =
   with_root (fun root ->
     let store=Store.create ~root in
@@ -865,6 +895,7 @@ let () =
         ; test_case "confirmed proof recovers lost outcome publication" `Quick
             test_confirmed_proof_recovers_lost_outcome_publication
         ; test_case "original execution binds request schema and actual attempt" `Quick test_original_execution_is_bound_to_one_attempt
+        ; test_case "latest original evidence cannot borrow a previous attempt" `Quick test_latest_execution_never_borrows_an_earlier_proof
         ; test_case "proof failure leaves uncertainty without exposing an answer" `Quick test_proof_publication_failure_never_exposes_an_answer
         ; test_case "malformed proof refuses local recovery without provider replay" `Quick test_malformed_proof_refuses_publication_recovery
         ; test_case "recovery validates the complete original attempt history" `Quick test_recovery_refuses_malformed_earlier_attempt

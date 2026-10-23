@@ -258,6 +258,28 @@ type replay_authority =
 (** Availability and ordered destinations captured by the host for the
     original pass, including explicit disabled/excluded decisions. *)
 
+type live_authority
+(** An original Keeper identity and the once-resolved gate availability and
+    armed destinations. Credentials remain private in memory; this handle
+    has no decoder and cannot be reconstructed from replay evidence. *)
+
+val resolve : keeper_id:string -> live_authority
+(** Capture current gate configuration and credentials once, without any
+    provider call. Explicit disabled/excluded and unavailable states remain
+    distinct. Resolve before retaining the original pass and dispatching it. *)
+val keeper_of_authority : live_authority -> string
+(** The original Keeper bound to this live handle; exposes no credentials. *)
+
+val replay_authority : live_authority -> replay_authority
+(** Credential-free availability and ordered destination identities from the
+    same live snapshot used by {!run_captured}; no configuration is reread. *)
+
+val replay_authority_to_yojson : replay_authority -> Yojson.Safe.t
+val replay_authority_of_yojson : Yojson.Safe.t -> (replay_authority, string) result
+(** Strict versioned codec for original availability and destination identity.
+    Unknown/duplicate fields, empty available walks and credential-bearing
+    endpoint fields refuse. Decoding grants no live execution authority. *)
+
 type retained_evaluation =
   { request : Yojson.Safe.t
   ; returned : Yojson.Safe.t option
@@ -346,6 +368,58 @@ val failure_detail
     reverse request also return a failure, so neither can commit candidates
     or advance the durable consumer. A skipped evaluation is not necessarily
     permission to commit. *)
+
+val run_captured
+  :  live_authority
+  -> ?observe:(observation -> unit)
+  -> ?before_evaluate:
+       (direction:direction
+        -> destinations:Typesafeai_client.destination_id list
+        -> state:Yojson.Safe.t
+        -> questions:(string * Typesafeai_types.question) list
+        -> 'evaluation_id)
+  -> ?after_evaluate:(evaluation_id:'evaluation_id -> evaluation -> unit)
+  -> ?on_evaluation_aborted:
+       (evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
+  -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
+  -> new_observations:Yojson.Safe.t list
+  -> facts:Keeper_memory_os_types.fact list
+  -> new_claims:Keeper_memory_os_types.fact list
+  -> superseding:string list
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> unit
+  -> run_result
+(** Execute only the captured live authority, using the original inputs.
+    Current configuration and credentials are not reread. The Keeper identity
+    used for logging is captured by {!resolve}. Hooks, observation ordering,
+    protected terminal recording and cancellation have the same contract as
+    {!run}. Persist {!replay_authority} before calling this port; after restart
+    use {!restore} with original transcripts rather than resolving a new live
+    authority to repeat an uncertain evaluation. *)
+
+val continue_captured
+  : keeper_id:string
+  -> authority:replay_authority
+  -> live_authority:live_authority option
+  -> evaluations:retained_evaluation list
+  -> before_evaluate:(direction:direction
+       -> destinations:Typesafeai_client.destination_id list -> state:Yojson.Safe.t
+       -> questions:(string * Typesafeai_types.question) list -> 'evaluation_id)
+  -> after_evaluate:(evaluation_id:'evaluation_id -> evaluation -> unit)
+  -> on_evaluation_aborted:(evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
+  -> new_observations:Yojson.Safe.t list
+  -> facts:Keeper_memory_os_types.fact list
+  -> new_claims:Keeper_memory_os_types.fact list
+  -> superseding:string list
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> unit -> (run_result, replay_error) result
+(** Replay the strict completed prefix through the same decision implementation
+    as restore, then execute only questions beyond that prefix. A retained
+    request without a returned answer refuses without another provider call.
+    Every new question requires the original Keeper and exactly matching
+    captured live/replay authority. With no needed new question, no live handle
+    or configuration is required. Hooks retain requests before dispatch and
+    protect terminal/aborted recording exactly as run_captured does. *)
 
 val run
   :  ?observe:(observation -> unit)

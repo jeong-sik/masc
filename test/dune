@@ -2637,6 +2637,7 @@
 (include stanzas/test_lane_addon_scheduled_act.inc)
 
 (include stanzas/test_lane_addon_lifecycle.inc)
+(include stanzas/test_lane_addon_submit_once.inc)
 
 (include stanzas/test_discord_gateway_client.inc)
 

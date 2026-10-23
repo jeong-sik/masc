@@ -28,6 +28,13 @@ let emit ~enabled ~level palette =
     ~project:(P.For_testing.best_color_for_level ~level) palette
 
 let () =
+  if Array.length Sys.argv > 1 && Sys.argv.(1) = "--no-color-env" then (
+    assert (not T.colors_enabled);
+    assert (T.recede None = "");
+    print_endline "PASS: actual NO_COLOR startup policy and production recede token";
+    exit 0)
+
+let () =
   let input = open_in "themes.tsv" in
   let rec loop count =
     match input_line input with

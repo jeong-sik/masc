@@ -25,4 +25,5 @@ ocamlopt -c masc_tui_terminal_palette_stubs.c
 ocamlopt -I +unix -o probe unix.cmxa masc_tui_terminal_palette_stubs.o \
   -cclib -lncurses masc_tui_terminal_palette.cmx masc_tui_color.cmx masc_tui_theme.cmx probe.ml
 ./probe > results.tsv
+NO_COLOR=1 MASC_TUI_FORCE_COLOR=0 ./probe --no-color-env > no-color-env.txt
 echo "Standalone colour observations: $task_output/results.tsv"

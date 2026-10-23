@@ -19,9 +19,18 @@
     "unknown"
   ],
   "observations": 212,
-  "no_color_checked": true,
   "missing_palette_checked": true,
   "tui_renderer_compiled": false,
   "visible_ui_verified": false,
-  "installed_runtime_verified": false
+  "installed_runtime_verified": false,
+  "disabled_colours_branch_checked": true,
+  "no_color_environment_checked": true,
+  "no_color_environment": {
+    "NO_COLOR": "1",
+    "MASC_TUI_FORCE_COLOR": "0",
+    "assertions": [
+      "production colors_enabled false",
+      "production recede returns empty string"
+    ]
+  }
 }

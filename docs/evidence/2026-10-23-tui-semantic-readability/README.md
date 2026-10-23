@@ -32,7 +32,10 @@ No new tool-state or approval behavior is introduced.
 terminfo C stub and ncurses. It decodes emitted SGR foreground sequences and
 checks their RGB contrast against all 53 shipped TOML palettes, at truecolor,
 ANSI256, ANSI16 and unknown capability: **212 observations**. It also checks
-NO_COLOR and missing palette for each case. `receipt.json` binds the exact
+the disabled-colours branch and missing palette for each case. A separate
+process with `NO_COLOR=1 MASC_TUI_FORCE_COLOR=0` asserts the actual startup
+policy and production `recede` token (`no-color-env.txt`). This is not an
+actual NO_COLOR TUI screen observation. `receipt.json` binds the exact
 source files by SHA-256; no substitute colour implementation is linked.
 
 | Palette | Previous truecolor RGB ratio | Candidate truecolor RGB ratio | Candidate ANSI256 |
@@ -45,7 +48,8 @@ The previous values are from the earlier source-RGB audit at
 The candidate values come from this native probe. All overridden foregrounds
 clear 4.5:1; minimum observed **4.500599145**. Across the 212 cases, 119 use the
 default-foreground fallback. None of these 53 palettes has a default foreground
-below 4.5:1. Seven changed OCaml source/interface files were syntax-parsed; the three colour modules
+below 4.5:1. Seven changed OCaml source/interface files were syntax-parsed;
+the three colour modules
 were also type-checked by the native probe compilation. The complete renderer
 was not locally built.
 

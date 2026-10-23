@@ -62,12 +62,14 @@ val enforce_caller_identity :
 
 module For_testing : sig
   val result_after_activity_projection :
-    tool_name:string ->
-    start_time:Tool_timing.started ->
     primary_result:Tool_result.result ->
-    operation:string ->
+    operation:Event_kind.Board.t ->
     (unit -> (unit, string) result) ->
     Tool_result.result
+  (** A committed Board operation stays [Completed] if its activity projection
+      fails. Its data, artifacts and media are retained, and metadata carries
+      the failed projection separately. Failed/deferred primary operations do
+      not attempt projection. *)
 
   val created_post_id : Tool_result.result -> string option
   (** The id of the post a successful [masc_board_post] result carries in
@@ -82,12 +84,12 @@ val dispatch :
   arguments:Yojson.Safe.t ->
   state:Mcp_server.server_state ->
   name:string ->
-  start_time:Tool_timing.started ->
   Tool_result.result option
-(** [dispatch ~config ~agent_name ~arguments ~state ~name ~start_time] handles
+(** [dispatch ~config ~agent_name ~arguments ~state ~name] handles
     MCP server-local routing for tool [name] when the main runtime router has no
     match. Declared Board tools pass through identity binding and
     {!Board_tool.handle_tool}; other names return [None]. Successful post,
     comment, post/comment vote and delete operations also project Board
-    activity. Post and comment notify mentions. Board activity does not
+    activity. Projection failure is reported as observation metadata alongside
+    the completed Board result. Post and comment notify mentions. Board activity does not
     create Task performance records. *)

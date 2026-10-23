@@ -13,6 +13,9 @@ let board_notification_content_max_bytes = 200
 let board_notification_content content =
   String_util.utf8_prefix ~max_bytes:board_notification_content_max_bytes content
 
+let json_upsert_assoc_field name value fields =
+  (name, value) :: List.filter (fun (k, _) -> not (String.equal k name)) fields
+
 let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
   try
     let payload =
@@ -36,36 +39,30 @@ let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
       Error detail
 
 let result_after_activity_projection
-      ~tool_name
-      ~start_time
       ~(primary_result : Tool_result.result)
       ~operation
       emit
   =
-  if not (Tool_result.is_success primary_result)
-  then primary_result
-  else
-    match emit () with
-    | Ok () -> primary_result
-    | Error detail ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
-        ~data:
-          (`Assoc
-            [ ("primary_result", Tool_result.data primary_result)
-            ; ( "effect_disposition"
-              , `String
-                  (Tool_result.failure_effect_disposition_to_string
-                     Tool_result.Proven_post_effect) )
-            ; ("projection", `String operation)
-            ; ("error", `String detail)
-            ])
-        (Printf.sprintf
-           "%s committed, but activity projection failed: %s"
-           operation
-           detail)
+  match primary_result with
+  | Tool_result.Deferred _ | Tool_result.Failed _ -> primary_result
+  | Tool_result.Completed output ->
+    (match emit () with
+     | Ok () -> primary_result
+     | Error detail ->
+       let observation = `Assoc
+         [ "status", `String "failed"
+         ; "operation", `String (Event_kind.Board.to_string operation)
+         ; "error", `String detail ] in
+       let fields = match output.metadata with
+         | None -> []
+         | Some metadata ->
+           (match metadata with
+            | `Assoc fields -> fields
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+              [ "primary_metadata", metadata ]) in
+       let metadata = `Assoc
+         (json_upsert_assoc_field "activity_projection" observation fields) in
+       Tool_result.Completed { output with metadata=Some metadata })
 
 (* The post handler returns the created post as its typed data
    ([Board.post_to_yojson]); its id is read from there, not parsed back out of
@@ -79,9 +76,6 @@ module For_testing = struct
   let result_after_activity_projection = result_after_activity_projection
   let created_post_id = created_post_id
 end
-
-let json_upsert_assoc_field name value fields =
-  (name, value) :: List.filter (fun (k, _) -> not (String.equal k name)) fields
 
 let json_upsert_meta_string_field name value fields =
   let value = String.trim value in
@@ -214,7 +208,7 @@ let bind_caller_identity ~name ~agent_name arguments =
         arguments
         (Board_tool_registry.identity_fields_for_board_name board_name)
 
-let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~name ~start_time =
+let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~name =
   let arguments = bind_caller_identity ~name ~agent_name arguments in
   match Tool_name.Board_name.of_string name with
   | None -> None
@@ -238,10 +232,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         Mcp_server.sse_broadcast state notification;
         let projected_result =
           result_after_activity_projection
-            ~tool_name:name
-            ~start_time
             ~primary_result:result_tr
-            ~operation:(Event_kind.Board.to_string Event_kind.Board.Posted)
+            ~operation:Event_kind.Board.Posted
             (fun () ->
                emit_activity
                  config
@@ -287,10 +279,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         Mcp_server.sse_broadcast state notification;
         let projected_result =
           result_after_activity_projection
-            ~tool_name:name
-            ~start_time
             ~primary_result:result_tr
-            ~operation:(Event_kind.Board.to_string Event_kind.Board.Commented)
+            ~operation:Event_kind.Board.Commented
             (fun () ->
                emit_activity
                  config
@@ -341,10 +331,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         in
         let target_id = Safe_ops.json_string ~default:"unknown" target_field arguments in
         result_after_activity_projection
-          ~tool_name:name
-          ~start_time
           ~primary_result:result_tr
-          ~operation:(Event_kind.Board.to_string Event_kind.Board.Voted)
+          ~operation:Event_kind.Board.Voted
           (fun () ->
              emit_activity
                config
@@ -375,10 +363,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         ] in
         Mcp_server.sse_broadcast state notification;
         result_after_activity_projection
-          ~tool_name:name
-          ~start_time
           ~primary_result:result_tr
-          ~operation:(Event_kind.Board.to_string Event_kind.Board.Deleted)
+          ~operation:Event_kind.Board.Deleted
           (fun () ->
              emit_activity
                config

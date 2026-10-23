@@ -1,0 +1,24 @@
+before=7ceccb5c947a30f2949147e59f1e457ee5813ecf
+after=ed476e2a76f21bd48330da9db38f7b651effef83
+
+SOURCE-SLICE PROBES (explicit I/O/decoder/scheduler adapters; not a linked server):
+reset before: returned=false external_file_preserved=false
+reset after: returned=true external_file_preserved=true
+history before: dashboard_visible=0 status_visible=0
+mentions before: rows=6 addressed_user_rows=6 counts=[{"keeper":"alice","count":5},{"keeper":"art","count":2}]
+history after: dashboard_visible=4 status_visible=4
+mentions after: rows=6 addressed_user_rows=1 counts=[{"keeper":"alice","count":1},{"keeper":"art","count":1}]
+
+CONNECTOR SOURCE-SLICE PROBES (actual Runtime_params and route helper, filesystem/lock/registration adapters):
+discord Before: audit_failed=true runtime=mention_only display=mention_or_thread retained=all
+discord After: audit_failed=true runtime=mention_only display=mention_only retained=all
+slack Before: audit_failed=true runtime=mention_only display=mention_or_thread retained=all
+slack After: audit_failed=true runtime=mention_only display=mention_only retained=all
+
+
+DASHBOARD CONSUMER (actual test suite, no adapters):
+vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 --cache=false src/keeper-store-normalize.test.ts
+47 tests passed (1 file), 2.08s.
+tsc --noEmit: exit 0.
+
+No local Dune build, complete linked OCaml suite, live gateway, installed server, or rendered browser verification is asserted.

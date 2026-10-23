@@ -1,0 +1,12 @@
+since 2026-10-16: keepers with browser calls 12
+browser calls 1000, reads 564
+same-tab same-mode read runs within 60 s: 54 (by length, 6 means 6+: {2: 36, 3: 15, 4: 2, 5: 1}), extra reads 76
+shell sleeps between two browser calls: 1
+run ('kidsnote-slack-reader', 'BrowserTabs', None, None, 2, 2.0)
+run ('kidsnote-slack-reader', 'BrowserRead', 3, 'text', 2, 13.6)
+run ('kidsnote-slack-reader', 'BrowserRead', 3, 'text', 2, 3.3)
+run ('kidsnote-slack-reader', 'BrowserRead', 3, 'elements', 2, 1.9)
+run ('kidsnote-slack-reader', 'BrowserRead', 4, 'screenshot', 2, 6.5)
+run ('kidsnote-slack-reader', 'BrowserTabs', None, None, 4, 5.6)
+sleep ('wkbl-front', 'BrowserTabs', 'cd repo; sleep 150; gh pr checks 755 -R jeong-sik/wkbl 2>&1 | head -10', 'BrowserSession')
+extra reads by keeper [('kidsnote-incoming-dd-manager', 52), ('kidsnote-slack-reader', 20), ('ocaml-refactor-woman', 2), ('you-never-change', 2)]

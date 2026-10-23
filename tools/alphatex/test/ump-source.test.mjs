@@ -30,14 +30,14 @@ test('native absolute pitch/zero velocity edits keep Note Index, PN32, Off dynam
 test('exact-onset native revoice changes one atomic revision and retains source scopes and every raw voice address', () => {
   const packets = rows(); let editor = newUmpEditor(asset, packets)
   assert.equal(umpEditorCommand(editor, 'export /music/My  native take').effect.path, '/music/My  native take')
-  assert.equal(umpOnsetHarmony(editor.notes, editor.selected).kind, 'key-index-candidates')
+  assert.equal(umpOnsetHarmony(editor.notes, editor.selection.id).kind, 'key-index-candidates')
   editor = umpEditorCommand(editor, 'revoice Cmaj7 drop2').editor
   assert.deepEqual(editor.notes.slice(0, 4).map(note => note.pitch / 512), [55, 60, 64, 71])
   assert.deepEqual(editor.notes.slice(0, 4).map(note => note.index), [60, 64, 67, 71])
   assert.ok(editor.notes.slice(0, 4).every(note => note.velocity === 0x9001))
   assert.equal(editor.notes[4].attribute, 0); assert.equal(editor.undo.length, 1)
-  assert.equal(umpOnsetHarmony(editor.notes, editor.selected).kind, 'absolute-attribute')
-  assert.ok(umpOnsetHarmony(editor.notes, editor.selected).candidates.includes('Cmaj7/G'))
+  assert.equal(umpOnsetHarmony(editor.notes, editor.selection.id).kind, 'absolute-attribute')
+  assert.ok(umpOnsetHarmony(editor.notes, editor.selection.id).candidates.includes('Cmaj7/G'))
   const revised = editor.asset
   editor = umpEditorCommand(editor, 'undo').editor; assert.equal(editor.asset, asset)
   editor = umpEditorCommand(editor, 'redo').editor; assert.equal(editor.asset, revised)

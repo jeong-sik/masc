@@ -10,7 +10,7 @@ const fields = (value, allowed) => value && typeof value === 'object' && !Array.
   && Object.keys(value).every(key => allowed.includes(key))
 export function validateUmpEdits(value, midiSha256) {
   if (value === undefined) return
-  if (!fields(value, ['schemaVersion', 'midiSha256', 'notes']) || value.schemaVersion !== 1
+  if (!fields(value, ['schemaVersion', 'midiSha256', 'notes', 'expressions']) || value.schemaVersion !== 1
       || value.midiSha256 !== midiSha256 || !Array.isArray(value.notes)) throw new Error('UMP edits disagree with their original MIDI source')
   const identities = new Set()
   for (const edit of value.notes) {
@@ -20,6 +20,15 @@ export function validateUmpEdits(value, midiSha256) {
     for (const field of ['pitch', 'velocity']) if (Object.hasOwn(edit, field)) integer(edit[field], 65535, field)
     const id = `${edit.packet}:${edit.word}`
     if (identities.has(id)) throw new Error('Duplicate UMP note edit')
+    identities.add(id)
+  }
+  if (Object.hasOwn(value, 'expressions') && !Array.isArray(value.expressions)) throw new Error('Invalid UMP expression edits')
+  for (const edit of value.expressions ?? []) {
+    if (!fields(edit, ['packet', 'word', 'value']) || !['packet', 'word', 'value'].every(key => Object.hasOwn(edit, key))) throw new Error('Invalid UMP expression edit')
+    integer(edit.packet, Number.MAX_SAFE_INTEGER, 'packet identity'); integer(edit.word, Number.MAX_SAFE_INTEGER, 'word identity')
+    integer(edit.value, 0xffffffff, 'expression value')
+    const id = `${edit.packet}:${edit.word}`
+    if (identities.has(id)) throw new Error('Duplicate UMP edit identity')
     identities.add(id)
   }
 }
@@ -45,9 +54,30 @@ function noteOn(event) {
   if (event?.type !== 4 || event.status !== 9 || (event.words[0] >>> 8 & 255) > 127) throw new Error('Select a native MIDI2 NoteOn')
   return event
 }
+// UMP 1.1.2 sections 7.4.3, 7.4.4 and 7.4.12: these four
+// per-note messages own one complete 32-bit data word. Keep their address
+// word and order; do not guess which attack a persistent controller belongs to.
+function expressionKind(event) {
+  if (event?.type !== 4 || (event.words[0] >>> 8 & 255) > 127) return
+  switch (event.status) {
+    case 0: return 'registered-per-note'
+    case 1: return 'assignable-per-note'
+    case 6: return (event.words[0] & 255) === 0 ? 'per-note-pitch-bend' : undefined
+    case 10: return (event.words[0] & 255) === 0 ? 'poly-pressure' : undefined
+  }
+}
+function expression(event) {
+  if (!expressionKind(event)) throw new Error('Select a native MIDI2 per-note controller, pitch bend or poly pressure message')
+  return event
+}
 export function materializeUmp(packets, edits, midiSha256) {
   validateUmpEdits(edits, midiSha256)
   const originals = new Map(umpSourceEvents(packets).map(event => [event.id, event])), changed = new Map()
+  function replace(event, words) {
+    let packet = changed.get(event.packet)
+    if (!packet) { packet = { ...packets[event.packet], words: [...packets[event.packet].words] }; changed.set(event.packet, packet) }
+    packet.words.splice(event.word, words.length, ...words)
+  }
   for (const edit of edits?.notes ?? []) {
     const event = noteOn(originals.get(`${edit.packet}:${edit.word}`)), words = [...event.words]
     if (Object.hasOwn(edit, 'pitch')) {
@@ -58,21 +88,39 @@ export function materializeUmp(packets, edits, midiSha256) {
       words[1] = ((words[1] & 0xffff0000) | edit.pitch) >>> 0
     }
     if (Object.hasOwn(edit, 'velocity')) words[1] = (edit.velocity * 65536 + (words[1] & 65535)) >>> 0
-    let packet = changed.get(event.packet)
-    if (!packet) { packet = { ...packets[event.packet], words: [...packets[event.packet].words] }; changed.set(event.packet, packet) }
-    packet.words.splice(event.word, words.length, ...words)
+    replace(event, words)
+  }
+  for (const edit of edits?.expressions ?? []) {
+    const event = expression(originals.get(`${edit.packet}:${edit.word}`))
+    replace(event, [event.words[0], edit.value])
   }
   return packets.map((packet, index) => changed.get(index) ?? packet)
 }
+export function umpSourceExpressions(packets, edits, midiSha256) {
+  return sourceExpressions(umpSourceEvents(materializeUmp(packets, edits, midiSha256)))
+}
+function sourceExpressions(events) {
+  return events.flatMap(event => {
+    const kind = expressionKind(event)
+    return kind ? [{ ...event, kind, index: event.words[0] >>> 8 & 127, value: event.words[1],
+      ...([0, 1].includes(event.status) ? { controller: event.words[0] & 255 } : {}) }] : []
+  })
+}
 export function umpSourceNotes(packets, edits, midiSha256) {
-  const result = materializeUmp(packets, edits, midiSha256)
-  return umpSourceEvents(result).filter(event => event.type === 4 && event.status === 9).map(event => {
+  return sourceNotes(umpSourceEvents(materializeUmp(packets, edits, midiSha256)))
+}
+function sourceNotes(events) {
+  return events.filter(event => event.type === 4 && event.status === 9).map(event => {
     noteOn(event)
     const index = event.words[0] >>> 8 & 127, attribute = event.words[0] & 255
     return { ...event, index, attribute, velocity: event.words[1] >>> 16,
       pitch: attribute === 3 ? event.words[1] & 65535 : index * 512,
       basis: attribute === 3 ? 'absolute-attribute' : attribute === 0 ? 'key-index' : 'opaque-attribute' }
   })
+}
+export function umpSourceView(packets, edits, midiSha256) {
+  const events = umpSourceEvents(materializeUmp(packets, edits, midiSha256))
+  return { notes: sourceNotes(events), expressions: sourceExpressions(events) }
 }
 export function umpVariantAsset(asset, packets, ump) {
   materializeUmp(packets, ump, asset.parts.midi.sha256)
@@ -99,7 +147,27 @@ export function editUmpNotes(packets, current, midiSha256, changes) {
       notes.set(event.id, next)
     }
   }
-  const result = { schemaVersion: 1, midiSha256, notes: [...notes.values()].sort((a, b) => a.packet - b.packet || a.word - b.word) }
+  const result = { schemaVersion: 1, midiSha256, notes: [...notes.values()].sort((a, b) => a.packet - b.packet || a.word - b.word),
+    ...(current?.expressions?.length ? { expressions: structuredClone(current.expressions) } : {}) }
+  materializeUmp(packets, result, midiSha256)
+  return result
+}
+export function editUmpExpressions(packets, current, midiSha256, changes) {
+  validateUmpEdits(current, midiSha256)
+  const expressions = new Map((current?.expressions ?? []).map(edit => [`${edit.packet}:${edit.word}`, { ...edit }]))
+  const events = new Map(umpSourceEvents(packets).map(event => [event.id, event])), seen = new Set()
+  for (const change of changes) {
+    if (seen.has(change.id)) throw new Error('Duplicate UMP expression decision')
+    seen.add(change.id)
+    const event = expression(events.get(change.id))
+    if (change.kind === 'reset') expressions.delete(event.id)
+    else {
+      if (change.kind !== 'expression' || !fields(change, ['kind', 'id', 'value']) || !Object.hasOwn(change, 'value')) throw new Error('Unknown UMP expression decision')
+      expressions.set(event.id, { packet: event.packet, word: event.word, value: change.value })
+    }
+  }
+  const result = { schemaVersion: 1, midiSha256, notes: structuredClone(current?.notes ?? []),
+    ...(expressions.size ? { expressions: [...expressions.values()].sort((a, b) => a.packet - b.packet || a.word - b.word) } : {}) }
   materializeUmp(packets, result, midiSha256)
   return result
 }

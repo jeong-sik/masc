@@ -28,15 +28,6 @@ Keeper 는 로그인된 브라우저가 필요할 때 ego lite 를 쓰지 못한
 10-20 부터 10-22 까지 Keeper 의 셸 호출은 전부 microVM 안의 `Execute` 였다.
 `ego-browser` 는 호스트의 `~/.local/bin` 에 있는 macOS 앱이라 microVM 에서 보이지 않는다.
 
-지금 저장소의 ego 지원(#44283, `addons/ego-browser`)은 이 문제를 풀지 않는다.
-그 README 는 "관측 레인과 호스트에서 직접 실행하는 companion 이고, `BrowserSession lane=ego` 같은 새 백엔드는 아니다"라고 정했다.
-호스트에서 명령을 직접 실행하는 에이전트(Codex, 운영자 셸)만 그 companion 을 쓴다.
-
-live 설정에도 어긋난 곳이 있다. `runtime.toml` 의 스킬 소스 `user-agents` 는
-`.masc/config/skills/ego-browser-owned-20261021T030829Z-dd26ea28` 를 가리킨다.
-10-21 12:08 KST 에 Codex 세션이 "심볼릭 링크라서 못 읽는다"는 degraded 경고를 없애려고 ego 의 스킬을 복사한 것이다.
-그 스킬은 "브라우저가 필요하면 기본으로 ego 를 쓰라"고 안내하는데, 그 안내를 따를 수 있는 Keeper 는 없다.
-
 ## 2. 확인한 사실
 
 2026-10-22, ego lite 0.6.0.16(Chromium 154), 이 맥에서 쟀다.
@@ -72,7 +63,6 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 |---|---|---|
 | 새 작업 레인 `ego` (automation·stagehand 처럼) | 세션 열기·닫기가 작업 공간과 맞는다 | 작업 레인은 "서버가 띄운 로그인 없는 브라우저"다. 레인 이름이 늘면 선택·전송 형식·TUI·도구 enum 이 모두 바뀐다 |
 | 특정 Keeper 의 샌드박스를 푼다 | 코드가 거의 없다 | 그 Keeper 가 호스트 전체와 운영자 로그인에 제한 없이 닿는다 |
-| 지금 companion 을 그대로 둔다 | 할 일이 없다 | Keeper 는 계속 못 쓴다 |
 
 ## 4. 연결과 탭
 
@@ -134,25 +124,17 @@ space = "masc"
 - live 를 끄면(`[browser.live] enabled = false`) ego 연결도 새 명령을 받지 않는다.
 - `[browser.live]` 표가 받는 키(`enabled`, `bidi`)에 `ego` 를 더한다.
 
-## 8. 지울 것
-
-ego 연결이 live 에서 Slack 읽기를 해낸 뒤에 지운다.
-
-- `addons/ego-browser` (#44283 의 관측 레인과 `host.py`). 같은 일을 browser Add-on 이 한다.
-- live `runtime.toml` 의 스킬 소스 `user-agents` 와 그 복사본. Keeper 에게는 MASC 브라우저 스킬이 ego 연결을 안내한다.
-
-## 9. 검사
+## 8. 검사
 
 - 가짜 `ego-browser`: 스크립트 맨 위의 표지 주석(`// masc-ego: tabs.list` 등)을 읽고 정해진 출력을 내는 실행 파일. worker 의 연결·탭 번호·실패 분류를 이걸로 본다.
 - 표 검사: `test_browser_lane` 의 연결 방식 표 검사에 `ego` 열을 더한다.
 - 실제 ego: 샌드박스 밖에서 example.com 과 고정 fixture 페이지로 목록·읽기·클릭·이동·닫기를 돈다. 결과는 `docs/evidence/` 에 둔다.
 - live: 운영자 승인 뒤 Keeper 가 BrowserTabs 로 ego 연결을 보고 Slack 채널 하나를 읽는다.
 
-## 10. 순서
+## 9. 순서
 
 1. 이 RFC.
 2. `Browser_lane.live_transport` 에 `Ego`, 연결 방식 표, 설정 `[browser.live.ego]`.
 3. worker 의 ego 연결: 공간 열기·닫기, `tabs.list`, 읽기 세 가지, 캡처.
 4. 입력: click·fill·hover·키보드, `open_tab`·`goto`·`close_tab`.
 5. 실제 ego 증거와 Keeper 스킬 안내.
-6. `addons/ego-browser` 와 live 스킬 소스 정리.

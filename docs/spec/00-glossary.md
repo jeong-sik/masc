@@ -2473,45 +2473,6 @@ status: reference
   [운영자 퀴즈 안내](../guides/operator-quiz.md) ·
   [RFC](../rfc/RFC-operator-quiz-lane.md)
 
-**Ego Browser Companion (ego 브라우저 컴패니언)**
-: 설치된 `ego-browser` 명령과 같은 macOS 호스트에서 도는 선택 패키지(`ego-browser`)와, 그
-  호스트가 남긴 관측을 투영하는 Lane Add-on(#44283). `addons/ego-browser/skills/ego-native/scripts/host.py`가
-  호스트 조력자이고 worker는 네트워크 없는 컨테이너에서 격리돼 `snapshot_file` 원천 하나
-  (`ego-browser`/`snapshot_file`, 출력 이름 `browser`)을 게시한다. 작업 단위는 **task space**
-  (ego의 Space) 하나이고, state directory 하나가 그 Space·직렬화된 호출·보존 영수증을 소유한다.
-  - **이름 경계**: 이것은 `BrowserSession lane=ego` 같은 새 브라우저 backend가 아니고
-    `masc_browser_*` 도구를 늘리지도 않는다. 패키지를 설치해도 Keeper의 일반 `Execute`
-    샌드박스가 호스트 조력자를 부를 수 없고, native Bash·승인 정책·stdio MCP 서버 등록도
-    바뀌지 않는다. 다른 Keeper가 할 수 있는 일은 게시된 관측과 동봉 Skill 읽기까지다.
-    호스트 실행은 그 호스트의 명령 실행 권한을 이미 가진 클라이언트의 몫이다.
-  - **조작 6종**: `open`·`observe`·`batch`·`finish`·`recover`·`retire`(`contract.OPERATIONS`).
-    `batch`는 앞 관측의 URL을 `expected_url`로 받고 닫힌 step 목록(`goto`·`click`·`dblclick`·
-    `hover`·`drag`·`fill`·`press`·`wait_for_selector`·`wait_for_url`)을 ego 호출 전에 전부
-    검증하며, 고정 대기나 자동 재시도는 넣지 않는다. 노출되는 것은 이름 붙은 조작이지 임의
-    Node.js·CDP·페이지 평가가 아니다.
-  - **상태 어휘**: 성공은 `observed`·`postcondition_met`·`closed`·`retired`, 실패는
-    `rejected_before_effect`·`outcome_unknown`이다. `closed`는 `finish`만, `postcondition_met`은
-    `batch`만, `retired`는 `retire`만 낼 수 있고, `rejected_before_effect`는 완료 step이 0일
-    때만 성립한다. `observed`는 "API가 돌아왔고 snapshot을 읽었다"는 뜻이지 과업 완료가
-    아니며, `postcondition_met`도 요청한 URL·요소 조건이 참이었다는 뜻이다.
-  - **영수증과 재생 금지**: 디스패치 전에 요청 digest를 동기화하고 결과를 `receipts/`에
-    보존한다. 같은 `request_id`는 보존 결과를 그대로 돌려주고 ego를 다시 부르지 않으며,
-    같은 ID에 다른 입력은 거절한다. 디스패치됐으나 결과가 없는 ID는 `outcome_unknown`으로
-    남고 재생되지 않는다 — 불확실한 입력을 반복하려고 새 ID를 만들지 않는다.
-  - **Space 소유와 은퇴**: `open-intent.json`·`session.json`·`snapshot.json`이 각각 첫 open의
-    소유, 바인딩된 Space, 마지막 게시 원천 봉투를 보존한다. Space 이름에는 설치 identity와
-    열기 epoch가 들어가 다른 설치나 은퇴한 바인딩과 이름을 공유하지 않는다. `retire`는
-    그 epoch의 로컬 바인딩 철회만 확인하며 브라우저 종료나 과업 완료를 뜻하지 않고,
-    ego를 부르거나 탭을 닫거나 사용자 소유 Space를 인수하지 않는다. ego Spaces는 브라우저
-    프로필의 쿠키를 공유하므로 Space는 계정 격리가 아니다.
-  - **관측의 한계**: worker coverage는 공급된 캡처 관측을 서술할 뿐 브라우저를 폴링하거나
-    native 과업 완료를 증명하지 않는다. 스크린샷은 호스트의 native 파일과 SHA-256으로
-    남고 worker는 그 이미지 바이트를 보관하지 않는다.
-  → [ego-browser](../../addons/ego-browser/lane.toml) ·
-  [host.py](../../addons/ego-browser/skills/ego-native/scripts/host.py) ·
-  [contract.py](../../addons/ego-browser/skills/ego-native/scripts/contract.py) ·
-  [패키지 안내](../../addons/ego-browser/README.md)
-
 **Lane Action Receipt & Uncertainty (Lane 액션 영수증과 불확실성 보존)**
 : Lane Add-on worker에 요청된 액션(`masc_lane_act`)의 진행 상태와 결과 영수증(`Lane Action Receipt`),
   그리고 파일시스템 반영 경계에서의 불확실성 보존 규약(#40396, #40573).

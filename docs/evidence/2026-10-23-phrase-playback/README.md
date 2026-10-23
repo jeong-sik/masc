@@ -26,7 +26,7 @@ before the final test result and are not described as product failures.
 
 An actual private auxiliary TUI selected FluidSynth, started a native output
 child pinned to BlackHole, paused, restarted, stopped, played again, stopped and
-saved the private copy with exit0. Native children disappeared after stop. The
+saved the private copy with exit 0. Native children disappeared after stop. The
 saved engine changed as requested, the notes remained identical and the user's
 original project stayed byte-identical. This is output-graph/process and source
 TUI evidence, not received PCM, acoustic or physical-interface proof. A local
@@ -35,3 +35,15 @@ private musical content and raw logs are excluded from this public evidence.
 
 [receipt.json](receipt.json) records hashes, counts and remaining limits. The
 full sequencer/MIDI objective remains active.
+
+After whole-stack rebase onto main containing the native UMP event-group work,
+the combined twelve-file focused selection passed 92/92. All phrase product
+files remained byte-identical; the new main's three UMP/tick modules entered the
+combined runtime. The actual private TUI journey was repeated with that new
+runtime and exit 0. The official auxiliary installer then published the same
+revision to the default launcher; every copied source and seven unchanged native
+helpers was hash-compared. The previously observed music PID was absent at installation readback; the
+operator can open Music to use this update. A running view keeps the immutable
+runtime with which it started. This
+installation is from the unmerged source candidate; it is not a main merge or a
+claim that the operator's own Ghostty session was observed running the update.

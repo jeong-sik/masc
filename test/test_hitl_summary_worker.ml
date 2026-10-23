@@ -3254,6 +3254,57 @@ let test_judge_original_refuses_loose_shapes () =
   refused "not an object" (`List [])
 ;;
 
+(* ── Durable judge original ────────────────────── *)
+
+module Judge_owner = Masc.Hitl_judge_owner
+
+let with_owner_store f =
+  let parent = Filename.temp_dir "hitl-judge-owner" "" in
+  let rec remove path =
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+      Sys.remove path
+  in
+  Fun.protect
+    ~finally:(fun () -> remove parent)
+    (fun () -> f (Masc.Lane_addon_store.create ~root:(Filename.concat parent "store")))
+;;
+
+let owner_ok = function Ok value -> value | Error detail -> Alcotest.fail detail
+
+let test_judge_owner_retains_and_restores_the_original () =
+  with_owner_store (fun store ->
+    let original = original_of_fields original_fields in
+    check bool "nothing is retained before the attempt" true
+      (owner_ok (Judge_owner.load ~store ~approval_id:"approval-1" ~sequence:3) = (None, None));
+    owner_ok (Judge_owner.retain ~store original);
+    owner_ok (Judge_owner.retain ~store original);
+    match Judge_owner.load ~store ~approval_id:"approval-1" ~sequence:3 with
+    | Ok (Some record, Some restored) ->
+      check bool "the restored original is the retained one" true
+        (Original.to_json restored = Original.to_json original);
+      check string "the record belongs to the judge tool" Judge_owner.tool record.Masc.Lane_addon_tool_request_owner.tool;
+      check bool "another sequence is another attempt" true
+        (owner_ok (Judge_owner.load ~store ~approval_id:"approval-1" ~sequence:4) = (None, None))
+    | Ok _ -> Alcotest.fail "a retained original must restore with its record"
+    | Error detail -> Alcotest.fail detail)
+;;
+
+let test_judge_owner_refuses_another_input_for_the_same_attempt () =
+  with_owner_store (fun store ->
+    owner_ok (Judge_owner.retain ~store (original_of_fields original_fields));
+    let changed =
+      original_of_fields
+        (("input_hash", `String "hash-2") :: List.remove_assoc "input_hash" original_fields)
+    in
+    match Judge_owner.retain ~store changed with
+    | Error _ -> ()
+    | Ok () -> Alcotest.fail "a second input for one attempt must not be retained")
+;;
+
 let () =
   run
     "Hitl_summary_worker"
@@ -3457,6 +3508,16 @@ let () =
             "refuses loose shapes"
             `Quick
             test_judge_original_refuses_loose_shapes
+        ] )
+    ; ( "judge_owner"
+      , [ test_case
+            "retains and restores the original"
+            `Quick
+            test_judge_owner_retains_and_restores_the_original
+        ; test_case
+            "refuses another input for the same attempt"
+            `Quick
+            test_judge_owner_refuses_another_input_for_the_same_attempt
         ] )
     ]
 ;;

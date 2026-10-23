@@ -24,6 +24,7 @@ const help = [
   ':save-as NEW_JSON; :export NEW_MIDI2; :title NAME; :undo / :redo.',
   'o: choose a native MIDI2 output; Space: play/pause/resume; 0: restart full Clip; .: stop.',
   ':midi-output ID pins an output; :play / :pause / :resume / :stop; :seek-event [ID] seeks the admitted snapshot.',
+  ':initial-tempo 50000000 explicitly supplies missing initial tempo (10ns/quarter); :initial-tempo clears it.',
   'MIDI1-only outputs and setup needing MIDI-CI negotiation are explicit playback refusals.',
 ]
 const groupColors = [cyan, green, magenta, yellow, blue]
@@ -59,15 +60,19 @@ export async function viewMidiClip({ loaded, initialDocument, root, embedded = f
       [[`MIDI2 Clip · ${editor.project.name}${dirty() ? ' *' : ''}`, [bold, cyan]],
         [` · ${editor.performance.ppq} ticks/quarter · ${editor.performance.ticks} ticks`, [dim]]],
       [[`${editor.view} · ${rows.length} events · ${editor.selection.length} grouped · ${editor.project.changes.length} edited`, [magenta]]],
-      [[`${player.state.kind} · MIDI2 output ${player.destination ?? 'choose with o'}${player.state.event ? ` · ${player.state.event.currentTime.toFixed(3)} / ${player.state.event.duration.toFixed(3)}s` : ''}`,
+      [[`${player.state.kind} · MIDI2 output ${player.destination ?? 'choose with o'}${player.state.event ? ` · ${player.state.event.currentTime.toFixed(3)} / ${player.state.event.duration.toFixed(3)}s${BigInt(player.state.event.currentNanoseconds) < BigInt(player.state.event.setupNanoseconds) ? ' · setting up' : ''}` : ''}`,
         player.state.kind === 'playing' ? [bold, green] : [cyan]]],
       [[status, failed ? [bold, red] : [green]]],
       'Space: play/pause · 0: restart · .: stop · o: output · Up/Down: select · Tab: view · u/y: undo/redo · s: save · :command · q: return',
     ]
     if (outputs) {
       lines.push('Choose a native MIDI2 destination · Up/Down: select · Enter: use · Esc: close')
-      for (const [index, output] of outputs.entries()) lines.push([[`${index === outputCursor ? '> ' : '  '}${output.name} · ${output.id}${output.nativeProtocol === 2 ? '' : ' · MIDI1 only'}`,
+      const firstOutput = Math.max(0, outputCursor - Math.floor(height / 2))
+      for (const [offset, output] of outputs.slice(firstOutput, firstOutput + Math.max(1, height - 1)).entries()) {
+        const index = firstOutput + offset
+        lines.push([[`${index === outputCursor ? '> ' : '  '}${output.name} · ${output.id}${output.nativeProtocol === 2 ? '' : ' · MIDI1 only'}`,
         index === outputCursor ? [bold, inverse] : output.nativeProtocol === 2 ? [green] : [dim]]])
+      }
       if (!outputs.length) lines.push('No MIDI destinations reported')
     } else if (showHelp) lines.push(...help)
     else for (const row of rows.slice(first, first + height)) {
@@ -104,6 +109,8 @@ export async function viewMidiClip({ loaded, initialDocument, root, embedded = f
       case 'stop': player.stop(); break
       case 'seek-event': player.seekEvent(result.effect.id); break
       case 'midi-output': player.setOutput(result.effect.path); break
+      case 'initial-tempo': player.setInitialTempo(result.effect.value); status = result.effect.value === undefined
+        ? 'Using declared source tempo only' : `Explicit initial tempo ${result.effect.value} × 10ns/quarter; session only`; break
     }
   }
   function close(discard = false) {

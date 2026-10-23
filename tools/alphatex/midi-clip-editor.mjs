@@ -115,6 +115,7 @@ export function midiClipCommand(editor, line) {
     case 'undo': case 'redo': count(0); return { editor: midiClipAction(editor, { kind: command }) }
     case 'help': case 'save': case 'play': case 'pause': case 'resume': case 'stop': count(0); return { editor, effect: { kind: command } }
     case 'seek-event': count(0, 1); return { editor, effect: { kind: command, id: args[0] ?? selected().id } }
+    case 'initial-tempo': count(0, 1); return { editor, effect: { kind: command, value: args.length ? dataWord(args[0]) : undefined } }
     case 'save-as': case 'export': case 'midi-output': count(1, Number.MAX_SAFE_INTEGER); return { editor,
       effect: { kind: command, path: line.trim().slice(command.length).trimStart() } }
     default: throw new Error('Use :help for native MIDI2 Clip editing commands')

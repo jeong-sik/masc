@@ -4,13 +4,23 @@ import { join } from 'node:path'
 import { midiClipPlaybackPlan, midiClipEventNanoseconds, validateMidiClipDestination } from './midi-clip-playback.mjs'
 import { openPlayback, midiDestinations, midiClipTransportPath } from './playback.mjs'
 
+function initialTempoValue(value) {
+  if (value !== undefined && (!Number.isInteger(value) || value < 1 || value > 0xffffffff)) throw new Error('Initial tempo must be a positive UInt32 in 10ns per quarter note')
+  return value
+}
+
 // One admitted immutable plan owns its files and native child until close.
 // Preparation never blocks the editor's stop/route/close decisions.
 export class MidiClipPlayer {
-  constructor({ destination, notify = () => {}, open = openPlayback, temporaryRoot = tmpdir() } = {}) {
+  constructor({ destination, initialTempo, notify = () => {}, open = openPlayback, temporaryRoot = tmpdir() } = {}) {
     if (destination !== undefined) validateMidiClipDestination(destination)
     this.destination = destination; this.notify = notify; this.open = open; this.temporaryRoot = temporaryRoot
+    this.initialTempo = initialTempoValue(initialTempo)
     this.active = null; this.owners = new Set(); this.state = { kind: 'stopped' }; this.closed = false
+  }
+  setInitialTempo(value) {
+    if (this.closed) throw new Error('Clip player is closed')
+    initialTempoValue(value); this.stop(); this.initialTempo = value
   }
   update(state) { this.state = state; this.notify(state) }
   setOutput(destination) {
@@ -21,7 +31,7 @@ export class MidiClipPlayer {
   play(document) {
     if (this.closed) throw new Error('Clip player is closed')
     if (this.destination === undefined) throw new Error('Choose a native MIDI2 output with o or :midi-output ID')
-    const plan = midiClipPlaybackPlan(document, { destination: this.destination })
+    const plan = midiClipPlaybackPlan(document, { destination: this.destination, initialTempo: this.initialTempo })
     return this.admit(plan)
   }
   admit(plan) {
@@ -40,6 +50,7 @@ export class MidiClipPlayer {
         owner.admission.signal.throwIfAborted()
         owner.handle = this.open({ path, format: 'midi-clip', midiOutput: plan.destination, midiClipSource: plan.source,
           onEvent: event => {
+            if (['ready', 'playing', 'paused', 'stopped'].includes(event.kind)) owner.lastEvent = event
             if (this.active !== owner || owner.cancelled) return
             this.update({ kind: event.kind === 'ready' ? 'starting' : event.kind, source: plan.source, event })
           } })
@@ -49,10 +60,10 @@ export class MidiClipPlayer {
         if (this.active === owner && !owner.cancelled) this.update({ kind: 'failed', error, source: plan.source })
       } finally {
         try { if (directory) await rm(directory, { recursive: true, force: true }) }
-        catch (error) { if (this.active === owner) this.update({ kind: 'failed', error, source: plan.source }) }
+        catch (error) { owner.cleanupFailure = error; if (this.active === owner) this.update({ kind: 'failed', error, source: plan.source }) }
         if (this.active === owner) {
           this.active = null
-          if (owner.cancelled || this.state.kind !== 'failed') this.update({ kind: 'stopped', source: plan.source })
+          if (!owner.cleanupFailure && (owner.cancelled || this.state.kind !== 'failed')) this.update({ kind: 'stopped', source: plan.source, event: owner.lastEvent })
         }
         this.owners.delete(owner)
       }
@@ -77,7 +88,7 @@ export class MidiClipPlayer {
   }
   restart(document) {
     if (this.closed) throw new Error('Clip player is closed')
-    return this.active ? this.admit(this.active.plan) : this.play(document)
+    return this.active && !this.active.cancelled ? this.admit(this.active.plan) : this.play(document)
   }
   pause() { if (this.state.kind !== 'playing') throw new Error('Clip is not playing'); this.active.handle.pause() }
   resume() { if (this.state.kind !== 'paused') throw new Error('Clip is not paused'); this.active.handle.resume() }

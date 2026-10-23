@@ -65,10 +65,11 @@ test('native clock/source/protocol substitution fails before source admission or
   await assert.rejects(missing.player.ready, /prepare before starting/)
 })
 
-function document() {
+function document(withTempo = true) {
   const words = [0x00400000, 0x003003e8, 0xd0100000, 50000000, 0, 0,
     0x00400000, 0xf0200000, 0, 0, 0, 0x00400000, 0x40903c00, 0xffff0000,
     0x004003e8, 0x40803c00, 0xffff0000, 0x00400000, 0xf0210000, 0, 0, 0]
+  if (!withTempo) words.splice(2, 4)
   const bytes = Buffer.alloc(8 + words.length * 4); bytes.write('SMF2CLIP')
   words.forEach((word, index) => bytes.writeUInt32BE(word, 8 + index * 4))
   return importMidiClip(bytes)
@@ -79,11 +80,14 @@ function fakeOpen() {
     const done = deferred(), plan = JSON.parse(readFileSync(options.path)), commands = []
     const value = { options, plan, commands, close: () => done.resolve(), fail: error => done.reject(error),
       event: event => options.onEvent(event) }
-    calls.push(value); waiting.shift()?.(value)
+    calls.push(value)
+    for (const waiter of [...waiting]) if (calls.length >= waiter.index) {
+      waiting.splice(waiting.indexOf(waiter), 1); waiter.resolve(calls[waiter.index - 1])
+    }
     return { completion: done.promise, stop: () => commands.push('stop'), pause: () => commands.push('pause'),
       resume: () => commands.push('resume'), status: () => commands.push('status'), seekNanoseconds: value => commands.push(['seek', value]) }
   }
-  return { open, calls, next: () => calls.length ? Promise.resolve(calls.at(-1)) : new Promise(resolve => waiting.push(resolve)) }
+  return { open, calls, next: (index = 1) => calls.length >= index ? Promise.resolve(calls[index - 1]) : new Promise(resolve => waiting.push({ index, resolve })) }
 }
 test('early restart keeps its admitted plan and stop retains files until the native child closes', async () => {
   const root = await mkdtemp(join(tmpdir(), 'masc-clip-player-')), fake = fakeOpen()
@@ -106,18 +110,41 @@ test('route changes retire old callbacks; a save-conflict drain permits later pl
   const root = await mkdtemp(join(tmpdir(), 'masc-clip-route-')), fake = fakeOpen()
   try {
     const player = new MidiClipPlayer({ destination: '42', open: fake.open, temporaryRoot: root })
-    player.play(document()); const first = await fake.next(); first.event({ kind: 'playing' })
+    const original = player.play(document()); const first = await fake.next(); first.event({ kind: 'playing' })
     assert.throws(() => player.setOutput('another device')); assert.deepEqual(first.commands, [])
-    player.setOutput('43'); const next = player.play(document())
+    player.setOutput('43'); const next = player.restart(document())
     first.event({ kind: 'playing' }); assert.equal(player.state.kind, 'preparing')
-    assert.equal(fake.calls.length, 1); first.close(); await player.owners.values().next().value?.completion
-    while (fake.calls.length < 2) await new Promise(resolve => setImmediate(resolve))
-    const second = fake.calls[1]; assert.equal(second.options.midiOutput, '43')
+    assert.equal(fake.calls.length, 1); first.close(); await original.completion
+    const second = await fake.next(2); assert.equal(second.options.midiOutput, '43')
     second.event({ kind: 'playing' }); const settling = player.settle(); second.close(); await settling; await next.completion
     assert.equal(player.closed, false)
     const final = player.play(document())
-    while (fake.calls.length < 3) await new Promise(resolve => setImmediate(resolve))
-    fake.calls[2].close(); await final.completion; await player.close()
+    const third = await fake.next(3); third.close(); await final.completion; await player.close()
     assert.throws(() => player.play(document()), /closed/); assert.deepEqual(await readdir(root), [])
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('an explicit initial tempo resolves only the session plan; invalid values keep an admitted owner intact', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'masc-clip-tempo-')), fake = fakeOpen()
+  try {
+    const player = new MidiClipPlayer({ destination: '42', open: fake.open, temporaryRoot: root }), original = document(false)
+    const before = structuredClone(original)
+    assert.throws(() => player.play(original), /explicit tempo/)
+    player.setInitialTempo(50000000); const owner = player.play(original), child = await fake.next()
+    assert.equal(BigInt(child.plan.durationNanoseconds.numerator) / BigInt(child.plan.durationNanoseconds.denominator), 500000000n)
+    assert.throws(() => player.setInitialTempo(0), /UInt32/); assert.deepEqual(child.commands, [])
+    assert.deepEqual(original, before)
+    player.setInitialTempo(undefined); assert.deepEqual(child.commands, ['stop'])
+    assert.throws(() => player.restart(original), /explicit tempo/)
+    child.close(); await owner.completion; await player.close(); assert.deepEqual(await readdir(root), [])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('the native controller preserves exact seek values beyond binary64 nanosecond precision', async () => {
+  const fixture = protocol(), clock = { durationNanoseconds: '9007199254740995', duration: Number('9007199254740995') / 1e9 }
+  fixture.event('ready', clock); fixture.event('playing', clock); await fixture.player.ready
+  fixture.player.seekNanoseconds('9007199254740993')
+  assert.deepEqual(fixture.commands.at(-1), { kind: 'seek', nanoseconds: '9007199254740993' })
+  for (const bad of ['9007199254740996', '01', '-1', '1.5']) assert.throws(() => fixture.player.seekNanoseconds(bad))
+  fixture.player.stop(); fixture.event('stopped', clock); fixture.close(); await fixture.player.completion
 })

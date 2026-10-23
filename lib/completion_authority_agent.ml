@@ -792,7 +792,8 @@ let task_already_terminal (runtime : runtime) task_id =
   | Some task ->
     (match task.task_status with
      | Masc_domain.Done _ | Masc_domain.Cancelled _ -> true
-     | _ -> false)
+     | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+     | Masc_domain.AwaitingVerification _ -> false)
   | None -> false
 
 let task_terminal_detail (runtime : runtime) task_id =
@@ -803,7 +804,8 @@ let task_terminal_detail (runtime : runtime) task_id =
        Some (Printf.sprintf "Done by %s" assignee)
      | Masc_domain.Cancelled { cancelled_by; _ } ->
        Some (Printf.sprintf "Cancelled by %s" cancelled_by)
-     | _ -> None)
+     | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+     | Masc_domain.AwaitingVerification _ -> None)
   | None -> None
 
 let commit_verdict
@@ -856,7 +858,7 @@ let commit_verdict
          verdict_label;
        (match task_terminal_detail runtime task.id with
         | Some detail ->
-          Superseded_by { authority = detail }, Verification_run_registry.Superseded_by { authority = detail }
+          Stalled (Superseded_by { authority = detail }), Verification_run_registry.Superseded_by { authority = detail }
         | None ->
           let cause = Commit_failed { detail = Masc_domain.masc_error_to_string error } in
           Stalled cause, registry_outcome_of_stop_cause cause)

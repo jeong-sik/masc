@@ -410,6 +410,8 @@ let outcome_detail_fields = function
     ]
   | Not_reviewed { gate; detail } ->
     [ "gate", `String gate; "detail", `String detail ]
+  | Superseded_by { authority } ->
+    [ "authority", `String authority ]
 ;;
 
 let run_to_yojson run =

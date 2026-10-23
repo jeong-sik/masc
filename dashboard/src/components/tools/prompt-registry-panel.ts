@@ -24,6 +24,7 @@ import {
   type KeeperPromptAssemblyStage,
 } from '../keeper-prompt-assembly-panel'
 import { PromptBookPanel } from './prompt-book-panel'
+import { PromptAuthoringIssues } from './prompt-authoring-issues'
 
 export type PromptSourceFilter = 'all' | PromptSource
 export type PromptPresetId = 'all' | 'attention' | `stage:${string}`
@@ -190,7 +191,7 @@ function isModelInputDestination(destination: PromptDestination): boolean {
 // they ask one question. A prompt wants attention when it is not simply the
 // file's words: an override is in force, or there is no file to fall back to.
 function wantsAttention(prompt: DashboardPromptItem): boolean {
-  return prompt.source !== 'file'
+  return prompt.source !== 'file' || (prompt.authoring_issues?.length ?? 0) > 0
 }
 
 function presetPromptCount(
@@ -235,7 +236,7 @@ export function promptPresetOptions(
     {
       id: 'attention',
       label: '수정/누락',
-      description: '저장된 오버라이드와 누락된 필수 프롬프트 파일.',
+      description: '저장된 오버라이드, 누락된 파일과 프롬프트 작성 오류.',
       count: presetPromptCount(prompts, report, 'attention'),
     },
   ]
@@ -618,6 +619,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
                 </div>
                 <div class="mb-1 text-2xs text-[var(--color-fg-muted)]">${prompt.category}</div>
                 <div class="text-xs text-[var(--color-fg-primary)] leading-relaxed">${prompt.description}</div>
+                <${PromptAuthoringIssues} issues=${prompt.authoring_issues} compact=${true} />
               </button>
             `)}
           </div>
@@ -640,6 +642,8 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
                 <div class="mt-1 font-mono text-xs text-[var(--color-fg-primary)]">${selectedPrompt.char_count}</div>
               </div>
             </div>
+
+            <${PromptAuthoringIssues} issues=${selectedPrompt.authoring_issues} />
 
             <div class="v2-lab-card mb-4 rounded-[var(--r-1)] border border-[var(--accent-22)] bg-[var(--accent-8)] px-3 py-2" data-prompt-destinations>
               <div class="mb-2 flex flex-wrap items-center gap-2">

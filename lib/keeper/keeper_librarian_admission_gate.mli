@@ -1,4 +1,5 @@
-(** Original absorption evaluations for one restored explicit-candidate answer.
+(** Explicit-candidate adapter of the shared original absorption journal.
+    Original absorption evaluations for one restored explicit-candidate answer.
     Caller holds the existing Memory-lane/purge fence and serializes this owner. *)
 val scope : Keeper_librarian_admission_capture.owner -> string
 val parent_execution_id : Lane_addon_tool_request_owner.retained -> (string, string) result

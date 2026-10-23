@@ -95,6 +95,22 @@ test('phrase track quantize and selected quantize share half-up rounding and lea
   assert.deepEqual(next.project.tracks[1],editor.project.tracks[1])
 })
 
+test('fractional grids preserve authored decimal positions and the imported source clock through both edit paths', () => {
+  const phrase = command(newEditor(),'note C4 8.3 1/3 91')
+  const file = new JZZ.MIDI.SMF(1,1001)
+  file.push(new JZZ.MIDI.SMF.MTrk().add(130,JZZ.MIDI.noteOn(0,60,91))
+    .add(230,JZZ.MIDI.noteOff(0,60,45)).add(2000,JZZ.MIDI.smfEndOfTrack()))
+  const imported = newEditor(importMidiSource(file.toUint8Array()))
+  for (const [editor,grid,expected] of [[phrase,'1/3',[8000,320,91]],[imported,'1/7',[143,100,91]]]) {
+    const whole = command(editor,`quantize ${grid}`)
+    const selected = command(command(editor,'select-all'),`quantize-notes ${grid}`)
+    assert.deepEqual(whole.project,selected.project)
+    const exported = midiSourcePattern(importMidiSource(projectMidi(whole.project)))
+    assert.deepEqual(exported.notes.map(n=>[n.start,n.duration,n.velocity]),[expected])
+    assert.deepEqual(command(whole,'undo').project,editor.project)
+  }
+})
+
 test('track quantize retains source-port refusal and invalid input remains transactional', () => {
   const editor = source([{notes:[[130,300]],portChange:true}]),before=structuredClone(editor)
   assert.throws(()=>command(editor,'quantize 1'),/source port/)

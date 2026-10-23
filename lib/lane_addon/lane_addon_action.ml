@@ -128,7 +128,7 @@ let rec schema_node ~object_policy schema =
 let validate_schema schema =
   let* _ = canonical schema in
   let* () = schema_node ~object_policy:Closed_objects schema in
-  let shape = Tool_input_validation.schema_shape schema in
+  let shape = Tool_input_contract.schema_shape schema in
   if shape.errors <> [] then Error (String.concat "; " shape.errors)
   else if List.sort String.compare shape.properties <> ["action"; "context"; "request_id"]
        || List.sort String.compare shape.required <> ["action"; "context"; "request_id"]
@@ -143,11 +143,15 @@ let validate_schema schema =
        || kind "action" <> Some (`String "object")
     then Error "action tool requires object context, string request_id and object action"
     else let context = List.assoc "context" properties in
-      let shape = Tool_input_validation.schema_shape context in
+      let shape = Tool_input_contract.schema_shape context in
       if List.sort String.compare shape.properties <> ["incarnation"; "instance_id"]
          || List.sort String.compare shape.required <> ["incarnation"; "instance_id"]
       then Error "action context must require exactly instance_id and incarnation"
       else Ok ()
+let check_arguments ~schema ~name ~args =
+  Tool_input_contract.check_arguments ~contract:Host_tool ~schema:(Some schema) ~name ~args
+  |> Result.map (fun _ -> ())
+  |> Result.map_error (fun rejection -> rejection.Tool_input_contract.message)
 let rec validate_node ~name schema value =
   let* fields = object_ schema in
   let* () = match List.assoc_opt "oneOf" fields with
@@ -162,8 +166,9 @@ let rec validate_node ~name schema value =
      including scalar and array nodes. It avoids synthetic string matching. *)
   let wrapper = `Assoc ["type", `String "object"; "properties", `Assoc ["value", schema];
     "required", `List [`String "value"]; "additionalProperties", `Bool false] in
-  let* _ = Tool_input_validation.validate_args ~schema:wrapper ~name
-    ~args:(`Assoc ["value", value]) () |> Result.map_error Tool_result.message in
+  (* Alternative probes are schema calculations, not dispatched tool calls.
+     Only the caller owns the final refusal and its observation. *)
+  let* () = check_arguments ~schema:wrapper ~name ~args:(`Assoc ["value", value]) in
   match value with
   | `Assoc _ when List.mem_assoc "oneOf" fields && not (List.mem_assoc "properties" fields) -> Ok ()
   | `Assoc values ->
@@ -174,8 +179,7 @@ let rec validate_node ~name schema value =
                The wrapper above already checks its type/enum/const/ranges;
                canonicalization checks every contained JSON value. *)
             Ok ()
-        | _ -> Tool_input_validation.validate_args ~schema ~name ~args:value ()
-            |> Result.map (fun _ -> ()) |> Result.map_error Tool_result.message in
+        | _ -> check_arguments ~schema ~name ~args:value in
       (match List.assoc_opt "properties" fields with
        | Some (`Assoc properties) ->
            let* _ = traverse (fun (key, value) -> match List.assoc_opt key properties with

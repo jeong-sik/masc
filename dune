@@ -62,7 +62,8 @@
 (subdir vendor
  (env
   (dev (flags (:standard -w -4-69)))
-  (release (flags (:standard -w -4-69)))))
+  (release (flags (:standard -w -4-69)))
+  (ci (flags (:standard -w -4-69)))))
 
 (install
  (package masc)

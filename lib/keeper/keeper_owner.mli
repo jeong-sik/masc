@@ -508,6 +508,10 @@ val direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
 val defer_direct_runtime_retry : ?retry_wait:runtime_retry_wait -> t -> operation_id:Chat_operation.Operation_id.t ->
   execution_digest:string -> continuation:Keeper_semantic_execution.runtime_retry ->
   (Chat_operation.t, error) result
+(** A cooling retry can advance the Owner's pending observation wake. A later
+    retry does not postpone an earlier wake. This schedules observation only;
+    the durable retry deadline and exact dependency witness still authorize
+    eligibility. *)
 val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
   observed:Keeper_semantic_execution.runtime_retry -> (unit, error) result
 

@@ -1727,6 +1727,60 @@ let test_retry_read_failure_recovers_and_rearms_after_deadline () =
        (resumed_at -. failed_at >= interval))
 ;;
 
+let test_cooling_retry_rearms_earliest ~earlier_added_second () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_context.with_test_env ~sw ~net:env#net
+    ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
+    ~mono_clock:env#mono_clock @@ fun () ->
+  let ready = ref false in
+  let owner_p, resolve_owner = Eio.Promise.create () in
+  let resumed, resolve_resumed = Eio.Promise.create () in
+  let executor ~sw:_ ~keeper_name:_ ~claim =
+    let owner = Eio.Promise.await owner_p in
+    let operation = claim () |> owner_ok |> Option.get in
+    let observed = Owner.direct_runtime_retry owner
+      ~operation_id:operation.Chat_operation.operation_id |> owner_ok |> Option.get in
+    Owner.resume_direct_runtime_retry owner ~operation_id:operation.operation_id ~observed |> owner_ok;
+    Eio.Promise.resolve resolve_resumed (operation.operation_id, Eio.Time.now clock);
+    Owner.Operation_succeeded {outcome_ref="earliest-retry-completed"}
+  in
+  let owner = start_owner_with_executor_ready ~now:(fun () -> Eio.Time.now clock)
+    ~operation_ready:(fun ~keeper_name:_ -> !ready) ~sw
+    ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+    ~operation_executor:(Some executor) ~keeper_name:"earliest-retry"
+    ~initial_meta:(Some (make_meta "earliest-retry")) () |> owner_ok in
+  Eio.Promise.resolve resolve_owner owner;
+  let interval = Env_config_keeper.KeeperKeepalive.sleep_chunk_sec () in
+  let earlier = interval /. 4. and later = interval *. 2. in
+  let first = operation_id "kmsg-earliest-first" and second = operation_id "kmsg-earliest-second" in
+  let checkpoint = Keeper_checkpoint_ref.create
+    ~trace_id:(Keeper_id.Trace_id.of_string "earliest-retry" |> Result.get_ok)
+    ~turn_count:1 ~canonical_checkpoint_bytes:"earliest retry checkpoint" |> Result.get_ok in
+  let defer operation_id deadline =
+    Owner.submit_operation owner ~operation_id ~source:operation_source
+      ~input:(operation_input "preserve this retry") |> owner_ok |> ignore;
+    let claimed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+    check bool "fixture claims its own original input" true
+      (Chat_operation.Operation_id.equal operation_id claimed.operation_id);
+    let continuation = Keeper_semantic_execution.runtime_retry ~not_before:(Some deadline)
+      ~checkpoint ~assignment_id:"original-lane" ~failed_runtime_id:"primary.test_model"
+      ~next_runtime_id:"alternate.test_model" ~later_runtime_ids:[] |> Result.get_ok in
+    Owner.defer_direct_runtime_retry owner ~operation_id
+      ~execution_digest:claimed.execution_digest ~continuation |> owner_ok |> ignore
+  in
+  defer first (if earlier_added_second then later else earlier);
+  defer second (if earlier_added_second then earlier else later);
+  ready := true;
+  Eio_mock.Clock.advance clock;
+  let actual, at = Eio.Time.with_timeout_exn env#clock 2. (fun () -> Eio.Promise.await resumed) in
+  let expected = if earlier_added_second then second else first in
+  Printf.printf "retry_wake earlier_added_second=%b due=%.6f resumed=%.6f operation=%s\n%!"
+    earlier_added_second earlier at (Chat_operation.Operation_id.to_string actual);
+  check bool "earliest original input starts" true (Chat_operation.Operation_id.equal expected actual);
+  check (float 0.) "wakes exactly at earliest deadline in controlled clock" earlier at
+;;
+
 let test_retry_deadline_crossing_automatically_wakes () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock
@@ -5622,6 +5676,11 @@ let () =
     "keeper owner"
     [ ( "input ownership", [test_case "writer binds child, lane and exact predecessor" `Quick
           test_input_writer_is_bound_to_child_and_predecessor] )
+    ; ( "retry_deadline_rearm",
+        [ test_case "earlier deadline replaces an armed later wake" `Quick
+            (test_cooling_retry_rearms_earliest ~earlier_added_second:true)
+        ; test_case "later deadline preserves an armed earlier wake" `Quick
+            (test_cooling_retry_rearms_earliest ~earlier_added_second:false) ] )
     ; ( "reducer"
       , [ test_case "direct waiter ignores continuations and wakes on original input" `Quick
             test_direct_waiter_skips_continuations_and_wakes_on_new_input;

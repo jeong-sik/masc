@@ -1,0 +1,99 @@
+{
+  "base": "1fac40687d05baa94e453ff8dbfa4452daa4e18e",
+  "scope": "controlled mock clock; actual Owner original-operation claim and exact retry resume; no wall-clock/provider/UI latency comparison",
+  "candidate_source_sha256": {
+    "lib/keeper/keeper_owner.ml": "364a01dbbdb898e699ceae73f1bf7059a355d2fb5130b08045d225d7c8b58d06",
+    "lib/keeper/keeper_owner.mli": "6133b7bca6061d28d8a5c37e91d5600b9fb7276422d0bd307b6b265a30cbf64e",
+    "test/test_keeper_owner.ml": "4f841888c1a35b25b598b58de7fbc80adcc3cfba5e9f5eb767e0ace320686772",
+    "test/stanzas/test_keeper_owner.inc": "77e0b7c277d2c69abd806dfa171c3de9690b501ae920c43eba4119c44a8de9aa"
+  },
+  "baseline_source_sha256": {
+    "lib/keeper/keeper_owner.ml": "35b024593d88b945a0186df0ac78bf7141c52305b3ea5f23d2e5ece510441d4e",
+    "lib/keeper/keeper_owner.mli": "6f97a2283276c8626e7cfc16ce8be0d7f2c4f028a1a787ffb8cef4d921d7ae6a",
+    "test/test_keeper_owner.ml": "4f841888c1a35b25b598b58de7fbc80adcc3cfba5e9f5eb767e0ace320686772",
+    "test/stanzas/test_keeper_owner.inc": "77e0b7c277d2c69abd806dfa171c3de9690b501ae920c43eba4119c44a8de9aa"
+  },
+  "identical_runner_files": [
+    "test/test_keeper_owner.ml",
+    "test/stanzas/test_keeper_owner.inc"
+  ],
+  "baseline_executable_sha256": "d3feff1f3a842b75f4eec7527c845a83ab46eb02aaa13e35fa7365c25372adee",
+  "baseline_reconstruction": "rebuilt from exact parent production files and identical runner; executable byte-identical; same failure reproduced",
+  "candidate_executable_sha256": {
+    "test/test_keeper_owner.exe": "4bea746823fc00a042161eb1036f8a6018ffb7c50a4c5b456a287d056f86af7c",
+    "test/keeper_chat_operations/test_keeper_direct_runtime_continuation.exe": "f98491a2a22c5379f4d40d244290dc31e6d29a34eaeb0e5adc2091eb7279a080"
+  },
+  "log_sha256": {
+    "baseline.log": "31e87c60105745282426171b4530f531793fc5261e180b455df827617d50ec1f",
+    "baseline-confirmed.log": "e0a2e0ba96802681025a3b0cc911bf2701c5d97168075fc6c76f61c72b98db3c",
+    "candidate.log": "896a80da793e9d1c786d49d8ab81851b2bb5137cee69cc66b0eeb4e6a26739cf",
+    "candidate-actor.log": "a0920ff9f68d4a1c1c6e35c873c613efbff0374822bf2ec77d30464ab4513583",
+    "candidate-waiters.log": "61995f16c69af19180cf11a910ae6401cced35f2db469fc7c4b5729bba437e80",
+    "candidate-continuation.log": "38ad79be8b3670953d15df36e80623303cc793316cad284d2a60d18ee1370b9b"
+  },
+  "build": {
+    "command": "opam exec --switch=5.5.1 -- dune build test/test_keeper_owner.exe test/keeper_chat_operations/test_keeper_direct_runtime_continuation.exe",
+    "candidate_exit_code": 0,
+    "baseline_owner_build_exit_code": 0
+  },
+  "new_reproduction": {
+    "command": "_build/default/test/test_keeper_owner.exe test retry_deadline_rearm --verbose",
+    "baseline_exit_code": 1,
+    "baseline": {
+      "earlier_added_second": "FAIL: expected0.125 actual0.5, same original ID",
+      "later_added_second": "PASS:0.125"
+    },
+    "candidate_exit_code": 0,
+    "candidate_passed": 2,
+    "candidate": {
+      "earlier_added_second": "PASS:0.125",
+      "later_added_second": "PASS:0.125"
+    }
+  },
+  "candidate_existing_checks": [
+    {
+      "log": "candidate-actor.log",
+      "command": [
+        "_build/default/test/test_keeper_owner.exe",
+        "test",
+        "actor",
+        "51,54-56",
+        "--verbose"
+      ],
+      "exit_code": 0
+    },
+    {
+      "log": "candidate-waiters.log",
+      "command": [
+        "_build/default/test/test_keeper_owner.exe",
+        "test",
+        "reducer",
+        "0-1",
+        "--verbose"
+      ],
+      "exit_code": 0
+    },
+    {
+      "log": "candidate-continuation.log",
+      "command": [
+        "_build/default/test/keeper_chat_operations/test_keeper_direct_runtime_continuation.exe"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "focused_total_passed": 28,
+  "full_regression": {
+    "run_id": null,
+    "head": null,
+    "TARGET_SUITES": null,
+    "state": "not run for this candidate; latest full regression identity not inspected"
+  },
+  "ci": "not run",
+  "installation": "not installed",
+  "runtime_latency": "not measured",
+  "known_scope_limits": [
+    "No forced arbitrary sequence of replacement races or timer-fork failures",
+    "No measured operating clock correction or provider behavior",
+    "This does not remove the existing transient retry fuse or periodic dependency observation"
+  ]
+}

@@ -35,10 +35,16 @@ val submit_durable : base_path:string -> keeper_name:string -> unit
 (** Submit disk-selected catch-up for this Keeper on the server-owned
     Librarian lane. Pending explicit candidates are recovered and judged
     independently of current Memory limits before conversation catch-up.
+    Completed-history work uses its configured Addon and immutable host owner.
+    Retained unfinished work resumes before a fresh source selection; detached
+    work stays unread until the Addon is reattached. Actual completion signals
+    this same serialized Memory lane.
     Each stored progress advance continues to the next unread
     range while no other unit waits. A waiting unit, empty backlog, failure,
     or disabled/invalid setting ends this wake. An unfinished durable commit
-    also ends the wake, without continuity or Memory cleanup. A launch submits its own
+    also ends the wake, without continuity or Memory cleanup. An original that
+    cannot be strictly restored remains a reported error and suspends those
+    following effects until its publication authority can be recovered. A launch submits its own
     Keeper's catch-up;
     {!submit_durable_for_unlaunched} submits it at boot for the Keepers that
     did not launch. After catch-up it reviews an over-limit current Memory

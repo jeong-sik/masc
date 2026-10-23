@@ -12,8 +12,10 @@ let observe ?(events=events) ?(policy=policy) at =
 let first = observe t0 and later = observe t1;;
 let before = Before.candle_observation_sequence ~base_path:"probe";;
 let after = After.candle_observation_sequence ~base_path:"probe";;
-let a = before ~request_sequence:0 (first,[]) and b = before ~request_sequence:1 (later,[]);;
-let x = after ~request_sequence:0 (first,[]) and y = after ~request_sequence:1 (later,[]);;
+let a = before ~request_sequence:0 (first,[]);;
+let b = before ~request_sequence:1 (later,[]);;
+let x = after ~request_sequence:0 (first,[]);;
+let y = after ~request_sequence:1 (later,[]);;
 assert (a <> b);; assert (x = y);;
 let item = Option.get (Keeper_portrait_item.of_id "crown");;
 let purchased = observe ~events:(events @ [{Candle_event.at=t0;body=Candle_event.Purchased {keeper="probe";item;amount_milli=0}}]) t1;;

@@ -365,7 +365,9 @@ After `:select-notes START END [LOW HIGH]` or `:select-all`, use
 (halfway points round forward). Lengths and dynamics stay unchanged. The grid
 uses quarter-note beats for phrases/PPQ MIDI or frames for SMPTE MIDI and must
 resolve to whole source ticks. The edit is one undoable transaction; invalid
-new same-key overlaps, source routing changes or document bounds refuse the entire edit.
+new same-key overlaps and source routing changes refuse the entire edit.
+Phrase notes must remain inside the phrase length. Imported MIDI may extend its
+edited performance to retain a moved note's end, as with other source note edits.
 An original MIDI overlap may remain; quantization cannot introduce a new one.
 The selection anchor follows the grid so later copy/paste retains its timing.
 The existing `:quantize` command still addresses the selected track/channel.

@@ -389,11 +389,23 @@ let test_unattached_reports_without_consuming () = with_fixture (fun ~sw:_ fixtu
   check int "unattached source calls no provider" 0 (F.post_count fixture.server);
   check bool "unattached source remains unread" true (progress fixture=before);
   no_memory fixture;
-  (match memory_action fixture (fun () -> Refresh.run_durable ~base_path:fixture.base_path ~keeper_name) with
-   | Refresh.Stopped error -> check bool "production queue retains blocked publication" true
+  check bool "production queue starts without a measurement" true
+    (Option.is_none (Refresh.last_measurement ~config:fixture.config ~keeper_name));
+  Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name;
+  Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
+  (match Refresh.last_measurement ~config:fixture.config ~keeper_name with
+   | Some {last_pass=Refresh.Stopped error;_} ->
+     check bool "production queue retains blocked publication" true
        (Consumer.publication_unfinished error)
-   | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Not_committed | Pending | Raised _ ->
-     fail "production queue must retain the attachment failure"))
+   | Some {last_pass=(Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+                    | Not_committed | Pending | Raised _);_}
+   | None -> fail "production queue must retain the attachment failure");
+  check int "unattached production queue creates no original" 0 (List.length (observed_originals fixture));
+  check int "unattached production queue calls no provider" 0 (F.post_count fixture.server);
+  check bool "unattached production queue preserves source progress" true (progress fixture=before);
+  no_memory fixture;
+  check bool "blocked publication skips continuity" false
+    (io (fun () -> Sys.file_exists (Keeper_librarian_continuity.path ~config:fixture.config ~keeper_name))))
 let test_terminal_refusal_allows_fresh_original () = with_fixture (fun ~sw:_ fixture ->
   let before=progress fixture in
   fixture.set_response (fun _ -> `Bad_request,

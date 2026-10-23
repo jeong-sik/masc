@@ -75,6 +75,17 @@ execution; neither completed run certifies those later changes.
   repair keeps the real external item and final ACK=1 assertion. [The second
   exact-head receipt](history-production-second-execution.json) preserves this
   failure separately; another execution must verify the repaired integration.
+- The terminal-refusal/attachment repair was selected in
+  [run39906960166](https://github.com/jeong-sik/masc/actions/runs/39906960166),
+  exact top `794ccac949f59e9bc2085d8656e8b9b4617498ae`, with only
+  `test_keeper_librarian_durable_execution` requested. Compilation stopped at
+  line 392: `Unbound value Refresh.run_durable`; no case executed. That helper
+  is private. The repaired attachment fixture uses the public
+  `submit_durable`, joins the actual serialized Memory lane and observes a new
+  `last_measurement` instead. It also checks that the production queue leaves
+  source progress, originals, provider calls, Memory and continuity unchanged
+  while the Addon is absent. Parsing and source checks do not establish native
+  compilation or execution; a new exact-head run remains unverified.
 
 ## What the eleven integration cases exercise
 

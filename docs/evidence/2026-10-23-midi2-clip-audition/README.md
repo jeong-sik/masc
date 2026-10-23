@@ -75,6 +75,34 @@ same input checks. No repository Dune build or CI watch was run.
 Physical MIDI2 reception/acoustics, MIDI-CI/profile negotiation, JR clock
 coordination, Clip looping, local Clip synthesis and arrangement consumers are
 not claimed. [#45643](https://github.com/jeong-sik/masc/issues/45643) remains open.
-The private prefix preserves the existing default runtime, which includes a
-separate unmerged phrase cursor-audition stack. Updating the default must retain
-both sets of functionality.
+The private-prefix run above preserved the then-default phrase cursor-audition
+runtime. That separate stack subsequently merged as #45604 and #45609. The
+integration and default installation below retain both sets of functionality.
+
+## Current-main integration and default installation
+
+The whole four-layer Clip stack was rebased onto main
+`453ece3f0a7ef169132cb8c94802256c3ac58620`. Its music delta from the earlier
+candidate is exactly the merged cursor-audition changes. All native, Clip,
+common playback and installer inputs are unchanged. The previous default's
+phrase editor modules remain byte identical; the shared TUI adds only an early
+Clip dispatch before phrase editor/worker construction. Independent source
+reviews checked these boundaries against the new base.
+
+The official auxiliary installer then installed runtime
+`3b3d71b3a1235deae963e95275504d29d777a4edb6db11d30ff44e66081245f2`
+as the default launcher. All 126 inputs and 8 native helpers were read back;
+helper reuse required complete native-input and binary-hash identity with the
+previous verified private installation. The VST host and locked environment
+identity were also checked. This is an auxiliary music-runtime installation,
+separate from an OCaml server/TUI build or a GitHub merge.
+
+The actual default launcher repeated the same isolated terminal/owned CoreMIDI
+scenario: 72 received words, one child for pause/seek/resume, replacement only
+after old-child retirement, cleanup on stop, exit0 and unchanged source/export.
+The combined Clip and merged cursor-audition/lifecycle checks passed 116/116.
+The [default-install receipt](default-install-receipt.json) records this newer
+runtime, source identity and fresh verification time. The screenshots above
+remain the earlier source-candidate captures. Existing user sessions and music
+were not replaced; physical-device, acoustic and Ghostty-display claims remain
+outside this evidence.

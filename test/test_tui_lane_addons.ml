@@ -769,8 +769,12 @@ let guided_installation () =
   check (option string) "matching preview advances without error" None error;
   let typed,detail = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
     (Ok schemaless) pending |> Option.get in
-  check (option string) "typed path refusal names keys that work there"
-    (Some "Package has no binding schema; Esc back to the Add-ons list, then n for an advanced TOML declaration.") detail;
+  check bool "schemaless preview reports a refusal" true (Option.is_some detail);
+  check bool "schemaless preview retires the pending read" true
+    (Option.is_none (Install.pending_read typed));
+  check string "schemaless preview retains the original manifest request" "/packages/arbitrary/lane.toml"
+    (match Install.handle ~key:"enter" typed |> ok with
+     | Preview path -> path | _ -> fail "expected the restored manifest request");
   check bool "n does not open the editor from the typed path" true
     (match Install.handle ~key:"n" typed |> ok with Updated _ -> true | _ -> false);
   let rec closes presses state = presses>0 && (match Install.handle ~key:"esc" state |> ok with
@@ -832,8 +836,10 @@ let guided_installation () =
   check (option string) "preview failure preserves folder" (Some "/packages") (Install.directory restored);
   check (option string) "preview failure shown" (Some "manifest changed") detail;
   let listed,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Ok schemaless) pending |> Option.get in
-  check (option string) "browser refusal names n"
-    (Some "Package has no binding schema; use n for an advanced TOML declaration.") detail;
+  check bool "schemaless catalog preview reports a refusal" true (Option.is_some detail);
+  check string "schemaless catalog preview retains the selected manifest" "/packages/arbitrary/lane.toml"
+    (match Install.handle ~key:"enter" listed |> ok with
+     | Preview path -> path | _ -> fail "expected the retained catalog selection");
   check bool "n in the browser opens the raw TOML declaration editor" true
     (Install.handle ~key:"n" listed = Ok Install.Declare);
   let remembered=Install.browse ~directory:"/packages/removed" () in
@@ -1845,8 +1851,10 @@ let inspect_category_decode_is_strict () =
 let role_refresh_keeps_original_action_and_installation () =
   let module Category = Masc.Lane_addon_category in
   let schema = Yojson.Safe.from_string
-    {|{"type":"object","required":["instance_id","request_id","action"],"additionalProperties":false,
-       "properties":{"instance_id":{"type":"string"},"request_id":{"type":"string"},
+    {|{"type":"object","required":["context","request_id","action"],"additionalProperties":false,
+       "properties":{"context":{"type":"object","required":["instance_id","incarnation"],"additionalProperties":false,
+       "properties":{"instance_id":{"type":"string"},"incarnation":{"type":"string"}}},
+       "request_id":{"type":"string"},
        "action":{"type":"object","required":["operation"],"additionalProperties":false,
        "properties":{"operation":{"type":"string","enum":["inspect"]}}}}}|} in
   let worker id category : UI.instance = {
@@ -1870,6 +1878,9 @@ let role_refresh_keeps_original_action_and_installation () =
   let request_id = "01901234-1234-7000-8000-000000000001" in
   let menu = UI.open_actions ~request_id before |> ok in
   let first = UI.submit_action menu |> ok in
+  let expected : UI.action_request = {instance_id=original.id;incarnation=original.incarnation;
+    request_id;action=`Assoc ["operation",`String "inspect"]} in
+  check bool "the action request retains its worker incarnation and reviewed input" true (first=expected);
   let refreshed = {snapshot with instances=[other;original];
     configuration=Some {config with declarations=[declaration "other" Category.Browser;
       declaration "original" Category.Analysis]}} in

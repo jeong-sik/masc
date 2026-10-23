@@ -388,7 +388,12 @@ export function sourceCommand(editor,line) {
       // Read the actual inserted port at each onset from the validated source
       // projection. Tracks may share keys; a point at an onset is also a clash.
       const added = next.performance.notes.filter(note => !existing.has(note.id))
-      if (added.some(note => editor.performance.notes.some(before => before.port === note.port
+      // An original unclosed attack has no paired note interval. Preserve
+      // existing diagnostics, but refuse any overlap newly reported by the
+      // actual event sweep, including attacks occurring inside a new voice.
+      const overlaps = new Set(editor.performance.diagnostics.filter(value => value.kind === 'overlapping-key').map(value => value.event))
+      if (next.performance.diagnostics.some(value => value.kind === 'overlapping-key' && !overlaps.has(value.event))
+        || added.some(note => editor.performance.notes.some(before => before.port === note.port
         && before.channel === note.channel && before.pitch === note.pitch
         && (before.duration === 0 ? note.start <= before.start && before.start < note.start + note.duration
           : before.start < note.start + note.duration && note.start < before.start + before.duration)))) {

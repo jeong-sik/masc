@@ -98,3 +98,23 @@ test('point collisions and same-tick pairing changes refuse while independent po
       editor.performance.notes.filter(n=>n.track===1).map(({seconds,durationSeconds,...n})=>n))
   }
 })
+
+test('unpaired original attacks cannot introduce overlap during new voices; unrelated original diagnostics survive', () => {
+  const fixture=(channel,pitch)=>{
+    const file=new JZZ.MIDI.SMF(0,1001)
+    file.push(new JZZ.MIDI.SMF.MTrk().add(0,JZZ.MIDI.program(4,33))
+      .add(500,JZZ.MIDI.noteOn(channel,pitch,80)).add(2000,JZZ.MIDI.smfEndOfTrack()))
+    return command(newEditor(importMidiSource(file.toUint8Array())),'channel 5')
+  }
+  const editor=fixture(4,53), before=structuredClone(editor)
+  assert.deepEqual(editor.performance.notes,[])
+  assert.deepEqual(editor.performance.diagnostics.map(d=>d.kind),['unclosed-note'])
+  assert.throws(()=>command(editor,'progression-led 0 1 rootless C3 C5 G7'),/overlapping/)
+  assert.deepEqual(editor,before)
+  for (const [channel,pitch] of [[5,53],[4,24]]) {
+    const original=fixture(channel,pitch)
+    const next=command(original,'progression-led 0 1 rootless C3 C5 G7')
+    assert.deepEqual(next.performance.diagnostics,original.performance.diagnostics)
+    assert.equal(next.performance.notes.length,4)
+  }
+})

@@ -63,6 +63,8 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 - browser Add-on worker 는 이미 호스트 프로세스로 돌고, `[browser.live.bidi]` 의 Keeper Firefox 를 띄워 BiDi 연결로 붙인다. ego 연결도 같은 자리에서 `ego-browser nodejs` 를 부른다.
 - Keeper 는 지금처럼 BrowserTabs·BrowserRead·BrowserInteract·BrowserAct·BrowserGoto 를 부른다. 샌드박스는 그대로다.
 - 연결 방식마다 할 수 있는 일은 `Browser_lane.live_transport_serves` 표 한 곳에 적는다. 모든 칸을 적어야 컴파일된다.
+- live 는 운영자와 같은 신뢰 수준이다. ego 연결에 따로 허용 목록을 두지 않는다. browser 도구를 부를 수 있는 Keeper 는 BiDi·확장 연결처럼 이 연결도 쓴다. 공간이 운영자 프로필의 로그인을 그대로 쓰므로, 그 Keeper 는 운영자가 로그인한 사이트 모두에 닿는다.
+- 이동은 절대 http(s) 주소만 받는다. loopback 과 사설 주소는 BiDi 연결처럼 막지 않는다.
 
 ### 다른 길
 
@@ -76,6 +78,7 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 
 - 연결 하나가 ego 작업 공간 하나다. worker 가 처음 붙을 때 `taskSpace(이름)` 으로 열거나 이어서 열고, 끝날 때 `finish({keep: []})` 로 닫는다.
 - 공간 이름은 설치마다 하나다. 운영자 공간(`ownership: "user"`)은 열지 않는다. `EGO_TASK_SPACE_NAME_IN_USE` 가 오면 연결하지 않고 그 이유를 남긴다.
+- 연결 하나는 명령을 하나씩 처리한다. worker 안에서 연결마다 fiber 하나가 명령을 받아 실행하고 답한 뒤에 다음 명령을 받는다. 그래서 `ego-browser nodejs` 실행 둘이 한 공간을 동시에 만지지 않는다.
 - 탭 번호는 연결 안에서 페이지 라벨(`p1`, `p2`)마다 한 번 정한 정수다. ego 는 라벨을 공간이 끝날 때까지 바꾸지 않고, `targetId` 는 실행 사이에 들고 다니지 말라고 한다. 라벨이 없는 탭(운영자가 그 공간에 연 탭)만 `targetId` 로 목록 번호를 받는다. 목록에서 사라진 탭의 번호는 버린다.
 - 라벨이 있고 `openedBy: "agent"` 인 페이지만 이동·닫기·입력을 받는다. 라벨 없는 운영자 탭은 목록에만 나오고, 읽기도 효과 없이 거절한다. ego 문서가 그런 탭은 adopt 한 뒤에만 다루라고 해서다. BiDi 의 "이 연결이 연 탭만" 규칙과 비슷하다.
 

@@ -764,6 +764,8 @@ let test_durable_runtime_returns_refusal_reports ~base_path () =
     ~range_id:None ~official_range_id:None input with
    | Keeper_librarian_durable_consumer.Memory_committed ->
      Alcotest.fail "the failed walk claimed Memory committed"
+   | Memory_pending ->
+     Alcotest.fail "the synchronous failed walk claimed an unfinished owner commit"
    | Memory_refused reports ->
      Alcotest.(check bool) "the adapter retains classified reports" true (reports <> []);
      Alcotest.(check bool) "provider size refusal and later quota both reach the durable edge" true

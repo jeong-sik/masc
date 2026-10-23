@@ -4,6 +4,9 @@ type pass_end =
   | Drained
   | Yielded_to_waiting_unit
   | Not_committed
+  | Pending
+      (** An unfinished durable commit suspends the remaining phases of this
+          wake. This is neither failure nor an invitation to retry inline. *)
   | Stopped of Keeper_librarian_durable_consumer.error
   | Raised of string
 
@@ -34,7 +37,8 @@ val submit_durable : base_path:string -> keeper_name:string -> unit
     independently of current Memory limits before conversation catch-up.
     Each stored progress advance continues to the next unread
     range while no other unit waits. A waiting unit, empty backlog, failure,
-    or disabled/invalid setting ends this wake. A launch submits its own
+    or disabled/invalid setting ends this wake. An unfinished durable commit
+    also ends the wake, without continuity or Memory cleanup. A launch submits its own
     Keeper's catch-up;
     {!submit_durable_for_unlaunched} submits it at boot for the Keepers that
     did not launch. After catch-up it reviews an over-limit current Memory
@@ -113,12 +117,14 @@ module For_testing : sig
     base_path:string -> keeper_name:string -> unit -> unit
   (** [has_waiting] replaces the lane's "a unit waits" read (RFC-0467). *)
   val run_with_readers
-    :  durable:(unit -> unit)
+    :  durable:(unit -> pass_end)
     -> continuity:(unit -> unit)
+    -> cleanup:(unit -> unit)
     -> base_path:string
     -> keeper_name:string
     -> unit
-  (** Production phase dispatch with controlled durable and continuity edges.
+  (** Production phase dispatch with controlled durable, continuity and cleanup
+      edges. [Pending] skips continuity, queue context and cleanup in this wake.
       Queue-context capture and owner/configuration checks remain unchanged. *)
 
   val run_durable_with_commit
@@ -130,8 +136,9 @@ module For_testing : sig
           -> official_range_id:Keeper_memory_os_current.official_range_id option
           -> Keeper_librarian.input
           -> Keeper_librarian_durable_consumer.commit_result)
-    -> unit
-  (** The production durable reader with a controlled Memory commit edge. *)
+    -> pass_end
+  (** The production durable reader with a controlled Memory commit edge.
+      Returns its actual phase result; measurements remain observation only. *)
 
   val queue_input
     :  config:Workspace.config

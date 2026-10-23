@@ -63,6 +63,7 @@ export type KeeperMemoryHealthLibrarianState =
   | 'lane_unconfigured'
   | 'drained'
   | 'yielded_to_waiting_unit'
+  | 'pending'
   | 'not_committed'
   | 'stopped'
   | 'raised'
@@ -292,6 +293,7 @@ const KEEPER_MEMORY_HEALTH_LIBRARIAN_STATES: readonly KeeperMemoryHealthLibraria
   'lane_unconfigured',
   'drained',
   'yielded_to_waiting_unit',
+  'pending',
   'not_committed',
   'stopped',
   'raised',

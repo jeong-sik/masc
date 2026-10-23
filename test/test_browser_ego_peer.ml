@@ -333,7 +333,7 @@ let interact_args ?(tab_id=1) ?(frame_path=[]) action =
     (Lane.verb_json (Lane.Page_interact {tab_id;frame_path;expected_url=Some observed_url;action}))
 (* What the guard and the receipt scripts read: the page, its title and scroll. *)
 let page_summary = in_page (obj ["url",str observed_url;"title",str "Slack";"scrollX",`Int 0;"scrollY",`Int 0])
-let input_answer ?(error=`Null) () = answered (obj ["guard",page_summary;"receipt",page_summary;"error",error])
+let input_answer ?(error=`Null) ?(released=true) () = answered (obj ["guard",page_summary;"receipt",page_summary;"error",error;"pointerReleased",`Bool released])
 (* The pointer target script's answer: the URL, a point and the viewport it is in. *)
 let resolved = in_page (obj ["url",str observed_url;"point",Lane.Pointer.point_to_json {x=0.25;y=0.5};
   "viewport",Lane.Pointer.viewport_to_json viewport])
@@ -425,6 +425,7 @@ let test_input_acts_through_the_shared_page_scripts () =
   by_step ["page.input",(fun _ -> refusal ~started:true)];
   check string "a failure after the edit started" "unknown" (failure_kind (interact fill));
   (* Refused before any run. *)
+  let elsewhere = {Lane.Pointer.x=0.75;y=0.5} in
   let before = runs () in
   check string "inside a frame" "before effect"
     (failure_kind (dispatch peer Live.Page_interact (interact_args ~frame_path:["iframe"] (Lane.Click "#send"))));
@@ -433,15 +434,57 @@ let test_input_acts_through_the_shared_page_scripts () =
   check string "control characters" "before effect" (failure_kind (interact (Lane.Type_text {document_id="d1";text="a\nb"})));
   check string "a key ego cannot press" "before effect"
     (failure_kind (interact (Lane.Press_key {document_id="d1";key=chord ~key:"é" ~modifiers:["Control"]})));
-  let elsewhere = {Lane.Pointer.x=0.75;y=0.25} in
   List.iter (fun action ->
     check bool (Lane.interaction_verb action ^ " is not served") true
       (String_util.contains_substring (before_effect "an input ego does not serve" (interact action)) "not served by an ego connection"))
-    [Lane.Drag {from=point;to_=elsewhere;viewport;via=[];duration_ms=0};
-     Lane.Drag_to {source=Lane.Selector "#a";destination=Lane.Selector "#b";via=[];duration_ms=0};
-     Lane.Tap_at {point;viewport}; Lane.Swipe {from=point;to_=elsewhere;viewport;via=[];duration_ms=0};
+    [Lane.Tap_at {point;viewport}; Lane.Swipe {from=point;to_=elsewhere;viewport;via=[];duration_ms=0};
      Lane.Set_zoom {factor=1.5}; Lane.Set_viewport Lane.Browser_default; Lane.Activate_tab];
   check int "none of those ran a script" before (runs ())
+
+let test_native_drag_and_release () =
+  let sent = ref [] and mode = ref "success" in
+  let target = obj ["url",str observed_url;"from",Lane.Pointer.point_to_json {x=0.25;y=0.5};
+    "to",Lane.Pointer.point_to_json {x=0.75;y=0.5};"viewport",Lane.Pointer.viewport_to_json viewport] in
+  let peer = opened (fun request ->
+    sent := request :: !sent;
+    match request.step with
+    | "tabs.list" -> answered tabs
+    | "page.target" -> answered (in_page target)
+    | "page.drag" ->
+      (match !mode with
+       | "refused" -> refused "observed_viewport_changed"
+       | "unknown" -> Error Peer.Timed_out
+       | "release_failed" -> input_answer ~released:false ~error:(str "up failed") ()
+       | _ -> input_answer ())
+    | "page.pointer" -> input_answer ()
+    | "page.read" -> page_answer ~label:"p1" (obj ["text",str "still readable"])
+    | other -> failf "unexpected step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let drag duration_ms = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";
+    via=[{Lane.Pointer.x=0.5;y=0.25}];duration_ms} in
+  let invoke action = dispatch peer Live.Page_interact (interact_args action) in
+  check string "native drag succeeds" "served" (failure_kind (invoke (drag 0)));
+  let last = List.hd !sent in
+  check string "native API step" "page.drag" last.step;
+  check bool "observed path is converted once to CSS pixels" true
+    (field "path" last.args = `List [obj ["x",`Int 200;"y",`Int 300];
+      obj ["x",`Int 400;"y",`Int 150];obj ["x",`Int 600;"y",`Int 300];
+      obj ["x",`Int 600;"y",`Int 300]]);
+  let count = List.length !sent in
+  check string "timed movement is not emulated" "before effect" (failure_kind (invoke (drag 100)));
+  check int "no script for unsupported timing" count (List.length !sent);
+  mode := "refused";
+  check string "guard rejects before input" "before effect" (failure_kind (invoke (drag 0)));
+  mode := "success";
+  check string "guard refusal leaves input usable" "served" (failure_kind (invoke (drag 0)));
+  mode := "release_failed";
+  check string "failed release is unknown" "unknown" (failure_kind (invoke (drag 0)));
+  let count = List.length !sent in
+  check string "no further input after unconfirmed release" "before effect"
+    (failure_kind (invoke (Lane.Click "#next")));
+  check int "blocked input is not run" count (List.length !sent);
+  check string "reads remain available" "served"
+    (failure_kind (dispatch peer Live.Page_read (obj ["tabId",`Int 1])))
 
 let png = "\137PNG\r\n\026\nfixture"
 let state ~url ~width = in_page (obj ["url",str url;"title",str "Slack";
@@ -463,7 +506,7 @@ let test_the_scripts_parse_as_modules () =
       answered (obj ["label",str "p1";"path",str path;"before",state ~url:"u" ~width:1;"after",state ~url:"u" ~width:1])
     | "space.finish" -> answered `Null
     | "page.target" -> answered resolved
-    | "page.pointer" | "page.keyboard" -> input_answer ()
+    | "page.pointer" | "page.keyboard" | "page.drag" -> input_answer ()
     | "page.input" -> answered (in_page (obj ["action",str "fill"]))
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "New";"active",`Bool true]])
     | "page.goto" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Next"]])
@@ -483,12 +526,13 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Hover_at {point={x=0.5;y=0.5};viewport});
       Live.Page_interact, interact_args (Lane.Scroll_at {point={x=0.5;y=0.5};viewport;x=0;y=120});
       Live.Page_interact, interact_args (Lane.Type_text {document_id="d1";text="hi"});
+      Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0});
       Live.Page_interact, interact_args (Lane.Fill {selector="#message";text="hi"});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.capture";
-     "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";
+     "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.drag";"page.input";
      "page.close";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
@@ -547,7 +591,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.goto" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
     | "page.target" -> answered resolved
-    | "page.pointer" | "page.keyboard" -> input_answer ()
+    | "page.pointer" | "page.keyboard" | "page.drag" -> input_answer ()
     | "page.input" -> answered (in_page (obj ["action",str "fill"]))
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -598,6 +642,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
 let () =
   run "browser_ego_peer" [
     "ego", [
+      test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
       test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;

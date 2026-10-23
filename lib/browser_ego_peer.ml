@@ -65,8 +65,10 @@ let result_marker = "masc-ego-result "
    from one run to the next, so a managed page is known by its label alone. *)
 type page = Managed of string | Unmanaged of string
 
+type pointer_state = Released | Release_uncertain
+
 type t = { run : runner; now : unit -> float; space_id : int; version : string; capture_directory : string;
-  mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
+  mutable pointer_state : pointer_state; mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
 let space_id t = t.space_id
 
@@ -129,7 +131,7 @@ let open_space ~run ~now ~space ~version ~capture_directory =
     |> Result.map_error step_failure_message in
   match field "spaceId" opened, field "ownership" opened with
   | Some (`Int space_id), Some (`String "agent") ->
-    Ok {run; now; space_id; version; capture_directory; pages=[]; next_tab=0; captures=0}
+    Ok {run; now; space_id; version; capture_directory; pointer_state=Released; pages=[]; next_tab=0; captures=0}
   | Some (`Int _), Some (`String ownership) ->
     Error (Printf.sprintf "ego task space %S belongs to %s, not to an agent" space ownership)
   | _ -> Error "ego answered the task space without its number and owner"
@@ -426,6 +428,27 @@ let motion_fields = function
   | Press {button; count} -> ["button",str (button_name button);"count",`Int count]
   | Wheel {x; y} -> ["dx",`Int x;"dy",`Int y]
 
+(* Native ego calls, not synthetic page events. A failed down may already
+   have pressed, so its finally block always attempts release. *)
+let drag_input = {js|
+async function dragInput(page, path) {
+  let error = null, released = true;
+  const reason = failure => String(failure?.message ?? failure);
+  try {
+    await page.mouse.move(path[0].x, path[0].y);
+    try {
+      released = false;
+      await page.mouse.down({button:'left'});
+      for (const point of path.slice(1)) await page.mouse.move(point.x, point.y);
+    } finally {
+      await page.mouse.up({button:'left'});
+      released = true;
+    }
+  } catch (failure) { error = reason(failure); }
+  return {error, released};
+}
+|js}
+
 (* ego takes a chord as Playwright writes one: the modifiers, then the key,
    joined by "+". It presses the named keys and printable ASCII, up to "~";
    ego 0.6.0.16 refused é, ß and € as an unknown key (2026-10-23). Its typing
@@ -457,9 +480,10 @@ let resolve t ~label ~deadline input =
 (* One run: the guard script checks that the page is the observed one and
    refuses before any input if not, the input is sent, and the receipt script
    reads where the page is. *)
-let guarded_input t ~id ~label ~deadline ~verb ~step ~guard ~input ~lines ~fields =
+let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guard ~input ~lines ~fields =
   let unknown = Printf.sprintf "read tab %d before another step" id in
-  match run_step t ~window_s:(left t deadline) ~step
+  if holds_button then t.pointer_state <- Release_uncertain;
+  let response = run_step t ~window_s:(left t deadline) ~step
           ~args:(obj (["label",str label;"tabId",`Int id;"guard",str (page_function guard);
             "input",str (Yojson.Safe.to_string input);
             "receipt",str (page_function Browser_interaction.pointer_receipt_script)] @ fields))
@@ -471,14 +495,22 @@ let guarded_input t ~id ~label ~deadline ~verb ~step ~guard ~input ~lines ~field
       "    const guard = await page.evaluate(pageCall(args.guard, args.input));";
       "    if (guard.pageError !== undefined) emit({ok: false, before: true, error: guard.pageError});";
       "    else {";
-      "      let failure = null;";
+      "      let failure = null, pointerReleased = false;";
       "      try {" ] @ lines @ [
       "      } catch (error) { failure = reason(error); }";
       "      const receipt = await page.evaluate(pageCall(args.receipt, \"{}\"));";
-      "      emit({ok: true, value: {guard, receipt, error: failure}});";
+      "      emit({ok: true, value: {guard, receipt, error: failure, pointerReleased}});";
       "    }";
-      "  }" ])) with
+      "  }" ])) in
+  if holds_button then (match response with
+    | Ok value when field "pointerReleased" value = Some (`Bool true) -> t.pointer_state <- Released
+    | Error (Refused _ | Unanswered (Unstarted _)) -> t.pointer_state <- Released
+    | Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _)
+        | Unreadable _ | Failed _) -> ());
+  match response with
   | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value when holds_button && field "pointerReleased" value <> Some (`Bool true) ->
+      Error (Live.Outcome_unknown ("ego drag did not confirm pointer release; " ^ unknown))
   | Ok value ->
     let decoded name = page_json (Option.value ~default:`Null (field name value)) in
     match decoded "guard", field "error" value, decoded "receipt" with
@@ -533,15 +565,25 @@ let interact t args =
   let* label = label_of t id in
   let deadline = command_deadline t (Browser_lane.Page_interact {tab_id = id; frame_path = []; expected_url = request.expected_url; action = request.action}) in
   let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url action in
-  let* expected_url, action = match request.action with
-    | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _ | Browser_lane.Double_click _ ->
-      let* resolved = resolve t ~label ~deadline (input ~expected_url:request.expected_url request.action) in
-      before (Browser_interaction.resolve_pointer_input request.action resolved)
+  let* () = match t.pointer_state with
+    | Released -> Ok ()
+    | Release_uncertain -> Error (Live.Before_effect
+        "ego pointer release is unconfirmed; read the browser, then end this task space before opening a fresh connection") in
+  let* () = match request.action with
+    | Browser_lane.Drag_to {duration_ms;_} | Browser_lane.Drag {duration_ms;_} when duration_ms <> 0 ->
+        Error (Live.Before_effect "ego drag requires durationMs=0; movement timing is not exposed by its mouse API")
+    | Browser_lane.Drag_to _ | Browser_lane.Drag _
     | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Set_zoom _
     | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
-    | Browser_lane.Scroll _ | Browser_lane.Drag_to _ | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
-    | Browser_lane.Click_at _ | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
-    | Browser_lane.Fill_node _ -> Ok (request.expected_url, request.action) in
+    | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
+    | Browser_lane.Click_at _ | Browser_lane.Scroll_at _ | Browser_lane.Follow_link _
+    | Browser_lane.Fill_node _ | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _
+    | Browser_lane.Double_click _ -> Ok () in
+  let* expected_url, action =
+    if Browser_interaction.needs_pointer_resolution request.action then
+      let* resolved = resolve t ~label ~deadline (input ~expected_url:request.expected_url request.action) in
+      before (Browser_interaction.resolve_pointer_input request.action resolved)
+    else Ok (request.expected_url, request.action) in
   let pointer (viewport : Browser_lane.Pointer.viewport) point motion =
     let x, y = Browser_lane.Pointer.viewport_pixels viewport point in
     guarded_input t ~id ~label ~deadline ~verb ~step:"page.pointer" ~guard:Browser_interaction.pointer_guard_script
@@ -549,11 +591,22 @@ let interact t args =
   let keyboard keys =
     guarded_input t ~id ~label ~deadline ~verb ~step:"page.keyboard" ~guard:Browser_interaction.keyboard_guard_script
       ~input:(input ~expected_url action) ~lines:(keys_lines keys) ~fields:(keys_fields keys) in
+  let drag ~from ~to_ ~viewport ~via =
+    let pixels point =
+      let x,y = Browser_lane.Pointer.viewport_pixels viewport point in obj ["x",`Int x;"y",`Int y] in
+    let path = from :: (Browser_lane.Pointer.drag_waypoints ~start:from ~destination:to_ via @ [to_;to_]) in
+    guarded_input ~holds_button:true t ~id ~label ~deadline ~verb ~step:"page.drag"
+      ~guard:Browser_interaction.pointer_guard_script ~input:(input ~expected_url action)
+      ~lines:["        const outcome = await (" ^ drag_input ^ ")(page, args.path);";
+        "        pointerReleased = outcome.released;";
+        "        if (outcome.error !== null) throw new Error(outcome.error);"]
+      ~fields:["path",`List (List.map pixels path)] in
   match action with
   | Browser_lane.Click_at {point; viewport; button} -> pointer viewport point (Press {button; count = 1})
   | Browser_lane.Double_click_at {point; viewport} -> pointer viewport point (Press {button = Browser_lane.Pointer.Primary; count = 2})
   | Browser_lane.Hover_at {point; viewport} -> pointer viewport point Move
   | Browser_lane.Scroll_at {point; viewport; x; y} -> pointer viewport point (Wheel {x; y})
+  | Browser_lane.Drag {from;to_;viewport;via;duration_ms=_} -> drag ~from ~to_ ~viewport ~via
   | Browser_lane.Type_text {text; _} -> let* () = before (Browser_lane.Keyboard.validate_text text) in keyboard (Text text)
   | Browser_lane.Press_key {key; _} ->
     (match key.key with
@@ -564,7 +617,7 @@ let interact t args =
     dom_input t ~id ~label ~deadline ~verb (input ~expected_url action)
   | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _ | Browser_lane.Double_click _ ->
     Error (Live.Before_effect "unresolved semantic pointer target")
-  | Browser_lane.Drag_to _ | Browser_lane.Drag _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
+  | Browser_lane.Drag_to _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
   | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Activate_tab -> refused
 
 let act t args =

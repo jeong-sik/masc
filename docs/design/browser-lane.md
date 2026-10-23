@@ -168,7 +168,7 @@ build their rejection from it.
 | `frame_read` | `BrowserRead` text, elements and frames modes with `framePath` (observed outer-to-inner iframe selectors); a dialog is not read this way | no | yes | no |
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel | yes, on a page an agent opened, ego's wheel |
 | `trusted_hover` | `hover`, `hover_at` | no | yes | yes, on a page an agent opened |
-| `trusted_drag` | `drag_to`, `drag` | no | yes | no |
+| `trusted_drag` | `drag_to`, `drag` | no | yes | yes, zero duration on agent pages |
 | `tab_activation` | `activate_tab` | yes | yes, and it also focuses the window | no |
 | `browser_zoom` | `set_zoom` | yes | no | no |
 
@@ -193,6 +193,23 @@ the observed document, URL and viewport are still there, and make the DOM edits,
 so a selector or node means the same on both; ego's own mouse and keyboard
 input clicks, hovers, scrolls at a point and types. Finding a target and acting
 on it are two runs that share the command's window.
+
+Native adapters share the semantic pointer decoder for observed geometry and
+URL. WebDriver, BiDi and ego also share the action classification; Stagehand
+retains its timing preflight. Native drag adapters share the intermediate
+waypoint calculation; each retains its own native input and release handling.
+
+Ego serves `drag_to` and `drag` with its native mouse API on agent pages.
+It visits the supplied viewport waypoints, or the midpoint for an empty route,
+then the destination twice before release. `durationMs` must be zero: ego's
+mouse API exposes steps, not a movement duration, so MASC adds no timing loop.
+The observed URL/document/viewport guard runs before the gesture. Button release
+is attempted in `finally`, including when a button-down call fails. If release
+cannot be confirmed or the run loses its answer, this peer refuses further
+input. Reads and ending the task space remain available; end that space before
+opening a fresh connection. This is a per-peer failure state, not a durable
+cross-process recovery record. A pointer receipt does not establish application
+drop acceptance or general HTML5 DataTransfer support.
 
 A request its connection does not serve is a selection failure: the server
 queues no command and answers `live_transport_unsupported`. A Keeper tool's

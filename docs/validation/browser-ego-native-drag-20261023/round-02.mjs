@@ -1,0 +1,21 @@
+const fs=await import('node:fs/promises');
+const directory='<evidence-directory>';
+const {spaceId}=JSON.parse(await fs.readFile(directory+'/space.json','utf8'));
+const task=await taskSpace(spaceId),page=task.page('p1');
+const geometry=await page.evaluate(()=>{
+  const center=id=>{const r=document.querySelector(id).getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}};
+  return {from:center('#source'),to:center('#target')};
+});
+const production=await fs.readFile('<checkout>/lib/browser_ego_peer.ml','utf8');
+const literal=production.match(/let drag_input = \{js\|([\s\S]*?)\|js\}/)?.[1];
+if(!literal)throw Error('production drag source not found');
+const nativeDrag=(0,eval)('('+literal+')');
+const {from,to}=geometry;
+const route=[from,{x:Math.round((from.x+to.x)/2),y:Math.round((from.y+to.y)/2)},to,to];
+const outcome=await nativeDrag(page,route);
+await page.waitForFunction(()=>window.completed===true);
+const result=await page.evaluate(()=>({completed:window.completed,status:document.querySelector('#status').textContent,events:window.events}));
+const log={scope:'production JS native drag helper in real ego; not OCaml adapter end-to-end',spaceId,geometry,route,outcome,result};
+await fs.writeFile(directory+'/native-drag.json',JSON.stringify(log,null,2)+'\n');
+console.log(log);
+console.log({screenshot:await page.screenshot({path:directory+'/native-drag.png'})});

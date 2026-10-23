@@ -166,7 +166,10 @@ let support backend operation = match backend with
          @ match backend with Owned_chromium -> ["durationMs must be zero."]
            | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Safari_unavailable -> [])
       | Connected Browser_lane.Web_extension -> Unsupported "WebExtension does not serve native pointer drag."
-      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"drag_to" Interact
+          [observed;target;geometry;ego_agent_pages;
+           "Uses ego's native mouse API with observed waypoints; durationMs must be zero. Input receipt does not establish application drop acceptance."]
+      | Safari_unavailable -> missing)
     | Html5_drop -> (match backend with
       | Owned_chromium -> conditional ~action:"drag_to" Interact
           [observed;target;"Native HTML5 DataTransfer/drop passed a fixture; target behavior must be observed afterward. Not a universal drop guarantee."]

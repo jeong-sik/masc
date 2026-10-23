@@ -14,11 +14,11 @@ Source: `25faf14776f1115e962a4c4873e668af386211ad`. These results replace neithe
 2. TUI role refresh: the fixture's action schema used top-level `instance_id`; the actual producer/consumer contract requires `context` containing `instance_id` and `incarnation`, plus `request_id` and `action`. The repair uses that envelope and checks the complete original submitted request.
 3. Schemaless installation: an exact display-text assertion failed on the Add-ons to Plugins terminology change. Replace display-text comparisons with pending-read retirement, the original manifest request, and explicit catalog/editor decisions. The constitution prohibits new screen wording/layout/row-order tests. This patch replaces the two directly affected wording checks; it does not certify the mixed historical suite as entirely presentation-free.
 
-The two fixture source patches were independently reviewed. OCaml parser and diff checks passed; the repaired tests have not yet been executed. Old failed runs are not new-source successes. Ordinary source approval, native build, test execution, integration, installation and visible use remain separate evidence.
+At the initial source-review boundary, the two fixture patches passed independent source review, parser and diff checks; their repaired tests had not yet executed. The completed selected executions are recorded below. Old failed runs remain failures. Ordinary source approval, native build, test execution, integration, installation and visible use remain separate evidence.
 
 ## Remaining original scope
 
-The same-source fixture rerun and new native artifact remain necessary to establish the repaired results. The previously merged catalog/Preview stack #45492 is newer than this failed-run source; the artifact does not prove that stack's UI. Original A02/G/H actual worker, both UI, real Agent/provider, recovery, continuity and installation checks remain bounded by their existing evidence. E06 frozen authority repair and durable dispatch/judgment/commit recovery are separate ongoing source work.
+The selected reruns and new artifact identity are now recorded below. The previously merged catalog/Preview stack #45492 is newer than the failed-run source; the old artifact does not prove that stack's UI. Original A02/G/H actual worker, both UI, real Agent/provider, recovery, continuity and installation checks remain bounded by their existing evidence. E06 frozen authority repair and durable dispatch/judgment/commit recovery are separate ongoing source work.
 
 ## Repaired selected execution and actual downloaded candidate
 

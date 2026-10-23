@@ -67,7 +67,7 @@ let with_fixture f =
         Keeper_types_profile.invalidate_keeper_profile_snapshots ();
         let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
         let () =
-          match Memory.ensure_epoch ~keepers_dir ~keeper_id with
+          match Memory.ensure_epoch ~keepers_dir ~keeper_id:keeper_name with
           | Ok _ -> ()
           | Error detail -> fail ("the Memory epoch could not be created: " ^ detail) in
         let owner =

@@ -56,7 +56,7 @@ One Ego TaskSpace (78) compared installed Dashboard port 8935 with the candidate
 For `#connectors?section=connector-status&connector=slack`:
 
 - Installed UI: Keeper directory schema error, no usable roster. It also showed an existing installed Dashboard/server source mismatch.
-- Candidate UI: directory-error indicator absent; Keeper filter present; **37 Keeper row controls** present in the DOM. Before/after screenshots were captured and visually inspected; `browser-captures.json` records their hashes. Screenshots remain local because they contain live workspace data.
+- Candidate UI: directory-error indicator absent; Keeper filter present; **37 Keeper row controls** present in the DOM. `browser-observation.json` records the completed DOM evaluation. Before/after screenshots were captured and visually inspected; `browser-captures.json` records their hashes. Screenshots remain local because they contain live workspace data.
 - Slack's existing disabled warning remains visible (`enabled=false`). This repair restores directory discovery; it does not activate Slack, repair transport, or establish a deployment.
 
 The source stack is unmerged and the candidate bundle is uninstalled at this evidence point. The Dashboard artifact workflow must remain disabled per the user's earlier instruction. Browser task tabs and the temporary preview server are cleaned up after observation.

@@ -1,0 +1,79 @@
+{
+  "kind": "cursor-audition-evidence",
+  "runtimeFingerprint": "278d8108dde5c0dd3342c42c4e3f2101631f9720625943bc54f538f9846a156d",
+  "sourceFiles": {
+    "sequencer-editor.mjs": "0102191889efb4506c86690bc15f60ee20631851d09f9a91016c56a6e6b4b36c",
+    "midi-source-editor.mjs": "e8ec5d7b852d907df69bab9ca65f41d53cfea39752ab48f18e5a4f7fa0b36b35",
+    "sequencer-tui.mjs": "9cf935da40e0299a5fd45a12651c6a45207513a937babd680578abea98d193f3"
+  },
+  "focusedChecks": {
+    "files": [
+      "cursor-audition.test.mjs",
+      "sequencer-close.test.mjs",
+      "source-loop.test.mjs"
+    ],
+    "passed": 65,
+    "failed": 0,
+    "scope": "Worker outputs, controller decisions and native PCM decoder; no terminal wording/layout assertions"
+  },
+  "actualPrivateTui": {
+    "exitCode": 0,
+    "commands": [
+      ":cursor 9.5 C3",
+      "p",
+      "0 before render completion",
+      "Space",
+      "0",
+      ".",
+      "q"
+    ],
+    "preparedPCM": {
+      "frames": 2394630,
+      "sampleRate": 44100,
+      "channels": 2,
+      "seconds": 54.3,
+      "allFinite": true,
+      "peak": 0.08267092704772949,
+      "sha256": "1acea67ab0d182e886f807b695204f0f95da0e47996efdb77e9bb20fb43c679c"
+    },
+    "privateProjectByteIdentical": true,
+    "userProjectByteIdentical": true,
+    "output": "BlackHole virtual audio output",
+    "nativeChildObserved": true,
+    "nativeChildGoneAfterStop": true,
+    "earlyRestartRetainedWindow": true
+  },
+  "limits": [
+    "No received PCM or acoustic measurement",
+    "No physical MIDI endpoint audition",
+    "No user Ghostty session observation",
+    "No Dune/full build or full regression run; ordinary source review scope"
+  ],
+  "defaultInstallation": {
+    "runtimeFingerprint": "278d8108dde5c0dd3342c42c4e3f2101631f9720625943bc54f538f9846a156d",
+    "declaredRuntimeFilesVerified": 117,
+    "additionalVstHostSourceVerified": true,
+    "vstEnvironmentLockIdentityVerified": true,
+    "nativeHelpersVerified": 7,
+    "nativeSourcesUnchanged": true,
+    "officialInstallerExit": 0,
+    "userSessionReplaced": false,
+    "verifiedAtUtc": "2026-10-23T11:06:37.089087+00:00"
+  },
+  "verificationCommands": {
+    "scope": "Templates; private paths and user music were not published. Source hashes are independently checkable from the PR; installed bundle and device facts require the operator machine.",
+    "focusedChecks": "node --test tools/alphatex/test/cursor-audition.test.mjs tools/alphatex/test/sequencer-close.test.mjs tools/alphatex/test/source-loop.test.mjs",
+    "install": "scripts/install-alphatex.sh --prefix \"$HOME/.local/bin\"",
+    "sourceHashCheck": "shasum -a 256 tools/alphatex/sequencer-editor.mjs tools/alphatex/midi-source-editor.mjs tools/alphatex/sequencer-tui.mjs",
+    "privateTui": "<candidate-prefix>/masc-alphatex --project <private-copy.json> --state-dir <private-state> --output BlackHole2ch_UID",
+    "privateTuiActions": [
+      ":cursor 9.5 C3",
+      "p then 0 in one input chunk",
+      "Space",
+      "0",
+      ".",
+      "q"
+    ],
+    "installedReadback": "Compare every declared runtime file and VST host against the checkout, verify the VST lock identity, seven reused helper hashes and launcher fingerprint; private readback script and full hash list retained locally."
+  }
+}

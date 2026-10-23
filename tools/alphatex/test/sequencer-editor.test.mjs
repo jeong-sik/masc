@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { newEditor, editorCommand, editorAction, selectedNote } from '../sequencer-editor.mjs'
@@ -6,7 +7,7 @@ import { harmonyAt, PPQ } from '../sequencer-project.mjs'
 import { newArrangement } from '../arrangement.mjs'
 import { defaultStateDirectory } from '../vst.mjs'
 import { mkdtemp, rm } from 'node:fs/promises'
-import { join, resolve, dirname } from 'node:path'
+import { join, resolve, dirname, basename } from 'node:path'
 import { constants } from 'node:fs'
 import { Note } from 'tonal'
 import { tmpdir } from 'node:os'
@@ -145,11 +146,11 @@ test('loading a saved arrangement dispatches before phrase terminal or backgroun
   const unexpected = name => () => { throw new Error(`Unexpected ${name} before arrangement dispatch`) }
   const refused = name => class { constructor() { throw new Error(`Unexpected ${name} before arrangement dispatch`) } }
   // The real path helpers and loader; every resource a phrase editor would open is refused.
-  const substitutes = { join, resolve, dirname, tmpdir, randomUUID, constants, Note,
+  const substitutes = { join, resolve, dirname, basename, isDeepStrictEqual, tmpdir, randomUUID, constants, Note,
     async mkdtemp() { ownership.temporary++; throw new Error('Unexpected terminal temporary directory') },
     rm: unexpected('rm'), writeFile: unexpected('writeFile'), copyFile: unexpected('copyFile'),
     emitKeypressEvents: unexpected('keypress setup'), snapshotWriter: unexpected('VST observation'),
-    captureVstSound: unexpected('VST capture'), renderVstPhrase: unexpected('VST render'), openVstSession: unexpected('VST session'),
+    captureVstSound: unexpected('VST capture'), captureVstEffect: unexpected('VST effect capture'), renderVstPhrase: unexpected('VST render'), openVstSession: unexpected('VST session'),
     captureFluidSound: unexpected('FluidSynth capture'), renderFluidSound: unexpected('FluidSynth render'),
     openStepInput: unexpected('MIDI input'), openPlayback: unexpected('playback'), saveProject: unexpected('save'),
     InstrumentPicker: refused('instrument picker'), MidiSourcePicker: refused('MIDI source picker'),

@@ -296,6 +296,84 @@ def description(plugin):
             "is_instrument": plugin.is_instrument}
 
 
+def frozen_preset(preset):
+    if not isinstance(preset, dict) or not isinstance(preset.get("data"), str):
+        raise ValueError("missing project preset bytes")
+    data = base64.b64decode(preset["data"], validate=True)
+    if not data or base64.b64encode(data).decode("ascii") != preset["data"] or digest(data) != preset.get("sha256"):
+        raise ValueError("project preset content changed")
+    return data
+
+
+def load_effect(request):
+    from pedalboard import load_plugin
+
+    plugin = load_plugin(nonempty(request.get("plugin_path"), "plugin_path"), plugin_name=request.get("plugin_name"))
+    if not plugin.is_effect:
+        raise ValueError(f"{plugin.name} is a MIDI instrument, not an audio effect")
+    return plugin
+
+
+def effect_snapshot(request):
+    plugin = load_effect(request)
+    if "expected_plugin" in request:
+        require_effect_identity(plugin, request["expected_plugin"])
+    if "preset" in request:
+        load_frozen_preset(plugin, frozen_preset(request["preset"]))
+    elif request.get("preset_path") is not None:
+        load_frozen_preset(plugin, Path(nonempty(request["preset_path"], "preset_path")).read_bytes())
+    if request.get("edit", False) is not False:
+        if request["edit"] is not True:
+            raise ValueError("effect edit must be a boolean")
+        plugin.show_editor()
+    data = plugin.preset_data
+    return {"plugin": description(plugin), "preset": {"data": base64.b64encode(data).decode("ascii"), "sha256": digest(data)}}
+
+
+def require_effect_identity(plugin, expected):
+    actual = description(plugin)
+    if not isinstance(expected, dict) or any(not isinstance(expected.get(key), str) or not expected[key] or expected[key] != actual[key]
+                                           for key in ("identifier", "version")):
+        raise ValueError("installed VST effect identity/version differs from the project sound")
+
+
+def load_effect_chain(effects, sample_rate):
+    if not isinstance(effects, list):
+        raise ValueError("VST effects must be an ordered array")
+    plugins, receipts = [], []
+    for effect in effects:
+        if (not isinstance(effect, dict) or effect.get("kind") != "vst-effect"
+                or not isinstance(effect.get("selection"), dict) or not isinstance(effect.get("plugin"), dict)):
+            raise ValueError("invalid project VST effect")
+        data = frozen_preset(effect.get("preset"))
+        plugin = load_effect(effect["selection"])
+        require_effect_identity(plugin, effect["plugin"])
+        actual = description(plugin)
+        load_frozen_preset(plugin, data)
+        plugins.append(plugin)
+        receipts.append({"identifier": actual["identifier"], "version": actual["version"], "preset_sha256": digest(data)})
+    if plugins:
+        import numpy as np
+        # Pedalboard compensates reported plugin latency. Refuse any remaining
+        # buffered output at the actual PCM clock before stream admission or
+        # publishing an offline file; never pad or truncate it silently.
+        process_effect_chain(plugins, np.zeros((2, sample_rate), dtype=np.float32), sample_rate, reset=True)
+        for plugin in plugins:
+            plugin.reset()
+    return plugins, receipts
+
+
+def process_effect_chain(plugins, audio, sample_rate, reset):
+    import numpy as np
+
+    shape = audio.shape
+    for plugin in plugins:
+        audio = plugin.process(audio, sample_rate=sample_rate, reset=reset)
+        if audio.shape != shape or not np.isfinite(audio).all():
+            raise ValueError("VST effect returned invalid audio or buffered/changed the PCM horizon; residual buffering is not supported")
+    return audio
+
+
 def inspect(request):
     from pedalboard import VST3Plugin
 
@@ -387,6 +465,7 @@ def render(request, retained=None, cancelled=lambda: False):
         if preset is not None:
             preset_bytes = Path(nonempty(preset, "preset_path")).read_bytes()
             preset_hash = digest(preset_bytes)
+        effects, effect_receipts = load_effect_chain(request.get("effects", []), sample_rate)
         key = retained_key(request, preset_hash) if retained is not None else None
         plugin = retained.take(key) if retained is not None else None
         if plugin is None:
@@ -436,6 +515,7 @@ def render(request, retained=None, cancelled=lambda: False):
                                    reset=rendered == 0)
                     if audio.shape != (2, count) or not np.isfinite(audio).all():
                         raise ValueError(f"VST returned invalid audio samples: expected stereo/{count} frames, got {audio.shape}")
+                    audio = process_effect_chain(effects, audio, sample_rate, reset=rendered == 0)
                     peak = max(peak, float(np.max(np.abs(audio))))
                     output.write(audio)
                     rendered += count
@@ -457,6 +537,7 @@ def render(request, retained=None, cancelled=lambda: False):
         finally:
             os.unlink(stage_name)
     return {"instrument": description(plugin), **source_receipt,
+            **({"effects": effect_receipts} if effect_receipts else {}),
             "preset_sha256": preset_hash, "state_sha256": state_hash,
             "sample_rate": sample_rate, "frames": frames, "frame_origin": first_frame,
             "duration_ms": frames / sample_rate * 1000, "peak": peak,
@@ -538,6 +619,8 @@ def run(request, retained=None, cancelled=lambda: False):
             return render(request, retained, cancelled)
         case "snapshot":
             return snapshot(request, retained)
+        case "effect_snapshot":
+            return effect_snapshot(request)
         case "mix":
             return mix(request)
         case _:
@@ -561,12 +644,7 @@ def stream_synthesis(source, emit):
     if not isinstance(expected, dict) or any(not isinstance(expected.get(k), str) or not expected[k]
                                             for k in ('identifier', 'version')):
         raise ValueError('missing project instrument identity/version')
-    preset = request.get('preset')
-    if not isinstance(preset, dict) or not isinstance(preset.get('data'), str):
-        raise ValueError('missing project preset bytes')
-    data = base64.b64decode(preset['data'], validate=True)
-    if not data or base64.b64encode(data).decode('ascii') != preset['data'] or digest(data) != preset.get('sha256'):
-        raise ValueError('project preset content changed')
+    data = frozen_preset(request.get('preset'))
     plugin = load_instrument(request)
     actual = description(plugin)
     if any(actual[k] != expected[k] for k in ('identifier', 'version')):
@@ -576,7 +654,9 @@ def stream_synthesis(source, emit):
         frozen = Path(folder) / 'sound.vstpreset'
         frozen.write_bytes(data)
         plugin.load_preset(str(frozen))
+    effects, effect_receipts = load_effect_chain(request.get('effects', []), rate)
     emit({'kind': 'ready', 'schemaVersion': 1, 'sampleRate': rate, 'channels': 2,
+          **({'effects': effect_receipts} if effect_receipts else {}),
           'instrument': actual, 'preset_sha256': digest(data)})
     sequence, total = 0, 0
     try:
@@ -614,6 +694,7 @@ def stream_synthesis(source, emit):
                            num_channels=2, reset=sequence == 0)
             if audio.shape != (2, count) or not np.isfinite(audio).all():
                 raise ValueError('VST returned invalid streaming audio samples')
+            audio = process_effect_chain(effects, audio, rate, reset=sequence == 0)
             pcm = np.asarray(audio.T, dtype='<f4').tobytes(order='C')
             if not np.isfinite(np.frombuffer(pcm, dtype='<f4')).all():
                 raise ValueError('VST returned samples outside Float32 PCM')
@@ -625,7 +706,10 @@ def stream_synthesis(source, emit):
             raise ValueError('VST stream closed without stop')
     finally:
         # Process-local notes cannot survive a failed operation or successor.
-        plugin.reset()
+        with ExitStack() as cleanup:
+            cleanup.callback(plugin.reset)
+            for effect in effects:
+                cleanup.callback(effect.reset)
     emit({'kind': 'stopped', 'frames': str(total)})
 
 

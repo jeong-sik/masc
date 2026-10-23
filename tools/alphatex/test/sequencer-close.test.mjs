@@ -1,7 +1,8 @@
+import { isDeepStrictEqual } from 'node:util'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { join, resolve, dirname } from 'node:path'
+import { join, resolve, dirname, basename } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { arrangementFromPhrase, arrangementFromMidiSource } from '../phrase-arrangement.mjs'
@@ -18,7 +19,7 @@ const frozenSound = selection => ({ kind: 'vst', selection, instrument: { identi
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.
 async function controller(options = {}) {
-  const observed = { saved: [], workers: [], writes: [], copies: [], sessions: 0, players: 0, arrangements: [], pickers: [], native: [], snapshots: [], soundCaptures: [], captureOptions: [], vstSessions: [] }
+  const observed = { saved: [], workers: [], writes: [], copies: [], sessions: 0, players: 0, arrangements: [], pickers: [], native: [], snapshots: [], soundCaptures: [], effectCaptures: [], captureOptions: [], vstSessions: [] }
   const process = new EventEmitter()
   process.stdin = new EventEmitter()
   Object.assign(process.stdin, { isTTY: true, isRaw: false,
@@ -56,13 +57,17 @@ async function controller(options = {}) {
       observed.vstSessions.push(session); return session
     },
     captureVstSound(selection, captureOptions) { observed.soundCaptures.push(selection); observed.captureOptions.push(captureOptions); return options.capture?.(selection) ?? { promise: Promise.resolve(frozenSound(selection)), cancel() {} } },
+    captureVstEffect(selection, settings) {
+      observed.effectCaptures.push({ selection, settings })
+      return options.effectCapture(selection, settings)
+    },
     renderVstPhrase(value) { observed.native.push(value); return options.native(value) },
     captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },
     renderFluidSound() { throw new Error('Unexpected FluidSynth render') },
     mkdtemp: async () => '/synthetic-temp', rm: async () => {},
     writeFile: async path => { observed.writes.push(path) },
     copyFile: async (from, to) => { observed.copies.push([from, to]) },
-    dirname, constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
+    dirname, basename, isDeepStrictEqual, constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
     openPlayback(value) { observed.players++; if (options.playback) return options.playback(value); throw new Error('Unexpected playback') }, Worker,
     Note: { fromMidi: String },
     loadProject: async () => { throw new Error('Unexpected load') },
@@ -704,4 +709,49 @@ test('phrase loop command enables its range, retires old preparation and retains
   view.command('play');await flush();assert.equal(worker.requests.at(-1).options.loop,false)
  }finally{view.key('q');await view.done}
  assert.deepEqual(view.observed.saved.at(-1).loop,{start:2*PPQ,end:4*PPQ})
+})
+
+const frozenEffect = name => ({ kind: 'vst-effect', selection: { plugin_path: `/${name}.vst3`, plugin_name: null, preset_path: null, name },
+  plugin: { identifier: name, version: '1' }, preset: frozenSound({}).preset })
+const effectProject = () => editor.editorSound(editor.newEditor(), frozenSound({ plugin_path: '/synth.vst3', plugin_name: null, preset_path: null, name: 'Synth' })).project
+
+test('effect capture remains responsive, retains note edits, and queued chain edits drain into save', async () => {
+  let complete
+  const view = await controller({ initialDocument: effectProject(), effectCapture() {
+    return { promise: new Promise(resolve => { complete = resolve }), cancel() {} }
+  } })
+  view.command('fx-add /Library/Soundtoys/EchoBoy Jr.vst3'); await flush()
+  assert.equal(view.observed.effectCaptures[0].selection.plugin_path, '/Library/Soundtoys/EchoBoy Jr.vst3')
+  view.command('note C4 0 1'); await flush()
+  complete(frozenEffect('delay')); await flush(); await flush()
+  view.command('fx-clear'); view.command('undo'); view.signal.abort(); await view.done
+  assert.deepEqual(view.observed.saved.at(-1).sound.effects, [frozenEffect('delay')])
+  assert.deepEqual(pitches(view), [60])
+})
+
+test('close cancels and joins native effect editor without saving its late result', async () => {
+  let complete, cancelled = 0
+  const view = await controller({ initialDocument: effectProject(), effectCapture() {
+    return { promise: new Promise(resolve => { complete = resolve }), cancel() { cancelled++ } }
+  } })
+  view.command('fx-add /delay.vst3'); await flush()
+  view.command('note C4 0 1'); await flush(); view.signal.abort(); await flush()
+  let done = false; view.done.then(() => { done = true }); await flush()
+  assert.equal(done, false); assert.equal(cancelled, 1)
+  complete(frozenEffect('delay')); await view.done
+  assert.equal(view.observed.saved.at(-1).sound.effects, undefined)
+  assert.deepEqual(pitches(view), [60])
+})
+
+test('changed sound authority discards pending effect edit and never overwrites newer chain', async () => {
+  let complete
+  const initial = effectProject(); initial.sound.effects = [frozenEffect('delay')]
+  const view = await controller({ initialDocument: initial, effectCapture() {
+    return { promise: new Promise(resolve => { complete = resolve }), cancel() {} }
+  } })
+  view.command('fx-edit 1'); await flush()
+  assert.deepEqual(view.observed.effectCaptures[0].settings, { preset: initial.sound.effects[0].preset, plugin: initial.sound.effects[0].plugin, edit: true })
+  view.command('fx-clear'); await flush(); complete(frozenEffect('edited')); await flush(); await flush()
+  view.signal.abort(); await view.done
+  assert.equal(view.observed.saved.at(-1).sound.effects, undefined)
 })

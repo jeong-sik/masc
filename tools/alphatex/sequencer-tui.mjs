@@ -1,14 +1,15 @@
 import { arrangementRoute, selectArrangementRoute } from './arrangement-playback.mjs'
 import { mkdtemp, rm, writeFile, copyFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { join, resolve, dirname } from 'node:path'
+import { join, resolve, dirname, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { emitKeypressEvents } from 'node:readline'
 import { Worker } from 'node:worker_threads'
+import { isDeepStrictEqual } from 'node:util'
 import { Note } from 'tonal'
 import { GM_DRUM_CHANNEL } from './sequencer-project.mjs'
-import { newEditor, editorCommand, editorAction, selectedNote, selectedNotes, editorView, editorAxis, editorHarmony, editorMeters, editorSound, stepInputEffect } from './sequencer-editor.mjs'
+import { newEditor, editorCommand, editorAction, selectedNote, selectedNotes, editorView, editorAxis, editorHarmony, editorMeters, editorSound, editorEffect, stepInputEffect } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceMeters, selectedMeter } from './midi-source-editor.mjs'
@@ -21,13 +22,16 @@ import { InstrumentPicker, pickerFooter, projectSoundLabel } from './instruments
 import { defaultStateDirectory, snapshotWriter } from './vst.mjs'
 import { renderVstPhrase } from './sequencer-vst.mjs'
 import { openVstSession } from './vst-session.mjs'
-import { captureVstSound } from './project-sound-files.mjs'
+import { captureVstSound, captureVstEffect } from './project-sound-files.mjs'
 import { captureFluidSound, isFluidSound, renderFluidSound } from './soundfont.mjs'
 import { openStepInput, sameStepContext, stepControl } from './step-input.mjs'
 import { phraseBacking } from './phrase-backing.mjs'
 import { MidiSourcePicker } from './midi-source-picker.mjs'
 
 const help = [
+  ':fx lists ordered VST effects; :fx-add PLUGIN_PATH freezes an effect after the bound VST instrument.',
+  ':fx-edit N opens its native editor; close that window to save. :fx-move FROM TO; :fx-remove N; :fx-clear.',
+  'Effect numbers start at 1. Undo/redo includes effects; effects with residual buffering are refused.',
   ':soundfont-fluid [SF2_PATH] saves a FluidSynth SF2; its control-block timing is reported with the selected sound.',
   ':step-input chooses a MIDI keyboard; :step-input SOURCE_UID arms it directly; :step-stop drains.',
   ':step-input [SOURCE_UID] --monitor also plays the selected VST or bound FluidSynth sound through the audio output.',
@@ -178,6 +182,39 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         nativeRenders.add(owned)
       } else adoptSound(choice)
     }).catch(error => { status = failure(error.message) }).finally(draw)
+  }
+  function chooseEffect(value) {
+    if (!accepting || closed || suspended) return
+    const basis = structuredClone(audioInstrument())
+    if (basis.kind !== 'vst') throw new Error('Choose a project-bound VST instrument before adding effects')
+    const previous = value.kind === 'fx-edit' ? basis.effects?.[value.index] : null
+    if (value.kind === 'fx-edit' && !previous) throw new Error('Choose an existing VST effect number')
+    stop()
+    const capture = previous
+      ? captureVstEffect(previous.selection, { preset: previous.preset, plugin: previous.plugin, edit: true })
+      : captureVstEffect({ plugin_path: resolve(value.path), plugin_name: null, preset_path: null,
+        name: basename(value.path).replace(/\.vst3$/i, '') })
+    let cancelled = false
+    const owned = { cancel() { if (!cancelled) { cancelled = true; capture.cancel() } } }
+    pendingSound = owned
+    status = notice(previous ? 'Close the effect editor to capture its preset' : 'Capturing VST effect')
+    owned.promise = capture.promise.then(effect => {
+      task = task.then(() => {
+        if (cancelled || pendingSound !== owned || !accepting || closed || suspended) return
+        if (!isDeepStrictEqual(audioInstrument(), basis)) {
+          status = notice('Sound changed; discarded the pending effect'); return
+        }
+        pendingSound = null
+        clearHarmony()
+        editor = editorEffect(editor, previous ? { kind: 'replace', index: value.index, effect } : { kind: 'add', effect })
+        selectedMidiOutput = undefined; portBindings = []
+        status = notice(`Selected ${projectSoundLabel(audioInstrument())}`)
+      }).catch(error => { status = failure(error.message) }).finally(draw)
+      return task
+    }).catch(error => {
+      if (!cancelled && pendingSound === owned && accepting && !closed) status = failure(error.message)
+    }).finally(() => { if (pendingSound === owned) pendingSound = null; nativeRenders.delete(owned); draw() })
+    nativeRenders.add(owned)
   }
   function adoptSound(sound, preview = true) {
       // Stop the previous sound's preview while its selection still describes
@@ -607,8 +644,21 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     childTask = owned
   }
   async function effect(value, menuOwner = null) {
-    if (!accepting && ['play', 'record', 'wave', 'arrange', 'step-input'].includes(value.kind)) return
+    if (!accepting && ['play', 'record', 'wave', 'arrange', 'step-input', 'fx-add', 'fx-edit'].includes(value.kind)) return
     switch (value.kind) {
+      case 'fx': {
+        const effects = audioInstrument().effects ?? []
+        statusReader.open('VST effect chain', effects.length ? effects.map((fx, i) => `${i + 1}. ${fx.selection.name} · ${fx.plugin.version}`).join('\n') : 'No VST effects')
+        break
+      }
+      case 'fx-add': case 'fx-edit': chooseEffect(value); break
+      case 'fx-clear': case 'fx-remove': case 'fx-move': {
+        const next = editorEffect(editor, value.kind === 'fx-clear' ? { kind: 'clear' }
+          : value.kind === 'fx-remove' ? { kind: 'remove', index: value.index }
+            : { kind: 'move', from: value.index, to: value.to })
+        stop(); clearHarmony(); editor = next
+        status = notice(`Selected ${projectSoundLabel(audioInstrument())}`); break
+      }
       case 'soundfont-fluid': chooseInstrument({ kind: 'fluid-selection', path: value.path, preview: false }); break
       case 'step-input':
         if (value.source !== undefined) startStepInput(value.source, value.monitor, value.practice, value.recording)

@@ -20,7 +20,7 @@ export function projectSoundLabel(sound) {
   if (sound === undefined || sound.kind === 'unselected') return 'Choose an instrument'
   switch (sound.kind) {
     case 'vst':
-      return safeText(`VST · ${selectionLabel(sound.selection)} · ${sound.instrument.version}`)
+      return safeText(`VST · ${selectionLabel(sound.selection)} · ${sound.instrument.version}${sound.effects?.length ? ' → ' + sound.effects.map(effect => effect.selection.name).join(' → ') : ''}`)
     case 'soundfont':
       if (sound.engine === undefined) return 'SoundFont · AlphaSynth'
       if (sound.engine.kind === 'fluidsynth') {

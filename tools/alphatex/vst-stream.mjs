@@ -1,4 +1,5 @@
-import { validateSound } from './project-sound.mjs'
+import { validateSound, effectIdentity } from './project-sound.mjs'
+import { isDeepStrictEqual } from 'node:util'
 import { openSynthStream } from './synth-stream.mjs'
 import { vstHostPath } from './vst-host.mjs'
 
@@ -13,8 +14,10 @@ export function openVstStream(sound, { sampleRate = 44100, signal,
     opening: { kind: 'open', schemaVersion: 1, sampleRate,
       plugin_path: sound.selection.plugin_path, plugin_name: sound.selection.plugin_name,
       instrument: { identifier: sound.instrument.identifier, version: sound.instrument.version },
-      preset: { data: sound.preset.data, sha256: sound.preset.sha256 } },
+      preset: { data: sound.preset.data, sha256: sound.preset.sha256 },
+      ...(sound.effects?.length ? { effects: sound.effects } : {}) },
     acknowledge: event => event.instrument?.identifier === sound.instrument.identifier
-      && event.instrument?.version === sound.instrument.version && event.preset_sha256 === sound.preset.sha256,
+      && event.instrument?.version === sound.instrument.version && event.preset_sha256 === sound.preset.sha256
+      && isDeepStrictEqual(event.effects === undefined ? [] : event.effects, (sound.effects ?? []).map(effectIdentity)),
   })
 }

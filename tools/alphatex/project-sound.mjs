@@ -13,6 +13,23 @@ export function validateVstSelection(value) {
 
 // The document owns actual preset bytes, including the captured default state.
 // The original path is a label; playback never reads that mutable path again.
+function validateVstBinding(selectionValue, preset, identity) {
+  const selection = validateVstSelection(selectionValue)
+  if (Object.keys(selectionValue).some(key => !(key in selection))) throw new Error('Invalid project VST selection fields')
+  const bytes = Buffer.from(preset?.data ?? '', 'base64')
+  if (!bytes.length || bytes.toString('base64') !== preset?.data
+      || createHash('sha256').update(bytes).digest('hex') !== preset.sha256) throw new Error('Project VST preset content changed')
+  if (typeof identity?.identifier !== 'string' || !identity.identifier
+      || typeof identity.version !== 'string' || !identity.version) throw new Error('Invalid project VST identity')
+}
+export function validateVstEffect(effect) {
+  if (effect?.kind !== 'vst-effect' || Object.keys(effect).some(key => !['kind', 'selection', 'preset', 'plugin'].includes(key))) throw new Error('Invalid VST effect')
+  validateVstBinding(effect.selection, effect.preset, effect.plugin)
+  return effect
+}
+export function effectIdentity(effect) {
+  return { identifier: effect.plugin.identifier, version: effect.plugin.version, preset_sha256: effect.preset.sha256 }
+}
 export function validateSound(sound) {
   if (sound?.kind === 'soundfont' && Object.keys(sound).length === 1) return sound
   if (sound?.kind === 'soundfont' && sound.engine?.kind === 'fluidsynth') {
@@ -29,14 +46,12 @@ export function validateSound(sound) {
       || bytes.toString('ascii', 0, 4) !== 'RIFF' || bytes.toString('ascii', 8, 12) !== 'sfbk') throw new Error('Bound SF2 content changed')
     return sound
   }
-  if (sound?.kind !== 'vst' || Object.keys(sound).some(key => !['kind', 'selection', 'preset', 'instrument'].includes(key))) throw new Error('Invalid project sound')
-  const selection = validateVstSelection(sound.selection)
-  if (Object.keys(sound.selection).some(key => !(key in selection))) throw new Error('Invalid project VST selection fields')
-  const bytes = Buffer.from(sound.preset?.data ?? '', 'base64')
-  if (!bytes.length || bytes.toString('base64') !== sound.preset?.data
-      || createHash('sha256').update(bytes).digest('hex') !== sound.preset.sha256) throw new Error('Project VST preset content changed')
-  if (typeof sound.instrument?.identifier !== 'string' || !sound.instrument.identifier
-      || typeof sound.instrument.version !== 'string' || !sound.instrument.version) throw new Error('Invalid project VST identity')
+  if (sound?.kind !== 'vst' || Object.keys(sound).some(key => !['kind', 'selection', 'preset', 'instrument', 'effects'].includes(key))) throw new Error('Invalid project sound')
+  validateVstBinding(sound.selection, sound.preset, sound.instrument)
+  if (Object.hasOwn(sound, 'effects')) {
+    if (!Array.isArray(sound.effects)) throw new Error('VST effects must be an ordered array')
+    sound.effects.forEach(validateVstEffect)
+  }
   return sound
 }
 
@@ -44,7 +59,8 @@ export function validateSound(sound) {
 // certify a sound; both capture retirement and source admission use this match.
 export function soundIdentity(sound) {
   if (sound?.kind === 'vst') return { name: sound.selection.name, identifier: sound.instrument.identifier,
-    version: sound.instrument.version, presetSHA256: sound.preset.sha256 }
+    version: sound.instrument.version, presetSHA256: sound.preset.sha256,
+    ...(sound.effects?.length ? { effects: sound.effects.map(effectIdentity) } : {}) }
   if (sound?.kind === 'soundfont' && sound.engine?.kind === 'fluidsynth') return {
     kind: 'soundfont', name: sound.font.name, engine: { ...sound.engine },
     bankStyle: sound.bankStyle, fontSHA256: sound.font.sha256, timing: 'control-block-ceil',
@@ -53,6 +69,8 @@ export function soundIdentity(sound) {
 }
 export function soundIdentityMatches(sound, observed) {
   if (sound?.kind === 'vst' && observed?.kind !== undefined) return false
+  if (sound?.kind === 'vst' && !isDeepStrictEqual(observed?.effects === undefined ? [] : observed.effects,
+    (sound.effects ?? []).map(effectIdentity))) return false
   const { name, ...expected } = soundIdentity(sound)
   return Object.entries(expected).every(([key, value]) => isDeepStrictEqual(observed?.[key], value))
 }

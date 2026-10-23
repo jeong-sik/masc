@@ -552,8 +552,16 @@ let test_registry_shutdown_projects_every_claimed_batch_member () =
       | _ -> fail "a batch member was not durably cancelled" in
     let delivered = List.find (fun (observed : Keeper_chat_operation.t) ->
       Keeper_chat_operation.Operation_id.equal observed.operation_id id) operations in
-    check bool "the hook receives the committed operation fact" true
-      (Yojson.Safe.equal (Keeper_chat_operation.to_json operation)
+    let member = match operation.batch_membership with
+      | Some member -> member
+      | None -> fail "the committed operation lost its batch membership" in
+    check bool "terminal member input is released" true (Option.is_none operation.input);
+    (* The claimed owner's execution digest addresses the aggregate input.
+       The callback carries the original member projection, whose digest is
+       frozen separately in the same durable store. All other facts agree. *)
+    let expected = {operation with execution_digest=member.input_digest} in
+    check bool "the hook receives the committed member projection" true
+      (Yojson.Safe.equal (Keeper_chat_operation.to_json expected)
          (Keeper_chat_operation.to_json delivered));
     let operation_id = Keeper_chat_operation.Operation_id.to_string id in
     let key = Identity.Operation (Identity.Request_id.of_string operation_id |> Result.get_ok) in

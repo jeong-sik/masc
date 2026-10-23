@@ -221,7 +221,9 @@ type operation_runner =
     [on_execution_settled] runs after the child's effects have ended and the
     Owner has committed its accepted settlement. [operations] is the complete,
     ordered batch read directly from this Owner's store, including immutable
-    terminal facts. The callback must not re-enter this Owner or look up a new
+    terminal facts and each member's original input digest (the execution
+    owner's aggregate digest remains on the claimed operation). The callback
+    must not re-enter this Owner or look up a new
     admission capability. It projects retained facts idempotently; its failure
     cannot undo them. Failed operations are available through
     {!failed_operations_at_start} for restart projection recovery. Deferred

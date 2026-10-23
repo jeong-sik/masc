@@ -127,12 +127,15 @@ let test_backtab_is_not_double_named () =
   check_name "with a mask" "shift-tab" "1;2" 'Z'
 ;;
 
-(* A press whose mask does not parse is still that press. Dropping the key
-   because the mask was odd would lose a keystroke to a detail nobody bound. *)
-let test_unreadable_mask_reads_as_no_modifier () =
-  check_name "empty" "up" "1;" 'A';
-  check_name "not a number" "up" "1;x" 'A';
-  check_name "below one" "up" "1;0" 'A'
+let test_unclaimed_modifiers_cannot_invoke_bindings () =
+  check_name "omitted modifiers" "up" "1;" 'A';
+  check_name "lock state keeps Ctrl-D" "\004" "100;197" 'u';
+  List.iter (fun parameters ->
+      check (option string) "unsupported/malformed chord stays unclaimed" None
+        (named ~parameters ~final:'u'))
+    [ "113;9"; "100;13"; "113;17"; "113;33"; "113;257"; "97;x"; "97;0" ];
+  check (option string) "malformed arrow cannot navigate" None
+    (named ~parameters:"1;x" ~final:'A')
 ;;
 
 (* The mask is read through the name rather than directly: the name is what a
@@ -202,7 +205,7 @@ let () =
       , [ test_case "modified arrows" `Quick test_modified_arrows
         ; test_case "order is fixed" `Quick test_modifier_order_is_fixed
         ; test_case "bits" `Quick test_modifier_bits
-        ; test_case "unreadable mask" `Quick test_unreadable_mask_reads_as_no_modifier
+        ; test_case "unclaimed modifiers" `Quick test_unclaimed_modifiers_cannot_invoke_bindings
         ] )
     ; ( "csi-u"
       , [ test_case "letters" `Quick test_csi_u_letters

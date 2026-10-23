@@ -24,6 +24,8 @@
 
 val name : parameters:string -> final:char -> string option
 (** The key for one CSI sequence, or [None] when this vocabulary has none.
+    Malformed or unsupported modifiers are unclaimed; they never lose their
+    modifiers and become an unmodified action. Caps/Num Lock are incidental.
 
     Named keys are lower-case and modifiers prefix them in a fixed order —
     ["ctrl-shift-up"], never ["shift-ctrl-up"]. CSI-u Enter, Tab, Backspace and Ctrl+ASCII sequences

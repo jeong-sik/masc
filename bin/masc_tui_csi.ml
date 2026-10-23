@@ -6,17 +6,21 @@ type modifiers = {
 
 let no_modifiers = { shift = false; alt = false; ctrl = false }
 
-(* The mask is one more than the bits, so 1 means "no modifier held". A value
-   that is not a number, or is below 1, is read as none: the press happened
-   and the key is known, and refusing it over an unreadable mask would lose a
-   keystroke to a detail nobody bound. *)
+(* Kitty encodes one plus the modifier bits. Shift/Alt/Ctrl have bindings;
+   Caps/Num Lock do not alter shortcut identity. Super/Hyper/Meta and unknown
+   bits must remain unclaimed rather than becoming a plain or Ctrl action. *)
 let decode_modifiers raw =
-  match int_of_string_opt (String.trim raw) with
-  | None -> no_modifiers
-  | Some value when value < 1 -> no_modifiers
+  let raw = String.trim raw in
+  if String.equal raw "" then Some no_modifiers
+  else match int_of_string_opt raw with
+  | None -> None
+  | Some value when value < 1 -> None
   | Some value ->
       let bits = value - 1 in
-      { shift = bits land 1 <> 0; alt = bits land 2 <> 0; ctrl = bits land 4 <> 0 }
+      let supported_bits = 1 lor 2 lor 4 lor 64 lor 128 in
+      if bits land (lnot supported_bits) <> 0 then None
+      else Some
+        { shift = bits land 1 <> 0; alt = bits land 2 <> 0; ctrl = bits land 4 <> 0 }
 
 (* One order, always. Two spellings of the same chord would be two bindings
    that drift apart, and the one nobody typed would look dead. *)
@@ -105,10 +109,10 @@ let name ~parameters ~final =
      A release must not invoke the checkpoint binding a second time. *)
   let modifiers =
     match String.split_on_char ':' second with
-    | [mask] -> Some (decode_modifiers mask)
+    | [mask] -> decode_modifiers mask
     | [mask; event] -> (
         match int_of_string_opt (String.trim event) with
-        | Some (1 | 2) -> Some (decode_modifiers mask)
+        | Some (1 | 2) -> decode_modifiers mask
         | _ -> None)
     | _ -> None
   in

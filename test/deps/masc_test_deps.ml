@@ -462,9 +462,10 @@ let fixture_sandbox_profile () =
    [sandbox_profile] is a required argument so each suite states what its
    path reads: [Keeper_meta_contract.effective_meta_result] refuses a
    declaration with no sandbox_profile, while the posture and endpoint
-   resolves read only the fields they name and take [None]. An existing
-   declaration is overwritten. *)
-let declare_fixture_keeper ~base_path ~sandbox_profile name =
+   resolves read only the fields they name and take [None]. Effective metadata
+   also requires [sandbox_image] for Docker/Micro_vm. An existing declaration
+   is overwritten. *)
+let declare_fixture_keeper ?sandbox_image ~base_path ~sandbox_profile name =
   let path = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path name in
   Fs_compat.mkdir_p (Filename.dirname path);
   let fields =
@@ -476,6 +477,9 @@ let declare_fixture_keeper ~base_path ~sandbox_profile name =
             , Otoml.TomlString
                 (Masc.Keeper_types_profile.sandbox_profile_to_string profile) )
           ])
+    @ (match sandbox_image with
+       | None -> []
+       | Some image -> ["sandbox_image", Otoml.TomlString image])
   in
   Out_channel.with_open_bin path (fun output ->
     output_string

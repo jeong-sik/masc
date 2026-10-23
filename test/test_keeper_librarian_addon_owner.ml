@@ -27,6 +27,15 @@ let io f=Eio_unix.run_in_systhread f
 let keeper_name="librarian-owner-fixture"
 let ()=Mirage_crypto_rng_unix.use_default ()
 let write path bytes=Fs_compat.mkdir_p (Filename.dirname path);Out_channel.with_open_bin path (fun c -> output_string c bytes)
+let install_keeper ~config ~name ~trace_id =
+  let instructions=name ^ " fixture instructions" in
+  io (fun () ->
+    Masc_test_deps.declare_fixture_keeper ~sandbox_image:"base"
+      ~base_path:config.Workspace.base_path ~sandbox_profile:(Some Keeper_types_profile.Docker) name;
+    Keeper_types_profile.invalidate_keeper_profile_snapshots ());
+  let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String name;
+    "instructions",`String instructions;"trace_id",`String trace_id]) |> get in
+  Keeper_meta_store.replace_snapshot config meta |> get
 let protocol_error = function
   | Protocol.Invalid_contract s | Protocol.Protocol_failed s | Protocol.Invalid_observation s -> s
   | Host_refusal (Lane_addon_call_context.Rejected s | Unavailable s | Activity_disabled s | Activity_unobserved s) -> s
@@ -172,7 +181,11 @@ let drive_until fixture predicate =
       let before= !(fixture.deliveries) in
       let outcome=run_worker fixture in
       if predicate outcome then outcome
-      else (await_delivery fixture ~after:before;loop ()) in loop ())
+      else match outcome with
+        | Worker.Unavailable detail -> fail detail
+        | Addon_unattached _ -> fail "The configured Addon has no live exported admission tool"
+        | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ ->
+          await_delivery fixture ~after:before;loop () in loop ())
 let assert_settled = function Worker.Settled _ -> ()
   | Disabled | Idle | Recheck_new_input | Pending _ | Addon_unattached _ | Unavailable _ -> fail "actual original decision did not commit Memory"
 let settled = function Worker.Settled _ -> true
@@ -235,11 +248,9 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) f =
       let config=Workspace.default_config base_path in
       let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
       let store=Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-      let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper_name;
-        "trace_id",`String "librarian-original-owner"]) |> get in
       (* Metadata publication owns an Eio-aware directory lock. Keep it on
-         this fiber; only the blocking admission Store work goes to [io]. *)
-      Keeper_meta_store.replace_snapshot config meta |> get;
+         this fiber; only the blocking declaration write goes to [io]. *)
+      install_keeper ~config ~name:keeper_name ~trace_id:"librarian-original-owner";
       io (fun () -> List.iter (fun (id,claim) -> ignore (append keepers_dir id claim)) initial);
       let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
         |> Result.map_error Lane_addon_manifest.error_to_string |> get in
@@ -251,15 +262,29 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) f =
       let observation_observed ()=incr observations;Eio.Condition.broadcast observation_changed in
       let response=ref (fun capture -> `OK,F.openai_response (answer (fun _ -> true) capture)) in
       let original_for body=
-        let messages=Yojson.Safe.from_string body |> member "messages" |> Yojson.Safe.Util.to_list in
+        let body=Yojson.Safe.from_string body in
+        let messages=member "messages" body in
+        let response_format=match Llm_provider.Backend_openai_request.response_format_to_openai_json
+          Agent_core.Types.JsonMode with
+          | Some value -> value | None -> fail "JSON mode has no OpenAI wire projection" in
+        check json "the actual declared fixture target requests JSON mode" response_format
+          (member "response_format" body);
         let captures=io (fun () ->
           Queue.list_keeper_ids ~keepers_dir |> get
           |> List.concat_map (fun keeper_name -> originals_for ~keeper_name base_path keepers_dir store)) in
         let matches=List.filter (fun (_,capture) ->
-          let original=Capture.request capture |> get |> Lane_addon_exact.request_to_json in
-          let sent=member "messages" original |> Yojson.Safe.Util.to_list in
-          List.length sent=List.length messages && List.for_all2 (fun original sent ->
-            member "text" original=member "content" sent && member "role" original=member "role" sent) sent messages) captures in
+          let original=Capture.request capture |> get in
+          let schema=match original.Lane_addon_exact.schema with
+            | Some schema -> schema | None -> fail "the captured admission schema is absent" in
+          let requirement=Agent_core.Exact_output.make_output_requirement ~schema
+            ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
+          let message role text=`Assoc ["role",`String role;"content",`String text] in
+          let sent=Option.to_list (Option.map (message "system") original.system)
+            @ List.map (fun (item:Lane_addon_exact.message) ->
+                let role=match item.role with User -> "user" | Assistant -> "assistant" in
+                message role item.text) original.messages
+            @ [message "user" (Agent_core.Exact_output.schema_instruction_text requirement)] in
+          Yojson.Safe.equal (`List sent) messages) captures in
         match matches with [_,capture] -> capture
         | [] | _::_::_ -> fail "actual provider request has no unique fully restored original capture" in
       let start_server respond=F.start_server ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
@@ -831,9 +856,7 @@ let test_purged_original_does_not_block_another_keeper ()=with_fixture (fun ~sw:
     (match purged with Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
     (* The Python worker keeps A's unanswered request. Neither its state nor
        the host original Store is cleared to let B pass. *)
-    let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String second_keeper;
-      "trace_id",`String "second-librarian-original-owner"]) |> get in
-    Keeper_meta_store.replace_snapshot fixture.config meta |> get;
+    install_keeper ~config:fixture.config ~name:second_keeper ~trace_id:"second-librarian-original-owner";
     io (fun () ->
       Queue.append ~keepers_dir:fixture.keepers_dir ~keeper_id:second_keeper
         ~request_id:"second-original" (fact "Durable second Keeper")

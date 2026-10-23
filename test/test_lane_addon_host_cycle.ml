@@ -276,6 +276,17 @@ let test_submit_in_the_replacement_gap_is_not_sent_and_reaches_the_next_worker (
        | Error (Lane_addon_submit_once.Sent_unknown _) | Ok _ ->
          fail "a submit in the replacement gap must be refused before sending");
       check int "the retired worker received nothing" 0 !calls;
+      (* An absent export only proves that retirement started. The entry can
+         still be publishing cleanup; wait for actual removal before the one
+         explicit replacement beat used by this service-free fixture. *)
+      await clock (fun () ->
+        Runtime.dispatch ~access:Lane_addon_sources.Operator_configuration ~config
+          ~operation:Runtime.Inspect (`Assoc [])
+        |> Result.map_error Runtime.error_to_string |> unwrap
+        |> member "instances" |> Yojson.Safe.Util.to_list
+        |> List.exists (fun instance -> text "runtime_presence" instance = "live"
+          && text "instance_id" instance = retired.instance_id)
+        |> not);
       write source declaration;
       ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
       await clock (fun () -> Option.is_some (export ()));

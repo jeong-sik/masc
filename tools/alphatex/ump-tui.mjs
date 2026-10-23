@@ -8,7 +8,7 @@ import { safeText } from './terminal.mjs'
 export async function viewUmpEditor({ asset, packets, signal, onPreview, onExport }) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('UMP editor requires a terminal')
   if (signal?.aborted) return { changed: false, asset }
-  let editor = newUmpEditor(asset, packets), prompt = null, status = 'Select a MIDI2 attack; :help lists commands'
+  let editor = newUmpEditor(asset, packets), prompt = null, status = 'Select a MIDI2 event; :help lists commands'
   let accepting = true, suspended = false, showHelp = false, tail = Promise.resolve(), commit = true
   const close = new AbortController(), operationSignal = signal ? AbortSignal.any([signal, close.signal]) : close.signal
   let finish
@@ -23,7 +23,7 @@ export async function viewUmpEditor({ asset, packets, signal, onPreview, onExpor
         : 'Expression edits change one recorded 32-bit value; note addresses, timestamps and message order stay fixed.',
       'Up/Down: select · Tab: notes/expressions · u/y: undo/redo · Space: native audition · :command · q: return variant · Ctrl+C: discard']
     if (showHelp) lines.push(...[
-      ':scope SOURCE GROUP CHANNEL (1–16) selects its first attack; :select PACKET:WORD selects an exact original message',
+      ':scope SOURCE GROUP CHANNEL (1–16) selects its first event in the current view; :select PACKET:WORD selects an exact attack',
       ':pitch-absolute 60.5 sets exact MIDI-note units (1/512); :velocity 0–65535; :reset-note restores original fields',
       ':expressions / :notes switches views; :select-expression PACKET:WORD selects a recorded per-note message',
       ':value32 0–4294967295 edits its raw data word; :reset-expression restores its original value',

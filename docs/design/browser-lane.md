@@ -89,7 +89,10 @@ session comes from `block_requests`, so the connection fails every held
 request without matching intercept ids; the `addIntercept` reply can arrive
 after the first request it holds. `unblock_requests` removes the tab's
 intercepts. When the session ends, BiDi lets held requests continue. Requests
-are never answered or changed.
+are never answered or changed. A response the browser cached before the block
+is held too, so the cache is not bypassed: on Firefox 158 the probe loads a
+`max-age` response twice (the server sees one request), blocks its host, and
+the third load fails.
 
 `BrowserInteract` requires an observed `tabId` and accepts these closed actions:
 

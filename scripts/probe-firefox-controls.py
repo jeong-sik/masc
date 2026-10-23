@@ -22,6 +22,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
    self.send_response(200)
    if self.path.startswith('/attachment'):self.send_header('Content-Disposition','attachment; filename="same.bin"')
    self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data);return
+  # A cacheable response and how often the network served it, so a block can be checked against the cache.
+  if self.path in('/cached','/cached-hits'):
+   if self.path=='/cached':self.server.cached_hits=getattr(self.server,'cached_hits',0)+1
+   data=(b'cached' if self.path=='/cached' else str(getattr(self.server,'cached_hits',0)).encode())
+   self.send_response(200);self.send_header('Content-Type','text/plain')
+   self.send_header('Cache-Control','max-age=600' if self.path=='/cached' else 'no-store')
+   self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data);return
   if self.path=='/downloads':content='<a id="download-link" href="/attachment">Download</a><a id="download-attribute" href="/plain-download" download="attribute.bin">Attribute</a><iframe id="download-frame" src="/download-frame"></iframe>'
   elif self.path=='/download-frame':content='<a id="frame-download" href="/attachment?frame">Frame download</a>'
   elif self.path=='/frame':content='<h1>Outer frame</h1><iframe id="nested-frame" src="http://localhost:'+str(self.server.server_port)+'/nested"></iframe>'

@@ -16,3 +16,12 @@ host's `hitl_context_summary_schema` declares). Configure its model under
 The package is a declaration only until the host dispatch is connected: while it
 is absent or Off the existing in-process HITL judge keeps running, and the
 Required contract and pending approvals are unchanged.
+
+Revision 0.1.1 uses worker record version 2: finished requests retain only the
+original ID, digest and result. Existing worker state needs the
+[backup and hard cut](../../docs/guides/EXACT-WORKER-STATE-HARD-CUT.md), even when
+the host dispatch is not connected. Build its image from the repository root:
+
+```sh
+docker build -f addons/hitl-auto-judge/Dockerfile -t masc-lane-hitl-auto-judge:0.1.1 addons
+```

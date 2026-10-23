@@ -1,6 +1,7 @@
 # Exact worker terminal records and fresh state
 
-Workspace Curator 0.1.4, Candle Appraiser 0.1.5 and Keeper Librarian 0.2.3
+Workspace Curator 0.1.4, Candle Appraiser 0.1.5, Keeper Librarian 0.2.3 and
+HITL Auto Judge 0.1.1
 use worker record version 2. Pending records retain the original request.
 Terminals retain `version`, `request_id`, `digest` and `result`; workers with
 multiple exported tools also retain `tool`. Retaining a terminal atomically
@@ -15,7 +16,8 @@ result bytes. This change does not delete terminal identities or results.
 
 Old worker records are refused. Do not convert them or copy old pending records
 into a new worker store. This hard cut applies only to the persistent worker
-volumes of the three packages above. It preserves host original requests,
+volumes of all four packages above, including operator-admitted HITL worker
+requests when its automatic host dispatch is not connected. It preserves host original requests,
 Exact records and proofs, domain ledgers, receipts and source queues.
 
 1. Record the actual workspace, installation IDs, selected manifests and image

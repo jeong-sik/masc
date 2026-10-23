@@ -1,0 +1,28 @@
+{
+  "original_row_id": "01a1681c-664d-7000-9b12-e905430e98a5/1/451835066f530213e751185322c2adce610e570bdf8c9bf48c52a124c2303721",
+  "replacement_row_id": "01a1681d-74da-7000-af11-ca81ee22e3a2/1/d5fc5b8636751787c95a195f3ed5bff3468d1fab7045a355193010f06187e8c6",
+  "original_row_sha256": "5618464d5328c1b28c7909659fbc42baedc8e9ae52bbb623502c74a65f1509aa",
+  "original_row_after_final_off_sha256": "5618464d5328c1b28c7909659fbc42baedc8e9ae52bbb623502c74a65f1509aa",
+  "original_row_after_final_off_equal": true,
+  "original_native_release_before_final_off": {
+    "kind": "detached",
+    "release": {
+      "kind": "native_released",
+      "installation_id": "result-statistics",
+      "instance_id": "01a1681c-664d-7000-9b12-e905430e98a5"
+    }
+  },
+  "original_native_release_after_final_off": {
+    "kind": "detached",
+    "release": {
+      "kind": "native_released",
+      "installation_id": "result-statistics",
+      "instance_id": "01a1681c-664d-7000-9b12-e905430e98a5"
+    }
+  },
+  "original_native_release_preserved": true,
+  "original_count": 1,
+  "new_count": 2,
+  "original_producer_sequence": 1,
+  "new_producer_sequence": 2
+}

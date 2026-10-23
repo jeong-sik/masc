@@ -1,0 +1,22 @@
+{"at": 1792747300.8904672, "capture": "01-startup", "settle_ms": 2000}
+{"at": 1792747329.3637938, "keys": ":features\r", "capture": "02-features", "settle_ms": 1000}
+{"at": 1792747346.689342, "keys": "o", "capture": "03-plugins-empty", "settle_ms": 800}
+{"at": 1792747370.4028218, "keys": "i", "capture": "05-install-catalog", "settle_ms": 1000, "show": false}
+{"at": 1792747383.8377979, "keys": "j\r", "capture": "06-package-roles", "settle_ms": 800, "show": false}
+{"at": 1792747391.1301818, "keys": "\r", "capture": "07-role-service-preview", "settle_ms": 800, "show": false}
+{"at": 1792747410.323169, "keys": "native-statistics\tactual-review\t[]\u0013\r", "capture": "08-local-draft", "settle_ms": 800, "show": false}
+{"at": 1792747417.701771, "keys": "s", "capture": "09-save-native-installation", "settle_ms": 1800, "show": false}
+{"at": 1792747424.935776, "capture": "10-save-result", "settle_ms": 800, "show": false}
+{"at": 1792747435.4377441, "keys": " ", "capture": "11-off-unsaved-draft", "settle_ms": 400, "show": false}
+{"at": 1792747451.000391, "keys": "s", "capture": "12-save-off", "settle_ms": 1500, "show": false}
+{"at": 1792747476.289454, "keys": "\u001brh", "capture": "13-off-history", "settle_ms": 1000, "show": false}
+{"at": 1792747497.488322, "keys": "h\r", "capture": "14-current-off-detail", "settle_ms": 600, "show": false}
+{"at": 1792747515.325443, "keys": "j\r", "capture": "15-off-installation", "settle_ms": 500, "show": false}
+{"at": 1792747527.1907809, "keys": "E", "capture": "16-off-editor", "settle_ms": 600, "show": false}
+{"at": 1792747532.971086, "keys": " s", "capture": "17-reconnect-save", "settle_ms": 1800, "show": false}
+{"at": 1792747554.3976152, "keys": "\u001b\u001br", "capture": "19-current-reconnected", "settle_ms": 1000, "show": false}
+{"at": 1792747594.778074, "keys": "h", "capture": "20-reconnected-history", "settle_ms": 600, "show": false}
+{"at": 1792747649.515249, "keys": "hjE", "capture": "21-reconnected-editor", "settle_ms": 800, "show": false}
+{"at": 1792747667.192827, "keys": " s", "capture": "22-final-off", "settle_ms": 1600, "show": false}
+{"at": 1792747673.217047, "keys": "\u001b\u001brh", "capture": "23-final-history", "settle_ms": 800, "show": false}
+{"at": 1792747701.009324, "stop": true}

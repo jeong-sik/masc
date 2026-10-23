@@ -84,8 +84,8 @@ A의 이번 Addon 변경 닫기는 대상 범위가 다르며, 같은 수정이�
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | exact25faf의 native39924354630에서 서버/TUI 빌드·artifact identity 확인, TUI24/26·application5/5로 전체FAIL. Linux39924350904는125PASS/1FAIL. 실패 fixture3원인 수리와 재실행은 별도; 새 UI 실제 화면·설치는 미검증. | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
-| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 새 Features/Plugins·분류·원본 선택 보존 소스는 main. 새 후속 TUI 실제 화면은 미관측. 기존 범위의 근거와 원래 완료 기준은 유지. | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
+| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 완료 범위: exacta6fba325의 native39928840589에서 TUI26/26·application5/5 PASS, 실제 다운로드 서버/TUI·키 안내 digest와 embedded commit 일치 확인. Linux39928835869에서 deferred1/1 PASS. A02 실제 화면·운영 설치·전체54 완료와 구분. | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
+| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 완료 범위: exacta6fba matching native TUI/API에서 명시적 저장·Off·같은 설치의 새 incarnation·원래 이력/해제 영수증 보존 실측. 비어 있지 않은 실제 worker 결과 count1/seq1은 재연결 count2/seq2와 분리돼 보존됐고 최종 Off·소유 프로세스 정리 확인. [증거](../docs/evidence/2026-10-23-addon-executed-regressions/native-ui/README.md). 입력은 명시적 local fixture, launcher source 미확인; 실제 audio/browser/Agent·Dashboard·운영 설치·전체54 완료와 구분. | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
 | A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 main 병합. 고정 `7b16a917` 실제 TUI에서 retained 실행 키 미노출·수동 Observe 거절·이력 진입 확인; 전체 상세 새로고침 결함은 A02/G06에서 별도 추적 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
 | A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | Core/UI/Connector 및 HITL/Verifier 원본 owner 병합 확인. Browser와 Librarian #45095도 병합됨. 이후 후속 head의 독립 리뷰와 남은 P0–P2 대응은 계속하며 병합을 실행 성공으로 바꾸어 세지 않음 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
 | A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | #44702 REST merged와 pinned main 조상 관계 확인. 원래 Browser 후속3 전체 재리뷰는 아님. 기존 범위의 근거와 원래 완료 기준은 유지. | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
@@ -879,3 +879,7 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - Deferred 실패는 특정 Addon 거부를 전체 loader 제거로 해석한 fixture 가정이다. 실제 거부 이름의 로드·스키마·RPC 차단과 별도 복구 도구 가용성을 검사하도록 수리한다.
 - TUI 실패는 실제 context/incarnation 액션 스키마와 fixture의 불일치, Plugins 표시명에 묶인 문구 snapshot이다. 요청·상태·결정 검증으로 바꾸며 새 실행 전 성공으로 세지 않는다.
 - Catalog/Preview Stack #45492의 #45457·#45488은 실제 main 병합을 확인했다. 그 소스는 위 artifact보다 새롭다. 병합을 새 화면의 실행·설치 성공으로 바꾸지 않는다. 원래54개의 이름·완료 기준과 X 별도 범위는 유지한다.
+
+## 2026-10-23 재개 · A01 선택 실행과 artifact identity 확인
+
+수정 source exacta6fba325404c963061b7b95c4c564e35f5ea5e2e의 Linux39928835869는 deferred1/1 PASS, native39928840589는 TUI26/26·application5/5 PASS다. native 서버/TUI를 실제 다운로드해 receipt의 digest와 각 build-commit을 확인했다. [원문 영수증·결과·실제 identity](../docs/evidence/2026-10-23-addon-executed-regressions/README.md#repaired-selected-execution-and-actual-downloaded-candidate)를 보존하며 A01의 원래 기준 범위를 확인했다. 이전125-case Linux 결과는25faf의 기록으로 남기고 새 source의 전체 재실행으로 세지 않는다. A02와 나머지54 항목의 실제 화면·복구·Agent·설치 기준은 각자의 증거로 판단한다.

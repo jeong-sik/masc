@@ -1,0 +1,18 @@
+[
+  ".masc/skill-packages/lane-addon-author.sha256",
+  ".masc/skills/lane-addon-author/SKILL.md",
+  ".masc/skills/lane-addon-author/references/package-recipe.md",
+  ".masc/lane-addons/declaration-owners/a19cd4fe7d222c22a8016b82e22bd82ebf31b995bdc3f102f01b696fd312576c.jsonl",
+  ".masc/lane-addons/bindings/fc5e33adc0f3b889242bbe44abca18235b52b23144ced3a169efe70b837eea2c.json",
+  ".masc/lane-addons/bindings/9ae18bf0522ad9ad72b0fb463f9e6bb2018b1b039c152bf69b4250d6bdea931d.json",
+  ".masc/lane-addons/observations/fc5e33adc0f3b889242bbe44abca18235b52b23144ced3a169efe70b837eea2c/00000000000000000001.json",
+  ".masc/lane-addons/observations/fc5e33adc0f3b889242bbe44abca18235b52b23144ced3a169efe70b837eea2c/00000000000000000002.json",
+  ".masc/lane-addons/observations/9ae18bf0522ad9ad72b0fb463f9e6bb2018b1b039c152bf69b4250d6bdea931d/00000000000000000001.json",
+  ".masc/lane-addons/native-claims/ac7561c241d5ddd4926445d36b126d5eb36a5032b6f82aff5a14a8b0a26ed90c/intent.json",
+  ".masc/lane-addons/native-claims/ac7561c241d5ddd4926445d36b126d5eb36a5032b6f82aff5a14a8b0a26ed90c/instance-9ae18bf0522ad9ad72b0fb463f9e6bb2018b1b039c152bf69b4250d6bdea931d.json",
+  ".masc/lane-addons/native-claims/ac7561c241d5ddd4926445d36b126d5eb36a5032b6f82aff5a14a8b0a26ed90c/owner.json",
+  ".masc/lane-addons/native-claims/ac7561c241d5ddd4926445d36b126d5eb36a5032b6f82aff5a14a8b0a26ed90c/lease",
+  ".masc/lane-addons/native-claims/ac7561c241d5ddd4926445d36b126d5eb36a5032b6f82aff5a14a8b0a26ed90c/instance-fc5e33adc0f3b889242bbe44abca18235b52b23144ced3a169efe70b837eea2c.json",
+  ".masc/lane-addons/native-claims/ac7561c241d5ddd4926445d36b126d5eb36a5032b6f82aff5a14a8b0a26ed90c/gate",
+  ".masc/config/lane-addons/native-statistics.toml"
+]

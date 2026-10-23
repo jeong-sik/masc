@@ -43,7 +43,23 @@ export function captureRange(asset) {
   // the exact WAV endpoint. The extra tick is a bound, not a fabricated event.
   const midiEnd = last === null ? 0n : last - origin + 1n
   const audioEnd = audioStart + ceil(frames * 1_000_000_000n * clock.denom, clock.rate * clock.numer)
-  return { origin: String(origin), extent: String(audioEnd > midiEnd ? audioEnd : midiEnd) }
+  let extent = audioEnd > midiEnd ? audioEnd : midiEnd
+  if (manifest.umpSourceSpan !== undefined) {
+    const span = manifest.umpSourceSpan
+    if (!span || Object.keys(span).length !== 2 || unsigned(span.origin, 'derived source origin', uint64Max) !== origin
+        || unsigned(span.extent, 'derived source extent') < extent) throw new Error('Derived UMP source span disagrees with its data')
+    extent = BigInt(span.extent)
+  }
+  // Keep the recorded/derived source span when messages move inward. An
+  // additional authored layer may extend either edge, including after export
+  // has been imported as a new source. Validate the base before applying edits.
+  let after = origin + extent
+  for (const edit of asset.ump?.timing ?? []) {
+    const tick = unsigned(edit.hostTime, 'authored MIDI time', uint64Max)
+    if (tick < origin) origin = tick
+    if (tick + 1n > after) after = tick + 1n
+  }
+  return { origin: String(origin), extent: String(after - origin) }
 }
 export function captureRegionTime(asset, { offset, extent }) {
   const range = captureRange(asset), clock = clockOf(asset.manifest)

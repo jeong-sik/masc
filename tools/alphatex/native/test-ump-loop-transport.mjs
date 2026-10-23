@@ -19,7 +19,7 @@ try{
  const swift=`import Foundation
 let on:[UInt32]=[0x43953c03,0x80012345],off:[UInt32]=[0x43853c00,0x12340000]
 let earlyOn:[UInt32]=[0x43953e03,0x90012345],earlyOff:[UInt32]=[0x43853e00,0x43210000]
-func packet(_ tick:UInt64,_ words:[UInt32])->UmpPacket{UmpPacket(kind:"midi",protocolID:2,hostTime:String(tick),source:"A",timestampOrigin:"packet",words:words)}
+func packet(_ tick:UInt64,_ words:[UInt32])->UmpPacket{UmpPacket(kind:"midi",protocolID:2,hostTime:String(tick),source:"A",timestampOrigin:"packet",recordedHostTime:nil,recordedTimestampOrigin:nil,words:words)}
 func source(_ rows:[UmpPacket],id:String="take",numer:UInt32=1,denom:UInt32=1,extent:String="1000000000")->UmpRegionSource {
  UmpRegionSource(id:id,extent:extent,timeline:UmpTimeline(schemaVersion:4,duration:Double(extent)!*Double(numer)/Double(denom)/1e9,clock:UmpClock(origin:"0",numer:numer,denom:denom),bindings:rows.isEmpty ? []:[UmpBinding(source:"A",destination:"42")],packets:rows))
 }

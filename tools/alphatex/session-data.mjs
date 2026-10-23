@@ -5,6 +5,7 @@ import { createReadStream } from 'node:fs'
 import JZZ from 'jzz'
 import midiFiles from 'jzz-midi-smf'
 import { readWaveMetadata } from './wave-file.mjs'
+import { captureRange, captureRegionTime } from './capture-time.mjs'
 
 midiFiles(JZZ)
 
@@ -39,9 +40,12 @@ export async function* jsonLines(path, { signal } = {}) {
 
 export function unpackMidi(row) {
   if (row.kind !== 'midi' || row.protocol !== 2 || !Array.isArray(row.words)
-      || !['packet', 'received'].includes(row.timestampOrigin) || typeof row.source !== 'string') {
+      || !['packet', 'received', 'authored'].includes(row.timestampOrigin) || typeof row.source !== 'string') {
     throw new Error('Invalid MIDI capture packet')
   }
+  if (row.timestampOrigin === 'authored' && (typeof row.recordedHostTime !== 'string'
+      || !/^(0|[1-9][0-9]*)$/.test(row.recordedHostTime) || BigInt(row.recordedHostTime) > 0xffffffffffffffffn
+      || !['packet', 'received'].includes(row.recordedTimestampOrigin))) throw new Error('Invalid authored UMP timestamp provenance')
   const bytes = Buffer.alloc(row.words.length * 4)
   row.words.forEach((word, index) => {
     if (!Number.isInteger(word) || word < 0 || word > 0xffffffff) throw new Error('Invalid UMP word')
@@ -136,6 +140,10 @@ export async function readCaptureFiles(files, { signal } = {}) {
   await readWaveMetadata(files.audio, {
     sampleRate: timeline.sampleRate, channels: timeline.channels, frames: timeline.frames,
   }, { signal })
+  if (manifest.umpSourceSpan !== undefined) {
+    const asset = { manifest, midiTime: timeline.midiTime }, range = captureRange(asset)
+    timeline.duration = captureRegionTime(asset, { offset: '0', extent: range.extent }).durationSeconds
+  }
   return timeline
 }
 

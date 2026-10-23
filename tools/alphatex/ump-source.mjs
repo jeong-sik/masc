@@ -10,7 +10,7 @@ const fields = (value, allowed) => value && typeof value === 'object' && !Array.
   && Object.keys(value).every(key => allowed.includes(key))
 export function validateUmpEdits(value, midiSha256) {
   if (value === undefined) return
-  if (!fields(value, ['schemaVersion', 'midiSha256', 'notes', 'expressions']) || value.schemaVersion !== 1
+  if (!fields(value, ['schemaVersion', 'midiSha256', 'notes', 'expressions', 'timing']) || value.schemaVersion !== 1
       || value.midiSha256 !== midiSha256 || !Array.isArray(value.notes)) throw new Error('UMP edits disagree with their original MIDI source')
   const identities = new Set()
   for (const edit of value.notes) {
@@ -31,6 +31,20 @@ export function validateUmpEdits(value, midiSha256) {
     if (identities.has(id)) throw new Error('Duplicate UMP edit identity')
     identities.add(id)
   }
+  if (Object.hasOwn(value, 'timing') && !Array.isArray(value.timing)) throw new Error('Invalid UMP timing edits')
+  const timed = new Set()
+  for (const edit of value.timing ?? []) {
+    if (!fields(edit, ['packet', 'word', 'hostTime']) || !['packet', 'word', 'hostTime'].every(key => Object.hasOwn(edit, key))) throw new Error('Invalid UMP timing edit')
+    integer(edit.packet, Number.MAX_SAFE_INTEGER, 'packet identity'); integer(edit.word, Number.MAX_SAFE_INTEGER, 'word identity')
+    hostTick(edit.hostTime)
+    const id = `${edit.packet}:${edit.word}`
+    if (timed.has(id)) throw new Error('Duplicate UMP timing edit')
+    timed.add(id)
+  }
+}
+function hostTick(value) {
+  if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value) || BigInt(value) > 0xffffffffffffffffn) throw new Error('Use exact unsigned UInt64 host ticks')
+  return BigInt(value)
 }
 
 // Packet index and word offset address immutable original messages, never a
@@ -70,13 +84,11 @@ function expression(event) {
   if (!expressionKind(event)) throw new Error('Select a native MIDI2 per-note controller, pitch bend or poly pressure message')
   return event
 }
-export function materializeUmp(packets, edits, midiSha256) {
+export function umpEditedEvents(packets, edits, midiSha256) {
   validateUmpEdits(edits, midiSha256)
-  const originals = new Map(umpSourceEvents(packets).map(event => [event.id, event])), changed = new Map()
+  const originals = new Map(umpSourceEvents(packets).map(event => [event.id, { ...event, originalHostTime: event.hostTime }])), changed = new Map()
   function replace(event, words) {
-    let packet = changed.get(event.packet)
-    if (!packet) { packet = { ...packets[event.packet], words: [...packets[event.packet].words] }; changed.set(event.packet, packet) }
-    packet.words.splice(event.word, words.length, ...words)
+    changed.set(event.id, { ...event, words })
   }
   for (const edit of edits?.notes ?? []) {
     const event = noteOn(originals.get(`${edit.packet}:${edit.word}`)), words = [...event.words]
@@ -94,10 +106,40 @@ export function materializeUmp(packets, edits, midiSha256) {
     const event = expression(originals.get(`${edit.packet}:${edit.word}`))
     replace(event, [event.words[0], edit.value])
   }
-  return packets.map((packet, index) => changed.get(index) ?? packet)
+  const timed = new Map()
+  const embeddedClocks = new Set([...originals.values()].filter(event => event.type === 0
+    && [1, 2, 3, 4].includes(event.words[0] >>> 20 & 15)).map(event => event.source))
+  for (const edit of edits?.timing ?? []) {
+    const event = originals.get(`${edit.packet}:${edit.word}`)
+    if (!event) throw new Error('Unknown original UMP timing identity')
+    // JR and delta clock utilities give following messages another timebase.
+    // Host-clock editing cannot silently contradict that embedded schedule.
+    if (embeddedClocks.has(event.source)) throw new Error('Embedded JR/delta-clock timing requires its own timing editor')
+    timed.set(event.id, edit.hostTime)
+  }
+  return [...originals.values()].map(event => ({ ...(changed.get(event.id) ?? event), hostTime: timed.get(event.id) ?? event.hostTime }))
+}
+export function materializeUmp(packets, edits, midiSha256) {
+  const events = umpEditedEvents(packets, edits, midiSha256)
+  if (!edits?.timing?.length) {
+    const result = packets.map(packet => ({ ...packet, words: [...packet.words] }))
+    for (const event of events) result[event.packet].words.splice(event.word, event.words.length, ...event.words)
+    return result
+  }
+  // Stable original identity/order never comes from these derived packet rows.
+  // Split complete messages only; ties retain original presentation order.
+  return events.map((event, ordinal) => ({ event, ordinal }))
+    .sort((a, b) => BigInt(a.event.hostTime) < BigInt(b.event.hostTime) ? -1 : BigInt(a.event.hostTime) > BigInt(b.event.hostTime) ? 1 : a.ordinal - b.ordinal)
+    .map(({ event }) => {
+      const original = packets[event.packet], result = { ...original, words: [...event.words], hostTime: event.hostTime }
+      if (event.hostTime !== event.originalHostTime) Object.assign(result, { timestampOrigin: 'authored',
+        recordedHostTime: original.recordedHostTime ?? event.originalHostTime,
+        recordedTimestampOrigin: original.recordedTimestampOrigin ?? original.timestampOrigin })
+      return result
+    })
 }
 export function umpSourceExpressions(packets, edits, midiSha256) {
-  return sourceExpressions(umpSourceEvents(materializeUmp(packets, edits, midiSha256)))
+  return sourceExpressions(umpEditedEvents(packets, edits, midiSha256))
 }
 function sourceExpressions(events) {
   return events.flatMap(event => {
@@ -107,7 +149,7 @@ function sourceExpressions(events) {
   })
 }
 export function umpSourceNotes(packets, edits, midiSha256) {
-  return sourceNotes(umpSourceEvents(materializeUmp(packets, edits, midiSha256)))
+  return sourceNotes(umpEditedEvents(packets, edits, midiSha256))
 }
 function sourceNotes(events) {
   return events.filter(event => event.type === 4 && event.status === 9).map(event => {
@@ -119,8 +161,8 @@ function sourceNotes(events) {
   })
 }
 export function umpSourceView(packets, edits, midiSha256) {
-  const events = umpSourceEvents(materializeUmp(packets, edits, midiSha256))
-  return { notes: sourceNotes(events), expressions: sourceExpressions(events) }
+  const events = umpEditedEvents(packets, edits, midiSha256)
+  return { notes: sourceNotes(events), expressions: sourceExpressions(events), events }
 }
 export function umpVariantAsset(asset, packets, ump) {
   materializeUmp(packets, ump, asset.parts.midi.sha256)
@@ -148,6 +190,7 @@ export function editUmpNotes(packets, current, midiSha256, changes) {
     }
   }
   const result = { schemaVersion: 1, midiSha256, notes: [...notes.values()].sort((a, b) => a.packet - b.packet || a.word - b.word),
+    ...(current?.timing?.length ? { timing: structuredClone(current.timing) } : {}),
     ...(current?.expressions?.length ? { expressions: structuredClone(current.expressions) } : {}) }
   materializeUmp(packets, result, midiSha256)
   return result
@@ -167,9 +210,40 @@ export function editUmpExpressions(packets, current, midiSha256, changes) {
     }
   }
   const result = { schemaVersion: 1, midiSha256, notes: structuredClone(current?.notes ?? []),
+    ...(current?.timing?.length ? { timing: structuredClone(current.timing) } : {}),
     ...(expressions.size ? { expressions: [...expressions.values()].sort((a, b) => a.packet - b.packet || a.word - b.word) } : {}) }
   materializeUmp(packets, result, midiSha256)
   return result
+}
+export function editUmpTimes(packets, current, midiSha256, changes) {
+  validateUmpEdits(current, midiSha256)
+  const events = new Map(umpSourceEvents(packets).map(event => [event.id, event]))
+  const timing = new Map((current?.timing ?? []).map(edit => [`${edit.packet}:${edit.word}`, { ...edit }])), seen = new Set()
+  for (const change of changes) {
+    if (!fields(change, ['kind', 'id', 'hostTime']) || !['time', 'reset'].includes(change.kind) || seen.has(change.id)) throw new Error('Invalid UMP timing decision')
+    seen.add(change.id)
+    const event = events.get(change.id)
+    if (!event) throw new Error('Unknown original UMP timing identity')
+    if (change.kind === 'reset') timing.delete(event.id)
+    else {
+      hostTick(change.hostTime)
+      if (change.hostTime === event.hostTime) timing.delete(event.id)
+      else timing.set(event.id, { packet: event.packet, word: event.word, hostTime: change.hostTime })
+    }
+  }
+  const result = { schemaVersion: 1, midiSha256, notes: structuredClone(current?.notes ?? []),
+    ...(current?.expressions?.length ? { expressions: structuredClone(current.expressions) } : {}),
+    ...(timing.size ? { timing: [...timing.values()].sort((a, b) => a.packet - b.packet || a.word - b.word) } : {}) }
+  materializeUmp(packets, result, midiSha256)
+  return result
+}
+export function editUmpNoteTime(packets, current, midiSha256, onID, offID, start, end) {
+  if (hostTick(end) <= hostTick(start)) throw new Error('Note release must follow its attack')
+  const events = new Map(umpSourceEvents(packets).map(event => [event.id, event]))
+  const on = noteOn(events.get(onID)), off = events.get(offID)
+  if (off?.type !== 4 || off.status !== 8 || on.source !== off.source || on.group !== off.group || on.channel !== off.channel
+      || (on.words[0] >>> 8 & 255) !== (off.words[0] >>> 8 & 255)) throw new Error('Choose an explicit native MIDI2 NoteOff with the same source/group/channel/Note Index')
+  return editUmpTimes(packets, current, midiSha256, [{ kind: 'time', id: onID, hostTime: start }, { kind: 'time', id: offID, hostTime: end }])
 }
 export function umpOnset(notes, id) {
   const selected = notes.find(note => note.id === id)

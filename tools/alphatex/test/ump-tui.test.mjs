@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { isDeepStrictEqual } from 'node:util'
 import JZZ from 'jzz'
-import { newUmpEditor, umpEditorAction, umpEditorCommand } from '../ump-editor.mjs'
+import { newUmpEditor, umpEditorRows, umpEditorAction, umpEditorCommand } from '../ump-editor.mjs'
 import { umpSourceNotes } from '../ump-source.mjs'
 import { packet } from './helpers/captured-midi-fixture.mjs'
 import { loadSubstituted } from './helpers/substituted-module.mjs'
@@ -14,7 +14,7 @@ async function controller({ preview = async () => {}, exported = async () => {},
     stdout: Object.assign(new EventEmitter(), { isTTY: true, columns: 100, rows: 24, write() {} }) }
   const asset = { name: 'Keys', parts: { midi: { sha256: 'a'.repeat(64) } } }
   const packets = captured ?? [packet(0n, 'A', [JZZ.UMP.umpNoteOn(0, 0, 60, 0x9001)]), packet(100n, 'A', [JZZ.UMP.umpNoteOff(0, 0, 60, 0x1234)])]
-  const substitutes = { isDeepStrictEqual, newUmpEditor, umpEditorAction, umpEditorCommand, safeText: String, emitKeypressEvents() {} }
+  const substitutes = { isDeepStrictEqual, newUmpEditor, umpEditorRows, umpEditorAction, umpEditorCommand, safeText: String, emitKeypressEvents() {} }
   const { viewUmpEditor } = await loadSubstituted(new URL('../ump-tui.mjs', import.meta.url), substitutes, { globals: { process } })
   const abort = new AbortController()
   const done = viewUmpEditor({ asset, packets, signal: abort.signal, onPreview: preview, onExport: exported })
@@ -77,4 +77,18 @@ test('owned controller exports mixed expression/note edits and returns the same 
   assert.deepEqual(result.asset.ump.notes, [{ packet: 0, word: 0, pitch: 30976 }])
   assert.deepEqual(result.asset.ump.expressions, [{ packet: 0, word: 2, value: 2147483648 }, { packet: 0, word: 4, value: 4294967295 }])
   assert.equal(view.process.stdin.isRaw, false); assert.equal(view.process.stdin.listenerCount('keypress'), 0)
+})
+
+test('owned controller keeps original identities through event time edits, undo and explicit release duration', async () => {
+  let finishExport
+  const exported = new Promise(resolve => { finishExport = resolve }), exports = []
+  const view = await controller({ exported: async asset => { exports.push(asset); finishExport() } })
+  view.command('shift-time 1'); view.command('duration-ticks 1:0 200')
+  view.command('select-event 1:0'); view.command('shift-time 10'); view.command('undo')
+  view.command('export /unused/time-output'); await exported; view.key('q')
+  const result = await view.done
+  assert.equal(result.changed, true); assert.deepEqual(result.asset.ump, exports[0].ump)
+  assert.deepEqual(result.asset.ump.timing, [{ packet: 0, word: 0, hostTime: '10000000000000000001' },
+    { packet: 1, word: 0, hostTime: '10000000000000000201' }])
+  assert.equal(view.process.stdin.listenerCount('keypress'), 0); assert.equal(view.process.stdin.isRaw, false)
 })

@@ -6,7 +6,7 @@ import { newArrangement } from './arrangement.mjs'
 import { captureClock, jsonLines, unpackMidi } from './session-data.mjs'
 import { validateCaptureManifest } from './captured-source.mjs'
 import { readWaveMetadata } from './wave-file.mjs'
-import { captureRange } from './capture-time.mjs'
+import { captureRange, captureRegionTime } from './capture-time.mjs'
 
 function destination(value) {
   const number = Number(value)
@@ -30,7 +30,7 @@ export async function prepareCapturedPlayback(input, { directory, midiOutput, so
     const imported = await importArrangementCapture(newArrangement(), input, { projectPath: join(temporary, 'project.json'), signal })
     const asset = imported.project.assets[0], manifest = asset.manifest, packets = [], used = new Set()
     if (expectedManifest !== undefined && !isDeepStrictEqual(manifest, expectedManifest)) throw new Error('Captured take changed; reopen it before playback')
-    const origin = BigInt(captureRange(asset).origin)
+    const range = captureRange(asset), origin = BigInt(range.origin)
     for await (const row of jsonLines(join(temporary, asset.parts.midi.file), { signal })) {
       unpackMidi(row)
       if (typeof row.hostTime !== 'string' || !/^(0|[1-9][0-9]*)$/.test(row.hostTime) || BigInt(row.hostTime) > 0xffffffffffffffffn || !row.words.length) throw new Error('Invalid captured packet host time or empty UMP')
@@ -44,7 +44,9 @@ export async function prepareCapturedPlayback(input, { directory, midiOutput, so
     if (!Number.isSafeInteger(frames)) throw new Error('WAV frame count exceeds exact project frame precision')
     const audioStart = manifest.clock.firstAudioHostTime === null ? 0 : seconds(manifest.clock.firstAudioHostTime, origin, manifest.clock)
     const audioEnd = audioStart + frames / metadata.sampleRate
-    const duration = packets.reduce((end, packet) => Math.max(end, seconds(packet.hostTime, origin, manifest.clock)), audioEnd)
+    const duration = manifest.umpSourceSpan === undefined
+      ? packets.reduce((end, packet) => Math.max(end, seconds(packet.hostTime, origin, manifest.clock)), audioEnd)
+      : captureRegionTime(asset, { offset: '0', extent: range.extent }).durationSeconds
     if (!Number.isFinite(duration) || duration <= 0) throw new Error('Captured source has no representable playback duration')
     const audio = { id: 'capture-audio', path: join(temporary, asset.parts.audio.file), sha256: asset.parts.audio.sha256, ...metadata, frames }
     const midi = { schemaVersion: 4, duration, clock: { origin: String(origin), numer: manifest.clock.numer, denom: manifest.clock.denom }, bindings, packets }

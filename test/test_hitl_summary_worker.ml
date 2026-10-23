@@ -3198,6 +3198,62 @@ let test_outcome_labels_are_distinct () =
     (List.length labels)
 ;;
 
+(* ── Immutable judge original ──────────────────── *)
+
+module Original = Masc.Hitl_judge_original
+
+let original_fields =
+  [ "schema", `String Original.schema
+  ; "approval_id", `String "approval-1"
+  ; "input_hash", `String "hash-1"
+  ; "sequence", `Int 3
+  ; "system_prompt", `String "judge this"
+  ; "output_contract", `String "answer with the schema"
+  ; "context_bundle", `Assoc [ "task", `String "t-1"; "facts", `List [ `Int 1 ] ]
+  ]
+;;
+
+let original_of_fields fields =
+  match Original.of_json (`Assoc fields) with
+  | Ok original -> original
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_judge_original_round_trips_and_ignores_key_order () =
+  let original = original_of_fields original_fields in
+  (match Original.of_json (Original.to_json original) with
+   | Ok again ->
+     check bool "decoding what was encoded gives the same original" true
+       (Original.to_json again = Original.to_json original)
+   | Error detail -> Alcotest.fail detail);
+  let digest value =
+    match Original.digest value with
+    | Ok digest -> digest
+    | Error detail -> Alcotest.fail detail
+  in
+  check string "the digest does not depend on the key order read"
+    (digest original)
+    (digest (original_of_fields (List.rev original_fields)));
+  check int "a judgment request is three messages" 3 (List.length (Original.messages original))
+;;
+
+let test_judge_original_refuses_loose_shapes () =
+  let refused label json =
+    match Original.of_json json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail (label ^ " must be refused")
+  in
+  refused "an extra field" (`Assoc (("extra", `Null) :: original_fields));
+  refused "a missing field" (`Assoc (List.remove_assoc "input_hash" original_fields));
+  refused "another schema"
+    (`Assoc (("schema", `String "keeper.hitl-judge-original.v0") :: List.remove_assoc "schema" original_fields));
+  refused "a blank approval id"
+    (`Assoc (("approval_id", `String " ") :: List.remove_assoc "approval_id" original_fields));
+  refused "a negative sequence"
+    (`Assoc (("sequence", `Int (-1)) :: List.remove_assoc "sequence" original_fields));
+  refused "not an object" (`List [])
+;;
+
 let () =
   run
     "Hitl_summary_worker"
@@ -3391,6 +3447,16 @@ let () =
             "source resolution preserves an earlier failure"
             `Quick
             test_source_resolution_preserves_prior_failure
+        ] )
+    ; ( "judge_original"
+      , [ test_case
+            "round trips and ignores key order"
+            `Quick
+            test_judge_original_round_trips_and_ignores_key_order
+        ; test_case
+            "refuses loose shapes"
+            `Quick
+            test_judge_original_refuses_loose_shapes
         ] )
     ]
 ;;

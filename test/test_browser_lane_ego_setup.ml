@@ -239,6 +239,18 @@ let test_a_replan_writes_beside_what_was_written_since () =
     ignore (configured fixture);
     check bool "the other table stays" true (contains (read fixture.runtime) "geckodriver = \"/bin/sh\""))
 
+(* The table itself was written since the plan, by someone else: a replan
+   refuses rather than overwrite it. *)
+let test_a_replan_refuses_a_table_written_since () =
+  with_fixture (fun fixture ->
+    let plan = plan_ok ~find:(found fixture) (request fixture) in
+    let theirs = read fixture.runtime ^ "\n[browser.live.ego]\ncommand = \"/bin/sh\"\nspace = \"theirs\"\n" in
+    write fixture.runtime theirs;
+    (match E.replan plan with
+     | Error E.Configuration_changed -> ()
+     | Ok _ | Error _ -> fail "a table written since the plan is refused as changed");
+    check string "their table is kept" theirs (read fixture.runtime))
+
 let test_a_lane_that_is_off_still_gets_the_table () =
   with_fixture ~config:(runtime_base ^ "\n[browser.live]\nenabled = false\n") (fun fixture ->
     let plan = plan_ok ~find:(found fixture) (request fixture) in
@@ -266,5 +278,7 @@ let () =
       , [ test_case "a change after the plan" `Quick test_a_change_after_the_plan_is_refused_and_not_overwritten
         ; test_case "a replan writes beside what was written since" `Quick
             test_a_replan_writes_beside_what_was_written_since
+        ; test_case "a replan refuses a table written since" `Quick
+            test_a_replan_refuses_a_table_written_since
         ; test_case "a lane that is off still gets the table" `Quick test_a_lane_that_is_off_still_gets_the_table ] )
     ]

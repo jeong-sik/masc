@@ -43,7 +43,7 @@ let error_message = function
   | Configuration_unreadable { path; reason } ->
     Printf.sprintf "%s cannot be read: %s." path reason
   | Configuration_refused reason ->
-    Printf.sprintf "runtime.toml would not load, so nothing was written: %s." reason
+    Printf.sprintf "runtime.toml would not load, so the automation table was not written: %s." reason
   | Geckodriver_not_found ->
     "No geckodriver answered on PATH. Install it (masc prerequisite-actions geckodriver), or \
      name the executable with --geckodriver."
@@ -56,12 +56,13 @@ let error_message = function
       (match key with Geckodriver -> "--geckodriver" | Browser -> "--browser")
       path
   | Table_refused reason ->
-    Printf.sprintf "The automation configuration would not load as written, so nothing was \
+    Printf.sprintf "The automation configuration would not load as written, so it was not \
                     written: %s."
       reason
   | Configuration_changed ->
-    "runtime.toml changed while this ran, so nothing was written. Run this again."
-  | Not_written reason -> Printf.sprintf "runtime.toml was not written: %s." reason
+    "runtime.toml changed while this ran, so the automation table was not written. Run this \
+     again."
+  | Not_written reason -> Printf.sprintf "The automation table was not written to runtime.toml: %s." reason
 
 let ( let* ) = Result.bind
 
@@ -250,6 +251,7 @@ type plan =
   { runtime_config_path : string
   ; revision : string
   ; location : location
+  ; existing : Browser_configuration.automation option
   ; table : Browser_configuration.automation
   ; set : key list
   ; change : change
@@ -299,6 +301,7 @@ let plan ~find_geckodriver (request : request) =
       { runtime_config_path = path
       ; revision = Runtime_table_edit.revision_of_observation observation
       ; location
+      ; existing = configuration.Browser_configuration.automation
       ; table
       ; set
       ; change
@@ -324,6 +327,15 @@ let replan previous =
       let* edited = edited ~location ~table:previous.table ~set text in
       Runtime.validate_config_text ~runtime_config_path:path edited
       |> Result.map_error (fun reason -> Configuration_refused reason)
+  in
+  (* The write since the plan was another table's (the bidi table, in the
+     same run). An automation table that changed meanwhile is another
+     writer's, and the plan's decisions were made without it. *)
+  let* () =
+    if Option.equal Browser_configuration.equal_automation
+         configuration.Browser_configuration.automation previous.existing
+    then Ok ()
+    else Error Configuration_changed
   in
   Ok
     { previous with

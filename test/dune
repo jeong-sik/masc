@@ -5595,6 +5595,7 @@
 (include stanzas/test_browser_addon_setup.inc)
 (include stanzas/test_browser_lane_bidi_setup.inc)
 (include stanzas/test_browser_lane_ego_setup.inc)
+(include stanzas/test_browser_lane_table_writes.inc)
 (include stanzas/test_browser_lane_automation_setup.inc)
 
 (include stanzas/test_apple_container_install.inc)

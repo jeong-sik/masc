@@ -495,7 +495,7 @@ let test_a_key_written_twice_in_the_table_is_refused_untouched () =
     let config = runtime_base ^ table in
     write fixture.runtime config;
     let message = message_of (B.plan ~find_firefox:never_asked (request ~port:9444 fixture)) in
-    check bool ("refused (got: " ^ message ^ ")") true (contains message "nothing was written");
+    check bool ("refused (got: " ^ message ^ ")") true (contains message "[browser.live.bidi] was not written");
     check string "runtime.toml is as it was" config (read fixture.runtime))
 
 (* --- the live lane switch --------------------------------------------------- *)

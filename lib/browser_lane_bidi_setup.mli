@@ -55,7 +55,7 @@ type error =
           The sentence is the loader's, or says the table is written in a form
           this command cannot edit. *)
   | Configuration_changed
-      (** [runtime.toml] changed after the plan was made. Nothing was
+      (** [runtime.toml] changed after the plan was made. The table was not
           written. *)
   | Not_written of string
 

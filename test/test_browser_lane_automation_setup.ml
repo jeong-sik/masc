@@ -384,6 +384,18 @@ let test_a_plan_made_again_keeps_its_decisions_and_runs_nothing () =
     lines_kept "the other writer's table survives" other_write (read fixture.runtime);
     check string "and the driver is there" fixture.driver (configured fixture).C.driver)
 
+(* The automation table itself was written since the plan, by someone else:
+   a replan refuses rather than overwrite it. *)
+let test_a_plan_made_again_refuses_a_table_written_since () =
+  with_fixture (fun fixture ->
+    let plan = plan_ok ~find:(found fixture) (request fixture) in
+    let theirs = read fixture.runtime ^ "\n[browser.automation]\ngeckodriver = \"/bin/sh\"\n" in
+    write fixture.runtime theirs;
+    (match A.replan plan with
+     | Error A.Configuration_changed -> ()
+     | Ok _ | Error _ -> fail "an automation table written since the plan is refused as changed");
+    check string "their table is kept" theirs (read fixture.runtime))
+
 let test_a_plan_made_again_is_refused_when_the_file_no_longer_takes_it () =
   with_fixture (fun fixture ->
     let plan = plan_ok ~find:(found fixture) (request fixture) in
@@ -634,6 +646,8 @@ let () =
             test_a_plan_made_again_keeps_its_decisions_and_runs_nothing
         ; test_case "a plan made again is refused when the file does not take it" `Quick
             test_a_plan_made_again_is_refused_when_the_file_no_longer_takes_it
+        ; test_case "a plan made again refuses a table written since" `Quick
+            test_a_plan_made_again_refuses_a_table_written_since
         ; test_case "a named path with a space around it" `Quick
             test_a_named_path_with_a_space_around_it_is_refused
         ; test_case "a header inside a string" `Quick

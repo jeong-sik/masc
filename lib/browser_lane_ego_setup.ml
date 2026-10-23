@@ -39,7 +39,7 @@ let error_message = function
   | Configuration_unreadable { path; reason } ->
     Printf.sprintf "%s cannot be read: %s." path reason
   | Configuration_refused reason ->
-    Printf.sprintf "runtime.toml would not load, so nothing was written: %s." reason
+    Printf.sprintf "runtime.toml would not load, so [%s] was not written: %s." table_path reason
   | Ego_not_found ->
     "No ego-browser answered on PATH or in ~/.local/bin. Install ego lite and finish its \
      onboarding, which puts ego-browser there, or name it with --ego-command."
@@ -51,11 +51,12 @@ let error_message = function
        versions: %s. Finish ego lite's onboarding, or name another with --ego-command."
       path detail
   | Table_refused reason ->
-    Printf.sprintf "The [%s] table would not load as written, so nothing was written: %s." table_path
+    Printf.sprintf "The [%s] table would not load as written, so it was not written: %s." table_path
       reason
   | Configuration_changed ->
-    "runtime.toml changed while this ran, so nothing was written. Run this again."
-  | Not_written reason -> Printf.sprintf "runtime.toml was not written: %s." reason
+    Printf.sprintf "runtime.toml changed while this ran, so [%s] was not written. Run this again."
+      table_path
+  | Not_written reason -> Printf.sprintf "[%s] was not written to runtime.toml: %s." table_path reason
 
 let ( let* ) = Result.bind
 
@@ -214,6 +215,14 @@ let replan previous =
   let* observation, configuration = observe path in
   let existing = configuration.Browser_configuration.live_ego in
   let* () = validated ~path ~existing ~table:previous.table ~set:previous.set observation.source_text in
+  (* Another table of this run may have been written since the plan, not this
+     one: a table that changed meanwhile is another writer's, and the plan's
+     decisions were made without it. *)
+  let* () =
+    if Option.equal Browser_configuration.equal_live_ego existing previous.existing
+    then Ok ()
+    else Error Configuration_changed
+  in
   Ok
     { previous with
       revision = Runtime_table_edit.revision_of_observation observation

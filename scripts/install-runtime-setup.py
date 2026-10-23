@@ -3070,7 +3070,9 @@ def prepare_browser_lane(binary, base, modes, port=None):
     """Bring the programs the chosen routes need up, then write them all with one command.
 
     One `masc browser-lane-setup` call takes every chosen route, so the command
-    plans them together and writes none if one is refused. It is not told which
+    plans them together and a route refused while planning writes none. Its
+    tables are then committed one after another; one refused at that point
+    leaves the tables before it, and the command lists them. It is not told which
     geckodriver or Firefox to use: it finds them the way the catalog did (the
     first one on PATH that answers), and it keeps a value the operator already
     wrote in runtime.toml, which a named path would replace.
@@ -3099,8 +3101,12 @@ def prepare_browser_lane(binary, base, modes, port=None):
         argv += ['--mode', mode]
     result = subprocess.run(argv + ['--base-path', str(base)], stdout=sys.stderr, env=workspace_child_env())
     if result.returncode != 0:
-        # The writer already said why. The browser is optional, so this does not end setup.
-        print("imp's browser was not saved. Nothing was written for any of the routes in that one command. "
+        # The writer already said why, and listed each table it wrote before the
+        # refusal: the tables are committed one after another. A second run
+        # keeps a table that is already there. The browser is optional, so
+        # this does not end setup.
+        print("imp's browser was not saved completely. The lines above list each route written before "
+              'the refusal, and a second run keeps those as they are. '
               'Run ' + command + ' to try again' + (
                   ', or one route at a time: ' + '; '.join(browser_lane_command(base, (mode,)) for mode in modes)
                   if len(modes) > 1 else '') + '.', file=sys.stderr)

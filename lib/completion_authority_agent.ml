@@ -610,6 +610,7 @@ type stop_cause =
               carries per-candidate outcomes (2026-10-07 audit F-02). *)
       }
   | Raised of { detail : string }
+  | Superseded_by of { authority : string }
 
 type process_outcome =
   | Committed
@@ -622,7 +623,8 @@ type process_outcome =
 let retry_request_of_stop_cause : stop_cause -> retry_request = function
   | Not_reviewed { retryable_runtimes = _ :: _; _ } -> Retry_requested
   | Not_reviewed { retryable_runtimes = []; _ }
-  | Infrastructure_unavailable _ | Commit_failed _ | Raised _ -> No_retry_requested
+  | Infrastructure_unavailable _ | Commit_failed _ | Raised _
+  | Superseded_by _ -> No_retry_requested
 ;;
 
 let registry_outcome_of_stop_cause : stop_cause -> Verification_run_registry.outcome
@@ -640,6 +642,7 @@ let registry_outcome_of_stop_cause : stop_cause -> Verification_run_registry.out
     in
     Verification_run_registry.Not_reviewed { gate; detail }
   | Raised { detail } -> Verification_run_registry.Raised { detail }
+  | Superseded_by { authority } -> Verification_run_registry.Superseded_by { authority }
 ;;
 
 (* No verdict means nobody judged this submission. Whether the lane retries
@@ -686,6 +689,8 @@ let stop_cause_detail = function
   | Commit_failed { detail }
   | Not_reviewed { detail; _ }
   | Raised { detail } -> detail
+  | Superseded_by { authority } ->
+    Printf.sprintf "verdict superseded by %s" authority
 ;;
 
 (* The Board notice keys its repeat check on [gate]: a reviewed stop keeps
@@ -775,6 +780,25 @@ let announce_stall ~notify ~task_id ~verification_id ~cause ~disposition =
    semantic verdict produced by the evaluator. Infrastructure failures never
    call this function. A failed commit is its own outcome because the verdict
    was decided but never reached the Task. *)
+let task_already_terminal (runtime : runtime) task_id =
+  match Workspace.read_task_r runtime.config ~task_id with
+  | Ok task ->
+    (match task.status with
+     | Types_core.Done _ | Types_core.Cancelled _ -> true
+     | _ -> false)
+  | Error _ -> false
+
+let task_terminal_detail (runtime : runtime) task_id =
+  match Workspace.read_task_r runtime.config ~task_id with
+  | Ok task ->
+    (match task.status with
+     | Types_core.Done { assignee; _ } ->
+       Some (Printf.sprintf "Done by %s" assignee)
+     | Types_core.Cancelled { cancelled_by; _ } ->
+       Some (Printf.sprintf "Cancelled by %s" cancelled_by)
+     | _ -> None)
+  | Error _ -> None
+
 let commit_verdict
       (runtime : runtime)
       (task : Masc_domain.task)
@@ -806,8 +830,32 @@ let commit_verdict
       verdict_label;
     Committed, on_commit
   | Error error ->
-    let cause = Commit_failed { detail = Masc_domain.masc_error_to_string error } in
-    Stalled cause, registry_outcome_of_stop_cause cause
+    (match error with
+     | Masc_domain.Task (Masc_domain.Task_error.InvalidState _)
+       when task_already_terminal runtime task.id ->
+       (* The Task reached a terminal state (Done/Cancelled) between the
+          system lane's read of AwaitingVerification and this verdict commit.
+          The verdict the evaluator produced is stale: an authority that ran
+          after it (a human operator's HITL commit, or another lane) already
+          closed the obligation. Quietly close as superseded instead of
+          announcing a Stalled task with no retry armed — retrying would just
+          reproduce the same commit refusal against the already-terminal Task. *)
+       let authority = Masc_domain.completion_authority_actor authority in
+       Log.Misc.info
+         "completion authority superseded task_id=%s verification_id=%s by=%s verdict=%s"
+         task.id
+         verification_id
+         authority
+         verdict_label;
+       (match task_terminal_detail runtime task.id with
+        | Some detail ->
+          Superseded_by detail, Verification_run_registry.Superseded_by { authority = detail }
+        | None ->
+          let cause = Commit_failed { detail = Masc_domain.masc_error_to_string error } in
+          Stalled cause, registry_outcome_of_stop_cause cause)
+     | _ ->
+       let cause = Commit_failed { detail = Masc_domain.masc_error_to_string error } in
+       Stalled cause, registry_outcome_of_stop_cause cause)
 ;;
 
 (** What the system lane does with one Task it was woken for, read off the

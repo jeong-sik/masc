@@ -25,6 +25,12 @@ type outcome =
           Before this constructor a cancelled review left no completion at
           all — the run stayed Running in memory and vanished on the next
           replay (lane audit W6). *)
+  | Superseded_by of { authority : string }
+      (** The reviewer's verdict arrived after another authority — typically a
+          HITL human confirmation — had already closed the Task. The late
+          verdict is recorded as superseded rather than committed, so the run
+          does not read as a commit failure and no [Stalled] board post is
+          raised for it. *)
 
 type tool_observation =
   { tool_name : string

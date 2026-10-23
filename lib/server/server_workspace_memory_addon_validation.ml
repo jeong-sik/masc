@@ -41,25 +41,30 @@ let check_frame ~max_reply_bytes capture =
 
 let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.package)
     (exact : Exact.request) =
+  let undecided detail = Exact.Undecided {detail} in
   let* retained = Owner.load ~store ~scope:Capture.scope ~request_id:exact.request_id
-    |> Result.map_error Owner.error_to_string in
+    |> Result.map_error (fun error -> undecided (Owner.error_to_string error)) in
   match retained with
   | None ->
-    if String.equal package.id package_id then Error "Curator exact request has no original host capture"
+    if String.equal package.id package_id
+    then Error (Exact.Unowned {reason="Curator exact request has no original host capture"})
     else Ok (fun _ -> Ok ())
   | Some retained ->
-    let* workspace = Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path) in
+    (* An original owns this ID. A request it does not match is refused
+       without ending the ID, which the original still needs. *)
+    let* workspace = Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path)
+      |> Result.map_error undecided in
     let* capture = Eio_unix.run_in_systhread (fun () -> Capture.restore ~workspace
       ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id
-        |> Result.map_error Owner.error_to_string) retained) in
+        |> Result.map_error Owner.error_to_string) retained) |> Result.map_error undecided in
     let destination = Capture.destination capture in
     let* () =
       if String.equal destination.installation_id (Owner.installation_id (Owner.Configuration declaration_id))
          && String.equal package.id package_id
          && String.equal destination.package_id package.id
          && String.equal destination.tool tool
-      then Ok () else Error "Curator exact request does not own this installation/package/tool" in
-    let* original = request capture in
+      then Ok () else Error (undecided "Curator exact request does not own this installation/package/tool") in
+    let* original = request capture |> Result.map_error undecided in
     let* () = if String.equal (Exact.digest original) (Exact.digest exact) then Ok ()
-      else Error "Curator exact request differs from its original captured prompt/schema/kind" in
+      else Error (undecided "Curator exact request differs from its original captured prompt/schema/kind") in
     Ok (fun answer -> Capture.validate_output capture answer |> Result.map (fun _ -> ()))

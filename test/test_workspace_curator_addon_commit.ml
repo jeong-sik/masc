@@ -431,18 +431,41 @@ let test_child_can_answer_and_commit_only_its_original_prefix ()=with_workspace 
   settle ~save:no_save base_path store again |> accepted |> committed |> ignore)
 let package ()=Lane_addon_manifest.load ~path:"../addons/workspace-curator/lane.toml"
   |> Result.map_error Lane_addon_manifest.error_to_string |> get
+let authorize_as ?(declaration_id="curator") base_path store request =
+  Server_workspace_memory_addon_validation.authorize ~base_path ~store ~declaration_id ~package:(package ()) request
 let authorize base_path store capture =
-  let request=get (Server_workspace_memory_addon_validation.request capture) in
-  Server_workspace_memory_addon_validation.authorize ~base_path ~store ~declaration_id:"curator" ~package:(package ()) request
+  authorize_as base_path store (get (Server_workspace_memory_addon_validation.request capture))
+let authorized = function
+  | Ok validate -> validate
+  | Error (Exact.Unowned {reason=detail} | Exact.Undecided {detail}) -> fail detail
+let unowned = function Error (Exact.Unowned _) -> true | Ok _ | Error (Exact.Undecided _) -> false
+let undecided = function Error (Exact.Undecided _) -> true | Ok _ | Error (Exact.Unowned _) -> false
 let test_direct_exact_authority_requires_acknowledged_ancestry ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Source a";"Source b"] in
   let parent,child,_=intent store capture size_input in
   retain_capture store child |> ignore;
-  check bool "direct Exact cannot bypass an unacknowledged predecessor" true
-    (Result.is_error (authorize base_path store child));
+  check bool "direct Exact cannot bypass an unacknowledged predecessor, which may still be acknowledged" true
+    (undecided (authorize base_path store child));
   narrow base_path store parent |> accepted |> successor |> ignore;
-  let validate=get (authorize base_path store child) in
+  let validate=authorized (authorize base_path store child) in
   get (validate (output_for child)))
+(* A worker may list a request whose original the host no longer has. That
+   request ends instead of stopping the host pass (#45223). A request that
+   does not match the original owning its ID never ends that ID. *)
+let test_a_request_with_no_original_is_unowned ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Unowned source a";"Unowned source b"] in
+  let request=get (Server_workspace_memory_addon_validation.request capture) in
+  check bool "a Curator request with no original is unowned" true (unowned (authorize_as base_path store request));
+  ignore (retain_capture store capture);
+  check bool "its original authorizes it" true (Result.is_ok (authorize_as base_path store request));
+  check bool "another installation is undecided, not unowned" true
+    (undecided (authorize_as ~declaration_id:"another-curator" base_path store request));
+  let changed=match Exact.request_to_json request with
+    | `Assoc fields -> get (Exact.request_of_json (`Assoc (List.map (fun (key,value) -> key,
+        if key="messages" then `List [`Assoc ["role",`String "user";"text",`String "Another prompt"]] else value) fields)))
+    | _ -> fail "an Exact request is an object" in
+  check bool "a request that differs from its original is undecided, not unowned" true
+    (undecided (authorize_as base_path store changed)))
 let test_missing_or_cyclic_parent_refuses missing ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Source a";"Source b"] in
   let parent,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
@@ -464,7 +487,8 @@ let test_missing_or_cyclic_parent_refuses missing ()=with_workspace (fun base_pa
   check bool "child resume cannot borrow missing or cyclic ancestry" true
     (match no_worker_resume base_path store child with Error (Consumer.Rejected _) -> true
      | Ok _ | Error (Consumer.Unavailable _ | Consumer.Uncertain _) -> false);
-  check bool "direct Exact rejects the same broken ancestry" true (Result.is_error (authorize base_path store smaller)))
+  check bool "direct Exact refuses the same broken ancestry without ending the request" true
+    (undecided (authorize base_path store smaller)))
 let test_nested_successor_has_no_root_sibling ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Source a";"Source b";"Source c";"Source d"] in
   let root,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
@@ -1199,6 +1223,7 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "Briefing output limit cannot reduce input" `Quick (test_briefing_successor_keeps_prepared_state true);
   test_case "acknowledged child answers and commits only its prefix" `Quick test_child_can_answer_and_commit_only_its_original_prefix;
   test_case "direct Exact authority cannot bypass parent acknowledgement" `Quick test_direct_exact_authority_requires_acknowledged_ancestry;
+  test_case "a request with no original is unowned" `Quick test_a_request_with_no_original_is_unowned;
   test_case "missing predecessor refuses resume and direct Exact" `Quick (test_missing_or_cyclic_parent_refuses true);
   test_case "cyclic predecessor refuses resume and direct Exact" `Quick (test_missing_or_cyclic_parent_refuses false);
   test_case "nested refusal narrows the child without a root sibling" `Quick test_nested_successor_has_no_root_sibling;

@@ -32,7 +32,7 @@ let sample_root : AR.lookup_root = AR.Producer_tree []
 
 let with_workspace f =
   let base_path = Filename.temp_dir "verifier-worker-" "" in
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) f
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () -> f base_path)
 
 let test_original_not_found () =
   with_workspace @@ fun base_path ->
@@ -54,12 +54,17 @@ let test_original_not_found () =
       ~lookup_root:sample_root
       ~provider_rest:(fun _ -> AR.No_stated_rest)
       ~base_path
+      ()
   with
   | Error W.Original_not_found -> ()
-  | Error err -> failwith ("expected Original_not_found, got: " ^ match err with
-      | W.Original_not_found -> "not_found"
-      | W.Original_corrupt d -> "corrupt: " ^ d
-      | W.Review_failed d -> "failed: " ^ d)
+  | Error err ->
+    failwith
+      ("expected Original_not_found, got: "
+       ^ (match err with
+          | W.Original_not_found -> "not_found"
+          | W.Original_corrupt d -> "corrupt: " ^ d
+          | W.Grants_mismatch d -> "grants: " ^ d
+          | W.Review_failed d -> "failed: " ^ d))
   | Ok _ -> failwith "review must not run when no original is retained"
 
 let () =

@@ -964,16 +964,67 @@ let process_task_once
                   evidence_posture_of_snapshot prepared.evidence_access
               }
             in
-            let result =
-              Task.Anti_rationalization.review
-                ~base_path:runtime.config.base_path
+            (* E06: retain the immutable original of this review attempt, then
+               hand the review to the worker bridge. The original freezes the
+               subject and the lookup grants; the worker can only answer the
+               review, never widen the subject or reapply another
+               verification's evidence. The verdict extraction, verdict tool
+               and Task/Goal transition stay on this host side below. *)
+            let owner_store =
+              Lane_addon_store.create
+                ~root:(Filename.concat runtime.config.base_path "request-ownership")
+            in
+            let attempt = 0 in
+            let run_result : (Task.Anti_rationalization.review_result, string) result =
+              let* original =
+                Verifier_review_original.prepare
+                  ~verification_id
+                  ~attempt
+                  ~question
+                  ~lookup_root
+                  ~lookup_schemas:(List.map (fun (s : Types_core.tool_schema) -> s.name)
+                                     (Verification_authority_tools.schemas lookup_tools))
+                  prepared.review_request
+                |> Result.map_error (fun reason -> "original_invalid: " ^ reason)
+              in
+              let* () =
+                Verifier_review_owner.retain
+                  ~store:owner_store
+                  ~verification_id
+                  ~attempt
+                  ~installation_id:"masc.completion-authority"
+                  ~package_id:"masc.completion-authority.review"
+                  original
+                |> Result.map_error (function
+                  | Verifier_review_owner.Original_invalid d -> "original_invalid: " ^ d
+                  | Verifier_review_owner.Identity_mismatch d -> "identity_mismatch: " ^ d
+                  | Verifier_review_owner.Retain_store_unavailable d -> "store: " ^ d
+                  | Verifier_review_owner.Already_retained d -> "already_retained: " ^ d)
+              in
+              Verifier_review_worker.run_attempt
+                ~on_tool_result
                 ~sw:(Some runtime.sw)
+                ~store:owner_store
+                ~verification_id
+                ~attempt
+                ~installation_id:"masc.completion-authority"
+                ~package_id:"masc.completion-authority.review"
+                ~question
                 ~lookup
                 ~lookup_root
                 ~provider_rest:Verification_retry.provider_rest
-                ~question
-                ~on_tool_result
-                prepared.review_request
+                ~base_path:runtime.config.base_path
+              |> Result.map_error (function
+                | Verifier_review_worker.Original_not_found -> "original_not_found"
+                | Verifier_review_worker.Original_corrupt d -> "original_corrupt: " ^ d
+                | Verifier_review_worker.Grants_mismatch d -> "grants_mismatch: " ^ d
+                | Verifier_review_worker.Review_failed d -> "review_failed: " ^ d)
+            in
+            let result =
+              match run_result with
+              | Error detail ->
+                stop (Raised { detail = "verifier review attempt failed: " ^ detail })
+              | Ok review_result -> review_result
             in
             (* Every verdict lands in the calibration ledger the Harness
                surface reads — which evaluator judged, and whether a fallback

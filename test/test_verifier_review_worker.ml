@@ -84,7 +84,7 @@ let test_frozen_prompt_media_and_lookup () = with_workspace (fun config store ->
       let expected = Agent_core.Types.image_block ~media_type:image.image_media_type
         ~data:image.image_body_base64 () in
       Alcotest.(check bool) "original media reaches reviewer" true (goal_blocks=Some [Agent_core.Types.text_block prompt;expected]);
-      (match lookup.AR.dispatch ~name:"tool_read_file" ~args:(`Assoc ["path",`String "receipt.txt"]) with
+      (match lookup.AR.dispatch ~name:"tool_read_file" ~args:(`Assoc ["file_path",`String "receipt.txt"]) with
        | Tool_result.Completed payload ->
          Alcotest.(check bool) "successful owned lookup retains shared evidence projection" true
            (Yojson.Safe.Util.member "evidence_lookup_succeeded" payload.data = `Bool true)

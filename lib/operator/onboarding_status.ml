@@ -282,23 +282,33 @@ let browser_configuration config_path =
     | Ok _ -> Result.to_option (Browser_configuration.of_file config_path)
 
 (* One observation answers both checks, so they say of one launcher and one
-   list of connections. *)
+   list of connections. Both are the operator's ([masc doctor] and the
+   CanAdmin setup status), so the Add-on is read as the native host poll
+   reads it. *)
 let browser_lane_check ~configuration base_path =
-  let host = Browser_bidi_host_status.observe ~base_path ~configuration in
+  let host =
+    Browser_bidi_host_status.observe ~access:Lane_addon_sources.Operator_configuration
+      ~base_path ~configuration
+  in
   let observation = host.lane in
   let message = Browser_lane_launcher.message observation in
   let report condition = [check Browser_lane condition message [Inspect_configuration]] in
   (* No browser Add-on, or one switched off, is a step the operator has not
-     taken yet. One declared on that the server does not run, or a lane the
-     launcher misdescribes, is broken. An Add-on this server cannot read
-     leaves the lane unconfirmed, as no server does. *)
+     taken yet. One declared on whose attach failed is broken, and so, once
+     the Add-on can take a host, is a lane the launcher misdescribes. One
+     declared on that is being started, or that this check knows nothing
+     more of, may still attach: it and an Add-on this server cannot read
+     leave the lane unconfirmed, as no server does. *)
   (match Browser_lane_launcher.verdict observation with
    | Browser_lane_launcher.Absent -> []
    | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned -> report Satisfied
    | Browser_lane_launcher.Addon_missing | Browser_lane_launcher.Addon_off -> report Needs_setup
+   | Browser_lane_launcher.Addon_not_running
+       (Browser_lane_launcher.Attaching | Browser_lane_launcher.Not_known)
    | Browser_lane_launcher.Addon_unreadable | Browser_lane_launcher.Unverified ->
      report Needs_verification
-   | Browser_lane_launcher.Addon_not_running | Browser_lane_launcher.Misconfigured -> report Invalid)
+   | Browser_lane_launcher.Addon_not_running Browser_lane_launcher.Attach_failed
+   | Browser_lane_launcher.Misconfigured -> report Invalid)
   @ browser_bidi_host_check host
 
 let inspected ~sandbox ~browser ~base_path =

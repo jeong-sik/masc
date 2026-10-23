@@ -316,7 +316,8 @@ let the_launcher_verdict_reads_the_browser_addon_before_the_launcher () =
     ; "no browser Add-on", lane (Launcher.Unlisted Launcher.No_browser_addon), Launcher.Addon_missing
     ; "an Add-on switched off", lane (Launcher.Unlisted Launcher.Browser_addon_off), Launcher.Addon_off
     ; "an Add-on declared on and not run",
-      lane (Launcher.Unlisted Launcher.Browser_addon_not_running), Launcher.Addon_not_running
+      lane (Launcher.Unlisted (Launcher.Browser_addon_not_running Launcher.Not_known)),
+      Launcher.Addon_not_running Launcher.Not_known
     ; "an Add-on this server cannot read",
       lane (Launcher.Unlisted (Launcher.Browser_addon_unreadable "owner busy")), Launcher.Addon_unreadable
     ; "the Add-on comes before a launcher to reinstall",
@@ -326,12 +327,13 @@ let the_launcher_verdict_reads_the_browser_addon_before_the_launcher () =
     ; "no host on the bound workspace port", lane (Launcher.Polling []), Launcher.Aligned ]
 
 (* A serving process asks the browser Add-on which hosts poll it, once per
-   inspection; a process that serves nothing does not ask. *)
+   inspection and as the operator; a process that serves nothing does not
+   ask. *)
 let the_browser_lane_check_asks_the_browser_addon_only_when_serving () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
-  let asked = ref 0 in
+  let asked = ref [] in
   let reading = ref (Launcher.Unlisted Launcher.No_browser_addon) in
-  Launcher.install_browser_addon_reader (Some (fun () -> incr asked; !reading));
+  Launcher.install_browser_addon_reader (Some (fun access -> asked := access :: !asked; !reading));
   Fun.protect ~finally:(fun () ->
       Launcher.install_browser_addon_reader None;
       Browser_lane.withdraw_serving_port ())
@@ -339,7 +341,7 @@ let the_browser_lane_check_asks_the_browser_addon_only_when_serving () =
   let lane_condition () = condition Onboarding_status.Browser_lane (inspect ~base_path:(Some base)) in
   check bool "outside a server the lane is unconfirmed" true
     (lane_condition () = Onboarding_status.Needs_verification);
-  check int "outside a server the Add-on is not asked" 0 !asked;
+  check int "outside a server the Add-on is not asked" 0 (List.length !asked);
   Browser_lane.install_serving_port 64850;
   let host : Browser_lane.client_info =
     { client_id = host_client; browser = Browser_lane.Firefox; version = "157.0"
@@ -350,8 +352,14 @@ let the_browser_lane_check_asks_the_browser_addon_only_when_serving () =
       Onboarding_status.Needs_setup
     ; "an Add-on switched off is a step to take", Launcher.Unlisted Launcher.Browser_addon_off,
       Onboarding_status.Needs_setup
-    ; "an Add-on declared on and not run is broken", Launcher.Unlisted Launcher.Browser_addon_not_running,
-      Onboarding_status.Invalid
+    ; "an Add-on whose attach failed is broken",
+      Launcher.Unlisted (Launcher.Browser_addon_not_running Launcher.Attach_failed), Onboarding_status.Invalid
+    ; "an Add-on being started is unconfirmed, not broken",
+      Launcher.Unlisted (Launcher.Browser_addon_not_running Launcher.Attaching),
+      Onboarding_status.Needs_verification
+    ; "an Add-on not run for a reason not known is unconfirmed, not broken",
+      Launcher.Unlisted (Launcher.Browser_addon_not_running Launcher.Not_known),
+      Onboarding_status.Needs_verification
     ; "an Add-on this server cannot read is unconfirmed",
       Launcher.Unlisted (Launcher.Browser_addon_unreadable "owner busy"), Onboarding_status.Needs_verification
     ; "a host the Add-on lists is connected", Launcher.Polling [ host ], Onboarding_status.Satisfied
@@ -361,7 +369,9 @@ let the_browser_lane_check_asks_the_browser_addon_only_when_serving () =
       reading := polling;
       check bool name true (lane_condition () = expected))
     cases;
-  check int "each inspection asks the Add-on once" (List.length cases) !asked;
+  check int "each inspection asks the Add-on once" (List.length cases) (List.length !asked);
+  check bool "the operator's check reads the Add-on as the native host poll does" true
+    (List.for_all (fun access -> access = Masc.Lane_addon_sources.Operator_configuration) !asked);
   Launcher.install_browser_addon_reader None;
   check bool "a server with no Add-on reader is unconfirmed, not aligned" true
     (lane_condition () = Onboarding_status.Needs_verification)

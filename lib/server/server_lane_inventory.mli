@@ -58,9 +58,11 @@ type t
 val snapshot : config:Workspace.config -> t
 
 (** The browser Add-on reading the browser rows of {!snapshot} are made from,
-    for the browser lane check. It reads the Lane directory off the server
-    fiber and the Add-on's cached observation on the owner domain. *)
-val browser_presence : config:Workspace.config -> Browser_addon_presence.t
+    for the browser lane check, as a reader with [access] sees it. It reads
+    the Lane directory off the server fiber and the Add-on's cached
+    observation on the owner domain. *)
+val browser_presence :
+  config:Workspace.config -> access:Lane_addon_sources.access -> Browser_addon_presence.t
 val to_json : t -> Yojson.Safe.t
 module For_testing : sig
   val machine_publication :

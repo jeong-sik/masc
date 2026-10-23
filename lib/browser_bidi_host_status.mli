@@ -29,13 +29,18 @@ type observation =
   ; keeper : keeper
   }
 
-(** Reads the manual host record and launcher, then asks this process's server,
-    which in a serving process reads the browser Add-on's published clients
-    ({!Browser_lane_launcher.current_server}). Reading can let other fibers
-    run, so the server is asked last: a host that attached during the reads
-    is in the list the observation holds. [configuration] is the one this
-    process loaded, or the workspace's [runtime.toml] read for it. *)
-val observe : base_path:string -> configuration:Browser_configuration.t option -> observation
+(** Reads the manual host record and launcher, then asks this process's server
+    with the reader's [access] ({!Browser_lane_launcher.current_server}). In a
+    serving process the server answers with the clients the browser Add-on
+    last published, not with a fresh answer from its worker, so the list can
+    be older than the record: a host that attached after that publication is
+    not in it yet. A caller that also reads the worker live, as the
+    dashboard's client list does after this observation, can see a client
+    this list lacks. [configuration] is the one this process loaded, or the
+    workspace's [runtime.toml] read for it. *)
+val observe :
+  access:Lane_addon_sources.access -> base_path:string ->
+  configuration:Browser_configuration.t option -> observation
 
 (** What the record, the lock and the observed server say together. *)
 type verdict =

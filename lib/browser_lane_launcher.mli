@@ -32,12 +32,26 @@ type launcher =
           server still answers the lane, and moves only to an address that
           answers. *)
 
+(** Why no installation of a browser Add-on declared on runs, as far as the
+    reader can tell from how the configuration maintenance pass last applied
+    its declaration. *)
+type not_running =
+  | Attach_failed
+      (** The pass applied every browser declaration that is on, and each
+          application failed. *)
+  | Attaching  (** The pass is starting or replacing a worker for one of them. *)
+  | Not_known
+      (** Nothing more is known: the pass has not applied the declaration
+          yet, the reader may not see how it went, or an installation runs
+          that the reader cannot see. *)
+
 (** Why the browser Add-on lists no host for this server. *)
 type unlisted =
   | No_browser_addon  (** The workspace declares no browser Add-on. *)
   | Browser_addon_off  (** A browser Add-on is declared and switched off. *)
-  | Browser_addon_not_running
-      (** One is declared on and the server runs no installation of it. *)
+  | Browser_addon_not_running of not_running
+      (** One is declared on and the server runs no installation of it the
+          reader can see. *)
   | Browser_addon_unreadable of string
       (** Its observation, or the declarations, could not be read; why, in
           words any caller may be shown: {!message} and the BiDi host
@@ -64,13 +78,17 @@ type server =
       (** The port this server's listener bound and which browser hosts poll it. *)
 
 (** The server installs how it reads the browser Add-on, as it installs the
-    port it bound ({!Browser_lane.install_serving_port}). [None] removes it. *)
-val install_browser_addon_reader : (unit -> polling) option -> unit
+    port it bound ({!Browser_lane.install_serving_port}). The reader is given
+    the access of the surface that asks, so a surface never states an
+    installation its own caller cannot see. [None] removes it. *)
+val install_browser_addon_reader : (Lane_addon_sources.access -> polling) option -> unit
 
 (** [Not_serving] while no bound port is installed; the reader is not asked
-    then. With a bound port it asks the installed reader, and without one it
-    answers [Not_observed]. *)
-val current_server : unit -> server
+    then. With a bound port it asks the installed reader with [access], and
+    without one it answers [Not_observed]. The server's reader runs on an Eio
+    fiber: it reads the Lane directory in a system thread and the Add-on's
+    observation on the owner domain. *)
+val current_server : access:Lane_addon_sources.access -> server
 
 type t =
   { base_path : string
@@ -89,8 +107,9 @@ type verdict =
       (** A launcher is installed, no host polls, and the workspace declares
           no browser Add-on, so no host can register with this server. *)
   | Addon_off  (** The same with the browser Add-on declared and switched off. *)
-  | Addon_not_running
-      (** The same with the browser Add-on declared on and not run by this server. *)
+  | Addon_not_running of not_running
+      (** The same with the browser Add-on declared on and not run by this
+          server now, and what is known of why. *)
   | Addon_unreadable
       (** A launcher is installed, and this server cannot read whether a host
           polls it. *)

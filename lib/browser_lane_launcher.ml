@@ -5,10 +5,12 @@ type launcher =
   | Describes_another_launcher
   | Follows_workspace
 
+type not_running = Attach_failed | Attaching | Not_known
+
 type unlisted =
   | No_browser_addon
   | Browser_addon_off
-  | Browser_addon_not_running
+  | Browser_addon_not_running of not_running
   | Browser_addon_unreadable of string
 
 type polling =
@@ -20,19 +22,21 @@ type server =
   | Not_serving
   | Serving of { port : int; polling : polling }
 
-(* Installed by the server, so this module never depends on Lane Add-on
-   runtime code; the server's bootstrap installs it beside the port. *)
-let browser_addon_reader : (unit -> polling) option Atomic.t = Atomic.make None
+(* Installed by the server, so this module never reads Lane Add-on runtime
+   state itself; the server's bootstrap installs it beside the port. Each
+   surface passes the access of whoever reads it. *)
+let browser_addon_reader : (Lane_addon_sources.access -> polling) option Atomic.t =
+  Atomic.make None
 let install_browser_addon_reader reader = Atomic.set browser_addon_reader reader
 
-let current_server () =
+let current_server ~access =
   match Browser_lane.serving_port () with
   | Browser_lane.Serving_port_unknown -> Not_serving
   | Browser_lane.Serving_port port ->
       let polling =
         match Atomic.get browser_addon_reader with
         | None -> Not_observed
-        | Some read -> read ()
+        | Some read -> read access
       in
       Serving { port; polling }
 
@@ -48,7 +52,7 @@ type verdict =
   | Connected
   | Addon_missing
   | Addon_off
-  | Addon_not_running
+  | Addon_not_running of not_running
   | Addon_unreadable
   | Aligned
   | Unverified
@@ -141,7 +145,8 @@ let verdict t =
   | _, Not_installed, _ -> Absent
   | Serving { polling = Unlisted No_browser_addon; _ }, _, _ -> Addon_missing
   | Serving { polling = Unlisted Browser_addon_off; _ }, _, _ -> Addon_off
-  | Serving { polling = Unlisted Browser_addon_not_running; _ }, _, _ -> Addon_not_running
+  | Serving { polling = Unlisted (Browser_addon_not_running reason); _ }, _, _ ->
+      Addon_not_running reason
   | Serving { polling = Unlisted (Browser_addon_unreadable _); _ }, _, _ -> Addon_unreadable
   | (Not_serving | Serving { polling = Polling [] | Not_observed; _ }),
     (Undeclared | Unreadable | Describes_another_launcher), _
@@ -212,10 +217,21 @@ let unlisted_message ~base_path unlisted =
          this server. The operator sets enabled = true in its declaration, which %s shows; the \
          server attaches it on its next maintenance pass."
         lane_addons
-  | Browser_addon_not_running ->
+  | Browser_addon_not_running Attach_failed ->
       Printf.sprintf
-        "The browser Add-on is declared on, but this server runs no installation of it, so no \
-         browser host can register here. The operator reads why on %s."
+        "The browser Add-on is declared on, and the server's last attempt to attach it failed, \
+         so no browser host can register here. The operator reads why on %s."
+        lane_addons
+  | Browser_addon_not_running Attaching ->
+      Printf.sprintf
+        "The browser Add-on is declared on, and the server is starting or replacing its worker \
+         now, so no browser host has registered here yet. The operator reads how it goes on %s."
+        lane_addons
+  | Browser_addon_not_running Not_known ->
+      Printf.sprintf
+        "The browser Add-on is declared on, and this check sees no installation of it running, \
+         so no browser host can register here yet. The server attaches it on its next \
+         maintenance pass, or its last attach failed; the operator reads which on %s."
         lane_addons
   | Browser_addon_unreadable detail ->
       Printf.sprintf

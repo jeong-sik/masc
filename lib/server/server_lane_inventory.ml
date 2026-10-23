@@ -123,7 +123,8 @@ let browser_map f = function
   | Browser_addon_presence.Observed published -> Browser_observed (f published)
   | Browser_addon_presence.Absent -> Browser_addon_absent
   | Browser_addon_presence.Off -> Browser_addon_off
-  | Browser_addon_presence.Not_running -> Browser_addon_not_running
+  | Browser_addon_presence.Not_running
+      Browser_lane_launcher.(Attach_failed | Attaching | Not_known) -> Browser_addon_not_running
   (* The inventory is served to the operator alone (CanAdmin), so a failure is
      shown with its detail. *)
   | Browser_addon_presence.Unavailable reason ->
@@ -151,9 +152,9 @@ let declarations ~config =
         Eio_unix.run_in_systhread (fun () -> Config.load ~directory) in
   directory, declarations
 
-let browser_presence ~config =
+let browser_presence ~config ~access =
   let _directory, declarations = declarations ~config in
-  Browser_addon_presence.read ~config ~declarations
+  Browser_addon_presence.read ~config ~access ~declarations
 
 let snapshot ~config =
   let exact = Exact_projection.observe () in
@@ -161,8 +162,10 @@ let snapshot ~config =
   let machine_configuration = Runtime.machine_configuration () in
   let directory, declarations = declarations ~config in
   (* Read once per snapshot, so the three browser rows describe one
-     observation. *)
-  let browser_publication = Browser_addon_presence.read ~config ~declarations in
+     observation. The inventory is served to the operator alone. *)
+  let browser_publication =
+    Browser_addon_presence.read ~config ~access:Lane_addon_sources.Operator_configuration
+      ~declarations in
   let builtin = Lane_id.all_of_builtin |> List.map (fun lane ->
     let selection,state = match lane with
       | Lane_id.Exact id -> Exact id,Exact_state (Exact_projection.configuration exact id)

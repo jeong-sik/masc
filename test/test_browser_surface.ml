@@ -428,7 +428,61 @@ let test_automatic_selection_keeps_observed_browser () =
         (Result.is_error (Masc.Browser_interaction.perform request));
       check int "lost-owner mutation is never dispatched elsewhere" before (List.length !calls)))
 
+(* The public browser tools as a Keeper or the dashboard calls them. In a
+   workspace nothing created there is no browser Add-on, so a request the
+   tool accepts fails at that lookup as an unavailable dependency, while one
+   it refuses fails earlier as the caller's input. *)
+let addon_tool ?keeper_name tool fields = Masc.Browser_addon_tools.handle
+    ~config:(Masc.Workspace.default_config no_workspace)
+    ~access:Masc.Lane_addon_sources.Operator_configuration
+    ~principal:(Lane_addon_call_context.Host_actor "browser-surface-tester") ~reserved:[]
+    ~keeper_name ~tool ~tool_name:"BrowserTool" ~start_time:(Tool_timing.start ()) (`Assoc fields)
+let refused_as_input result =
+  Tool_result.failure_class result = Some Tool_result.Policy_rejection
+  && (match result with
+      | Tool_result.Failed failure -> failure.effect_disposition = Tool_result.Proven_pre_effect
+      | Tool_result.Completed _ | Tool_result.Deferred _ -> false)
+let reaches_the_addon_lookup result =
+  Tool_result.failure_class result = Some Tool_result.Dependency_unavailable
+
+let test_malformed_arguments_reach_no_browser () =
+  let module Cap = Masc.Browser_capabilities in
+  let invalid_id = `String "not-a-browser-uuid" in
+  let read fields = addon_tool Cap.Read (("lane",`String "automation") :: ("tabId",`Int 1) :: fields) in
+  List.iter (fun (name, result) -> check bool name true (refused_as_input result))
+    [ "a malformed connection in tabs", addon_tool Cap.Tabs ["lane",`String "live";"clientId",invalid_id]
+    ; "a malformed connection in read",
+      addon_tool Cap.Read ["lane",`String "live";"clientId",invalid_id;"tabId",`Int 1]
+    ; "a navigation guard on a text read",
+      read ["mode",`String "text";
+            "navigationSource",`Assoc ["url",`String "https://example.org/";"documentId",`String "observed"]]
+    ; "a text cap below the range", read ["mode",`String "text";"maxChars",`Int 0]
+    ; "a text cap past the most",
+      read ["mode",`String "text";"maxChars",`Int (Masc.Browser_page_script.max_text_chars + 1)]
+    ; "a malformed scene source", read ["mode",`String "scene";"navigationSource",`Assoc []]
+    ; "a malformed scene scope", read ["mode",`String "scene";"scope",`Assoc []]
+    ; "a malformed scene URL", read ["mode",`String "scene";"expectedUrl",`Int 1]
+    ; "a scene with no tab", addon_tool Cap.Read ["lane",`String "automation";"mode",`String "scene"]
+    ; "a malformed act", addon_tool Cap.Act []
+    ; "an unknown session action", addon_tool Cap.Session ["action",`String "unknown"]
+    ; "a malformed navigation URL", addon_tool Cap.Goto ["url",`Int 1] ];
+  check bool "a well-formed text read goes on to find the browser Add-on" true
+    (reaches_the_addon_lookup (read ["mode",`String "text"]))
+
+(* BrowserRead keeps a screenshot under its Keeper's workspace, so a caller
+   with no owning Keeper is refused as input before the tool looks for a
+   browser Add-on. *)
+let test_screenshot_requires_an_owning_keeper () =
+  let read keeper_name = addon_tool ?keeper_name Masc.Browser_capabilities.Read
+      ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73] in
+  let unowned = read None in
+  check bool "a screenshot without an owner is refused as input" true (refused_as_input unowned);
+  check bool "an owned screenshot goes on to find the browser Add-on" true
+    (reaches_the_addon_lookup (read (Some "browser-screenshot-keeper")))
+
 let () = run "browser surface" ["behavior",[
+  test_case "a screenshot needs an owning Keeper" `Quick test_screenshot_requires_an_owning_keeper;
+  test_case "malformed tool arguments reach no browser" `Quick test_malformed_arguments_reach_no_browser;
   test_case "automatic discovery binds subsequent observations and input" `Quick test_automatic_selection_keeps_observed_browser;
   test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
   test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;

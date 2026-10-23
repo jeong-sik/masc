@@ -9,7 +9,7 @@ module M = Keeper_librarian_maintenance_capture
 
 let get = function Ok value -> value | Error detail -> fail detail
 
-let proposal = function
+let unwrap = function
   | Ok value -> value
   | Error e -> fail (M.error_to_string e)
 
@@ -85,8 +85,8 @@ let test_create_and_roundtrip ~owner ~destination ~prepared =
   let captured =
     M.create ~request_id:"req-1" ~owner ~destination ~preparation:prepared
       ~answer_text:"{not json}" ~captured_at:123.
-    |> get in
-  let restored = captured |> M.to_json |> M.of_json |> Result.map_error M.error_to_string |> get in
+    |> unwrap in
+  let restored = captured |> M.to_json |> M.of_json |> unwrap in
   check string "request id survives" "req-1" (M.request_id restored);
   check string "answer bytes survive verbatim" "{not json}"
     (M.answer_text restored);
@@ -115,8 +115,8 @@ let test_proposal_validation ~owner ~destination ~prepared =
   let captured =
     M.create ~request_id:"req-4" ~owner ~destination ~preparation:prepared
       ~answer_text:(Yojson.Safe.to_string answer) ~captured_at:123.
-    |> get in
-  let judged = M.validate_proposal captured answer |> proposal in
+    |> unwrap in
+  let judged = M.validate_proposal captured answer |> unwrap in
   let expected =
     L.selection_of_json_result ~now:123. prepared.source_input answer
     |> Result.map_error L.parse_error_to_string

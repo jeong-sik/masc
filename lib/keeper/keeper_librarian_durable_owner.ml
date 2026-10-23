@@ -168,7 +168,9 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
   match result with
   | Submit.Awaiting (wait,record) -> Ok (Pending (wait,record))
   | Final (Answer (proposal,record)) -> publish_answer record proposal
-  | Final (Refusal (final,record)) -> Ok (Refused (final,record))
+  | Final (Refusal (Exact.Outcome_unknown,record)) -> Ok (Pending (Worker_unknown,record))
+  | Final (Refusal ((Exact.Call_final _ | Not_allowed _ | Request_id_reused as final),record)) ->
+    Ok (Refused (final,record))
   | Commit_pending record ->
     let* _,proposal=restore_answer ~store ~schema request record in
     publish_answer record proposal

@@ -6,6 +6,7 @@ module Runtime = Lane_addon_runtime
 module Consumer = Keeper_librarian_durable_consumer
 module Source = Keeper_librarian_durable_capture
 module Current = Keeper_memory_os_current
+module Commit = Keeper_librarian_durable_commit
 module Submit = Lane_addon_submit_once
 module Exact = Lane_addon_exact
 let ( let* ) = Result.bind
@@ -69,10 +70,6 @@ let call ~config ~reserved ~expected ~(original : Retained.retained) ~arguments 
       ~installation_id:expected.Request.installation_id ~package_id:expected.package_id
       ~tool:expected.tool ~configuration_revision:expected.configuration_revision ~original ~arguments
     |> Result.map_error Submit.call_error_of_runtime
-let active (record : Retained.retained) = match Progress.phase record.progress with
-  | Progress.Finished _ | Conflicted _ | Rejected _ -> false
-  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-  | Subdividing _ | Subdivided _ -> true
 let refusal_report final : Keeper_librarian_runtime.not_committed =
   let detail=match final with
     | Exact.Call_final (Answered _) -> "Unexpected answered result in original history refusal"
@@ -251,12 +248,16 @@ let rec consume_one ~config ~keeper_name ~wake =
   match Owner.discover ~store ~base_path ~keepers_dir ~keeper_id:keeper_name with
   | Error failure -> error (Owner.error_to_string failure)
   | Ok originals ->
-    let validated=List.fold_left (fun result (record,request) ->
-      let* ()=result in
-      io (fun () -> Keeper_librarian_durable_commit.validate ~store ~request ~record)) (Ok ()) originals in
+    let validated=List.fold_left (fun result ((record,request) as original) ->
+      let* unfinished=result in
+      let* frontier=io (fun () -> Commit.validate ~store ~request ~record) in
+      match frontier with
+      | Commit.Unfinished -> Ok (original::unfinished)
+      | Commit.Settled -> Ok unfinished) (Ok []) originals in
     match validated with
     | Error detail -> error detail
-    | Ok () ->
+    | Ok unfinished ->
+    let unfinished=List.rev unfinished in
     match validate_lineage originals with
     | Error detail -> error detail
     | Ok superseded ->
@@ -264,7 +265,6 @@ let rec consume_one ~config ~keeper_name ~wake =
       match Progress.replacement record.progress with
       | Some (Preparation_pending _) -> true
       | None | Some (Preparation_confirmed _) -> false) originals in
-    let unfinished=List.filter (fun (record,_) -> active record) originals in
     if List.length unfinished + List.length superseded > 1 then
       error "Completed-history Librarian has multiple unfinished original frontiers"
     else (match recoveries with

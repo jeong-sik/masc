@@ -48,8 +48,11 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:str
   original:Lane_addon_tool_request_owner.retained -> request:Keeper_librarian_durable_request.t ->
   call:call -> publish:publish -> wake:(unit -> unit) -> (outcome, error) result
 (** Host retained/latest proof and complete raw domain validation precede any
-    publication callback, including recovery while Off. Unknown work is never
-    resubmitted; only shared submit-once pre-admission/Not_sent rules retry.
+    publication callback, including recovery while Off. An actual host terminal
+    [Outcome_unknown] returns [Pending (Worker_unknown, original)] after its
+    immutable refusal is verified and retained. It never grants a fresh source
+    selection or submission, including after restart or while Off. Only shared
+    submit-once pre-admission/Not_sent rules retry.
     Linked work cannot dispatch before its predecessor confirms publication of
     this exact full child request. Missing or changed parent intent refuses.
     Existing Finished is strictly restored but not republished against today's

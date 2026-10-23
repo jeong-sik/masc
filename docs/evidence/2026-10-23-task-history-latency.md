@@ -71,7 +71,15 @@ answering, then cancels the caller. It awaits the actual request worker's
 cleanup, checks that the pool's inflight count returns to its original
 value, and checks a subsequent request on the same origin/domain. The full
 test module passes focused typechecking against existing dependency
-interfaces; execution of this new scenario remains pending.
+interfaces. A focused native relink of that test against existing local
+production archives then passed all seven IO-domain scenarios, including
+the new unanswered-GET case (Alcotest run `YQVE5FW6`, 0.163 seconds).
+The first attempt could not bind the loopback socket inside the filesystem/
+network sandbox; rerunning the same executable with loopback access passed.
+This is not a clean candidate build or exact-head CI result. Minimal CI run
+`39915980810` was separately requested on source head
+`f179140e7f67b455aa4ca0f66df551a74be1a809` for `test_h2_journal` and
+`test_tui_io_domain`; its outcome is not claimed here.
 
 This checks withdrawal of an owned observation, not server progress while
 the operator remains on the same view. An unanswered peer stays pending

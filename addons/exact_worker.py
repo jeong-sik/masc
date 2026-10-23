@@ -54,6 +54,17 @@ class Contract:
     tool_input: dict
     parse_request: Callable[[object], dict]
     host_request: Callable[[dict], dict]
+    additional_tools: tuple[dict, ...] = ()
+    tool_for_request: Callable[[dict], str] | None = None
+
+    def exported_names(self) -> set[str]:
+        return {self.tool_name, *(tool["name"] for tool in self.additional_tools)}
+
+    def request_tool(self, request: dict) -> str:
+        name = self.tool_name if self.tool_for_request is None else self.tool_for_request(request)
+        if name not in self.exported_names():
+            raise InvalidInput("request purpose has no exported Exact tool")
+        return name
 
 
 def exact(value, fields: set[str], label: str) -> dict:
@@ -194,6 +205,7 @@ class Store:
             raise InvalidInput("unknown Exact request record version")
         if set(record) == {"version", "request", "digest", "result"}:
             request = self.contract.parse_request(record["request"])
+            self.contract.request_tool(request)
             if self.path(request["request_id"]).name != name or record["digest"] != digest(request):
                 raise InvalidInput("Exact request record identity or input digest disagrees")
             if record["result"] is not None:
@@ -269,7 +281,11 @@ class Worker:
             return {"request_id": request_id, "state": "pending"}
         return {"request_id": request_id, "state": "finished", "result": record["result"]}
 
-    def invoke(self, args, caller: dict) -> dict:
+    def invoke(self, args, caller: dict, *, tool_name: str | None = None) -> dict:
+        tool_name = self.contract.tool_name if tool_name is None else tool_name
+        text(tool_name, "tool")
+        if tool_name not in self.contract.exported_names():
+            raise InvalidInput("unknown exported Exact tool")
         match caller.get("kind"):
             case "operator" | "anonymous":
                 exact(caller, {"kind"}, "caller")
@@ -286,6 +302,8 @@ class Worker:
                     raise InvalidInput("only the admitted host operator may submit an Exact request")
                 exact(args, {"kind", "request"}, "submit")
                 request = self.contract.parse_request(args["request"])
+                if self.contract.request_tool(request) != tool_name:
+                    raise InvalidInput("Exact request purpose does not belong to this tool")
                 request_id, request_digest = request["request_id"], digest(request)
                 # A retained request keeps its answer even if the declared frame
                 # changed after it was admitted.
@@ -313,7 +331,10 @@ class Worker:
             case "read":
                 exact(args, {"kind", "request_id"}, "read")
                 request_id = text(args["request_id"], "request_id")
-                return self.status(request_id, self.store.read(request_id))
+                record = self.store.read(request_id)
+                if record is not None and self.contract.request_tool(record["request"]) != tool_name:
+                    raise InvalidInput("retained Exact request belongs to another tool")
+                return self.status(request_id, record)
             case _:
                 raise InvalidInput("Exact request kind must be submit or read")
 
@@ -378,6 +399,7 @@ def tools(contract: Contract) -> list[dict]:
          "inputSchema": INPUT_SCHEMA, "outputSchema": OUTPUT_SCHEMA},
         {"name": contract.tool_name, "description": "Read an original Exact request; host authority also admits new requests.",
          "inputSchema": contract.tool_input, "outputSchema": TOOL_OUTPUT},
+        *contract.additional_tools,
         {"name": "lane_call", "description": "Host-admitted caller envelope; never export this control port.",
          "inputSchema": CONTROL},
         {"name": "lane_host_requests", "description": "List retained pending Exact requests.", "inputSchema": EMPTY},
@@ -416,9 +438,11 @@ def serve(here: Path, contract: Contract) -> None:
                             case "lane_host_result": output = worker.host_result(args)
                             case "lane_call":
                                 envelope = exact(args, {"tool", "arguments", "caller"}, "host call")
-                                if envelope["tool"] != contract.tool_name:
+                                text(envelope["tool"], "tool")
+                                if envelope["tool"] not in contract.exported_names():
                                     raise InvalidInput("unknown exported Exact tool")
-                                output = worker.invoke(envelope["arguments"], object_value(envelope["caller"], "caller"))
+                                output = worker.invoke(envelope["arguments"], object_value(envelope["caller"], "caller"),
+                                                       tool_name=envelope["tool"])
                             case _:
                                 raise InvalidInput("use the admitted caller envelope for exported tools")
                         result = tool_result(output)

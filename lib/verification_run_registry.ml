@@ -16,6 +16,7 @@ type outcome =
   | Commit_failed of { detail : string }
   | Raised of { detail : string }
   | Review_cancelled of { detail : string }
+  | Superseded_by of { authority : string }
 
 type tool_observation =
   { tool_name : string

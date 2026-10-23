@@ -682,6 +682,7 @@ let stop_cause_label = function
   | Not_reviewed { gate; evaluator_runtime; _ } ->
     Printf.sprintf "Not_reviewed{gate=%s,slot=%s}" gate evaluator_runtime
   | Raised _ -> "Raised"
+  | Superseded_by { authority } -> Printf.sprintf "Superseded_by{%s}" authority
 ;;
 
 let stop_cause_detail = function
@@ -699,6 +700,8 @@ let stalled_gate = function
   | Not_reviewed { gate; _ } -> gate
   | (Infrastructure_unavailable _ | Commit_failed _ | Raised _) as cause ->
     stop_cause_label cause
+  | Superseded_by { authority } ->
+    Printf.sprintf "Superseded_by{%s}" authority
 ;;
 
 (* The Board disposition for one stall, from what the scheduler reported. A
@@ -853,7 +856,7 @@ let commit_verdict
          verdict_label;
        (match task_terminal_detail runtime task.id with
         | Some detail ->
-          Superseded_by detail, Verification_run_registry.Superseded_by { authority = detail }
+          Superseded_by { authority = detail }, Verification_run_registry.Superseded_by { authority = detail }
         | None ->
           let cause = Commit_failed { detail = Masc_domain.masc_error_to_string error } in
           Stalled cause, registry_outcome_of_stop_cause cause)

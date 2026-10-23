@@ -26010,6 +26010,14 @@ and is loaded on demand through keeper_skill.
            state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
        | None, _ | Some _, None -> ());
       (match key with
+       (* Above the modals on purpose: the reason to reach for this is to copy
+          something already on the screen, and the help overlay is one of the
+          screens worth copying from. *)
+       | Some k when String.equal k toggle_mouse_tracking_key ->
+           toggle_mouse_tracking ();
+           (* Handed to the terminal, the button's release never comes here. *)
+           pointer_gesture := Masc_tui_pane_selection.Idle;
+           Render_schedule.request render_schedule Render_schedule.Force
        (* The invite card holds the only copy of a link, so it takes every key and
           closes on the operator's own: Esc or q, after which /play link brings
           it back. Enter does not close it, so a second Enter, pressed while
@@ -26152,6 +26160,9 @@ and is loaded on demand through keeper_skill.
                 | "\r" | "\n" | "enter" ->
                     launch_voice_agent_voice_save state ~mailbox:async_messages session
                 | _ -> ()))
+       (* Hidden Add-ons actions keep their draft and receipts, but cannot
+          dispatch while the resize fallback is the only painted frame. *)
+       | Some _ when compact_viewport && Option.is_some state.lane_addons -> ()
        | Some key when Option.is_some state.lane_addons && not state.palette_open ->
            let module Addons = Masc_tui_lane_addons in
            (match state.lane_addons with
@@ -26802,14 +26813,6 @@ and is loaded on demand through keeper_skill.
              report_action state "system"
                (session_quit_notice state ~key:"q")
            end
-       (* Above the modals on purpose: the reason to reach for this is to copy
-          something already on the screen, and the help overlay is one of the
-          screens worth copying from. *)
-       | Some k when String.equal k toggle_mouse_tracking_key ->
-           toggle_mouse_tracking ();
-           (* Handed to the terminal, the button's release never comes here. *)
-           pointer_gesture := Masc_tui_pane_selection.Idle;
-           Render_schedule.request render_schedule Render_schedule.Force
        (* Also above the modals: the roster is chrome around whatever is
           showing, and reclaiming its columns should not depend on which
           surface is up. *)

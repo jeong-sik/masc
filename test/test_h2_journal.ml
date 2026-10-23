@@ -1852,6 +1852,10 @@ let test_task_history_buffered_sources () = with_workspace (fun _env _sw base_pa
   let module History = Masc.Task.History_page in
   let config=Workspace.default_config base_path in
   let task_id="buffered-history-task" in
+  ignore (Activity_graph.emit config ~kind:"task.started"
+    ~actor:(Activity_graph.entity ~kind:"agent" keeper)
+    ~subject:(Activity_graph.entity ~kind:"task" "unrelated-history-task")
+    ~payload:(`Assoc ["task_id",`String "unrelated-history-task"]) ~tags:["task"] ());
   let directory=Filename.concat (Workspace.masc_dir config) "events/2099-12" in
   Fs_compat.mkdir_p directory;
   let path=Filename.concat directory "31.jsonl" in
@@ -1887,7 +1891,11 @@ let test_task_history_buffered_sources () = with_workspace (fun _env _sw base_pa
   check_row "large" (String.length first+1) middle;
   let bottom=get ~cursor:(Option.get middle.next_cursor) () in
   check_row "oldest" 0 bottom;
-  check bool "original stored prefix exhausted" true (Option.is_none bottom.next_cursor);
+  (* The page stops at the requested match, not at the last physical source.
+     Unrelated activity still remains after the final audit match. *)
+  let tail=get ~cursor:(Option.get bottom.next_cursor) () in
+  check int "remaining sources contain no observations for this Task" 0 (List.length tail.events);
+  check bool "original stored prefix exhausted" true (Option.is_none tail.next_cursor);
   (* Early success must not eagerly validate an older malformed row, while
      continuing into that row must still report its original physical offset. *)
   let malformed="not-json\n" in

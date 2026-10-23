@@ -478,7 +478,7 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
 
 **배포 1: 스택 1 (G)**
 - 새 판은 옛 automation 정리 기록(`driver`·`binary` 만 있는 것)을 읽지 않아요. 배포 전 검사가 그 기록을 가진 native claim 슬롯을 거절해요(`lane_addon_store_preflight.ml`, decoder `Browser_addon_socket.check_retained`).
-- 서버를 멈추고, 거절된 슬롯마다 그 슬롯 폴더와 그 인스턴스의 binding, 그 기록이 가리키는 `mb-…` 할당을 지운 뒤 새 판을 띄워요. 옛 할당에 남은 `automation-closed.json` 과 `profiles/` 도 이때 함께 지워져요.
+- 서버를 멈춰요. 거절마다 그 기록이 가리키는 `mb-…` 할당의 `profiles/` 를 아직 쥔 프로세스가 있으면 먼저 끝내요(`lsof +D <할당>/profiles`). 옛 판은 다시 뜬 Gecko 브라우저를 그곳에 남길 수 있어요(#45187). 그런 다음 배포 전 검사가 알려 주는 경로(슬롯, 그 인스턴스의 binding 과 observations)와 그 할당을 옮겨 두고 새 판을 띄워요. 옛 할당에 남은 `automation-closed.json` 과 `profiles/` 도 이때 함께 치워져요.
 - changelog 에 `Fresh state required` 로 적어요(#45403).
 
 **배포 2: 스택 2·3 (S, H, D)**

@@ -90,7 +90,7 @@ let dispatch ?carried_front_seed ?(initial_messages = covered @ [msg T.User pend
     ?(on_error = fun () -> ())
     ~sw ~net ~base_path () =
   let errors = ref [] in
-  (match Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = trace_id }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~system_prompt:"Continuity dispatch fixture."
+  (match Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = trace_id }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~system_prompt:"Continuity dispatch fixture."
       ~runtime_id:"continuity" ~keeper_name ~base_path
       ?carried_front_seed ~initial_messages ~agent_core_tools:[]
       ~goal:"Report progress."

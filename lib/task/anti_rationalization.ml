@@ -697,18 +697,18 @@ let run
        let lookup_observations = ref [] in
        let capture_lookup evaluator_slot name arguments result =
          let refusal = ref None in
-         let projected = Tool_bridge.to_agent_core_typed_result
+         let projected = Tool_projection.to_agent_core_typed_result
            ~base_path
            ~model_projection:(Tool_output.Inline_up_to
              { maximum_bytes = Tool_shard_limits.verification_evidence_max_bytes })
            ~on_externalization_error:(fun error -> refusal := Some error)
            result in
          let fields, media = match !refusal with
-           | Some { Tool_bridge.kind = Inline_budget_exceeded; message } ->
+           | Some { Tool_projection.kind = Inline_budget_exceeded; message } ->
              [ "projection_refusal", `Assoc
                  [ "kind", `String "inline_budget_exceeded"
                  ; "message", `String message ] ], []
-           | Some { Tool_bridge.kind = Artifact_storage_failure; message } ->
+           | Some { Tool_projection.kind = Artifact_storage_failure; message } ->
              [ "projection_refusal", `Assoc
                  [ "kind", `String "artifact_storage_failure"
                  ; "message", `String message ] ], []

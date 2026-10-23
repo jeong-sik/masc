@@ -738,7 +738,7 @@ let host_failure_fragments =
   Generic.host_failure_fragments @ keeper_matrix_guard_fragments
 
 (* The keeper path lowers [Tool_result.tool_failure_class] through
-   [Tool_bridge.agent_core_error_class_of_tool_failure_class], which keeps the
+   [Tool_projection.agent_core_error_class_of_tool_failure_class], which keeps the
    distinction this test needs: a refusal the tool chose arrives as
    [Deterministic] or [Transient], and only [Runtime_failure] arrives as
    [Unknown]. So the same question the MCP matrix asks is answerable here.

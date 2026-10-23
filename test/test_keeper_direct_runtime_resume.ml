@@ -233,7 +233,7 @@ is-default = true
         check_native_acknowledged binding;
         observe_native_request := observe_native_provider_request binding native_calls_seen)
         native_binding;
-      let result = Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = session_id }) ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      let result = Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = session_id }) ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
         ~keeper_name ~base_path  ~goal:"Finish original task"
         ~system_prompt:"Use the effect receipt to finish the original task."
@@ -524,7 +524,7 @@ is-default = true
         check_native_acknowledged binding;
         observe_native_request := observe_native_provider_request binding native_calls_seen)
         native_binding;
-      let result = Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = session_id }) ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      let result = Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = session_id }) ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~checkpoint_progress
         ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
         ~keeper_name ~base_path  ~goal:"Finish original task"

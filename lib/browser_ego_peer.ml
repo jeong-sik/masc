@@ -840,35 +840,56 @@ let ego_locator = function
   | Target_role {role;name;exact} ->
     Printf.sprintf "loc=role:%s[name%s%s]" role (if exact then "=" else "*=") (Yojson.Safe.to_string (str name))
   | Target_text {text;exact} -> "text=" ^ (if exact then Yojson.Safe.to_string (str text) else text)
-let target_input t ~id ~label ~deadline ~verb ~expected_url ~target ~text =
+type target_operation = Target_click | Target_fill of string | Target_hover | Target_double_click
+let target_input_script = {js|async function nativeTargetInput(page, args) {
+  const reason = error => String(error && error.message || error);
+  let refusal = null, urlBefore = null;
+  const checkUrl = async () => {
+    try {
+      urlBefore = await page.url();
+      if (urlBefore !== args.expectedUrl)
+        refusal = "the tab is at " + urlBefore + ", not at expectedUrl; read it again";
+    } catch (error) { refusal = reason(error); }
+  };
+  if (!["click", "fill", "hover", "double_click"].includes(args.action))
+    return {before: true, error: "unsupported snapshot target action"};
+  await checkUrl();
+  if (refusal === null) {
+    try { await page.waitForSelector(args.target, {state: "attached", timeout: args.waitMs}); }
+    catch (error) { refusal = reason(error); }
+  }
+  if (refusal === null) await checkUrl();
+  if (refusal !== null) return {before: true, error: refusal};
+  let receipt = null, failure = null;
+  try {
+    switch (args.action) {
+      case "click": receipt = await page.click(args.target); break;
+      case "fill": receipt = await page.fill(args.target, args.text); break;
+      case "hover": receipt = await page.hover(args.target); break;
+      case "double_click": receipt = await page.dblclick(args.target); break;
+    }
+  } catch (error) { failure = reason(error); }
+  return {urlBefore, receipt, error: failure};
+}|js}
+let target_input t ~id ~label ~deadline ~expected_url ~target ~operation =
+  let verb, text = match operation with
+    | Target_click -> "click", `Null
+    | Target_fill text -> "fill", str text
+    | Target_hover -> "hover", `Null
+    | Target_double_click -> "double_click", `Null in
   let unknown = Printf.sprintf "read tab %d before another step" id in
   let response = run_step t ~window_s:(left t deadline) ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",str expected_url;"target",str (ego_locator target);
-        "text",(match text with Some text -> str text | None -> `Null);"waitMs",`Int target_wait_ms])
+        "action",str verb;"text",text;"waitMs",`Int target_wait_ms])
       (String.concat "\n" [
-        "  const reason = " ^ message ^ ";";
+        target_input_script;
         unblocked_agent_page;
         "    const page = task.page(args.label);";
-        "    let refusal = null, urlBefore = null;";
-        "    try { urlBefore = await page.url(); } catch (error) { refusal = reason(error); }";
-        "    if (refusal === null && urlBefore !== args.expectedUrl)";
-        "      refusal = \"the tab is at \" + urlBefore + \", not at expectedUrl; read it again\";";
-        "    if (refusal === null) {";
-        "      try { await page.waitForSelector(args.target, {state: \"attached\", timeout: args.waitMs}); }";
-        "      catch (error) { refusal = reason(error); }";
-        "    }";
-        "    if (refusal === null) {";
-        "      try { urlBefore = await page.url(); } catch (error) { refusal = reason(error); }";
-        "      if (refusal === null && urlBefore !== args.expectedUrl)";
-        "        refusal = \"the tab is at \" + urlBefore + \", not at expectedUrl; read it again\";";
-        "    }";
-        "    if (refusal !== null) emit({ok: false, before: true, error: refusal});";
+        "    const outcome = await nativeTargetInput(page, args);";
+        "    if (outcome.before === true) emit({ok: false, before: true, error: outcome.error});";
         "    else {";
-        "      let receipt = null, failure = null;";
-        "      try { receipt = await (args.text === null ? page.click(args.target) : page.fill(args.target, args.text)); }";
-        "      catch (error) { failure = reason(error); }";
         "      const after = " ^ row_after ^ ";";
-        "      emit({ok: true, value: {urlBefore, receipt, error: failure, tab: after === undefined ? null : {url: after.url, title: after.title}}});";
+        "      emit({ok: true, value: {...outcome, tab: after === undefined ? null : {url: after.url, title: after.title}}});";
         "    }";
         "  }" ]) in
   match response with
@@ -926,7 +947,7 @@ let interact t args =
     | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
     | Browser_lane.Click_at _ | Browser_lane.Scroll_at _ | Browser_lane.Follow_link _
     | Browser_lane.Fill_node _ | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _
-    | Browser_lane.Double_click _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _ -> Ok () in
+    | Browser_lane.Double_click _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Ok () in
   let* expected_url, action =
     if Browser_interaction.needs_pointer_resolution request.action then
       let* resolved = resolve t ~label ~deadline (input ~expected_url:request.expected_url request.action) in
@@ -949,8 +970,8 @@ let interact t args =
         "        pointerReleased = outcome.released;";
         "        if (outcome.error !== null) throw new Error(outcome.error);"]
       ~fields:["path",`List (List.map pixels path)] in
-  let on_target ~target ~text = match expected_url with
-    | Some expected_url -> target_input t ~id ~label ~deadline ~verb ~expected_url ~target ~text
+  let on_target ~target operation = match expected_url with
+    | Some expected_url -> target_input t ~id ~label ~deadline ~expected_url ~target ~operation
     | None -> Error (Live.Before_effect "a snapshot target requires expectedUrl") in
   match action with
   | Browser_lane.Click_at {point; viewport; button} -> pointer viewport point (Press {button; count = 1})
@@ -968,8 +989,10 @@ let interact t args =
     dom_input t ~id ~label ~deadline ~verb (input ~expected_url action)
   | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _ | Browser_lane.Double_click _ ->
     Error (Live.Before_effect "unresolved semantic pointer target")
-  | Browser_lane.Click_target target -> on_target ~target ~text:None
-  | Browser_lane.Fill_target {target; text} -> on_target ~target ~text:(Some text)
+  | Browser_lane.Click_target target -> on_target ~target Target_click
+  | Browser_lane.Fill_target {target; text} -> on_target ~target (Target_fill text)
+  | Browser_lane.Hover_target target -> on_target ~target Target_hover
+  | Browser_lane.Double_click_target target -> on_target ~target Target_double_click
   | Browser_lane.Drag_to _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
   | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Activate_tab -> refused
 

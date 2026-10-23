@@ -85,7 +85,7 @@ description = "Retain the observed live clientId on every subsequent tab read/ac
 name = "target"
 type = "object"
 additional_properties = false
-description = "click/fill on an ego connection, with expectedUrl and without selector or documentId/nodeId: {ref} from the latest BrowserRead snapshot of the same page (12 for ref=12), {role, name} or {text}. exact (default true) matches the whole name or text; false matches a part, any case."
+description = "click/fill/hover/double_click on an ego connection, with the observed top-level expectedUrl and without selector or documentId/nodeId: {ref} from the latest BrowserRead snapshot of the same page (12 for ref=12), {role, name} or {text}. iframe refs use ego's native resolver; framePath is not combined with target. exact (default true) matches the whole name or text; false matches a part, any case."
 
 [[params.params]]
 name = "ref"

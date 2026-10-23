@@ -308,6 +308,10 @@ let test_snapshot_targets () =
           expected_url=request.expected_url;action=request.action}) = Some Browser_lane.Snapshot_target_input)
     | Error error -> failf "%s: %s" label error in
   expect "a ref" (Browser_lane.Click_target (Browser_lane.Target_ref 12)) (target "click" (`Assoc ["ref",`Int 12]));
+  expect "a hover ref" (Browser_lane.Hover_target (Browser_lane.Target_ref 12)) (target "hover" (`Assoc ["ref",`Int 12]));
+  expect "a double-click role"
+    (Browser_lane.Double_click_target (Browser_lane.Target_role {role="button";name="Edit";exact=true}))
+    (target "double_click" (`Assoc ["role",`String "button";"name",`String "Edit"]));
   expect "a role is exact by default"
     (Browser_lane.Click_target (Browser_lane.Target_role {role="button";name="Send";exact=true}))
     (target "click" (`Assoc ["role",`String "button";"name",`String "Send"]));
@@ -323,7 +327,9 @@ let test_snapshot_targets () =
      "with a selector",target "click" (`Assoc ["ref",`Int 1]) @ ["selector",`String "#send"];
      "with a scene node",target "click" (`Assoc ["ref",`Int 1]) @ ["documentId",`String "d";"nodeId",`String "n"];
      "in a frame",target "click" (`Assoc ["ref",`Int 1]) @ ["framePath",`List [`String "#frame"]];
-     "on hover",target "hover" (`Assoc ["ref",`Int 1]);
+     "on select",target "select_option" (`Assoc ["ref",`Int 1]) @ ["values",`List []];
+     "hover with a selector",target "hover" (`Assoc ["ref",`Int 1]) @ ["selector",`String "#send"];
+     "double-click in an explicit frame",target "double_click" (`Assoc ["ref",`Int 1]) @ ["framePath",`List [`String "#frame"]];
      "a negative ref",target "click" (`Assoc ["ref",`Int (-1)]);
      "a ref as text",target "click" (`Assoc ["ref",`String "@1"]);
      "two shapes at once",target "click" (`Assoc ["ref",`Int 1;"text",`String "Send"]);

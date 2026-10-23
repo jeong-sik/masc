@@ -420,7 +420,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
         | Browser_lane.Hover_at _ | Browser_lane.Click_at _ | Browser_lane.Scroll_at _
         | Browser_lane.Tap_at _ | Browser_lane.Swipe _
         | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _
-        | Browser_lane.Click_target _ | Browser_lane.Fill_target _ -> Ok action in
+        | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Ok action in
       Ok (action, expected_url)
     | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
     | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
@@ -428,7 +428,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
     | Browser_lane.Tap_at _ | Browser_lane.Swipe _
     | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
     | Browser_lane.Fill_node _ -> Ok (action, expected_url)
-    | Browser_lane.Click_target _ | Browser_lane.Fill_target _ ->
+    | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ ->
       Error (Browser_lane.Rejected_before_effect Browser_lane.snapshot_target_refused) in
   let args = Browser_lane.interaction_args ~tab_id ~frame_path:[] ~expected_url action in
   match (action : Browser_lane.interaction) with
@@ -485,7 +485,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
   | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _ | Browser_lane.Fill_node _ ->
     let* receipt = evaluate ~runtime:Scene_runtime ~send:(send call) ~args page_id Browser_interaction.script in
     interaction_receipt ~tab_id receipt
-  | Browser_lane.Click_target _ | Browser_lane.Fill_target _ ->
+  | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ ->
     Error (Browser_lane.Rejected_before_effect Browser_lane.snapshot_target_refused)
 ;;
 

@@ -24,6 +24,34 @@ val with_turn_span : (unit -> 'a) -> 'a
     a body exception is preserved.  Brackets the pair so a caller cannot
     emit a start without its matching end. *)
 
+type 'handoff startup_error =
+  | Handoff_failed of 'handoff
+  | Directory_unavailable of { directory : string; detail : string }
+  | Exec_failed of { executable_path : string; detail : string }
+
+val startup_error_to_string :
+  handoff_error_to_string:('handoff -> string) -> 'handoff startup_error -> string
+
+val prepare_process :
+  base_path:string ->
+  executable_path:string ->
+  argv:string array ->
+  before_exec:(unit -> (unit, 'handoff) result) ->
+  (unit, 'handoff startup_error) result
+(** Prepare the HTTP server's Runtime_events directory before its listener,
+    PID lock, console thread, sampler, or Eio scheduler starts. The caller
+    holds the canonical BasePath writer lease for this operation.
+
+    When events are enabled, [OCAML_RUNTIME_EVENTS_DIR] is absent and no ring
+    is already active, call [before_exec] to preserve the existing lease,
+    prepare [<base_path>/.masc/runtime/events] through no-follow directory
+    checks, then exec [executable_path] with the unchanged [argv] and an
+    environment containing that directory.
+
+    Expected directory/exec failures return [Error] without fallback. Exec
+    failure does not change this process's environment. The caller releases
+    its lease and refuses startup on any failure, including an exception. *)
+
 val prune_stale_dumps : dir:string -> unit
 (** Remove [<pid>.events] ring-buffer dumps in [dir] whose owning process no
     longer exists.

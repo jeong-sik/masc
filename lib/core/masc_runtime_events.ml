@@ -32,6 +32,70 @@ let with_turn_span f =
 let runtime_events_enabled () =
   Safe_ops.get_env_bool_logged "MASC_RUNTIME_EVENTS" ~default:true
 
+type 'handoff startup_error =
+  | Handoff_failed of 'handoff
+  | Directory_unavailable of { directory : string; detail : string }
+  | Exec_failed of { executable_path : string; detail : string }
+
+let startup_error_to_string ~handoff_error_to_string = function
+  | Handoff_failed error ->
+    "Runtime_events lease handoff failed: " ^ handoff_error_to_string error
+  | Directory_unavailable { directory; detail } ->
+    Printf.sprintf "Runtime_events directory unavailable path=%s: %s" directory detail
+  | Exec_failed { executable_path; detail } ->
+    Printf.sprintf "Runtime_events restart failed executable=%s: %s" executable_path detail
+
+type startup_plan =
+  | Keep_process
+  | Reexec_with_directory of { ownership_root : string; directory : string }
+
+let plan_startup ~base_path ~enabled ~configured_directory ~ring_started =
+  match enabled, configured_directory, ring_started with
+  | false, _, _ | true, Some _, _ | true, None, true -> Keep_process
+  | true, None, false ->
+    let ownership_root = Common.masc_dir_from_base_path ~base_path in
+    Reexec_with_directory
+      { ownership_root; directory = Filename.concat ownership_root "runtime/events" }
+
+let prepare_directory ~ownership_root directory =
+  let unavailable detail = Error (Directory_unavailable { directory; detail }) in
+  let inspect () =
+    match Fs_compat.inspect_owned_directory_chain ~ownership_root directory with
+    | Error rejection ->
+      unavailable (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+    | Ok Fs_compat.Owned_directory_missing -> Ok false
+    | Ok (Fs_compat.Owned_directory _) -> Ok true
+  in
+  try
+    match inspect () with
+    | Error _ as error -> error
+    | Ok true -> Ok ()
+    | Ok false ->
+      Fs_compat.mkdir_p directory;
+      (match inspect () with
+       | Error _ as error -> error
+       | Ok true -> Ok ()
+       | Ok false -> unavailable "directory is absent after creation")
+  with
+  | (Unix.Unix_error _ | Sys_error _) as error -> unavailable (Printexc.to_string error)
+
+let prepare_process ~base_path ~executable_path ~argv ~before_exec =
+  let directory_key = "OCAML_RUNTIME_EVENTS_DIR" in
+  let plan = plan_startup ~base_path
+      ~enabled:(runtime_events_enabled ())
+      ~configured_directory:(Sys.getenv_opt directory_key)
+      ~ring_started:(Option.is_some (Runtime_events.path ())) in
+  match plan with
+  | Keep_process -> Ok ()
+  | Reexec_with_directory { ownership_root; directory } ->
+    let ( let* ) = Result.bind in
+    let* () = before_exec () |> Result.map_error (fun error -> Handoff_failed error) in
+    let* () = prepare_directory ~ownership_root directory in
+    let environment = Array.append (Unix.environment ()) [| directory_key ^ "=" ^ directory |] in
+    (try Unix.execve executable_path argv environment with
+     | (Unix.Unix_error _ | Sys_error _) as error ->
+       Error (Exec_failed { executable_path; detail = Printexc.to_string error }))
+
 let dump_suffix = ".events"
 
 let is_decimal_digits s =

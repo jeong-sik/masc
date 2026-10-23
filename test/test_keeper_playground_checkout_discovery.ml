@@ -187,6 +187,27 @@ let test_symlinked_git_entry_is_rejected () =
     check_paths "a symlinked .git is not a checkout" [] (C.discover ~root))
 ;;
 
+(* A symlinked .git excludes the whole child tree, even a recognizable nested
+   checkout. A visible sibling proves the scan itself still runs. This checks the
+   boundary decision directly, without relying on exhausting the entry budget. *)
+let test_symlinked_git_entry_does_not_descend () =
+  with_temp_root (fun root ->
+    let dir = Filename.concat root "repos/x" in
+    make_checkout root "repos/x/nested/repo";
+    make_checkout root "repos/visible";
+    check_paths "a nested checkout without a boundary is discoverable"
+      [ "repos/visible"; "repos/x/nested/repo" ] (C.discover ~root);
+    let git_entry = Filename.concat dir ".git" in
+    Unix.symlink (Filename.concat root "elsewhere") git_entry;
+    Fun.protect ~finally:(fun () -> Unix.unlink git_entry) (fun () ->
+      match C.discover ~root with
+      | Ok (C.Complete checkouts) ->
+        check (list string) "a symlinked .git prunes nested checkouts but keeps siblings"
+          [ "repos/visible" ]
+          (List.map (fun (checkout : C.checkout) -> checkout.relative_path) checkouts)
+      | Ok (C.Partial _) | Error _ -> fail "expected a complete scan within checkout boundaries"))
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Failure is not emptiness                                            *)
 (* ------------------------------------------------------------------ *)
@@ -401,6 +422,8 @@ let () =
       , [ test_case "symlinked directory not traversed" `Quick
             test_symlinked_directory_is_not_traversed
         ; test_case "symlinked .git rejected" `Quick test_symlinked_git_entry_is_rejected
+        ; test_case "symlinked .git does not descend" `Quick
+            test_symlinked_git_entry_does_not_descend
         ] )
     ; ( "failure is not emptiness"
       , [ test_case "missing root is not an empty listing" `Quick

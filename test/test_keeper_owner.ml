@@ -125,7 +125,7 @@ let owner_ok = function
   | Error error -> fail (Owner.error_to_string error)
 ;;
 
-let noop_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ =
+let noop_execution_settled ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution:_ =
   ()
 ;;
 
@@ -861,7 +861,7 @@ let test_stopping_cancels_and_joins_active_child () =
   let never, _resolve_never = Eio.Promise.create () in
   let settled = ref None in
   let original_turn = Ids.Turn_ref.make ~trace_id:"stopping-active-original" ~absolute_turn:1 in
-  let record_settled ~keeper_name ~claimed_operation_id ~execution =
+  let record_settled ~keeper_name ~operations:_ ~claimed_operation_id ~execution =
     settled := Some (keeper_name, claimed_operation_id, execution)
   in
   let operation_executor ~sw:child_sw ~keeper_name:_ ~claim =
@@ -1481,7 +1481,7 @@ let test_gate_wait_releases_owner_without_repeated_children () =
       Owner.resume_direct_gate owner ~operation_id ~waiting ~resolution |> owner_ok;
       Owner.discharge_direct_gate owner ~operation_id ~obligation |> owner_ok;
       Owner.Operation_succeeded {outcome_ref="original-gate-complete"} in
-  let on_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~execution =
+  let on_execution_settled ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution =
     match execution with
     | Owner.Operation_deferred -> Eio.Promise.resolve resolve_waiting ()
     | Owner.Operation_succeeded _ -> Eio.Promise.resolve resolve_finished ()
@@ -1871,7 +1871,7 @@ let test_runtime_deferred_child_keeps_same_operation_and_drains () =
       owner_ok (Owner.resume_direct_runtime_retry owner ~operation_id:operation.operation_id ~observed);
       Owner.Operation_succeeded {outcome_ref="alternate-runtime-completed"}
   in
-  let on_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~execution =
+  let on_execution_settled ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution =
     match execution with
     | Owner.Operation_deferred -> ()
     | Owner.Operation_succeeded _ -> Eio.Promise.resolve resolve_settled ()
@@ -2724,7 +2724,7 @@ let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
     Owner.
       { ready = (fun ~keeper_name:_ -> true)
       ; execute = operation_executor
-      ; on_execution_settled = (fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ ->
+      ; on_execution_settled = (fun ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution:_ ->
           Eio.Promise.resolve mark_settling ();
           Eio.Promise.await release)
       }
@@ -3265,7 +3265,7 @@ let test_startup_requeues_exact_native_call () =
       ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 20.) ~operation_runner:None
       ~on_turn_slot_released:None ~keeper_name:"native-restart"
       ~initial_meta:(Some (make_meta "native-restart")) |> owner_ok in
-    check int "witnessed native operation not interrupted" 0 (List.length (Owner.restart_interrupted_operations owner));
+    check int "witnessed native operation not interrupted" 0 (List.length (Owner.failed_operations_at_start owner));
     let resumed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
     check bool "Owner claims original operation" true (Chat_operation.Operation_id.equal operation_id resumed.operation_id);
     check bool "Owner preserves input" true (operation.input = resumed.input);
@@ -3345,7 +3345,7 @@ let test_startup_interrupts_running_without_requeue () =
             (Chat_operation.failure_kind_to_string kind)
         | state -> fail ("restart did not interrupt Running: " ^ Chat_operation.state_to_string state));
        check bool "interrupted input is scrubbed" true (Option.is_none settled.input);
-       (match Owner.restart_interrupted_operations owner with
+       (match Owner.failed_operations_at_start owner with
         | [ interrupted ] ->
           check bool "the owner names the operation the restart cut off" true
             (Chat_operation.Operation_id.equal interrupted.operation_id operation_id)
@@ -3522,11 +3522,10 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
        start_and_check [journal;member_journal])
 ;;
 
-(* A restart-interrupted operation stays in the store with the source it was
-   submitted with. Once that source no longer decodes, the first start writes a
-   failure row without a surface and says so; every later start finds the row
-   present and neither decodes the source nor repeats the warning. *)
-let test_registry_start_reports_an_undecodable_restart_source_only_when_it_writes_the_row () =
+(* A failed operation retains its accepted source. If that source cannot
+   supply a route, recovery still preserves the failed request once, without
+   inventing a surface or conversation coordinate. *)
+let test_registry_start_preserves_failure_without_an_undecodable_route () =
   let base_path = Filename.temp_dir "keeper-owner-restart-old-source" "" in
   Fun.protect
     ~finally:(fun () ->
@@ -3566,11 +3565,8 @@ let test_registry_start_reports_an_undecodable_restart_source_only_when_it_write
          | `Assoc fields -> `Assoc (List.remove_assoc "sender_keeper" fields)
          | _ -> fail "an operation source encodes as a JSON object"
        in
-       let decode_detail =
-         match Keeper_chat_operation_payload.source_of_json source with
-         | Error detail -> detail
-         | Ok _ -> fail "a source without sender_keeper must not decode"
-       in
+       check bool "the stored source cannot supply a route" true
+         (Result.is_error (Keeper_chat_operation_payload.source_of_json source));
        let store_path =
          Keeper_chat_operation_store.path_for_keeper
            ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
@@ -3589,14 +3585,7 @@ let test_registry_start_reports_an_undecodable_restart_source_only_when_it_write
        |> ignore;
        Keeper_chat_operation_store.claim_next seed ~now:11.0 |> Result.get_ok |> ignore;
        Keeper_chat_operation_store.close seed |> Result.get_ok;
-       let decode_warning =
-         Printf.sprintf
-           "restart-interrupted operation %s has an undecodable source; its failure row carries no surface: %s"
-           (Chat_operation.Operation_id.to_string operation_id)
-           decode_detail
-       in
-       let start_and_count_warnings () =
-         let baseline = (Log.Ring.bounds ()).total - 1 in
+       let start () =
          Eio.Switch.run (fun sw ->
            match
              Owner_registry.install_from_store
@@ -3606,34 +3595,122 @@ let test_registry_start_reports_an_undecodable_restart_source_only_when_it_write
                config
            with
            | Ok count -> check int "one owner installed" 1 count
-           | Error error -> fail (Owner_registry.install_error_to_string error));
-         Log.Ring.recent
-           ~limit:1000
-           ~module_filter:"Keeper"
-           ~since_seq:baseline
-           ~order:`Oldest_first
-           ()
-         |> List.filter (fun (entry : Log.Ring.entry) ->
-              entry.level = Log.Warn
-              && Option.equal String.equal entry.keeper_name (Some keeper_name)
-              && String.equal entry.message decode_warning)
-         |> List.length
+           | Error error -> fail (Owner_registry.install_error_to_string error))
        in
        let failure_rows () =
          Keeper_chat_store.load ~base_dir:base_path ~keeper_name
          |> List.filter (fun (row : Keeper_chat_store.chat_message) ->
               Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Request_failure)
        in
-       check int "the start that writes the row reports the undecodable source" 1
-         (start_and_count_warnings ());
+       start ();
        (match failure_rows () with
         | [ row ] ->
           check bool "the row carries no surface" true (Option.is_none row.surface);
           check (option string) "the row carries no conversation" None row.conversation_id
         | rows -> failf "expected one failure row, got %d" (List.length rows));
-       check int "a start that finds the row present does not report the source again" 0
-         (start_and_count_warnings ());
+       start ();
        check int "the later start writes no second row" 1 (List.length (failure_rows ())))
+;;
+
+let test_registry_replays_all_failed_facts_without_erasing_output () =
+  let base_path = Filename.temp_dir "keeper-owner-failed-projection" "" in
+  Fun.protect ~finally:(fun () ->
+    Keeper_registry.For_testing.clear ();
+    remove_tree base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let module Store = Keeper_chat_operation_store in
+  let module Journal = Keeper_chat_event_log in
+  let module Identity = Keeper_chat_delivery_identity in
+  let keeper_name = "failed-projection-owner" in
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:(Some "operator"));
+  Keeper_meta_store.replace_snapshot config (make_meta keeper_name) |> Result.get_ok;
+  let source = Keeper_chat_operation_payload.source_to_json
+    ~submitted_by:"masc-tui" ~thread_id:("keeper:" ^ keeper_name)
+    ~continuation_channel:(Keeper_continuation_channel.dashboard
+      ~thread_id:("keeper:" ^ keeper_name) |> Result.get_ok)
+    ~surface:(Surface_ref.Dashboard {session_id=None})
+    ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
+    ~conversation_id:None ~external_message_id:None ~workspace_id:None
+    ~extra_mentions:[] ~sender_keeper:None ~user_row_origin:Keeper_chat_store.Needs_append
+    |> Result.get_ok in
+  let path = Store.path_for_keeper
+    ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config) ~keeper_name in
+  (try Unix.mkdir (Filename.dirname path) 0o755 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error) in
+  let seed = store_ok (Store.open_or_create ~path) in
+  let facts = Fun.protect ~finally:(fun () -> ignore (Store.close seed)) @@ fun () ->
+    List.mapi (fun index kind ->
+      let operation_id = operation_id ("kmsg-failed-" ^ Chat_operation.failure_kind_to_string kind) in
+      ignore (store_ok (Store.submit seed ~now:1. ~operation_id ~source
+        ~input:(operation_input "retain this accepted request")));
+      ignore (store_ok (Store.claim_next seed ~now:2.));
+      store_ok (Store.fail_running seed ~now:(10. +. float_of_int index)
+        ~operation_id ~kind ~detail:"private producer diagnostic" ~outcome_ref:None))
+      Chat_operation.all_failure_kinds in
+  let cancelled = List.find (fun (operation : Chat_operation.t) -> match operation.state with
+    | Failed {failure={kind=Turn_cancelled;_};_} -> true | _ -> false) facts in
+  let raw_id operation = Chat_operation.Operation_id.to_string operation.Chat_operation.operation_id in
+  let key operation = Identity.Operation (Identity.Request_id.of_string (raw_id operation) |> Result.get_ok) in
+  let answer = "An answer delivered before the host rejected completion." in
+  Keeper_chat_store.append_assistant_message_once ~base_dir:base_path ~keeper_name
+    ~delivery_key:(key cancelled) ~content:answer () |> Result.get_ok |> ignore;
+  let journal operation = Journal.open_journal ~base_dir:base_path ~keeper_name
+    ~operation_id:(raw_id operation) () in
+  ignore (journal cancelled);
+  let blocked_path = Journal.journal_path ~base_dir:base_path ~keeper_name
+    ~operation_id:(raw_id cancelled) in
+  Unix.mkdir blocked_path 0o700;
+  let start () = Eio.Switch.run @@ fun sw ->
+    Owner_registry.install_from_store ~sw ~operation_runner:None
+      ~on_turn_slot_released:None config
+    |> Result.map_error Owner_registry.install_error_to_string |> Result.get_ok |> ignore in
+  let rows_for operation slot =
+    Keeper_chat_store.load ~base_dir:base_path ~keeper_name
+    |> List.filter (fun (row : Keeper_chat_store.chat_message) -> match row.delivery_provenance with
+      | Some provenance -> Identity.delivery_key_equal provenance.delivery_key (key operation)
+          && Identity.transcript_slot_equal provenance.transcript_slot slot
+      | None -> false) in
+  let check_transcripts () =
+    List.iter (fun operation -> match rows_for operation Identity.Settled_failure with
+      | [row] -> check bool "every failed verdict has its own server-owned row" true
+          (Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Request_failure)
+      | _ -> fail "retained failed operation lost or duplicated its transcript projection") facts;
+    match rows_for cancelled Identity.Terminal_result with
+    | [row] ->
+        check string "the earlier assistant output survives failure projection" answer row.content;
+        check bool "the earlier terminal keeps the assistant role" true
+          (Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Assistant)
+    | _ -> fail "failure projection replaced or duplicated the delivered assistant result" in
+  start ();
+  check_transcripts ();
+  check bool "the journal append really failed" true (Sys.is_directory blocked_path);
+  Unix.rmdir blocked_path;
+  let check_recovered () =
+    start ();
+    check_transcripts ();
+    let store = store_ok (Store.open_or_create ~path) in
+    Fun.protect ~finally:(fun () -> ignore (Store.close store)) @@ fun () ->
+    List.iter (fun (original : Chat_operation.t) ->
+      let persisted = Option.get (store_ok (Store.get store original.operation_id)) in
+      check bool "startup does not rewrite an immutable failure or its clock" true
+        (Yojson.Safe.equal (Chat_operation.to_json original) (Chat_operation.to_json persisted));
+      let completed_at = match persisted.state with
+        | Failed {completed_at;_} -> completed_at
+        | _ -> fail "startup changed the durable failed state" in
+      let journal = journal original in
+      (match Journal.find_operation_terminal journal
+          ~settlement:{operation_id=original.operation_id;completed_at} with
+       | Ok (Some (Journal.Existing_terminal_error {seq=0;ts;_})) ->
+           check (float 0.) "recovery retains the original completed_at" completed_at ts
+       | _ -> fail "startup did not project the exact original failed settlement");
+      (match Journal.read_journal journal with
+       | Ok [{event=Keeper_chat_events.Event_error _;_}] -> ()
+       | _ -> fail "failure replay appended a duplicate or omitted its terminal")) facts in
+  check_recovered ();
+  check_recovered ()
 ;;
 
 (* A shared chat batch runs once and journals to every member. The restart
@@ -5843,9 +5920,11 @@ let () =
             `Quick
             test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request
         ; test_case
-            "registry start reports an undecodable restart source only when it writes the row"
+            "registry start preserves failure when the source cannot supply a route"
             `Quick
-            test_registry_start_reports_an_undecodable_restart_source_only_when_it_writes_the_row
+            test_registry_start_preserves_failure_without_an_undecodable_route
+        ; test_case "registry replays every failed fact and preserves earlier output" `Quick
+            test_registry_replays_all_failed_facts_without_erasing_output
         ; test_case
             "registry start ends every batch member journal after a restart"
             `Quick

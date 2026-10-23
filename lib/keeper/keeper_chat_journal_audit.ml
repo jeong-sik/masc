@@ -166,7 +166,7 @@ let lifecycle_ends_run_error row =
 
 let is_terminal_result_slot (row : Store.chat_message) =
   match row.delivery_provenance with
-  | Some { Delivery.transcript_slot = Delivery.Terminal_result; _ } -> true
+  | Some { Delivery.transcript_slot = (Delivery.Terminal_result | Delivery.Settled_failure); _ } -> true
   | Some { transcript_slot = (Delivery.Accepted_user | (Delivery.Approval_request | (Delivery.Approval_resolution | (Delivery.Approval_replay | (Delivery.Approval_replay_correction | (Delivery.Approval_continuation | (Delivery.Tool_call _ | Delivery.Tool_delivery _)))))));_}
   | None -> false
 ;;
@@ -176,7 +176,7 @@ let is_terminal_row (row : Store.chat_message) =
   || Store.Role.equal row.role Store.Role.Request_failure
 ;;
 
-(* The store half of a turn: the exact [Terminal_result] slot when the
+(* The store half of a turn: the latest exact terminal slot when the
    append-once path persisted it, otherwise the last joined terminal row
    (Keeper speech or server-owned failed request). *)
 let terminal_result_row rows =

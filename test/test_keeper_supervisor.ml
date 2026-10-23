@@ -1283,7 +1283,7 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
                   Masc.Keeper_owner.Operation_succeeded
                     { outcome_ref = "supervisor-ready-wake" })
          ; on_execution_settled =
-             (fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ -> ())
+             (fun ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution:_ -> ())
          }
        in
        (match

@@ -43,6 +43,7 @@ describe('keeper chat delivery provenance', () => {
 
   it.each([
     [{ kind: 'operation', operation_id: 'kmsg-1' }, { kind: 'accepted_user' }],
+    [{ kind: 'operation', operation_id: 'kmsg-1' }, { kind: 'settled_failure' }],
     [checkpointKey, { kind: 'tool_call', execution_id: 'exec-3', ordinal: 0 }],
     [nativeKey, { kind: 'tool_delivery', ordinal: 2 }],
     [{ kind: 'fusion_run', request_id: 'fusion-1' }, { kind: 'terminal_result' }],
@@ -119,6 +120,25 @@ describe('keeper chat delivery provenance', () => {
     expect(sameDeliveryProvenance(user, { ...user })).toBe(true)
     expect(isOperationDeliveryProvenance(user, 'kmsg-1', 'accepted_user')).toBe(true)
     expect(isOperationDeliveryProvenance(user, 'kmsg-1', 'terminal_result')).toBe(false)
+  })
+
+  it('retains authoritative failure after an earlier assistant result', () => {
+    const key = { kind: 'operation' as const, operation_id: 'kmsg-settled' }
+    const decoded = decodeKeeperChatDeliveryProvenance(key, { kind: 'settled_failure' })
+    expect(decoded.status).toBe('valid')
+    if (decoded.status !== 'valid') throw new Error('settled failure did not decode')
+    expect(sameDeliveryProvenance(decoded.value, {
+      delivery_key: key, transcript_slot: { kind: 'terminal_result' },
+    })).toBe(false)
+    expect(sameDeliveryProvenance(decoded.value, {
+      delivery_key: key, transcript_slot: { kind: 'settled_failure' },
+    })).toBe(true)
+    expect(normalizeKeeperStatusPayloadDeliveryProvenance({ history_tail: [{
+      role: 'request_failure', delivery_key: key, transcript_slot: { kind: 'settled_failure' },
+    }] })).toEqual({ history_tail: [{
+      role: 'request_failure', delivery_provenance: decoded.value,
+      delivery_provenance_status: 'valid',
+    }] })
   })
 
   it('compares every field of a multi-field delivery key', () => {

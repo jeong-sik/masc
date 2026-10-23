@@ -1605,7 +1605,7 @@ let test_official_turn_keeps_tool_result_until_completion () =
         }
     | Error error -> fail (Owner.error_to_string error)
   in
-  let noop_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ = () in
+  let noop_execution_settled ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution:_ = () in
   (match
      Owner_registry.install_from_store
        ~sw

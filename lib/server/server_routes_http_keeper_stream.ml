@@ -3577,19 +3577,25 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
          "keeper chat operation %s succeeded without a wire terminal event"
          operation_id)
 
-(* The production settle glue between the Owner hook and the wire registry.
-   Named (and exposed via For_testing) so a test executes exactly what the
-   runner wires: both identifiers become plain strings at this boundary, so
-   a swapped argument would typecheck (#28849 review). *)
-let on_operation_execution_settled ~base_path ~keeper_name ~claimed_operation_id ~execution =
+(* The Owner supplies the committed batch. Looking it up through admission
+   here would fail during shutdown and re-enter the actor while it is settling.
+   Projection errors leave the immutable failure available for restart. *)
+let on_operation_execution_settled ~base_path ~keeper_name ~claimed_operation_id
+    ~operations ~execution =
   match claimed_operation_id with
   | None -> ()
-  | Some operation_id ->
-    synthesize_wire_terminal_on_settle
-      ~base_path
-      ~keeper_name
-      ~operation_id:(Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
-      ~execution
+  | Some _ ->
+    List.iter (fun (operation : Keeper_chat_operation.t) ->
+      match Keeper_chat_failure_projection.persist ~base_path ~keeper_name operation with
+      | Error error ->
+        Log.Keeper.error ~keeper_name
+          "chat operation projection pending operation=%s: %s"
+          (Keeper_chat_operation.Operation_id.to_string operation.operation_id)
+          (Keeper_chat_failure_projection.error_to_string error)
+      | Ok (Not_failed | Projected _) ->
+        synthesize_wire_terminal_on_settle ~base_path ~keeper_name
+          ~operation_id:(Keeper_chat_operation.Operation_id.to_string operation.operation_id)
+          ~execution) operations
 ;;
 
 let operation_runner ~state ~clock : Keeper_owner.operation_runner =
@@ -3604,18 +3610,7 @@ let operation_runner ~state ~clock : Keeper_owner.operation_runner =
          | Some (_, Keeper_registry_types.Base_path_mismatch _)
          | Some (_, Keeper_registry_types.Name_mismatch _) -> false)
   ; execute = operation_executor ~state ~clock
-  ; on_execution_settled = (fun ~keeper_name ~claimed_operation_id ~execution ->
-      match claimed_operation_id with
-      | None -> ()
-      | Some operation_id ->
-        match Keeper_owner_registry.batch_operations ~base_path ~keeper_name operation_id with
-        | Error error ->
-          Log.Keeper.error "batch terminal projection failed for %s: %s"
-            keeper_name (Keeper_owner_registry.command_error_to_string error);
-          on_operation_execution_settled ~base_path ~keeper_name ~claimed_operation_id ~execution
-        | Ok members -> List.iter (fun (member : Keeper_chat_operation.t) ->
-            on_operation_execution_settled ~base_path ~keeper_name
-              ~claimed_operation_id:(Some member.operation_id) ~execution) members)
+  ; on_execution_settled = on_operation_execution_settled ~base_path
   }
 ;;
 
@@ -3695,14 +3690,14 @@ let journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq =
    must not suppress its failure. A matching terminal already sent by this
    replay needs no supplement. The fallback has no sequence and cannot move
    the client's cursor backwards. *)
-let restart_terminal_after_replay ~base_path ~keeper_name
+let operation_terminal_after_replay ~base_path ~keeper_name
     ~(operation : Keeper_chat_operation.t) ~replayed =
   match operation.state with
-  | Failed {completed_at;failure={kind=Interrupted_by_restart;_}} ->
+  | Failed {completed_at;_} ->
       let operation_id = Keeper_chat_operation.Operation_id.to_string operation.operation_id in
       let journal = Keeper_chat_event_log.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
       let settlement = {Keeper_chat_event_log.operation_id=operation.operation_id;completed_at} in
-      let already_sent = match Keeper_chat_event_log.find_restart_terminal journal ~settlement with
+      let already_sent = match Keeper_chat_event_log.find_operation_terminal journal ~settlement with
         | Ok (Some (Existing_terminal_error {seq;_} | Recorded_terminal_error {seq;_})) -> Hashtbl.mem replayed seq
         | Ok None | Error _ -> false in
       if already_sent then None
@@ -3711,24 +3706,7 @@ let restart_terminal_after_replay ~base_path ~keeper_name
         ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
         ~message:(Some Keeper_chat_events.public_error_message)
         ~code:(Some Keeper_chat_events.public_error_code) Ag_ui.Run_error)
-  | Queued
-  | Running _
-  | Succeeded _
-  | Failed
-      { failure =
-          { kind =
-              ( Keeper_chat_operation.Turn_cancelled
-              | Keeper_chat_operation.Turn_exception
-              | Keeper_chat_operation.Store_unavailable
-              | Keeper_chat_operation.No_queued_operation
-              | Keeper_chat_operation.Invalid_input
-              | Keeper_chat_operation.Turn_invariant
-              | Keeper_chat_operation.Delivery_failed )
-          ; _
-          }
-      ; _
-      }
-  | Cancelled _ -> None
+  | Queued | Running _ | Succeeded _ | Cancelled _ -> None
 ;;
 
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
@@ -3873,7 +3851,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
            ());
         Server_keeper_stream_handoff.accept handoff ~send:send_live;
         Option.iter (fun event -> ignore (send_event ~seq:None event))
-          (restart_terminal_after_replay ~base_path ~keeper_name:payload.name ~operation ~replayed);
+          (operation_terminal_after_replay ~base_path ~keeper_name:payload.name ~operation ~replayed);
         if Keeper_owner.Chat_operation.is_terminal operation.state then finish ()
       in
       let submit_result =
@@ -3994,7 +3972,7 @@ module For_testing = struct
   let parse_request = parse_keeper_chat_stream_request
   let live_event_is_new = live_event_is_new
   let journal_replay_frames = journal_replay_frames
-  let restart_terminal_after_replay = restart_terminal_after_replay
+  let operation_terminal_after_replay = operation_terminal_after_replay
   let has_connector_context = has_connector_context
   let has_external_speaker = has_external_speaker
   let message_for_request = message_for_request

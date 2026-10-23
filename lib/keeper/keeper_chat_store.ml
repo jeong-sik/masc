@@ -545,6 +545,7 @@ let validate_delivery_execution_identity ~execution_id
           Error "tool_delivery transcript slot forbids row execution_id"
       | ( Keeper_chat_delivery_identity.Accepted_user
         | Keeper_chat_delivery_identity.Terminal_result
+        | Keeper_chat_delivery_identity.Settled_failure
         | Keeper_chat_delivery_identity.Approval_request
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
@@ -554,6 +555,7 @@ let validate_delivery_execution_identity ~execution_id
           Ok ()
       | ( Keeper_chat_delivery_identity.Accepted_user
         | Keeper_chat_delivery_identity.Terminal_result
+        | Keeper_chat_delivery_identity.Settled_failure
         | Keeper_chat_delivery_identity.Approval_request
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
@@ -568,6 +570,7 @@ let validate_delivery_role ~role_label
   match provenance.transcript_slot, role_label with
   | Keeper_chat_delivery_identity.Accepted_user, "user"
   | Keeper_chat_delivery_identity.Terminal_result, ("assistant" | "request_failure")
+  | Keeper_chat_delivery_identity.Settled_failure, ("assistant" | "request_failure")
   | ( Keeper_chat_delivery_identity.Approval_request
     | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
@@ -580,6 +583,8 @@ let validate_delivery_role ~role_label
     Ok ()
   | Keeper_chat_delivery_identity.Accepted_user, _ ->
     Error "accepted_user transcript slot requires a user row"
+  | Keeper_chat_delivery_identity.Settled_failure, _ ->
+    Error "settled_failure transcript slot requires a request_failure row"
   | Keeper_chat_delivery_identity.Terminal_result, _ ->
     Error "terminal_result transcript slot requires an assistant or request_failure row"
   | ( Keeper_chat_delivery_identity.Approval_request
@@ -774,6 +779,7 @@ let provenance_index_of_existing existing =
       | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
       | Keeper_chat_delivery_identity.Accepted_user
       | Keeper_chat_delivery_identity.Terminal_result
+      | Keeper_chat_delivery_identity.Settled_failure
       | Keeper_chat_delivery_identity.Approval_request
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
@@ -804,6 +810,7 @@ let provenance_index_of_existing existing =
     | Keeper_chat_delivery_identity.Accepted_user
     | Keeper_chat_delivery_identity.Tool_delivery _
     | Keeper_chat_delivery_identity.Terminal_result
+    | Keeper_chat_delivery_identity.Settled_failure
     | Keeper_chat_delivery_identity.Approval_request
     | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
@@ -873,6 +880,7 @@ let find_indexed_provenance index ~provenance =
       | Keeper_chat_delivery_identity.Accepted_user
       | Keeper_chat_delivery_identity.Tool_delivery _
       | Keeper_chat_delivery_identity.Terminal_result
+      | Keeper_chat_delivery_identity.Settled_failure
       | Keeper_chat_delivery_identity.Approval_request
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
@@ -887,6 +895,7 @@ let find_indexed_provenance index ~provenance =
       | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
       | Keeper_chat_delivery_identity.Accepted_user
       | Keeper_chat_delivery_identity.Terminal_result
+      | Keeper_chat_delivery_identity.Settled_failure
       | Keeper_chat_delivery_identity.Approval_request
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
@@ -1272,6 +1281,7 @@ let transcript_slot_ordinal = function
   | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
   | Keeper_chat_delivery_identity.Accepted_user
   | Keeper_chat_delivery_identity.Terminal_result
+  | Keeper_chat_delivery_identity.Settled_failure
   | Keeper_chat_delivery_identity.Approval_request
   | Keeper_chat_delivery_identity.Approval_resolution
   | Keeper_chat_delivery_identity.Approval_replay
@@ -1306,6 +1316,7 @@ let validate_append_once_lines lines =
         | Keeper_chat_delivery_identity.Accepted_user
         | Keeper_chat_delivery_identity.Tool_delivery _
         | Keeper_chat_delivery_identity.Terminal_result
+        | Keeper_chat_delivery_identity.Settled_failure
         | Keeper_chat_delivery_identity.Approval_request
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
@@ -1492,7 +1503,7 @@ let append_tool_calls_once
       Error detail
 ;;
 
-type terminal_row = Reply of string | Failed_request of string
+type terminal_row = Reply of string | Failed_request of string | Settled_failure of string
 
 let append_terminal_message_once
       ~base_dir
@@ -1508,7 +1519,7 @@ let append_terminal_message_once
   =
   let role, content = match terminal with
     | Reply content -> Role.Assistant, content
-    | Failed_request content -> Role.Request_failure, content in
+    | Failed_request content | Settled_failure content -> Role.Request_failure, content in
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -1518,8 +1529,9 @@ let append_terminal_message_once
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let row_id = mint_message_id ~ts in
-    let transcript_slot =
-      Keeper_chat_delivery_identity.Terminal_result
+    let transcript_slot = match terminal with
+      | Reply _ | Failed_request _ -> Keeper_chat_delivery_identity.Terminal_result
+      | Settled_failure _ -> Keeper_chat_delivery_identity.Settled_failure
     in
     let line =
       lazy
@@ -1577,6 +1589,11 @@ let append_request_failure_once ~base_dir ~keeper_name ~delivery_key ~content
   append_terminal_message_once ~base_dir ~keeper_name ~delivery_key
     ~terminal:(Failed_request content) ~route ?tool_calls ?blocks ?turn_ref
     ?stream_lifecycle ()
+;;
+
+let append_settled_failure_once ~base_dir ~keeper_name ~delivery_key ~content ~route () =
+  append_terminal_message_once ~base_dir ~keeper_name ~delivery_key
+    ~terminal:(Settled_failure content) ~route ()
 ;;
 
 (* Unit wrapper: existing callers keep the prior swallow-and-count behavior (the

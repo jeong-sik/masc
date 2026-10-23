@@ -394,7 +394,7 @@ let failed_owner_to_saved_preparation () =
         ~operation_store_path:(Filename.concat config.Workspace.base_path "failure-owner.sqlite3") ~session_root:(Filename.concat (Filename.dirname (Filename.concat config.Workspace.base_path "failure-owner.sqlite3")) "traces")
         ~now:(fun () -> 10.) ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta)
         ~operation_runner:(Some {ready=(fun ~keeper_name:_ -> true); execute;
-          on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution -> Eio.Promise.resolve settle execution)})
+          on_execution_settled=(fun ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution -> Eio.Promise.resolve settle execution)})
       |> Result.map_error Keeper_owner.error_to_string |> ok in
     ignore (Keeper_owner.submit_operation owner ~operation_id
       ~source:(`Assoc ["kind",`String "dashboard"])

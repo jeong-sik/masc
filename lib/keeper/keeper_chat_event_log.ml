@@ -698,17 +698,17 @@ type journaled_event =
   ; event : keeper_chat_event
   }
 
-type restart_settlement =
+type operation_settlement =
   { operation_id : Keeper_chat_operation.Operation_id.t
   ; completed_at : float
   }
 
-let restart_settlement_to_json settlement =
+let operation_settlement_to_json settlement =
   `Assoc ["operation_id", `String (Keeper_chat_operation.Operation_id.to_string settlement.operation_id);
     "completed_at", `Float settlement.completed_at]
 ;;
 
-let restart_settlement_of_json = function
+let operation_settlement_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = ["completed_at";"operation_id"] ->
       let ( let* ) = Result.bind in
       let* operation_id = match List.assoc "operation_id" fields with
@@ -735,7 +735,7 @@ let journaled_event_payload_of_json json =
   let open Yojson.Safe.Util in
   let ( let* ) = Result.bind in
   try
-    let* _ = object_fields ~label:"journaled_event" ~allowed:["v"; "seq"; "ts"; "event"; "restart_settlement"] json in
+    let* _ = object_fields ~label:"journaled_event" ~allowed:["v"; "seq"; "ts"; "event"; "operation_settlement"] json in
     let* seq = Runtime_json_integer.of_json (json |> member "seq") in
     let* () = if seq >= 0 then Ok () else Error "journaled_event: negative seq" in
     let ts = json |> member "ts" |> to_float in
@@ -765,9 +765,9 @@ let journaled_envelope_of_json json =
   let* entry = journaled_event_payload_of_json json in
   let* settlement = match json with
     | `Assoc fields ->
-        (match List.filter (fun (name, _) -> name = "restart_settlement") fields with
+        (match List.filter (fun (name, _) -> name = "operation_settlement") fields with
          | [] -> Ok None
-         | [(_, value)] -> Result.map Option.some (restart_settlement_of_json value)
+         | [(_, value)] -> Result.map Option.some (operation_settlement_of_json value)
          | _ -> Error "duplicate restart settlement")
     | _ -> Error "journaled event is not an object" in
   match settlement, entry.event with
@@ -941,7 +941,7 @@ let event_floats_are_finite = function
 
 (* The result covers raw filesystem exceptions too: mkdir/open/lock failures
    can occur before the Fs_compat transaction produces its typed outcome. *)
-let append_journaled_result ?restart_settlement journal ~seq ~ts event =
+let append_journaled_result ?operation_settlement journal ~seq ~ts event =
   try
     if (not (float_is_finite ts)) || not (event_floats_are_finite event)
     then
@@ -949,9 +949,9 @@ let append_journaled_result ?restart_settlement journal ~seq ~ts event =
         "refusing to journal non-finite float path=%s seq=%d" journal.path seq)
     else begin
       let envelope = journaled_event_to_json {seq;ts;event} in
-      let envelope = match restart_settlement, envelope with
+      let envelope = match operation_settlement, envelope with
         | Some settlement, `Assoc fields ->
-            `Assoc (fields @ ["restart_settlement", restart_settlement_to_json settlement])
+            `Assoc (fields @ ["operation_settlement", operation_settlement_to_json settlement])
         | None, _ -> envelope
         | Some _, _ -> assert false in
       let line = Yojson.Safe.to_string envelope ^ "\n" in
@@ -1171,16 +1171,16 @@ type terminal_error_receipt =
   | Recorded_terminal_error of { seq : int; ts : float }
   | Existing_terminal_error of { seq : int; ts : float; message : string }
 
-type terminal_error_segment = Existing_segment | Restart_settlement of restart_settlement
+type terminal_error_segment = Existing_segment | Operation_settlement of operation_settlement
 
-let same_restart_settlement left right =
+let same_operation_settlement left right =
   Keeper_chat_operation.Operation_id.equal left.operation_id right.operation_id
   && Float.equal left.completed_at right.completed_at
 ;;
 
-let existing_restart_terminal settlement = function
+let existing_operation_terminal settlement = function
   | ({event=Event_error {message};seq;ts}, Some recorded) :: _
-    when same_restart_settlement settlement recorded -> Some (Existing_terminal_error {seq;ts;message})
+    when same_operation_settlement settlement recorded -> Some (Existing_terminal_error {seq;ts;message})
   | []
   | ( { event =
           ( Run_started _
@@ -1229,9 +1229,9 @@ let existing_restart_terminal settlement = function
     :: _ -> None
 ;;
 
-let find_restart_terminal journal ~settlement =
+let find_operation_terminal journal ~settlement =
   match read_journal_envelopes journal with
-  | Ok entries -> Ok (existing_restart_terminal settlement (List.rev entries))
+  | Ok entries -> Ok (existing_operation_terminal settlement (List.rev entries))
   | Error Journal_missing -> Ok None
   | Error (Journal_unreadable detail | Journal_corrupt detail) -> Error detail
 ;;
@@ -1251,11 +1251,11 @@ let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
   match segment, List.rev entries with
   | Existing_segment, ({ event = Keeper_chat_events.Event_error { message }; seq; ts }, _) :: _ ->
     Ok (Existing_terminal_error { seq; ts; message })
-  | Restart_settlement settlement, entries ->
-    (match existing_restart_terminal settlement entries with
+  | Operation_settlement settlement, entries ->
+    (match existing_operation_terminal settlement entries with
      | Some receipt -> Ok receipt
      | None ->
-         let* () = append_journaled_result ~restart_settlement:settlement journal ~seq ~ts (Event_error {message}) in
+         let* () = append_journaled_result ~operation_settlement:settlement journal ~seq ~ts (Event_error {message}) in
          Ok (Recorded_terminal_error {seq;ts}))
   | Existing_segment, []
   | ( Existing_segment

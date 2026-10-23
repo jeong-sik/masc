@@ -217,7 +217,7 @@ let run_call ~scenario root =
   in
   let runner : Owner.operation_runner =
     {ready=(fun ~keeper_name:_ -> true); execute;
-     on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution ->
+     on_execution_settled=(fun ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution ->
        match execution with
        | Owner.Operation_deferred -> ()
        | Owner.Operation_succeeded _ | Owner.Operation_failed _ ->

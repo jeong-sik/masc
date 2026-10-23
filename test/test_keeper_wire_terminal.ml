@@ -44,6 +44,26 @@ let failed_execution detail =
     ; outcome_ref = None
     }
 
+let operation_source keeper_name =
+  Keeper_chat_operation_payload.source_to_json
+    ~submitted_by:"masc-tui" ~thread_id:("keeper:" ^ keeper_name)
+    ~continuation_channel:(Keeper_continuation_channel.dashboard
+      ~thread_id:("keeper:" ^ keeper_name) |> Result.get_ok)
+    ~surface:(Surface_ref.Dashboard {session_id=None})
+    ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
+    ~conversation_id:None ~external_message_id:None ~workspace_id:None
+    ~extra_mentions:[] ~sender_keeper:None ~user_row_origin:Keeper_chat_store.Needs_append
+  |> Result.get_ok
+
+let failed_operation keeper_name operation_id : Keeper_chat_operation.t =
+  let source=operation_source keeper_name in
+  let input=`Assoc ["message",`String "unanswered request"] in
+  {operation_id; batch_membership=None;
+   admission_digest=Keeper_chat_operation.admission_digest ~source ~input |> Result.get_ok;
+   execution_digest=Keeper_chat_operation.execution_digest input |> Result.get_ok;
+   sequence=0L; source; input=None; created_at=1.;
+   state=Failed {completed_at=42.; failure={kind=Turn_cancelled;detail="cancelled";outcome_ref=None}}}
+
 let test_note_marks_started_then_terminal () =
   with_workspace @@ fun base_path ->
   let operation_id = "op-wire-note" in
@@ -323,6 +343,7 @@ let test_production_glue_settles_claimed_operation () =
     ~base_path
     ~keeper_name:"wire-glue"
     ~claimed_operation_id:(Some operation_id)
+    ~operations:[failed_operation "wire-glue" operation_id]
     ~execution:(failed_execution "glue path verdict");
   (match !events with
    | [ event ] ->
@@ -342,6 +363,7 @@ let test_production_glue_settles_claimed_operation () =
     ~base_path
     ~keeper_name:"wire-glue"
     ~claimed_operation_id:None
+    ~operations:[]
     ~execution:(failed_execution "never claimed");
   check int "unclaimed settle synthesizes nothing" 1 (List.length !events)
 
@@ -392,9 +414,9 @@ let test_interrupted_owner_without_subscriber_replays_failure () =
     Eio.Promise.resolve signal_started ();
     Eio.Promise.await parked;
     Owner.Operation_succeeded { outcome_ref = "unreachable-before-interrupt" } in
-  let on_execution_settled ~keeper_name ~claimed_operation_id ~execution =
+  let on_execution_settled ~keeper_name ~operations ~claimed_operation_id ~execution =
     Stream.For_testing.on_operation_execution_settled
-      ~base_path ~keeper_name ~claimed_operation_id ~execution;
+      ~base_path ~keeper_name ~claimed_operation_id ~operations ~execution;
     Eio.Promise.resolve signal_settled execution in
   let owner = owner_ok (Owner.start ~sw
     ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
@@ -404,7 +426,7 @@ let test_interrupted_owner_without_subscriber_replays_failure () =
       execute; on_execution_settled })
     ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta)) in
   ignore (owner_ok (Owner.submit_operation owner ~operation_id
-    ~source:(`Assoc [ "kind", `String "dashboard" ])
+    ~source:(operation_source keeper_name)
     ~input:(`Assoc [ "message", `String "answer me" ])));
   Eio.Promise.await started;
   (match owner_ok (Owner.interrupt_running_operation owner operation_id) with
@@ -442,6 +464,117 @@ let test_failed_continuation_after_prior_finished_segment () =
   | [2, event] -> check bool "old finish did not hide new failure" true
       (event.Ag_ui.event_type = Ag_ui.Run_error)
   | _ -> fail "continuation failure disappeared behind its prior terminal"
+
+let test_registry_shutdown_projects_every_claimed_batch_member () =
+  with_workspace @@ fun base_path ->
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let module Owner = Keeper_owner in
+  let module Registry = Keeper_owner_registry in
+  let module Store = Keeper_chat_operation_store in
+  let module Identity = Keeper_chat_delivery_identity in
+  let keeper_name = "shutdown-batch" in
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:(Some "operator"));
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name", `String keeper_name; "trace_id", `String "trace-shutdown-batch";
+             "activation_mode", `String "manual"])
+    |> Result.get_ok in
+  Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
+  let owner_ok = function Ok value -> value | Error error -> fail (Owner.error_to_string error) in
+  let ids = List.map (fun id -> Keeper_chat_operation.Operation_id.of_string id |> Result.get_ok)
+    ["op-shutdown-batch-primary"; "op-shutdown-batch-sibling"] in
+  let before_claim, signal_before_claim = Eio.Promise.create () in
+  let claim_ready, release_claim = Eio.Promise.create () in
+  let started, signal_started = Eio.Promise.create () in
+  let observed_settlement = ref None in
+  let execute ~sw:_ ~keeper_name ~claim =
+    Eio.Promise.resolve signal_before_claim ();
+    Eio.Promise.await claim_ready;
+    let claimed = Option.get (owner_ok (claim ())) in
+    List.iter (fun id ->
+      let operation_id = Keeper_chat_operation.Operation_id.to_string id in
+      let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+      Journal.append_result journal ~seq:0 ~ts:1.
+        (Events.Run_started {run_id="keeper-operation-run-" ^ operation_id;
+          thread_id="keeper:" ^ keeper_name}) |> Result.get_ok) ids;
+    Eio.Promise.resolve signal_started claimed;
+    Eio.Fiber.await_cancel () in
+  let on_execution_settled ~keeper_name ~operations ~claimed_operation_id ~execution =
+    (* This hook is inside Owner settlement. Its immutable arguments are the
+       only Owner facts consumed here; it must not call the actor again. *)
+    observed_settlement := Some (operations, execution);
+    Stream.For_testing.on_operation_execution_settled ~base_path ~keeper_name
+      ~operations ~claimed_operation_id ~execution in
+  Registry.install_from_store ~sw
+    ~operation_runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true);
+      execute; on_execution_settled}) ~on_turn_slot_released:None config
+  |> Result.map_error Registry.install_error_to_string |> Result.get_ok |> ignore;
+  let owner = Registry.get ~base_path ~keeper_name
+    |> Result.map_error Registry.lookup_error_to_string |> Result.get_ok in
+  let submit id message =
+    let input = Keeper_chat_operation_payload.input_to_json ~message ~user_blocks:[]
+      ~turn_instructions:None ~surface_context:None ~attachments:[] in
+    Owner.submit_operation owner ~operation_id:id
+      ~source:(operation_source keeper_name) ~input |> owner_ok |> ignore in
+  let primary = List.hd ids and sibling = List.nth ids 1 in
+  submit primary "first input";
+  Eio.Promise.await before_claim;
+  submit sibling "second input";
+  Eio.Promise.resolve release_claim ();
+  let claimed = Eio.Promise.await started in
+  check bool "the queued inputs have one batch execution" true
+    (Option.is_some claimed.Keeper_chat_operation.batch_membership);
+  (match Registry.begin_stopping_all ~base_path with
+   | Ok [Ok ()] -> ()
+   | Ok _ -> fail "shutdown did not join the installed Owner successfully"
+   | Error error -> fail (Registry.lookup_error_to_string error));
+  (match Registry.get ~base_path ~keeper_name with
+   | Error Registry.Inventory_stopping -> ()
+   | _ -> fail "the shutdown admission fence was not active");
+  let operations, execution = match !observed_settlement with
+    | Some observed -> observed
+    | None -> fail "shutdown returned without invoking the production settle hook" in
+  check int "settle hook receives both immutable batch members" 2 (List.length operations);
+  (match execution with
+   | Owner.Operation_failed {kind=Keeper_chat_operation.Turn_cancelled; _} -> ()
+   | _ -> fail "shutdown did not accept the typed cancellation verdict");
+  let store_path = Store.path_for_keeper
+    ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config) ~keeper_name in
+  let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error) in
+  let store = store_ok (Store.open_or_create ~path:store_path) in
+  Fun.protect ~finally:(fun () -> ignore (Store.close store)) @@ fun () ->
+  List.iter (fun id ->
+    let operation = Option.get (store_ok (Store.get store id)) in
+    let completed_at = match operation.state with
+      | Keeper_chat_operation.Failed {completed_at; failure={kind=Turn_cancelled; _}} -> completed_at
+      | _ -> fail "a batch member was not durably cancelled" in
+    let delivered = List.find (fun (observed : Keeper_chat_operation.t) ->
+      Keeper_chat_operation.Operation_id.equal observed.operation_id id) operations in
+    check bool "the hook receives the committed operation fact" true
+      (Yojson.Safe.equal (Keeper_chat_operation.to_json operation)
+         (Keeper_chat_operation.to_json delivered));
+    let operation_id = Keeper_chat_operation.Operation_id.to_string id in
+    let key = Identity.Operation (Identity.Request_id.of_string operation_id |> Result.get_ok) in
+    let failure_rows = Keeper_chat_store.load ~base_dir:base_path ~keeper_name
+      |> List.filter (fun (row : Keeper_chat_store.chat_message) ->
+        match row.delivery_provenance with
+        | Some provenance -> Identity.delivery_key_equal provenance.delivery_key key
+            && Identity.transcript_slot_equal provenance.transcript_slot Identity.Settled_failure
+        | None -> false) in
+    (match failure_rows with
+     | [row] -> check bool "settled failure is a server-owned transcript row" true
+         (Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Request_failure)
+     | _ -> fail "a batch member lacks its exact settled-failure transcript row");
+    let entries = read_journal ~base_path ~keeper_name ~operation_id in
+    check int "each journal retains its start and one failure" 2 (List.length entries);
+    check int "each journal has one terminal error" 1 (List.length (error_entries entries));
+    let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+    (match Journal.find_operation_terminal journal ~settlement:{operation_id=id;completed_at} with
+     | Ok (Some (Journal.Existing_terminal_error {ts; _})) ->
+         check (float 0.) "journal terminal uses the durable settlement clock" completed_at ts
+     | _ -> fail "a batch member journal lacks its exact durable settlement identity")) ids
 
 (* A rejected terminal append leaves no durable seq, and both reconnect
    replay and the RFC-0412 live dedup key off seq membership. Broadcasting the
@@ -532,7 +665,7 @@ let test_record_terminal_error_creates_a_missing_journal () =
   check int "the terminal is the journal" 1
     (List.length (read_journal ~base_path ~keeper_name ~operation_id))
 
-let test_restart_settlement_retries_and_replays_past_a_live_cursor () =
+let test_operation_settlement_retries_and_replays_past_a_live_cursor () =
   with_workspace @@ fun base_path ->
   let module Store = Keeper_chat_operation_store in
   let keeper_name = "restart-replay" and operation_id = "op-restart-replay" in
@@ -546,18 +679,18 @@ let test_restart_settlement_retries_and_replays_past_a_live_cursor () =
     ignore (store_ok (Store.claim_next store ~now:2.));
     ignore (store_ok (Store.settle_running_after_restart store ~now:3.));
     let operation = Option.get (store_ok (Store.get store id)) in
-    let settlement : Journal.restart_settlement = {operation_id=id;completed_at=3.} in
+    let settlement : Journal.operation_settlement = {operation_id=id;completed_at=3.} in
     let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
     let message = Keeper_request_failure.summary {cause=Keeper_request_failure.Server_restarted} in
     Journal.append journal ~seq:0 ~ts:1. (Events.Run_started {run_id="run";thread_id="keeper:restart-replay"});
     (* Identical text from an earlier segment does not identify this settlement. *)
     Journal.append journal ~seq:1 ~ts:2. (Events.Event_error {message});
-    (match Journal.record_terminal_error ~segment:(Restart_settlement settlement) journal ~ts:3. ~message with
+    (match Journal.record_terminal_error ~segment:(Operation_settlement settlement) journal ~ts:3. ~message with
      | Ok (Recorded_terminal_error {seq=2;_}) -> ()
      | _ -> fail "restart must append its own identified terminal");
     (* Simulate restart after append success without any in-memory receipt. *)
     let reopened = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
-    (match Journal.record_terminal_error ~segment:(Restart_settlement settlement) reopened ~ts:99. ~message with
+    (match Journal.record_terminal_error ~segment:(Operation_settlement settlement) reopened ~ts:99. ~message with
      | Ok (Existing_terminal_error {seq=2;ts=3.;_}) -> ()
      | _ -> fail "retry must reuse the durable settlement marker");
     check int "retry appends no duplicate" 3 (List.length (read_journal ~base_path ~keeper_name ~operation_id));
@@ -565,7 +698,7 @@ let test_restart_settlement_retries_and_replays_past_a_live_cursor () =
     let suffix = Stream.For_testing.journal_replay_frames ~base_path ~keeper_name ~operation_id
       ~since_seq:(Journal.After_seq 50) in
     check int "the client's live cursor is ahead of the journal" 0 (List.length suffix);
-    let fallback = Stream.For_testing.restart_terminal_after_replay ~base_path ~keeper_name ~operation ~replayed in
+    let fallback = Stream.For_testing.operation_terminal_after_replay ~base_path ~keeper_name ~operation ~replayed in
     (match fallback with
      | Some event ->
          check bool "the durable failure still yields RUN_ERROR" true (event.Ag_ui.event_type=Ag_ui.Run_error);
@@ -575,15 +708,15 @@ let test_restart_settlement_retries_and_replays_past_a_live_cursor () =
     Stream.For_testing.journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq:Journal.Whole_turn
     |> List.iter (fun (seq,_) -> Hashtbl.replace replayed seq ());
     check bool "ordinary replay already includes this exact terminal" true
-      (Option.is_none (Stream.For_testing.restart_terminal_after_replay ~base_path ~keeper_name ~operation ~replayed));
+      (Option.is_none (Stream.For_testing.operation_terminal_after_replay ~base_path ~keeper_name ~operation ~replayed));
     let metadata = `Assoc ["operation_id",`String operation_id;"completed_at",`Float 3.] in
     List.iter (fun (event, fields) ->
       let envelope = Journal.journaled_event_to_json {seq=0;ts=3.;event} in
       let envelope = match envelope with `Assoc base -> `Assoc (base @ fields) | _ -> assert false in
       check bool "malformed restart provenance is refused" true (Result.is_error (Journal.journaled_event_of_json envelope)))
-      [ Events.Event_error {message}, ["restart_settlement",`String "unknown"]
-      ; Events.Event_error {message}, ["restart_settlement",metadata;"restart_settlement",metadata]
-      ; Events.Text_delta {text="not terminal"; response=Unobserved_scope (None)}, ["restart_settlement",metadata] ])
+      [ Events.Event_error {message}, ["operation_settlement",`String "unknown"]
+      ; Events.Event_error {message}, ["operation_settlement",metadata;"operation_settlement",metadata]
+      ; Events.Text_delta {text="not terminal"; response=Unobserved_scope (None)}, ["operation_settlement",metadata] ])
 
 let () =
   Alcotest.run "keeper_wire_terminal"
@@ -614,6 +747,8 @@ let () =
             test_interrupted_owner_without_subscriber_replays_failure
         ; test_case "failed continuation follows prior finished segment" `Quick
             test_failed_continuation_after_prior_finished_segment
+        ; test_case "registry shutdown projects both claimed batch members" `Quick
+            test_registry_shutdown_projects_every_claimed_batch_member
         ; test_case "journal failure skips live broadcast without durable seq" `Quick
             test_journal_failure_skips_live_broadcast
         ; test_case "record_terminal_error writes once" `Quick
@@ -623,6 +758,6 @@ let () =
         ; test_case "record_terminal_error creates a missing journal" `Quick
             test_record_terminal_error_creates_a_missing_journal
         ; test_case "durable restart settlement retries and survives a newer live cursor" `Quick
-            test_restart_settlement_retries_and_replays_past_a_live_cursor
+            test_operation_settlement_retries_and_replays_past_a_live_cursor
         ] )
     ]

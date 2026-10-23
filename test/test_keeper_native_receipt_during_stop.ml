@@ -141,7 +141,7 @@ let stop_while_dispatching env ~root ~workspace ~session_dir =
   in
   let runner : Keeper_owner.operation_runner =
     {ready=(fun ~keeper_name:_ -> true); execute;
-     on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ -> ())} in
+     on_execution_settled=(fun ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution:_ -> ())} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner)
     ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
   let owner = Registry.get ~base_path:root ~keeper_name |> require "Owner handle" in

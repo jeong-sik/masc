@@ -268,7 +268,7 @@ is-default = true
       | Ok _, Some _ -> fail "successful inference unexpectedly retained deferred failure")
     in
     let runner : Owner.operation_runner = {ready=(fun ~keeper_name:_ -> !ready); execute;
-      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id ~execution ->
+      on_execution_settled=(fun ~keeper_name:_ ~operations:_ ~claimed_operation_id ~execution ->
         (* The Owner catches hook exceptions. Resolve failures back to the
            test fiber instead of abandoning its completion promise. *)
         match execution with
@@ -568,7 +568,7 @@ is-default = true
       | Ok _, Some _ -> fail "successful inference unexpectedly retained a deferred failure"
     in
     let runner : Owner.operation_runner = {ready=(fun ~keeper_name:_ -> !ready); execute;
-      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution ->
+      on_execution_settled=(fun ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution ->
         match execution with
         | Owner.Operation_failed {detail; _} when Some execution <> !expected_failure ->
           Eio.Promise.resolve resolve_settled (Error detail)

@@ -65,4 +65,3 @@ val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
     original execution proof/schema/outcome. Worker Finished JSON grants nothing. *)
 val validate_proposal : t -> Yojson.Safe.t ->
   (Keeper_librarian_runtime.durable_proposal, string) result
-

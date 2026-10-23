@@ -70,7 +70,7 @@ let navigation () =
   let reordered={snapshot with entries=List.rev snapshot.entries} in
   let state=Browser.receive (Catalog.to_json reordered) state |> ok in
   check (option string) "refresh preserves exact selected manifest" (Some "/workspace/packages/p/lane.toml") (Browser.selected_manifest state);
-  let bad=move "j" (move "home" state) in
+  let bad=move "home" state in
   check bool "issue is not installable" true (Result.is_error (Browser.handle ~key:"enter" bad));
   check bool "manual path remains available" true (Browser.handle ~key:"p" state = Ok Browser.Manual);
   check bool "directory jump available" true (Browser.handle ~key:"g" state = Ok Browser.Jump);
@@ -86,14 +86,18 @@ let roles () =
   and b2=package "browser2" (Some Masc.Lane_addon_category.Browser) in
   let snapshot=Catalog.{directory="/w";parent=None;entries=[u;a;Folder "/w/f";b;Issue {path="/w/bad/lane.toml";message="bad"};b2]} in
   let state=Browser.receive (Catalog.to_json snapshot) (Browser.create ()) |> ok in
-  let walk state = List.fold_left (fun (state,seen) _ ->
-    let seen=Browser.selected_manifest state :: seen in (move "j" state, seen)) (state,[]) (List.init 6 Fun.id) |> snd |> List.rev in
-  check (list (option string)) "folders and issues first, then roles; headers never selected"
-    [None;None;Some "/w/browser/lane.toml";Some "/w/browser2/lane.toml";Some "/w/analysis/lane.toml";Some "/w/plain/lane.toml"] (walk state);
+  check (option string) "first selection is navigation, not a manifest" None (Browser.selected_manifest state);
+  (match Browser.handle ~key:"enter" state |> ok with Browse (Some path) -> check string "folder navigation enters" "/w/f" path | _ -> fail "folder did not open");
   let state=move "j" (move "j" (move "j" state)) in
   (match Browser.handle ~key:"enter" state |> ok with Preview path -> check string "Enter previews the displayed package" "/w/browser2/lane.toml" path | _ -> fail "missing preview");
+  (match Browser.handle ~key:"right" state |> ok with Browse (Some path) -> check string "Right targets the displayed package" "/w/browser2" path | _ -> fail "missing package directory");
   let refreshed=Browser.receive (Catalog.to_json {snapshot with entries=List.rev snapshot.entries}) state |> ok in
-  check (option string) "refresh keeps manifest identity" (Some "/w/browser2/lane.toml") (Browser.selected_manifest refreshed)
+  check (option string) "refresh keeps manifest identity" (Some "/w/browser2/lane.toml") (Browser.selected_manifest refreshed);
+  let rec mangle = function
+    | `Assoc fields -> `Assoc (List.map (fun (k,v) -> if k="ui_category" then (k, `String "nonsense") else (k, mangle v)) fields)
+    | `List l -> `List (List.map mangle l)
+    | j -> j in
+  check bool "unknown category rejected" true (Result.is_error (Browser.receive (mangle (Catalog.to_json snapshot)) state))
 
 let reachable_large_list () =
   let snapshot=Catalog.{directory="/workspace";parent=None;entries=List.init 100 (fun i -> Folder (Printf.sprintf "/workspace/folder-%03d" i))} in

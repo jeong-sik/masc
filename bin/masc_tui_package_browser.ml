@@ -34,7 +34,7 @@ let identity = function
 let receive json t =
   Result.map (fun (snapshot : Catalog.t) ->
     let previous = Option.map identity (selected t) in
-    let cursor = match List.find_index (fun entry -> Some (identity entry) = previous) snapshot.entries with
+    let cursor = match List.find_index (fun entry -> Some (identity entry) = previous) (present snapshot.entries) with
       | Some index -> index | None -> 0 in
     {directory=Some snapshot.directory; snapshot=Some snapshot; cursor}) (Catalog.of_json json)
 let selected_manifest t = match selected t with

@@ -52,7 +52,11 @@ val resume : store:Lane_addon_store.t -> label:string ->
 
     Captured and Admission_wait read the worker first. Only authoritative
     absence leads to admission, and [prepare] runs every pre-send check
-    before Dispatch_intended is written. A newly Stored intent is the only
+    before Dispatch_intended is written. An [Unavailable] pre-send check or
+    [Not_sent (Unavailable _)] read returns [Awaiting Worker_unreachable] in
+    either pre-admission phase without changing the journal or sending a
+    submission. A later wake reads and admits only this same original request;
+    [Rejected] and [Uncertain] checks remain errors. A newly Stored intent is the only
     permission to submit; Already_stored is a journal recheck. When the submit
     call reports [Not_sent], the intent admitted nothing, so it is declined in
     place and the next pass may submit the same request again. [Sent_unknown],

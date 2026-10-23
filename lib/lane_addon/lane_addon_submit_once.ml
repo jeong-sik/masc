@@ -125,8 +125,13 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
       reply ~label ~request_id:original.request_id ~schema response
       |> Result.map_error (fun error -> Unknown error) in
   let read = `Assoc ["kind", `String "read"; "request_id", `String original.request_id] in
+  let wait_before_send original = function
+    | Unavailable _ -> Ok (Awaiting (Worker_unreachable, original))
+    | (Rejected _ | Uncertain _) as error -> Error error in
   let admit original =
-    let* () = prepare () in
+    match prepare () with
+    | Error error -> wait_before_send original error
+    | Ok () ->
     let* published = publish ~store original Progress.Dispatch_intended in
     match published with
     | Acknowledged record -> Ok (Awaiting (Journal_recheck, record))
@@ -166,11 +171,11 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
   | Progress.Subdividing ({stage = Progress.Before_dispatch; _}, _)
   | Progress.Subdivided ({stage = Progress.Before_dispatch; _}, _) -> Ok (Settled original)
   | Progress.Captured | Progress.Admission_wait _ ->
-    let* state, _evidence = invoke read
-      |> Result.map_error (function Unsent error | Unknown error -> error) in
-    (match state with
-     | Absent -> admit original
-     | Pending | Capacity_wait | Finished _ ->
+    (match invoke read with
+     | Error (Unsent error) -> wait_before_send original error
+     | Error (Unknown error) -> Error error
+     | Ok (Absent, _) -> admit original
+     | Ok ((Pending | Capacity_wait | Finished _), _) ->
        Error (Rejected ("Worker state contradicts original " ^ label ^ " pre-admission progress")))
   | Progress.Dispatch_pending _ ->
     let* installation = rejected (Owner.installation_of_id original.installation_id) in
@@ -189,6 +194,5 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
        (* The worker that may hold this request cannot be reached now. That
           is no new fact about it; wait without a journal write. A refused
           destination or owner is not a wait and is returned. *)
-       | Error (Unsent (Unavailable _)) -> Ok (Awaiting (Worker_unreachable, original))
-       | Error (Unsent ((Rejected _ | Uncertain _) as error)) -> Error error
+       | Error (Unsent error) -> wait_before_send original error
        | Error (Unknown error) -> unknown original error)

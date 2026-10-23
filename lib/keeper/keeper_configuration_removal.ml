@@ -157,7 +157,8 @@ let require_configuration_only config keeper_name =
     ~ownership_root:config.Workspace.base_path
     (Keeper_types_profile.keeper_meta_path config keeper_name)
     |> Result.map_error (function
-      | Keeper_meta_store.Unreadable detail -> Storage_error ("Keeper metadata unreadable: " ^ detail)
+      | Keeper_meta_store.Unreadable detail
+      | Keeper_meta_store.Invalid_json detail -> Storage_error ("Keeper metadata unreadable: " ^ detail)
       | Keeper_meta_store.Not_current detail -> Conflict ("Keeper metadata requires reconciliation: " ^ detail)) in
   let* () = match meta, Keeper_registry.get ~base_path:config.Workspace.base_path keeper_name with
     | None, None -> Ok ()

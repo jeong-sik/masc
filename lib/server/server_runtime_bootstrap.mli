@@ -214,6 +214,8 @@ val initialize_owner_state_blocking
     initialization with [Keeper_persistence_preparation_failed
     (Store_quarantine_refused _)] and nothing is moved aside. An unread store inventory
     refuses preparation even with the flag; repair directory access first.
+    Keeper metadata file I/O failures also refuse with the flag; repair
+    file access or the file kind instead of quarantining unread bytes.
     Failed quarantine moves also refuse preparation: accepting the move does
     not authorize continuing with the unreadable store still in place. *)
 

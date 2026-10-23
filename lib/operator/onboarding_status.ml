@@ -131,8 +131,9 @@ let model_checks config_path =
 (* The workspace's Keeper history is readable exactly when the server's boot
    reconcile admits it: every metadata file passes the same
    [validate_current_meta_file_result] (Keeper_store_boot_reconcile), and one
-   that does not refuses the whole boot unless the operator accepts the
-   quarantine. Judging it any other way opens a TUI on a server that will not
+   that does not refuses the whole boot. Only a content rejection can be
+   accepted for quarantine; I/O failures still need repair. Judging it any
+   other way opens a TUI on a server that will not
    start. imp is only the Keeper the setup journey creates; a workspace whose
    Keepers were declared by hand never has it, and judging history by imp alone
    sent that workspace back into setup on every bare `masc`. *)
@@ -158,7 +159,7 @@ let persistence_check base_path =
         "No Keeper has persisted history yet. Prepare imp before opening its conversation." [Start_imp]
     | _ :: _, _ :: _ -> check Keeper_persistence Invalid
         ("Keeper metadata this build cannot read: " ^ String.concat ", " refused
-         ^ ". The server refuses to boot until it is repaired or started with --accept-store-quarantine.")
+         ^ ". The server refuses to boot until the files are repaired; --accept-store-quarantine only permits readable metadata rejected by this build.")
         [Inspect_configuration]
     | _ :: _, [] -> check Keeper_persistence Satisfied
         ("Persisted Keeper history: " ^ String.concat ", " names

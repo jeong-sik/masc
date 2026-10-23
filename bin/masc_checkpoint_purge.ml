@@ -191,7 +191,7 @@ let () =
     match
       Masc.Keeper_meta_store.read_meta_file_path_read_only ~ownership_root:runtime_root path
     with
-    | Error (Masc.Keeper_meta_store.Unreadable detail) ->
+    | Error (Masc.Keeper_meta_store.Unreadable detail | Masc.Keeper_meta_store.Invalid_json detail) ->
       error ("keeper meta unreadable: " ^ detail)
     | Error (Masc.Keeper_meta_store.Not_current detail) ->
       error ("keeper meta is not the current schema: " ^ detail)

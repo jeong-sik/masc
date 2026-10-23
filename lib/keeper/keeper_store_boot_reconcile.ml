@@ -30,12 +30,14 @@ type failure =
 
 type refusal =
   | Undecodable of undecodable
+  | Unreadable of failure
   | Discovery_failed of discovery_failure
   | Quarantine_failed of failure
 
 type examination =
   { readable : int
   ; undecodable : undecodable list
+  ; unreadable : failure list
   ; discovery_failures : discovery_failure list
   }
 
@@ -59,8 +61,13 @@ let examine_keeper_meta (config : Workspace.config) examination =
          in
          match Keeper_meta_store.validate_current_meta_file_result path with
          | Ok () -> { examination with readable = examination.readable + 1 }
+         | Error (Keeper_meta_store.Unreadable error) ->
+           { examination with
+             unreadable =
+               { store = D.Refusing.Keeper_meta; keeper; path; error } :: examination.unreadable
+           }
          | Error
-             ( Keeper_meta_store.Unreadable rejection
+             ( Keeper_meta_store.Invalid_json rejection
              | Keeper_meta_store.Not_current rejection ) ->
            { examination with
              undecodable =
@@ -215,29 +222,33 @@ let examine config =
            examine_reported store config;
            examination
          | D.Preflight_only _ -> examination)
-      { readable = 0; undecodable = []; discovery_failures = [] }
+      { readable = 0; undecodable = []; unreadable = []; discovery_failures = [] }
       D.Id.all
   in
   { examination with
     undecodable = List.rev examination.undecodable
+  ; unreadable = List.rev examination.unreadable
   ; discovery_failures = List.rev examination.discovery_failures
   }
 ;;
 
 let admit ~accept_quarantine examination =
   let discovery = List.map (fun failure -> Discovery_failed failure) examination.discovery_failures in
+  let unreadable = List.map (fun failure -> Unreadable failure) examination.unreadable in
   let undecodable = List.map (fun row -> Undecodable row) examination.undecodable in
-  match discovery, undecodable, accept_quarantine with
+  match unreadable @ discovery, undecodable, accept_quarantine with
   | [], [], (true | false) | [], _ :: _, true -> Ok examination
   | [], _ :: _, false -> Error undecodable
-  | _ :: _, _, (true | false) -> Error (discovery @ undecodable)
+  | (_ :: _ as mandatory), _, (true | false) -> Error (mandatory @ undecodable)
 ;;
 
 let refusal_to_string undecodable =
   let guidance =
-    if List.exists (function Discovery_failed _ -> true | Undecodable _ | Quarantine_failed _ -> false) undecodable
+    if List.exists (function Unreadable _ -> true | Undecodable _ | Discovery_failed _ | Quarantine_failed _ -> false) undecodable
+    then "repair the reported file access or file kind and run `deployment_preflight_helper validate-stores` against this base path before restarting; quarantine cannot bypass a file I/O failure"
+    else if List.exists (function Discovery_failed _ -> true | Undecodable _ | Unreadable _ | Quarantine_failed _ -> false) undecodable
     then "repair directory access and run `deployment_preflight_helper validate-stores` against this base path before restarting; quarantine cannot bypass an unread inventory"
-    else if List.exists (function Quarantine_failed _ -> true | Undecodable _ | Discovery_failed _ -> false) undecodable
+    else if List.exists (function Quarantine_failed _ -> true | Undecodable _ | Unreadable _ | Discovery_failed _ -> false) undecodable
     then "repair the reported quarantine failure and run `deployment_preflight_helper validate-stores` against this base path before restarting; accepting quarantine does not bypass a failed move"
     else "strip or repair the files and run `deployment_preflight_helper validate-stores` against this base path, or start with --accept-store-quarantine to move them aside and start those keepers with empty stores"
   in
@@ -251,6 +262,9 @@ let refusal_to_string undecodable =
             | Undecodable u ->
               Printf.sprintf "  %s keeper=%s path=%s: %s"
                 (store_to_string u.store) u.keeper u.path u.rejection
+             | Unreadable failure ->
+               Printf.sprintf "  %s keeper=%s path=%s: file unreadable: %s"
+                 (store_to_string failure.store) failure.keeper failure.path failure.error
             | Discovery_failed failure ->
               Printf.sprintf "  %s inventory path=%s: %s (repair directory access; quarantine cannot recover an unread inventory)"
                 (store_to_string failure.store) failure.path failure.rejection
@@ -380,9 +394,10 @@ let quarantine ~now (config : Workspace.config) (examination : examination) =
                { store = u.store; keeper = u.keeper; path = u.path; error } :: report.failed
            })
       { examined = examination.readable + List.length examination.undecodable
+          + List.length examination.unreadable
       ; readable = examination.readable
       ; quarantined = []
-      ; failed = []
+      ; failed = List.rev examination.unreadable
       }
       examination.undecodable
   in

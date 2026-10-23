@@ -66,12 +66,14 @@ type failure =
 
 type refusal =
   | Undecodable of undecodable
+  | Unreadable of failure
   | Discovery_failed of discovery_failure
   | Quarantine_failed of failure
 
 type examination =
   { readable : int
   ; undecodable : undecodable list
+  ; unreadable : failure list
   ; discovery_failures : discovery_failure list
   }
 
@@ -79,9 +81,10 @@ val examine : Workspace.config -> examination
 (** Decode every file of each [Refuse_boot] store with this build, and read
     the [Degrade_typed] store once. [Preflight_only] stores are not read.
     No file is created, renamed or written, so calling it twice gives the
-    same answer. A snapshot the
-    process cannot read at all counts as undecodable; its [rejection] says
-    so. [readable] and [undecodable] count the per-keeper files only.
+    same answer. Keeper metadata I/O failures are [unreadable], while invalid
+    JSON or a rejected current schema is [undecodable]. The other stores
+    retain their existing rejection classification. These lists count
+    per-keeper files only.
 
     The goal store is read through [Goal_store.load_source]. When it is
     [Unavailable], [examine] logs one INFO line
@@ -94,15 +97,16 @@ val admit
   -> examination
   -> (examination, refusal list) result
 (** Whether boot may go on. [Ok] when nothing is undecodable, or the operator
-    accepted the quarantine. Discovery failures always refuse boot, including
-    when quarantine was accepted: no per-keeper inventory was read.
+    accepted the quarantine. Unreadable files and discovery failures always
+    refuse boot, including when quarantine was accepted.
     [Error] names every store boot refuses to move;
     the files stay where they are. *)
 
 val refusal_to_string : refusal list -> string
 (** The boot refusal: one line per store (kind, keeper, path, rejection) and
-    the required repair or quarantine action. Failed inventory reads and
-    failed quarantine moves cannot be bypassed with the quarantine flag. *)
+    the required repair or quarantine action. File I/O failures, failed
+    inventory reads and failed quarantine moves cannot be bypassed with
+    the quarantine flag. *)
 
 type quarantined =
   { store : Keeper_durable_store.Refusing.t
@@ -121,8 +125,9 @@ type report =
   ; readable : int
   ; quarantined : quarantined list
   ; failed : failure list
-      (** Refused by the decoder but not moved aside; each is logged at
-          ERROR with its path and error. Boot must refuse while any remains,
+      (** File I/O failures and rejected stores that were not moved aside.
+          Failed moves are logged at ERROR with their path and error.
+          Boot must refuse while any remains,
           even when the operator accepted quarantine. An event queue whose
           move stopped halfway keeps its snapshot and names the WAL already
           moved in [error]. *)
@@ -132,7 +137,8 @@ val quarantine : now:float -> Workspace.config -> examination -> report
 (** Move every [undecodable] store to [<path>.rejected-<now>] (a suffix is
     added if that name is taken). Never raises for a single file; a file that
     cannot be moved lands in [failed]. With nothing undecodable the report
-    only counts. *)
+    only counts. Any [unreadable] files remain untouched and are carried
+    into [failed], even if a caller did not first call [admit]. *)
 
 val summary : report -> string
 (** One line for the boot log. *)

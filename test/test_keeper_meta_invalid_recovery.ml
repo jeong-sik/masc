@@ -319,6 +319,7 @@ let test_gate_verdict_matches_runtime_read () =
     (match Keeper_meta_store.validate_current_meta_file_result path with
      | Ok () -> ()
      | Error (Keeper_meta_store.Unreadable detail)
+     | Error (Keeper_meta_store.Invalid_json detail)
      | Error (Keeper_meta_store.Not_current detail) ->
        failf "%s: gate rejected a meta the runtime serves: %s" label detail);
     check string (label ^ ": gate left the file untouched") before
@@ -334,6 +335,8 @@ let test_gate_verdict_matches_runtime_read () =
       | Error (Keeper_meta_store.Not_current detail) -> detail
       | Error (Keeper_meta_store.Unreadable detail) ->
         failf "%s: gate classed decodable JSON as unreadable: %s" label detail
+      | Error (Keeper_meta_store.Invalid_json detail) ->
+        failf "%s: gate classed decodable JSON as invalid JSON: %s" label detail
       | Ok () -> failf "%s: gate passed a meta the runtime discards" label
     in
     let base_seq = latest_seq () in
@@ -370,7 +373,9 @@ let test_gate_verdict_matches_runtime_read () =
   let pretty = Yojson.Safe.pretty_to_string (current ()) in
   write_file path (String.sub pretty 0 64);
   (match Keeper_meta_store.validate_current_meta_file_result path with
-   | Error (Keeper_meta_store.Unreadable _) -> ()
+   | Error (Keeper_meta_store.Invalid_json _) -> ()
+   | Error (Keeper_meta_store.Unreadable detail) ->
+     failf "truncated JSON classed as an I/O failure: %s" detail
    | Error (Keeper_meta_store.Not_current detail) ->
      failf "truncated JSON classed as a schema mismatch: %s" detail
    | Ok () -> fail "gate passed truncated JSON");

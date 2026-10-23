@@ -1,0 +1,98 @@
+{
+  "base": "bdd5151351e7de19a80e78722f9bc1f97ff46d1c",
+  "at": "2026-10-23T07:33:11.126235+00:00",
+  "scope": "Five remaining main test compilation locations after merged summary repair45444",
+  "patch_sha256": "3cd7a5a749ae2938254a4d10f159500bb62f9ed4a62c78a3e54494560baf2be5",
+  "patch_bytes": 4835,
+  "files": [
+    {
+      "path": "test/stanzas/test_lane_addon_submit_once.inc",
+      "sha256": "1de3ac76b461230c9b0d8209f2a5decd3e9dcd05a820c9d661b3afeaecea232c",
+      "bytes": 158
+    },
+    {
+      "path": "test/test_workspace_curator_addon_commit.ml",
+      "sha256": "a9b13139604d30883b6d9ae94f9276e9fbf42cc6fc81723bf52bd18c86d5299b",
+      "bytes": 106412
+    },
+    {
+      "path": "test/test_keeper_addon_deferred_runtime.ml",
+      "sha256": "3142ba8227bbb0c68163d3638e822c853fbf68b5be0d379fa08c558b469c835a",
+      "bytes": 17869
+    },
+    {
+      "path": "test/test_keeper_librarian_addon_owner.ml",
+      "sha256": "137aef82ff1e6c4170eaae27b96137b5be74311a83457a9172ce79b09ce2a67e",
+      "bytes": 74297
+    },
+    {
+      "path": "test/test_keeper_librarian_durable_execution.ml",
+      "sha256": "121a74ef2da1824674f0dd1338efb27768dd8a7ffa8ba02f3f8bd040ba1f0863",
+      "bytes": 68391
+    }
+  ],
+  "checks": [
+    {
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "test/test_workspace_curator_addon_commit.ml"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "test/test_keeper_addon_deferred_runtime.ml"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "test/test_keeper_librarian_addon_owner.ml"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-c",
+        "test/test_keeper_librarian_durable_execution.ml"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "output": ""
+    }
+  ],
+  "not_run": [
+    "Dune parsing/build",
+    "OCaml typing",
+    "test execution",
+    "CI",
+    "installed runtime"
+  ],
+  "no_new_tests_reason": "Repair existing test dependency, exhaustive event classification and actual worker exit protocol without changing behavioral assertions.",
+  "source_head": "5378dd4abe30b669253f7b65818a369c58b4dccf"
+}

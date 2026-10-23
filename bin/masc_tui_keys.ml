@@ -2042,6 +2042,9 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       [ b Navigate "j/k" "preview"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Navigate "Home/End" "first/last"
+      ; b Navigate "v" "view" ~help:"all, owned, can buy, then face/neck/head/hand/base"
+      ; b Navigate "Space" "compare" ~help:"compare the try-on picture with the current outfit"
+      ; b Act "a" "ask Keeper" ~help:"prepare a price-bounded buy/equip chat draft; Enter sends it"
       ]
   | Detail_github ->
       [ b Act "L" "login" ~help:"start the gh device-flow login with the ticked scopes"

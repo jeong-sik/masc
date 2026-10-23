@@ -11,6 +11,66 @@ type account = {
 }
 type t = Off | Disabled of string | Ready of account
 
+type filter = All | Owned | Can_buy | In_slot of Item.slot
+
+let next_filter = function
+  | All -> Owned
+  | Owned -> Can_buy
+  | Can_buy -> In_slot Item.Face
+  | In_slot Item.Face -> In_slot Item.Neck
+  | In_slot Item.Neck -> In_slot Item.Head
+  | In_slot Item.Head -> In_slot Item.Hand
+  | In_slot Item.Hand -> In_slot Item.Base
+  | In_slot Item.Base -> All
+
+let filter_name = function
+  | All -> "All"
+  | Owned -> "Owned"
+  | Can_buy -> "Can buy"
+  | In_slot slot -> String.capitalize_ascii (Item.slot_id slot)
+
+let items ~filter ~account =
+  List.filter (fun item -> match filter, account with
+    | All, _ -> true
+    | In_slot slot, _ -> Item.slot item = slot
+    | Owned, Some (Ready account) -> List.mem item account.owned_items
+    | Can_buy, Some (Ready account) ->
+      not (List.mem item account.owned_items)
+      && List.exists (fun entry -> entry.item = item && match entry.price with
+        | Priced amount -> amount <= account.balance_milli
+        | Unpriced -> false) account.catalog
+    | (Owned | Can_buy), (None | Some (Off | Disabled _)) -> false) Item.all
+
+let cursor ~items current = max 0 (min (List.length items - 1) current)
+let move ~items ~cursor:current ~delta = cursor ~items (cursor ~items current + delta)
+let item_name item =
+  Item.id item |> String.map (function '_' -> ' ' | c -> c) |> String.capitalize_ascii
+
+type request =
+  | Equip of Item.t
+  | Buy_and_equip of { item : Item.t; expected_price_milli : int }
+
+let request ~account item =
+  match account with
+  | None -> Error "Read this Keeper's Item account before preparing a request"
+  | Some Off -> Error "Candle is off"
+  | Some (Disabled reason) -> Error ("Candle is disabled: " ^ reason)
+  | Some (Ready account) when List.mem item account.owned_items ->
+    Ok (Equip item)
+  | Some (Ready account) ->
+    match List.find_opt (fun entry -> entry.item = item) account.catalog with
+    | None | Some { price = Unpriced; _ } -> Error "This item has no configured price"
+    | Some { price = Priced amount; _ } when amount > account.balance_milli ->
+      Error "The observed Candle balance cannot cover this item"
+    | Some { price = Priced amount; _ } ->
+      Ok (Buy_and_equip {item; expected_price_milli=amount})
+
+let request_draft = function
+  | Equip item -> Printf.sprintf
+      "Please equip the portrait accessory %S from your owned items. Check your current ownership and equipment first, and tell me the confirmed result. Do not purchase another item." (Item.id item)
+  | Buy_and_equip {item; expected_price_milli} -> Printf.sprintf
+      "Please buy and equip the portrait accessory %S for yourself. First check your current ownership and balance. If you already own it, only equip it. Otherwise use expected_price_milli=%d as the maximum purchase price; if the price is higher, report the new price instead of buying. Confirm the purchase before equipping, then tell me the confirmed equipment and remaining Candle balance. If a purchase result is uncertain, check the account before trying again." (Item.id item) expected_price_milli
+
 let exact_keys expected fields =
   List.sort String.compare (List.map fst fields)
   = List.sort String.compare expected

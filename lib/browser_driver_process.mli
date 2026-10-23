@@ -1,4 +1,5 @@
 (** Loopback Gecko driver command. Each session names its own profile with
-    [-profile], so the driver makes none; with a given profile geckodriver does
-    not choose the Marionette port, so the worker passes one. *)
-val argv : driver:string -> port:int -> marionette_port:int -> string list
+    [-profile], so the driver makes none. geckodriver writes
+    [marionette.port] 0 into that profile, so each browser picks its own
+    Marionette port and reports it in the profile's [MarionetteActivePort]. *)
+val argv : driver:string -> port:int -> string list

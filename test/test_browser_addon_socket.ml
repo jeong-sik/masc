@@ -82,10 +82,10 @@ let owned_backend_cleanup () =
   with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
-      let profiles=Filename.concat root "profiles" and downloads=Filename.concat root "downloads" in
-      Unix.mkdir profiles 0o700;Unix.mkdir downloads 0o700;
+      let downloads=Filename.concat root "downloads" in
+      Unix.mkdir downloads 0o700;
       Unix.mkdir (Filename.concat downloads "session") 0o700;
-      let file=Filename.concat profiles "still-in-use" in
+      let file=Filename.concat (Filename.concat downloads "session") "partial" in
       Out_channel.with_open_bin file (fun out -> output_string out "preserve");
       lease (Lease.retire admission);
       check "missing worker receipt retains allocation" true (Result.is_error (Socket.cleanup ~admission ~directory));
@@ -95,8 +95,8 @@ let owned_backend_cleanup () =
       write "another-worker";
       check "other worker receipt is refused" true (Result.is_error (Socket.cleanup ~admission ~directory));
       write (Lease.instance_id admission);
-      check "receipt alone cannot discard profile contents" true (Result.is_error (Socket.cleanup ~admission ~directory));
-      check "unconfirmed profile content remains" true (Sys.file_exists file);
+      check "receipt alone cannot discard download contents" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      check "unconfirmed download content remains" true (Sys.file_exists file);
       Unix.unlink file;
       released (Socket.cleanup ~admission ~directory);
       check "receipt and empty trees release allocation" false (Sys.file_exists root))
@@ -129,9 +129,9 @@ let operator_retains_unconfirmed_allocation () =
   with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
-      let profiles=Filename.concat root "profiles" in
-      Unix.mkdir profiles 0o700;
-      let file=Filename.concat profiles "escaped-browser-profile" in
+      let downloads=Filename.concat root "downloads" in
+      Unix.mkdir downloads 0o700;
+      let file=Filename.concat downloads "unsettled-download" in
       Out_channel.with_open_bin file (fun out -> output_string out "preserve");
       refused "a launchable reservation cannot be retained" (Socket.retain ~admission ~directory);
       check "a refused retain keeps the acquisition" true (acquisition_state directory = "acquired");
@@ -139,7 +139,7 @@ let operator_retains_unconfirmed_allocation () =
       check "missing worker receipt retains allocation" true (Result.is_error (Socket.cleanup ~admission ~directory));
       check "the operator retains the allocation" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained);
       check "the acquisition record names the operator's retention" true (acquisition_state directory = "retained");
-      check "retained profile content remains" true (Sys.file_exists file);
+      check "retained download content remains" true (Sys.file_exists file);
       (* A later recovery pass reports the retention, never a release. *)
       retained (Socket.cleanup ~admission ~directory);
       check "cleanup leaves a retained allocation in place" true (Sys.file_exists file);

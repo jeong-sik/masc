@@ -16,17 +16,15 @@ val root : lane_addon_root:string -> string
 
 val prepare_instance : root:string -> instance_id:string -> (string, string) result
 (** Creates or checks [root] and [root]/[instance_id] as private directories
-    with canonical paths, and returns the instance directory. [instance_id]
-    must be a canonical UUID. *)
+    with canonical paths, and returns the instance directory. [root] itself
+    must not be a symbolic link. [instance_id] must be a canonical UUID. *)
 
 val is_masc_name : string -> bool
 (** Whether an instance or profile directory name is a canonical UUID, the only
     names masc gives them. *)
 
-val check_root : string -> (unit, string) result
 val check_instance : string -> (unit, string) result
-(** Each refuses a directory that is not a private directory with a canonical
-    path. *)
+(** Refuses a directory that is not a private directory with a canonical path. *)
 
 val create : instance:string -> (string, string) result
 (** Creates a fresh private profile directory named by a new UUID. *)

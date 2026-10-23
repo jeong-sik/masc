@@ -62,7 +62,12 @@ let release_resources t session =
 let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
   (match result with
-   | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources t session
+   | Error (Remote { code = Invalid_session_id; _ }) ->
+     (* A release hook may call again with a session already released. *)
+     (match t.session with
+      | Some current when current == session ->
+        t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources t session
+      | Some _ | None -> ())
    | Error (Transport _ | Protocol _) -> Atomic.set t.observed_session Browser_lane.Browser_unknown
    | Ok _ -> (match session.downloads with Ok _ -> Atomic.set t.observed_session Browser_lane.Browser_open | Error _ -> ())
    | Error (Remote { code = No_such_window | No_such_alert | Unexpected_alert_open | Other _; _ }) -> ());

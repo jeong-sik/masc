@@ -39,20 +39,12 @@ let close ~env ~endpoint ~uncertain driver =
          | Ok _ | Error (Transport _|Protocol _|Remote {code=No_such_window|No_such_alert|Unexpected_alert_open|Other _;_}) -> ());
         outcome));
     Eio.Fiber.await_cancel ())) (fun () -> Eio.Promise.await result)
-(* Both sockets stay bound until both ports are read, so the two differ. *)
-let ports () =
-  let bound () =
-    let socket=Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
-    (try Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback,0))
-     with exn -> Unix.close socket;raise exn);
-    socket in
-  let port socket = match Unix.getsockname socket with
-    | Unix.ADDR_INET (_,port) -> port
-    | Unix.ADDR_UNIX _ -> invalid_arg "expected loopback port" in
-  let driver=bound () in
-  Fun.protect ~finally:(fun () -> Unix.close driver) (fun () ->
-    let marionette=bound () in
-    Fun.protect ~finally:(fun () -> Unix.close marionette) (fun () -> port driver,port marionette))
+let port () =
+  let socket=Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Fun.protect ~finally:(fun () -> Unix.close socket) (fun () ->
+    Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback,0));
+    match Unix.getsockname socket with Unix.ADDR_INET (_,port) -> port
+      | Unix.ADDR_UNIX _ -> invalid_arg "expected loopback port")
 let ready ~clock ~pool ~endpoint ~process =
   (* Same driver startup window as the previous owner: measured startup 1.5 s;
      cold disk allowance 10 s. This bounds readiness I/O, never agent work. *)
@@ -89,11 +81,11 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
     Eio.Fiber.fork ~sw:lifetime (fun () ->
     let outcome = try
     Eio.Switch.run (fun sw ->
-      let port,marionette_port=Eio_unix.run_in_systhread ports in
+      let port=Eio_unix.run_in_systhread port in
       let output=Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) Eio.Path.(Eio.Stdenv.fs env / Filename.concat directory "webdriver.log") in
       Eio.Switch.check sw;
       let process=Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr ~stdout:output ~stderr:output
-        (Browser_driver_process.argv ~driver:configuration.driver ~port ~marionette_port) in
+        (Browser_driver_process.argv ~driver:configuration.driver ~port) in
       let endpoint=Printf.sprintf "http://%s:%d" Masc_network_defaults.masc_http_loopback_peer port in
       let clock=Eio.Stdenv.clock env in
       let pool=Masc_http_client.Pool.create ~sw ~env () in
@@ -113,7 +105,10 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
         | Error ((Transport _|Protocol _|Remote {code=No_such_window|No_such_alert|Unexpected_alert_open|Other _;_}) as error) -> Error error in
       let profiles={Browser_webdriver.fresh=(fun () -> Eio_unix.run_in_systhread (fun () ->
           Browser_gecko_profile.create ~instance:configuration.profiles));
-        ended=(fun path -> match Eio_unix.run_in_systhread (fun () -> Browser_gecko_profile.remove_if_free path) with
+        (* A session ended by cancellation, such as a command timeout, still
+           lets its profile go; the removal never waits on another process. *)
+        ended=(fun path -> match Eio.Cancel.protect (fun () ->
+            Eio_unix.run_in_systhread (fun () -> Browser_gecko_profile.remove_if_free path)) with
           | Ok Browser_gecko_profile.Removed -> ()
           | Ok Browser_gecko_profile.In_use ->
             Printf.eprintf "Gecko profile %s is still in use; the host removes it after this instance ends\n%!" path

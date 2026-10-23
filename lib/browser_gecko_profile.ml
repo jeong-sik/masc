@@ -28,14 +28,14 @@ let prepare_instance ~root ~instance_id =
     Error (Printf.sprintf "%s require a canonical instance UUID; it is %S" instance_label instance_id)
   else protect ~label:root_label root (fun () ->
     ensure_directory root;
-    let root = Unix.realpath root in
+    (* Resolve the parent only: a symlinked root is refused, not followed. *)
+    let root = Filename.concat (Unix.realpath (Filename.dirname root)) (Filename.basename root) in
     let* () = checked ~label:root_label root in
     let instance = Filename.concat root instance_id in
     ensure_directory instance;
     let* () = checked ~label:instance_label instance in
     Ok instance)
 
-let check_root root = protect ~label:root_label root (fun () -> checked ~label:root_label root)
 let check_instance instance = protect ~label:instance_label instance (fun () -> checked ~label:instance_label instance)
 
 let create ~instance =

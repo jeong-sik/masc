@@ -12,7 +12,7 @@ let driver = {|#!/usr/bin/env python3
 import argparse,base64,fcntl,hashlib,http.server,json,os,pathlib,struct
 p=argparse.ArgumentParser()
 p.add_argument("--host");p.add_argument("--port",type=int)
-p.add_argument("--websocket-port");p.add_argument("--marionette-port",type=int)
+p.add_argument("--websocket-port")
 a=p.parse_args()
 root=pathlib.Path(__file__).resolve().parent
 held={}

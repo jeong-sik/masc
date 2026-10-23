@@ -6,11 +6,12 @@ let check = Alcotest.check Alcotest.bool
 let rec remove path = match (Unix.lstat path).Unix.st_kind with
   | Unix.S_DIR -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);Unix.rmdir path
   | Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK -> Unix.unlink path
-let with_claim ?(automation=None) ?(models=fun _ -> None) ?(stagehand=fun _ -> None) work =
+let with_claim ?(automation=None) ?(models=fun _ -> None) ?(stagehand=fun _ -> None)
+    ?(context=Fun.id) work =
   let directory=Filename.temp_file "browser-addon-slot-" "" in
   Unix.unlink directory;Unix.mkdir directory 0o700;
   let instance_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
-  let context=ok (Socket.context ~stagehand:(stagehand directory) ~live_bidi:None ~instance_id ~automation ~models:(models directory)) in
+  let context=ok (Socket.context ~stagehand:(stagehand directory) ~live_bidi:None ~instance_id ~automation ~models:(models directory)) |> context in
   let root=match context with `Assoc fields -> (match List.assoc_opt "directory" fields with
     | Some (`String root) -> root | _ -> Alcotest.fail "missing allocation directory")
     | _ -> Alcotest.fail "invalid allocation intent" in
@@ -246,6 +247,101 @@ let retain_waits_for_an_unpublished_child_to_be_fenced () =
     ok (Masc.Browser_addon_stagehand.settle c ~incarnation:(Lease.instance_id admission) ~directory:root);
     check "the operator retains the allocation once the child is fenced" true
       (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained))
+(* A reservation keeps its producer's backend payloads. Settlement must not
+   require interpreting them after an explicit operator handoff. *)
+let opaque_backends = function
+  | `Assoc fields -> `Assoc (List.map (fun (key,value) -> match key with
+      | "automation" -> key,`Assoc ["driver",`String "/fixture/driver";"binary",`Null]
+      | "models" -> key,`String "operator-owned payload"
+      | _ -> key,value) fields)
+  | value -> value
+let allocation_record admission directory = Filename.concat directory
+  ("browser-" ^ Digestif.SHA256.(to_hex (digest_string (Lease.instance_id admission))) ^ ".json")
+let produce_allocation admission directory root =
+  Unix.mkdir root 0o700;
+  let info=Unix.lstat root in
+  let value=`Assoc ["state",`String "acquired";"incarnation",`String (Lease.instance_id admission);
+    "directory",`String root;"device",`Int info.st_dev;"inode",`Int info.st_ino] in
+  ok (Fs_compat.save_file_atomic_strict (allocation_record admission directory) (Yojson.Safe.to_string value))
+let opaque_payload_handoff () = with_claim ~context:opaque_backends (fun admission directory root ->
+  produce_allocation admission directory root;
+  let record=allocation_record admission directory in
+  let acquired=In_channel.with_open_bin record In_channel.input_all in
+  let sentinel=Filename.concat root "operator-evidence" in
+  Out_channel.with_open_bin sentinel (fun out -> output_string out "preserve");
+  lease (Lease.retire admission);
+  check "unretained resources still need their full backend contract" true
+    (Result.is_error (Socket.cleanup ~admission ~directory));
+  Alcotest.check Alcotest.string "failed cleanup leaves acquisition unchanged" acquired
+    (In_channel.with_open_bin record In_channel.input_all);
+  check "official handoff does not interpret automation or model contents" true
+    (retain_ok (Socket.retain ~admission ~directory)=Socket.Allocation_retained);
+  check "an allocation cannot be projected as an empty reservation" true
+    (Result.is_error (Socket.check_retained ~instance_id:(Lease.instance_id admission) ~slot:directory None));
+  let marker=In_channel.with_open_bin record In_channel.input_all in
+  let moved=Filename.concat directory "operator-allocation" in
+  Unix.rename root moved; Unix.symlink moved root;
+  let reopened=lease (Lease.reopen ~directories:[directory] ~instance_id:(Lease.instance_id admission)) in
+  retained (Socket.cleanup ~admission:reopened ~directory);
+  ok (Socket.check_retained ~instance_id:(Lease.instance_id admission) ~slot:directory
+    (lease (Lease.cleanup_context reopened)));
+  check "repeated handoff does not reopen operator resources" true
+    (retain_ok (Socket.retain ~admission:reopened ~directory)=Socket.Allocation_retained);
+  Alcotest.check Alcotest.string "operator marker remains byte-identical" marker
+    (In_channel.with_open_bin record In_channel.input_all);
+  Alcotest.check Alcotest.string "operator evidence survives path replacement" "preserve"
+    (In_channel.with_open_bin (Filename.concat moved "operator-evidence") In_channel.input_all))
+let retained_record_binding () = with_claim (fun admission directory root ->
+  ignore (ok (Socket.acquire ~admission ~directory));
+  lease (Lease.retire admission);
+  ignore (retain_ok (Socket.retain ~admission ~directory));
+  let record=allocation_record admission directory in
+  let fields=match Yojson.Safe.from_file record with `Assoc fields -> fields | _ -> Alcotest.fail "record" in
+  let altered key value=`Assoc (List.map (fun (name,original) -> name,if name=key then value else original) fields) in
+  List.iter (fun value ->
+    ok (Fs_compat.save_file_atomic_strict record (Yojson.Safe.to_string value));
+    check "unbound or malformed retention is refused" true (Result.is_error (Socket.cleanup ~admission ~directory));
+    check "invalid retention preserves the allocation" true (Sys.file_exists root))
+    [altered "incarnation" (`String "another-instance");altered "directory" (`String directory);
+     altered "state" (`String "unknown");`Assoc (("state",`String "retained")::fields)];
+  ok (Fs_compat.save_file_atomic_strict record (Yojson.Safe.to_string (`Assoc fields)));
+  let original=Filename.concat directory "original-record" in
+  Unix.rename record original; Unix.symlink original record;
+  check "a symlink cannot confer retained ownership" true (Result.is_error (Socket.cleanup ~admission ~directory));
+  Unix.unlink record;Unix.link original record;
+  check "a hardlink cannot confer retained ownership" true (Result.is_error (Socket.cleanup ~admission ~directory)))
+let retained_publication_readback () = with_claim ~context:opaque_backends (fun admission directory root ->
+  produce_allocation admission directory root;lease (Lease.retire admission);
+  let save path contents =
+    ok (Fs_compat.save_file_atomic_strict path contents);
+    Error {Fs_compat.path;stage=Fs_compat.After_rename;exception_=Failure "fsync failed";
+      backtrace=Printexc.get_callstack 0} in
+  (match Socket.For_testing.retain ~save ~admission ~directory with
+   | Error (Socket.Retained_record_unconfirmed _) -> ()
+   | Ok _|Error (Socket.Retain_refused _) -> Alcotest.fail "published handoff must remain unconfirmed");
+  let reopened=lease (Lease.reopen ~directories:[directory] ~instance_id:(Lease.instance_id admission)) in
+  retained (Socket.cleanup ~admission:reopened ~directory);
+  check "published operator allocation survives recovery" true (Sys.file_exists root))
+let opaque_release_boundary () = with_claim ~context:opaque_backends (fun admission directory root ->
+  lease (Lease.retire admission);
+  refused "an unrecorded unknown backend is not reported released" (Socket.retain ~admission ~directory);
+  let record=allocation_record admission directory in
+  check "a refused unrecorded handoff publishes no marker" false (Sys.file_exists record);
+  (* The terminal producer format has no backend payload: release already
+     proved that this reservation has no allocation left. *)
+  ok (Fs_compat.save_file_atomic_strict record (Yojson.Safe.to_string (`Assoc ["state",`String "released"])));
+  released (Socket.cleanup ~admission ~directory);
+  ok (Socket.check_retained ~instance_id:(Lease.instance_id admission) ~slot:directory
+    (lease (Lease.cleanup_context admission)));
+  check "explicit released ownership survives an opaque backend" true
+    (retain_ok (Socket.retain ~admission ~directory)=Socket.Allocation_released);
+  Unix.mkdir root 0o700;
+  check "a released path resurrection is not cleaned" true (Result.is_error (Socket.cleanup ~admission ~directory));
+  check "preflight rejects the same resurrection" true
+    (Result.is_error (Socket.check_retained ~instance_id:(Lease.instance_id admission) ~slot:directory
+      (lease (Lease.cleanup_context admission))));
+  refused "handoff cannot bless a released path resurrection" (Socket.retain ~admission ~directory);
+  check "the resurrected path survives every refusal" true (Sys.file_exists root))
 let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "original allocation recovery and historical release" `Quick cleanup_after_reopen;
   Alcotest.test_case "crash before acquisition record" `Quick interrupted_acquisition;
@@ -260,4 +356,8 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "retain requires a settled Chrome child and signals nothing" `Quick retain_requires_a_settled_child_without_signalling;
   Alcotest.test_case "retain reports where a record write failed" `Quick retain_reports_where_a_record_write_failed;
   Alcotest.test_case "retain refuses a child claim of another allocation" `Quick retain_refuses_a_foreign_child;
-  Alcotest.test_case "retain waits until an unpublished child is fenced" `Quick retain_waits_for_an_unpublished_child_to_be_fenced]]
+  Alcotest.test_case "retain waits until an unpublished child is fenced" `Quick retain_waits_for_an_unpublished_child_to_be_fenced;
+  Alcotest.test_case "operator handoff makes backend payloads opaque" `Quick opaque_payload_handoff;
+  Alcotest.test_case "retention remains bound to the original host record" `Quick retained_record_binding;
+  Alcotest.test_case "published handoff survives an unconfirmed fsync" `Quick retained_publication_readback;
+  Alcotest.test_case "released ownership needs an absent original path" `Quick opaque_release_boundary]]

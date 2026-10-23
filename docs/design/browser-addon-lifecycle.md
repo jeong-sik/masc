@@ -239,6 +239,17 @@ receipts remain distinct from successful contract validation.
    converges on `Native_retained`. The host's Gecko profile pass leaves a
    retained instance's profiles in place as well.
 
+   Ownership is checked before backend payloads are interpreted. Preflight,
+   cleanup and a repeated Retain validate the original descriptor envelope and
+   instance-bound acquisition record, then leave an operator-retained allocation
+   alone even if its backend payload no longer decodes or the operator moved
+   its contents. The first Retain still decodes the Chrome/live BiDi child
+   configurations needed to confirm their settlement; it does not interpret
+   automation or model contents. Acquired resources still require the full
+   current backend contract for automatic cleanup. An explicit released record
+   requires its original path to remain absent; a missing acquisition record
+   cannot bypass backend validation or silently confer retained ownership.
+
    The tool proxy must
    preserve the exported tool's installation-selected command/result hooks;
    mandatory wire decoding does not replace those optional hooks. Upload leases, artifacts and model

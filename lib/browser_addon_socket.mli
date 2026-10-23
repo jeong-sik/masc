@@ -10,9 +10,12 @@ val context : instance_id:string -> automation:Browser_addon_automation.configur
 val check_retained : instance_id:string -> slot:string -> Yojson.Safe.t option -> (unit, string) result
 (** Read what {!cleanup} reads for [instance_id] in its installation [slot],
     without a claim, lock, creating or removing anything: the retained cleanup
-    descriptor, the socket acquisition record in [slot], and each Chrome and
-    live BiDi child claim the descriptor names, compared with the descriptor it
-    recomputes. [None] is a reservation with no browser allocation. *)
+    envelope and socket acquisition record in [slot]. An operator-retained
+    allocation needs no backend decoding or child inspection: its resources
+    belong to the operator. An explicit released record instead requires its
+    original allocation path to be absent. Other states compare each Chrome
+    and live BiDi child claim with its original descriptor. [None] permits no
+    allocation record except an explicit released record. *)
 val acquire : admission:Native_addon_lease.t -> directory:string -> (t, string) result
 (** Before payload spawn, acquire the directory selected by the original native
     reservation and persist its exact identity in that host claim slot. *)
@@ -34,7 +37,9 @@ val cleanup : admission:Native_addon_lease.t -> directory:string -> (settlement,
     whether cleanup is required, including orphan recovery. Known directories
     are never reused and unknown contents are never recursively deleted. A
     missing acquisition record with an existing socket is unconfirmed. A
-    retained allocation is reported as [Allocation_retained] and not touched. *)
+    retained allocation is reported as [Allocation_retained] before decoding
+    backend configuration or inspecting its children or contents. The original
+    claim, descriptor envelope and acquisition record must still agree. *)
 type retain_error =
   | Retain_refused of string
       (** The acquisition record was not changed. *)
@@ -49,8 +54,12 @@ val retain : admission:Native_addon_lease.t -> directory:string -> (settlement, 
     The allocation's contents are not read or removed: the acquisition record
     becomes [retained] with the recorded directory identity, or, with no
     record, the identity of the private directory found at this instance's own
-    path. An allocation already released is reported as [Allocation_released]
-    and left as it is. *)
+    path. Only the child configurations needed to confirm settlement are
+    decoded; automation/model payloads are not execution authority for this
+    handoff. A repeated retain reads only the envelope and retained record.
+    With no acquisition record, the full current descriptor is still required.
+    An allocation already released is reported as [Allocation_released] and
+    left as it is. *)
 module For_testing : sig
   val retain : save:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
     admission:Native_addon_lease.t -> directory:string -> (settlement, retain_error) result

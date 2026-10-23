@@ -1084,7 +1084,7 @@ class LocalVoice(StepByStep):
         self.assertEqual(order, ['voice', 'sandbox'])
 
 
-BROWSER_NAMES = {'geckodriver': 'geckodriver', 'firefox': 'Firefox'}
+BROWSER_NAMES = {'geckodriver': 'geckodriver', 'firefox': 'Firefox', 'ego-browser': 'ego lite'}
 BROWSER_INSTALLS = {'geckodriver': ['brew', 'install', 'geckodriver'],
                     'firefox': ['brew', 'install', '--cask', 'firefox']}
 
@@ -1242,7 +1242,7 @@ class ImpTools(unittest.TestCase):
         # Whether Docker runs here, and whether ZAI_API_KEY is set, decide a
         # row each (the first also costs one more catalog call), so both are
         # pinned to "no row" like the login. SearchChoices covers them.
-        for name in ('searxng_row', 'zai_row'):
+        for name in ('searxng_row', 'zai_row', 'ego_row'):
             pinned = patch.object(SETUP, name, return_value=None)
             pinned.start()
             self.addCleanup(pinned.stop)
@@ -1710,9 +1710,10 @@ class SearchChoices(unittest.TestCase):
         login = patch.object(SETUP, 'host_github_login', return_value=None)
         login.start()
         self.addCleanup(login.stop)
-        browser = patch.object(SETUP, 'browser_rows', return_value=[])
-        browser.start()
-        self.addCleanup(browser.stop)
+        for name, value in (('browser_rows', []), ('ego_row', None)):
+            browser = patch.object(SETUP, name, return_value=value)
+            browser.start()
+            self.addCleanup(browser.stop)
         # The wizard's own environment: no key unless a case sets one.
         self.environment = patch.dict(os.environ, {}, clear=False)
         self.environment.start()
@@ -2226,7 +2227,7 @@ class FirefoxRoutes(unittest.TestCase):
         login = patch.object(SETUP, 'host_github_login', return_value=None)
         login.start()
         self.addCleanup(login.stop)
-        for name in ('searxng_row', 'zai_row'):
+        for name in ('searxng_row', 'zai_row', 'ego_row'):
             pinned = patch.object(SETUP, name, return_value=None)
             pinned.start()
             self.addCleanup(pinned.stop)
@@ -2344,10 +2345,6 @@ class FirefoxRoutes(unittest.TestCase):
         self.assertTrue(any('open debugging port' in label for label in labels))
         self.assertTrue(any('load the add-on after each restart' in label for label in labels))
 
-    def test_choosing_both_routes_is_told_at_the_point_of_choice(self):
-        notice = {row.key: row for row in self.rows()}['extension'].notice
-        self.assertIn('refused as ambiguous', notice)
-
     def test_the_restart_note_is_for_the_routes_that_write_a_table(self):
         # The extension route writes no table of runtime.toml, and the lane token
         # is read for each request: telling the reader to restart a live server
@@ -2459,6 +2456,104 @@ class FirefoxRoutes(unittest.TestCase):
         self.assertIn('--mode extension', printed.getvalue())
 
 
+class EgoRoute(unittest.TestCase):
+    """The ego lite row (RFC-browser-live-ego section 7).
+
+    It is shown when ego-browser answers, starts unmarked and is written by
+    `masc browser-lane-setup --mode ego`. It needs no Firefox, so a Firefox
+    that is missing or left out does not take it away, nor the other way round.
+    """
+
+    def setUp(self):
+        login = patch.object(SETUP, 'host_github_login', return_value=None)
+        login.start()
+        self.addCleanup(login.stop)
+        for name in ('searxng_row', 'zai_row'):
+            pinned = patch.object(SETUP, name, return_value=None)
+            pinned.start()
+            self.addCleanup(pinned.stop)
+
+    def looks(self, firefox=True, ego=True):
+        # The rows look at geckodriver, Firefox and then ego-browser, once each.
+        return [completed(browser_catalog('geckodriver', ready=True)),
+                completed(browser_catalog('firefox', ready=firefox)),
+                completed(browser_page_catalog('ego-browser', ready=ego))]
+
+    def rows(self, **found):
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.looks(**found)):
+            return {row.key: row for row in SETUP.imp_tool_rows('/bin/masc', '/work space')}
+
+    def setup_calls(self, run):
+        return [call.args[0] for call in run.call_args_list
+                if len(call.args[0]) > 1 and call.args[0][1] == 'browser-lane-setup']
+
+    def prepare(self, modes, replies, port=None, menu=False):
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'prerequisite_menu', return_value=menu), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.prepare_browser_lane('/bin/masc', '/workspace', modes, port)
+        return run, printed.getvalue()
+
+    def test_ego_found_shows_its_row_unmarked_with_its_command(self):
+        row = self.rows()['ego']
+        self.assertFalse(row.checked)
+        self.assertEqual(row.command, "masc browser-lane-setup --mode ego --base-path '/work space'")
+        self.assertIn('cookies of your ego lite profile', row.notice)
+
+    def test_no_ego_browser_means_no_ego_row(self):
+        self.assertNotIn('ego', self.rows(ego=False))
+
+    def test_ego_is_offered_without_firefox(self):
+        rows = self.rows(firefox=False)
+        self.assertIn('ego', rows)
+        self.assertNotIn('bidi', rows)
+
+    def test_an_unreadable_ego_catalog_leaves_the_other_rows_and_names_the_command(self):
+        replies = self.looks()[:2] + [completed('', 1)]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            rows = {row.key for row in SETUP.imp_tool_rows('/bin/masc', '/workspace')}
+        self.assertNotIn('ego', rows)
+        self.assertTrue({'automation', 'bidi', 'extension', 'github'} <= rows)
+        self.assertIn('masc browser-lane-setup --mode ego --base-path /workspace', printed.getvalue())
+
+    def test_marking_the_row_runs_the_ego_mode_and_asks_for_no_firefox(self):
+        replies = self.looks() + [completed(browser_page_catalog('ego-browser', ready=True)),
+                                  completed(), completed(json.dumps(dict(status='free')))]
+        ego = lambda *a, **k: [index for index, label in enumerate(a[1]) if 'ego lite' in label]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', side_effect=ego), \
+                contextlib.redirect_stderr(io.StringIO()):
+            confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace', 8945)
+        self.assertEqual([row.key for row in confirmed], ['ego'])
+        asked = [call.args[0][2] for call in run.call_args_list if call.args[0][1] == 'prerequisite-actions']
+        self.assertEqual(asked, ['geckodriver', 'firefox', 'ego-browser', 'ego-browser'])
+        self.assertEqual(self.setup_calls(run),
+                         [['/bin/masc', 'browser-lane-setup', '--mode', 'ego', '--base-path', '/workspace']])
+
+    def test_a_firefox_left_missing_keeps_the_ego_route(self):
+        run, printed = self.prepare(('bidi', 'ego'), [completed(browser_catalog('firefox', ready=False)),
+                                                      completed(browser_page_catalog('ego-browser', ready=True)),
+                                                      completed()])
+        self.assertEqual(self.setup_calls(run),
+                         [['/bin/masc', 'browser-lane-setup', '--mode', 'ego', '--base-path', '/workspace']])
+        self.assertIn('Firefox is missing, so this is left out. Run masc browser-lane-setup --mode bidi ', printed)
+
+    def test_an_ego_browser_left_missing_keeps_the_firefox_routes(self):
+        run, printed = self.prepare(('extension', 'ego'), [completed(browser_catalog('firefox', ready=True)),
+                                                           completed(browser_page_catalog('ego-browser', ready=False)),
+                                                           completed()])
+        self.assertEqual(self.setup_calls(run),
+                         [['/bin/masc', 'browser-lane-setup', '--mode', 'extension', '--base-path', '/workspace']])
+        self.assertIn('ego-browser is missing, so this is left out. Run masc browser-lane-setup --mode ego ', printed)
+
+    def test_the_ego_route_writes_a_table_so_a_running_server_is_told_to_restart(self):
+        run, printed = self.prepare(('ego',), [completed(browser_page_catalog('ego-browser', ready=True)), completed(),
+                                               completed(json.dumps(dict(status='same_workspace')))], port=8945)
+        self.assertTrue(any(call.args[0][1] == 'setup-server' for call in run.call_args_list))
+        self.assertIn('already running', printed)
+
+
 class HostGithubLoginProbe(unittest.TestCase):
     """What `gh auth status --json hosts` says, read into a login worth offering."""
 
@@ -2561,6 +2656,7 @@ class ImpGithubLogin(unittest.TestCase):
                 patch.object(SETUP, 'browser_rows', side_effect=SETUP.SetupError('no browser tools')), \
                 patch.object(SETUP, 'searxng_row', return_value=None), \
                 patch.object(SETUP, 'zai_row', return_value=None), \
+                patch.object(SETUP, 'ego_row', return_value=None), \
                 patch.object(SETUP, 'pick', side_effect=lambda *a, **k: shown.append(sys.stderr.getvalue()) or [0]), \
                 contextlib.redirect_stderr(io.StringIO()):
             SETUP.choose_imp_tools('/bin/masc', '/workspace')

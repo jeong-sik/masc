@@ -162,8 +162,9 @@ Keeper 에게 이렇게 부탁해 한 장으로 남깁니다.
 - 설치: 설치 과정의 "5 · Give imp tools (optional)" 체크리스트에서 브라우저 줄을
   표시해 두면 `geckodriver` 와 Firefox 를 찾고, 없으면 설치 메뉴를 보여 줍니다.
   아니면 서버 시작 전에 `masc browser-lane-setup --mode automation` 을 실행합니다.
-  평소 쓰는 Firefox 를 연결하는 BiDi 줄과 부가 기능(add-on) 줄은 처음에 표시되어
-  있지 않으니 필요할 때만 고릅니다. 설치를 이미 끝냈다면 같은 명령을 직접 실행하고
+  MASC 가 띄우는 Firefox 를 쓰는 BiDi 줄, 평소 쓰는 Firefox 를 붙이는 부가 기능(add-on)
+  줄, ego lite 안의 작업 공간을 쓰는 ego lite 줄(`ego-browser` 가 답할 때만 나옴)은
+  처음에 표시되어 있지 않으니 필요할 때만 고릅니다. 설치를 이미 끝냈다면 같은 명령을 직접 실행하고
   서버를 다시 시작합니다.
 - 레인이 꺼져 있으면 Browser Lane 화면에 이런 줄이 보입니다.
   - `Live lane off in runtime.toml · it serves nothing, MASC starts nothing` —

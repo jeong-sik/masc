@@ -1605,6 +1605,68 @@ let require_mcp_runtime_result name args =
   | Some result -> ((Tool_result.is_success result), (Tool_result.message result))
   | None -> Alcotest.failf "%s not routed by MCP runtime board dispatch" name
 
+let test_board_activity_does_not_complete_tasks () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
+  let config = Mcp_server.workspace_config state in
+  let agent_name = "mcp-runtime-curator" in
+  let metric = Metrics_store_eio.create_metric ~agent_id:agent_name ~task_id:"actual-task" ()
+    |> fun metric -> Metrics_store_eio.complete_metric metric ~success:true () in
+  (match Metrics_store_eio.record config metric with
+   | Ok Metrics_store_eio.Written -> ()
+   | Ok Enqueued -> Metrics_store_eio.flush_pending ()
+   | Error error -> Alcotest.fail (Metrics_store_eio.record_error_to_string error));
+  let check_task_records () =
+    match Metrics_store_eio.get_recent config ~agent_id:agent_name ~days:1 with
+    | Error error -> Alcotest.fail (Metrics_store_eio.read_error_to_string error)
+    | Ok rows ->
+        Alcotest.(check (list string)) "only the actual Task contributes"
+          ["actual-task"] (List.map (fun (row : Metrics_store_eio.task_metric) -> row.task_id) rows)
+  in
+  let runtime name args =
+    let result = match Mcp_tool_runtime_board.dispatch ~config ~agent_name ~arguments:args
+      ~state ~name ~start_time:(Tool_timing.start ()) with
+      | Some result -> result
+      | None -> Alcotest.failf "%s was not routed" name in
+    Alcotest.(check bool) name true (Tool_result.is_success result);
+    check_task_records ();
+    result
+  in
+  let id result = Yojson.Safe.Util.(Tool_result.data result |> member "id" |> to_string) in
+  let posted = runtime "masc_board_post"
+    (make_args ["content", `String "A Board post is not a Task"]) |> id in
+  let other_post = dispatch_result "masc_board_post"
+    (make_args ["author", `String "other-author"; "content", `String "Discussion target"]) in
+  Alcotest.(check bool) "other author's post created" true (Tool_result.is_success other_post);
+  let post_id = id other_post in
+  ignore (runtime "masc_board_comment"
+    (make_args ["post_id", `String post_id; "content", `String "Discussion is Board activity"]));
+  ignore (runtime "masc_board_vote"
+    (make_args ["post_id", `String post_id; "direction", `String "up"]));
+  let other_comment = dispatch_result "masc_board_comment"
+    (make_args ["post_id", `String post_id; "author", `String "other-author";
+      "content", `String "Another comment"]) in
+  Alcotest.(check bool) "other author's comment created" true (Tool_result.is_success other_comment);
+  let comment_id = id other_comment in
+  ignore (runtime "masc_board_comment_vote"
+    (make_args ["comment_id", `String comment_id; "direction", `String "up"]));
+  let board = Event_kind.Board.to_string in
+  let expected = [board Event_kind.Board.Posted, "post", posted;
+    board Event_kind.Board.Commented, "post", post_id;
+    board Event_kind.Board.Voted, "post", post_id;
+    board Event_kind.Board.Voted, "comment", comment_id] in
+  let events = Activity_graph.list_events config ~after_seq:0 ~limit:(List.length expected)
+    ~kinds:(List.sort_uniq String.compare (List.map (fun (kind, _, _) -> kind) expected))
+    ~keep:(fun (event : Activity_graph.event) ->
+      event.actor = Some (Server_utils.board_actor_entity agent_name)) () in
+  Alcotest.(check int) "all four Board actions remain observable" (List.length expected) (List.length events);
+  List.iter (fun (kind, subject_kind, subject_id) ->
+    Alcotest.(check bool) "actual Board subject and kind retained" true
+      (List.exists (fun (event : Activity_graph.event) -> event.kind = kind
+        && event.subject = Some (Activity_graph.entity ~kind:subject_kind subject_id)) events)) expected
+
 let test_board_curation_mcp_runtime_routes_read_and_submit () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3541,6 +3603,8 @@ let () =
             test_board_curation_submit_roundtrips_to_read;
           Alcotest.test_case "curation MCP runtime routes read and submit" `Quick
             test_board_curation_mcp_runtime_routes_read_and_submit;
+          Alcotest.test_case "Board activity does not complete Tasks" `Quick
+            test_board_activity_does_not_complete_tasks;
           Alcotest.test_case "accept automation reject system" `Quick
             test_post_create_accepts_automation_rejects_system;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;

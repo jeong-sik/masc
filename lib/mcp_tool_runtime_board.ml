@@ -227,29 +227,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         let post_id = created_post_id result_tr in
         if Option.is_none post_id then
           Log.Misc.error "board_post succeeded but its result data is not a post";
-        (* Record board activity as a fitness metric so board-active agents
-           appear in agent_fitness queries (Issue #1861). *)
-        (try
-           let now = Time_compat.now () in
-           let metric : Metrics_store_eio.task_metric = {
-             id = Metrics_store_eio.generate_id ();
-             agent_id = author;
-             task_id = "board_post";
-             started_at = now;
-             completed_at = Some now;
-             success = true;
-             error_message = None;
-             collaborators = [];
-             handoff_from = None;
-             handoff_to = None;
-           } in
-           (match Metrics_store_eio.record config metric with
-            | Ok (Metrics_store_eio.Enqueued | Written) -> ()
-            | Error error -> Log.Misc.error "board_post fitness record rejected: %s"
-                (Metrics_store_eio.record_error_to_string error))
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Misc.error "board_post fitness record failed: %s"
-             (Stdlib.Printexc.to_string exn));
         let notification = `Assoc [
           ("type", `String "masc/board_post");
           ("author", `String author);
@@ -299,28 +276,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
-        (* Record board comment as a fitness metric (Issue #1861). *)
-        (try
-           let now = Time_compat.now () in
-           let metric : Metrics_store_eio.task_metric = {
-             id = Metrics_store_eio.generate_id ();
-             agent_id = author;
-             task_id = "board_comment:" ^ post_id;
-             started_at = now;
-             completed_at = Some now;
-             success = true;
-             error_message = None;
-             collaborators = [];
-             handoff_from = None;
-             handoff_to = None;
-           } in
-           (match Metrics_store_eio.record config metric with
-            | Ok (Metrics_store_eio.Enqueued | Written) -> ()
-            | Error error -> Log.Misc.error "board_comment fitness record rejected: %s"
-                (Metrics_store_eio.record_error_to_string error))
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Misc.error "board_comment fitness record failed: %s"
-             (Stdlib.Printexc.to_string exn));
         let notification = `Assoc [
           ("type", `String "board_comment");
           ("author", `String author);
@@ -365,7 +320,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
 
   | Some ((Tool_name.Board_name.Board_vote | Tool_name.Board_name.Board_comment_vote) as vote_name) ->
       let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments in
-      (* Record vote activity as a fitness metric (Issue #1861). *)
       let result_tr =
         if Tool_result.is_success result_tr then begin
         let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
@@ -386,27 +340,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           | Tool_name.Board_name.Board_sub_board_delete -> "comment_id", "comment"
         in
         let target_id = Safe_ops.json_string ~default:"unknown" target_field arguments in
-        (try
-           let now = Time_compat.now () in
-           let metric : Metrics_store_eio.task_metric = {
-             id = Metrics_store_eio.generate_id ();
-             agent_id = voter;
-             task_id = "board_vote:" ^ target_id;
-             started_at = now;
-             completed_at = Some now;
-             success = true;
-             error_message = None;
-             collaborators = [];
-             handoff_from = None;
-             handoff_to = None;
-           } in
-           (match Metrics_store_eio.record config metric with
-            | Ok (Metrics_store_eio.Enqueued | Written) -> ()
-            | Error error -> Log.Misc.error "board_vote fitness record rejected: %s"
-                (Metrics_store_eio.record_error_to_string error))
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Misc.error "board_vote fitness record failed: %s"
-             (Stdlib.Printexc.to_string exn));
         result_after_activity_projection
           ~tool_name:name
           ~start_time

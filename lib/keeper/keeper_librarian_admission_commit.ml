@@ -110,7 +110,8 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
      | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok ())
   | Rejected {stage=Progress.Execution;evidence} ->
-    let* final=Exact.final_of_json ~schema evidence in
+    let* retained=Exact.retained_final_of_json ~schema evidence in
+    let final=Exact.delivered retained in
     let* ()=Capture.confirm_final ~store capture final in
     (match final with
      | Exact.Call_final (Answered _) -> Error "Original refusal contains an answered proposal"

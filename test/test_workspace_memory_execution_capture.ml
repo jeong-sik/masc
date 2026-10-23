@@ -345,7 +345,11 @@ let test_settled_chains_are_the_ones_no_pass_reads () = with_workspace (fun root
                                P.Observer (Receipt.Recorded (Receipt.Completion,completion.Receipt.digest))] in
   let change : P.change = {before=`Null;after=`Assoc ["committed",`Bool true]} in
   let finished = [P.Dispatch_intended;P.Judgment_retained `Null;P.Commit_intended change;P.Commit_observed change.after] in
-  let refused = [P.Dispatch_intended;P.Refused {stage=P.Execution;evidence=`Null}] in
+  let refused = [P.Dispatch_intended;P.Refused {stage=P.Execution;
+    evidence=Lane_addon_exact.retained_final_to_json
+      (Lane_addon_exact.Retained_not_allowed {reason="original fixture refusal"})}] in
+  let unknown cause = [P.Dispatch_intended;P.Refused {stage=P.Execution;
+    evidence=Lane_addon_exact.retained_final_to_json (Lane_addon_exact.Retained_unknown cause)}] in
   (* Minted in this order, so [latest] is the last answered classification. *)
   let older = original (classification ()) (finished @ observed) in
   let parent_capture = classification () in
@@ -358,6 +362,11 @@ let test_settled_chains_are_the_ones_no_pass_reads () = with_workspace (fun root
   let child = original child_capture (finished @ observed) in
   let unobserved = original (classification ()) (finished @ registered @ [completion_intended]) in
   let fenced = original (classification ()) (refused @ observed) in
+  let interrupted = original (classification ()) (unknown Lane_addon_exact.Interrupted @ observed) in
+  let interrupted_unobserved = original (classification ())
+      (unknown Lane_addon_exact.Interrupted @ registered @ [completion_intended]) in
+  let cut = original (classification ()) (unknown Lane_addon_exact.Cut @ observed) in
+  let raised = original (classification ()) (unknown Lane_addon_exact.Raised @ observed) in
   let conflicted = original (classification ())
       ([P.Dispatch_intended;P.Judgment_retained `Null;P.Commit_intended change;
         P.Commit_conflicted (`Assoc ["changed",`Bool true])] @ observed) in
@@ -380,11 +389,15 @@ let test_settled_chains_are_the_ones_no_pass_reads () = with_workspace (fun root
       ~render:briefing_render B.empty) with
     | B.Prepared batch -> batch
     | B.Unchanged | B.Cleanup _ -> Alcotest.fail "expected a briefing pass" in
-  let briefing = original (get (C.briefing ~request_id:(C.Request_id.fresh ()) ~workspace ~destination
-      ~prompt:briefing_prompt ~batch)) (finished @ observed) in
+  let briefing_capture () = get (C.briefing ~request_id:(C.Request_id.fresh ()) ~workspace ~destination
+      ~prompt:briefing_prompt ~batch) in
+  let briefing = original (briefing_capture ()) (finished @ observed) in
+  let interrupted_briefing = original (briefing_capture ()) (unknown Lane_addon_exact.Interrupted @ observed) in
+  let cut_briefing = original (briefing_capture ()) (unknown Lane_addon_exact.Cut @ observed) in
+  let raised_briefing = original (briefing_capture ()) (unknown Lane_addon_exact.Raised @ observed) in
   let records = owned (Owner.discover ~store ~scope:C.scope)
     |> List.map (fun record -> record,get (C.Summary.of_json (Owner.Record.summary record))) in
-  let settled settling = C.settled_chains settling records
+  let settled settling = get (C.settled_chains settling records)
     |> List.map (fun (root,leaf_first) -> C.Request_id.to_string root,List.map Owner.Record.request_id leaf_first)
     |> List.sort compare in
   let chains = Alcotest.(list (pair string (list string))) in
@@ -393,15 +406,25 @@ let test_settled_chains_are_the_ones_no_pass_reads () = with_workspace (fun root
     List.filter_map (fun (record,_) -> let id = Owner.Record.request_id record in
       if List.mem id moved then None else Some id) records |> List.sort compare in
   Alcotest.check chains "older answered chains settle, each leaf first, a conflicted one too"
-    (List.sort compare [older,[older];parent,[child;parent];conflicted,[conflicted]]) (settled C.Classifications);
+    (List.sort compare [older,[older];parent,[child;parent];conflicted,[conflicted];interrupted,[interrupted]])
+    (settled C.Classifications);
   Alcotest.(check (list string))
     "the latest answer, a pending receipt anywhere in a chain, a refusal and every Briefing stay"
-    (List.sort compare [unobserved;fenced;pending_parent;pending_child;latest;briefing]) (kept C.Classifications);
+    (List.sort compare [unobserved;fenced;pending_parent;pending_child;latest;briefing;
+      interrupted_unobserved;cut;raised;interrupted_briefing;cut_briefing;raised_briefing]) (kept C.Classifications);
   let prepared = Workspace_memory_revision.briefing_sha256
       (Workspace_memory_revision.of_briefing (B.prepared_state batch)) in
-  Alcotest.check chains "a Briefing that prepared the current state stays" [] (settled (C.Briefings {state=prepared}));
+  Alcotest.check chains "Interrupted releases the current Briefing pass, Cut and Raised stay"
+    [interrupted_briefing,[interrupted_briefing]] (settled (C.Briefings {state=prepared}));
   Alcotest.check chains "a Briefing that prepared another state settles, and only Briefing chains do"
-    [briefing,[briefing]] (settled (C.Briefings {state=String.make 64 '0'})))
+    (List.sort compare [briefing,[briefing];interrupted_briefing,[interrupted_briefing]])
+    (settled (C.Briefings {state=String.make 64 '0'}));
+  (* An old cause-free refusal has no policy interpretation or cleanup grant. *)
+  let _old = original (classification ()) [P.Dispatch_intended;
+    P.Refused {stage=P.Execution;evidence=Lane_addon_exact.final_to_json Lane_addon_exact.Outcome_unknown}] in
+  let invalid = owned (Owner.discover ~store ~scope:C.scope)
+    |> List.map (fun record -> record,get (C.Summary.of_json (Owner.Record.summary record))) in
+  rejected (C.settled_chains C.Classifications invalid))
 
 let () = Alcotest.run "Curator trusted host capture" ["capture",[
   Alcotest.test_case "canonical storage preserves exact original prompt and judgment" `Quick test_canonical_storage_preserves_original_prompt_and_selected_judgment;

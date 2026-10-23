@@ -307,7 +307,9 @@ let narrow ~request_id ~final t =
 let expected_successor original (refusal : Progress.refusal) (successor : Progress.successor) =
   let* id = Request_id.of_string successor.request_id in
   let* final = match refusal.stage with
-    | Progress.Execution -> Exact.final_of_json ~schema:(output_schema original) refusal.evidence
+    | Progress.Execution ->
+      Exact.retained_final_of_json ~schema:(output_schema original) refusal.evidence
+      |> Result.map Exact.delivered
     | Progress.Before_dispatch -> Error "Curator successor requires an original execution refusal" in
   let* child = narrow ~request_id:id ~final original in
   let* child = match child with Some child -> Ok child
@@ -399,11 +401,19 @@ let recoverable_successors ~workspace originals =
         | Progress.Rejected _ -> Ok pending in
       validate pending rest in
   validate [] originals
-(* Chains no pass needs again, each with its root's ID and its records leaf
-   first, the order they move in. A chain stays while any of its originals
-   has observer work, while its leaf is not answered (a Rejected leaf holds
-   its facts back), while it holds the latest answered classification, which
-   sizes the next batch, or while its Briefing prepared the current state. *)
+let refusal_blocks summary (refusal : Progress.refusal) =
+  match refusal.stage with
+  | Progress.Before_dispatch -> Ok true
+  | Progress.Execution ->
+    let* retained = Exact.retained_final_of_json ~schema:(Summary.output_schema summary) refusal.evidence in
+    match retained with
+    | Exact.Retained_unknown Exact.Interrupted -> Ok false
+    | Exact.Retained_unknown (Exact.Cut | Exact.Raised)
+    | Exact.Retained_call (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
+    | Exact.Retained_not_allowed _ | Exact.Retained_request_id_reused -> Ok true
+    | Exact.Retained_call (Exact.Answered _) -> Error "An original refusal cannot contain an Answered judgment"
+(* Chains no pass needs again, leaf first. Interrupted leaves release their
+   inputs, but observer work must still be acknowledged across the chain. *)
 type settling = Classifications | Briefings of { state : string }
 let settled_chains settling originals =
   let records = List.fold_left (fun records ((record, _) as original : Owner.Record.t * Summary.t) ->
@@ -436,18 +446,28 @@ let settled_chains settling originals =
          | Some newer when Request_id.compare newer id > 0 -> latest
          | Some _ | None -> Some id)
       | Summary.Classification _ | Summary.Briefing _ -> latest) None originals in
-  List.filter_map (fun ((root, summary) as original : Owner.Record.t * Summary.t) ->
+  let* chains = List.fold_left (fun accumulated ((root, summary) as original : Owner.Record.t * Summary.t) ->
+    let* accumulated = accumulated in
     match summary.Summary.predecessor, chain [] original with
-    | Some _, _ | None, (None | Some []) -> None
+    | Some _, _ | None, (None | Some []) -> Ok accumulated
     | None, Some ((leaf, leaf_summary) :: _ as leaf_first) ->
+      let* interrupted = match Progress.phase (Owner.Record.progress leaf) with
+        | Progress.Rejected refusal -> Result.map not (refusal_blocks leaf_summary refusal)
+        | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
+        | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _
+        | Progress.Subdividing _ | Progress.Subdivided _ -> Ok false in
       (* A child is captured with its parent's kind, so the leaf names the
          chain's domain. *)
       let unneeded = match settling, leaf_summary.Summary.batch with
-        | Classifications, Summary.Classification _ -> latest_answer <> Some (Owner.Record.request_id leaf)
-        | Briefings {state}, Summary.Briefing {prepared_state; _} -> not (String.equal prepared_state state)
+        | Classifications, Summary.Classification _ ->
+          interrupted || latest_answer <> Some (Owner.Record.request_id leaf)
+        | Briefings {state}, Summary.Briefing {prepared_state; _} ->
+          interrupted || not (String.equal prepared_state state)
         | Classifications, Summary.Briefing _ | Briefings _, Summary.Classification _ -> false in
-      if unneeded && answered leaf && List.for_all (fun (record, _) -> observed record) leaf_first
-      then Some (Owner.Record.request_id root, List.map fst leaf_first) else None) originals
+      if unneeded && (answered leaf || interrupted) && List.for_all (fun (record, _) -> observed record) leaf_first
+      then Ok ((Owner.Record.request_id root, List.map fst leaf_first) :: accumulated)
+      else Ok accumulated) (Ok []) originals in
+  Ok (List.rev chains)
 type expected_commit = Classification_commit of Ledger.t | Briefing_commit of Brief.t
 let validate_output t raw = match t.work with
   | Classification {ledger;batch} ->

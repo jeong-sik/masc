@@ -1080,7 +1080,87 @@ let test_a_refused_briefing_waits_for_its_pass_to_change ()=
     ignore (Curator.request ~base_path);
     await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path && ready_summary base_path);
     check int "a changed contract prepares and sends one new pass" (calls+1) (F.post_count server))
+let seed_unknown_refusal store capture cause =
+  let record=advance store (original_record store capture) Progress.Dispatch_intended in
+  advance store record (Progress.Refused {stage=Progress.Execution;
+    evidence=Lane_addon_exact.retained_final_to_json (Lane_addon_exact.Retained_unknown cause)})
+let interrupted = function
+  | Lane_addon_exact.Interrupted -> true
+  | Cut | Raised -> false
+let test_classification_unknown_policy cause () =
+  with_fixture ~start_owner:false ~claims:["Original fact held by an unknown call"]
+    (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode:_ ~delivery:_ ->
+    reconcile_until_export clock ~config;
+    let capture=capture_classification config in
+    let original=seed_unknown_refusal store capture cause in
+    Curator.start ~sw ~config;
+    let expected=if interrupted cause then 1 else 0 in
+    await_owner clock base_path (fun () ->
+      Curator.For_testing.is_idle ~base_path
+      && List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=expected
+      && observer_acknowledged (find_original store original.request_id).stored_progress);
+    let classified=every_original store |> List.filter (fun current ->
+      match current.stored_summary.Capture.Summary.batch with
+      | Classification _ -> is_finished current.stored_progress
+      | Briefing _ -> false) in
+    check int "only Interrupted prepares another original for the same fact" expected (List.length classified);
+    let archived=List.exists (fun (_,record) -> text record "request_id"=original.request_id) (settled_records store) in
+    check bool "only the acknowledged Interrupted original leaves the live scope" (interrupted cause) archived;
+    let calls=F.post_count server in
+    ignore (Curator.request ~base_path);
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
+    check int "an ordinary wake repeats no completed or still-fenced original" calls (F.post_count server))
+let test_briefing_unknown_policy cause () =
+  with_fixture ~start_owner:false ~claims:["Original source for an interrupted Briefing"]
+    (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode:_ ~delivery:_ ->
+    reconcile_until_export clock ~config;
+    let classification=capture_classification config in
+    let selected=match Capture.work classification with
+      | Capture.Classification {batch;_} -> Request.selected_ids batch
+      | Briefing _ -> fail "fixture requires classification evidence" in
+    let answer=`Assoc ["decisions",`List (List.map (fun (id,(fact:Ledger.pending_fact)) ->
+      `Assoc ["fact_id",`String id;"kind",`String "create_claim";"value",`String fact.claim]) selected)] in
+    let ledger=match get (Capture.validate_output classification answer) with
+      | Capture.Classification_commit ledger -> ledger
+      | Briefing_commit _ -> fail "fixture requires a classified ledger" in
+    get (Ledger.save ~base_path ledger);
+    ignore (advance store (original_record store classification)
+      (Progress.Refused {stage=Progress.Before_dispatch;evidence=`String "fixture ledger already prepared"}));
+    let prompt=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
+    let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_briefing
+      prompt ["workspace_memory_briefing",Yojson.Safe.to_string input] in
+    let batch=match get (Briefing.prepare ~sources:(Ledger.briefing_sources ledger)
+        ~contract:(Briefing.contract ~template:prompt.effective) ~render Briefing.empty) with
+      | Prepared batch -> batch
+      | Unchanged | Cleanup _ -> fail "fixture requires a prepared Briefing pass" in
+    get (Briefing.save ~directory:(Ledger.directory ~base_path) (Briefing.prepared_state batch));
+    let capture=Consumer.capture_briefing ~config ~prompt ~batch |> consumed in
+    let original=seed_unknown_refusal store capture cause in
+    Curator.start ~sw ~config;
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path
+      && observer_acknowledged (find_original store original.request_id).stored_progress
+      && (not (interrupted cause) || ready_summary base_path));
+    check bool "only Interrupted releases the identical prepared Briefing state"
+      (interrupted cause) (ready_summary base_path);
+    check int "only Interrupted sends one replacement Briefing"
+      (if interrupted cause then 1 else 0) (F.post_count server);
+    let calls=F.post_count server in
+    ignore (Curator.request ~base_path);
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
+    check int "a further wake sends no duplicate Briefing" calls (F.post_count server))
 let ()=run "Actual Addon-backed production Curator owner" ["owner",[
+  test_case "Interrupted classification selects and commits the same original fact" `Quick
+    (test_classification_unknown_policy Lane_addon_exact.Interrupted);
+  test_case "Cut classification keeps its original fact fenced" `Quick
+    (test_classification_unknown_policy Lane_addon_exact.Cut);
+  test_case "Raised classification keeps its original fact fenced" `Quick
+    (test_classification_unknown_policy Lane_addon_exact.Raised);
+  test_case "Interrupted Briefing releases the identical prepared state" `Quick
+    (test_briefing_unknown_policy Lane_addon_exact.Interrupted);
+  test_case "Cut Briefing keeps the identical prepared state fenced" `Quick
+    (test_briefing_unknown_policy Lane_addon_exact.Cut);
+  test_case "Raised Briefing keeps the identical prepared state fenced" `Quick
+    (test_briefing_unknown_policy Lane_addon_exact.Raised);
   test_case "public owner uses real worker, semantic candidates and original terminal" `Quick test_actual_production_pipeline;
   test_case "actual Addon On wakes sources parked while Off" `Quick test_off_then_actual_metadata_on;
   test_case "actual output publication resumes the same original request" `Quick test_original_waits_for_actual_route_publication;

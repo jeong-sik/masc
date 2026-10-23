@@ -234,7 +234,8 @@ let validate ~store ~request ~(record : Owner.retained) =
   | Rejected {stage=Progress.Execution;evidence} ->
     let* exact=Request.request request in
     let* schema=Option.to_result ~none:"Original history refusal lacks its schema" exact.schema in
-    let* final=Exact.final_of_json ~schema evidence in
+    let* retained=Exact.retained_final_of_json ~schema evidence in
+    let final=Exact.delivered retained in
     let* ()=Request.confirm_final ~store request final in
     (match final with
      | Exact.Call_final (Answered _) -> Error "History refusal contains an answered host result"

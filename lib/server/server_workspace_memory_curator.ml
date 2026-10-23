@@ -26,7 +26,8 @@ let leaves originals=List.filter (fun original -> match phase original with
   | Finished _ | Conflicted _ | Rejected _ -> true) originals
 let size_refusal (original : Consumer.original)=match phase original with
   | Progress.Rejected {stage=Progress.Execution;evidence} ->
-    let* final=Exact.final_of_json ~schema:(Capture.Summary.output_schema original.summary) evidence in
+    let* retained=Exact.retained_final_of_json ~schema:(Capture.Summary.output_schema original.summary) evidence in
+    let final=Exact.delivered retained in
     (match final with
      | Exact.Call_final (Exact.Input_refused (Exact.Input_capacity | Context_overflow | Request_body_refused)) -> Ok true
      | Exact.Call_final (Exact.Output_limit_reached _) ->
@@ -113,13 +114,17 @@ let one_successor ~config originals =
         else Ok false in
       collect (if current then original::acc else acc) rest in
   collect [] originals
-let classification_blocked originals (fact:Ledger.pending_fact) =
-  List.exists (fun (original : Consumer.original) -> match original.summary.Capture.Summary.batch with
-    | Capture.Summary.Briefing _ -> false
+let classification_blocked originals =
+  List.fold_left (fun blocked (original : Consumer.original) ->
+    let* blocked=blocked in
+    match original.summary.Capture.Summary.batch with
+    | Capture.Summary.Briefing _ -> Ok blocked
     | Capture.Summary.Classification {selected;_} -> match phase original with
-      | Progress.Rejected _ -> List.mem fact.Ledger.fact selected
+      | Progress.Rejected refusal ->
+        let* holds=Capture.refusal_blocks original.summary refusal in
+        Ok (if holds then List.rev_append selected blocked else blocked)
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-      | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> false) originals
+      | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok blocked) (Ok []) originals
 let classify_new ~config ~originals ~new_work =
   let base_path=config.Workspace.base_path in
   let* context,ledger=io (fun () -> let* context=Context.collect ~base_path in
@@ -128,8 +133,9 @@ let classify_new ~config ~originals ~new_work =
   let* ()=if change.vanished=[] then Ok () else io (fun () -> Ledger.save ~base_path change.ledger) in
   (* Finished work already has a disposition in its confirmed after-state.
      Only fresh reconciliation can make that identity pending again, after
-     its disposition was removed. A rejected original still fences its facts. *)
-  let pending=List.filter (fun fact -> not (classification_blocked originals fact)) change.new_facts in
+     its disposition was removed. Only Interrupted releases a refusal's facts. *)
+  let* blocked=classification_blocked originals in
+  let pending=List.filter (fun (fact:Ledger.pending_fact) -> not (List.mem fact.fact blocked)) change.new_facts in
   if pending=[] || not new_work then Ok false else
   (* Size the batch for the Add-on that receives it, before ranking any
      neighbor. Without one there is no batch to build. *)
@@ -159,13 +165,17 @@ let classify_new ~config ~originals ~new_work =
    still current, blocks preparing the same batch again. *)
 let briefing_blocked ~sources ~contract ~state originals =
   let state_sha256=Revision.briefing_sha256 (Revision.of_briefing state) in
-  let prepared_this_state=List.exists (fun (original : Consumer.original) ->
+  let* prepared_this_state=List.fold_left (fun blocked (original : Consumer.original) ->
+      let* blocked=blocked in
       match original.summary.Capture.Summary.batch, phase original with
-      | Capture.Summary.Briefing {prepared_state;_}, (Progress.Rejected _ | Finished _) ->
-        String.equal prepared_state state_sha256
+      | Capture.Summary.Briefing {prepared_state;_}, Progress.Rejected refusal ->
+        let* holds=Capture.refusal_blocks original.summary refusal in
+        Ok (blocked || (holds && String.equal prepared_state state_sha256))
+      | Capture.Summary.Briefing {prepared_state;_}, Finished _ ->
+        Ok (blocked || String.equal prepared_state state_sha256)
       | Capture.Summary.Briefing _, (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
                                     | Commit_unknown _ | Conflicted _ | Subdividing _ | Subdivided _)
-      | Capture.Summary.Classification _, _ -> false) originals in
+      | Capture.Summary.Classification _, _ -> Ok blocked) (Ok false) originals in
   if prepared_this_state then Briefing.state_is_current ~sources ~contract state else Ok false
 let briefing_new ~config ~originals ~new_work ~busy =
   let base_path=config.Workspace.base_path in

@@ -225,10 +225,17 @@ let with_original_consumer f =
             In_channel.with_open_bin path In_channel.input_all]
         | Unix.(S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK) -> fail "unexpected original fixture store entry" in
       let journal_snapshot ()=files (Store.root store) in
-      f ~resume ~reply ~request_id ~good ~bad ~journal_snapshot))
+      let retain_host_unknown () =
+        let exact=get (Binding.request original) in
+        let cause=Exact.retained_final_to_json (Exact.Retained_unknown Exact.Interrupted) in
+        get (Store.save_exact_request store ~declaration_id:"curator" ~request_id
+          (`Assoc ["declaration_id",`String "curator";"request_id",`String request_id;
+            "digest",`String (Exact.digest exact);"request",Exact.request_to_json exact;
+            "attempts",`List [cause];"final",Exact.final_to_json Exact.Outcome_unknown])) in
+      f ~resume ~reply ~request_id ~good ~bad ~journal_snapshot ~retain_host_unknown))
 
 let test_capacity_retries_original_but_lost_admission_never_submits_again () =
-  with_original_consumer (fun ~resume ~reply ~request_id ~good ~bad ~journal_snapshot:_ ->
+  with_original_consumer (fun ~resume ~reply ~request_id ~good ~bad ~journal_snapshot:_ ~retain_host_unknown:_ ->
     let submitted=ref [] and reads=ref 0 in
     let call ~arguments =
       match member "kind" arguments with
@@ -262,10 +269,12 @@ let test_capacity_retries_original_but_lost_admission_never_submits_again () =
      | Consumer.Judgment _ -> () | _ -> fail "same host judgment must survive a fresh handle"))
 
 let test_terminal_unknown_survives_host_restart_without_worker_or_replacement () =
-  with_original_consumer (fun ~resume ~reply ~request_id:_ ~good:_ ~bad:_ ~journal_snapshot:_ ->
+  with_original_consumer (fun ~resume ~reply ~request_id:_ ~good:_ ~bad:_ ~journal_snapshot:_ ~retain_host_unknown ->
     let call ~arguments=match member "kind" arguments with
       | `String "read" -> reply "absent" []
-      | `String "submit" -> reply "finished" ["result",`Assoc ["status",`String "outcome_unknown"]]
+      | `String "submit" ->
+        retain_host_unknown ();
+        reply "finished" ["result",`Assoc ["status",`String "outcome_unknown"]]
       | _ -> fail "unexpected worker command" in
     let accepted value=get (Result.map_error Consumer.error_to_string value) in
     let assert_unknown=function
@@ -275,7 +284,7 @@ let test_terminal_unknown_survives_host_restart_without_worker_or_replacement ()
     assert_unknown (accepted (resume (fun ~arguments:_ -> fail "terminal unknown was dispatched again"))))
 
 let test_original_output_limit_is_retained_without_worker_replay_or_a_judgment () =
-  with_original_consumer (fun ~resume ~reply ~request_id:_ ~good:_ ~bad:_ ~journal_snapshot ->
+  with_original_consumer (fun ~resume ~reply ~request_id:_ ~good:_ ~bad:_ ~journal_snapshot ~retain_host_unknown:_ ->
     let terminal=`Assoc ["status",`String "output_limit_reached";"detail",`String "original provider limit"] in
     let call ~arguments=match member "kind" arguments with
       | `String "read" -> reply "absent" []
@@ -296,7 +305,7 @@ let test_original_output_limit_is_retained_without_worker_replay_or_a_judgment (
     check bool "restoring the terminal does not add a new journal fact" true (original_files=journal_snapshot ()))
 
 let test_repeated_observation_retains_original_history_without_another_fact () =
-  with_original_consumer (fun ~resume ~reply ~request_id:_ ~good:_ ~bad:_ ~journal_snapshot ->
+  with_original_consumer (fun ~resume ~reply ~request_id:_ ~good:_ ~bad:_ ~journal_snapshot ~retain_host_unknown:_ ->
     let first ~arguments=match member "kind" arguments with
       | `String "read" -> reply "absent" []
       | `String "submit" -> reply "pending" []

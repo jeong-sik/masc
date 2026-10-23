@@ -77,14 +77,18 @@ let settled_records store=
 let text json key=Yojson.Safe.Util.to_string (member key json)
 type stored = { stored_id : string; stored_progress : Progress.t; stored_summary : Capture.Summary.t }
 (* Every original, whether its record is in the scope a pass reads or was
-   settled. Settling moves a record unchanged. *)
+   settled. Settling moves a record unchanged. The scope is read first, so a
+   record a pass settles between the two reads shows up in both, and the
+   settled copy stands for it. *)
 let every_original store=
   let live=owned (Owner.discover ~store ~scope:Capture.scope) |> List.map (fun record ->
     {stored_id=Owner.Record.request_id record;stored_progress=Owner.Record.progress record;
      stored_summary=get (Capture.Summary.of_json (Owner.Record.summary record))}) in
-  live @ List.map (fun (_,json) -> {stored_id=text json "request_id";
+  let settled=List.map (fun (_,json) -> {stored_id=text json "request_id";
     stored_progress=get (Progress.of_json (member "progress" json));
-    stored_summary=get (Capture.Summary.of_json (member "summary" json))}) (settled_records store)
+    stored_summary=get (Capture.Summary.of_json (member "summary" json))}) (settled_records store) in
+  settled @ List.filter (fun original ->
+    not (List.exists (fun moved -> moved.stored_id=original.stored_id) settled)) live
 let find_original store request_id=
   match List.find_opt (fun original -> original.stored_id=request_id) (every_original store) with
   | Some original -> original
@@ -456,6 +460,11 @@ let test_the_next_root_takes_the_size_its_last_answer_supports ()=
        the last answer. A source that arrives only then still takes its size
        from that answer. *)
     ignore (Curator.request ~base_path);await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
+    check int "the idle pass leaves only the last answered classification in the scope" 1
+      (List.length (List.filter (fun record ->
+         match (get (Capture.Summary.of_json (Owner.Record.summary record))).Capture.Summary.batch with
+         | Capture.Summary.Classification _ -> true | Capture.Summary.Briefing _ -> false)
+         (owned (Owner.discover ~store ~scope:Capture.scope))));
     commit_facts base_path (claims @ ["Size-evidence source after an idle pass"]);
     await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=6
       && Curator.For_testing.is_idle ~base_path);

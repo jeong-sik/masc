@@ -53,28 +53,38 @@ filesystem mutation, not a live process/worker restart or a domain commit.
 
 `Lane_addon_tool_request_owner.settle` moves one original out of the scope that
 discovery reads, into `tool-request-owners-settled/<scope digest>/<YYYY-MM-DD>/`,
-its record under `records/` and its body under `bodies/`. It moves nothing and
-returns `Settle_changed` unless the scope still holds exactly the record the
-caller read. The record moves first and then its body, the reverse of
-publication: a settle that stops between the two leaves a body no record names,
-as an interrupted retain does, never a record without its body. A file already
-in the archive counts as moved, so settling the same original again completes
-the move; a file in neither place is an error. Only single-link regular files
-this process owns move, under the scope's publication serializer, and both
+its record under `records/` and its body under `bodies/`. It first reads the
+record the scope holds now, and moves nothing and returns `Settle_changed` when
+that record differs from the one the caller read. The read and the move each
+take the scope serializer, so the caller's lease and serialization keep the
+record from changing between them, as for `advance`. The record moves first
+and then its body, the reverse of publication: a settle that stops between the
+two leaves a body no record names, as an interrupted retain does, never a
+record without its body. A file already in the archive counts as moved, so the
+store's settle call run again completes the move; a file in neither place is
+an error. Only single-link regular files this process owns move, and both
 directories are synced after each rename. The consumer picks the date; the
 Workspace Curator uses the UTC date its chain's root ID was minted.
 
+Nothing settles an original again once its record has left the scope, so a
+body that a stopped settle left beside the scope stays there, like one a
+stopped retain left. No pass, load or deploy check reads such a body; #45320
+tracks collecting them.
+
 A known-ID load reads the record and the body it names under one hold of the
 same serializer, so it finds an original whole or gone, never a record whose
-body a settle moved between two reads. Discovery, a known-ID load and the
-deploy store check do not read the archive, and `settled` only answers whether
-a record is there. The caller settles only
-originals no pass needs again and whose body no other record names. The
-`settle` group of `test_lane_addon_request_discovery` moves real files: the
-record and body arrive unchanged and leave the scope, a record that changed
-after it was read stays, settling again completes a move stopped after the
-record, a record that cannot move leaves the original whole, and a date that is
-not a day or an original in neither place is refused.
+body a settle moved between two reads. The deploy store check runs beside a
+live server and takes none of its locks: a record it read before a settle
+moved it, and whose body it then finds gone, counts as absent. A known-ID load
+and the deploy store check do not look in the archive; the Curator's discovery
+only asks whether a child's record is there, to finish a stopped settle, and
+`settled` answers only that. The caller settles only originals no pass needs
+again and whose body no other record names. The `settle` group of
+`test_lane_addon_request_discovery` moves real files: the record and body
+arrive unchanged and leave the scope, a record that changed after it was read
+stays, settling again completes a move stopped after the record, a record that
+cannot move leaves the original whole, and a date that is not a day or an
+original in neither place is refused.
 
 Production Curator metadata capture and serialized scheduling, the original
 HTTP/CLI semantic acceptance, uncertain domain commit recovery, Addon wake,

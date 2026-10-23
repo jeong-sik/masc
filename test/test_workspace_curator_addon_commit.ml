@@ -45,7 +45,7 @@ let commit_facts base_path claims =
 let destination : Capture.destination = {
   installation_id=Owner.installation_id (Owner.Configuration "curator");package_id="workspace-curator";
   tool="curate";source_revision="domain-fixture";configuration_revision="original"}
-let classification base_path claims =
+let classification ?(request_id=Capture.Request_id.fresh ()) base_path claims =
   commit_facts base_path claims;
   let context=get (Context.collect ~base_path) in
   let current=Ledger.reconcile Ledger.empty (Context.keepers context) in
@@ -56,7 +56,7 @@ let classification base_path claims =
       ~current:current.current_facts ~pending:current.new_facts ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0)
       |> Result.map_error Request.error_to_string |> get with
     | Some batch -> batch | None -> fail "expected original changed facts" in
-  let capture=get (Capture.classification ~request_id:(Capture.Request_id.fresh ())
+  let capture=get (Capture.classification ~request_id
     ~workspace:(get (Capture.observe_workspace ~base_path)) ~destination ~prompt ~ledger:Ledger.empty ~batch) in
   let output=`Assoc ["decisions",`List (List.map (fun (id,(fact : Ledger.pending_fact)) ->
     `Assoc ["fact_id",`String id;"kind",`String "create_claim";"value",`String fact.claim]) (Request.selected_ids batch))] in
@@ -466,6 +466,60 @@ let test_a_request_with_no_original_is_unowned ()=with_workspace (fun base_path 
     | _ -> fail "an Exact request is an object" in
   check bool "a request that differs from its original is undecided, not unowned" true
     (undecided (authorize_as base_path store changed)))
+(* A root, its child and its grandchild, the root minted on [root_id]. *)
+let three_level_chain ?request_id base_path store =
+  let capture,_=classification ?request_id base_path
+      ["Chain source a";"Chain source b";"Chain source c";"Chain source d"] in
+  let root,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
+  let child,grandchild=narrow base_path store
+      (refuse store (get (restore_capture base_path store child)) size_input) |> accepted |> successor in
+  root,child,grandchild
+let listed store (retained : Owner.retained)=
+  match List.find_opt (fun record -> Owner.Record.request_id record=retained.request_id)
+      (owned (Owner.discover ~store ~scope:Capture.scope)) with
+  | Some record -> record | None -> fail "the original is not in its scope"
+let settle_one store ~date retained=match Owner.settle ~store ~date (listed store retained) with
+  | Ok () -> () | Error error -> fail (Owner.settle_error_to_string error)
+let day_of (retained : Owner.retained)=
+  get (Capture.Request_id.minted_on (get (Capture.Request_id.of_string retained.request_id)))
+(* A settle stopped two levels below its root leaves the grandchild under the
+   root's date and the child and the root in the scope. The root is minted a
+   day before the others, so a move under each original's own date would
+   differ. *)
+let test_discovery_settles_the_rest_of_a_chain_under_its_root_date ()=with_workspace (fun base_path store ->
+  let root,child,grandchild=three_level_chain
+      ~request_id:(get (Capture.Request_id.of_string "01a1660e-abff-7000-8000-000000000000")) base_path store in
+  let root_day=day_of root in
+  settle_one store ~date:root_day grandchild;
+  check int "discovery settles the child and the root" 0 (List.length (accepted (Consumer.For_testing.discover ~store:(Store.create ~root:(Store.root store)) ~base_path)));
+  let settled ~date (retained : Owner.retained)=
+    owned (Owner.settled ~store ~scope:Capture.scope ~date ~request_id:retained.request_id) in
+  check bool "the child is under the root's date" true (settled ~date:root_day child);
+  check bool "the root is under it too" true (settled ~date:root_day root);
+  check bool "the child was minted on another day" false (String.equal (day_of child) root_day);
+  check bool "and nothing is under that day" false (settled ~date:(day_of child) child))
+(* A parent whose own parent does not name it as its child is a broken link.
+   Discovery refuses it and moves nothing. *)
+let test_discovery_settles_no_chain_with_a_broken_link ()=with_workspace (fun base_path store ->
+  let root,child,grandchild=three_level_chain base_path store in
+  settle_one store ~date:(day_of root) grandchild;
+  (* The root's history as recorded, with its successor naming another ID. *)
+  let other=Capture.Request_id.to_string (Capture.Request_id.fresh ()) in
+  let intent : Progress.successor={request_id=other;request_digest=child.request_digest} in
+  let progress=List.fold_left (fun progress event -> get (Progress.append progress event)) Progress.captured
+      [Progress.Dispatch_intended;Progress.Refused {stage=Progress.Execution;evidence=Exact.final_to_json size_input};
+       Progress.Successor_intended intent;Progress.Successor_observed other] in
+  let fields=match get (Store.load_tool_request_owner store ~scope:Capture.scope ~request_id:root.request_id) with
+    | Some (`Assoc fields) -> fields | Some _ | None -> fail "the root record is missing" in
+  get (Store.save_tool_request_owner store ~scope:Capture.scope ~request_id:root.request_id
+    (`Assoc (List.map (fun (key,value) -> key,if key="progress" then Progress.to_json progress else value) fields)));
+  (match Consumer.For_testing.discover ~store:(Store.create ~root:(Store.root store)) ~base_path with
+   | Error (Consumer.Rejected _) -> ()
+   | Ok _ | Error (Consumer.Unavailable _ | Consumer.Uncertain _) ->
+     fail "a chain whose root names another child was settled or read");
+  check (list string) "the child and the root stay in the scope"
+    (List.sort String.compare [root.request_id;child.request_id])
+    (List.sort String.compare (List.map Owner.Record.request_id (owned (Owner.discover ~store ~scope:Capture.scope)))))
 (* A settled original leaves the scope the host reads, so a request the
    worker still lists for it ends like one that has no original. *)
 let test_a_settled_original_is_unowned ()=with_workspace (fun base_path store ->
@@ -1240,6 +1294,10 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "direct Exact authority cannot bypass parent acknowledgement" `Quick test_direct_exact_authority_requires_acknowledged_ancestry;
   test_case "a request with no original is unowned" `Quick test_a_request_with_no_original_is_unowned;
   test_case "a settled original is unowned" `Quick test_a_settled_original_is_unowned;
+  test_case "discovery settles the rest of a chain under its root's date" `Quick
+    test_discovery_settles_the_rest_of_a_chain_under_its_root_date;
+  test_case "discovery settles no chain with a broken link" `Quick
+    test_discovery_settles_no_chain_with_a_broken_link;
   test_case "missing predecessor refuses resume and direct Exact" `Quick (test_missing_or_cyclic_parent_refuses true);
   test_case "cyclic predecessor refuses resume and direct Exact" `Quick (test_missing_or_cyclic_parent_refuses false);
   test_case "nested refusal narrows the child without a root sibling" `Quick test_nested_successor_has_no_root_sibling;

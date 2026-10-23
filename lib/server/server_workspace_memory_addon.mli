@@ -122,7 +122,8 @@ val discover : config:Workspace.config -> (original list, error) Stdlib.result
     the result is an observation, not a grant to bypass fresh effect checks.
     A settle interrupted inside a chain left a Subdivided parent whose child
     is already in the settled archive; discovery settles that parent and its
-    ancestors before the link check. *)
+    ancestors before the link check, and a move that fails there fails the
+    discovery. *)
 val settle_chains : config:Workspace.config -> Workspace_memory_execution_capture.settling ->
   original list -> (unit, error) Stdlib.result
 (** Move the chains of one domain that no pass needs again

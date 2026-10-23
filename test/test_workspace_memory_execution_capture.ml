@@ -357,6 +357,20 @@ let test_settled_chains_are_the_ones_no_pass_reads () = with_workspace (fun root
   let child = original child_capture (finished @ observed) in
   let unobserved = original (classification ()) (finished @ registered @ [completion_intended]) in
   let fenced = original (classification ()) (refused @ observed) in
+  let conflicted = original (classification ())
+      ([P.Dispatch_intended;P.Judgment_retained `Null;P.Commit_intended change;
+        P.Commit_conflicted (`Assoc ["changed",`Bool true])] @ observed) in
+  (* Its leaf is observed, but its parent still has a completion to record. *)
+  let pending_parent_capture = classification () in
+  let pending_child_capture = some (get (C.narrow ~request_id:(C.Request_id.fresh ())
+      ~final:(Lane_addon_exact.Call_final (Input_refused Input_capacity)) pending_parent_capture)) in
+  let pending_child_id = C.Request_id.to_string (C.request_id pending_child_capture) in
+  let pending_link : P.successor = {request_id=pending_child_id;
+    request_digest=get (Owner.request_digest (C.to_json pending_child_capture))} in
+  let pending_parent = original pending_parent_capture
+      (refused @ [P.Successor_intended pending_link;P.Successor_observed pending_child_id] @ registered
+       @ [completion_intended]) in
+  let pending_child = original pending_child_capture (finished @ observed) in
   let latest = original (classification ()) (finished @ observed) in
   let briefing_prompt = prompt "Original briefing: {{workspace_memory_briefing}}" in
   let briefing_render = render Prompt_names.workspace_memory_briefing "workspace_memory_briefing" briefing_prompt in
@@ -377,10 +391,11 @@ let test_settled_chains_are_the_ones_no_pass_reads () = with_workspace (fun root
     let moved = List.concat_map snd (settled settling) in
     List.filter_map (fun (record,_) -> let id = Owner.Record.request_id record in
       if List.mem id moved then None else Some id) records |> List.sort compare in
-  Alcotest.check chains "older answered chains settle, each leaf first"
-    (List.sort compare [older,[older];parent,[child;parent]]) (settled C.Classifications);
-  Alcotest.(check (list string)) "the latest answer, a pending receipt, a refusal and every Briefing stay"
-    (List.sort compare [unobserved;fenced;latest;briefing]) (kept C.Classifications);
+  Alcotest.check chains "older answered chains settle, each leaf first, a conflicted one too"
+    (List.sort compare [older,[older];parent,[child;parent];conflicted,[conflicted]]) (settled C.Classifications);
+  Alcotest.(check (list string))
+    "the latest answer, a pending receipt anywhere in a chain, a refusal and every Briefing stay"
+    (List.sort compare [unobserved;fenced;pending_parent;pending_child;latest;briefing]) (kept C.Classifications);
   let prepared = get (C.briefing_state_sha256 (B.prepared_state batch)) in
   Alcotest.check chains "a Briefing that prepared the current state stays" [] (settled (C.Briefings {state=prepared}));
   Alcotest.check chains "a Briefing that prepared another state settles, and only Briefing chains do"

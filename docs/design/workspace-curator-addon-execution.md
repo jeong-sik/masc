@@ -586,16 +586,21 @@ answered classification, which sizes the next batch, or while its Briefing leaf
 prepared the current Briefing state, which keeps the same pass from being
 prepared again. A Rejected leaf keeps its chain, since it holds its facts or its
 pass back. A pass therefore reads its active work, its refusals and its last
-answer, not every original the workspace ever retained. A settle failure is
-logged and the chain waits for a later pass; it does not stop the domain work.
+answer, not every original the workspace ever retained. When a pass fails to
+move a chain it logs the failure and goes on with its domain work, and a later
+pass tries again.
 
 A settle stopped inside a chain leaves a Subdivided parent whose child is
 already under the root's date. Discovery finds that parent, checks that each
 ancestor holds the one below it as its Subdivided child, settles them and reads
 the records again before the link check. A parent whose child is in neither
-place is still a broken link and refuses the inventory. A worker that still
-lists the request of a settled original finds no original behind it, so the
-host ends that request as `not_allowed` and the worker drops it.
+place is still a broken link and refuses the inventory. A move that fails here
+fails that discovery, and with it the pass of both domains, because the link
+check cannot pass while the parent is in the scope and its child in the
+archive; every later discovery tries the move again. A body that a stopped
+settle left beside the scope stays there (#45320). A worker that still lists
+the request of a settled original finds no original behind it, so the host
+ends that request as `not_allowed` and the worker drops it.
 
 The port uses local original journals and can recover an already stored intent
 without a live worker or model route. New root/new successor admission still

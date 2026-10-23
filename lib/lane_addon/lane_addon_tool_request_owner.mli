@@ -100,9 +100,9 @@ val settle : store:Lane_addon_store.t -> date:string -> Record.t -> (unit, settl
     under [date], if the scope still holds exactly this record; [Settle_changed]
     otherwise, and nothing moves. A record already in the archive completes
     the move of whatever is left. The caller settles only originals no pass
-    needs again and whose body no other record names. This is an
-    expected-record check under the caller's lease and serialization, like
-    {!advance}. *)
+    needs again and whose body no other record names. The check and the move
+    each take the scope serializer, so this is an expected-record check under
+    the caller's lease and serialization, like {!advance}. *)
 val settled : store:Lane_addon_store.t -> scope:string -> date:string -> request_id:string ->
   (bool, error) result
 (** Whether the archive holds the record of [request_id] under [date]. *)

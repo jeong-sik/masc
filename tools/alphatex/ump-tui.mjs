@@ -19,7 +19,7 @@ export async function viewUmpEditor({ asset, packets, tempo, signal, onPreview, 
     const noteView = editor.selection.kind === 'note', eventView = editor.selection.kind === 'event', rows = umpEditorRows(editor)
     const selected = rows.findIndex(row => row.id === editor.selection.id), height = Math.max(1, (process.stdout.rows || 24) - 6)
     const first = Math.max(0, selected - Math.floor(height / 2))
-    const lines = [`Native UMP · ${asset.name}${tempo === undefined ? '' : ` · ${tempo} BPM`} · ${status}`,
+    const lines = [`Native UMP · ${asset.name} · ${editor.eventSelection.length} grouped events${tempo === undefined ? '' : ` · ${tempo} BPM`} · ${status}`,
       noteView ? 'Pitch edits explicitly override this attack with Pitch7.9; note indices and per-note addresses stay fixed.'
         : eventView ? 'Original packet:word IDs survive authored time/order changes; raw words stay native UMP.'
           : 'Expression values retain note addresses; authored time edits are stored separately from recorded timestamps.',
@@ -30,6 +30,11 @@ export async function viewUmpEditor({ asset, packets, tempo, signal, onPreview, 
       ':expressions / :notes switches views; :select-expression PACKET:WORD selects a recorded per-note message',
       ':value32 0–4294967295 edits its raw data word; :reset-expression restores its original value',
       ':events shows all original messages; :select-event PACKET:WORD; :time HOST_TICKS edits the selected event',
+      ':select-events ID... replaces an explicit event group; + marks its messages in every view; :deselect-events clears it',
+      ':shift-events-ticks N / :shift-events-seconds S / :shift-events-beats B moves the whole group in one Undo',
+      ':stretch-events RATIO [ANCHOR_BEATS] scales exact tick distances about the earliest selected event or explicit beat',
+      'Stretch requires whole native ticks; choose attacks, releases and expression explicitly; no association is guessed.',
+      ':reset-event-times restores only grouped timestamps; other timing/value edits and original WAV remain intact',
       ':note-time OFF_ID START_HOST END_HOST edits an explicitly chosen attack/release; no pairing is inferred',
       ':shift-time SIGNED_TICKS moves the selected event; :duration-ticks OFF_ID TICKS sets the explicit release',
       ':at-seconds S / :shift-seconds S edit decimal seconds; :note-seconds OFF_ID START_S END_S edits a pair',
@@ -48,7 +53,7 @@ export async function viewUmpEditor({ asset, packets, tempo, signal, onPreview, 
       'Manufacturer/Profile attributes cannot be overwritten by absolute pitch; velocity edits retain their bytes',
     ])
     else for (const row of rows.slice(first, first + height)) lines.push(
-      `${row.id === editor.selection.id ? '>' : ' '} ${row.id} ${row.source} g${row.group + 1}/ch${row.channel + 1} t:${captureSecondsAtHost(editor.asset, row.hostTime).toFixed(6)}s${row.hostTime === row.originalHostTime ? '' : '*'} `
+      `${row.id === editor.selection.id ? '>' : ' '}${editor.eventSelection.includes(row.id) ? '+' : ' '} ${row.id} ${row.source} g${row.group + 1}/ch${row.channel + 1} t:${captureSecondsAtHost(editor.asset, row.hostTime).toFixed(6)}s${row.hostTime === row.originalHostTime ? '' : '*'} `
       + (noteView ? `index:${row.index} pitch:${row.pitch / 512} (${row.basis}) vel16:${row.velocity}` : eventView
         ? row.words.map(word => word.toString(16).padStart(8, '0')).join(' ')
         : `index:${row.index} ${row.kind}${row.controller === undefined ? '' : ` #${row.controller}`} value32:${row.value}`))

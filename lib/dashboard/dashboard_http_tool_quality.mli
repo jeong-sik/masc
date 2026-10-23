@@ -26,14 +26,23 @@ val unknown_runtime_profile_bucket : string
     [runtime_profile] evidence at either the top level or in
     [runtime_contract]. *)
 
+type sampling = private
+  | Window_hours of float
+  | Recent_n of int
+(** Effective data selection. A positive window reads every retained call in
+    that period; a recent count reads only the most recent calls. Constructors
+    are private so cache identity and aggregation share the selected mode. *)
+
+val select_sampling : ?n:int -> ?window_hours:float -> unit -> sampling
+(** Preserve the aggregation boundary's selection: positive [window_hours]
+    takes priority over [n]; absent/nonpositive/NaN windows select recent [n],
+    whose default is [5000]. No route-specific clamping occurs here. *)
+
 val aggregate :
-  ?n:int ->
-  ?window_hours:float ->
-  unit ->
+  sampling ->
   (Yojson.Safe.t, Keeper_tool_call_log.index_error) result
-(** Build the dashboard payload from the most recent [n] keeper
-    tool-call log records (default [5000]), optionally narrowed to
-    the last [window_hours] hours. The recent-[n] read goes through the
+(** Build the dashboard payload from the selected retained data. The recent
+    count read goes through the
     tool-call read index; an index that cannot be read is the [Error],
     never a payload with zero calls. The payload includes per-tool /
     per-keeper / per-thinking-mode / per-hour rate tables plus the

@@ -81,13 +81,17 @@ def parse_fragment(path: pathlib.Path) -> Sections:
     sections: Sections = {}
     section: str | None = None
     bullet: list[str] | None = None
+    first_lineno: int | None = None
 
     def close_bullet() -> None:
         if bullet is None or section is None:
             return
         text = "\n".join(bullet).rstrip()
         if not cite.search(text):
-            raise FragmentError(f"{path}: bullet does not cite #{number}: {bullet[0]}")
+            where = f":{first_lineno}" if first_lineno is not None else ""
+            raise FragmentError(
+                f"{path}{where}: bullet does not cite #{number}: {bullet[0]}"
+            )
         sections[section].append(text)
 
     for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -95,6 +99,7 @@ def parse_fragment(path: pathlib.Path) -> Sections:
         if re.match(r"^#+ ", line):
             close_bullet()
             bullet = None
+            first_lineno = None
             heading = re.match(r"^### (.+)$", line)
             if heading is None or heading.group(1) not in SECTIONS:
                 raise FragmentError(
@@ -110,10 +115,12 @@ def parse_fragment(path: pathlib.Path) -> Sections:
             if section is None:
                 raise FragmentError(f"{path}:{lineno}: bullet before any '### <Section>'")
             close_bullet()
+            first_lineno = lineno
             bullet = [line]
         elif line == "":
             close_bullet()
             bullet = None
+            first_lineno = None
         else:
             if bullet is None:
                 raise FragmentError(f"{path}:{lineno}: text outside a bullet: {line!r}")
@@ -355,6 +362,24 @@ def missing(base: str, head: str, directory: pathlib.Path) -> int:
     return 0
 
 
+def workflow_error(message: str) -> str:
+    """Render one diagnostic as a GitHub Actions error annotation command.
+
+    A `path:line: detail` diagnostic becomes
+    `::error file=path,line=N::detail` so the failing line is annotated on
+    the pull request instead of living only in the raw job log. Anything
+    without that shape is emitted as a plain file-less error annotation.
+    """
+    match = re.match(r"^(changelog\.d/[^\s:]+)(?::(\d+))?: (.*)$", message, re.S)
+    if match is None:
+        return f"::error::{message}"
+    filepart, line, detail = match.groups()
+    location = f"file={filepart}"
+    if line is not None:
+        location += f",line={line}"
+    return f"::error {location}::{detail}"
+
+
 def check_files(names: list[str]) -> int:
     """Refuse a listed fragment that misses its own citation.
 
@@ -383,6 +408,8 @@ def check_files(names: list[str]) -> int:
             continue
         checked += 1
     if errors:
+        for message in errors:
+            print(workflow_error(message))
         raise FragmentError("\n".join(errors))
     if checked == 0:
         print("no fragment to check")

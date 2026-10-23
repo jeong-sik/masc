@@ -453,7 +453,7 @@ type t =
            that it is free. Owner-fiber-local; every reader and writer below
            runs in the command loop. *)
   ; failed_at_start : Chat_operation.t list
-        (* All durable [Interrupted_by_restart] failures, including batch
+        (* All durable [Failed] operations, including batch
            members and prior starts, so the transcript and event journal can
            retry incomplete recovery. Fixed at start; settlement identity
            makes repeated recovery idempotent. *)

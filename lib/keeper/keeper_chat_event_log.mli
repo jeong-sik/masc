@@ -147,16 +147,16 @@ type operation_settlement =
   { operation_id : Keeper_chat_operation.Operation_id.t
   ; completed_at : float
   }
-(** Identity of the immutable restart failure in the operation store. *)
+(** Identity of the immutable operation failure in the operation store. *)
 
 type terminal_error_segment = Existing_segment | Operation_settlement of operation_settlement
-(** A restart terminal stores its exact settlement identity in the journal
+(** An operation terminal stores its exact settlement identity in the journal
     envelope. Earlier segment errors cannot acknowledge it; retrying the same
     durable settlement reuses its terminal even after another process exit. *)
 
 val find_operation_terminal :
   journal -> settlement:operation_settlement -> (terminal_error_receipt option, string) result
-(** Read the matching final restart terminal. Missing or different settlement
+(** Read the matching final operation terminal. Missing or different settlement
     metadata returns [None]; malformed metadata is an error. *)
 
 val record_terminal_error :

@@ -713,13 +713,13 @@ let operation_settlement_of_json = function
       let ( let* ) = Result.bind in
       let* operation_id = match List.assoc "operation_id" fields with
         | `String id -> Keeper_chat_operation.Operation_id.of_string id
-        | _ -> Error "restart settlement operation_id is not a string" in
+        | _ -> Error "operation settlement operation_id is not a string" in
       let* completed_at = match List.assoc "completed_at" fields with
         | `Float value when Float.is_finite value && value >= 0. -> Ok value
         | `Int value when value >= 0 -> Ok (float_of_int value)
-        | _ -> Error "restart settlement completed_at is not a finite nonnegative timestamp" in
+        | _ -> Error "operation settlement completed_at is not a finite nonnegative timestamp" in
       Ok {operation_id;completed_at}
-  | _ -> Error "restart settlement has an invalid shape"
+  | _ -> Error "operation settlement has an invalid shape"
 ;;
 
 let journaled_event_to_json { seq; ts; event } =
@@ -768,7 +768,7 @@ let journaled_envelope_of_json json =
         (match List.filter (fun (name, _) -> name = "operation_settlement") fields with
          | [] -> Ok None
          | [(_, value)] -> Result.map Option.some (operation_settlement_of_json value)
-         | _ -> Error "duplicate restart settlement")
+         | _ -> Error "duplicate operation settlement")
     | _ -> Error "journaled event is not an object" in
   match settlement, entry.event with
   | Some _, Event_error _ | None, _ -> Ok (entry, settlement)
@@ -811,7 +811,7 @@ let journaled_envelope_of_json json =
     | Image_block _
     | Status_block _
     | Audio_block _
-    | Tool_context_block _ ) -> Error "restart settlement must identify an error terminal"
+    | Tool_context_block _ ) -> Error "operation settlement must identify an error terminal"
 ;;
 
 let journaled_event_of_json json = Result.map fst (journaled_envelope_of_json json)

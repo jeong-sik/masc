@@ -87,7 +87,7 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 | `tab_creation` | `task.newPage()` 뒤 `goto` | 한다 |
 | `tab_navigation` | `page.goto` (agent 페이지만) | 한다 |
 | `tab_closing` | `page.close()` (agent 페이지만) | 한다 |
-| `tab_history` | `page.reload()` 만 API 에 있다. 뒤로·앞으로는 CDP | 다음 단계 |
+| `tab_history` | 새로고침은 `page.reload()`. 뒤로·앞으로는 `page.cdp()` 로 `Page.getNavigationHistory` 를 읽고 `Page.navigateToHistoryEntry` 로 한 칸 옮긴 뒤, 그 탭의 현재 항목이 그 칸이 되고 문서가 다 불러와질 때까지 기다린다 (agent 페이지만) | 한다. 그 쪽에 항목이 없으면 행동 전에 거절한다 |
 | `tab_activation` | CDP `Target.activateTarget` | 다음 단계 |
 | 드래그, 터치, 줌, 뷰포트 | `page.mouse.down`·`up` 등 | 다음 단계 |
 

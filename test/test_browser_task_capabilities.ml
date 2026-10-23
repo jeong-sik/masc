@@ -174,6 +174,7 @@ let test_tab_history_and_close_table () =
     check bool (Cap.operation_name operation ^ " on live BiDi") true (reaches (Cap.Connected Lane.Webdriver_bidi) operation);
     check bool (Cap.operation_name operation ^ " on owned Gecko") true (reaches Cap.Owned_gecko operation);
     check bool (Cap.operation_name operation ^ " on Stagehand") true (reaches Cap.Owned_chromium operation);
+    check bool (Cap.operation_name operation ^ " on ego") true (reaches (Cap.Connected Lane.Ego_task_space) operation);
     check bool (Cap.operation_name operation ^ " is not claimed for the extension") false
       (reaches (Cap.Connected Lane.Web_extension) operation);
     check bool (Cap.operation_name operation ^ " is not claimed for Safari") false (reaches Cap.Safari_unavailable operation))
@@ -214,8 +215,8 @@ let test_ego_table () =
   let backend = Cap.Connected Lane.Ego_task_space in
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
-  check (list string) "reads, capture, the tab list, its own tabs and input on them"
-    ["list_tabs";"open_tab";"close_tab";"navigate";"follow_link";"read_text";"read_elements";"read_scene";"read_regions";"screenshot";
+  check (list string) "reads, capture, the tab list, its own tabs, their history and input on them"
+    ["list_tabs";"open_tab";"close_tab";"navigate";"follow_link";"back";"forward";"reload";"read_text";"read_elements";"read_scene";"read_regions";"screenshot";
      "click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
      "fill";"type_text";"press_key";"key_chord";"select_option"]
     (List.map Cap.operation_name reachable);

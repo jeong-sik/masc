@@ -359,6 +359,26 @@ let open_tab t url =
        | (None | Some _), _ -> Error (Live.Outcome_unknown ("ego answered the new tab outside its answer frame; " ^ unknown)))
     | Some _ | None -> Error (Live.Outcome_unknown ("ego answered the new tab without its page label; " ^ unknown))
 
+(* A step that moves a page answers where the page is now. The script catches
+   what the page step threw and reads the tab's row after it, so a failure
+   with a row is a known partial effect, as the BiDi connection settles a
+   navigation; without a row the outcome is unknown. *)
+let moved_page_answer = String.concat "\n" [
+  "    const after = " ^ row_after ^ ";";
+  "    emit({ok: true, value: {error: failure, tab: after === undefined ? null : {url: after.url, title: after.title}}});" ]
+let unknown_move id = Printf.sprintf "list this connection's tabs and read tab %d before another step" id
+let settled ~id ~action = function
+  | Error failure -> Error (effect_failure ~unknown:(unknown_move id) failure)
+  | Ok value ->
+    let receipt tab = obj (["tabId",`Int id;"action",str action] @ tab_fields tab) in
+    match field "error" value, field "tab" value with
+    | Some `Null, Some (`Assoc _ as tab) -> Ok (receipt (Some tab))
+    | Some (`String error), Some (`Assoc _ as tab) ->
+      Error (Live.Partial_failure {tab_id = id; message = error; receipt = receipt (Some tab)})
+    | Some (`String error), (None | Some _) -> Error (Live.Outcome_unknown (error ^ "; " ^ unknown_move id))
+    | (None | Some _), _ ->
+      Error (Live.Outcome_unknown (Printf.sprintf "ego answered the %s outside its answer frame; %s" action (unknown_move id)))
+
 let goto t args =
   let* url = match field "url" args with
     | Some (`String url) -> Ok url
@@ -368,29 +388,70 @@ let goto t args =
     | Some (`Int id) -> Ok id
     | Some _ | None -> Error (Live.Before_effect "page.goto on an ego connection needs the tabId of a page its space opened") in
   let* label = label_of t id in
-  let unknown = Printf.sprintf "list this connection's tabs and read tab %d before another step" id in
-  match run_step t ~window_s:(window_s (Browser_lane.Page_goto {url; tab_id = Some id}))
-          ~step:"page.goto" ~args:(obj ["label",str label;"url",str url;"tabId",`Int id]) (String.concat "\n" [
+  settled ~id ~action:"goto" (run_step t ~window_s:(window_s (Browser_lane.Page_goto {url; tab_id = Some id}))
+    ~step:"page.goto" ~args:(obj ["label",str label;"url",str url;"tabId",`Int id]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
       agent_page;
       "    let failure = null;";
       "    try { await task.page(args.label).goto(args.url); } catch (error) { failure = reason(error); }";
-      "    const after = " ^ row_after ^ ";";
-      "    emit({ok: true, value: {error: failure, tab: after === undefined ? null : {url: after.url, title: after.title}}});";
-      "  }" ]) with
-  | Error failure -> Error (effect_failure ~unknown failure)
-  | Ok value ->
-    let receipt tab = obj (["tabId",`Int id;"action",str "goto"] @ tab_fields tab) in
-    match field "error" value, field "tab" value with
-    | Some `Null, Some (`Assoc _ as tab) -> Ok (receipt (Some tab))
-    | Some (`String error), Some (`Assoc _ as tab) ->
-      Error (Live.Partial_failure {tab_id = id; message = error; receipt = receipt (Some tab)})
-    | Some (`String error), (None | Some _) -> Error (Live.Outcome_unknown (error ^ "; " ^ unknown))
-    | (None | Some _), _ -> Error (Live.Outcome_unknown ("ego answered the move outside its answer frame; " ^ unknown))
+      moved_page_answer;
+      "  }" ]))
+
+let tab_window id interaction =
+  window_s (Browser_lane.Page_act (Browser_lane.Action.On_tab {tab_id = id; frame_path = []; interaction}))
+
+let reload t id =
+  let* label = label_of t id in
+  settled ~id ~action:"reload" (run_step t ~window_s:(tab_window id Browser_lane.Action.Reload)
+    ~step:"page.reload" ~args:(obj ["label",str label;"tabId",`Int id]) (String.concat "\n" [
+      "  const reason = " ^ message ^ ";";
+      agent_page;
+      "    let failure = null;";
+      "    try { await task.page(args.label).reload(); } catch (error) { failure = reason(error); }";
+      moved_page_answer;
+      "  }" ]))
+
+(* ego's Page API has no back or forward, so the step goes through the
+   page's CDP session: it reads the tab's history, refuses before acting when
+   there is no entry that way, moves to the entry, and waits until the tab's
+   current entry is that one and its document has loaded. The entry's index
+   says the move happened even when the page at it has the same URL. A read
+   while waiting can fail as the page changes renderer (ego lite 0.6.0.16
+   answered "Not attached to an active page" once on a move back to
+   chrome://new-tab-page/, and the next read was on the entry); such a
+   failure says nothing about the move, so the wait goes on, within the
+   run's window. *)
+let history_poll_ms = 50
+let traverse t id ~action ~delta ~side interaction =
+  let* label = label_of t id in
+  settled ~id ~action (run_step t ~window_s:(tab_window id interaction)
+    ~step:"page.history" ~args:(obj ["label",str label;"tabId",`Int id;"delta",`Int delta;"side",str side;"pollMs",`Int history_poll_ms])
+    (String.concat "\n" [
+      "  const reason = " ^ message ^ ";";
+      agent_page;
+      "    const page = task.page(args.label);";
+      "    let history = null;";
+      "    let unread = null;";
+      "    try { history = await page.cdp(\"Page.getNavigationHistory\", {}); } catch (error) { unread = reason(error); }";
+      "    const target = history === null ? -1 : history.currentIndex + args.delta;";
+      "    const entry = history === null ? undefined : history.entries[target];";
+      "    if (history === null) emit({ok: false, before: true, error: \"the history of tab \" + args.tabId + \" could not be read: \" + unread});";
+      "    else if (entry === undefined) emit({ok: false, before: true, error: \"tab \" + args.tabId + \" has no \" + args.side + \" page in its history\"});";
+      "    else {";
+      "      let failure = null;";
+      "      try {";
+      "        await page.cdp(\"Page.navigateToHistoryEntry\", {entryId: entry.id});";
+      "        const landed = async () => { try { return (await page.cdp(\"Page.getNavigationHistory\", {})).currentIndex === target; } catch (error) { return false; } };";
+      "        while (!(await landed())) await page.waitForTimeout(args.pollMs);";
+      "        await page.waitForLoadState();";
+      "      } catch (error) { failure = reason(error); }";
+      moved_page_answer;
+      "    }";
+      "  }" ]))
 
 let close_tab t id =
   let* label = label_of t id in
-  match run_step t ~window_s:(window_s (Browser_lane.Page_act (Browser_lane.Action.On_tab {tab_id = id; frame_path = []; interaction = Browser_lane.Action.Close_tab})))
+  match run_step t ~window_s:(tab_window id Browser_lane.Action.Close_tab)
           ~step:"page.close" ~args:(obj ["label",str label;"tabId",`Int id]) (String.concat "\n" [
       agent_page;
       "    await task.page(args.label).close();";
@@ -629,13 +690,17 @@ let act t args =
   | Ok (Browser_lane.Action.On_tab {frame_path = _ :: _; _}) ->
     Error (Live.Before_effect "an ego connection does not act inside frames")
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Close_tab}) -> close_tab t tab_id
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Reload}) -> reload t tab_id
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Back as interaction}) ->
+    traverse t tab_id ~action:"back" ~delta:(-1) ~side:"earlier" interaction
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Forward as interaction}) ->
+    traverse t tab_id ~action:"forward" ~delta:1 ~side:"later" interaction
   | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Upload _
       | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests
-      | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog
-      | Browser_lane.Action.Back | Browser_lane.Action.Forward | Browser_lane.Action.Reload); _}) ->
-    Error (Live.Before_effect "an ego connection's page.act serves open_tab and close_tab only")
+      | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog); _}) ->
+    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward and reload only")
 
 let dispatch t ~verb args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

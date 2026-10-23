@@ -294,8 +294,8 @@ let test_effects_answer_what_happened () =
     (failure_kind (dispatch peer Live.Page_goto (obj ["tabId",`Int 2;"url",str "https://slack.com/"])));
   check string "a move without a tab" "before effect"
     (failure_kind (dispatch peer Live.Page_goto (obj ["url",str "https://slack.com/"])));
-  check string "back is not served" "before effect"
-    (failure_kind (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back}))));
+  check string "a request block is not served" "before effect"
+    (failure_kind (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Block_requests ["ads.example"]}))));
   check int "none of those ran a script" before (runs ());
   reply := (fun _ -> refused "tab 3 was not opened by an agent in the ego task space");
   check string "a page the space adopted" "before effect"
@@ -515,6 +515,7 @@ let test_the_scripts_parse_as_modules () =
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "New";"active",`Bool true]])
     | "page.goto" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
+    | "page.reload" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Back"]])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
   let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -532,12 +533,14 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Type_text {document_id="d1";text="hi"});
       Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0});
       Live.Page_interact, interact_args (Lane.Fill {selector="#message";text="hi"});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab}) ];
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.drag";"page.input";
-     "page.close";"space.finish"]
+     "page.close";"page.reload";"page.history";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
     let file = Filename.concat directory (step ^ ".mjs") in
@@ -592,7 +595,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
         "after",(state ~url:"https://app.slack.com/" ~width:800)])
     | "page.read" | "page.elements" | "page.scene" -> page_answer ~label:"p1" (obj ["url",str "https://app.slack.com/"])
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/new";"title",str "New";"active",`Bool true]])
-    | "page.goto" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
+    | "page.goto" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
     | "page.target" -> answered resolved
     | "page.pointer" | "page.keyboard" | "page.drag" -> input_answer ()
@@ -643,6 +646,126 @@ let test_the_peer_serves_what_the_lane_table_says () =
       failf "the peer did not serve %s (%s), which the lane table says ego does" name detail)
     Lane.all_of_live_capability
 
+(* The history scripts run in node against a stand-in for ego: one agent page
+   whose history holds a.test then b.test. A move to an entry lands a little
+   after the CDP call returns, as a navigation commits later; with [detaches]
+   the first history read after it fails, as ego's did while the page changed
+   renderer. With [same_url] both entries have one URL, as a pushState to the
+   same address makes; [load] is what the load wait does after it notes the
+   call. The stand-in prints the CDP calls and waits the script made. *)
+let stand_in ~current ~navigation ~detaches ~same_url ~load = Printf.sprintf {js|
+const entries = [{id: 11, url: "https://a.test/", title: "A"}, {id: 12, url: "%s", title: "B"}];
+let current = %d;
+let detached = false;
+const seen = [];
+process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
+const page = {
+  cdp: async (method, params) => {
+    seen.push(method);
+    if (method === "Page.getNavigationHistory" && detached) { detached = false; seen.push("detached"); throw new Error("Not attached to an active page"); }
+    if (method === "Page.getNavigationHistory") return {currentIndex: current, entries};
+    if (method !== "Page.navigateToHistoryEntry") throw new Error("unexpected " + method);
+    %s
+    const index = entries.findIndex(entry => entry.id === params.entryId);
+    setTimeout(() => { current = index; }, 20);
+    detached = %b;
+    return {};
+  },
+  reload: async () => { seen.push("reload"); },
+  waitForTimeout: ms => new Promise(resolve => setTimeout(resolve, ms)),
+  waitForLoadState: async () => { seen.push("load at " + current); %s },
+};
+const taskSpace = async () => ({
+  tabs: async () => [{label: "p1", openedBy: "agent", url: entries[current].url, title: entries[current].title}],
+  page: () => page,
+});
+|js} (if same_url then "https://a.test/" else "https://b.test/") current navigation detaches load
+
+let in_node script =
+  let directory = capture_directory () in
+  let file = Filename.concat directory "step.mjs" and out = Filename.concat directory "out.txt" in
+  Out_channel.with_open_bin file (fun channel -> Out_channel.output_string channel script);
+  let fd = Unix.openfile out [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
+  let pid = Unix.create_process "node" [|"node";file|] Unix.stdin fd Unix.stderr in
+  Unix.close fd;
+  match Unix.waitpid [] pid with
+  | _, Unix.WEXITED 0 -> In_channel.with_open_bin out In_channel.input_all
+  | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> fail "node did not run the step"
+
+let test_history_moves_one_entry () =
+  let current = ref 1 and navigation = ref "" and detaches = ref false and same_url = ref false and load = ref "" in
+  let output = ref "" and steps = ref [] in
+  let run ~window_s script =
+    let sent = sent_of ~window_s script in
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "tabs.list" -> answered (`List [
+        obj ["label",str "p1";"targetId",str "T1";"title",str "B";"url",str "https://b.test/";"active",`Bool true];
+        obj ["label",`Null;"targetId",str "T9";"title",str "Mail";"url",str "https://mail.example/";"active",`Bool false]])
+    | "page.history" | "page.reload" ->
+      steps := sent :: !steps;
+      output := in_node (stand_in ~current:!current ~navigation:!navigation ~detaches:!detaches
+        ~same_url:!same_url ~load:!load ^ script);
+      Ok !output
+    | other -> failf "unexpected step %s" other in
+  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+    | Ok peer -> peer | Error detail -> fail detail in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let on_tab ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
+  let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.Util.(to_list (Yojson.Safe.from_string (after ~prefix:"seen " line)) |> List.map to_string)
+    | None -> fail "the stand-in did not say what it saw" in
+  (match on_tab Lane.Action.Back with
+   | Ok receipt -> check string "back" {|{"tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt)
+   | other -> failf "back was %s" (failure_kind other));
+  check bool "it moved to the entry" true (List.mem "Page.navigateToHistoryEntry" (seen ()));
+  check string "and waited for the load once the tab was on it" "load at 0" (List.hd (List.rev (seen ())));
+  check bool "back runs within the action window" true ((List.hd !steps).window_s
+    < Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back})));
+  current := 0;
+  check string "no earlier page" "tab 1 has no earlier page in its history"
+    (before_effect "back from the first entry" (on_tab Lane.Action.Back));
+  check (list string) "and nothing moved" ["Page.getNavigationHistory"] (seen ());
+  (match on_tab Lane.Action.Forward with
+   | Ok receipt -> check string "forward" {|{"tabId":1,"action":"forward","url":"https://b.test/","title":"B"}|} (Yojson.Safe.to_string receipt)
+   | other -> failf "forward was %s" (failure_kind other));
+  current := 1;
+  check string "no later page" "tab 1 has no later page in its history"
+    (before_effect "forward from the last entry" (on_tab Lane.Action.Forward));
+  (match on_tab Lane.Action.Reload with
+   | Ok receipt -> check string "reload" {|{"tabId":1,"action":"reload","url":"https://b.test/","title":"B"}|} (Yojson.Safe.to_string receipt)
+   | other -> failf "reload was %s" (failure_kind other));
+  check (list string) "a reload is ego's own" ["reload"] (seen ());
+  detaches := true;
+  (match on_tab Lane.Action.Back with
+   | Ok receipt -> check string "back past a failed read" {|{"tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt)
+   | other -> failf "a move with a failed read while waiting was %s" (failure_kind other));
+  check bool "a read failed while it waited" true (List.mem "detached" (seen ()));
+  detaches := false;
+  same_url := true;
+  (match on_tab Lane.Action.Back with
+   | Ok receipt -> check string "back to an entry with the same URL" {|{"tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt)
+   | other -> failf "a move to the same URL was %s" (failure_kind other));
+  check string "it waited for the entry, not the URL" "load at 0" (List.hd (List.rev (seen ())));
+  same_url := false;
+  load := {|throw new Error("Timeout 30000ms exceeded");|};
+  (match on_tab Lane.Action.Back with
+   | Error (Live.Partial_failure {receipt; message; _}) ->
+     check string "a load wait that failed answers where the tab is" {|{"tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt);
+     check string "and what failed" "Timeout 30000ms exceeded" message
+   | other -> failf "a failed load wait was %s" (failure_kind other));
+  load := "";
+  navigation := {|throw new Error("net::ERR_ABORTED");|};
+  (match on_tab Lane.Action.Back with
+   | Error (Live.Partial_failure {tab_id; receipt; message}) ->
+     check int "the tab" 1 tab_id;
+     check string "where it is now" {|{"tabId":1,"action":"back","url":"https://b.test/","title":"B"}|} (Yojson.Safe.to_string receipt);
+     check string "what failed" "net::ERR_ABORTED" message
+   | other -> failf "a failed move was %s" (failure_kind other));
+  let before = List.length !steps in
+  check string "the operator's tab" "before effect" (failure_kind (on_tab ~tab_id:2 Lane.Action.Back));
+  check int "ran no script" before (List.length !steps)
+
 let () =
   run "browser_ego_peer" [
     "ego", [
@@ -659,5 +782,6 @@ let () =
       test_case "an answer past the limit is refused" `Quick test_an_answer_past_the_limit_is_refused;
       test_case "a capture reads and removes its file" `Quick test_capture_reads_and_removes_the_file;
       test_case "effects answer what happened" `Quick test_effects_answer_what_happened;
+      test_case "history moves one entry and waits for it" `Quick test_history_moves_one_entry;
       test_case "input acts through the shared page scripts" `Quick test_input_acts_through_the_shared_page_scripts;
       test_case "the peer serves what the lane table says" `Quick test_the_peer_serves_what_the_lane_table_says ] ]

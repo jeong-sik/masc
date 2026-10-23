@@ -176,7 +176,7 @@ build their rejection from it.
 | `trusted_keyboard` | `type_text`, `press_key` | no | yes | yes, on a page an agent opened, ego's keyboard |
 | `touch_input` | `tap_at`, `swipe` | no | yes | no |
 | `viewport_resize` | `set_viewport` | no | yes | no |
-| `tab_history` | `back`, `forward`, `reload`, only for a tab the same connection opened | no | yes | no |
+| `tab_history` | `back`, `forward`, `reload`, only for a tab the same connection opened | no | yes | yes, only a page an agent opened in the task space; back and forward through the page's CDP history |
 | `tab_navigation` | `BrowserGoto`, only for a tab the same connection opened | no | yes | yes, only a page an agent opened in the task space |
 | `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes | yes, only a page an agent opened in the task space |
 | `tab_creation` | `open_tab` | no | yes | yes |

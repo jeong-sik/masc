@@ -304,7 +304,6 @@ start_live_server() {
     export MASC_CONFIG_DIR="${CONFIG_DIR}"
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
-    export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" \
@@ -316,7 +315,6 @@ start_live_server() {
     export MASC_CONFIG_DIR="${CONFIG_DIR}"
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
-    export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" --target-dir "${TARGET_DIR}" --port "${PORT}"

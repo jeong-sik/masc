@@ -60,8 +60,6 @@
         <string>__BASE_PATH__</string>
         <key>MASC_AUTO_RESPOND</key>
         <string>true</string>
-        <key>MASC_ORCHESTRATOR_ENABLED</key>
-        <string>0</string>
         <key>SSL_CERT_FILE</key>
         <string>/opt/homebrew/etc/ca-certificates/cert.pem</string>
         <key>SSL_CERT_DIR</key>

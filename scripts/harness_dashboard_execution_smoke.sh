@@ -115,13 +115,11 @@ unset SLACK_BOT_TOKEN SLACK_APP_TOKEN DISCORD_BOT_TOKEN
 log "starting server"
 if [ -x "$SERVER_EXE" ]; then
   nohup env \
-    MASC_ORCHESTRATOR_ENABLED=false \
     MASC_KEEPER_AUTONOMOUS_ENABLED=false \
     MASC_DASHBOARD_FIXTURE="$FIXTURE_MODE" \
     "$SERVER_EXE" --port "$PORT" --base-path "$BASE_PATH" >"$SERVER_LOG" 2>&1 &
 else
   nohup env \
-    MASC_ORCHESTRATOR_ENABLED=false \
     MASC_KEEPER_AUTONOMOUS_ENABLED=false \
     MASC_DASHBOARD_FIXTURE="$FIXTURE_MODE" \
     "$REPO_ROOT/start-masc.sh" --port "$PORT" --base-path "$BASE_PATH" >"$SERVER_LOG" 2>&1 &

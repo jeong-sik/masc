@@ -249,8 +249,7 @@ that prompt into its ephemeral base path from the explicit root.
    `manual` waits for an explicit start. Paused keepers remain paused.
 3. **The keeper TOML must set `sandbox_profile`** (`docker`, `microvm`, or `remote_ssh`) — boot
    rejects without it.
-4. Boot env: `MASC_ORCHESTRATOR_ENABLED=1`,
-   `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`, with per-keeper `activation_mode = "autonomous"` in
+4. Boot env: `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`, with per-keeper `activation_mode = "autonomous"` in
    each keeper TOML (`MASC_KEEPER_AUTONOMOUS_ENABLED` defaults to `true` in `lib/config/env_config_keeper.ml`; do not set it to `0`). Boot the exe directly —
    **not** via `harness_start_server` (`scripts/harness/lib/server_bootstrap.sh` / `scripts/harness_coding_eval.sh`), which exports `MASC_KEEPER_AUTONOMOUS_ENABLED=0` to disable autonomous turns in single-turn harnesses.
 5. Every generated Keeper has a non-empty

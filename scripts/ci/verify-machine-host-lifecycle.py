@@ -222,7 +222,7 @@ def main():
         bootstrap = source / 'scripts/harness/lib/server_bootstrap.sh'
         env = {key: os.environ[key] for key in ('PATH', 'HOME', 'LANG', 'TMPDIR') if key in os.environ}
         env.update({'MASC_BASE_PATH': str(base), 'MASC_CONFIG_DIR': str(base / '.masc/config'),
-                    'MASC_KEEPER_AUTONOMOUS_ENABLED': '0', 'MASC_ORCHESTRATOR_ENABLED': '0',
+                    'MASC_KEEPER_AUTONOMOUS_ENABLED': '0',
                     'MASC_OTEL_ENABLED': '0'})
         command(['bash', '-c', 'source "$1"; harness_seed_server_config "$2" "$3"',
                  'seed', str(bootstrap), str(source), str(base)], env=env)

@@ -37,6 +37,18 @@ class WorkflowError(unittest.TestCase):
             "::error::weird: not a fragment path",
         )
 
+    def test_literal_percent_sequences_survive_round_trip(self):
+        self.assertEqual(
+            fragments.workflow_error("changelog.d/x.md:3: bullet cites %0A literal"),
+            "::error file=changelog.d/x.md,line=3::bullet cites %250A literal",
+        )
+
+    def test_comma_and_colon_in_property_escaped(self):
+        self.assertEqual(
+            fragments.workflow_error("changelog.d/a,b.md:2: detail"),
+            "::error file=changelog.d/a%2Cb.md,line=2::detail",
+        )
+
 
 class CheckFilesAnnotation(unittest.TestCase):
     def run_in_fragment_tree(self, name: str, text: str) -> str:

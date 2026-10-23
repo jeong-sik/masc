@@ -362,6 +362,27 @@ def missing(base: str, head: str, directory: pathlib.Path) -> int:
     return 0
 
 
+def _escape_annotation_data(value: str) -> str:
+    """Escape a workflow-command message like actions/toolkit `escapeData`."""
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_annotation_property(value: str) -> str:
+    """Escape a workflow-command property like actions/toolkit `escapeProperty`.
+
+    Property values live inside `::error file=...,line=...::` where `,`
+    separates properties and `:` separates name from value, so those two
+    characters are escaped on top of the data escapes.
+    """
+    return (
+        value.replace("%", "%25")
+        .replace("\r", "%0D")
+        .replace("\n", "%0A")
+        .replace(":", "%3A")
+        .replace(",", "%2C")
+    )
+
+
 def workflow_error(message: str) -> str:
     """Render one diagnostic as a GitHub Actions error annotation command.
 
@@ -369,15 +390,18 @@ def workflow_error(message: str) -> str:
     `::error file=path,line=N::detail` so the failing line is annotated on
     the pull request instead of living only in the raw job log. Anything
     without that shape is emitted as a plain file-less error annotation.
+    Message and property values are escaped with the percent rules the
+    runner applies in reverse, so a literal `%0A` in a bullet or a comma in
+    a filename survives the round trip verbatim.
     """
     match = re.match(r"^(changelog\.d/[^\s:]+)(?::(\d+))?: (.*)$", message, re.S)
     if match is None:
-        return f"::error::{message}"
+        return f"::error::{_escape_annotation_data(message)}"
     filepart, line, detail = match.groups()
-    location = f"file={filepart}"
+    location = f"file={_escape_annotation_property(filepart)}"
     if line is not None:
         location += f",line={line}"
-    return f"::error {location}::{detail}"
+    return f"::error {location}::{_escape_annotation_data(detail)}"
 
 
 def check_files(names: list[str]) -> int:

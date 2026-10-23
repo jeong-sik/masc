@@ -140,18 +140,58 @@ let finish t =
   Result.map ignore (ask t ~step:"space.finish" ~args:`Null
     "  await task.finish({keep: []});\n  emit({ok: true, value: null});")
 
+(* A page blocked on a JavaScript dialog runs no page script until the
+   dialog is answered: ego 0.6.0.16 refuses page.evaluate then, and a move
+   would leave the dialog's answer to the browser. Reads, moves and input
+   are refused before any effect; closing the tab and answering the dialog
+   are not. ego's page.info() names the open dialog. *)
+let dialog_blocked = "is blocked on a JavaScript dialog; list the tabs to read it, and answer it with accept_dialog or dismiss_dialog before another step"
+let open_dialog page = "(await " ^ page ^ ".info()).dialog ?? null"
+
+(* The dialog ego's page.info() names: CDP's javascriptDialogOpening, with
+   defaultPrompt "" on a dialog that is not a prompt. *)
+let ego_dialog json : (Browser_surface.dialog, string) result =
+  match field "type" json, field "message" json, field "defaultPrompt" json with
+  | Some (`String kind), Some (`String message), default_prompt ->
+    (match Browser_surface.dialog_kind_of_wire kind, default_prompt with
+     | Some Browser_surface.Prompt, Some (`String value) -> Ok {kind = Browser_surface.Prompt; message; default_value = Some value}
+     | Some Browser_surface.Prompt, (None | Some _) -> Error "ego reported a prompt dialog without its default text"
+     | Some (Browser_surface.Alert | Browser_surface.Confirm | Browser_surface.Beforeunload as kind), (None | Some _) ->
+       Ok {kind; message; default_value = None}
+     | None, (None | Some _) -> Error (Printf.sprintf "ego reported a JavaScript dialog of unknown type %S" kind))
+  | _ -> Error "ego reported a JavaScript dialog without its type or message"
+
 (* A listing is the space's tabs now: a number whose page is no longer
-   listed is dropped, so a read of it is refused before any run. *)
+   listed is dropped, so a read of it is refused before any run. Each page
+   the space manages says whether a JavaScript dialog blocks it, as a BiDi
+   row does; a page whose dialog state could not be read is listed among
+   the unavailable tabs with why, as BiDi lists a tab it could not read. *)
+type listed_tab = Listed of { page : page; title : string; url : string; active : bool; dialog : Browser_surface.dialog option }
+  | Unread of { page : page; url : string; reason : string }
 let tab_rows t =
-  let* listed = ask t ~step:"tabs.list" ~args:`Null
-      "  const tabs = await task.tabs();\n  emit({ok: true, value: tabs.map(tab => ({label: tab.label ?? null, targetId: tab.targetId, title: tab.title, url: tab.url, active: tab.active}))});" in
+  let* listed = ask t ~step:"tabs.list" ~args:`Null (String.concat "\n" [
+      "  const rows = [];";
+      "  for (const tab of await task.tabs()) {";
+      "    const row = {label: tab.label ?? null, targetId: tab.targetId, title: tab.title, url: tab.url, active: tab.active, dialog: null, dialogUnread: null};";
+      "    if (tab.label) { try { row.dialog = " ^ open_dialog "task.page(tab.label)" ^ "; } catch (error) { row.dialogUnread = String(error && error.message || error); } }";
+      "    rows.push(row);";
+      "  }";
+      "  emit({ok: true, value: rows});" ]) in
   let row json =
     let* page = match field "label" json, field "targetId" json with
       | Some (`String label), _ when label <> "" -> Ok (Managed label)
       | Some `Null, Some (`String target) when target <> "" -> Ok (Unmanaged target)
       | _ -> Error "ego listed a tab without a label or a target id" in
     match field "title" json, field "url" json, field "active" json with
-    | Some (`String title), Some (`String url), Some (`Bool active) -> Ok (page, title, url, active)
+    | Some (`String title), Some (`String url), Some (`Bool active) ->
+      (match field "dialog" json, field "dialogUnread" json with
+       | Some `Null, Some `Null -> Ok (Listed {page; title; url; active; dialog = None})
+       | Some (`Assoc _ as dialog), Some `Null ->
+         (match ego_dialog dialog with
+          | Ok dialog -> Ok (Listed {page; title; url; active; dialog = Some dialog})
+          | Error reason -> Ok (Unread {page; url; reason}))
+       | Some `Null, Some (`String reason) -> Ok (Unread {page; url; reason = "ego did not read whether a dialog blocks this page: " ^ reason})
+       | _ -> Error "ego listed a tab without its dialog state")
     | _ -> Error "ego listed a tab without its title, URL or active state" in
   let* rows = match listed with
     | `List rows ->
@@ -160,10 +200,19 @@ let tab_rows t =
         | json :: rest -> let* row = row json in collect (row :: acc) rest in
       collect [] rows
     | _ -> Error "ego answered a tab list that is not a list" in
-  let numbered = List.map (fun (page, title, url, active) -> remember t page, title, url, active) rows in
-  t.pages <- List.filter (fun (page, _) -> List.exists (fun (listed, _, _, _) -> listed = page) rows) t.pages;
-  Ok (`List (List.mapi (fun index (id, title, url, active) ->
-    obj ["id",`Int id;"index",`Int index;"url",str url;"title",str title;"active",`Bool active]) numbered))
+  let page_of = function Listed {page; _} | Unread {page; _} -> page in
+  let numbered = List.map (fun row -> remember t (page_of row), row) rows in
+  t.pages <- List.filter (fun (page, _) -> List.exists (fun row -> page_of row = page) rows) t.pages;
+  let tabs, unavailable = List.fold_left (fun (tabs, unavailable) (index, (id, row)) -> match row with
+    | Listed {title; url; active; dialog; _} ->
+      obj (["id",`Int id;"index",`Int index;"url",str url;"title",str title;"active",`Bool active]
+        @ match dialog with Some dialog -> ["dialog",Browser_surface.dialog_json dialog] | None -> []) :: tabs, unavailable
+    | Unread {url; reason; _} ->
+      tabs, obj ["id",`Int id;"index",`Int index;"error",str reason;"url",str url] :: unavailable)
+    ([], []) (List.mapi (fun index row -> index, row) numbered) in
+  Ok (match unavailable with
+    | [] -> `List (List.rev tabs)
+    | _ :: _ -> obj ["tabs",`List (List.rev tabs);"complete",`Bool false;"unavailableTabs",`List (List.rev unavailable)])
 
 let unmanaged_refused = "was opened by the operator in the ego task space; this connection reads only the pages the space manages"
 
@@ -192,7 +241,11 @@ let on_page body = String.concat "\n" [
   "  else if (!tab.label) emit({ok: false, before: true, error: " ^ Yojson.Safe.to_string (str ("the active tab " ^ unmanaged_refused)) ^ "});";
   "  else {";
   "    const page = task.page(tab.label);";
+  "    const blocking = " ^ open_dialog "page" ^ ";";
+  "    if (blocking !== null) emit({ok: false, before: true, error: \"the page \" + " ^ Yojson.Safe.to_string (str dialog_blocked) ^ "});";
+  "    else {";
   body;
+  "    }";
   "  }" ]
 
 let page_function body =
@@ -326,11 +379,16 @@ let capture t args =
    marks a tab the operator opened, or one adopted from them, otherwise. The
    page's own row is checked in the same run that acts, before acting. *)
 let not_agent_refused = "was not opened by an agent in the ego task space; this connection moves and closes only the pages its space opened"
-let agent_page = String.concat "\n" [
-  "  const tab = (await task.tabs()).find(item => item.label === args.label);";
+let find_agent_tab = "  const tab = (await task.tabs()).find(item => item.label === args.label);"
+let agent_refusals = [
   "  if (tab === undefined) emit({ok: false, before: true, error: \"browser tab is no longer present\"});";
-  "  else if (tab.openedBy !== \"agent\") emit({ok: false, before: true, error: \"tab \" + args.tabId + \" \" + " ^ Yojson.Safe.to_string (str not_agent_refused) ^ "});";
-  "  else {" ]
+  "  else if (tab.openedBy !== \"agent\") emit({ok: false, before: true, error: \"tab \" + args.tabId + \" \" + " ^ Yojson.Safe.to_string (str not_agent_refused) ^ "});" ]
+let agent_page = String.concat "\n" (find_agent_tab :: agent_refusals @ ["  else {"])
+let unblocked_agent_page = String.concat "\n" (find_agent_tab
+  :: ("  const blocking = tab === undefined || tab.openedBy !== \"agent\" ? null : " ^ open_dialog "task.page(args.label)" ^ ";")
+  :: agent_refusals @ [
+  "  else if (blocking !== null) emit({ok: false, before: true, error: \"tab \" + args.tabId + \" \" + " ^ Yojson.Safe.to_string (str dialog_blocked) ^ "});";
+  "  else {" ])
 let message = "error => String(error && error.message || error)"
 (* After a step that may have moved the page, its row in the space says where it is. *)
 let row_after = "(await task.tabs()).find(item => item.label === args.label)"
@@ -427,7 +485,7 @@ let goto t args =
   settled ~id ~action:"goto" (run_step t ~window_s:(window_s (Browser_lane.Page_goto {url; tab_id = Some id}))
     ~step:"page.goto" ~args:(obj ["label",str label;"url",str url;"tabId",`Int id]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
-      agent_page;
+      unblocked_agent_page;
       "    let failure = null;";
       "    try { await task.page(args.label).goto(args.url); } catch (error) { failure = reason(error); }";
       moved_page_answer;
@@ -441,7 +499,7 @@ let reload t id =
   settled ~id ~action:"reload" (run_step t ~window_s:(tab_window id Browser_lane.Action.Reload)
     ~step:"page.reload" ~args:(obj ["label",str label;"tabId",`Int id]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
-      agent_page;
+      unblocked_agent_page;
       "    let failure = null;";
       "    try { await task.page(args.label).reload(); } catch (error) { failure = reason(error); }";
       moved_page_answer;
@@ -464,7 +522,7 @@ let traverse t id ~action ~delta ~side interaction =
     ~step:"page.history" ~args:(obj ["label",str label;"tabId",`Int id;"delta",`Int delta;"side",str side;"pollMs",`Int history_poll_ms])
     (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
-      agent_page;
+      unblocked_agent_page;
       "    const page = task.page(args.label);";
       "    let history = null;";
       "    let unread = null;";
@@ -498,6 +556,39 @@ let close_tab t id =
   | Ok _ ->
     t.pages <- List.filter (fun (_, known) -> known <> id) t.pages;
     Ok (obj ["tabId",`Int id;"action",str "close_tab";"closed",`Bool true])
+
+(* A dialog is answered on a page an agent opened, as the BiDi connection
+   answers one only on a tab it opened. The dialog is read before it is
+   answered, since the answer closes it, and the receipt says which one was
+   answered; ego answers false when none is open, and nothing happened. A
+   dialog ego reported in a shape this connection cannot read is left out
+   of the receipt, as BiDi leaves out one it did not track. Prompt text
+   reaches ego as given, as BiDi passes userText. *)
+let no_dialog_refused = "no dialog is open in this tab"
+let answer_dialog t id ~accept text =
+  let* label = label_of t id in
+  let action, interaction = if accept then "accept_dialog", Browser_lane.Action.Accept_dialog text
+    else "dismiss_dialog", Browser_lane.Action.Dismiss_dialog in
+  match run_step t ~window_s:(tab_window id interaction) ~step:"page.dialog"
+          ~args:(obj ["label",str label;"tabId",`Int id;"accept",`Bool accept;
+            "text",(match text with Some text -> str text | None -> `Null)]) (String.concat "\n" [
+      agent_page;
+      "    const page = task.page(args.label);";
+      "    const open = " ^ open_dialog "page" ^ ";";
+      "    if (open === null) emit({ok: false, before: true, error: " ^ Yojson.Safe.to_string (str no_dialog_refused) ^ "});";
+      "    else {";
+      "      const answered = !args.accept ? await page.dismissDialog() : args.text === null ? await page.acceptDialog() : await page.acceptDialog(args.text);";
+      "      if (answered === false) emit({ok: false, before: true, error: " ^ Yojson.Safe.to_string (str no_dialog_refused) ^ "});";
+      "      else emit({ok: true, value: {dialog: open}});";
+      "    }";
+      "  }" ]) with
+  | Error failure ->
+    Error (effect_failure ~unknown:(Printf.sprintf "the dialog of tab %d may have been answered: list this connection's tabs" id) failure)
+  | Ok value ->
+    let answered = match field "dialog" value with
+      | Some dialog -> (match ego_dialog dialog with Ok dialog -> ["dialog",Browser_surface.dialog_json dialog] | Error _ -> [])
+      | None -> [] in
+    Ok (obj (["tabId",`Int id;"action",str action] @ answered))
 
 (* Input acts as a move or a close does: on a page an agent opened, checked
    in the run that acts. The page scripts the BiDi connection runs find the
@@ -574,6 +665,28 @@ let resolve t ~label ~deadline input =
   | Error failure -> Error (Live.Before_effect (step_failure_message failure))
   | Ok answer -> page_json answer |> Result.map_error (fun detail -> Live.Before_effect detail)
 
+(* An input that opened a JavaScript dialog is done: the page reads nothing
+   until the dialog is answered, so the receipt is the tab's row and the
+   dialog, which a Keeper answers with accept_dialog or dismiss_dialog. *)
+let dialog_receipt ~id ~verb ~unknown value =
+  let guard = page_json (Option.value ~default:`Null (field "guard" value)) in
+  let dialog = match field "dialog" value with Some opened -> ego_dialog opened | None -> Error "ego reported no dialog" in
+  match field "error" value, guard, field "tab" value, dialog with
+  | Some (`String error), (Ok _ | Error _), (None | Some _), (Ok _ | Error _) ->
+    Error (Live.Outcome_unknown (head error ^ "; the page opened a JavaScript dialog; " ^ unknown))
+  | Some `Null, Ok observed, Some (`Assoc _ as tab), Ok dialog ->
+    (match field "url" observed with
+     | Some (`String url) ->
+       receipt_of ~id ~verb (obj (("urlBefore",str url) :: tab_fields (Some tab) @ ["dialog",Browser_surface.dialog_json dialog]))
+       |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown))
+     | Some _ | None -> Error (Live.Outcome_unknown ("the input was sent and its guard lacks the page URL; " ^ unknown)))
+  | Some `Null, Error detail, (None | Some _), (Ok _ | Error _) | Some `Null, Ok _, (None | Some _), Error detail ->
+    Error (Live.Outcome_unknown ("the input was sent and " ^ detail ^ "; " ^ unknown))
+  | Some `Null, Ok _, (None | Some _), Ok _ ->
+    Error (Live.Outcome_unknown ("the input opened a JavaScript dialog and its tab was not listed; " ^ unknown))
+  | (None | Some _), (Ok _ | Error _), (None | Some _), (Ok _ | Error _) ->
+    Error (Live.Outcome_unknown ("ego answered the input outside its answer frame; " ^ unknown))
+
 (* One run: the guard script checks that the page is the observed one and
    refuses before any input if not, the input is sent, and the receipt script
    reads where the page is. *)
@@ -587,7 +700,7 @@ let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guar
           (String.concat "\n" ([
       page_call;
       "  const reason = " ^ message ^ ";";
-      agent_page;
+      unblocked_agent_page;
       "    const page = task.page(args.label);";
       "    const guard = await page.evaluate(pageCall(args.guard, args.input));";
       "    if (guard.pageError !== undefined) emit({ok: false, before: true, error: guard.pageError});";
@@ -595,8 +708,17 @@ let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guar
       "      let failure = null, pointerReleased = false;";
       "      try {" ] @ lines @ [
       "      } catch (error) { failure = reason(error); }";
-      "      const receipt = await page.evaluate(pageCall(args.receipt, \"{}\"));";
-      "      emit({ok: true, value: {guard, receipt, error: failure, pointerReleased}});";
+      (* An unread dialog state is left to the receipt script, which ego
+         refuses while a dialog is open. *)
+      "      let opened = null;";
+      "      try { opened = " ^ open_dialog "page" ^ "; } catch (error) { opened = null; }";
+      "      if (opened !== null) {";
+      "        const after = " ^ row_after ^ ";";
+      "        emit({ok: true, value: {guard, dialog: opened, tab: after === undefined ? null : {url: after.url, title: after.title}, error: failure, pointerReleased}});";
+      "      } else {";
+      "        const receipt = await page.evaluate(pageCall(args.receipt, \"{}\"));";
+      "        emit({ok: true, value: {guard, receipt, error: failure, pointerReleased}});";
+      "      }";
       "    }";
       "  }" ])) in
   if holds_button then (match response with
@@ -608,6 +730,8 @@ let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guar
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value when holds_button && field "pointerReleased" value <> Some (`Bool true) ->
       Error (Live.Outcome_unknown ("ego drag did not confirm pointer release; " ^ unknown))
+  | Ok value when (match field "dialog" value with Some (`Assoc _) -> true | Some _ | None -> false) ->
+    dialog_receipt ~id ~verb ~unknown value
   | Ok value ->
     let decoded name = page_json (Option.value ~default:`Null (field name value)) in
     match decoded "guard", field "error" value, decoded "receipt" with
@@ -632,12 +756,36 @@ let dom_input t ~id ~label ~deadline ~verb input =
             "input",str (Yojson.Safe.to_string input)])
           (String.concat "\n" [
       page_call;
-      agent_page;
-      "    const result = await task.page(args.label).evaluate(pageCall(args.fn, args.input));";
-      "    emit({ok: true, value: result});";
+      "  const reason = " ^ message ^ ";";
+      unblocked_agent_page;
+      "    const page = task.page(args.label);";
+      "    let result = null, failure = null;";
+      "    try { result = await page.evaluate(pageCall(args.fn, args.input)); } catch (error) { failure = reason(error); }";
+      "    let opened = null;";
+      "    if (failure !== null) { try { opened = " ^ open_dialog "page" ^ "; } catch (error) { opened = null; } }";
+      "    if (failure === null) emit({ok: true, value: {result}});";
+      "    else if (opened === null) emit({ok: false, error: failure});";
+      "    else {";
+      "      const after = " ^ row_after ^ ";";
+      "      emit({ok: true, value: {dialog: opened, tab: after === undefined ? null : {url: after.url, title: after.title}}});";
+      "    }";
       "  }" ]) with
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value ->
+    match field "dialog" value, field "result" value with
+    (* ego stops waiting for a page script once it opens a dialog; the
+       script goes on in the page after the answer, so its own receipt is
+       not read. *)
+    | Some (`Assoc _ as opened), _ ->
+      (match field "tab" value, ego_dialog opened with
+       | Some (`Assoc _ as tab), Ok dialog ->
+         Error (Live.Partial_failure {tab_id = id;
+           receipt = obj (["tabId",`Int id;"action",str verb] @ tab_fields (Some tab) @ ["dialog",Browser_surface.dialog_json dialog]);
+           message = Printf.sprintf "The page opened a JavaScript dialog while the %s ran, so its own receipt was not read. Answer the dialog with accept_dialog or dismiss_dialog, then read tab %d." verb id})
+       | (None | Some _), Error detail -> Error (Live.Outcome_unknown ("the input opened a JavaScript dialog and " ^ detail ^ "; " ^ unknown))
+       | (None | Some _), Ok _ -> Error (Live.Outcome_unknown ("the input opened a JavaScript dialog and its tab was not listed; " ^ unknown)))
+    | (None | Some _), None -> Error (Live.Outcome_unknown ("ego answered the input outside its answer frame; " ^ unknown))
+    | (None | Some _), Some value ->
     match page_json value with
     | Error detail -> Error (Live.Outcome_unknown (detail ^ "; " ^ unknown))
     | Ok result ->
@@ -731,12 +879,15 @@ let act t args =
     traverse t tab_id ~action:"back" ~delta:(-1) ~side:"earlier" interaction
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Forward as interaction}) ->
     traverse t tab_id ~action:"forward" ~delta:1 ~side:"later" interaction
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Accept_dialog text}) ->
+    answer_dialog t tab_id ~accept:true text
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Dismiss_dialog}) ->
+    answer_dialog t tab_id ~accept:false None
   | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Upload _
       | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
-      | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests
-      | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog); _}) ->
-    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward and reload only")
+      | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
+    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog and dismiss_dialog only")
 
 let dispatch t ~verb args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

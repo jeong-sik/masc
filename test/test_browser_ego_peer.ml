@@ -55,10 +55,19 @@ let opened ?(capture_directory=capture_directory ()) run =
   | Ok peer -> peer
   | Error detail -> failf "the space did not open: %s" detail
 
+(* A row as the listing script writes it: [dialog] is what page.info()
+   named on a managed page, [dialogUnread] why it could not be read. *)
+let tab_row ?(dialog=`Null) ?(unread=`Null) ~label ~target ~title ~url ~active () =
+  obj ["label",label;"targetId",str target;"title",str title;"url",str url;"active",`Bool active;
+    "dialog",dialog;"dialogUnread",unread]
 let tabs = `List [
-  obj ["label",str "p1";"targetId",str "T1";"title",str "Slack";"url",str "https://app.slack.com/";"active",`Bool true];
-  obj ["label",`Null;"targetId",str "T9";"title",str "Mail";"url",str "https://mail.example/";"active",`Bool false];
-  obj ["label",str "p2";"targetId",str "T2";"title",str "";"url",str "about:blank";"active",`Bool false]]
+  tab_row ~label:(str "p1") ~target:"T1" ~title:"Slack" ~url:"https://app.slack.com/" ~active:true ();
+  tab_row ~label:`Null ~target:"T9" ~title:"Mail" ~url:"https://mail.example/" ~active:false ();
+  tab_row ~label:(str "p2") ~target:"T2" ~title:"" ~url:"about:blank" ~active:false ()]
+
+(* A JavaScript dialog as ego 0.6.0.16's page.info() names it. *)
+let ego_dialog ?(default="") kind message = obj ["url",str "https://app.slack.com/";"frameId",str "F1";
+  "message",str message;"type",str kind;"hasBrowserHandler",`Bool true;"defaultPrompt",str default]
 
 (* What a page script answers from inside the page: its JSON text, or what it threw. *)
 let in_page value = obj ["answer",str (Yojson.Safe.to_string value)]
@@ -341,6 +350,8 @@ let interact_args ?(tab_id=1) ?(frame_path=[]) action =
     (Lane.verb_json (Lane.Page_interact {tab_id;frame_path;expected_url=Some observed_url;action}))
 (* What the guard and the receipt scripts read: the page, its title and scroll. *)
 let page_summary = in_page (obj ["url",str observed_url;"title",str "Slack";"scrollX",`Int 0;"scrollY",`Int 0])
+(* What the DOM input script answers: the shared script's own answer. *)
+let dom_answer value = answered (obj ["result",in_page value])
 let input_answer ?(error=`Null) ?(released=true) () = answered (obj ["guard",page_summary;"receipt",page_summary;"error",error;"pointerReleased",`Bool released])
 (* The pointer target script's answer: the URL, a point and the viewport it is in. *)
 let resolved = in_page (obj ["url",str observed_url;"point",Lane.Pointer.point_to_json {x=0.25;y=0.5};
@@ -421,13 +432,13 @@ let test_input_acts_through_the_shared_page_scripts () =
     (keys (Lane.Press_key {document_id="d1";key=chord ~key:"a" ~modifiers:["Control";"Shift"]}));
   check string "a named key" "Enter" (keys (Lane.Press_key {document_id="d1";key=chord ~key:"Enter" ~modifiers:[]}));
   (* The DOM edits. *)
-  by_step ["page.input",(fun _ -> answered (in_page (obj ["action",str "fill";"url",str observed_url;"title",str "Slack"])))];
+  by_step ["page.input",(fun _ -> dom_answer (obj ["action",str "fill";"url",str observed_url;"title",str "Slack"]))];
   let fill = Lane.Fill {selector="#message";text="hi"} in
   (match interact fill with
    | Ok receipt -> check string "the fill" {|{"tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack"}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "the fill was %s" (failure_kind other));
-  let refusal ~started = answered (in_page (obj ["interactionFailure",obj ["message",str "element_not_found";"effectStarted",`Bool started]])) in
+  let refusal ~started = dom_answer (obj ["interactionFailure",obj ["message",str "element_not_found";"effectStarted",`Bool started]]) in
   by_step ["page.input",(fun _ -> refusal ~started:false)];
   check string "a refusal the script made first" "element_not_found" (before_effect "a refused fill" (interact fill));
   by_step ["page.input",(fun _ -> refusal ~started:true)];
@@ -515,12 +526,13 @@ let test_the_scripts_parse_as_modules () =
     | "space.finish" -> answered `Null
     | "page.target" -> answered resolved
     | "page.pointer" | "page.keyboard" | "page.drag" -> input_answer ()
-    | "page.input" -> answered (in_page (obj ["action",str "fill"]))
+    | "page.input" -> dom_answer (obj ["action",str "fill"])
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "New";"active",`Bool true]])
     | "page.goto" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
     | "page.reload" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Back"]])
     | "page.snapshot" -> answered (obj ["label",str "p1";"url",str "u";"title",str "T";"snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])
+    | "page.dialog" -> answered (obj ["dialog",ego_dialog ~default:"def" "prompt" "name?"])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
   let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -541,12 +553,14 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Fill {selector="#message";text="hi"});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back}) ];
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog (Some "hi")});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Dismiss_dialog}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.snapshot";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.drag";"page.input";
-     "page.close";"page.reload";"page.history";"space.finish"]
+     "page.close";"page.reload";"page.history";"page.dialog";"page.dialog";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
     let file = Filename.concat directory (step ^ ".mjs") in
@@ -605,9 +619,10 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/new";"title",str "New";"active",`Bool true]])
     | "page.goto" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
+    | "page.dialog" -> answered (obj ["dialog",ego_dialog "alert" "hello"])
     | "page.target" -> answered resolved
     | "page.pointer" | "page.keyboard" | "page.drag" -> input_answer ()
-    | "page.input" -> answered (in_page (obj ["action",str "fill"]))
+    | "page.input" -> dom_answer (obj ["action",str "fill"])
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let viewport : Lane.Pointer.viewport = {document_id="observed"; width=800.; height=600.; scroll_x=0.; scroll_y=0.} in
@@ -681,6 +696,7 @@ const page = {
     return {};
   },
   reload: async () => { seen.push("reload"); },
+  info: async () => ({url: entries[current].url, title: entries[current].title, w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600}),
   waitForTimeout: ms => new Promise(resolve => setTimeout(resolve, ms)),
   waitForLoadState: async () => { seen.push("load at " + current); %s },
 };
@@ -785,8 +801,8 @@ let test_history_moves_one_entry () =
     match sent.step with
     | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
     | "tabs.list" -> answered (`List [
-        obj ["label",str "p1";"targetId",str "T1";"title",str "B";"url",str "https://b.test/";"active",`Bool true];
-        obj ["label",`Null;"targetId",str "T9";"title",str "Mail";"url",str "https://mail.example/";"active",`Bool false]])
+        tab_row ~label:(str "p1") ~target:"T1" ~title:"B" ~url:"https://b.test/" ~active:true ();
+        tab_row ~label:`Null ~target:"T9" ~title:"Mail" ~url:"https://mail.example/" ~active:false ()])
     | "page.history" | "page.reload" ->
       steps := sent :: !steps;
       output := in_node (stand_in ~current:!current ~navigation:!navigation ~detaches:!detaches
@@ -851,6 +867,205 @@ let test_history_moves_one_entry () =
   check string "the operator's tab" "before effect" (failure_kind (on_tab ~tab_id:2 Lane.Action.Back));
   check int "ran no script" before (List.length !steps)
 
+(* A managed page's row names the dialog blocking it, and an agent page's
+   dialog is answered with a receipt that names it. *)
+let test_dialogs_are_listed_and_answered () =
+  let asked = ref [] and listing = ref tabs and reply = ref (fun (_ : sent) -> fail "no reply set") in
+  let peer = opened (fun sent ->
+    asked := sent :: !asked;
+    match sent.step with "tabs.list" -> answered !listing | _ -> !reply sent) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let runs () = List.length !asked and last () = List.hd !asked in
+  let act ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
+  let prompt = ego_dialog ~default:"def" "prompt" "name?" and alert = ego_dialog "alert" "saved" in
+  reply := (fun _ -> answered (obj ["dialog",prompt]));
+  (match act (Lane.Action.Accept_dialog (Some "Vincent")) with
+   | Ok receipt -> check string "the answer names the dialog"
+       {|{"tabId":1,"action":"accept_dialog","dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|}
+       (Yojson.Safe.to_string receipt)
+   | other -> failf "the accept was %s" (failure_kind other));
+  check string "on the page's label" "p1" (text (field "label" (last ()).args));
+  check bool "accepts" true (field "accept" (last ()).args = `Bool true);
+  check string "with the text" "Vincent" (text (field "text" (last ()).args));
+  check bool "within the action window" true ((last ()).window_s
+    < Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None})));
+  ignore (act (Lane.Action.Accept_dialog None));
+  check bool "no text is no text" true (field "text" (last ()).args = `Null);
+  reply := (fun _ -> answered (obj ["dialog",alert]));
+  (match act Lane.Action.Dismiss_dialog with
+   | Ok receipt -> check string "the dismissal names the dialog"
+       {|{"tabId":1,"action":"dismiss_dialog","dialog":{"type":"alert","message":"saved"}}|} (Yojson.Safe.to_string receipt)
+   | other -> failf "the dismissal was %s" (failure_kind other));
+  check bool "dismisses" true (field "accept" (last ()).args = `Bool false);
+  reply := (fun _ -> answered (obj ["dialog",ego_dialog "modal" "?"]));
+  (match act Lane.Action.Dismiss_dialog with
+   | Ok receipt -> check string "a dialog it cannot read is left out" {|{"tabId":1,"action":"dismiss_dialog"}|} (Yojson.Safe.to_string receipt)
+   | other -> failf "an answer to an unreadable dialog was %s" (failure_kind other));
+  reply := (fun _ -> refused "no dialog is open in this tab");
+  check string "none open" "no dialog is open in this tab" (before_effect "an answer with none open" (act Lane.Action.Dismiss_dialog));
+  reply := (fun _ -> failed "Target closed");
+  (match act Lane.Action.Dismiss_dialog with
+   | Error (Live.Outcome_unknown detail) ->
+     check bool "may have been answered" true (String_util.contains_substring detail "may have been answered")
+   | other -> failf "a failed answer was %s" (failure_kind other));
+  let before = runs () in
+  check string "the operator's tab" "before effect" (failure_kind (act ~tab_id:2 Lane.Action.Dismiss_dialog));
+  check int "ran no script" before (runs ());
+  (* The rows: a managed page's dialog, read now; an operator tab has none. *)
+  listing := `List [
+    tab_row ~dialog:prompt ~label:(str "p1") ~target:"T1" ~title:"Slack" ~url:"https://app.slack.com/" ~active:true ();
+    tab_row ~label:`Null ~target:"T9" ~title:"Mail" ~url:"https://mail.example/" ~active:false ();
+    tab_row ~dialog:alert ~label:(str "p2") ~target:"T2" ~title:"" ~url:"about:blank" ~active:false ()];
+  (match dispatch peer Live.Tabs_list (obj []) with
+   | Ok rows -> check string "each managed page names the dialog blocking it"
+       ({|[{"id":1,"index":0,"url":"https://app.slack.com/","title":"Slack","active":true,"dialog":{"type":"prompt","message":"name?","defaultValue":"def"}},|}
+        ^ {|{"id":2,"index":1,"url":"https://mail.example/","title":"Mail","active":false},|}
+        ^ {|{"id":3,"index":2,"url":"about:blank","title":"","active":false,"dialog":{"type":"alert","message":"saved"}}]|})
+       (Yojson.Safe.to_string rows)
+   | Error _ -> fail "the listing failed");
+  (* A page whose dialog state ego could not read, or named in a shape this
+     connection cannot read, is listed as BiDi lists a tab it could not read. *)
+  listing := `List [
+    tab_row ~label:(str "p1") ~target:"T1" ~title:"Slack" ~url:"https://app.slack.com/" ~active:true ();
+    tab_row ~unread:(str "Not attached to an active page") ~label:(str "p2") ~target:"T2" ~title:"" ~url:"about:blank" ~active:false ();
+    tab_row ~dialog:(ego_dialog "modal" "?") ~label:(str "p3") ~target:"T3" ~title:"X" ~url:"https://x.test/" ~active:false ()];
+  (match dispatch peer Live.Tabs_list (obj []) with
+   | Ok rows -> check string "an unread dialog state is not a page without a dialog"
+       ({|{"tabs":[{"id":1,"index":0,"url":"https://app.slack.com/","title":"Slack","active":true}],"complete":false,"unavailableTabs":[|}
+        ^ {|{"id":3,"index":1,"error":"ego did not read whether a dialog blocks this page: Not attached to an active page","url":"about:blank"},|}
+        ^ {|{"id":4,"index":2,"error":"ego reported a JavaScript dialog of unknown type \"modal\"","url":"https://x.test/"}]}|})
+       (Yojson.Safe.to_string rows)
+   | Error _ -> fail "the partial listing failed");
+  listing := `List [obj ["label",str "p1";"targetId",str "T1";"title",str "Slack";"url",str "https://app.slack.com/";"active",`Bool true]];
+  check bool "a row without its dialog state is refused" true (Result.is_error (dispatch peer Live.Tabs_list (obj [])))
+
+(* An input whose page opened a dialog answers with it; a page already
+   blocked is refused before any input. *)
+let test_an_input_that_opens_a_dialog_answers_with_it () =
+  let reply = ref (fun (_ : sent) -> fail "no reply set") in
+  let peer = opened (fun sent -> match sent.step with "tabs.list" -> answered tabs | _ -> !reply sent) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let interact action = dispatch peer Live.Page_interact (interact_args action) in
+  let row = obj ["url",str observed_url;"title",str "Slack"] in
+  reply := (fun sent -> match sent.step with
+    | "page.target" -> answered resolved
+    | "page.pointer" -> answered (obj ["guard",page_summary;"dialog",ego_dialog "confirm" "sure?";"tab",row;"error",`Null;"pointerReleased",`Bool true])
+    | other -> failf "unexpected step %s" other);
+  (match interact (Lane.Click "#send") with
+   | Ok receipt -> check string "the click and the dialog it opened"
+       {|{"tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"confirm","message":"sure?"}}|}
+       (Yojson.Safe.to_string receipt)
+   | other -> failf "a click that opened a dialog was %s" (failure_kind other));
+  reply := (fun _ -> answered (obj ["dialog",ego_dialog "alert" "saved";"tab",row]));
+  (match interact (Lane.Fill {selector="#message";text="hi"}) with
+   | Error (Live.Partial_failure {tab_id; receipt; message}) ->
+     check int "the tab" 1 tab_id;
+     check string "where it is and the dialog"
+       {|{"tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"alert","message":"saved"}}|}
+       (Yojson.Safe.to_string receipt);
+     check bool "says to answer it" true (String_util.contains_substring message "accept_dialog or dismiss_dialog")
+   | other -> failf "a fill the dialog stopped was %s" (failure_kind other));
+  reply := (fun _ -> refused "tab 1 is blocked on a JavaScript dialog; list the tabs to read it, and answer it with accept_dialog or dismiss_dialog before another step");
+  check string "a blocked page" "before effect" (failure_kind (interact (Lane.Fill {selector="#message";text="hi"})))
+
+(* The dialog scripts in node, against a stand-in for ego: one agent page,
+   [open] the dialog it is blocked on, and [opening] the one the next click
+   or page script opens. ego refuses page.evaluate while a dialog is open
+   and stops waiting for one that opens a dialog, as 0.6.0.16 did. *)
+let dialog_stand_in ~open_ ~opening ~opens_on ~canned = Printf.sprintf {js|
+let open = %s;
+const opening = %s;
+const opensOn = %S;
+const canned = %s;
+const seen = [];
+process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
+const page = {
+  info: async () => { seen.push("info"); return open === null ? {url: "https://app.slack.com/", title: "Slack", w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600} : {dialog: open}; },
+  evaluate: async () => {
+    seen.push("evaluate");
+    if (open !== null) throw new Error("Runtime.evaluate cannot run while a JavaScript " + open.type + " dialog is open");
+    if (opensOn === "evaluate") { open = opening; throw new Error("a JavaScript " + open.type + " dialog opened while Runtime.evaluate was running"); }
+    return canned;
+  },
+  mouse: {
+    move: async () => { seen.push("move"); },
+    click: async () => { seen.push("click"); if (opensOn === "click") open = opening; return open === null ? {} : {dialog: open}; },
+  },
+  acceptDialog: async text => { seen.push(text === undefined ? "accept" : "accept " + text); if (open === null) return false; open = null; return true; },
+  dismissDialog: async () => { seen.push("dismiss"); if (open === null) return false; open = null; return true; },
+  goto: async () => { seen.push("goto"); },
+  close: async () => { seen.push("close"); },
+};
+const taskSpace = async () => ({
+  tabs: async () => [{label: "p1", openedBy: "agent", url: "https://app.slack.com/", title: "Slack", targetId: "T1", active: true}],
+  page: () => page,
+});
+|js} (Yojson.Safe.to_string open_) (Yojson.Safe.to_string opening) opens_on (Yojson.Safe.to_string canned)
+
+let test_dialog_scripts_in_node () =
+  let scenario = ref (`Null, `Null, "") and output = ref "" in
+  let canned = function
+    | "page.target" -> resolved
+    | "page.pointer" -> page_summary
+    | "page.input" -> in_page (obj ["action",str "fill"])
+    | _ -> in_page (obj ["url",str observed_url]) in
+  let run ~window_s script =
+    let sent = sent_of ~window_s script in
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | step ->
+      let open_, opening, opens_on = !scenario in
+      output := in_node (dialog_stand_in ~open_ ~opening ~opens_on ~canned:(canned step) ^ script);
+      Ok !output in
+  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+    | Ok peer -> peer | Error detail -> fail detail in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.Util.(to_list (Yojson.Safe.from_string (after ~prefix:"seen " line)) |> List.map to_string)
+    | None -> fail "the stand-in did not say what it saw" in
+  let act interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})) in
+  let interact action = dispatch peer Live.Page_interact (interact_args action) in
+  let blocked detail = check bool ("refused as blocked: " ^ detail) true (String_util.contains_substring detail "is blocked on a JavaScript dialog") in
+  let prompt = ego_dialog ~default:"def" "prompt" "name?" and alert = ego_dialog "alert" "saved" in
+  scenario := (prompt, `Null, "");
+  (match dispatch peer Live.Tabs_list (obj []) with
+   | Ok rows -> check string "listed with its dialog"
+       {|[{"id":1,"index":0,"url":"https://app.slack.com/","title":"Slack","active":true,"dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}]|}
+       (Yojson.Safe.to_string rows)
+   | Error _ -> fail "the listing failed");
+  (match act (Lane.Action.Accept_dialog (Some "Vincent")) with
+   | Ok receipt -> check string "the answer"
+       {|{"tabId":1,"action":"accept_dialog","dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|} (Yojson.Safe.to_string receipt)
+   | other -> failf "the accept was %s" (failure_kind other));
+  check (list string) "read, then answered with the text" ["info";"accept Vincent"] (seen ());
+  scenario := (`Null, `Null, "");
+  check string "none open" "no dialog is open in this tab" (before_effect "a dismissal with none open" (act Lane.Action.Dismiss_dialog));
+  check (list string) "and nothing was answered" ["info"] (seen ());
+  scenario := (`Null, ego_dialog "confirm" "sure?", "click");
+  (match interact (Lane.Click "#send") with
+   | Ok receipt -> check string "the click and its dialog"
+       {|{"tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"confirm","message":"sure?"}}|}
+       (Yojson.Safe.to_string receipt)
+   | other -> failf "a click that opened a dialog was %s" (failure_kind other));
+  check (list string) "no page script after the dialog opened" ["info";"evaluate";"click";"info"] (seen ());
+  scenario := (`Null, alert, "evaluate");
+  (match interact (Lane.Fill {selector="#message";text="hi"}) with
+   | Error (Live.Partial_failure {receipt; _}) -> check string "a fill the dialog stopped"
+       {|{"tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"alert","message":"saved"}}|}
+       (Yojson.Safe.to_string receipt)
+   | other -> failf "a fill the dialog stopped was %s" (failure_kind other));
+  check (list string) "read the dialog after the script stopped" ["info";"evaluate";"info"] (seen ());
+  scenario := (alert, `Null, "");
+  blocked (before_effect "a read of a blocked page" (dispatch peer Live.Page_read (obj ["tabId",`Int 1])));
+  check (list string) "read nothing" ["info"] (seen ());
+  blocked (before_effect "a move of a blocked page" (dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://example.test/"])));
+  check (list string) "moved nothing" ["info"] (seen ());
+  blocked (before_effect "a click on a blocked page" (interact (Lane.Click_at {point={x=0.5;y=0.5};viewport;button=Lane.Pointer.Primary})));
+  check (list string) "clicked nothing" ["info"] (seen ());
+  (match act Lane.Action.Close_tab with
+   | Ok _ -> check (list string) "a blocked page still closes" ["close"] (seen ())
+   | other -> failf "a close of a blocked page was %s" (failure_kind other))
+
 let () =
   run "browser_ego_peer" [
     "ego", [
@@ -869,5 +1084,8 @@ let () =
       test_case "effects answer what happened" `Quick test_effects_answer_what_happened;
       test_case "history moves one entry and waits for it" `Quick test_history_moves_one_entry;
       test_case "a snapshot reads ego's own tree" `Quick test_a_snapshot_reads_egos_own_tree;
+      test_case "dialogs are listed and answered" `Quick test_dialogs_are_listed_and_answered;
+      test_case "an input that opens a dialog answers with it" `Quick test_an_input_that_opens_a_dialog_answers_with_it;
+      test_case "the dialog scripts run against a stand-in in node" `Quick test_dialog_scripts_in_node;
       test_case "input acts through the shared page scripts" `Quick test_input_acts_through_the_shared_page_scripts;
       test_case "the peer serves what the lane table says" `Quick test_the_peer_serves_what_the_lane_table_says ] ]

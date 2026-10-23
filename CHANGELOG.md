@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-10-23
+
 ### Upgrade notes
 
 - `workspace-curator` is now package revision 0.1.1 and `candle-appraiser` 0.1.2, because both ship the shared Exact worker. Rebuild both worker images and install the new package revisions (#45200).
@@ -128,14 +130,6 @@
 - `Keeper_volume_filesystem` reads a Keeper volume's ext4 error state from the host image's superblock: the kernel's Errors detected bit, the error count, and the first and last error's time, function, line, inode, block and cause. The image path comes from `container volume inspect` (#45143).
 - The browser Add-on owner holds one live connection per transport, so a BiDi Firefox and an ego task space can attach to one worker (#45235).
 - Remove dead `Tuple`/`Variant` Yojson pattern matches in `browser_observation.ml`, `keeper_msg_async_record.ml`, `keeper_projection_change.ml`, and `keeper_tool_plan.ml`. yojson 3.0.0 cannot construct these variants, so the branches were unreachable; explicit `Yojson.Safe.t` annotations replace them (#45273).
-
-## [0.63.0] - 2026-10-23
-
-### Changed
-- TBD
-
-### Deprecated
-- TBD
 
 ## [0.62.0] - 2026-10-22
 

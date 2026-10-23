@@ -2395,15 +2395,15 @@ class FirefoxRoutes(unittest.TestCase):
         self.assertIn('Firefox is missing, so this is left out', printed.getvalue())
         self.assertIn('--mode bidi --mode extension', printed.getvalue())
 
-    def test_a_refused_call_with_several_routes_says_none_were_written_and_offers_each(self):
-        # The command plans every route before it writes, so one refusal means
-        # none were written. The reader can then run the ones that are fine.
+    def test_a_refused_call_with_several_routes_points_at_what_was_written_and_offers_each(self):
+        # The command commits its tables one after another, so a refusal can
+        # come after a route was written; it lists those itself. The reader
+        # can run the call again, or the routes one at a time.
         replies = [completed(browser_catalog('firefox', ready=True)), completed('', 1)]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
             SETUP.prepare_browser_lane('/bin/masc', '/workspace', ('bidi', 'extension'), 8945)
         text = printed.getvalue()
-        self.assertIn('Nothing was written for any of the routes in that one command', text)
         self.assertIn('masc browser-lane-setup --mode bidi --mode extension --base-path /workspace', text)
         self.assertIn('one route at a time: masc browser-lane-setup --mode bidi --base-path /workspace; '
                       'masc browser-lane-setup --mode extension --base-path /workspace', text)

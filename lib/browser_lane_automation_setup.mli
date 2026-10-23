@@ -54,6 +54,9 @@ type error =
   | Not_executable of { key : key; path : string }
   | Table_refused of string
   | Configuration_changed
+      (** [runtime.toml] changed after the plan was made, or, for a plan
+          made again, the automation table changed. The table was not
+          written. *)
   | Not_written of string
 
 val error_message : error -> string
@@ -93,7 +96,9 @@ val plan
     another write of this command has changed since (the bidi table, in the
     same run). The table, its keys and the notes are kept and nothing is looked
     for or started again; the file is read, the edit is made on it, read back
-    and validated, and the revision is taken from it. *)
+    and validated, and the revision is taken from it. An automation table that
+    changed since the plan was written by someone else, and is refused as
+    [Configuration_changed] rather than overwritten. *)
 val replan : plan -> (plan, error) result
 
 (** Commits the change under the configuration write lock. A configuration

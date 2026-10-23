@@ -633,7 +633,7 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         result = masc(root, "--mode", "bidi", "--binary", str(HOST), "--base-path", str(base),
                       "--firefox", str(fake_firefox(root)), "--profile", str(root / "profile"))
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("runtime.toml was not written", result.stderr)
+        self.assertIn("[browser.live.bidi] was not written to runtime.toml", result.stderr)
         # The host is installed first and the table last, so what a failure
         # leaves is an installed lane and no table, never a table with no lane.
         self.assertTrue((lane(base) / "host/launch.json").is_file())

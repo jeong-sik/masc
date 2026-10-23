@@ -49,8 +49,8 @@ type error =
           The sentence is the loader's, or says the table is written in a form
           this command cannot edit. *)
   | Configuration_changed
-      (** [runtime.toml] changed after the plan was made. Nothing was
-          written. *)
+      (** [runtime.toml] changed after the plan was made, or, for a plan
+          made again, this table changed. The table was not written. *)
   | Not_written of string
 
 val error_message : error -> string
@@ -89,7 +89,9 @@ val plan
 (** The same plan against the file as it is now, for when another table was
     written to it since. Nothing is looked for or started again; the edit is
     made on the file, read back and validated, and the revision is taken from
-    it. *)
+    it. A [\[browser.live.ego\]] that changed since the plan was written by
+    someone else, and is refused as [Configuration_changed] rather than
+    overwritten. *)
 val replan : plan -> (plan, error) result
 
 (** Commits the table under the configuration write lock. A table that is

@@ -4,6 +4,7 @@ module Bidi_setup = Masc.Browser_lane_bidi_setup
 module Automation_setup = Masc.Browser_lane_automation_setup
 module Addon_setup = Masc.Browser_addon_setup
 module Ego_setup = Masc.Browser_lane_ego_setup
+module Table_writes = Masc.Browser_lane_table_writes
 
 type mode = Addon | Extension | Bidi | Ego | Host | Automation
 
@@ -432,84 +433,66 @@ let install
         | Done applied ->
           if Option.is_some installed then print_endline "";
           print_addon applied);
-       let tabled =
-         match bidi with
-         | None -> Ok None
-         | Some plan ->
-           Bidi_setup.apply plan
-           |> Result.map (fun applied -> Some (plan, applied))
-           |> Result.map_error Bidi_setup.error_message
+       (* The tables are committed one after another. A refusal leaves the
+          ones before it written, so they are printed with their next steps
+          before the refusal, and a run of the same command keeps them. A
+          table planned against the file before an earlier table was written
+          is planned again against the file as it is now: nothing is looked
+          for or run again, and it is refused only if that file no longer
+          takes the edit or the same table changed meanwhile. *)
+       let bidi_step =
+         Option.map
+           (fun plan () ->
+              Bidi_setup.apply plan
+              |> Result.map (fun applied -> plan, applied)
+              |> Result.map_error Bidi_setup.error_message)
+           bidi
        in
-       (match tabled with
-        | Error message -> refuse message
-        | Ok tabled ->
-          (* Both tables were planned against the same runtime.toml. The bidi
-             table has been written since, so the automation plan would be
-             refused as stale: it keeps its decisions and takes the revision of
-             what the file holds now. Nothing is looked for or run again, and
-             it is refused here only if that file no longer takes the edit. *)
-          let automation =
-            match bidi, automation with
-            | Some _, Some plan ->
-              Automation_setup.replan plan
-              |> Result.map Option.some
-              |> Result.map_error Automation_setup.error_message
-            | None, _ | _, None -> Ok automation
+       let automation_step =
+         Option.map
+           (fun plan ~after_write ->
+              (let* plan = if after_write then Automation_setup.replan plan else Ok plan in
+               Automation_setup.apply plan |> Result.map (fun () -> plan))
+              |> Result.map_error Automation_setup.error_message)
+           automation
+       in
+       let ego_step =
+         Option.map
+           (fun plan ~after_write ->
+              (let* plan = if after_write then Ego_setup.replan plan else Ok plan in
+               Ego_setup.apply plan |> Result.map (fun () -> plan))
+              |> Result.map_error Ego_setup.error_message)
+           ego
+       in
+       let { Table_writes.written; refusal } =
+         Table_writes.write ~bidi:bidi_step ~automation:automation_step ~ego:ego_step
+       in
+       Option.iter
+         (fun (installed : Setup.installed) -> Option.iter print_extension_steps installed.extension)
+         installed;
+       Option.iter
+         (fun (plan, applied) ->
+            print_table ~runtime_config_path plan applied;
+            print_bidi_steps plan)
+         written.bidi;
+       Option.iter (print_automation ~runtime_config_path) written.automation;
+       Option.iter (print_ego ~runtime_config_path) written.ego;
+       (match refusal with
+        | Some message -> refuse message
+        | None ->
+          if modes = [ Host ] then (print_endline ""; print_endline print_host_only);
+          if List.mem Extension modes && List.mem Bidi modes
+          then (print_endline ""; print_endline print_both_routes);
+          let extension_written =
+            match installed with
+            | Some { Setup.extension = Some _; _ } -> true
+            | Some { Setup.extension = None; _ } | None -> false
           in
-          let automation =
-            Result.bind automation (fun plan ->
-              match plan with
-              | None -> Ok None
-              | Some plan ->
-                Automation_setup.apply plan
-                |> Result.map (fun () -> Some plan)
-                |> Result.map_error Automation_setup.error_message)
-          in
-          (* The ego table was planned against the file before the bidi and
-             automation tables were written, so it takes the revision of what
-             the file holds now, as the automation plan does. *)
-          let ego =
-            Result.bind automation (fun automation ->
-              let written = Option.is_some tabled || Option.is_some automation in
-              match ego with
-              | None -> Ok None
-              | Some plan ->
-                let* plan =
-                  if written
-                  then Ego_setup.replan plan |> Result.map_error Ego_setup.error_message
-                  else Ok plan
-                in
-                Ego_setup.apply plan
-                |> Result.map (fun () -> Some plan)
-                |> Result.map_error Ego_setup.error_message)
-          in
-          (match Result.bind ego (fun ego -> Result.map (fun automation -> automation, ego) automation) with
-           | Error message -> refuse message
-           | Ok (automation, ego) ->
-             Option.iter
-               (fun (installed : Setup.installed) ->
-                  Option.iter print_extension_steps installed.extension)
-               installed;
-             Option.iter
-               (fun (plan, applied) ->
-                  print_table ~runtime_config_path plan applied;
-                  print_bidi_steps plan)
-               tabled;
-             Option.iter (print_automation ~runtime_config_path) automation;
-             Option.iter (print_ego ~runtime_config_path) ego;
-             if modes = [ Host ] then (print_endline ""; print_endline print_host_only);
-             if List.mem Extension modes && List.mem Bidi modes
-             then (print_endline ""; print_endline print_both_routes);
-             let extension_written =
-               match installed with
-               | Some { Setup.extension = Some _; _ } -> true
-               | Some { Setup.extension = None; _ } | None -> false
-             in
-             if extension_written || List.mem Host modes
-             then (print_endline ""; print_lane_state ~base_path);
-             if Option.is_some tabled
-             then (print_endline ""; print_bidi_state ~base_path ~runtime_config_path);
-             0)))
+          if extension_written || List.mem Host modes
+          then (print_endline ""; print_lane_state ~base_path);
+          if Option.is_some written.bidi
+          then (print_endline ""; print_bidi_state ~base_path ~runtime_config_path);
+          0))
 
 let run
       ~base_path

@@ -45,7 +45,7 @@ let error_message = function
   | Configuration_unreadable { path; reason } ->
     Printf.sprintf "%s cannot be read: %s." path reason
   | Configuration_refused reason ->
-    Printf.sprintf "runtime.toml would not load, so nothing was written: %s." reason
+    Printf.sprintf "runtime.toml would not load, so [%s] was not written: %s." table_path reason
   | Home_unknown ->
     "HOME is not set, so the default profile has no place. Name the profile with --profile."
   | Firefox_not_found ->
@@ -62,11 +62,12 @@ let error_message = function
   | Profile_not_created { path; reason } ->
     Printf.sprintf "Could not create the profile directory %s: %s." path reason
   | Table_refused reason ->
-    Printf.sprintf "The [%s] table would not load as written, so nothing was written: %s." table_path
+    Printf.sprintf "The [%s] table would not load as written, so it was not written: %s." table_path
       reason
   | Configuration_changed ->
-    "runtime.toml changed while this ran, so nothing was written. Run this again."
-  | Not_written reason -> Printf.sprintf "runtime.toml was not written: %s." reason
+    Printf.sprintf "runtime.toml changed while this ran, so [%s] was not written. Run this again."
+      table_path
+  | Not_written reason -> Printf.sprintf "[%s] was not written to runtime.toml: %s." table_path reason
 
 let ( let* ) = Result.bind
 

@@ -232,6 +232,7 @@ let rec restore_record ~store ~owner ~capture ~visited (record : Owner.retained)
     | Admission_declined _ | Execution_observed (Absent _) | Commit_intended _ | Commit_uncertain _
     | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _
     | Preparation_intended _ | Preparation_observed _
+    | Replacement_intended _ | Replacement_observed _
     | Refused {stage=Progress.Before_dispatch;_} | Observer _ -> Error "Unexpected event in original gate journal")
     (Ok (empty,None)) (Progress.events record.progress) in
   let* derived = valid_prefix authority input transcript in

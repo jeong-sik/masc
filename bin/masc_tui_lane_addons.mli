@@ -197,6 +197,14 @@ val open_declaration : t -> string -> t
 (** Enter the selected worker or unresolved installation. A worker pins its
     incarnation; an installation opens its existing TOML detail section. *)
 val overview_count : ?mode:overview_mode -> snapshot -> int
+type current_category = Classified of Masc.Lane_addon_category.t | Unclassified | Unverified
+(** [Classified]/[Unclassified] require the exact installation id and source
+    path to match one parsed, issue-free declaration in a complete reading.
+    [Unverified] is any weaker match: id-only, path-only, duplicated claims,
+    an incomplete inventory or an issue on the declaration itself. This is
+    navigation grouping only; it grants nothing. *)
+val current_category : snapshot ->
+  [`Instance of instance | `Declaration of int * declaration] -> current_category
 (** Selectable current workers/declarations, or retained runs in history mode. *)
 val toggle_history : t -> t
 (** Explicitly switch the overview list. Detail keeps its pinned incarnation. *)

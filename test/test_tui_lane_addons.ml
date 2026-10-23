@@ -1848,6 +1848,62 @@ let inspect_category_decode_is_strict () =
      @ [["ui_category",`String "browser";"ui_category",`String "analysis"];
         ["ui_category",`String "browser";"ui_category",`String "browser"]])
 
+let current_category_requires_exact_id_and_path () =
+  let module Category = Masc.Lane_addon_category in
+  let worker : UI.instance = {
+    id="worker";incarnation="worker-original";run_id="world";addon_id="fixture";
+    title="worker";revision="1";phase=UI.Row.Attached;runtime_presence=UI.Live_entry;
+    observation_seq=1;rows_count=0;installation_id=Some "worker";
+    source_path=Some "/config/worker.toml";configuration_revision=Some "r1";
+    binding=`Assoc [];outputs=[];skills_directory=None;
+    ui_category=Some Category.Browser;action_schema=None;binding_schema=None;
+    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+  let declaration ?(path="/config/worker.toml") ?(id="worker") category : UI.declaration = {
+    source_path=path;installation_id=Some id;ui_category=Some category;
+    desired=Some "r1";applied=Some "r1";instance_id=Some id;issues=[];enabled=Some true;
+    origin=UI.Parsed_declaration;application=None} in
+  let snapshot ~declarations : UI.snapshot = {
+    instances=[worker];configuration=Some {directory="/config";complete=true;declarations};
+    output={rows=[];coverage=[]};complete=Some true} in
+  let exact = snapshot ~declarations:[declaration Category.Browser] in
+  check bool "an exact id and path match reads the declared category" true
+    (UI.current_category exact (`Instance worker)=UI.Classified Category.Browser);
+  check bool "an exact match with no declared category is unclassified" true
+    (UI.current_category (snapshot ~declarations:[{(declaration Category.Browser) with ui_category=None}])
+       (`Instance worker)=UI.Unclassified);
+  let id_only = snapshot ~declarations:[declaration ~path:"/config/elsewhere.toml" Category.Analysis] in
+  check bool "a declaration matching only the id stays unverified" true
+    (UI.current_category id_only (`Instance worker)=UI.Unverified);
+  let path_only = snapshot ~declarations:[declaration ~id:"other" Category.Analysis] in
+  check bool "a declaration matching only the path stays unverified" true
+    (UI.current_category path_only (`Instance worker)=UI.Unverified);
+  let both_claimed = snapshot ~declarations:[
+    declaration ~path:"/config/elsewhere.toml" Category.Analysis;
+    declaration ~id:"other" Category.Browser] in
+  check bool "id-only and path-only claims together stay unverified" true
+    (UI.current_category both_claimed (`Instance worker)=UI.Unverified);
+  let issue = snapshot ~declarations:[{(declaration Category.Browser) with issues=["duplicate"]}] in
+  check bool "an issue on the exact declaration stays unverified" true
+    (UI.current_category issue (`Instance worker)=UI.Unverified);
+  let incomplete = {exact with configuration=
+    Option.map (fun (c : UI.configuration) -> {c with complete=false}) exact.configuration} in
+  check bool "an incomplete inventory stays unverified" true
+    (UI.current_category incomplete (`Instance worker)=UI.Unverified);
+  let drifted = snapshot ~declarations:[declaration Category.Analysis] in
+  check bool "an exact match may read a drifted current category" true
+    (UI.current_category drifted (`Instance worker)=UI.Classified Category.Analysis);
+  (* A declaration entry judges itself by the same rule: another declaration
+     claiming its id makes even the exact pair untrusted. *)
+  let duplicate_id = snapshot ~declarations:[
+    declaration Category.Browser;
+    declaration ~path:"/config/elsewhere.toml" Category.Analysis] in
+  let first = List.hd (Option.get duplicate_id.configuration).declarations in
+  check bool "a declaration entry is judged by the same exact-match rule" true
+    (UI.current_category duplicate_id (`Declaration (0, first))=UI.Unverified);
+  check bool "a lone declaration keeps its own declared category" true
+    (UI.current_category (snapshot ~declarations:[declaration Category.Browser])
+       (`Declaration (0, declaration Category.Browser))=UI.Classified Category.Browser)
+
 let role_refresh_keeps_original_action_and_installation () =
   let module Category = Masc.Lane_addon_category in
   let schema = Yojson.Safe.from_string
@@ -1966,6 +2022,8 @@ let role_refresh_keeps_original_action_and_installation () =
     (Option.bind (UI.selected_declaration selected) (fun declaration -> declaration.installation_id))
 
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "current category requires exact id and path" `Quick
+    current_category_requires_exact_id_and_path;
   test_case "Inspect categories use strict shared decoding" `Quick inspect_category_decode_is_strict;
   test_case "role refresh preserves original action and installation targets" `Quick
     role_refresh_keeps_original_action_and_installation;

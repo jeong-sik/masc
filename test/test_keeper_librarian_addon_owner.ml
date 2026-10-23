@@ -432,14 +432,22 @@ let test_actual_mixed_walk_blocks_partition kind ()=with_fixture (fun ~sw:_ fixt
   let evidence=Keeper_exact_walk_receipt.failure_evidence (latest_execution fixture capture).receipt in
   check bool "the actual typed named input refusal survives the other visit" true evidence.named_input_capacity;
   (match kind with
-   | Quota -> check bool "actual quota visit vetoes smaller input" true evidence.size_independent_execution_failure
-   | Invalid -> check bool "actual schema/domain rejection vetoes smaller input" true evidence.invalid_output);
-  check bool "whole-walk production classifier rejects recursive partition" false
-    (Keeper_exact_walk_failure.refuses_input_capacity evidence);
+   | Quota ->
+     check bool "actual quota visit vetoes smaller input" true evidence.size_independent_execution_failure;
+     check bool "quota does not erase the independent named capacity observation" true
+       (Keeper_exact_walk_failure.refuses_input_capacity evidence)
+   | Invalid ->
+     check bool "actual schema/domain rejection vetoes smaller input" true evidence.invalid_output;
+     check bool "invalid output vetoes the derived capacity classification" false
+       (Keeper_exact_walk_failure.refuses_input_capacity evidence));
   ignore (run_worker fixture);
   let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
   let inventory=io (fun () -> Parts.discover ~store:fixture.store ~owner
     ~restore_gate:(Gate.restore_size_evidence ~store:fixture.store ~owner) |> get) in
+  let parent=Parts.find inventory ~part_id:(Capture.parent_part_id capture) |> get in
+  check bool "the actual original proof refuses size-only partition authority" true
+    (io (fun () -> Parts.execution_size_evidence ~store:fixture.store ~owner ~inventory
+      ~parent ~execution_id:(Capture.request_id capture)) |> Result.is_error);
   check int "the original mixed failure never creates a partition child" 1 (List.length (Parts.runnable inventory));
   check bool "the remaining part is the original root" true
     (List.for_all (fun part -> Parts.predecessor part=None) (Parts.runnable inventory));

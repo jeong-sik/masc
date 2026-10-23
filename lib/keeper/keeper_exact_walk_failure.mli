@@ -20,9 +20,15 @@ val with_invalid_output : t -> t
 val without_measured_cli_capacity : t -> t
 
 val shows_range_size : t -> bool
+(** Historical range-fitting evidence after the invalid-output veto. *)
+
 val refuses_input_capacity : t -> bool
-(** Invalid output vetoes both derived decisions without erasing independent
-    execution failures or measured CLI limits. *)
+(** A named input-capacity observation after the invalid-output veto, not
+    permission to recursively partition the input. A quota or other independent
+    execution failure does not erase the capacity observation. Admission
+    partitioning must additionally reject [size_independent_execution_failure],
+    as the original Parts proof checker does. Neither derived observation
+    erases the independent failures or measured CLI limits retained in [t]. *)
 
 val of_cause : Agent_core.Exact_output.execution_error_cause -> t
 val of_disposition : Agent_core.Exact_output.candidate_rejection_disposition -> t

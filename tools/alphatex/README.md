@@ -274,13 +274,29 @@ built-in microphone, aggregate device or loopback device exposed by CoreAudio.
 The take folder is displayed before recording. Its default is `music-sessions`
 under the process's working directory; `--session-root /path/to/folder` chooses
 another location. Every take has its own directory and no saved take is replaced.
-`--input DEVICE_UID` and `--midi all|none|SOURCE_ID` preselect inputs from
-`--devices`; the recording still requires pressing `r`.
+`--input DEVICE_UID` and `--midi=all|none|SOURCE_ID` preselect inputs from
+`--devices`; the recording still requires pressing `r`. Use the equals form for
+MIDI IDs: CoreMIDI may assign a negative ID, which a separate CLI argument would
+parse as an option. For example, `--midi=-123` selects that exact source ID.
 WAV channel waveforms and MIDI source/group/channel tracks share the native host
 clock. Waveforms show captured block extrema, not an editable sample waveform.
 Use arrows to scroll tracks or time, +/- to zoom, and `f` to follow incoming data.
-Space plays/stops the saved WAV through the system default output. It does not
-play the captured MIDI tracks. Open an existing take with:
+Space starts/stops playback of the saved take. With no MIDI output selected it
+plays the WAV; on macOS this uses the native audio output, with the system default
+as the initial route. Press `a` to cycle audio outputs or use `:output AUDIO_UID`.
+Press `o` to cycle MIDI destinations or use `:midi-output MIDI_UID` to play the
+original UMP alongside the WAV. `:source SOURCE_ID MIDI_UID` binds one recorded
+input source to a destination; each source containing packets needs an explicit
+binding or the default MIDI destination. Choosing a new default MIDI destination
+clears the individual source bindings. The source ID is the recorded input's ID,
+which may differ from currently connected devices.
+
+During native playback, `p` pauses/resumes and `:seek SECONDS` moves audio and MIDI
+together; `:pause`, `:resume` and `:stop` are also available. Pausing, resuming
+and seeking may be refused when the captured MIDI state cannot be reconstructed
+safely. These controls do not change the saved take. The
+playhead's running position is an estimate between native acknowledgements.
+Open an existing take with:
 
 ```sh
 masc-alphatex --devices
@@ -294,10 +310,12 @@ word remain in `midi.ump.jsonl`. Clip-owned timing/start/end utility messages ar
 not duplicated in the export. Capture failures remain visible and retain their
 files. See the [native protocol](native/README.md) for clock and failure semantics.
 
-This recording view captures simultaneous tracks in a take. Overdubbing,
-multi-take arrangement/mixing, MIDI playback/output, input monitoring, output
-device selection and practice scoring are not implemented here. The existing
-score playback remains available when returning to the score view.
+This view records and auditions a simultaneous take. Use the
+[arrangement editor](ARRANGEMENT.md) for multi-take placement and mixing,
+[record into an arrangement](#choose-correction-for-new-arrangement-recordings),
+or [practice an arrangement range](#continuous-arrangement-range-practice). Live input monitoring
+is a [separate workflow](INPUT-MONITORING.md); the take view does not enable it.
+The existing score playback remains available when returning to the score view.
 
 alphaTab is MPL-2.0, Bravura is OFL-1.1, alphaSkia is BSD-3-Clause. Their notices ship
 with the locked dependencies. The Sonivox license is in alphaTab's

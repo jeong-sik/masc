@@ -533,7 +533,8 @@ let test_the_scripts_parse_as_modules () =
     | "page.reload" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Back"]])
     | "page.snapshot" -> answered (obj ["label",str "p1";"url",str "u";"title",str "T";"snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])
     | "page.dialog" -> answered (obj ["dialog",ego_dialog ~default:"def" "prompt" "name?"])
-    | "page.target_input" -> answered (obj ["urlBefore",str observed_url;"receipt",obj [];"error",`Null;"url",str observed_url])
+    | "page.target_input" -> answered (obj ["urlBefore",str observed_url;"receipt",obj [];"error",`Null;
+        "tab",obj ["url",str observed_url;"title",str "Slack"]])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
   let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -619,7 +620,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.snapshot" -> answered (obj ["label",str "p1";"url",str "https://app.slack.com/";"title",str "Slack";
         "snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])
     | "page.target_input" -> answered (obj ["urlBefore",str "https://app.slack.com/";"receipt",obj [];"error",`Null;
-        "url",str "https://app.slack.com/"])
+        "tab",obj ["url",str "https://app.slack.com/";"title",str "Slack"]])
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/new";"title",str "New";"active",`Bool true]])
     | "page.goto" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])

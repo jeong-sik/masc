@@ -15,9 +15,16 @@ type locate = scene:Browser_scene.t -> instruction:string option ->
 val session_observation : t -> Browser_lane.session_observation
 (** Nonblocking local lifecycle observation. Registration or a driver process
     alone does not establish an open Firefox session. *)
-val create : ?binary:string -> ?locate:locate -> start_downloads:Browser_downloads.start -> request:request -> unit -> t
+type profiles = { fresh : unit -> (string, string) result; ended : string -> unit }
+(** Where each new session's Firefox profile comes from. [fresh] makes one;
+    Firefox runs it through [-profile], and a session whose browser reports
+    another [moz:profile] is closed and refused. [ended] receives the path once
+    that session has ended or failed to start. *)
+val create : ?binary:string -> ?locate:locate -> ?profiles:profiles ->
+  start_downloads:Browser_downloads.start -> request:request -> unit -> t
 (** [binary] is forwarded verbatim to moz:firefoxOptions.binary. Missing means
-    geckodriver discovers its default Firefox; an invalid explicit path fails. *)
+    geckodriver discovers its default Firefox; an invalid explicit path fails.
+    Without [profiles], geckodriver makes and deletes a temporary profile. *)
 val execute : t -> Browser_lane.verb -> Browser_lane.answer
 val observe_document_if_idle : t -> tab_id:int -> Browser_lane.answer
 (** Observe the already selected document only when no owned command is active.

@@ -1156,6 +1156,70 @@ let test_remote_error_is_a_closed_sum () =
        | _ -> fail "status answer carries no data")
     | _ -> fail "status must answer after the session was lost")
 
+(* The profile Firefox was told to run, read from the creation capabilities. *)
+let profile_argument = function
+  | None -> fail "session creation without capabilities"
+  | Some body ->
+    let open Yojson.Safe.Util in
+    let args = body |> member "capabilities" |> member "alwaysMatch" |> member "moz:firefoxOptions"
+      |> member "args" |> to_list in
+    let rec after = function
+      | `String "-profile" :: `String path :: _ -> path
+      | _ :: rest -> after rest
+      | [] -> fail "Firefox was not given -profile" in
+    after args
+
+(* Each session runs on a fresh profile, and its profile is let go exactly
+   once however the session ends. *)
+let test_each_session_lets_its_profile_go_once () = Eio_main.run (fun _ ->
+  let made = ref 0 and ended = ref [] in
+  let profiles = {Driver.fresh=(fun () -> incr made; Ok (Printf.sprintf "/fixture/profile-%d" !made));
+    ended=(fun path -> ended := path :: !ended)} in
+  let creation = ref `Open and input_lost = ref false in
+  let opened ~reported = Ok (`Assoc ["sessionId",`String "owned";"capabilities",`Assoc [
+    "webSocketUrl",`String "ws://localhost:1234/session/owned";"moz:profile",`String reported]]) in
+  let request ~method_ ~path ~body = match method_,path with
+    | `POST,"/session" ->
+      let profile = profile_argument body in
+      (match !creation with
+       | `Open -> opened ~reported:profile
+       | `Other_profile -> opened ~reported:"/elsewhere/profile"
+       | `No_session_id -> Ok (`Assoc ["capabilities",`Assoc []])
+       | `Refused -> Error (Driver.Remote {code=Driver.Other "session not created";message="no browser"})
+       | `Lost -> Error (Driver.Transport "create response lost"))
+    | `DELETE,"/session/owned" -> Ok `Null
+    | `GET,"/session/owned/window/handles" -> Ok (`List [`String "tab"])
+    | `GET,"/session/owned/window" -> Ok (`String "tab")
+    | `POST,"/session/owned/window" | `POST,"/session/owned/frame" -> Ok `Null
+    | `POST,"/session/owned/execute/sync" -> Ok (`Assoc ["url",`String "https://example.org";"title",`String "native"])
+    | (`POST | `DELETE),"/session/owned/actions" ->
+      if !input_lost then Error (Driver.Remote {code=Driver.Invalid_session_id;message="Firefox exited"}) else Ok `Null
+    | _ -> fail ("unexpected request: " ^ path) in
+  let driver = Driver.create ~profiles ~start_downloads ~request () in
+  let open_session () = ignore (Driver.execute driver (Lane.Session_open {headless=Some true})) in
+  let let_go_once name =
+    let profile = Printf.sprintf "/fixture/profile-%d" !made in
+    check (list string) name [profile] (List.filter (String.equal profile) !ended);
+    check int (name ^ ": no other profile is let go") !made (List.length !ended) in
+  creation := `Open; open_session ();
+  check int "an open session keeps its profile" 0 (List.length !ended);
+  ignore (Driver.execute driver Lane.Session_close);
+  let_go_once "a closed session lets its profile go";
+  List.iter (fun (mode, name) -> creation := mode; open_session (); let_go_once name)
+    [ `Other_profile, "a session on another profile is closed and lets its own profile go";
+      `No_session_id, "a creation answer without a session id lets the profile go";
+      `Refused, "a refused creation lets the profile go";
+      `Lost, "a lost creation answer lets the profile go" ];
+  creation := `Open; open_session ();
+  ignore (Driver.execute driver Lane.Tabs_list);
+  input_lost := true;
+  (* The input reply says the session is gone; the pointer release that
+     follows answers the same about a session already let go. *)
+  ignore (Driver.execute driver (Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
+    action=Lane.Type_text {document_id="d1";text="a"}}));
+  let_go_once "a session the driver forgot lets its profile go once";
+  check bool "the forgotten session is closed" true (Driver.session_observation driver=Lane.Browser_closed))
+
 let () = run "native Firefox lane" ["behavior", [
   test_case "browser zoom is refused without driver input" `Quick test_zoom_requires_extension;
   test_case "native keyboard and double click guarded release" `Quick test_native_keyboard_and_double_click;
@@ -1185,4 +1249,5 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "touch sends a touch pointer and releases it" `Quick test_touch_sends_a_touch_pointer_and_releases_it;
   test_case "console read uses the tab's context" `Quick test_console_read_uses_the_tabs_context;
   test_case "cookie values never leave the driver module" `Quick test_cookie_values_never_leave_the_driver_module;
-  test_case "browser configuration" `Quick test_browser_configuration ]]
+  test_case "browser configuration" `Quick test_browser_configuration;
+  test_case "each session lets its profile go once" `Quick test_each_session_lets_its_profile_go_once ]]

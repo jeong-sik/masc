@@ -1,9 +1,11 @@
 let ( let* ) = Result.bind
+type configuration = { driver : string; binary : string option; profiles : string }
 let configuration_label = "automation configuration"
-let configuration_keys = ["binary";"driver"]
-let configuration_to_json (configuration:Browser_configuration.automation) = `Assoc [
+let configuration_keys = ["binary";"driver";"profiles"]
+let configuration_to_json configuration = `Assoc [
   "driver",`String configuration.driver;
-  "binary",(match configuration.binary with None -> `Null | Some binary -> `String binary)]
+  "binary",(match configuration.binary with None -> `Null | Some binary -> `String binary);
+  "profiles",`String configuration.profiles]
 let configuration_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=configuration_keys ->
     let path name requirement = function
@@ -14,7 +16,8 @@ let configuration_of_json = function
     let* binary=match List.assoc "binary" fields with
       | `Null -> Ok None
       | value -> Result.map Option.some (path "binary" "null or an absolute path without NUL" value) in
-    Ok {Browser_configuration.driver;binary}
+    let* profiles=path "profiles" "an absolute path without NUL" (List.assoc "profiles" fields) in
+    Ok {driver;binary;profiles}
   | `Assoc fields ->
     Error (Resource_requirement.keys ~label:configuration_label ~found:(List.map fst fields) ~required:configuration_keys)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as value ->
@@ -63,7 +66,10 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
     let* text=text in
     let* text=Option.to_result ~none:"missing automation configuration" text in
     try configuration_of_json (Yojson.Safe.from_string text) with Yojson.Json_error detail -> Error detail) in
-  let configuration=match configuration with Ok value -> value | Error detail -> invalid_arg detail in
+  let configuration=match Result.bind configuration (fun configuration ->
+      Eio_unix.run_in_systhread (fun () -> Browser_gecko_profile.check_instance configuration.profiles)
+      |> Result.map (fun () -> configuration)) with
+    | Ok value -> value | Error detail -> invalid_arg detail in
   let locate=match Browser_addon_locate.for_owner owner with
     | Ok locate -> locate | Error detail -> invalid_arg detail in
   let clean=ref true and uncertain=ref false in
@@ -75,12 +81,11 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
     Eio.Fiber.fork ~sw:lifetime (fun () ->
     let outcome = try
     Eio.Switch.run (fun sw ->
-      let profiles=Filename.concat directory "profiles" in
-      let port=Eio_unix.run_in_systhread (fun () -> Unix.mkdir profiles 0o700;port ()) in
+      let port=Eio_unix.run_in_systhread port in
       let output=Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) Eio.Path.(Eio.Stdenv.fs env / Filename.concat directory "webdriver.log") in
       Eio.Switch.check sw;
       let process=Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr ~stdout:output ~stderr:output
-        (Browser_driver_process.argv ~driver:configuration.driver ~port ~profile_root:profiles) in
+        (Browser_driver_process.argv ~driver:configuration.driver ~port) in
       let endpoint=Printf.sprintf "http://%s:%d" Masc_network_defaults.masc_http_loopback_peer port in
       let clock=Eio.Stdenv.clock env in
       let pool=Masc_http_client.Pool.create ~sw ~env () in
@@ -98,7 +103,17 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
           Ok value
         | Error ((Browser_webdriver.Remote {code=Invalid_session_id;_}) as error) -> uncertain:=true;Error error
         | Error ((Transport _|Protocol _|Remote {code=No_such_window|No_such_alert|Unexpected_alert_open|Other _;_}) as error) -> Error error in
-      let driver=Browser_webdriver.create ?binary:configuration.binary ?locate ~request:transport
+      let profiles={Browser_webdriver.fresh=(fun () -> Eio_unix.run_in_systhread (fun () ->
+          Browser_gecko_profile.create ~instance:configuration.profiles));
+        (* A session ended by cancellation, such as a command timeout, still
+           lets its profile go; the removal never waits on another process. *)
+        ended=(fun path -> match Eio.Cancel.protect (fun () ->
+            Eio_unix.run_in_systhread (fun () -> Browser_gecko_profile.remove_if_free path)) with
+          | Ok Browser_gecko_profile.Removed -> ()
+          | Ok Browser_gecko_profile.In_use ->
+            Printf.eprintf "Gecko profile %s is still in use; the host removes it after this instance ends\n%!" path
+          | Error detail -> Printf.eprintf "Gecko profile %s was kept: %s\n%!" path detail)} in
+      let driver=Browser_webdriver.create ?binary:configuration.binary ?locate ~profiles ~request:transport
         ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root:(Filename.concat directory "downloads")
           ~publish:(fun path -> Eio_unix.run_in_systhread (fun () -> Browser_addon_owner.publish_download owner path))) () in
       let close_original=Eio.Lazy.from_fun ~cancel:`Protect (fun () ->

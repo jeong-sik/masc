@@ -79,13 +79,13 @@ let model_configuration_cleanup () =
     check "model bootstrap is released with original allocation" false (Sys.file_exists root);
     check "separate model receipts survive resource cleanup" true (Sys.file_exists retained))
 let owned_backend_cleanup () =
-  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
-      let profiles=Filename.concat root "profiles" and downloads=Filename.concat root "downloads" in
-      Unix.mkdir profiles 0o700;Unix.mkdir downloads 0o700;
+      let downloads=Filename.concat root "downloads" in
+      Unix.mkdir downloads 0o700;
       Unix.mkdir (Filename.concat downloads "session") 0o700;
-      let file=Filename.concat profiles "still-in-use" in
+      let file=Filename.concat (Filename.concat downloads "session") "partial" in
       Out_channel.with_open_bin file (fun out -> output_string out "preserve");
       lease (Lease.retire admission);
       check "missing worker receipt retains allocation" true (Result.is_error (Socket.cleanup ~admission ~directory));
@@ -95,13 +95,13 @@ let owned_backend_cleanup () =
       write "another-worker";
       check "other worker receipt is refused" true (Result.is_error (Socket.cleanup ~admission ~directory));
       write (Lease.instance_id admission);
-      check "receipt alone cannot discard profile contents" true (Result.is_error (Socket.cleanup ~admission ~directory));
-      check "unconfirmed profile content remains" true (Sys.file_exists file);
+      check "receipt alone cannot discard download contents" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      check "unconfirmed download content remains" true (Sys.file_exists file);
       Unix.unlink file;
       released (Socket.cleanup ~admission ~directory);
       check "receipt and empty trees release allocation" false (Sys.file_exists root))
 let interrupted_owned_cleanup () =
-  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let receipt=Filename.concat root "automation-closed.json" in
@@ -126,12 +126,12 @@ let acquisition_state directory =
       | _ -> Alcotest.fail "acquisition record is not an object")
   | names -> Alcotest.failf "expected one acquisition record, found %d" (List.length names)
 let operator_retains_unconfirmed_allocation () =
-  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
-      let profiles=Filename.concat root "profiles" in
-      Unix.mkdir profiles 0o700;
-      let file=Filename.concat profiles "escaped-browser-profile" in
+      let downloads=Filename.concat root "downloads" in
+      Unix.mkdir downloads 0o700;
+      let file=Filename.concat downloads "unsettled-download" in
       Out_channel.with_open_bin file (fun out -> output_string out "preserve");
       refused "a launchable reservation cannot be retained" (Socket.retain ~admission ~directory);
       check "a refused retain keeps the acquisition" true (acquisition_state directory = "acquired");
@@ -139,7 +139,7 @@ let operator_retains_unconfirmed_allocation () =
       check "missing worker receipt retains allocation" true (Result.is_error (Socket.cleanup ~admission ~directory));
       check "the operator retains the allocation" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained);
       check "the acquisition record names the operator's retention" true (acquisition_state directory = "retained");
-      check "retained profile content remains" true (Sys.file_exists file);
+      check "retained download content remains" true (Sys.file_exists file);
       (* A later recovery pass reports the retention, never a release. *)
       retained (Socket.cleanup ~admission ~directory);
       check "cleanup leaves a retained allocation in place" true (Sys.file_exists file);
@@ -147,7 +147,7 @@ let operator_retains_unconfirmed_allocation () =
       check "the operator retains the allocation" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained);
       check "a repeated retain changes nothing" true (Sys.file_exists file && acquisition_state directory = "retained"))
 let retain_refuses_replaced_directory () =
-  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let original=Filename.concat directory "original" in
@@ -156,7 +156,7 @@ let retain_refuses_replaced_directory () =
       refused "a different directory identity is not retained" (Socket.retain ~admission ~directory);
       check "the refused retain keeps the acquisition" true (acquisition_state directory = "acquired"))
 let retain_reports_a_released_allocation () =
-  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       Out_channel.with_open_bin (Filename.concat root "automation-closed.json") (fun out ->
@@ -193,7 +193,7 @@ let retain_requires_a_settled_child_without_signalling () =
 let retain_reports_where_a_record_write_failed () =
   let failing stage _path _contents = Error {Fs_compat.path="record";stage;
     exception_=Failure "disk full";backtrace=Printexc.get_callstack 0} in
-  let attempt save = with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  let attempt save = with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory _root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       lease (Lease.retire admission);

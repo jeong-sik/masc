@@ -1,2 +1,5 @@
-(** Loopback Gecko driver command for a worker-owned profile allocation. *)
-val argv : driver:string -> port:int -> profile_root:string -> string list
+(** Loopback Gecko driver command. Each session names its own profile with
+    [-profile], so the driver makes none. geckodriver writes
+    [marionette.port] 0 into that profile, so each browser picks its own
+    Marionette port and reports it in the profile's [MarionetteActivePort]. *)
+val argv : driver:string -> port:int -> string list

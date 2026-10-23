@@ -221,7 +221,7 @@ let operator_retain () = with_fixture (fun clock root config ->
   check string "an instance with no allocation left is found released" "native_released" (release_kind id);
   check bool "a detached instance is not retained again" true (Result.is_error (retain id));
   (* A browser allocation admitted under the record's own installation slot:
-     the worker never wrote its Gecko receipt and a profile was left behind. *)
+     the worker never wrote its Gecko receipt and a download was left behind. *)
   let browser_instance () =
     let instance_id = Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
     let slot = Filename.concat (Filename.concat (Lane_addon_store.root store) "native-claims")
@@ -229,12 +229,12 @@ let operator_retain () = with_fixture (fun clock root config ->
     Unix.mkdir slot 0o700;
     let lease result = result |> Result.map_error Native_addon_lease.error_to_string |> require in
     let context = require (Browser_addon_socket.context ~instance_id ~stagehand:None ~live_bidi:None ~models:None
-      ~automation:(Some {Browser_configuration.driver="/fixture/geckodriver";binary=None})) in
+      ~automation:(Some {Browser_addon_automation.driver="/fixture/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})) in
     let admission = lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
     let allocation = require (Browser_addon_socket.acquire ~admission ~directory:slot) in
-    let profiles = Filename.concat (Filename.dirname (Browser_addon_socket.socket_path allocation)) "profiles" in
-    Unix.mkdir profiles 0o700;
-    let left = Filename.concat profiles "escaped-browser-profile" in write left "kept";
+    let downloads = Filename.concat (Filename.dirname (Browser_addon_socket.socket_path allocation)) "downloads" in
+    Unix.mkdir downloads 0o700;
+    let left = Filename.concat downloads "unsettled-download" in write left "kept";
     lease (Native_addon_lease.retire admission);
     seed ~instance_id ~authority:(Lane_addon_lifecycle.authority_to_json
       (Lane_addon_lifecycle.Native_admission {installation_id=instance_id})) unconfirmed;
@@ -247,7 +247,7 @@ let operator_retain () = with_fixture (fun clock root config ->
     check bool "recovery cannot release an allocation without its receipt" true (cleanup_refused first && still_failed first);
     ignore (dispatch config R.Retain ["instance_id",`String first]);
     check string "the operator's retention is recorded" "native_retained" (release_kind first);
-    check bool "the left profile stays in place" true (Sys.file_exists left));
+    check bool "the left download stays in place" true (Sys.file_exists left));
   (* The acquisition was retained but the binding still says Failed, as when
      the binding write of a retain did not land: recovery reports the
      retention, never a release. *)
@@ -259,7 +259,7 @@ let operator_retain () = with_fixture (fun clock root config ->
        | Error (Browser_addon_socket.Retain_refused detail | Retained_record_unconfirmed detail) -> fail detail);
     ignore (dispatch config R.Detach ["instance_id",`String second]);
     check string "recovery of a retained allocation is not a release" "native_retained" (release_kind second);
-    check bool "the left profile stays in place" true (Sys.file_exists left));
+    check bool "the left download stays in place" true (Sys.file_exists left));
   (* A retain refused after the host began its checks leaves no cleanup marked
      in progress: a later Detach runs the cleanup and reports its failure. *)
   let third, _, _, left = browser_instance () in

@@ -1,7 +1,7 @@
 (** Host-selected socket resource of a native browser installation. Blocking
     filesystem operations must be offloaded by the server caller. *)
 type t
-val context : instance_id:string -> automation:Browser_configuration.automation option ->
+val context : instance_id:string -> automation:Browser_addon_automation.configuration option ->
   stagehand:Browser_addon_stagehand.configuration option ->
   live_bidi:Browser_addon_live_bidi.configuration option ->
   models:Browser_addon_models.configuration option -> (Yojson.Safe.t, string) result

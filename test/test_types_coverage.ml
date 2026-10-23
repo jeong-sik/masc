@@ -749,11 +749,21 @@ let test_backlog_completion_rejection_relations_roundtrip () =
        check bool "complete delivered record roundtrips" true
          (restored.delivered_completion_rejections = backlog.delivered_completion_rejections))
 
-let test_backlog_requires_delivered_rejection_state () =
+let test_backlog_optional_rejection_observations () =
   let fields = match rejection_relation_json ~pending:(`List []) ~delivered:(`List []) with
     | `Assoc fields -> fields | _ -> fail "relation fixture must be an object" in
-  expect_backlog_decode_error "missing delivered relation is not known empty"
-    (`Assoc (List.remove_assoc "delivered_completion_rejections" fields));
+  let main_task = `Assoc ["id",`String "task-wire";"title",`String "Existing Task";
+    "description",`String "Task must remain readable";"status",`String "todo";
+    "created_at",`String "2026-10-23T00:00:00Z"] in
+  let main_fields = ("tasks",`List [main_task]) :: List.remove_assoc "tasks" fields in
+  (match Masc_domain.backlog_of_yojson
+     (`Assoc (List.remove_assoc "delivered_completion_rejections" main_fields)) with
+   | Error error -> fail error
+   | Ok backlog ->
+     check int "absent delivered field supplies no delivery observation" 0
+       (List.length backlog.delivered_completion_rejections);
+     check (list string) "existing Task inventory survives the absent observation"
+       ["task-wire"] (List.map (fun (task:Masc_domain.task) -> task.id) backlog.tasks));
   expect_backlog_decode_error "null delivered relation"
     (`Assoc (("delivered_completion_rejections", `Null)
       :: List.remove_assoc "delivered_completion_rejections" fields));
@@ -765,7 +775,7 @@ let test_backlog_requires_delivered_rejection_state () =
   | Ok backlog ->
     check int "optional missing pending delivery remains empty" 0
       (List.length backlog.pending_completion_rejections);
-    check int "required known delivered state remains empty" 0
+    check int "absent optional pending does not create delivered evidence" 0
       (List.length backlog.delivered_completion_rejections)
 
 let test_backlog_rejects_conflicting_rejection_states () =
@@ -2020,8 +2030,8 @@ let () =
         test_malformed_lifecycle_clock_makes_the_backlog_unreadable;
       test_case "rejection pending and delivered relations roundtrip" `Quick
         test_backlog_completion_rejection_relations_roundtrip;
-      test_case "delivered relation is mandatory while pending remains optional" `Quick
-        test_backlog_requires_delivered_rejection_state;
+      test_case "absent rejection sets supply no observations" `Quick
+        test_backlog_optional_rejection_observations;
       test_case "rejection relations reject duplicates and cross-state conflicts" `Quick
         test_backlog_rejects_conflicting_rejection_states;
       test_case "delivered relation rejects malformed authority and identity" `Quick

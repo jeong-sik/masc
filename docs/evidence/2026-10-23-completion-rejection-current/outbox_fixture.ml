@@ -39,7 +39,11 @@ let queue config calls result () =
 let forbid calls () = incr calls;fail "a stale or unavailable relation published to the queue"
 
 let test_normal_publication_ack_and_duplicate_ack () =
-  let config=C.make (backlog ()) in let calls=ref 0 in
+  let fields = match D.backlog_to_yojson (backlog ()) with
+    | `Assoc fields -> fields | _ -> fail "backlog encoder must produce an object" in
+  let snapshot = D.backlog_of_yojson
+    (`Assoc (List.remove_assoc "delivered_completion_rejections" fields)) |> ok in
+  let config=C.make snapshot in let calls=ref 0 in
   assert_current config;
   check int "pending delivery observed" 1 (List.length (ok (O.pending config)));
   (match ok (publish config (queue config calls (Ok "queue-receipt"))) with
@@ -156,6 +160,49 @@ let test_known_absence_is_obsolete () =
   (match ok (publish config (forbid calls)) with O.Superseded -> () | O.Published _ -> fail "missing relation published");
   check int "known absence never publishes" 0 !calls;assert_released config
 
+let without_relation_wire tasks =
+  let snapshot = {(backlog ()) with tasks;pending_completion_rejections=[];
+    delivered_completion_rejections=[]} in
+  let fields = match D.backlog_to_yojson snapshot with
+    | `Assoc fields -> fields
+    | _ -> fail "backlog encoder must produce an object" in
+  D.backlog_of_yojson (`Assoc (List.remove_assoc "delivered_completion_rejections" fields)) |> ok
+
+let test_absent_relation_preserves_possible_old_source () =
+  let config=C.make (without_relation_wire [task ()]) in
+  check int "main-format Task remains readable" 1 (List.length config.snapshot.tasks);
+  check int "absent field supplies no delivered fact" 0
+    (List.length config.snapshot.delivered_completion_rejections);
+  let before=encoded config and calls=ref 0 in
+  error (current config);
+  (match ok (publish config (forbid calls)) with
+   | O.Superseded -> () | O.Published _ -> fail "absent pending identity granted new publication");
+  check int "uncertain existing source is never requeued" 0 !calls;
+  ok (ack config "verification-a");
+  check string "old ACK cannot manufacture delivered authority" before (encoded config);
+  check int "old ACK commits nothing" 0 config.committed_writes;
+  assert_released config
+
+let test_positive_task_state_retires_unobserved_source () =
+  let states = [Some D.Todo;
+    Some (D.Claimed {assignee="keeper-a";claimed_at=at});
+    Some (D.InProgress {assignee="new-owner";started_at=at});
+    Some (D.AwaitingVerification {assignee="keeper-a";started_at=at;submitted_at=at;
+      verification_id="verification-b"});
+    Some (D.Done {assignee="keeper-a";completed_at=at;notes=None});
+    Some (D.Cancelled {cancelled_by="keeper-a";cancelled_at=at;reason=None});None] in
+  List.iter (fun status ->
+    let tasks = match status with None -> [] | Some task_status -> [{(task ()) with task_status}] in
+    let config=C.make (without_relation_wire tasks) and calls=ref 0 in
+    let before=encoded config in
+    (match ok (current config) with O.Obsolete -> () | O.Current -> fail "retired producer granted intake");
+    (match ok (publish config (forbid calls)) with
+     | O.Superseded -> () | O.Published _ -> fail "retired producer granted new queue publication");
+    ok (ack config "verification-a");
+    check int "positive retirement never publishes" 0 !calls;
+    check string "source ACK cannot alter current Task" before (encoded config);
+    assert_released config) states
+
 let () = run "actual rejection outbox with explicit storage and lease ports"
   ["current authority",[
     test_case "publication then exact and duplicate ACK" `Quick test_normal_publication_ack_and_duplicate_ack;
@@ -164,5 +211,7 @@ let () = run "actual rejection outbox with explicit storage and lease ports"
     test_case "unread primary and lock failure keep source" `Quick test_unread_and_lock_failure_preserve_source;
     test_case "lease takeover never enters publication" `Quick test_lease_takeover_never_enters_callback;
     test_case "queue and ACK failure preserve crash-gap authority" `Quick test_queue_and_ack_write_failure_keep_pending;
-    test_case "known relation absence is obsolete" `Quick test_known_absence_is_obsolete;
+    test_case "known deleted Task makes missing relation obsolete" `Quick test_known_absence_is_obsolete;
+    test_case "absent relation preserves possible old source without publication grant" `Quick test_absent_relation_preserves_possible_old_source;
+    test_case "positive Task state retires unobserved old source" `Quick test_positive_task_state_retires_unobserved_source;
   ]]

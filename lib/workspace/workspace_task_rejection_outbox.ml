@@ -18,7 +18,16 @@ let standing_in_backlog (backlog : Masc_domain.backlog)
     (backlog.pending_completion_rejections @ backlog.delivered_completion_rejections)
   in
   match relations with
-  | [] -> Ok Obsolete
+  | [] ->
+    (match List.find_opt (fun (task : Masc_domain.task) ->
+       String.equal task.id task_id) backlog.tasks with
+     | Some {task_status=Masc_domain.InProgress {assignee; _}; _}
+       when String.equal assignee producer ->
+       Error "completion rejection relation is unavailable for its active producer"
+     | Some {task_status=(Masc_domain.Todo | Masc_domain.Claimed _
+         | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+         | Masc_domain.Done _ | Masc_domain.Cancelled _); _}
+     | None -> Ok Obsolete)
   | _ :: _ :: _ -> Error "multiple current completion rejection relations"
   | [item] ->
     if not (String.equal item.verification_id verification_id) then Ok Obsolete
@@ -72,15 +81,15 @@ let deliver_if_pending config ~task_id ~verification_id ~producer ~reason ~autho
         (Workspace_backlog.backlog_lock_path config) (fun () ->
           let open Result.Syntax in
           let* backlog = Workspace_backlog.read_backlog_r config in
-          let* current = standing_in_backlog backlog
-            ~task_id ~verification_id ~producer ~reason ~authority in
-          match current with
-          | Obsolete -> Ok Superseded
-          | Current ->
-            if List.exists (same_identity ~task_id ~verification_id)
-              backlog.pending_completion_rejections
-            then Result.map (fun receipt -> Published receipt) (deliver ())
-            else Ok Superseded)
+          if not (List.exists (same_identity ~task_id ~verification_id)
+            backlog.pending_completion_rejections)
+          then Ok Superseded
+          else
+            let* current = standing_in_backlog backlog
+              ~task_id ~verification_id ~producer ~reason ~authority in
+            match current with
+            | Obsolete -> Ok Superseded
+            | Current -> Result.map (fun receipt -> Published receipt) (deliver ()))
       |> function
       | Ok result -> result
       | Error refusal ->

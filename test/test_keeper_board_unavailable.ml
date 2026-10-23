@@ -382,6 +382,9 @@ let test_superseded_rejection_is_retired_before_projection () =
         ~task_id:task.Masc_domain.id ~output:(`Assoc []) ~criteria:[] ~worker:assignee ()
       |> Result.map (fun _ -> ()))
     ~notes:"note:repaired the evidence and resubmitted" ()));
+  let path = Workspace_backlog.backlog_path config in
+  let fields = Yojson.Safe.from_file path |> Yojson.Safe.Util.to_assoc in
+  Yojson.Safe.to_file path (`Assoc (List.remove_assoc "delivered_completion_rejections" fields));
   let before = rejection_ok (Workspace_backlog.read_backlog_r config) in
   let readable = seed_board "independent work after superseded rejection" in
   let selected = intake () in
@@ -390,6 +393,33 @@ let test_superseded_rejection_is_retired_before_projection () =
   check int "only independent work remains queued" 1 (List.length (pending ()));
   let after = rejection_ok (Workspace_backlog.read_backlog_r config) in
   check bool "stale queue ACK cannot change the newer submission" true (before=after)
+;;
+
+let test_missing_or_malformed_delivered_evidence_preserves_active_rejection () =
+  List.iter (fun malformed ->
+    with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+    let config,task_id,verification_id,stimulus = prepare_intake_rejection () in
+    seed stimulus;
+    rejection_ok (Workspace_task_rejection_outbox.acknowledge config ~task_id ~verification_id);
+    let path = Workspace_backlog.backlog_path config in
+    let fields = Yojson.Safe.from_file path |> Yojson.Safe.Util.to_assoc
+      |> List.remove_assoc "delivered_completion_rejections" in
+    let document = `Assoc (if malformed then ("delivered_completion_rejections",`Null)::fields else fields) in
+    Yojson.Safe.to_file path document;
+    let before = In_channel.with_open_text path In_channel.input_all in
+    let readable = seed_board "independent source after uncertain old rejection" in
+    let selected = intake () in
+    check (list string) "uncertain rejection grants no admission but allows independent work"
+      [readable] (admitted_ids selected);
+    check int "uncertain rejection has no trigger" 0 (List.length selected.event_queue_triggers);
+    check int "old A and independent source both remain queued" 2 (List.length (pending ()));
+    check string "missing or corrupt evidence never rewrites authority" before
+      (In_channel.with_open_text path In_channel.input_all);
+    match selected.event_queue_intake_error with
+    | Some (Keeper_heartbeat_stimulus_intake.Completion_rejection_read_failed _ as error) ->
+      check bool "uncertain evidence is typed retry, not cycle failure" false
+        (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
+    | None | Some _ -> fail "uncertain old rejection lost its retry outcome") [false;true]
 ;;
 
 let test_unread_rejection_authority_retains_source_and_allows_siblings () =
@@ -695,6 +725,8 @@ let () =
             test_delivered_rejection_remains_current_at_intake
         ; test_case "superseded rejection retires before projection" `Quick
             test_superseded_rejection_is_retired_before_projection
+        ; test_case "missing or malformed delivered evidence preserves active old rejection" `Quick
+            test_missing_or_malformed_delivered_evidence_preserves_active_rejection
         ; test_case "unread rejection authority retains source and allows siblings" `Quick
             test_unread_rejection_authority_retains_source_and_allows_siblings
         ] )

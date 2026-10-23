@@ -1293,7 +1293,7 @@ let backlog_of_yojson_with_diagnostics = function
       List.partition (fun (name, _) -> String.equal name "delivered_completion_rejections") fields
     in
     let delivered_result = match delivered_fields with
-      | [] -> Error "backlog.delivered_completion_rejections is required"
+      | [] -> Ok []
       | [ _, value ] -> completion_rejections_of_yojson ~field:"delivered_completion_rejections" value
       | _ -> Error "duplicate backlog.delivered_completion_rejections field" in
     let approval_fields, fields =

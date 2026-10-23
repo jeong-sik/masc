@@ -26,15 +26,24 @@ reentry into the lease fence.
 Keeper intake accepts a rejection only when the pending or delivered relation
 matches the Task, verification, producer, reason, typed authority and InProgress
 owner. A positively obsolete source is acknowledged by exact queue selection
-without an observation or trigger. Unread/corrupt primary authority is retryable:
+without an observation or trigger. If neither relation is recorded while the
+Task remains InProgress under the same producer, intake cannot establish which
+rejection is current: preserve the exact source with a typed retry outcome.
+With no relation, a missing Task, another owner or another Task state is
+positive retirement evidence. Unread/corrupt primary authority is retryable:
 retain the source and continue independent inputs. Recovery snapshots and handoff
 text are never control authority. This is an intake-time decision, not a promise
 that the Task cannot change during subsequent provider rounds.
 
-`delivered_completion_rejections` is required canonical wire state. Missing,
-malformed, duplicate and overlapping states are refused. The unreleased contract
-uses an explicit schema cut, without inferring or migrating historical authority.
-No live data, installation or runtime restart was changed in this work.
+An absent `delivered_completion_rejections` field supplies an empty observation
+set, just like an absent pending set; it confers neither delivered authority nor
+proof of retirement. This keeps Task reads and claims available for ordinary
+backlogs without that observation. Explicitly malformed, duplicate and
+overlapping states are refused. A missing exact pending identity returns
+`Superseded` before standing checks and never permits a new queue publication;
+that producer result is not permission to ACK an uncertain existing source.
+No version-specific migration or inferred receipt is introduced. No live data,
+installation or runtime restart was changed in this work.
 
 ## Evidence scope
 
@@ -42,15 +51,21 @@ No live data, installation or runtime restart was changed in this work.
   independently compiled; four verbatim new codec fixture functions passed.
   The Skill_source_config dependency includes its actual identity type/parser
   slice only; unrelated TOML effects and Types_auth are outside this probe.
-- The actual Outbox ML/MLI passed seven additional cases against explicit
+- The actual Outbox ML/MLI passed nine cases against explicit
   storage/lock/lease ports: publication scope, delivered authority, obsolete
   snapshots and ACKs, payload/owner conflicts, read/write/queue failures, and
-  refusal before publication on lease loss. These ports model ordering and
+  refusal before publication on lease loss. Two cases additionally decode a
+  field-absent document through the actual codec, preserve a possible old source
+  under its active producer, and require positive Task retirement evidence for
+  Obsolete. The normal publication case also decodes an absent delivered field
+  while retaining its existing pending relation. These ports model ordering and
   failures; they do not execute real filesystem leases or concurrent queues.
 - Task/queue integration regressions were added to existing native suites:
   four delivery/acknowledgement cases and three consumer cases. Existing raw
-  wake tests now create actual committed rejection authority. These native
-  suites have not been executed by this external coding session.
+  wake tests now create actual committed rejection authority. Additional native
+  regressions check Task list/claim with no delivered wire field, uncertain or
+  malformed delivered evidence preserving the old queue source, and positive
+  resubmission ACK with the field absent. These native suites have not been executed by this external coding session.
 - Changed OCaml source syntax and whitespace checks are recorded separately.
 - Independent agent source review covered the producer/outbox/queue publication
   and unroutable release delta. It does not independently approve the consumer
@@ -70,7 +85,7 @@ python3 docs/evidence/2026-10-23-completion-rejection-current/reproduce.py .
 
 The command creates and retains a fresh temporary directory, copies actual
 source from this checkout, compiles the selected dependency closure, and runs
-the four actual codec fixtures plus seven actual Outbox cases. The sibling
+the four actual codec fixtures plus nine actual Outbox cases. The sibling
 `ports/` files and `outbox_fixture.ml` explicitly model only storage, errors
 and deterministic ordering. They do not run the real Keeper queue, consumer,
 filesystem lease or shutdown. The output manifest binds source, verbatim

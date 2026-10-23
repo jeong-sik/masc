@@ -16,13 +16,13 @@
     "lib/types/ids.ml": "05c3d25d8a8ad87dfac894cf057bf024405d30654fda262ae3fae254b2d615d5",
     "lib/skill_reference/skill_reference.mli": "cf96b38ea33e60d5c5f02a9a4a8604644724e7fb0bd615429f9b04b43b296c40",
     "lib/skill_reference/skill_reference.ml": "5302c3b7f11d07008ba1201abbc0fd020c288732305adea2929d7de07dda3551",
-    "lib/types/types_core.mli": "2b503dce1b8d135ae0c2c80d212201b8bc790c7d1f430597a88322f8f804daa3",
-    "lib/types/types_core.ml": "fe9d05c3c71ff17b2adbd51b3f76e4ae8c257309dae2566e7581b4ee65b2040f",
+    "lib/types/types_core.mli": "1b3767b3de71726ab395926c6f6093bde5afbd18a924046e615bc086f07b2430",
+    "lib/types/types_core.ml": "7d8b9f7794ef97b25053c42308ef16a85fba601347cf4757be82a019aeb7a11c",
     "lib/skill_config/skill_source_config.ml": "11d7f54b107c47fb54f36ce9aee2030cdfcc170b719c243b47169d6451911328",
     "lib/skill_config/skill_source_config.mli": "0af7aa6de56965cb664d092011bf9203057e5366ace68ba63e2eb2fcc4e7330e",
-    "test/test_types_coverage.ml": "96586de881059dd1344831ecea8a6324f7eae6f2ec30396ffb3b39cbebb803d1",
-    "lib/workspace/workspace_task_rejection_outbox.mli": "0510ba8cd3e76ad1907461ac3a075b4cf3996c762a47c5aa77ed9bcd9e752323",
-    "lib/workspace/workspace_task_rejection_outbox.ml": "f16709e7c9e626752dd33451615cfd991715fb0ff7dc574a35df51efcc98a25c"
+    "test/test_types_coverage.ml": "e3845a659c4915c6d5919f38a14bcf90f2e0158c07ea3cab55a529e2308a9fcf",
+    "lib/workspace/workspace_task_rejection_outbox.mli": "0427b6cfeba8b0959f680c442ff69014b350eb102c616dda8f0baf5305b867cb",
+    "lib/workspace/workspace_task_rejection_outbox.ml": "7088c976af0a2bfa75439e5411dbfadcadc78297e83230c505362f8631c872d0"
   },
   "actual_sources_unchanged_during_run": {
     "lib/string_util/string_util.mli": true,
@@ -54,13 +54,13 @@
     "rejection_receipt_json": "7eb4bff2a4c7de181d64ce5a899e3a98eed6d1eac808235d6c754cb664165b04",
     "rejection_relation_json": "ac5a87e024804e8cc8cf6e24b9d4863129195d8e49ffc67764c3b2a0d6c397ba",
     "test_backlog_completion_rejection_relations_roundtrip": "843e6448dd96b882af002945961aa383d5de9edb06bc9de2df1fcc42d79d69ed",
-    "test_backlog_requires_delivered_rejection_state": "2510bf10ed0c40b02189e36c2e5ae5fb21b26548fde1b26a8631ceefc67cad3e",
+    "test_backlog_optional_rejection_observations": "e364332a47dc906373a620d160467a6af47abc83963353e438aadea30cacf30b",
     "test_backlog_rejects_conflicting_rejection_states": "a21077e9a49b81b49a3f1014b1f36a1ee690f68c3d8e3738df286e672d61b7d3",
     "test_backlog_rejects_malformed_delivered_rejection": "22eae082440cc2251cfef51aeab86233dc8a391fadda6b18c1458da781ef2bea"
   },
   "harness_assets_sha256": {
-    "reproduce.py": "85742305ff8184fedea6fbf518b647055a020b041f33860d0efec927baba784d",
-    "outbox_fixture.ml": "2db1a16f6e7e1a01be79cf62fbbbcb7f756d82e3bb463cd61437c1ce2f20d96d",
+    "reproduce.py": "8d5c9a3a7965fac318ccc36602e15f7871277e662f2b84617f19868777c81087",
+    "outbox_fixture.ml": "65fef513d4bd86da0ee1a2cff5f99ab0988c56fa6800555b66bdfcb2fb7d14ed",
     "ports/boundary_renderer.ml": "b40e9a4cf43e6594b5055df35838a5aa1bf6b0d07687f947427e1e8362944718",
     "ports/workspace_backlog.ml": "14ed4eeb6a04d7f53e852f58a2bfac1f8aff198b8cf25f3d8953a524dac0c6d3",
     "ports/workspace_utils_backend_setup.ml": "20dacb5bbfb8e388673c402fa57eaf8e450f23947847cab77ebb68faac741e53",
@@ -68,6 +68,6 @@
   },
   "scope": "Reproduce selected actual codec and Outbox checks without Dune.\n\nCopies complete Types_core and its actual dependency closure. Skill source\nconfiguration is reduced to the actual source_id contract/parser, excluding\nTOML effects. Generated aliases reproduce component visibility; Types_auth is\nnot used. Actual Outbox ML/MLI stays byte-identical. Only storage/lock/lease and\nlock-error-rendering boundaries are explicit sibling ports. Queue callbacks are\nobservations, not a native queue/FS/concurrency/runtime proof.\n",
   "codec_cases": 4,
-  "outbox_cases": 7,
+  "outbox_cases": 9,
   "ports": "Sibling Workspace_utils_backend_setup, Workspace_backlog, Workspace_utils_ops and boundary renderer; deterministic sequential interposition, no real queue/filesystem/lease concurrency."
 }

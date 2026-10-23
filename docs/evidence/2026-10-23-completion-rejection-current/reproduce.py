@@ -28,7 +28,7 @@ ORDER = ["string_util", "json_kind", "shared_types", "json_util", "safe_identifi
          "skill_source_config", "skill_reference", "time_codec", "time_compat", "ids", "types_core"]
 HELPERS = ["expect_backlog_decode_error", "rejection_receipt_json", "rejection_relation_json"]
 CASES = ["test_backlog_completion_rejection_relations_roundtrip",
-         "test_backlog_requires_delivered_rejection_state",
+         "test_backlog_optional_rejection_observations",
          "test_backlog_rejects_conflicting_rejection_states",
          "test_backlog_rejects_malformed_delivered_rejection"]
 PACKAGES = ("yojson,re,digestif.ocaml,alcotest,ptime,uuidm,mcp_protocol.eio,"
@@ -118,12 +118,12 @@ def main() -> None:
         "codec_definition_sha256": {name: sha(body.encode()) for name, body in definitions.items()},
         "harness_assets_sha256": {str(path.relative_to(assets)): sha(path.read_bytes())
             for path in [Path(__file__).resolve(), assets / "outbox_fixture.ml", *sorted((assets / "ports").glob("*.ml"))]},
-        "scope": __doc__, "codec_cases": 4, "outbox_cases": 7,
+        "scope": __doc__, "codec_cases": 4, "outbox_cases": 9,
         "ports": "Sibling Workspace_utils_backend_setup, Workspace_backlog, Workspace_utils_ops and boundary renderer; deterministic sequential interposition, no real queue/filesystem/lease concurrency."}
     (work / "source-identity.json").write_text(json.dumps(manifest, indent=2) + "\n")
     if not all(current.values()):
         raise RuntimeError("actual source changed during validation; inspect source-identity.json")
-    print("PASS: actual codec4 + actual Outbox7; scope in source-identity.json", flush=True)
+    print("PASS: actual codec4 + actual Outbox9; scope in source-identity.json", flush=True)
 
 if __name__ == "__main__":
     main()

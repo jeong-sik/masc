@@ -799,6 +799,24 @@ let test_corrupt_primary_blocks_wake_without_changing_queue () =
     reconcile config ~delivered:1 ~retained:0;
     check_rejection config ~verification_id ~authority:system)
 
+let test_backlog_without_delivered_observations_lists_and_claims () =
+  with_workspace (fun config ->
+    let path = Workspace_backlog.backlog_path config in
+    let fields = Yojson.Safe.from_file path |> Yojson.Safe.Util.to_assoc in
+    let document = `Assoc (List.remove_assoc "delivered_completion_rejections" fields) in
+    Yojson.Safe.to_file path document;
+    let loaded = ok (Workspace_backlog.read_backlog_r config) in
+    Alcotest.(check int) "Task inventory remains readable" 1 (List.length loaded.tasks);
+    Alcotest.(check int) "absent relation supplies no delivered observation" 0
+      (List.length loaded.delivered_completion_rejections);
+    Alcotest.(check bool) "Task list still contains the actual Task" true
+      (Astring.String.is_infix ~affix:task_id (W.list_tasks config));
+    ignore (workspace_ok (W.claim_task_r config ~agent_name:producer ~task_id ()));
+    match only_task config with
+    | {task_status=D.Claimed {assignee; _}; _} ->
+      Alcotest.(check string) "claim commits under the same available backlog" producer assignee
+    | _ -> Alcotest.fail "the readable unclaimed Task must remain claimable")
+
 let test_corrupt_explicit_outbox_is_not_empty () =
   with_workspace (fun config ->
     let path = Workspace_backlog.backlog_path config in
@@ -930,5 +948,6 @@ let () =
       ; Alcotest.test_case "delivered authority retires only on resubmission" `Quick test_delivered_receipt_remains_current_until_resubmit
       ; Alcotest.test_case "old release cannot retire a newer rejection" `Quick test_old_unroutable_snapshot_cannot_release_new_rejection
       ; Alcotest.test_case "corrupt primary preserves queue and pending rejection" `Quick test_corrupt_primary_blocks_wake_without_changing_queue
+      ; Alcotest.test_case "absent delivered observations preserve Task list and claim" `Quick test_backlog_without_delivered_observations_lists_and_claims
       ; Alcotest.test_case "corrupt outbox fails closed" `Quick test_corrupt_explicit_outbox_is_not_empty
       ] ]

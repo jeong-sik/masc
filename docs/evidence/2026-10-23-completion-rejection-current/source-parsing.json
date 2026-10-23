@@ -165,22 +165,16 @@
     },
     {
       "file": "lib/types/types_core.ml",
-      "sha256": "fe9d05c3c71ff17b2adbd51b3f76e4ae8c257309dae2566e7581b4ee65b2040f",
+      "sha256": "7d8b9f7794ef97b25053c42308ef16a85fba601347cf4757be82a019aeb7a11c",
       "argv": [
         "opam",
         "exec",
         "--",
         "ocamlc",
-        "-w",
-        "+4+32+69",
-        "-warn-error",
-        "+a",
         "-stop-after",
         "parsing",
         "-c",
-        "lib/types/types_core.ml",
-        "-o",
-        "/private/tmp/masc-38059-outbox-20261023-3jbuxifj/source-validation-final/Probe_7.cmo"
+        "lib/types/types_core.ml"
       ],
       "exit_code": 0,
       "stdout": "",
@@ -188,22 +182,16 @@
     },
     {
       "file": "lib/types/types_core.mli",
-      "sha256": "2b503dce1b8d135ae0c2c80d212201b8bc790c7d1f430597a88322f8f804daa3",
+      "sha256": "1b3767b3de71726ab395926c6f6093bde5afbd18a924046e615bc086f07b2430",
       "argv": [
         "opam",
         "exec",
         "--",
         "ocamlc",
-        "-w",
-        "+4+32+69",
-        "-warn-error",
-        "+a",
         "-stop-after",
         "parsing",
         "-c",
-        "lib/types/types_core.mli",
-        "-o",
-        "/private/tmp/masc-38059-outbox-20261023-3jbuxifj/source-validation-final/Probe_8.cmi"
+        "lib/types/types_core.mli"
       ],
       "exit_code": 0,
       "stdout": "",
@@ -280,22 +268,16 @@
     },
     {
       "file": "lib/workspace/workspace_task_rejection_outbox.ml",
-      "sha256": "f16709e7c9e626752dd33451615cfd991715fb0ff7dc574a35df51efcc98a25c",
+      "sha256": "7088c976af0a2bfa75439e5411dbfadcadc78297e83230c505362f8631c872d0",
       "argv": [
         "opam",
         "exec",
         "--",
         "ocamlc",
-        "-w",
-        "+4+32+69",
-        "-warn-error",
-        "+a",
         "-stop-after",
         "parsing",
         "-c",
-        "lib/workspace/workspace_task_rejection_outbox.ml",
-        "-o",
-        "/private/tmp/masc-38059-outbox-20261023-3jbuxifj/source-validation-final/Probe_12.cmo"
+        "lib/workspace/workspace_task_rejection_outbox.ml"
       ],
       "exit_code": 0,
       "stdout": "",
@@ -303,22 +285,16 @@
     },
     {
       "file": "lib/workspace/workspace_task_rejection_outbox.mli",
-      "sha256": "0510ba8cd3e76ad1907461ac3a075b4cf3996c762a47c5aa77ed9bcd9e752323",
+      "sha256": "0427b6cfeba8b0959f680c442ff69014b350eb102c616dda8f0baf5305b867cb",
       "argv": [
         "opam",
         "exec",
         "--",
         "ocamlc",
-        "-w",
-        "+4+32+69",
-        "-warn-error",
-        "+a",
         "-stop-after",
         "parsing",
         "-c",
-        "lib/workspace/workspace_task_rejection_outbox.mli",
-        "-o",
-        "/private/tmp/masc-38059-outbox-20261023-3jbuxifj/source-validation-final/Probe_13.cmi"
+        "lib/workspace/workspace_task_rejection_outbox.mli"
       ],
       "exit_code": 0,
       "stdout": "",
@@ -418,22 +394,16 @@
     },
     {
       "file": "test/test_completion_repair_delivery.ml",
-      "sha256": "5ab3e6e381e9d751f199820397d2a1bf0a22272dac786a1157d13c2134b3d6b3",
+      "sha256": "f5cd61e883819b11667268f38aef317611929dbeff72ed26d422baf7ef373f11",
       "argv": [
         "opam",
         "exec",
         "--",
         "ocamlc",
-        "-w",
-        "+4+32+69",
-        "-warn-error",
-        "+a",
         "-stop-after",
         "parsing",
         "-c",
-        "test/test_completion_repair_delivery.ml",
-        "-o",
-        "/private/tmp/masc-38059-outbox-20261023-3jbuxifj/source-validation-final/Probe_18.cmo"
+        "test/test_completion_repair_delivery.ml"
       ],
       "exit_code": 0,
       "stdout": "",
@@ -487,22 +457,16 @@
     },
     {
       "file": "test/test_keeper_board_unavailable.ml",
-      "sha256": "f8b5ec132b37a728115be5e60e868ea054ded1afad96e9938cdeb8b9540468c5",
+      "sha256": "bc7a940449d66e937c8e8b83e56b5863b17814a18ead0d3afc0f0009722d690d",
       "argv": [
         "opam",
         "exec",
         "--",
         "ocamlc",
-        "-w",
-        "+4+32+69",
-        "-warn-error",
-        "+a",
         "-stop-after",
         "parsing",
         "-c",
-        "test/test_keeper_board_unavailable.ml",
-        "-o",
-        "/private/tmp/masc-38059-outbox-20261023-3jbuxifj/source-validation-final/Probe_21.cmo"
+        "test/test_keeper_board_unavailable.ml"
       ],
       "exit_code": 0,
       "stdout": "",
@@ -671,22 +635,16 @@
     },
     {
       "file": "test/test_types_coverage.ml",
-      "sha256": "96586de881059dd1344831ecea8a6324f7eae6f2ec30396ffb3b39cbebb803d1",
+      "sha256": "e3845a659c4915c6d5919f38a14bcf90f2e0158c07ea3cab55a529e2308a9fcf",
       "argv": [
         "opam",
         "exec",
         "--",
         "ocamlc",
-        "-w",
-        "+4+32+69",
-        "-warn-error",
-        "+a",
         "-stop-after",
         "parsing",
         "-c",
-        "test/test_types_coverage.ml",
-        "-o",
-        "/private/tmp/masc-38059-outbox-20261023-3jbuxifj/source-validation-final/Probe_29.cmo"
+        "test/test_types_coverage.ml"
       ],
       "exit_code": 0,
       "stdout": "",
@@ -807,5 +765,19 @@
       "stdout": "",
       "stderr": ""
     }
-  ]
+  ],
+  "review_repair": {
+    "review_id": "5626006435",
+    "head_before_repair": "2455c550d6e8a22778b24b7247968d4848af7def",
+    "reparsed_files": [
+      "lib/types/types_core.mli",
+      "lib/types/types_core.ml",
+      "lib/workspace/workspace_task_rejection_outbox.mli",
+      "lib/workspace/workspace_task_rejection_outbox.ml",
+      "test/test_types_coverage.ml",
+      "test/test_completion_repair_delivery.ml",
+      "test/test_keeper_board_unavailable.ml"
+    ],
+    "unchanged_original_file_hashes_rechecked": true
+  }
 }

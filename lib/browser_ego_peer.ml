@@ -160,7 +160,10 @@ let target t args = match field "tabId" args with
   | Some _ -> Error "invalid tabId"
 
 (* A page script that throws is answered from inside the page: ego's own
-   error for it repeats the whole expression. *)
+   error for it repeats the whole expression. [fn] is spliced into that
+   expression as source, so it is only ever [page_function] of one of this
+   module's own scripts; what a Keeper sends reaches the page as [input],
+   through JSON.stringify. *)
 let on_page body = String.concat "\n" [
   "  const pageCall = (fn, input) => \"(function(){ try { return {answer: (\" + fn + \")(\" + JSON.stringify(input) + \")}; } catch (error) { return {pageError: String(error && error.message || error)}; } })()\";";
   "  const tabs = await task.tabs();";

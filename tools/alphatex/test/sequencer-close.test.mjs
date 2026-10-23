@@ -62,8 +62,8 @@ async function controller(options = {}) {
       return options.effectCapture(selection, settings)
     },
     renderVstPhrase(value) { observed.native.push(value); return options.native(value) },
-    captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },
-    renderFluidSound() { throw new Error('Unexpected FluidSynth render') },
+    captureFluidSound(path) { if (options.fluidCapture) return options.fluidCapture(path); throw new Error('Unexpected FluidSynth selection') },
+    renderFluidSound(sound, request) { if (options.fluidRender) return options.fluidRender(sound, request); throw new Error('Unexpected FluidSynth render') },
     mkdtemp: async () => '/synthetic-temp', rm: async () => {},
     writeFile: async path => { observed.writes.push(path) },
     copyFile: async (from, to) => { observed.copies.push([from, to]) },
@@ -754,4 +754,32 @@ test('changed sound authority discards pending effect edit and never overwrites 
   view.command('fx-clear'); await flush(); complete(frozenEffect('edited')); await flush(); await flush()
   view.signal.abort(); await view.done
   assert.equal(view.observed.saved.at(-1).sound.effects, undefined)
+})
+
+
+test('explicit FluidSynth picker selection binds its sound before rendering; a failed selection preserves the original', async () => {
+  const bytes = Buffer.from('RIFF0000sfbk'), sound = { kind: 'soundfont', engine: { kind: 'fluidsynth', version: 'fixture', controlFrames: 64 },
+    bankStyle: 'mma', font: { name: 'Selected SF2', data: bytes.toString('base64'), sha256: createHash('sha256').update(bytes).digest('hex') } }
+  const initial = { ...editor.newEditor().project, sound: { kind: 'soundfont' } }, captures = [], renders = []
+  const view = await controller({ initialDocument: initial, autoSoundfont: false,
+    fluidCapture(path) { captures.push(path); return { promise: Promise.resolve(sound), cancel() {} } },
+    fluidRender(selected, { preparation }) { renders.push(selected); return { promise: preparation.promise.then(() => { throw new Error('Fixture render refusal') }), cancel() {} } } })
+  try {
+    view.key('i'); await flush(); view.observed.pickers[0].close(); view.observed.pickers[0].soundfont('fluidsynth')
+    for (let i = 0; i < 5; i++) await flush()
+    assert.equal(captures.length, 1); assert.deepEqual(renders, [sound])
+    assert.equal(view.observed.workers[0].requests.at(-1).options.format, 'fluid-plan')
+    assert.deepEqual(view.observed.workers[0].requests.at(-1).project.sound, sound)
+    view.key('q'); await view.done
+    assert.deepEqual(view.observed.saved.at(-1).sound, sound)
+  } finally { view.signal.abort(); await view.done }
+  const rejected = await controller({ initialDocument: initial, autoSoundfont: false,
+    fluidCapture() { return { promise: Promise.reject(new Error('Unavailable engine')), cancel() {} } } })
+  try {
+    rejected.key('i'); await flush(); rejected.observed.pickers[0].close(); rejected.observed.pickers[0].soundfont('fluidsynth')
+    for (let i = 0; i < 5; i++) await flush()
+    rejected.key('q'); await rejected.done
+    assert.deepEqual(rejected.observed.saved.at(-1), initial)
+    assert.equal(rejected.observed.workers[0].requests.length, 0)
+  } finally { rejected.signal.abort(); await rejected.done }
 })

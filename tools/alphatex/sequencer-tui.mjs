@@ -229,11 +229,21 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   const picker = new InstrumentPicker({ directory: stateDirectory, notify: draw,
     active: () => {
       const sound = audioInstrument()
-      return sound.kind === 'vst' ? sound.selection : sound.kind === 'soundfont' ? null : undefined
+      return sound.kind === 'vst' ? sound.selection : sound.kind === 'soundfont' ? sound : undefined
     },
     selected: selection => chooseInstrument({ kind: 'vst', selection }),
-    soundfont: () => chooseInstrument(editor.project.kind === 'midi-source'
-      ? { kind: 'fluid-selection' } : { kind: 'soundfont' }),
+    soundfontChoices: [
+      { kind: 'soundfont', engine: 'fluidsynth', name: 'SoundFont · FluidSynth' },
+      ...(editor.project.kind === 'midi-source' ? [] : [{ kind: 'soundfont', engine: 'alphasynth', name: 'SoundFont · AlphaSynth' }]),
+    ],
+    soundfont: engine => {
+      switch (engine) {
+        case 'fluidsynth': chooseInstrument({ kind: 'fluid-selection' }); break
+        case 'alphasynth': chooseInstrument({ kind: 'soundfont' }); break
+        case undefined: chooseInstrument(editor.project.kind === 'midi-source' ? { kind: 'fluid-selection' } : { kind: 'soundfont' }); break
+        default: throw new Error('Choose an available SoundFont engine')
+      }
+    },
     failed: error => { status = failure(`VST: ${error.message}`); draw() } })
   const sourcePicker = new MidiSourcePicker({ notify: draw, selected(source) {
     const monitor = openedSourceMenuOwner?.monitor === true
@@ -587,7 +597,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     transport = { kind: 'rendering', cancel: result.cancel, native: result.native }
     if (result.native && audioInstrument().kind === 'vst') observe({ state: 'rendering', selection: audioInstrument().selection, render: null })
     result.promise.then(wave => startPlayer(wave, id)).catch(error => {
-      if (!closed && id === generation) { transport = { kind: 'stopped' }; status = failure(error.message);
+      if (!closed && id === generation) { transport = { kind: 'stopped' }; status = failure(error.message +
+          (audioInstrument().kind === 'soundfont' && !isFluidSound(audioInstrument()) ? ' · i: select SoundFont · FluidSynth, or another instrument' : ''));
         if (result.native && audioInstrument().kind === 'vst') observe({ state: 'failed', selection: audioInstrument().selection, render: null, error: error.message }); draw() }
     })
     draw()

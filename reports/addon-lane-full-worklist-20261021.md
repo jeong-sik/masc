@@ -803,3 +803,5 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - 실제 durable drain이 반환한 pass_end를 queue signal과 boot catch-up이 직접 소비한다. Pending인 같은 wake의 continuity/context/cleanup을 중단하고, 관측값을 재조회해 실행 허가로 삼거나 새 retry loop/timer를 만들지 않는다. 기존 취소·오류 전파는 유지한다.
 - server Memory health의 pending을 strict Dashboard/TUI까지 전달하고 stopped alert·실패 수에 넣지 않는다. Dashboard 실제 decoder67건과 tsc --noEmit은 PASS다. OCaml parser만 수행했으며 새 checkpoint/official/mixed-source·원래 marker/Memory/cursor 보존·후속 phase 재개 사례는 아직 compiled 실행 미확인이다. UI 문구·행순서 검사는 만들지 않았다.
 - 이 단위의 production synchronous adapter는 아직 Pending을 생산하지 않는다. fake owner나 route flag는 없으며 실제 durable Addon source capture/restore, source-before-Memory lock, execution proof와 원래 receipt/두 cursor 복구를 다음 실제 owner 단위에서 연결해야 한다. 기반 하나로 E03·원래 A01–H06의54개 완료·provider·실제 UI·설치를 증명하지 않는다.
+
+- 위 Pending 기반의 후속 PR은 [#45298](https://github.com/jeong-sik/masc/pull/45298)이다. 기존 owner 수리의 [39886511979](https://github.com/jeong-sik/masc/actions/runs/39886511979)는 exact `3fdc42ef7e33e70f555ac10e40112875a45fff34`에서22/22 PASS이며 mixed capacity+quota 사례도 실제 통과했다. 이후 `f8c751ca7f1977a700297aa9f0e942f2dde0e995`는 실패 로그 excerpt의 공백만 바뀌었다. 이 결과를 새 Pending 코드의 실행 성공으로 확대하지 않는다.

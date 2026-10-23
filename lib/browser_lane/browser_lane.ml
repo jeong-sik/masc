@@ -47,8 +47,10 @@ type viewport_size = Fit of { width : int; height : int } | Browser_default
 let viewport_side_min_px = 100
 let viewport_side_max_px = 4096
 
+type option_selection = Single_option of string | Multiple_options of string list
+
 type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
-  | Select_option of { selector : string; value : string }
+  | Select_option of { selector : string; selection : option_selection }
   | Set_zoom of { factor : float }
   | Set_viewport of viewport_size
   | Double_click of pointer_target
@@ -266,7 +268,10 @@ let interaction_args ~tab_id ~frame_path ~expected_url action =
         "viewport", Pointer.viewport_to_json viewport] @ drag_fields via duration_ms
     | Click selector -> [verb; "selector", `String selector]
     | Fill {selector; text} -> [verb; "selector", `String selector; "text", `String text]
-    | Select_option {selector; value} -> [verb; "selector", `String selector; "value", `String value]
+    | Select_option {selector; selection} ->
+      [verb; "selector", `String selector] @ (match selection with
+        | Single_option value -> ["value", `String value]
+        | Multiple_options values -> ["values", `List (List.map (fun value -> `String value) values)])
     | Follow_link target -> verb :: node_fields target
     | Click_node target -> verb :: node_fields target
     | Fill_node {target;text} -> verb :: ("text",`String text) :: node_fields target

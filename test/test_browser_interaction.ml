@@ -253,7 +253,7 @@ let test_select_option () =
   let base = fields "select_option" @ ["selector",`String "#country"] in
   let request = parsed (base @ ["value",`String "kr"]) in
   (match request.action with
-   | Browser_lane.Select_option {selector="#country";value="kr"} -> ()
+   | Browser_lane.Select_option {selector="#country";selection=Browser_lane.Single_option "kr"} -> ()
    | _ -> fail "select_option parsed as another action");
   let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path ~expected_url:request.expected_url request.action in
   check bool "select_option survives the wire round trip" true
@@ -262,18 +262,34 @@ let test_select_option () =
     (Browser_lane.live_capability (Browser_lane.Page_interact {frame_path=[];tab_id=request.tab_id;
       expected_url=request.expected_url;action=request.action}) = Some Browser_lane.Dom_interaction);
   (match (parsed (base @ ["value",`String ""])).action with
-   | Browser_lane.Select_option {value="";_} -> ()
+   | Browser_lane.Select_option {selection=Browser_lane.Single_option "";_} -> ()
    | _ -> fail "an empty option value is a value");
+  List.iter (fun values ->
+    let multiple = parsed (base @ ["values",`List (List.map (fun value -> `String value) values)]) in
+    (match multiple.action with
+     | Browser_lane.Select_option {selection=Browser_lane.Multiple_options actual;_} ->
+       check (list string) "multiple selection and clear remain distinct from a single option" values actual
+     | _ -> fail "multiple selection parsed as another action");
+    let wire = Browser_lane.interaction_args ~tab_id:multiple.tab_id ~frame_path:multiple.frame_path
+      ~expected_url:multiple.expected_url multiple.action in
+    check bool "multiple selection survives the actual wire" true
+      ((parsed Yojson.Safe.Util.(to_assoc wire)).action = multiple.action)) [["kr";"jp"];[];[""]];
   List.iter (fun (label,input) ->
     check bool label true (Result.is_error (Interaction.parse (`Assoc input))))
     ["no value",base;
      "a number value",base @ ["value",`Int 1];
+     "both value and values",base @ ["value",`String "kr";"values",`List []];
+     "duplicate values",base @ ["values",`List [`String "kr";`String "kr"]];
+     "mixed values",base @ ["values",`List [`String "kr";`Int 1]];
+     "non-array values",base @ ["values",`String "kr"];
      "no selector",fields "select_option" @ ["value",`String "kr"];
      "a node target",fields "select_option" @ ["documentId",`String "d";"nodeId",`String "n";"value",`String "kr"];
      "text",base @ ["value",`String "kr";"text",`String "Korea"];
      "a point",base @ ["value",`String "kr";"point",`Assoc ["x",`Float 0.5;"y",`Float 0.5]];
      "value on fill",fields "fill" @ ["selector",`String "#country";"text",`String "kr";"value",`String "kr"];
-     "value on click",fields "click" @ ["selector",`String "#country";"value",`String "kr"]]
+     "value on click",fields "click" @ ["selector",`String "#country";"value",`String "kr"];
+     "values on fill",fields "fill" @ ["selector",`String "#country";"text",`String "kr";"values",`List []];
+     "values on click",fields "click" @ ["selector",`String "#country";"values",`List []]]
 
 (* An ego snapshot target: one of three shapes, given alone, on a page the
    caller observed; it is what only an ego connection serves. *)

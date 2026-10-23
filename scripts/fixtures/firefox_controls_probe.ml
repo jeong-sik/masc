@@ -78,7 +78,7 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let options = member "options" (control "country") |> Yojson.Safe.Util.to_list in
     check "opaque option values are observable" (List.exists (fun item -> member "value" item = `String "opaque-02") options);
     input first (Browser_lane.Fill {selector=selector "name";text="한글 Firefox 🙂"});
-    input first (Browser_lane.Select_option {selector=selector "country";value="opaque-02"});
+    input first (Browser_lane.Select_option {selector=selector "country";selection=Browser_lane.Single_option "opaque-02"});
     input first (Browser_lane.Click (selector "submit"));
     let read id = success (run (Browser_lane.Page_read {tab_id=Some id;max_chars=None})) in
     let text = member "text" (read first) |> string in

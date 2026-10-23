@@ -259,8 +259,8 @@ let support backend operation = match backend with
     | Select_option -> (match backend with
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Owned_chromium ->
           dom_input backend (conditional ~action:"select_option" Interact
-            [observed;"Pass the selector of one single-choice select and the exact value of one enabled option; a multiple select, a missing, repeated or disabled option is refused before any effect.";
-             "Sets the option and emits input and change; this is not a trusted click on the list."])
+            [observed;"Pass one select's selector and either value for a single-choice select or distinct values for a multiple select ([] clears it). Missing, ambiguous or disabled requested options are refused before any effect.";
+             "Replaces the selection, emits input and change once, and reports selectedValues after page handlers. This is DOM selection, not trusted pointer input."])
       | Safari_unavailable -> missing)
     | Read_frames -> (match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko ->

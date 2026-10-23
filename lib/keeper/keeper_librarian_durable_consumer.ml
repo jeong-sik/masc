@@ -12,10 +12,12 @@ module History = Keeper_checkpoint_store.Saved_history
 
 type commit_result =
   | Memory_committed
+  | Memory_pending
   | Memory_refused of Keeper_librarian_runtime.not_committed list
 
 type outcome =
   | Nothing_to_read
+  | Pending
   | Baseline_advanced of P.t
   | Memory_not_committed of Keeper_librarian_runtime.not_committed list
   | Progress_advanced of P.t
@@ -1605,8 +1607,10 @@ let consume_one_with_extent
              checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor
                ~selection_progress ~messages ~selected_range ~range ~external_cursor ~external_through reports input
            | (None | Some _), (None | Some _), ([] | _::_), (None | Some _), ([] | _::_) -> result)
-        | (Memory_committed | Memory_refused _), (No_message_floor | Runtime_message_floor _) -> result in
+        | (Memory_committed | Memory_pending | Memory_refused _),
+          (No_message_floor | Runtime_message_floor _) -> result in
       match result with
+      | Memory_pending -> Ok Pending
       | Memory_refused reports -> Ok (Memory_not_committed reports)
       | Memory_committed ->
         let* _ = Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -1629,7 +1633,8 @@ let consume_one_with_progress_writer_and_floor
   =
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let key = range_key ~runtime_keepers_dir ~keeper_name in
-  let extent = if failed_before key then R.To_first_cut_point else R.All_unread in
+  let had_failed_range = failed_before key in
+  let extent = if had_failed_range then R.To_first_cut_point else R.All_unread in
   (* Leave the marker set across exceptions and cancellation. After a failed
      wide range, keep taking one cut point until a later pass proves that the
      backlog is empty. Clearing after the first small success would alternate
@@ -1646,6 +1651,10 @@ let consume_one_with_progress_writer_and_floor
       ~commit
   in
   (match result, extent with
+   | Ok Pending, _ ->
+     (* Pending is not a failed attempt: retain an earlier failure marker, but
+        undo the provisional marker this wrapper installs for exceptions. *)
+     if not had_failed_range then clear_failed key
    | Ok (Nothing_to_read | Baseline_advanced _), _
    | Ok (Progress_advanced _ | Official_advanced _), R.All_unread -> clear_failed key
    (* Returned only when the atom side has nothing to read: the atom backlog

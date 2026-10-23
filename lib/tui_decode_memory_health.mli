@@ -36,6 +36,8 @@ type memory_librarian_pass_end =
   | Pass_lane_unconfigured
   | Pass_drained
   | Pass_yielded_to_waiting_unit
+  | Pass_pending
+      (** Original work is suspended; unread input is neither consumed nor failed. *)
   | Pass_not_committed
   | Pass_stopped of string
   | Pass_raised of string

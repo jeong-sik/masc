@@ -394,3 +394,35 @@ judgment over the same outstanding source. Publication still requires fresh
 physical/source authority under the actual source-before-Memory locks and a
 matching original disposition receipt before cursor/ACK settlement. The data
 codec alone implements none of those effects or the remaining Librarian purposes.
+
+
+## Typed suspension before the durable owner connects
+
+The durable commit port now distinguishes `Memory_pending` from a committed
+snapshot and a refused pass. It returns `Pending` without message-floor inference,
+Memory mutation, external acknowledgement or atom/official cursor advancement.
+A successful receipt recovery still runs before a new commit callback. Suspension
+preserves the failed-range marker that existed before the pass: it neither turns
+a previously wide selection into a narrow retry nor clears an earlier failure.
+
+The actual queue drain returns its typed `pass_end`. Both queue signals and boot
+catch-up stop the same wake's continuity, context and cleanup phases when that
+result is `Pending`; they do not consult an observation snapshot to decide what
+to run. Exceptions and cancellation retain their original propagation, and no
+new timer, polling loop or immediate retry is introduced. Later external wakes
+continue through the existing serialized Memory lane.
+
+Memory health carries `pending` separately from stopped, failed and drained.
+The server, strict Dashboard decoder and typed TUI decoder preserve it without
+adding a stopped alert or changing the unread count. This is observation of the
+real drain result, not permission to dispatch, consume input or commit Memory.
+
+This unit prepares the existing durable consumer for an asynchronous owner.
+The current synchronous `run_best_effort` adapter does not produce Pending;
+there is no new empty owner, runtime selector or production history cutover.
+Tests exercise the actual public commit port and production phase dispatcher.
+Before the Addon route is enabled, its immutable original selection, checkpoint
+and official witnesses, source lock, execution proof and Memory/cursor receipt
+recovery must still be connected. Typed suspension alone cannot freeze a later
+source tail or establish source freshness. E03 and the original54 criteria remain
+incomplete until those connections and Keeper continuity are verified.

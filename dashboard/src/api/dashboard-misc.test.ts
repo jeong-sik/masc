@@ -222,6 +222,20 @@ describe('fetchKeeperMemoryHealth', () => {
     expect(health.alert_summary.librarian_stopped_keepers).toBe(0)
   })
 
+  it('retains suspended work and unread input without a stopped or drained result', async () => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!.librarian, {
+      state: 'pending', detail: null, unread_atom_turns: 2, unread_official_turns: 1,
+    })
+    payload.totals.librarian_unread_turns = 3
+    getMock.mockResolvedValue(payload)
+    const health = await fetchKeeperMemoryHealth()
+    expect(health.keepers[0]!.librarian.state).toBe('pending')
+    expect(health.keepers[0]!.librarian.unread_atom_turns).toBe(2)
+    expect(health.keepers[0]!.librarian.unread_official_turns).toBe(1)
+    expect(health.alert_summary.librarian_stopped_keepers).toBe(0)
+  })
+
   it('keeps saved and prepared frontiers separate without inventing provider success', async () => {
     const payload = keeperMemoryHealthPayload()
     const saved = { trace_id: 'trace-a', end_atom: 12, boundary_line: 8 }

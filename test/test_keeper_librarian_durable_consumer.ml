@@ -195,6 +195,7 @@ let establish_progress config ~trace_id first =
     check int "initial end" 1 progress.position.end_atom
   | Consumer.Nothing_to_read
   | Consumer.Official_advanced _
+  | Consumer.Pending
   | Consumer.Memory_not_committed _ -> fail "initial range did not advance"
 ;;
 
@@ -348,6 +349,7 @@ let test_n_tick_reads_every_intermediate_turn () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "unread range did not commit");
   check (list string) "both unread turns are delivered" [ "turn-2"; "turn-3" ] !carried
 ;;
@@ -374,6 +376,7 @@ let test_unread_turns_counts_what_a_pass_has_left () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "unread range did not commit");
   match Consumer.unread_turns ~config ~keeper_name with
   | Ok { atoms; official } ->
@@ -396,6 +399,7 @@ let test_failed_commit_and_restart_retry_the_same_range () =
        (Consumer.Memory_refused []))
    with
    | Consumer.Memory_not_committed _ -> ()
+   | Consumer.Pending
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
@@ -415,6 +419,7 @@ let test_failed_commit_and_restart_retry_the_same_range () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "restart did not retry unread range");
   check (list string) "restart reads identical range" !first !after_restart
 ;;
@@ -525,6 +530,7 @@ let test_undecodable_current_snapshot_routes_through_write_path_quarantine () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "undecodable snapshot blocked the pass");
   check int "memory commit ran once" 1 !commits;
   let recovered =
@@ -885,6 +891,7 @@ let test_memory_the_continuity_round_saved_is_not_sent_again () =
   save_checkpoint config ~trace_id through_three 3;
   (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> (Consumer.Memory_refused [])) with
    | Consumer.Memory_not_committed _ -> ()
+   | Consumer.Pending
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
@@ -910,6 +917,7 @@ let test_memory_the_continuity_round_saved_is_not_sent_again () =
       | Consumer.Progress_advanced _ -> drain (remaining - 1)
       | Consumer.Baseline_advanced _
       | Consumer.Official_advanced _
+      | Consumer.Pending
       | Consumer.Memory_not_committed _ -> fail "unexpected durable outcome")
   in
   drain rounds_until_settled;
@@ -1021,6 +1029,7 @@ let test_historical_range_does_not_borrow_the_current_task () =
        (Consumer.Memory_refused []))
    with
    | Consumer.Memory_not_committed _ -> ()
+   | Consumer.Pending
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
@@ -1041,6 +1050,7 @@ let test_historical_range_does_not_borrow_the_current_task () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "historical retry did not advance");
   (match !retry_context with
    | Some context -> check_no_task "retried catch-up" context
@@ -1049,6 +1059,7 @@ let test_historical_range_does_not_borrow_the_current_task () =
   (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> fail "quiet tick recommitted") with
    | Consumer.Nothing_to_read -> ()
    | Consumer.Baseline_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _
    | Consumer.Official_advanced _
    | Consumer.Progress_advanced _ -> fail "quiet tick did not stay quiet")
@@ -1076,6 +1087,131 @@ let markers_without_working_sources (input : Masc.Keeper_librarian.input) =
   text_markers input
 ;;
 
+(* The Memory store and both progress readers remain real. Only the commit
+   callback can suspend; no production adapter claims to own a Pending input
+   until the durable Addon owner is implemented. *)
+let seed_pending_memory config ~trace_id =
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path in
+  let fact = Memory.observed ~claim:"Retain the current durable Memory fact."
+      ~category:Memory.Fact ~now:1.
+      ~origin:{kind=Memory.Authored;trace_id} in
+  (match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name
+      ~now:1. ~source:{kind=Current.Librarian;trace_id}
+      ~new_claims:[fact] ~absorbed:[] () with
+   | Ok _ -> ()
+   | Error detail -> fail detail);
+  Current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name
+;;
+
+let commit_pending_memory config ~expected_revision:_ ~range_id ~official_range_id
+    (input : Masc.Keeper_librarian.input) =
+  let module Current = Masc.Keeper_memory_os_current in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path in
+  match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name
+      ~now:5. ~source:{kind=Current.Librarian;trace_id=Ids.Turn_ref.trace_id input.turn_ref}
+      ?durable_range_id:range_id ?official_range_id ~new_claims:[] ~absorbed:[] () with
+  | Ok _ -> Consumer.Memory_committed
+  | Error detail -> fail detail
+;;
+
+let test_pending_preserves_selection_and_memory ~after_failure () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-pending-selection" in
+  prepare_three_unread_turns config ~trace_id;
+  let memory_path = seed_pending_memory config ~trace_id in
+  let memory_before = Fs_compat.load_file memory_path in
+  let progress_before = read_progress config in
+  if after_failure then (
+    match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+        Consumer.Memory_refused []) with
+    | Consumer.Memory_not_committed [] -> ()
+    | _ -> fail "the earlier refusal did not reach its real retry marker");
+  let selected = if after_failure then ["turn-2"] else ["turn-2";"turn-3";"turn-4"] in
+  let calls = ref 0 in
+  let pending ~expected_revision:_ ~range_id ~official_range_id:_ input =
+    incr calls;
+    check bool "real selected range has an atom receipt" true (Option.is_some range_id);
+    check (list string) "Pending does not change the prior selection mode"
+      selected (text_markers input);
+    Consumer.Memory_pending in
+  List.iter (fun () ->
+    (match consume config pending with
+     | Consumer.Pending -> ()
+     | _ -> fail "an unfinished commit did not suspend the durable pass");
+    check bool "Pending preserves the actual atom position" true
+      (read_progress config=progress_before);
+    check string "Pending preserves exact Memory bytes" memory_before
+      (Fs_compat.load_file memory_path)) [();()];
+  check int "each external wake reaches its one unfinished commit" 2 !calls;
+  let commit ~expected_revision ~range_id ~official_range_id input =
+    check (list string) "normal commit retains the pre-Pending selection mode"
+      selected (text_markers input);
+    commit_pending_memory config ~expected_revision ~range_id ~official_range_id input in
+  (match consume config commit with
+   | Consumer.Progress_advanced progress ->
+     check int "only a real Memory commit advances progress"
+       (if after_failure then 2 else 4) progress.position.end_atom
+   | _ -> fail "normal Memory commit did not resume progress");
+  if after_failure then (
+    let commit ~expected_revision ~range_id ~official_range_id input =
+      check (list string) "prior failure remains narrow after the successful cut"
+        ["turn-3"] (text_markers input);
+      commit_pending_memory config ~expected_revision ~range_id ~official_range_id input in
+    match consume config commit with
+    | Consumer.Progress_advanced progress ->
+      check int "the next oldest cut advances normally" 3 progress.position.end_atom
+    | _ -> fail "the next oldest cut did not commit")
+;;
+
+let test_pending_wake_suspends_following_phases () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true") @@ fun () ->
+  with_workspace @@ fun config ->
+  let trace_id = "trace-pending-wake" in
+  prepare_three_unread_turns config ~trace_id;
+  let memory_path = seed_pending_memory config ~trace_id in
+  let memory_before = Fs_compat.load_file memory_path in
+  let events = ref [] in
+  let record event = events := !events @ [event] in
+  let run commit = Queue_refresh.For_testing.run_with_readers
+      ~durable:(fun () -> Queue_refresh.For_testing.run_durable_with_commit
+        ~config ~keeper_name ~commit)
+      ~continuity:(fun () -> record "continuity")
+      ~cleanup:(fun () -> record "cleanup")
+      ~base_path:config.Workspace.base_path ~keeper_name in
+  let pending ~expected_revision:_ ~range_id:_ ~official_range_id:_ input =
+    record "pending";
+    check (list string) "the actual drain selects all unread turns"
+      ["turn-2";"turn-3";"turn-4"] (text_markers input);
+    Consumer.Memory_pending in
+  run pending;
+  run pending;
+  check (list string) "an unfinished commit suppresses both following phases"
+    ["pending";"pending"] !events;
+  check_progress_end config 1;
+  check string "same-wake cleanup cannot change Memory" memory_before
+    (Fs_compat.load_file memory_path);
+  (match Queue_refresh.last_measurement ~config ~keeper_name with
+   | Some {last_pass=Queue_refresh.Pending;unread=Some {atoms=3;official=0};_} -> ()
+   | _ -> fail "Pending must retain the real unread observation");
+  let commit ~expected_revision ~range_id ~official_range_id input =
+    record "committed";
+    check (list string) "the next normal wake still selects the full range"
+      ["turn-2";"turn-3";"turn-4"] (text_markers input);
+    commit_pending_memory config ~expected_revision ~range_id ~official_range_id input in
+  run commit;
+  check (list string) "a completed commit reopens the actual phase pipeline"
+    ["pending";"pending";"committed";"continuity";"cleanup"] !events;
+  check_progress_end config 4;
+  (match Queue_refresh.last_measurement ~config ~keeper_name with
+   | Some {last_pass=Queue_refresh.Drained;unread=Some {atoms=0;official=0};_} -> ()
+   | _ -> fail "the subsequent completed wake must drain normally")
+;;
+
 let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
     (Some "true")
@@ -1083,10 +1219,10 @@ let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
   with_workspace @@ fun config ->
   prepare_three_unread_turns config ~trace_id:"trace-wake-retry";
   let failed_calls = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
     ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
       failed_calls := markers_without_working_sources input :: !failed_calls;
-      (Consumer.Memory_refused []));
+      (Consumer.Memory_refused [])));
   check (list (list string)) "a refused commit ends this wake after one attempt"
     [ [ "turn-2"; "turn-3"; "turn-4" ] ] (List.rev !failed_calls);
   check_progress_end config 1;
@@ -1095,11 +1231,11 @@ let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
     committed_calls := markers_without_working_sources input :: !committed_calls;
     Consumer.Memory_committed
   in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit);
   check (list (list string)) "one later wake drains all successful small cuts"
     [ [ "turn-2" ]; [ "turn-3" ]; [ "turn-4" ] ] (List.rev !committed_calls);
   check_progress_end config 4;
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit);
   check int "an empty backlog is not committed again" 3 (List.length !committed_calls)
 ;;
 
@@ -1129,8 +1265,8 @@ let test_growing_source_allows_following_phases () =
       in
       let next_unit () =
         record "queued-context-opportunity";
-        Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
-          ~commit:commit_later
+        ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+          ~commit:commit_later)
       in
       let appended = ref false in
       let commit ~expected_revision:_ ~range_id:_ ~official_range_id:_ input =
@@ -1152,6 +1288,7 @@ let test_growing_source_allows_following_phases () =
              | Some {last_pass = Queue_refresh.Yielded_to_waiting_unit; unread = Some {atoms = 1; official = 0}; _} -> ()
              | _ -> fail "yield must expose remaining source without reporting drained");
             record "continuity-opportunity")
+          ~cleanup:(fun () -> ())
           ~base_path:config.Workspace.base_path ~keeper_name));
       Lane.For_testing.await_idle ~base_path:config.Workspace.base_path ~keeper_name;
       check (list string) "new source waits until the following phases get an opportunity"
@@ -1178,10 +1315,10 @@ let test_one_wake_continues_after_an_initial_baseline () =
   check bool "this Keeper has no read position yet" true
     (Option.is_none (read_progress config));
   let calls = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
     ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
       calls := markers_without_working_sources input :: !calls;
-      Consumer.Memory_committed);
+      Consumer.Memory_committed));
   check (list (list string)) "baseline is skipped and the same wake commits unread turns"
     [ [ "recorded-2"; "recorded-3" ] ] (List.rev !calls);
   check_progress_end config 3
@@ -1192,26 +1329,26 @@ let test_disabling_between_cuts_stops_until_a_new_enabled_wake () =
   Masc_test_deps.with_process_env env_key (Some "true") @@ fun () ->
   with_workspace @@ fun config ->
   prepare_three_unread_turns config ~trace_id:"trace-wake-disable";
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
     ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
       ignore (markers_without_working_sources input : string list);
-      (Consumer.Memory_refused []));
+      (Consumer.Memory_refused [])));
   check_progress_end config 1;
   let before_disable = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
     ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
       before_disable := markers_without_working_sources input :: !before_disable;
       Unix.putenv env_key "false";
-      Consumer.Memory_committed);
+      Consumer.Memory_committed));
   check (list (list string)) "turning off prevents the next cut in the same wake"
     [ [ "turn-2" ] ] (List.rev !before_disable);
   check_progress_end config 2;
   Unix.putenv env_key "true";
   let after_enable = ref [] in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
     ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
       after_enable := markers_without_working_sources input :: !after_enable;
-      Consumer.Memory_committed);
+      Consumer.Memory_committed));
   check (list (list string)) "a separate enabled wake drains the remaining cuts"
     [ [ "turn-3" ]; [ "turn-4" ] ] (List.rev !after_enable);
   check_progress_end config 4
@@ -1226,6 +1363,7 @@ let test_unchanged_boundaries_do_not_require_checkpoint () =
   match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> fail "commit was called") with
   | Consumer.Nothing_to_read -> ()
   | Consumer.Baseline_advanced _
+  | Consumer.Pending
   | Consumer.Memory_not_committed _
   | Consumer.Official_advanced _
   | Consumer.Progress_advanced _ -> fail "unchanged boundaries did not stop before checkpoint"
@@ -1629,6 +1767,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
   save_checkpoint config ~trace_id first_two 2;
   (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> (Consumer.Memory_refused [])) with
    | Consumer.Memory_not_committed _ -> ()
+   | Consumer.Pending
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
@@ -1649,6 +1788,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "bounded retry did not advance");
   check (list string) "retry does not grow with later turns" [ "turn-2" ] !retry;
   let remaining = ref [] in
@@ -1662,6 +1802,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "remaining range did not advance");
   check (list string) "bounded catch-up remains active" [ "turn-3" ] !remaining;
   let final = ref [] in
@@ -1675,6 +1816,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "final range did not advance");
   check (list string) "final turn remains readable" [ "turn-4" ] !final;
   (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> fail "empty range called commit") with
@@ -1682,6 +1824,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "empty pass did not clear bounded catch-up")
 ;;
 
@@ -1703,6 +1846,7 @@ let test_last_matching_boundary_wins_when_clock_moves_backward () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "clock regression range did not advance");
   check (option int) "last appended boundary is authoritative" (Some 3) !selected_turn
 ;;
@@ -1718,6 +1862,7 @@ let test_distinct_boundaries_reject_non_monotone_counterpart_interval () =
    | Consumer.Baseline_advanced _ | Consumer.Progress_advanced _ -> ()
    | Consumer.Nothing_to_read
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "fixture progress did not advance");
   let messages = first @ [ message "turn-2" ] in
   append_boundary config ~trace_id ~turn:2 ~recorded_at:10.0 messages;
@@ -1751,6 +1896,7 @@ let test_equal_boundary_timestamps_form_an_empty_counterpart_interval () =
    | Consumer.Baseline_advanced _ | Consumer.Progress_advanced _ -> ()
    | Consumer.Nothing_to_read
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "fixture progress did not advance");
   let messages = first @ [ message "turn-2" ] in
   append_boundary config ~trace_id ~turn:2 ~recorded_at:20.0 messages;
@@ -2587,6 +2733,7 @@ let test_an_official_only_keeper_is_read_from_its_fragments () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "official turns were not read");
   check (list string) "both turns, each in its order" [ "q1"; "a1"; "q2"; "a2" ] !carried;
   check (list string) "the tool the first turn called" [ "masc_tasks" ] !tools;
@@ -2600,6 +2747,7 @@ let test_an_official_only_keeper_is_read_from_its_fragments () =
   | Consumer.Official_advanced _
   | Consumer.Baseline_advanced _
   | Consumer.Progress_advanced _
+  | Consumer.Pending
   | Consumer.Memory_not_committed _ -> fail "read turns were read again"
 ;;
 
@@ -2666,11 +2814,11 @@ let test_a_superseded_current_checkpoint_is_fresh_state () =
     | Some _ -> failf "%s: the pass did not drain" label
     | None -> failf "%s: no measurement" label
   in
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit);
   check_settled "first pass";
   check (list string) "the official turn after the cut is read"
     [ "q-after-cut"; "a-after-cut" ] !carried;
-  Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit;
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit);
   check_settled "next pass";
   check int "the official turn is committed once" 1 !commits;
   check bool "the atom position is unchanged" true (read_progress config = atom_position)
@@ -2753,6 +2901,7 @@ let test_a_failed_official_turn_is_read ?(tool_only=false) () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "the failed turn left nothing to read");
   check (list string) "the failed turn's input, then the next turn" (if tool_only then [] else [ "q-failed"; "q2"; "a2" ])
     !carried;
@@ -2794,7 +2943,7 @@ let test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports ()
     Consumer.Memory_refused reports) with
    | Consumer.Memory_not_committed actual ->
      check bool "all reports survive in callback order" true (actual = reports)
-   | Consumer.Nothing_to_read | Consumer.Baseline_advanced _
+   | Consumer.Pending | Consumer.Nothing_to_read | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _ | Consumer.Official_advanced _ ->
      fail "refused mixed range advanced");
   check bool "refusal preserves atom cursor" true (read_progress config = atom_before);
@@ -2808,7 +2957,90 @@ let test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports ()
      check int "only the successful retry advances official lines" 2 official.boundary_line
    | Consumer.Nothing_to_read | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _ | Consumer.Official_advanced {atom=None;_}
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "successful mixed retry did not advance")
+
+let test_pending_official_sources_preserve_memory_and_ack ~mixed () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-pending-official" in
+  if mixed then establish_progress config ~trace_id "t1"
+  else write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:2.;
+  let selected = if mixed then (
+    let first_two = [message "t1";message "t3"] in
+    let all = first_two @ [message "t4"] in
+    append_boundary config ~trace_id ~turn:3 ~recorded_at:3. first_two;
+    append_boundary config ~trace_id ~turn:4 ~recorded_at:4. all;
+    save_checkpoint config ~trace_id all 4;
+    ["q2";"a2";"t3";"t4"])
+    else (
+      write_official_turn config ~trace_id ~turn:3 ~user:"q3" ~assistant:"a3" ~tools:[];
+      append_official_boundary config ~trace_id ~turn:3 ~recorded_at:3.;
+      ["q2";"a2";"q3";"a3"]) in
+  let memory_path = seed_pending_memory config ~trace_id in
+  let memory_before = Fs_compat.load_file memory_path in
+  let atom_before = read_progress config and official_before = read_official config in
+  let item : Keeper_external_attention.item =
+    {event_id=Keeper_external_attention.event_id_of_dedupe_key "pending-counterpart";
+     dedupe_key="pending-counterpart";keeper_name;
+     conversation={conversation_id="agent:pending";surface=Keeper_external_attention.Agent};
+     external_message=None;source_label="agent";
+     actor={actor_id=Some "external";display_name=Some "External";authority=Keeper_chat_store.External};
+     urgency=Keeper_external_attention.Ambient;content_preview="Retain this external observation.";
+     content_ref=None;received_at=1.5;metadata=[]} in
+  (match Keeper_external_attention.For_testing.record_with_clock ~now:(fun () -> 1.5)
+      ~base_path:config.Workspace.base_path item with
+   | `Recorded -> ()
+   | `Duplicate _ -> fail "duplicate pending counterpart fixture"
+   | `Error detail -> fail detail);
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let external_path = Masc.Keeper_external_read_cursor.path_for_keepers_dir
+      ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
+  let check_external ~after ~prepared =
+    let open Yojson.Safe.Util in
+    let state = Fs_compat.load_file external_path |> Yojson.Safe.from_string in
+    check int "external acknowledgement follows Memory commit" after
+      (member "after" state |> to_int);
+    check bool "Pending retains preparation without acknowledging it" prepared
+      (member "pending" state <> `Null) in
+  let check_selected ~range_id ~official_range_id input =
+    check bool "only mixed input has an atom receipt" mixed (Option.is_some range_id);
+    check bool "official input retains its exact receipt" true (Option.is_some official_range_id);
+    check (list string) "Pending never narrows or drops official source messages"
+      selected (text_markers input);
+    check int "external evidence remains in the original selected input" 1
+      (List.length input.Masc.Keeper_librarian.counterpart_observations) in
+  let pending ~expected_revision:_ ~range_id ~official_range_id input =
+    check_selected ~range_id ~official_range_id input;
+    Consumer.Memory_pending in
+  List.iter (fun () ->
+    (match consume config pending with
+     | Consumer.Pending -> ()
+     | _ -> fail "official source did not suspend at its unfinished commit");
+    check bool "Pending preserves atom cursor" true (read_progress config=atom_before);
+    check bool "Pending preserves official cursor" true (read_official config=official_before);
+    check string "Pending preserves actual Memory bytes" memory_before
+      (Fs_compat.load_file memory_path);
+    check_external ~after:0 ~prepared:true) [();()];
+  let commit ~expected_revision ~range_id ~official_range_id input =
+    check_selected ~range_id ~official_range_id input;
+    commit_pending_memory config ~expected_revision ~range_id ~official_range_id input in
+  (match consume config commit with
+   | Consumer.Official_advanced {atom;official} ->
+     check int "committed receipt advances the official position" 2 official.boundary_line;
+     (match mixed,atom with
+      | true,Some progress ->
+        check int "committed mixed receipt advances every selected atom" 3 progress.position.end_atom
+      | false,None -> ()
+      | true,None | false,Some _ -> fail "commit changed the selected source kinds")
+   | _ -> fail "normal official Memory commit did not resume both source cursors");
+  check_external ~after:1 ~prepared:false;
+  (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+      fail "settled official source was submitted again") with
+   | Consumer.Nothing_to_read -> ()
+   | _ -> fail "normal commit left selected source unread")
+;;
 
 let test_a_mixed_keeper_is_read_in_line_order () =
   with_workspace
@@ -2841,6 +3073,7 @@ let test_a_mixed_keeper_is_read_in_line_order () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "the mixed pass did not advance");
   check (list string) "T2 before T3, T1 not again" [ "q2"; "a2"; "t3" ] !carried
 ;;
@@ -2914,7 +3147,7 @@ let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ?
     fail "saved input was sent for synthesis again"
   in
   if through_queue then (
-    Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit:no_commit;
+    ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit:no_commit);
     (match read_official config with
      | Some official -> check int "queue restores official cursor" (if mixed then 3 else 2) official.boundary_line
      | None -> fail "queue left official cursor behind");
@@ -3705,6 +3938,7 @@ let test_untagged_fragments_are_passed_without_a_commit () =
   | Consumer.Nothing_to_read
   | Consumer.Baseline_advanced _
   | Consumer.Progress_advanced _
+  | Consumer.Pending
   | Consumer.Memory_not_committed _ -> fail "the untagged line was not passed"
 ;;
 
@@ -3751,6 +3985,7 @@ let test_an_official_line_older_than_the_baseline_is_read () =
    | Consumer.Nothing_to_read
    | Consumer.Progress_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "the first pass did not set the baseline");
   let carried = ref [] in
   match
@@ -3765,6 +4000,7 @@ let test_an_official_line_older_than_the_baseline_is_read () =
   | Consumer.Nothing_to_read
   | Consumer.Baseline_advanced _
   | Consumer.Progress_advanced _
+  | Consumer.Pending
   | Consumer.Memory_not_committed _ -> fail "the older official line was not read"
 ;;
 
@@ -3821,6 +4057,7 @@ let test_an_official_stop_does_not_hold_the_atom_part () =
        ( Consumer.Nothing_to_read
        | Consumer.Baseline_advanced _
        | Consumer.Official_advanced _
+       | Consumer.Pending
        | Consumer.Memory_not_committed _ ) -> fail "the atom part did not advance"
    | Error error -> fail (Consumer.error_to_string error));
   check (list string) "the settled round reads from atom zero" [ "t1"; "t2" ] !carried;
@@ -3845,6 +4082,7 @@ let check_next_pass_reads_both config ~trace_id =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "the two turns were not read");
   check (list string) "one pass carries both turns" [ "t3"; "t4" ] !carried
 ;;
@@ -3868,6 +4106,7 @@ let test_an_official_stop_does_not_narrow_later_passes () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "the atom part did not advance");
   check_official_stop config ~line:2;
   check_next_pass_reads_both config ~trace_id
@@ -3887,6 +4126,7 @@ let test_a_drained_pass_does_not_narrow_later_passes () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "the atom part did not advance");
   (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
      fail "a drained pass called commit") with
@@ -3894,6 +4134,7 @@ let test_a_drained_pass_does_not_narrow_later_passes () =
    | Consumer.Progress_advanced _
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "the drained pass was not quiet");
   check_next_pass_reads_both config ~trace_id
 ;;
@@ -3956,6 +4197,7 @@ let test_a_refused_boundary_line_is_not_lifted_for_official_turns () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "the atom part did not advance");
   check_official_stop config ~line:2
 ;;
@@ -3985,6 +4227,7 @@ let test_an_official_turn_before_a_refused_boundary_line_is_read () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
+   | Consumer.Pending
    | Consumer.Memory_not_committed _ -> fail "the turn before the refused line was not read");
   check (list string) "the turn before the refused line is carried" [ "q1"; "a1" ] !carried;
   (match !committed_range with
@@ -4420,6 +4663,10 @@ let () =
             (test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports:true)
         ; test_case "unclassified mixed refusal preserves both cursors across restart" `Quick
             (test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports:false)
+        ; test_case "Pending official-only input preserves Memory cursors and external ACK" `Quick
+            (test_pending_official_sources_preserve_memory_and_ack ~mixed:false)
+        ; test_case "Pending mixed input preserves Memory cursors and external ACK" `Quick
+            (test_pending_official_sources_preserve_memory_and_ack ~mixed:true)
         ; test_case "official turns skip an unchanged atom checkpoint" `Quick
             (test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms:true)
         ; test_case "official-only turns skip an unused checkpoint" `Quick
@@ -4482,6 +4729,12 @@ let () =
             test_memory_count_cleanup_continues_without_external_wake
         ; test_case "retained and worsening count excess does not spin" `Quick
             test_memory_count_cleanup_does_not_spin
+        ; test_case "Pending preserves all-unread selection and Memory" `Quick
+            (test_pending_preserves_selection_and_memory ~after_failure:false)
+        ; test_case "Pending preserves the earlier narrow retry marker" `Quick
+            (test_pending_preserves_selection_and_memory ~after_failure:true)
+        ; test_case "Pending suspends the same wake and normal commit reopens phases" `Quick
+            test_pending_wake_suspends_following_phases
         ; test_case "failure stops and a later wake drains successful cuts" `Quick
             test_one_wake_stops_on_failure_then_drains_successful_cuts
         ; test_case "growing source allows following phases" `Quick

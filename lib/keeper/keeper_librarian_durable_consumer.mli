@@ -18,6 +18,10 @@
 
 type commit_result =
   | Memory_committed
+  | Memory_pending
+      (** The selected input remains owned by an unfinished commit. This is
+          neither refusal evidence nor permission to advance or try a smaller
+          input. The callback must not report it after a Memory commit. *)
   | Memory_refused of Keeper_librarian_runtime.not_committed list
       (** All failure reports in callback order. An empty list means the pass
           returned without committing or supplying classified evidence. Neither
@@ -25,6 +29,9 @@ type commit_result =
 
 type outcome =
   | Nothing_to_read
+  | Pending
+      (** No Memory commit, external acknowledgement, or progress advance.
+          Preserves the retry selection mode present when this pass started. *)
   | Baseline_advanced of Keeper_librarian_progress.t
   | Memory_not_committed of Keeper_librarian_runtime.not_committed list
   | Progress_advanced of Keeper_librarian_progress.t
@@ -127,7 +134,10 @@ val consume_one
     unread turn, of whichever kind ends first in the log. A small successful
     cut keeps that mode until the backlog is empty; a successful all-unread
     pass or a baseline also clears the marker. Durable progress remains the
-    authority across process restarts.
+    authority across process restarts. [Memory_pending] returns [Pending]
+    without invoking message-floor inference or changing the pre-existing
+    failure marker. A later read still selects from current sources; this
+    foundation alone does not retain an immutable original across wakes.
 
     [range_id] is the receipt identity of the atoms in the pass, [None] when
     the pass read official lines only: the receipt recovers a Memory commit

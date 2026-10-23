@@ -925,7 +925,7 @@ let durable_reads config ~commit =
   let module Consumer = Masc.Keeper_librarian_durable_consumer in
   match Consumer.consume_one ~config ~keeper_name ~commit with
   | Ok (Consumer.Progress_advanced progress) -> progress.position.end_atom
-  | Ok (Consumer.Nothing_to_read | Consumer.Baseline_advanced _ | Consumer.Memory_not_committed _
+  | Ok (Consumer.Pending | Consumer.Nothing_to_read | Consumer.Baseline_advanced _ | Consumer.Memory_not_committed _
        | Consumer.Official_advanced _) ->
     fail "the durable pass did not move past the turn"
   | Error error -> fail (Consumer.error_to_string error)

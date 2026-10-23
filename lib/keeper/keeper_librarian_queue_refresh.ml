@@ -4,6 +4,7 @@ type pass_end =
   | Drained
   | Yielded_to_waiting_unit
   | Not_committed
+  | Pending
   | Stopped of Keeper_librarian_durable_consumer.error
   | Raised of string
 
@@ -198,6 +199,9 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
       | Ok Keeper_librarian_durable_consumer.Nothing_to_read ->
         clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
         Drained
+      | Ok Keeper_librarian_durable_consumer.Pending ->
+        clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
+        Pending
       | Ok (Memory_not_committed reports) ->
         (match reports with
          | [] -> clear_reported_problem ~config ~keeper_name ~site:Durable_drain
@@ -242,6 +246,7 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
       | Drained
       | Yielded_to_waiting_unit
       | Not_committed
+      | Pending
       | Stopped
           (Keeper_librarian_durable_consumer.
              ( Keeper_meta_unreadable _
@@ -267,7 +272,8 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
       | Raised _ ->
         measure_unread ~config ~keeper_name
     in
-    publish_measurement ~config ~keeper_name ~last_pass ~unread
+    publish_measurement ~config ~keeper_name ~last_pass ~unread;
+    last_pass
   with
   | Eio.Cancel.Cancelled _ as exn ->
     (* Do not run another filesystem read in the cancelled context. Replace
@@ -843,31 +849,39 @@ let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta)
    as a failed unit. *)
 exception Blank_keeper_name
 
-let run_with_readers ~durable ~continuity ~base_path ~keeper_name =
+let after_durable ~durable ~following =
+  match durable () with
+  | Pending -> ()
+  | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+  | Not_committed | Stopped _ | Raised _ -> following ()
+;;
+
+let run_with_readers ~durable ~continuity ~cleanup ~base_path ~keeper_name =
   let keeper_id =
     match Keeper_identity.Keeper_id.of_string keeper_name with
     | Some keeper_id -> keeper_id
     | None -> raise Blank_keeper_name
   in
-  durable ();
-  continuity ();
-  match Env_config.KeeperMemoryOs.librarian_config_state (),
-        Keeper_owner_projection.lookup ~base_path ~keeper_name with
-  | Enabled, Owner_projection {meta = Some meta; stopping = false} ->
-    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-    let working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
-      Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
-    if context_pass_needed ~keepers_dir ~keeper_name working_context then (
-      let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
-          ~working_context in
-      Keeper_librarian_runtime.run_best_effort
-        ~write_scope:Keeper_librarian_runtime.Context_only
-        ~on_context_committed:(remember_context_pass ~keepers_dir ~keeper_name working_context)
-        ~base_path ~keepers_dir ~keeper_id:keeper_name
-        ~expected_revision:None inp)
-  | (Disabled | Invalid), _
-  | Enabled, (Owner_absent | Owner_projection {meta = None; _}
-             | Owner_projection {stopping = true; _}) -> ()
+  after_durable ~durable ~following:(fun () ->
+    continuity ();
+    (match Env_config.KeeperMemoryOs.librarian_config_state (),
+          Keeper_owner_projection.lookup ~base_path ~keeper_name with
+    | Enabled, Owner_projection {meta = Some meta; stopping = false} ->
+      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+      let working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+        Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
+      if context_pass_needed ~keepers_dir ~keeper_name working_context then (
+        let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
+            ~working_context in
+        Keeper_librarian_runtime.run_best_effort
+          ~write_scope:Keeper_librarian_runtime.Context_only
+          ~on_context_committed:(remember_context_pass ~keepers_dir ~keeper_name working_context)
+          ~base_path ~keepers_dir ~keeper_id:keeper_name
+          ~expected_revision:None inp)
+    | (Disabled | Invalid), _
+    | Enabled, (Owner_absent | Owner_projection {meta = None; _}
+               | Owner_projection {stopping = true; _}) -> ());
+    cleanup ())
 
 let run_memory_cleanup ~base_path ~keeper_name =
   let config = Workspace.default_config base_path in
@@ -925,8 +939,8 @@ let run ~base_path ~keeper_name =
   run_with_readers
     ~durable:(fun () -> run_durable ~base_path ~keeper_name)
     ~continuity:(fun () -> run_continuity ~base_path ~keeper_name ())
-    ~base_path ~keeper_name;
-  run_memory_cleanup ~base_path ~keeper_name
+    ~cleanup:(fun () -> run_memory_cleanup ~base_path ~keeper_name)
+    ~base_path ~keeper_name
 ;;
 
 let install () =
@@ -946,9 +960,11 @@ let submit_durable ~base_path ~keeper_name =
   let (_ : Keeper_memory_lane.outcome) =
     Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
       run_explicit_admission ~base_path ~keeper_name;
-      run_durable ~base_path ~keeper_name;
-      run_continuity ~base_path ~keeper_name ();
-      run_memory_cleanup ~base_path ~keeper_name)
+      after_durable
+        ~durable:(fun () -> run_durable ~base_path ~keeper_name)
+        ~following:(fun () ->
+          run_continuity ~base_path ~keeper_name ();
+          run_memory_cleanup ~base_path ~keeper_name))
   in
   ()
 ;;

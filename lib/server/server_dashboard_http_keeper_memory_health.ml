@@ -326,6 +326,7 @@ let librarian_state_to_string = function
   | Lane_unconfigured -> "lane_unconfigured"
   | Drained -> "drained"
   | Yielded_to_waiting_unit -> "yielded_to_waiting_unit"
+  | Pending -> "pending"
   | Not_committed -> "not_committed"
   | Stopped _ -> "stopped"
   | Raised _ -> "raised"
@@ -335,7 +336,7 @@ let librarian_state_detail = function
   | Keeper_librarian_queue_refresh.Stopped error ->
     Some (Keeper_librarian_durable_consumer.error_to_string error)
   | Raised detail -> Some detail
-  | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Not_committed -> None
+  | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Pending | Not_committed -> None
 ;;
 
 (* Labels mirror the counter increments in [Keeper_librarian_runtime] and the
@@ -575,7 +576,7 @@ let alerts (h : keeper_health) =
      Librarian is off. Off is not an alert. *)
   let stopped_alert =
     match h.librarian.state with
-    | None | Some (Keeper_librarian_queue_refresh.Off | Drained | Yielded_to_waiting_unit) -> []
+    | None | Some (Keeper_librarian_queue_refresh.Off | Drained | Yielded_to_waiting_unit | Pending) -> []
     | Some ((Lane_unconfigured | Not_committed | Stopped _ | Raised _) as state) ->
       let behind =
         match h.librarian.unread_atom_turns, h.librarian.unread_official_turns with
@@ -868,7 +869,7 @@ let keeper_memory_health_http_json ~base_path =
                 (sum (fun entry ->
                    match entry.librarian.state with
                    | Some (Lane_unconfigured | Not_committed | Stopped _ | Raised _) -> 1
-                   | Some (Off | Drained | Yielded_to_waiting_unit) | None -> 0)) )
+                   | Some (Off | Drained | Yielded_to_waiting_unit | Pending) | None -> 0)) )
           ; ( "librarian_starving_keepers"
             , `Int
                 (sum (fun entry ->

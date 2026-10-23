@@ -567,9 +567,9 @@ let test_purge_bracket_excludes_late_wakes () =
       Eio.Promise.resolve start ();
       try Eio.Promise.await never with Eio.Cancel.Cancelled _ as exn ->
         cancelled := true;
-        Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+        ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
           ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
-            Alcotest.fail "disabled observer reached model");
+            Alcotest.fail "disabled observer reached model"));
         raise exn));
     Eio.Promise.await started;
     (match Domain.join (Domain.spawn (fun () ->
@@ -717,9 +717,9 @@ let test_durable_drain_publishes_scoped_health () =
       ignore (Masc.Workspace.init config ~agent_name:None);
       Config_dir_resolver.reset ();
       let keeper_name = "health-observed" in
-      let run () = Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+      let run () = ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
         ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
-          Alcotest.fail "empty history must not call the model") in
+          Alcotest.fail "empty history must not call the model")) in
       let observed () =
         match Queue_refresh.last_measurement ~config ~keeper_name with
         | Some value -> value

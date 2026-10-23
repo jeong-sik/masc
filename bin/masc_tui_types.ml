@@ -5493,6 +5493,7 @@ let memory_state (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
            | Masc.Tui_decode_memory_health.Pass_lane_unconfigured
            | Masc.Tui_decode_memory_health.Pass_drained
            | Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit
+           | Masc.Tui_decode_memory_health.Pass_pending
            | Masc.Tui_decode_memory_health.Pass_not_committed)
     | None -> false in
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error

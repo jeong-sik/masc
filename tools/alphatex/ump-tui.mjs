@@ -34,7 +34,7 @@ export async function viewUmpEditor({ asset, packets, signal, onPreview, onExpor
       ':shift-time SIGNED_TICKS moves the selected event; :duration-ticks OFF_ID TICKS sets the explicit release',
       ':at-seconds S / :shift-seconds S edit decimal seconds; :note-seconds OFF_ID START_S END_S edits a pair',
       ':duration-seconds OFF_ID S sets length; seconds round to nearest native tick, half ties away from zero',
-      'Seconds use the fixed recorded-source zero; :clock shows exact selected host ticks and original time',
+      'Seconds use this asset’s fixed original source zero; * marks authored time; :clock shows exact ticks',
       ':reset-time restores selected original time; ticks are exact UInt64; controls and WAV do not follow notes',
       'Sources containing JR/delta-clock utility messages need an embedded-clock editor before time changes.',
       'Per-note registered/assignable controllers, pitch bend and poly pressure keep their original note addresses.',
@@ -58,7 +58,7 @@ export async function viewUmpEditor({ asset, packets, signal, onPreview, onExpor
   async function command(line) {
     const result = umpEditorCommand(editor, line); editor = result.editor
     if (result.harmony) status = `${result.harmony.kind}: ${result.harmony.candidates.join(', ') || 'no 12-TET chord label'}`
-    else if (result.clock) status = `host:${result.clock.hostTime} recorded:${result.clock.originalHostTime} zero:${result.clock.sourceOrigin}`
+    else if (result.clock) status = `host:${result.clock.hostTime} original:${result.clock.originalHostTime} zero:${result.clock.sourceOrigin}`
     else status = 'Edited'
     if (result.effect?.kind === 'help') showHelp = !showHelp
     if (result.effect?.kind === 'play') {

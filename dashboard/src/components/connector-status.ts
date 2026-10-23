@@ -1,3 +1,4 @@
+import { isImeComposing } from '../lib/keyboard'
 // Connector Status — Channel Gate per-channel diagnostics panel.
 // Keeper-first layout: each directory keeper is a primary section; bindings nest under.
 
@@ -1994,7 +1995,7 @@ function ConnectorDetailDrawer({
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (!e.defaultPrevented && !isImeComposing(e) && e.key === 'Escape') {
         e.stopPropagation()
         onClose()
       }

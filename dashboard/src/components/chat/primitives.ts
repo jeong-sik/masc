@@ -995,7 +995,7 @@ function ChatPreviewModal({
 }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (!e.defaultPrevented && !isImeComposing(e) && e.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)

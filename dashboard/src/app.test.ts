@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
-import { waitFor } from '@testing-library/preact'
+import { act, fireEvent, waitFor } from '@testing-library/preact'
 import {
   App,
   shouldBootstrapCommandPaletteShortcut,
@@ -14,6 +14,7 @@ import { route } from './router'
 import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution } from './store'
 import { activeKeeperName } from './keeper-state'
 import type { Keeper } from './types'
+import { commandPaletteRequested } from './components/common/command-palette-state'
 
 describe('App v2 header chrome', () => {
   let container: HTMLDivElement
@@ -48,6 +49,26 @@ describe('App v2 header chrome', () => {
   function renderApp() {
     render(h(App, {}), container)
   }
+
+  it('does not bootstrap the palette for IME, handled, or extra-modifier keydowns', async () => {
+    commandPaletteRequested.value = false
+    await act(async () => { renderApp() })
+    try {
+      const input = document.createElement('input')
+      container.appendChild(input)
+      const mod = navigator.platform.toLowerCase().includes('mac') ? { metaKey: true } : { ctrlKey: true }
+      for (const flags of [{ isComposing: true }, { keyCode: 229 }, { shiftKey: true }, { metaKey: true, ctrlKey: true }, { defaultPrevented: true }]) {
+        const event = new KeyboardEvent('keydown', { key: 'k', ...mod, ...flags, bubbles: true, cancelable: true })
+        if ('defaultPrevented' in flags) event.preventDefault()
+        fireEvent(input, event)
+        expect(commandPaletteRequested.value).toBe(false)
+      }
+      fireEvent.keyDown(input, { key: 'k', ...mod })
+      expect(commandPaletteRequested.value).toBe(true)
+    } finally {
+      await act(async () => { render(null, container); commandPaletteRequested.value = false })
+    }
+  })
 
   it('renders v2 app shell wrapper with tweak attributes (v2 dark default, no data-theme)', () => {
     renderApp()

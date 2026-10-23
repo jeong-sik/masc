@@ -17,6 +17,7 @@ import { executionLoaded, keepers, refreshExecution } from '../store'
 import { compositeTick } from '../composite-signals'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
 import { useGlobalShortcut } from '../lib/use-global-shortcut'
+import { isImeComposing } from '../lib/keyboard'
 import { EmptyState } from './common/feedback-state'
 import { Kbd } from './common/kbd'
 
@@ -527,6 +528,7 @@ export function FsmHub(props: FsmHubProps = {}) {
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
         if (target.isContentEditable) return
       }
+      if (ev.defaultPrevented || isImeComposing(ev)) return
       if (ev.key === '?') {
         ev.preventDefault()
         setShortcutsOpen(o => !o)

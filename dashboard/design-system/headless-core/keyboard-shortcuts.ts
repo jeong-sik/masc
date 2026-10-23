@@ -97,17 +97,18 @@ function modKeyForPlatform(platform: Platform): 'meta' | 'ctrl' {
   return platform === 'mac' ? 'meta' : 'ctrl'
 }
 
-function keyMatches(chordKey: string, event: ShortcutKeyEvent): boolean {
+function keyMatches(chordKey: string, event: Pick<ShortcutKeyEvent, 'key' | 'code'>): boolean {
   if (/^[0-9]$/.test(chordKey) && event.code !== undefined) {
     return event.code === `Digit${chordKey}`
   }
   return chordKey.toLowerCase() === event.key.toLowerCase()
 }
 
-function chordMatches(
+/** Shared matching for both lazy bootstrap listeners and registered shortcuts. */
+export function matchesShortcutChord(
   chord: Chord,
-  event: ShortcutKeyEvent,
-  platform: Platform,
+  event: Pick<ShortcutKeyEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
+  platform: Platform = detectPlatform(),
 ): boolean {
   if (!keyMatches(chord.key, event)) return false
   const wantsMod = chord.modifiers.includes('Mod')
@@ -115,29 +116,12 @@ function chordMatches(
   const wantsAlt = chord.modifiers.includes('Alt')
   const wantsCtrl = chord.modifiers.includes('Ctrl')
 
-  // Mod resolution: on mac wants metaKey; elsewhere wants ctrlKey.
-  if (wantsMod) {
-    const modKey = modKeyForPlatform(platform)
-    const has = modKey === 'meta' ? event.metaKey === true : event.ctrlKey === true
-    if (!has) return false
-  }
-  // Mod-only chords don't ALSO require Ctrl on win/linux (Mod IS Ctrl
-  // there). But chords that explicitly want Ctrl on mac must check it.
-  if (wantsCtrl && !wantsMod) {
-    if (event.ctrlKey !== true) return false
-  }
+  const wantsMeta = wantsMod && modKeyForPlatform(platform) === 'meta'
+  const wantsControl = wantsCtrl || (wantsMod && modKeyForPlatform(platform) === 'ctrl')
+  if (wantsMeta !== (event.metaKey === true)) return false
+  if (wantsControl !== (event.ctrlKey === true)) return false
   if (wantsShift !== (event.shiftKey === true)) return false
   if (wantsAlt !== (event.altKey === true)) return false
-
-  // Reject extra modifiers that the chord didn't ask for, EXCEPT for
-  // ctrlKey when Mod is wanted on mac (where Mod IS metaKey, ctrlKey
-  // happening to be true alongside is still rejected — RFC 0012 §5
-  // exact match policy).
-  if (!wantsMod && !wantsCtrl) {
-    const modKey = modKeyForPlatform(platform)
-    if (modKey === 'meta' && event.metaKey === true) return false
-    if (modKey === 'ctrl' && event.ctrlKey === true) return false
-  }
 
   return true
 }
@@ -277,7 +261,7 @@ export function createKeyboardShortcutManager(
       // first, last-registered as final tie-break.
       const candidates: ShortcutDescriptor[] = []
       for (const s of registry.values()) {
-        if (!chordMatches(s.chord, event, platform)) continue
+        if (!matchesShortcutChord(s.chord, event, platform)) continue
         if (inInput && s.preserveInInputs !== true) continue
         if (!isInScope(s.scope, event.target)) continue
         if (s.when && !s.when(event)) continue

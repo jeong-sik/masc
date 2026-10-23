@@ -43,6 +43,7 @@ import { isPrimaryDashboardSurface } from './config/navigation'
 import { gateData } from './components/gate-signals'
 import type { TabId } from './types'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
+import { matchesShortcutChord } from '../design-system/headless-core/keyboard-shortcuts'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
 import { useKeeperPinShortcuts } from './components/ide/use-keeper-pin-shortcuts'
 import { useIsMobile } from './hooks/use-is-mobile'
@@ -109,13 +110,15 @@ const LazyCommandPalette = lazy(async () => ({
 }))
 
 export function shouldBootstrapCommandPaletteShortcut(
-  event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey'>,
+  event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey'>
+    & Partial<Pick<KeyboardEvent, 'shiftKey' | 'defaultPrevented' | 'isComposing' | 'keyCode'>>,
   mounted: boolean,
 ): boolean {
   return !mounted
-    && !event.altKey
-    && (event.ctrlKey || event.metaKey)
-    && event.key.toLowerCase() === 'k'
+    && !event.defaultPrevented
+    && !event.isComposing
+    && event.keyCode !== 229
+    && matchesShortcutChord({ key: 'k', modifiers: ['Mod'] }, event)
 }
 
 function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {

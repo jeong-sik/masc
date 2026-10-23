@@ -1,3 +1,4 @@
+import { isImeComposing } from '../../lib/keyboard'
 // Confirm one durable purge operation; the server owns lane shutdown and cleanup.
 
 import { html } from 'htm/preact'
@@ -28,7 +29,7 @@ export function RegistryDeregister({ keeper, state, onClose }: RegistryDeregiste
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (!e.defaultPrevented && !isImeComposing(e) && e.key === 'Escape') {
         e.stopPropagation()
         onClose()
       }

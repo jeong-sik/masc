@@ -94,6 +94,29 @@ describe('createKeyboardShortcutManager — register / unregister', () => {
 })
 
 describe('createKeyboardShortcutManager — chord matching (mac platform)', () => {
+  it.each([
+    { platform: 'mac' as const, modifiers: ['Mod'] as const, key: 'k', metaKey: true, ctrlKey: true },
+    { platform: 'linux' as const, modifiers: ['Mod'] as const, key: 'k', metaKey: true, ctrlKey: true },
+    { platform: 'mac' as const, modifiers: [] as const, key: 'F11', ctrlKey: true },
+    { platform: 'linux' as const, modifiers: [] as const, key: 'F11', metaKey: true },
+  ])('does not dispatch an extra modifier combination (%o)', ({ platform, modifiers, key, ...keys }) => {
+    const manager = createKeyboardShortcutManager({ platform })
+    const action = vi.fn()
+    manager.register({ id: 'exact-chord', chord: { key, modifiers }, description: '', scope: 'global', action })
+    expect(manager.dispatch(makeEvent({ key, ...keys }))).toBe(false)
+    expect(action).not.toHaveBeenCalled()
+  })
+
+  it('requires an explicitly declared Ctrl alongside Mod on mac', () => {
+    const manager = createKeyboardShortcutManager({ platform: 'mac' })
+    const action = vi.fn()
+    manager.register({ id: 'both', chord: { key: 'k', modifiers: ['Mod', 'Ctrl'] }, description: '', scope: 'global', action })
+    expect(manager.dispatch(makeEvent({ key: 'k', metaKey: true }))).toBe(false)
+    expect(action).not.toHaveBeenCalled()
+    expect(manager.dispatch(makeEvent({ key: 'k', metaKey: true, ctrlKey: true }))).toBe(true)
+    expect(action).toHaveBeenCalledTimes(1)
+  })
+
   it('Meta+B matches Mod+B chord', () => {
     const m = createKeyboardShortcutManager({ platform: 'mac' })
     const action = vi.fn()

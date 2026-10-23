@@ -71,6 +71,21 @@ describe('DialogOverlay behavior', () => {
     expect(panel.classList.contains('panel')).toBe(true)
   })
 
+  it.each([{ isComposing: true }, { keyCode: 229 }, { consumed: true }])('preserves the dialog when Escape belongs to the input (%o)', async (flags) => {
+    const onClose = vi.fn()
+    render(html`<${DialogOverlay} labelledBy="owned-escape" onClose=${onClose}>
+      <input aria-label="Draft" />
+    <//>`, container)
+    await flushUi()
+    const input = container.querySelector('input')!
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...flags })
+    if ('consumed' in flags) event.preventDefault()
+    input.dispatchEvent(event)
+    expect(onClose).not.toHaveBeenCalled()
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('Escape key invokes onClose', async () => {
     const onClose = vi.fn()
     render(

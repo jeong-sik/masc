@@ -1,3 +1,4 @@
+import { isImeComposing } from '../../lib/keyboard'
 // MASC v2 — Registry surface (design: registry.jsx RegistrySurface).
 // Rebuilt onto the design's `.reg-*`/`.rk-*`/`.rp-*` vocabulary so the vendored
 // keeper-v2/registry.css skin has markup to land on.
@@ -124,7 +125,7 @@ export function RegistrySurface() {
     if (!menu) return
     const close = () => setMenu(null)
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenu(null)
+      if (!event.defaultPrevented && !isImeComposing(event) && event.key === 'Escape') setMenu(null)
     }
     window.addEventListener('click', close)
     window.addEventListener('keydown', onKey)

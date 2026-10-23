@@ -947,6 +947,21 @@ describe('RuntimeTomlEditor', () => {
     })
   })
 
+  it.each([{ isComposing: true }, { keyCode: 229 }, { consumed: true }])('does not save a draft for an owned shortcut (%o)', async (flags) => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement | null)?.value).toBe(baseConfig.source_text))
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    const nextSource = `${baseConfig.source_text}# composing\n`
+    fireEvent.input(textarea, { target: { value: nextSource } })
+    const event = new KeyboardEvent('keydown', { key: 's', metaKey: true, bubbles: true, cancelable: true, ...flags })
+    if ('consumed' in flags) event.preventDefault()
+    await act(async () => { fireEvent(textarea, event) })
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    expect(textarea.value).toBe(nextSource)
+    fireEvent.keyDown(textarea, { key: 's', metaKey: true })
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledExactlyOnceWith(nextSource, baseConfig.source_revision, expect.objectContaining({ beforeDispatch: expect.any(Function), expectedSourcePath: baseConfig.path })))
+  })
+
   it('saves from the editor keyboard shortcut', async () => {
     render(html`<${RuntimeTomlEditor} />`, container)
 
@@ -973,6 +988,10 @@ describe('RuntimeTomlEditor', () => {
 
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement
     textarea.setSelectionRange('[runtime]\n'.length, '[runtime]\n'.length)
+    for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+      fireEvent.keyDown(textarea, { key: 'Tab', ...composition })
+      expect(textarea.value).toBe(baseConfig.source_text)
+    }
     fireEvent.keyDown(textarea, { key: 'Tab' })
 
     await waitFor(() => {

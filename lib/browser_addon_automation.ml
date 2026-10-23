@@ -73,6 +73,10 @@ let run ~env ~owner ~directory work =
   let locate=match Browser_addon_locate.for_owner owner with
     | Ok locate -> locate | Error detail -> invalid_arg detail in
   let clean=ref true and uncertain=ref false in
+  (* Session authority lost while serving is never regained: the worker ends,
+     so its group ends and the host sweep reaches any browser it left. *)
+  let lost,lost_u=Eio.Promise.create () in
+  let lose () = uncertain:=true;ignore (Eio.Promise.try_resolve lost_u ()) in
   let ready_p,ready_u=Eio.Promise.create () in
   let stopping,stop=Eio.Promise.create () in
   let stopped,settle=Eio.Promise.create () in
@@ -95,14 +99,19 @@ let run ~env ~owner ~directory work =
            receipt cannot be rewritten into a clean [close None]. *)
         let was_uncertain = !uncertain in
         if creating then (clean:=false;uncertain:=true);
+        (* A creation that ends without a session id, including one a command
+           timeout cancelled, may have left a browser this worker cannot
+           address. *)
         match request ~pool ~clock ~endpoint ~method_ ~path ~body with
+        | exception exn -> if creating then lose ();raise exn
         | Ok value ->
           if creating then (match value with
             | `Assoc fields when (match List.assoc_opt "sessionId" fields with Some (`String id) -> id<>"" | None|Some _ -> false) -> uncertain:=was_uncertain
-            | _ -> ());
+            | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> lose ());
           Ok value
-        | Error ((Browser_webdriver.Remote {code=Invalid_session_id;_}) as error) -> uncertain:=true;Error error
-        | Error ((Transport _|Protocol _|Remote {code=No_such_window|No_such_alert|Unexpected_alert_open|Other _;_}) as error) -> Error error in
+        | Error ((Browser_webdriver.Remote {code=Invalid_session_id;_}) as error) -> lose ();Error error
+        | Error ((Transport _|Protocol _|Remote {code=No_such_window|No_such_alert|Unexpected_alert_open|Other _;_}) as error) ->
+          if creating then lose ();Error error in
       let profiles={Browser_webdriver.fresh=(fun () -> Eio_unix.run_in_systhread (fun () ->
           Browser_gecko_profile.create ~instance:configuration.profiles));
         (* A session ended by cancellation, such as a command timeout, still
@@ -127,7 +136,7 @@ let run ~env ~owner ~directory work =
         | Error detail -> Printf.eprintf "browser session cleanup unconfirmed: %s\n%!" detail);
       ready ~clock ~pool ~endpoint ~process;
       let execute verb = if !uncertain then
-          Browser_lane.Rejected_before_effect "owned browser session authority is unknown; detach and inspect cleanup"
+          Browser_lane.Rejected_before_effect "owned browser session authority was lost; this worker is ending"
         else Browser_webdriver.execute driver verb in
       let cleanup () =
         ignore (Eio.Promise.try_resolve stop ());
@@ -174,5 +183,8 @@ let run ~env ~owner ~directory work =
            Browser_addon_owner.revoke owner;
            ignore (Eio.Promise.try_resolve stop ());
            ignore (Eio.Promise.await stopped));
-         work ())))
+         Eio.Fiber.first work (fun () ->
+           Eio.Promise.await lost;
+           Browser_addon_owner.revoke owner;
+           raise (Sys_error "owned Gecko session authority was lost; this worker ends so the host replaces it")))))
 

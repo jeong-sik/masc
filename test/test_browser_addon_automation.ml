@@ -9,7 +9,7 @@ let lease result=ok (Result.map_error Native_addon_lease.error_to_string result)
 (* An actual external HTTP driver process, with no personal browser/profile.
    This proves backend lifecycle wiring, not Firefox behavior. *)
 let driver = {|#!/usr/bin/env python3
-import argparse,base64,fcntl,hashlib,http.server,json,os,pathlib,struct
+import argparse,base64,fcntl,hashlib,http.server,json,os,pathlib,struct,time
 p=argparse.ArgumentParser()
 p.add_argument("--host");p.add_argument("--port",type=int)
 p.add_argument("--websocket-port")
@@ -67,6 +67,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         fcntl.lockf(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         held["lock"]=lock
         with (root/"profiles-seen").open("a") as output:output.write(profile+"\n")
+        # A creation answer without a session id, after the browser started.
+        if (root/"no-session-id").exists():return self.send_json({"capabilities":{}})
+        # A creation that answers after the command's deadline.
+        if (root/"slow-session").exists():time.sleep(30)
         reported="/elsewhere/profile" if (root/"wrong-profile").exists() else profile
         self.send_json({"sessionId":"owned","capabilities":{"moz:profile":reported,
             "webSocketUrl":f"ws://{a.host}:{a.port}/session/owned"}})
@@ -83,14 +87,16 @@ let seen_profiles driver_root =
   match In_channel.with_open_bin (Filename.concat driver_root "profiles-seen") In_channel.input_all with
   | text -> String.split_on_char '\n' text |> List.filter (fun line -> line<>"")
   | exception Sys_error _ -> []
-let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false) () = Eio_main.run (fun env ->
-  Time_compat.set_clock (Eio.Stdenv.clock env);
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+(* One instance allocation around the scripted driver. Each marker is a file
+   the driver reads when it answers. *)
+type instance = { slot : string; driver_root : string; profile_root : string; profiles : string;
+  instance_id : string; admission : Native_addon_lease.t; directory : string }
+let instance ~markers =
   let slot=Filename.temp_dir "browser-owned-slot-" "" in
   let driver_root=Filename.temp_dir "browser-owned-driver-" "" in
   let executable=Filename.concat driver_root "geckodriver.py" in
   Out_channel.with_open_bin executable (fun out -> output_string out driver);Unix.chmod executable 0o700;
-  if wrong_profile then Out_channel.with_open_bin (Filename.concat driver_root "wrong-profile") (fun _ -> ());
+  List.iter (fun marker -> Out_channel.with_open_bin (Filename.concat driver_root marker) (fun _ -> ())) markers;
   let instance_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
   let profile_root=Filename.temp_dir "browser-owned-profiles-" "" in
   let profiles=ok (Browser_gecko_profile.prepare_instance ~root:profile_root ~instance_id) in
@@ -98,8 +104,12 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false)
     ~automation:(Some {Masc.Browser_addon_automation.driver=executable;binary=None;profiles})) in
   let admission=lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
   let resource=ok (Socket.acquire ~admission ~directory:slot) in
-  let directory=Filename.dirname (Socket.socket_path resource) in
-  if refuse_delete then Out_channel.with_open_bin (Filename.concat driver_root "refuse-delete") (fun _ -> ());
+  {slot;driver_root;profile_root;profiles;instance_id;admission;directory=Filename.dirname (Socket.socket_path resource)}
+let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false) () = Eio_main.run (fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let {slot;driver_root;profile_root;profiles;instance_id;admission;directory}=instance
+    ~markers:((if wrong_profile then ["wrong-profile"] else []) @ (if refuse_delete then ["refuse-delete"] else [])) in
   Eio.Switch.run (fun sw ->
     let owner=ok (Owner.create ~incarnation:instance_id) in
     let work () =
@@ -161,6 +171,44 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false)
      | Allocation_retained -> Alcotest.fail "the allocation was retained, not released");
     check bool "original allocation released" false (Sys.file_exists directory));
   List.iter Fs_compat.remove_tree [slot;driver_root;profile_root])
+(* The worker of #45187 kept serving after its creation answer carried no
+   session id. A worker that still serves returns from [work] after this many
+   seconds, which fails the case instead of hanging it. *)
+let still_serving_seconds = 10.
+(* The command deadline a slow creation answer misses. *)
+let creation_deadline_seconds = 1.
+let lost_authority ~marker () = Eio_main.run (fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let {slot;driver_root;profile_root;profiles=_;instance_id;admission;directory}=instance ~markers:[marker] in
+  let owner=ok (Owner.create ~incarnation:instance_id) in
+  let work () =
+    ignore (Owner.dispatch owner {W.incarnation=instance_id;command=W.Issue {route=B.Automation_route;
+      verb=B.Session_open {headless=Some true};actor=Some "fixture";timeout_sec=creation_deadline_seconds;
+      only_if_idle=false}});
+    Eio.Time.sleep (Eio.Stdenv.clock env) still_serving_seconds in
+  (match Masc.Browser_addon_automation.run ~env ~owner ~directory work with
+   | () -> fail "the worker kept serving after it lost its session authority"
+   | exception Sys_error _ -> ());
+  check bool "the worker retired admission before it ended" true (Owner.is_retired owner);
+  let profile=match seen_profiles driver_root with
+    | [profile] -> profile
+    | [] | _ :: _ :: _ -> fail "the driver did not receive exactly one session profile" in
+  check bool "the browser still held the profile, so the worker left it" true (Sys.file_exists profile);
+  lease (Native_addon_lease.retire admission);
+  (match ok (Socket.cleanup ~admission ~directory:slot) with
+   | Socket.Allocation_released -> ()
+   | Allocation_retained -> fail "the allocation was retained, not released");
+  let outcomes=Masc.Browser_gecko_sweep.(pass (create ~termination_grace_seconds)
+    (plan ~root:profile_root ~sweepable:(fun _ -> true))) in
+  check bool "the host pass removes the profile the ended worker left" true
+    (List.exists (function Masc.Browser_gecko_sweep.Removed path -> String.equal path profile
+       | Terminated _ | Killed _ | Kept _ -> false) outcomes && not (Sys.file_exists profile));
+  List.iter Fs_compat.remove_tree [slot;driver_root;profile_root])
+let lost_authority_child flag () =
+  let pid=Unix.create_process Sys.executable_name [|Sys.executable_name;flag|] Unix.stdin Unix.stdout Unix.stderr in
+  check bool "a worker that lost its session authority ends and leaves its profile to the host" true
+    (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
 let open_bidi_child () =
   let pid=Unix.create_process Sys.executable_name [|Sys.executable_name;"--open-bidi"|] Unix.stdin Unix.stdout Unix.stderr in
   check bool "open BiDi reader settles before original switch join" true (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
@@ -180,6 +228,14 @@ let () =
     run ~argv:[|Sys.executable_name|] "browser session on another profile" ["backend",[
       test_case "a session reporting another moz:profile is refused" `Quick
         (scenario ~open_session:true ~wrong_profile:true)]]
+  else if Array.to_list Sys.argv=[Sys.executable_name;"--no-session-id"] then
+    run ~argv:[|Sys.executable_name|] "browser lost session authority" ["backend",[
+      test_case "a creation answer without a session id ends the worker" `Quick
+        (lost_authority ~marker:"no-session-id")]]
+  else if Array.to_list Sys.argv=[Sys.executable_name;"--slow-session"] then
+    run ~argv:[|Sys.executable_name|] "browser interrupted session creation" ["backend",[
+      test_case "a creation the command deadline interrupts ends the worker" `Quick
+        (lost_authority ~marker:"slow-session")]]
   else if Array.to_list Sys.argv=[Sys.executable_name;"--refused-close"] then
     run ~argv:[|Sys.executable_name|] "browser refused DELETE retirement" ["backend",[
       test_case "rejected DELETE leaves cleanup unconfirmed after reader cancellation" `Quick
@@ -188,4 +244,7 @@ let () =
     test_case "owned driver readiness, command and retirement" `Quick (fun () -> scenario ());
     test_case "open BiDi reader joins retirement" `Quick open_bidi_child;
     test_case "a session on another profile is refused" `Quick wrong_profile_child;
-    test_case "rejected DELETE still joins the original BiDi reader" `Quick refused_close_child]]
+    test_case "rejected DELETE still joins the original BiDi reader" `Quick refused_close_child;
+    test_case "a creation answer without a session id ends the worker" `Quick
+      (lost_authority_child "--no-session-id");
+    test_case "an interrupted creation ends the worker" `Quick (lost_authority_child "--slow-session")]]

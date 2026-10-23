@@ -197,8 +197,11 @@ receipts remain distinct from successful contract validation.
    revoked, the session is closed through an independent HTTP pool, and the
    exact driver child is reaped. Retirement waits for this completion rather than the quick
    control timeout or the native worker's short abort grace. Stdin EOF and
-   termination signals also join backend cleanup. Interrupted session creation
-   and lost session authority remain sticky; later success cannot erase them.
+   termination signals also join backend cleanup. A session creation that ends
+   without a session id, including one a command timeout interrupted, and a
+   driver that no longer knows the session end the worker: it retires
+   admission and raises, so the runtime replaces it and the host's Gecko
+   profile pass reaches any browser it left.
    The host additionally requires native group settlement, the original
    allocation inode, its unchanged spec and empty download directory trees. It
    removes only known regular files, the socket and empty directories. Changed

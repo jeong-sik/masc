@@ -41,7 +41,10 @@
 ; exhausts the free disk space with test executables. The CI lane selects
 ; this profile via DUNE_PROFILE=ci in scripts/ci-run-test-suite.sh so only
 ; the CI build strips debug symbols; local dev and release builds keep them
-; for backtraces.
+; for backtraces. -no-g alone barely shrinks the executable (-0.01%);
+; linking with -ccopt -s strips C linker symbols and DWARF, which is where
+; most of the size lives, while OCaml backtrace frames stay intact (leader
+; measurement on OCaml 5.5.1: 3.1MB toy exe, -58%).
 (env
  (dev
   (flags
@@ -52,8 +55,8 @@
  (ci
   (flags
    (:standard -w +4+32+69 -warn-error +a))
-  (ocamlopt_flags
-   (:standard -no-g))))
+  (link_flags
+   (:standard -ccopt -s))))
 
 ; Vendored packages are local copies of external sources. Keep the repository's
 ; strict warning policy for MASC code, but do not turn vendor warnings 4 and 69 into a

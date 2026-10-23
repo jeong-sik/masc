@@ -361,29 +361,34 @@ let test_total_timeout_reports_progress_snapshot () =
   | Ok (_, _) ->
     Alcotest.fail "expected total timeout, got Ok"
 
-let test_close_unreleased_client_closes_once () =
-  Eio_main.run @@ fun _env ->
-  let released = ref false in
-  let calls = ref [] in
-  Masc_http_client.Pool.For_testing.close_unreleased_client released (fun ~close_only ->
-    calls := close_only :: !calls;
-    released := true);
-  Masc_http_client.Pool.For_testing.close_unreleased_client released (fun ~close_only ->
-    calls := close_only :: !calls;
-    released := true);
-  Alcotest.(check (list bool)) "close_only called once" [ true ] (List.rev !calls)
+module Lease = Masc_http_client.Pool_client_lease
 
-let test_close_unreleased_client_swallows_release_error () =
+exception Request_failed
+
+let test_repeated_release_does_not_close_a_parked_client () =
   Eio_main.run @@ fun _env ->
-  let released = ref false in
-  let calls = ref 0 in
-  Masc_http_client.Pool.For_testing.close_unreleased_client released (fun ~close_only ->
-    Alcotest.(check bool) "finalizer forces close_only" true close_only;
-    incr calls;
-    released := true;
-    failwith "synthetic release failure");
-  Alcotest.(check int) "release attempted once" 1 !calls;
-  Alcotest.(check bool) "marked released before failing" true !released
+  let parked = ref 0 and closed = ref 0 and releases = ref 0 in
+  Lease.with_client
+    ~release:(fun lease ~close_only ->
+      incr releases;
+      if close_only then Lease.close lease ~signal:(fun () -> incr closed)
+      else Lease.park lease ~publish:(fun () -> incr parked))
+    ~close:(fun () -> incr closed)
+    (fun ~release -> release ~close_only:false; release ~close_only:false);
+  Alcotest.(check int) "one real release" 1 !releases;
+  Alcotest.(check int) "client is in idle queue" 1 !parked;
+  Alcotest.(check int) "request never closes idle queue's client" 0 !closed
+
+let test_close_failure_preserves_request_failure () =
+  Eio_main.run @@ fun _env ->
+  let attempts = ref 0 in
+  (try
+     Lease.with_client
+       ~release:(fun _ ~close_only:_ -> Alcotest.fail "request never released")
+       ~close:(fun () -> incr attempts; failwith "synthetic close failure")
+       (fun ~release:_ -> raise Request_failed)
+   with Request_failed -> ());
+  Alcotest.(check int) "close signal attempted" 1 !attempts
 
 let test_request_timeout_bounds_never_returning_transport () =
   Eio_main.run @@ fun env ->
@@ -533,10 +538,10 @@ let () =
         ] );
       ( "cancel-safe release finalizer",
         [
-          Alcotest.test_case "closes unreleased client once" `Quick
-            test_close_unreleased_client_closes_once;
-          Alcotest.test_case "swallows release failure" `Quick
-            test_close_unreleased_client_swallows_release_error;
+          Alcotest.test_case "repeated release preserves the idle client" `Quick
+            test_repeated_release_does_not_close_a_parked_client;
+          Alcotest.test_case "close failure preserves request failure" `Quick
+            test_close_failure_preserves_request_failure;
         ] );
       ( "request deadline",
         [

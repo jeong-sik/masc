@@ -1,6 +1,15 @@
 type key = Enter | Tab | Escape | Backspace | Delete | ArrowUp | ArrowDown | ArrowLeft | ArrowRight | Home | End
+type same_site = Strict | Lax | Same_site_none
+type cookie = { name : string; value : string; path : string; secure : bool; http_only : bool;
+  same_site : same_site option; max_age_sec : int option }
+let max_cookie_age_sec = 7 * 24 * 60 * 60
+let max_cookie_value_bytes = 4096
+let max_cookie_name_bytes = 256
+let same_site_wire = function Strict -> "Strict" | Lax -> "Lax" | Same_site_none -> "None"
 type interaction =
   | Upload of { selector : string; paths : string list }
+  | Set_cookie of cookie
+  | Delete_cookie of string
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
 type t = Open_tab of string | Open_window of string | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
@@ -29,6 +38,40 @@ let parse_frame_path = function
   | `Assoc fields -> (match List.assoc_opt "framePath" fields with
       | None -> Ok [] | Some value -> string_list "framePath" value)
   | _ -> Error "browser arguments must be an object"
+(* A cookie name or value is data for the driver, but a control character, a
+   semicolon or a comma would split it into other cookies in some paths, so
+   they are refused here instead of repaired. *)
+let cookie_text_ok ~token text =
+  String.for_all (fun c -> Char.code c >= 0x20 && Char.code c <> 0x7f && c <> ';') text
+  && (not token || not (String.exists (fun c -> c = ',' || c = '=' || c = ' ') text))
+let cookie_name fields = match List.assoc_opt "cookieName" fields with
+  | Some (`String name) when name <> "" && String.length name <= max_cookie_name_bytes && cookie_text_ok ~token:true name -> Ok name
+  | _ -> Error "cookieName must be a nonempty token (no space, comma, semicolon, equals sign or control character) of at most 256 bytes"
+let parse_cookie fields =
+  let* name = cookie_name fields in
+  let* value = match List.assoc_opt "cookieValue" fields with
+    | Some (`String value) when String.length value <= max_cookie_value_bytes && cookie_text_ok ~token:false value -> Ok value
+    | _ -> Error "cookieValue must be a string of at most 4096 bytes without a control character or semicolon" in
+  let* path = match List.assoc_opt "cookiePath" fields with
+    | None -> Ok "/"
+    | Some (`String path) when String.length path > 0 && path.[0] = '/' && cookie_text_ok ~token:false path -> Ok path
+    | Some _ -> Error "cookiePath must start with / and hold no control character or semicolon" in
+  let boolean key = match List.assoc_opt key fields with
+    | None -> Ok false | Some (`Bool b) -> Ok b | Some _ -> Error (key ^ " must be a boolean") in
+  let* secure = boolean "cookieSecure" in
+  let* http_only = boolean "cookieHttpOnly" in
+  let* same_site = match List.assoc_opt "cookieSameSite" fields with
+    | None -> Ok None
+    | Some (`String "Strict") -> Ok (Some Strict) | Some (`String "Lax") -> Ok (Some Lax)
+    | Some (`String "None") -> Ok (Some Same_site_none)
+    | Some _ -> Error "cookieSameSite must be Strict, Lax or None" in
+  let* () = if same_site = Some Same_site_none && not secure
+    then Error "a SameSite=None cookie must also be cookieSecure" else Ok () in
+  let* max_age_sec = match List.assoc_opt "cookieMaxAgeSec" fields with
+    | None -> Ok None
+    | Some (`Int n) when n >= 1 && n <= max_cookie_age_sec -> Ok (Some n)
+    | Some _ -> Error (Printf.sprintf "cookieMaxAgeSec must be an integer from 1 to %d" max_cookie_age_sec) in
+  Ok {name; value; path; secure; http_only; same_site; max_age_sec}
 let parse = function
   | `Assoc fields ->
     let string key = match List.assoc_opt key fields with
@@ -46,8 +89,8 @@ let parse = function
       let* () = exact ("tabId" :: "framePath" :: allowed) in
       let* frame_path = parse_frame_path (`Assoc fields) in
       let* () = match interaction, frame_path with
-        | (Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog), _ :: _ -> Error "this action operates on the top-level tab"
-        | ((Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog), [])
+        | (Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _), _ :: _ -> Error "this action operates on the top-level tab"
+        | ((Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _), [])
         | Upload _, _ -> Ok () in
       let* tab_id = integer "tabId" in
       if tab_id < 0 then Error "tabId must be nonnegative"
@@ -68,6 +111,12 @@ let parse = function
        let* text = match List.assoc_opt "text" fields with
          | None -> Ok None | Some (`String text) -> Ok (Some text) | _ -> Error "text must be a string" in
        on_tab ["text"] (Accept_dialog text)
+     | "set_cookie" ->
+       let* cookie = parse_cookie fields in
+       on_tab ["cookieName";"cookieValue";"cookiePath";"cookieSecure";"cookieHttpOnly";"cookieSameSite";"cookieMaxAgeSec"] (Set_cookie cookie)
+     | "delete_cookie" ->
+       let* name = cookie_name fields in
+       on_tab ["cookieName"] (Delete_cookie name)
      | "dismiss_dialog" -> on_tab [] Dismiss_dialog
      | "back" -> on_tab [] Back | "forward" -> on_tab [] Forward
      | "reload" -> on_tab [] Reload | "close_tab" -> on_tab [] Close_tab
@@ -81,6 +130,12 @@ let to_json = function
       | Upload {selector;paths} -> "upload", ["selector",`String selector;"paths",`List (List.map (fun p -> `String p) paths)]
       | Accept_dialog text -> "accept_dialog", Option.to_list (Option.map (fun s -> "text",`String s) text)
       | Dismiss_dialog -> "dismiss_dialog", []
+      | Delete_cookie name -> "delete_cookie", ["cookieName",`String name]
+      | Set_cookie {name;value;path;secure;http_only;same_site;max_age_sec} ->
+        "set_cookie", ["cookieName",`String name;"cookieValue",`String value;"cookiePath",`String path;
+          "cookieSecure",`Bool secure;"cookieHttpOnly",`Bool http_only]
+          @ Option.to_list (Option.map (fun site -> "cookieSameSite",`String (same_site_wire site)) same_site)
+          @ Option.to_list (Option.map (fun n -> "cookieMaxAgeSec",`Int n) max_age_sec)
       | Back -> "back", [] | Forward -> "forward", [] | Reload -> "reload", [] | Close_tab -> "close_tab", [] in
     `Assoc (["action",`String action;"tabId",`Int tab_id] @
       (if frame_path = [] then [] else ["framePath",`List (List.map (fun s -> `String s) frame_path)]) @ args)

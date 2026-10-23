@@ -1,6 +1,6 @@
 name = "masc_browser_act"
 description = """
-Run one action in an explicitly selected browser. Automation serves the listed actions; Stagehand serves only open_tab and top-level back/forward/reload/close_tab through native browser methods. open_window opens a new browser window holding one tab (automation Firefox and live BiDi only; it returns that tab's tabId). Live BiDi serves open_tab, open_window, and top-level back/forward/reload/close_tab only for a tab this connection opened with open_tab. Omit identity only for initial open_tab discovery; otherwise retain the exact browserSelection lane/clientId and returned tabId. A failed navigation after creation retains a partial-effect receipt: inspect that created tab on the same browser before deciding what to do next; never open another automatically.
+Run one action in an explicitly selected browser. Automation serves the listed actions; Stagehand serves only open_tab and top-level back/forward/reload/close_tab through native browser methods. open_window opens a new browser window holding one tab (automation Firefox and live BiDi only; it returns that tab's tabId). set_cookie and delete_cookie write one cookie for the tab's own page host on an automation Firefox only (never on a live or operator browser); the value is never returned. Live BiDi serves open_tab, open_window, and top-level back/forward/reload/close_tab only for a tab this connection opened with open_tab. Omit identity only for initial open_tab discovery; otherwise retain the exact browserSelection lane/clientId and returned tabId. A failed navigation after creation retains a partial-effect receipt: inspect that created tab on the same browser before deciding what to do next; never open another automatically.
 Read elements in the same tab/frame for selectors; preserve decoded CSS escapes exactly. After no match, re-read. Actions can change external state: observe again after success or failure before retrying."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
@@ -13,7 +13,7 @@ defer_loading = true
 [[params]]
 name = "action"
 type = "string"
-enum = ["open_tab", "open_window", "close_tab", "back", "forward", "reload", "upload", "accept_dialog", "dismiss_dialog"]
+enum = ["open_tab", "open_window", "close_tab", "back", "forward", "reload", "upload", "accept_dialog", "dismiss_dialog", "set_cookie", "delete_cookie"]
 required = true
 description = "Browser-level actions: tabs, history, JavaScript dialogs and file upload. Page input (click, fill, select, scroll, keys) is masc_browser_interact."
 
@@ -60,3 +60,41 @@ description = "Keeper-readable playground-relative or visible absolute files, pr
 name = "clientId"
 type = "string"
 description = "Required with lane=live for open_tab and open_window: exact observed BiDi connection ID. Not valid on automation or stagehand."
+
+[[params]]
+name = "cookieName"
+type = "string"
+description = "set_cookie and delete_cookie: the cookie name, a token of at most 256 bytes (no space, comma, semicolon, equals sign or control character)."
+
+[[params]]
+name = "cookieValue"
+type = "string"
+description = "set_cookie: the cookie value, at most 4096 bytes, no control character or semicolon. It is a credential: it is sent to the browser and never returned."
+
+[[params]]
+name = "cookiePath"
+type = "string"
+description = "set_cookie: path scope starting with /; default /."
+
+[[params]]
+name = "cookieSecure"
+type = "boolean"
+description = "set_cookie: send only over HTTPS. Required with cookieSameSite None."
+
+[[params]]
+name = "cookieHttpOnly"
+type = "boolean"
+description = "set_cookie: hide the cookie from page scripts."
+
+[[params]]
+name = "cookieSameSite"
+type = "string"
+enum = ["Strict", "Lax", "None"]
+description = "set_cookie: SameSite attribute; omit to leave it to the browser."
+
+[[params]]
+name = "cookieMaxAgeSec"
+type = "integer"
+minimum = 1
+maximum = 604800
+description = "set_cookie: lifetime in seconds, at most 7 days. Omit for a session cookie."

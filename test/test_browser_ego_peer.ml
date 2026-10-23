@@ -109,6 +109,12 @@ let test_a_tab_that_left_the_listing_loses_its_number () =
     [2; 3];
   ignore (before_effect "an unsupported browser window" (dispatch peer Live.Page_act
     (Lane.Action.to_json (Lane.Action.Open_window "https://example.test/window"))));
+  let cookie : Lane.Action.cookie = {name="session";value="fixture";path="/";
+    secure=true;http_only=true;same_site=Some Lane.Action.Strict;max_age_sec=None} in
+  List.iter (fun interaction -> ignore (before_effect "an unsupported cookie write"
+    (dispatch peer Live.Page_act (Lane.Action.to_json
+      (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})))))
+    [Lane.Action.Set_cookie cookie;Lane.Action.Delete_cookie "session"];
   check (list string) "no script ran" [] !ran
 
 (* What ego threw reaches the Keeper cut, where a character starts. *)

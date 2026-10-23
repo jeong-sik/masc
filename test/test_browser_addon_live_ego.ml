@@ -80,67 +80,202 @@ let test_a_stopped_run_answers_within_the_peers_window () =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let command = Filename.concat root "ego-browser" in
     write command "#!/bin/sh\nexec sleep 30\n"; Unix.chmod command 0o700;
-    Eio_main.run (fun env ->
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       let clock = Eio.Stdenv.clock env in
+      let session = Ego.session ~sw ~env ~command ~directory:root in
       let window_s = 2.5 in
       let started = Eio.Time.now clock in
-      check string "the run" "timed out" (match Ego.runner ~env ~command ~window_s "" with
+      check string "the run" "timed out" (match Ego.runner session ~window_s "" with
         | Ok _ -> "answered" | Error failure -> failure_name failure);
       (* Stopping it spends the stop grace inside the window, not after it. *)
       check bool "within the window" true (Eio.Time.now clock -. started < window_s +. 0.5);
       let started = Eio.Time.now clock in
-      check string "a window no longer than the stop" "unstarted" (match Ego.runner ~env ~command ~window_s:1.5 "" with
+      check string "a window no longer than the stop" "unstarted" (match Ego.runner session ~window_s:1.5 "" with
         | Ok _ -> "answered" | Error failure -> failure_name failure);
-      check bool "is refused before the run starts" true (Eio.Time.now clock -. started < 0.5)))
+      check bool "is refused before the run starts" true (Eio.Time.now clock -. started < 0.5))))
 
-(* ego-browser as the worker runs it: [--version], and [nodejs] with one
-   fixed script on stdin, answered by the step its first line names. *)
+(* A stand-in for the session process: it connects to the loop's socket and
+   answers each script with its pid and how many it has run, sleeps past
+   the window on "sleep", answers past the output limit on "big <n>", and
+   leaves on "exit". *)
+let session_stand_in = {|#!/usr/bin/env python3
+import json,os,re,socket,sys,time
+assert sys.argv[1:3]==['nodejs','-e'],sys.argv
+path=json.loads(re.search(r'net\.createConnection\((".*?")\);',sys.argv[3]).group(1))
+connection=socket.socket(socket.AF_UNIX);connection.connect(path)
+stream=connection.makefile('rw')
+count=0
+for raw in stream:
+    command=json.loads(raw);script=command['script'];count+=1
+    if script=='sleep':time.sleep(30)
+    if script=='exit':print('leaving');sys.stdout.flush();sys.exit(4)
+    lines=['x'*int(script[4:])] if script.startswith('big ') else ['%d %d'%(os.getpid(),count)]
+    stream.write(json.dumps({'id':command['id'],'lines':lines})+'\n');stream.flush()
+|}
+
+(* A stand-in that writes its pid next to itself and never connects, so a
+   start is still waiting for it when the start is cancelled. *)
+let unconnected_stand_in = {|#!/usr/bin/env python3
+import os,pathlib,time
+here=pathlib.Path(__file__).resolve().parent
+(here/'pid.part').write_text(str(os.getpid()));(here/'pid.part').rename(here/'pid')
+time.sleep(30)
+|}
+
+let running pid = match Unix.kill pid 0 with
+  | () -> true
+  | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
+
+(* A start cancelled before its process connected stops that process, so
+   nothing of the session keeps the connection's switch from ending, and
+   the next command starts again. *)
+let test_a_cancelled_start_stops_its_process () =
+  let root = Unix.realpath (Filename.temp_dir ~perms:0o700 "owned-live-ego-" "") in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let command = Filename.concat root "ego-browser" in
+    write command unconnected_stand_in; Unix.chmod command 0o700;
+    let pid_file = Filename.concat root "pid" in
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      (* The cancel waits for the process to run, not for a fixed time,
+         because an interpreter behind a version shim starts slowly. *)
+      let rec until_running () =
+        if not (Sys.file_exists pid_file) then (Eio.Time.sleep clock 0.05; until_running ()) in
+      let ended = Eio.Time.with_timeout clock 6. (fun () ->
+        Ok (Eio.Switch.run (fun sw ->
+          let session = Ego.session ~sw ~env ~command ~directory:root in
+          match Eio.Fiber.first
+                  (fun () -> `Answered (Ego.runner session ~window_s:10. "count"))
+                  (fun () -> until_running (); `Cancelled) with
+          | `Answered _ -> Error "the start answered before it was cancelled"
+          | `Cancelled ->
+            let pid = int_of_string (String.trim (read pid_file)) in
+            check bool "the process that would have connected was stopped" false (running pid);
+            check bool "its socket was removed" false (Sys.file_exists (Filename.concat root "s"));
+            write command session_stand_in;
+            let restarted = Ego.runner session ~window_s:5. "count" in
+            Ego.end_session session;
+            Result.map_error failure_name restarted |> Result.map ignore))) in
+      match ended with
+      | Ok (Ok ()) -> ()
+      | Ok (Error detail) -> failf "the next command after the cancelled start: %s" detail
+      | Error `Timeout -> fail "the connection's switch did not end after its start was cancelled"))
+
+(* A fork on a cancelled switch runs nothing, so a start there is refused
+   before a process exists instead of waiting for one that never ends. *)
+let test_a_start_on_a_cancelled_connection_starts_nothing () =
+  let root = Unix.realpath (Filename.temp_dir ~perms:0o700 "owned-live-ego-" "") in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let command = Filename.concat root "ego-browser" in
+    write command unconnected_stand_in; Unix.chmod command 0o700;
+    let refused = ref false in
+    Eio_main.run (fun env ->
+      match Eio.Switch.run (fun sw ->
+        let session = Ego.session ~sw ~env ~command ~directory:root in
+        Eio.Switch.fail sw Exit;
+        match Ego.runner session ~window_s:5. "count" with
+        | Ok _ | Error _ -> ()
+        | exception Eio.Cancel.Cancelled _ -> refused := true) with
+      | () -> fail "the failed connection's switch returned"
+      | exception Exit -> ());
+    check bool "the start raised the connection's cancellation" true !refused;
+    check bool "no process was started" false (Sys.file_exists (Filename.concat root "pid")))
+
+let test_one_process_runs_the_connections_commands () =
+  let root = Unix.realpath (Filename.temp_dir ~perms:0o700 "owned-live-ego-" "") in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let command = Filename.concat root "ego-browser" in
+    write command session_stand_in; Unix.chmod command 0o700;
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let session = Ego.session ~sw ~env ~command ~directory:root in
+      let run ?(window_s=5.) script = Ego.runner session ~window_s script in
+      let kind ?window_s script = match run ?window_s script with Ok _ -> "answered" | Error failure -> failure_name failure in
+      let held script = match run script with
+        | Ok output -> (match String.split_on_char ' ' (String.trim output) with
+          | [pid; count] -> pid, int_of_string count
+          | _ -> failf "%s answered %S" script output)
+        | Error failure -> failf "%s: %s" script (failure_name failure) in
+      let first, one = held "count" in
+      let again, two = held "count" in
+      check string "one process runs both scripts" first again;
+      check (pair int int) "and keeps what it holds between them" (1, 2) (one, two);
+      check bool "the socket is gone once the process connected" false (Sys.file_exists (Filename.concat root "s"));
+      let started = Eio.Time.now clock in
+      check string "a script past its window" "timed out" (kind ~window_s:3. "sleep");
+      check bool "is stopped within its window" true (Eio.Time.now clock -. started < 3.5);
+      let next, count = held "count" in
+      check bool "the next script starts another process" true (next <> first);
+      check int "which holds nothing yet" 1 count;
+      check string "an answer past the output limit" "output exceeded" (kind (Printf.sprintf "big %d" (Peer.output_limit_bytes + 1)));
+      (match run "exit" with
+       | Error (Peer.Exited {code; output}) ->
+         check int "a process that left" 4 code;
+         check bool "says what it wrote" true (String_util.contains_substring output "leaving")
+       | Ok _ | Error _ -> fail "expected the process to have left");
+      ignore (held "count");
+      let started = Eio.Time.now clock in
+      Ego.end_session session;
+      check bool "a process that leaves its loop is not waited out" true (Eio.Time.now clock -. started < 1.))))
+
+(* ego-browser as the worker runs it: [--version], and [nodejs -e] with
+   the session loop, which this stand-in plays: it connects to the loop's
+   socket and answers each script by the step its first line names. *)
 let ego = {|#!/usr/bin/env python3
-import json,pathlib,sys,time
+import json,os,pathlib,re,socket,sys,time
 root=pathlib.Path(__file__).resolve().parent
 mode=(root/'mode').read_text()
 if sys.argv[1:]==['--version']:
     if mode=='no-version':
         print('ego-browser: not signed in');sys.exit(3)
     print('ego-browser 0.6.0.16\n  chromium 154.0.8037.44\n  node v24.21.0');sys.exit(0)
-assert sys.argv[1:]==['nodejs'],sys.argv
-lines=sys.stdin.read().split('\n')
-step=lines[0].removeprefix('// masc-ego: ')
-args=json.loads(next(l for l in lines if l.startswith('const args = ')).removeprefix('const args = ').removesuffix(';'))
-with open(root/'steps','a') as log:log.write(step+'\n')
-def answer(value=None,error=None):
-    frame={'ok':True,'value':value} if error is None else {'ok':False,'error':error}
-    sys.stderr.write('masc-ego-result '+json.dumps(frame)+'\n')
+assert sys.argv[1:3]==['nodejs','-e'],sys.argv
+with open(root/'processes','a') as log:log.write(str(os.getpid())+'\n')
+path=json.loads(re.search(r'net\.createConnection\((".*?")\);',sys.argv[3]).group(1))
+connection=socket.socket(socket.AF_UNIX);connection.connect(path)
+stream=connection.makefile('rw')
 state=json.dumps({'url':'https://fixture.test/','title':'Fixture','viewport':{'width':800,'height':600}})
-if step=='space.open':
-    if mode=='in-use':answer(error='EGO_TASK_SPACE_NAME_IN_USE: masc')
-    else:answer({'spaceId':51,'ownership':'agent'})
-elif step=='tabs.list':
-    answer([{'label':'p1','targetId':'T1','title':'Fixture','url':'https://fixture.test/','active':True}])
-elif step=='page.capture':
-    path=pathlib.Path(args['path'])
-    path.write_bytes(b'\x89PNG\r\n\x1a\nfixture')
-    (root/'captures').write_text(str(path.parent))
-    # What a capture stopped part way leaves behind.
-    (path.parent/'ego-capture-51-99.png').write_bytes(b'left')
-    answer({'label':'p1','path':str(path),'before':{'answer':state},'after':{'answer':state}})
-elif step=='page.read':
-    # late: done after the caller stopped waiting; retire: still running when the worker retires.
-    time.sleep({'late':2.5,'retire':30}.get(mode,0))
-    answer({'label':'p1','answer':{'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','text':'hi','chars':2,'truncated':False})}})
-elif step=='page.open':
-    answer({'label':'p2','error':None,'tab':{'url':args['url'],'title':'Opened','active':True}})
-elif step=='page.goto':
-    answer({'error':None,'tab':{'url':args['url'],'title':'Moved'}})
-elif step=='page.target':
-    answer({'answer':json.dumps({'url':'https://fixture.test/','point':{'x':0.25,'y':0.5},
-        'viewport':{'documentId':'d1','width':800,'height':600,'scrollX':0,'scrollY':0}})})
-elif step=='page.pointer':
-    page={'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','scrollX':0,'scrollY':0})}
-    (root/'clicked').write_text(json.dumps([args['x'],args['y'],args['button']]))
-    answer({'guard':page,'receipt':page,'error':None})
-elif step=='space.finish':answer(None)
-else:answer(error='unexpected step '+step)
+def run(script,answer):
+    lines=script.split('\n')
+    step=lines[0].removeprefix('// masc-ego: ')
+    args=json.loads(next(l for l in lines if l.startswith('const args = ')).removeprefix('const args = ').removesuffix(';'))
+    with open(root/'steps','a') as log:log.write(step+'\n')
+    if step=='space.open':
+        if mode=='in-use':answer(error='EGO_TASK_SPACE_NAME_IN_USE: masc')
+        else:answer({'spaceId':51,'ownership':'agent'})
+    elif step=='tabs.list':
+        answer([{'label':'p1','targetId':'T1','title':'Fixture','url':'https://fixture.test/','active':True}])
+    elif step=='page.capture':
+        path=pathlib.Path(args['path'])
+        path.write_bytes(b'\x89PNG\r\n\x1a\nfixture')
+        (root/'captures').write_text(str(path.parent))
+        # What a capture stopped part way leaves behind.
+        (path.parent/'ego-capture-51-99.png').write_bytes(b'left')
+        answer({'label':'p1','path':str(path),'before':{'answer':state},'after':{'answer':state}})
+    elif step=='page.read':
+        # late: done after the caller stopped waiting; retire: still running when the worker retires.
+        time.sleep({'late':2.5,'retire':30}.get(mode,0))
+        answer({'label':'p1','answer':{'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','text':'hi','chars':2,'truncated':False})}})
+    elif step=='page.open':
+        answer({'label':'p2','error':None,'tab':{'url':args['url'],'title':'Opened','active':True}})
+    elif step=='page.goto':
+        answer({'error':None,'tab':{'url':args['url'],'title':'Moved'}})
+    elif step=='page.target':
+        answer({'answer':json.dumps({'url':'https://fixture.test/','point':{'x':0.25,'y':0.5},
+            'viewport':{'documentId':'d1','width':800,'height':600,'scrollX':0,'scrollY':0}})})
+    elif step=='page.pointer':
+        page={'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','scrollX':0,'scrollY':0})}
+        (root/'clicked').write_text(json.dumps([args['x'],args['y'],args['button']]))
+        answer({'guard':page,'receipt':page,'error':None})
+    elif step=='space.finish':answer(None)
+    else:answer(error='unexpected step '+step)
+for raw in stream:
+    command=json.loads(raw);out=[]
+    def answer(value=None,error=None):
+        frame={'ok':True,'value':value} if error is None else {'ok':False,'error':error}
+        out.append('masc-ego-result '+json.dumps(frame))
+    run(command['script'],answer)
+    stream.write(json.dumps({'id':command['id'],'lines':out})+'\n');stream.flush()
 |}
 
 let answered = function
@@ -151,14 +286,15 @@ let answered = function
 
 let scenario mode =
   let root = Unix.realpath (Filename.temp_dir ~perms:0o700 "owned-live-ego-" "") in
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+  (* The connection's screenshot directory is made here, so what is left of
+     it after the run can be seen. It is not under [root], whose real path
+     would make the session socket's path longer than a socket's. *)
+  let temporary = Filename.temp_dir ~perms:0o700 "ego-tmp-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root; Fs_compat.remove_tree temporary) (fun () ->
     let command = Filename.concat root "ego-browser" in
     write command ego; Unix.chmod command 0o700;
     write (Filename.concat root "mode") mode;
-    (* The connection's screenshot directory is made here, so what is left
-       of it after the run can be seen. *)
-    let temporary = Filename.concat root "tmp" in
-    Unix.mkdir temporary 0o700; Filename.set_temp_dir_name temporary;
+    Filename.set_temp_dir_name temporary;
     let entered = ref false in
     Eio_main.run (fun env ->
       Time_compat.set_clock (Eio.Stdenv.clock env);
@@ -228,23 +364,28 @@ let scenario mode =
        | _, Some detail -> failf "%s: %s" mode detail);
       check bool "owner input is fenced at the end" true (Owner.is_retired owner));
     let steps = lines (Filename.concat root "steps") in
+    let processes = List.length (lines (Filename.concat root "processes")) in
     check (array string) "nothing is left of the screenshot directory" [||] (Sys.readdir temporary);
     match mode with
     | "normal" ->
       check bool "caller work ran" true !entered;
       check (list string) "steps"
         ["space.open"; "tabs.list"; "page.capture"; "page.open"; "page.goto"; "page.target"; "page.pointer"; "space.finish"] steps;
+      check int "one ego process ran them all" 1 processes;
       check bool "the screenshot directory is removed, with what a stopped capture left" false
         (Sys.file_exists (read (Filename.concat root "captures")))
     | "late" ->
       check bool "caller work ran" true !entered;
-      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"; "tabs.list"; "space.finish"] steps
+      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"; "tabs.list"; "space.finish"] steps;
+      check int "a late answer keeps the process" 1 processes
     | "retire" ->
       check bool "caller work ran" true !entered;
-      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"; "space.finish"] steps
+      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"; "space.finish"] steps;
+      check int "the stopped read's process, then the end's" 2 processes
     | "no-version" ->
       check bool "caller work never ran" false !entered;
-      check (list string) "no script ran" [] steps
+      check (list string) "no script ran" [] steps;
+      check int "no session process started" 0 processes
     | _ ->
       check bool "caller work never ran" false !entered;
       check (list string) "only the open ran" ["space.open"] steps)
@@ -264,6 +405,9 @@ let () =
       test_case "the table names a command and a space" `Quick test_the_table_names_a_command_and_a_space;
       test_case "a run answers both streams, or why not" `Quick test_a_run_answers_both_streams_or_why_not;
       test_case "a stopped run answers within the peer's window" `Quick test_a_stopped_run_answers_within_the_peers_window;
+      test_case "one process runs the connection's commands" `Quick test_one_process_runs_the_connections_commands;
+      test_case "a cancelled start stops its process" `Quick test_a_cancelled_start_stops_its_process;
+      test_case "a start on a cancelled connection starts nothing" `Quick test_a_start_on_a_cancelled_connection_starts_nothing;
       test_case "the worker serves the space until retirement" `Quick (child "normal");
       test_case "a result delivered after the caller stopped waiting does not end the connection" `Quick (child "late");
       test_case "retirement stops a running command and ends the space" `Quick (child "retire");

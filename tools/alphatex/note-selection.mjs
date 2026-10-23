@@ -1,5 +1,5 @@
 import { quantizeTick, quantizedStarts } from './note-quantize.mjs'
-import { assertMidiTimingOrder } from './note-overlap.mjs'
+import { assertMidiTimingOrder, assertNoNewNoteOverlaps } from './note-overlap.mjs'
 import { pitch, editProject } from './sequencer-project.mjs'
 import { editMidiSourceNotes } from './midi-source.mjs'
 import { sourceEditor } from './midi-source-editor.mjs'
@@ -16,7 +16,7 @@ const integer = (value, label) => {
 }
 function units(editor, value, signed = false) {
   return tickUnits(value, source(editor) ? editor.axis.per : editor.project.ppq,
-    { signed, label: 'Selection position' })
+    { signed, label: 'Selection time' })
 }
 export function selectedNotes(editor) {
   const selection = editor.noteSelection
@@ -111,6 +111,18 @@ export function noteSelectionCommand(editor, command, args) {
         id: note.id, start: starts.get(note.id) })))
       if (source(editor)) assertMidiTimingOrder(editor.performance,next.performance)
       return { ...next, noteSelection: { ...next.noteSelection, origin: quantizeTick(editor.noteSelection.origin, grid) } }
+    }
+    case 'duration-notes': case 'duration-add-notes': {
+      count(1)
+      const relative = command === 'duration-add-notes', value = units(editor, args[0], relative)
+      const notes = chosen(editor), changes = notes.map(note => {
+        const duration = integer(relative ? note.duration + value : value, 'note duration')
+        if (duration < (source(editor) ? 0 : 1)) throw new Error('Note duration is outside the document range')
+        integer(note.start + duration, 'note release position')
+        return {kind:source(editor)?'change':'change-note',id:note.id,duration}
+      })
+      if (!source(editor)) assertNoNewNoteOverlaps(track(editor).notes, changes)
+      return apply(editor, changes)
     }
     case 'velocity-notes': case 'velocity-add-notes': {
       count(1)

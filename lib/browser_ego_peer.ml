@@ -826,6 +826,11 @@ let target_input t ~id ~label ~deadline ~verb ~expected_url ~target ~text =
         "      try { await page.waitForSelector(args.target, {state: \"attached\", timeout: args.waitMs}); }";
         "      catch (error) { refusal = reason(error); }";
         "    }";
+        "    if (refusal === null) {";
+        "      try { urlBefore = await page.url(); } catch (error) { refusal = reason(error); }";
+        "      if (refusal === null && urlBefore !== args.expectedUrl)";
+        "        refusal = \"the tab is at \" + urlBefore + \", not at expectedUrl; read it again\";";
+        "    }";
         "    if (refusal !== null) emit({ok: false, before: true, error: refusal});";
         "    else {";
         "      let receipt = null, failure = null;";

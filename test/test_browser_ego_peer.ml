@@ -806,21 +806,21 @@ let test_a_snapshot_reads_egos_own_tree () =
    does. The stand-in prints the calls the script made. *)
 let target_stand_in ~url ~blocked ~find ~act = Printf.sprintf {js|
 const seen = [];
+let currentUrl = %s;
 let dialogOpen = %b;
 process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
 const page = {
-  info: async () => { seen.push("info"); return dialogOpen ? {url: %s, dialog: {type: "alert", message: "Hold on", defaultPrompt: ""}} : {url: %s}; },
-  url: async () => { seen.push("url"); if (dialogOpen) throw new Error("PageDialogOpenedError: Runtime.evaluate cannot run while a JavaScript alert dialog is open"); return %s; },
+  info: async () => { seen.push("info"); return dialogOpen ? {url: currentUrl, dialog: {type: "alert", message: "Hold on", defaultPrompt: ""}} : {url: currentUrl}; },
+  url: async () => { seen.push("url"); if (dialogOpen) throw new Error("PageDialogOpenedError: Runtime.evaluate cannot run while a JavaScript alert dialog is open"); return currentUrl; },
   waitForSelector: async (target, options) => { seen.push("wait " + target + " " + options.state); %s },
   click: async target => { seen.push("click " + target); %s },
   fill: async (target, text) => { seen.push("fill " + target + " " + text); %s },
 };
 const taskSpace = async () => ({
-  tabs: async () => [{label: "p1", openedBy: "agent", url: %s, title: "Slack"}],
+  tabs: async () => [{label: "p1", openedBy: "agent", url: currentUrl, title: "Slack"}],
   page: () => page,
 });
-|js} blocked (Yojson.Safe.to_string (`String url)) (Yojson.Safe.to_string (`String url)) (Yojson.Safe.to_string (`String url))
-    find act act (Yojson.Safe.to_string (`String url))
+|js} (Yojson.Safe.to_string (`String url)) blocked find act act
 
 let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   let url = ref observed_url and blocked = ref false and find = ref "return true;" and act = ref "return {};" in
@@ -850,10 +850,10 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     (Yojson.Safe.to_string (obj ["tabId",`Int 1;"action",str "click";"target",obj ["ref",`Int 12];
       "urlBefore",str observed_url;"url",str observed_url;"title",str "Slack"]))
     (answer "ref click" (click (Lane.Target_ref 12)));
-  check string "the dialog check and the wait come before the click" {|["info","url","wait @12 attached","click @12"]|} (seen ());
+  check string "the page is checked after finding the target" {|["info","url","wait @12 attached","url","click @12"]|} (seen ());
   ignore (answer "role" (click (Lane.Target_role {role="button";name="Say \"hi\"";exact=true})));
   check string "a role target is ego's role locator with a JSON name"
-    {|["info","url","wait loc=role:button[name=\"Say \\\"hi\\\"\"] attached","click loc=role:button[name=\"Say \\\"hi\\\"\"]"]|} (seen ());
+    {|["info","url","wait loc=role:button[name=\"Say \\\"hi\\\"\"] attached","url","click loc=role:button[name=\"Say \\\"hi\\\"\"]"]|} (seen ());
   ignore (answer "part of a name" (click (Lane.Target_role {role="link";name="Docs";exact=false})));
   check bool "a part of a name is name*=" true (contains (seen ()) {|loc=role:link[name*=\"Docs\"]|});
   ignore (answer "text" (click (Lane.Target_text {text="Send";exact=false})));
@@ -861,7 +861,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   ignore (answer "exact text" (click (Lane.Target_text {text="Send now";exact=true})));
   check bool "an exact text is ego's quoted text" true (contains (seen ()) {|click text=\"Send now\"|});
   ignore (answer "fill" (on (Lane.Fill_target {target=Lane.Target_ref 5;text="Ada"})));
-  check string "a fill gives ego its text" {|["info","url","wait @5 attached","fill @5 Ada"]|} (seen ());
+  check string "a fill gives ego its text" {|["info","url","wait @5 attached","url","fill @5 Ada"]|} (seen ());
   act := {|return {popups: [{label: "p7", targetId: "T7"}]};|};
   check bool "an opened page is answered with its tab number" true
     (contains (answer "popup" (click (Lane.Target_ref 4))) {|"popups":[{"tabId":4,"label":"p7"}]|});
@@ -871,7 +871,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     (contains with_dialog {|"dialog":{"type":"prompt","message":"Name?","defaultValue":"Ada"}|});
   check bool "and the tab's row still says where the page is" true
     (contains with_dialog (Printf.sprintf {|"url":%S|} observed_url));
-  check string "the page itself is not read after the dialog" {|["info","url","wait @3 attached","click @3"]|} (seen ());
+  check string "the page itself is not read after the dialog" {|["info","url","wait @3 attached","url","click @3"]|} (seen ());
   act := "return {};";
   let runs = List.length !asked in
   let refused label result = match result with
@@ -891,12 +891,20 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   check bool "several matches are refused before any effect, with ego's candidates" true
     (contains (refused "ambiguous" (click (Lane.Target_text {text="A";exact=true}))) "matched 2 elements");
   check bool "and nothing is clicked" false (contains (seen ()) "click");
+  find := {|currentUrl = "https://app.slack.com/other"; return true;|};
+  List.iter (fun action ->
+    check bool "navigation while finding a target is refused before input" true
+      (contains (refused "redirect during target wait" (on action)) "not at expectedUrl");
+    check bool "the new page receives no click or fill" false
+      (contains (seen ()) "click" || contains (seen ()) "fill"))
+    [Lane.Click_target (Lane.Target_ref 12);
+     Lane.Fill_target {target=Lane.Target_ref 12;text="Ada"}];
   find := "return true;";
   act := {|throw new Error("Target closed");|};
   (match click (Lane.Target_ref 12) with
    | Error (Live.Outcome_unknown detail) -> check bool "a failed click is unknown and asks for a read" true (contains detail "read tab 1")
    | other -> failf "a failed click was %s" (failure_kind other));
-  check int "each of them was one run" (runs + 4) (List.length !asked);
+  check int "each of them was one run" (runs + 6) (List.length !asked);
   let before = List.length !asked in
   check bool "an operator tab is refused without a run" true
     (match dispatch peer Live.Page_interact (interact_args ~tab_id:2 (Lane.Click_target (Lane.Target_ref 1))) with

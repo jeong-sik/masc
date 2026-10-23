@@ -23,7 +23,25 @@ import subprocess
 import sys
 import tempfile
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+def _find_repo():
+    """저장소 루트를 찾는다.
+
+    로컬에서는 test/ 바로 아래에서 실행되지만, CI의 dune sandbox에서는
+    _build/default/test/ 아래에서 실행된다. CHANGELOG.md가 있는 곳이
+    저장소 루트다.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(6):
+        if os.path.isfile(os.path.join(here, "CHANGELOG.md")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            break
+        here = parent
+    raise RuntimeError("repository root (CHANGELOG.md) not found")
+
+
+REPO = _find_repo()
 COUNT = os.path.join(REPO, "scripts", "release", "count-guideless-added.py")
 CHANGELOG = os.path.join(REPO, "CHANGELOG.md")
 

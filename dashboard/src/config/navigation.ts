@@ -526,13 +526,6 @@ interface SectionRedirect {
 type TabSectionKey = `${TabId}:${string}`
 
 export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
-  // RFC-MASC-006 Phase 0: sessions stub removed
-  'monitoring:sessions': { section: 'agents' },
-  // Keeper status SSOT pass (#25578): the hidden cognition lens section was
-  // removed; stale bookmarks redirect (with telemetry) instead of silently
-  // falling back to the default section.
-  'monitoring:cognition': { section: 'agents' },
-
   // Dashboard consolidation Phase 1: monitoring surface
   'monitoring:telemetry':    { section: 'fleet-health', view: 'event-log' },
   'monitoring:fleet':        { section: 'fleet-health', view: 'comparison' },
@@ -556,15 +549,7 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'connectors:connector-slack': { section: 'connector-status', params: { connector: 'slack' } },
   'connectors:connector-telegram': { section: 'connector-status', params: { connector: 'telegram' } },
 
-  // Keeper v2 parity: the old Lab Memory Explore route used hard-coded sample
-  // graph data, and the Memory OS section that replaced it served only
-  // delegation requests, which nothing writes. Point legacy links at the
-  // backed per-keeper memory projection.
-  'lab:memory-explore': { section: 'keeper-memory-health' },
 
-  // Keeper v2 parity: Design Canvas was a static preview over prototype
-  // fixture data. Collapse legacy links into the backed Lab tools inventory.
-  'lab:design-canvas': { section: 'tools' },
 }
 
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {

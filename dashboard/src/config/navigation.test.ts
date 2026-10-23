@@ -159,26 +159,6 @@ describe('lab navigation', () => {
       '키퍼 메모리 상태',
     ])
   })
-
-  it('collapses legacy Memory Explore links into the backed Memory OS route', () => {
-    expect(normalizeRouteParams('lab', {
-      section: 'memory-explore',
-      keeper: 'sangsu',
-      view: 'stale',
-    })).toEqual({
-      section: 'keeper-memory-health',
-      keeper: 'sangsu',
-    })
-  })
-
-  it('collapses legacy Design Canvas links into the backed tools inventory', () => {
-    expect(normalizeRouteParams('lab', {
-      section: 'design-canvas',
-      view: 'fixtures',
-    })).toEqual({
-      section: 'tools',
-    })
-  })
 })
 
 describe('command navigation', () => {
@@ -270,13 +250,6 @@ describe('monitoring navigation labels', () => {
       expect(wordCount).toBeLessThanOrEqual(7)
       expect(item.description.split(',').length).toBeLessThanOrEqual(2)
     }
-  })
-
-  it('does not expose sessions section (removed in Phase 0 of RFC-MASC-006)', () => {
-    const sections = visibleSectionItemsForTab('monitoring')
-    const ids = sections.map(item => item.id)
-
-    expect(ids).not.toContain('sessions')
   })
 
   it('surfaces the primary Monitor lanes and keeps support diagnostics routeable', () => {
@@ -383,18 +356,7 @@ describe('workspace navigation labels', () => {
   })
 })
 
-describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
-  it('redirects legacy ?section=sessions URL to agents and preserves other params', () => {
-    const redirected = normalizeRouteParams('monitoring', { section: 'sessions', session_id: 's-123' })
-    expect(redirected.section).toBe('agents')
-    expect(redirected.session_id).toBe('s-123')
-  })
-
-  it('redirects retired ?section=cognition URL to agents and preserves other params', () => {
-    const redirected = normalizeRouteParams('monitoring', { section: 'cognition', keeper: 'k-1' })
-    expect(redirected.section).toBe('agents')
-    expect(redirected.keeper).toBe('k-1')
-  })
+describe('route normalization', () => {
 
   it('redirects telemetry to fleet-health with event-log view (Phase 1)', () => {
     const result = normalizeRouteParams('monitoring', { section: 'telemetry' })
@@ -445,9 +407,6 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
 })
 
 describe('SECTION_REDIRECTS table (consolidation Phase -1)', () => {
-  it('exposes the sessions → agents redirect as reference contract', () => {
-    expect(SECTION_REDIRECTS['monitoring:sessions']).toEqual({ section: 'agents' })
-  })
 
   it('is the single source of truth for legacy section remaps', () => {
     // All entries must produce valid canonical sections after application.
@@ -506,12 +465,6 @@ describe('normalizeRouteParams query param preservation', () => {
     expect(result.target_id).toBe('op-x')
     expect(result.source).toBe('execution')
     expect(result.focus_kind).toBe('operation')
-  })
-
-  it('preserves session_id through the sessions → agents redirect', () => {
-    const result = normalizeRouteParams('monitoring', { section: 'sessions', session_id: 's-9' })
-    expect(result.section).toBe('agents')
-    expect(result.session_id).toBe('s-9')
   })
 
   it('preserves keeper filter through invalid activity fallback to agents', () => {

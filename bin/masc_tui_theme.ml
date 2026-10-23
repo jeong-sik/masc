@@ -59,60 +59,37 @@ let blend_component ~toward ~ratio component =
   |> int_of_float
 ;;
 
-(* How far a receded row travels from the terminal's text toward its
-   background, and how legible it must stay when it gets there.
-
-   Receded text is still text: blended all the way to the background it is
-   gone, not quiet. WCAG asks 3:1 of text that is not the main reading, and
-   low-contrast themes have little room to spend -- Solarized Dark starts at
-   4.75:1, so a flat two-fifths step lands it at 2.58:1 and turns a quiet row
-   into an unreadable one. So two fifths is a ceiling rather than the step,
-   and the floor decides what is actually taken.
-
-   The arithmetic is [Masc_tui_color]'s; the two numbers are this module's
-   call about how a row should look. *)
+(* Secondary information is still normal-size text. WCAG 2.2 SC 1.4.3
+   uses 4.5:1; the 3:1 exception is for large text, not secondary text.
+   Blend only as far as this floor allows, then check the emitted colour
+   again because a 256-colour projection can lower contrast. *)
 let recede_max_ratio = 0.4
-let recede_contrast_floor = 3.0
+let recede_contrast_floor = 4.5
 
 let recede_rgb ~foreground ~background =
   Color.recede_toward ~background ~floor:recede_contrast_floor
     ~max_ratio:recede_max_ratio foreground
 ;;
 
-let recede_for ~colors_enabled ~dim ~gray ~theme_mode ~project palette =
+let recede_for ~colors_enabled ~default_foreground ~project palette =
   if not colors_enabled then ""
   else
     match palette with
-    | None -> (
-      (* No palette: a multiplexer, or an emulator without the OSC reply. The
-         page may still have been reported on its own, and which way it goes
-         is the whole question -- SGR 2 blends toward black, so on a light
-         terminal the quiet row comes out darker than its neighbours.
-
-         Where the page is known to be light, bright black is the safer
-         recede: base16 and its relatives put it a step above the background
-         in the ramp, so on a light theme it sits between the text and the
-         page rather than past the text. Where the page is dark or unsaid,
-         SGR 2 is what every row drew before this and is right on a dark
-         one. *)
-      match theme_mode with
-      | Some Terminal_palette.Light -> gray
-      | Some Terminal_palette.Dark | None -> dim)
+    | None -> default_foreground
     | Some palette ->
-      (match
-         recede_rgb
-           ~foreground:(Terminal_palette.foreground palette)
-           ~background:(Terminal_palette.background palette)
-       with
-       (* No room to recede without dropping under the floor, or a capability
-          that cannot carry the colour. Either way SGR 2 is what this drew
-          before, so that is what it keeps drawing. *)
-       | None -> dim
-       | Some blended ->
-         (match project blended with
-          | None -> dim
-          | Some _ as projected ->
-            projected_foreground ~colors_enabled projected))
+      let background = Terminal_palette.background palette in
+      match recede_rgb ~foreground:(Terminal_palette.foreground palette)
+              ~background with
+      | None -> default_foreground
+      | Some blended ->
+        match project blended with
+        | None -> default_foreground
+        | Some projected ->
+          if Color.contrast_ratio
+               (Terminal_palette.projected_rgb projected) background
+             >= recede_contrast_floor
+          then projected_foreground ~colors_enabled (Some projected)
+          else default_foreground
 ;;
 
 (* How far the reader's own row is set apart from the page behind it. A light
@@ -224,8 +201,8 @@ let side_pane_background palette =
     ~project:Terminal_palette.best_color palette
 ;;
 
-let recede ~theme_mode palette =
-  recede_for ~colors_enabled ~dim:Sgr.dim ~gray:Sgr.gray ~theme_mode
+let recede palette =
+  recede_for ~colors_enabled ~default_foreground:Sgr.default_fg
     ~project:Terminal_palette.best_color palette
 ;;
 

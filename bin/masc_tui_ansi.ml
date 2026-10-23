@@ -235,7 +235,6 @@ module Theme = struct
     | Some _ | None ->
       let style =
         Masc_tui_theme.recede
-          ~theme_mode:(Masc_tui_terminal_palette.snapshot_theme_mode probed)
           (Masc_tui_terminal_palette.snapshot_palette probed)
       in
       if Atomic.compare_and_set recede_cache previous
@@ -521,8 +520,7 @@ module Chat_theme = struct
     ; inline_restore : string
     (* A bare link changes only underline and foreground. Closing exactly
        those two attributes preserves an enclosing diff background and any
-       weight; a dim body then re-asserts its dim, which the foreground
-       restore deliberately leaves alone. *)
+       weight; secondary text restores its measured foreground. *)
     ; link_restore : string
     ; palette_generation : int
     ; ambient_background : bool
@@ -564,10 +562,9 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Local -> Ansi.reset
     | Masc_tui_message_layout.Error -> Theme.bad ()
     (* Work, background news and skill chatter sit one rung below speech. *)
-    | Masc_tui_message_layout.Journal -> Ansi.dim
-    | Masc_tui_message_layout.Tool -> Ansi.dim
-    | Masc_tui_message_layout.Skill _ -> Ansi.dim
-    | Masc_tui_message_layout.Thinking _ -> Ansi.dim
+    | Masc_tui_message_layout.Journal | Masc_tui_message_layout.Tool
+    | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking _ ->
+      Ansi.reset ^ Theme.recede ()
 
   let link_foreground : Masc_tui_message_layout.style -> string = function
     | Masc_tui_message_layout.Status -> Theme.warn ()
@@ -580,15 +577,14 @@ module Chat_theme = struct
 
   (* A bare link opens underline and a bright foreground, and the restore
      must close both. [Ansi.default_fg] clears the link colour without
-     touching intensity -- SGR 39 is not a reset -- so a dim body re-asserts
-     [Ansi.dim] after it, while a full-brightness body stops at the
-     foreground. *)
+     touching intensity. Secondary text restores its measured foreground;
+     speech returns to the default foreground. *)
   let link_style_restore style =
     let foreground =
       match style with
       | Masc_tui_message_layout.Journal | Masc_tui_message_layout.Tool
       | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking _ ->
-        Ansi.default_fg ^ Ansi.dim
+        Theme.recede ()
       | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
       | Masc_tui_message_layout.Keeper | Masc_tui_message_layout.Status
       | Masc_tui_message_layout.Local | Masc_tui_message_layout.Error ->
@@ -647,7 +643,7 @@ module Chat_theme = struct
 
        [markdown_close] reopens the body style after the reset: every chat
        body is markdown-rendered, and the palette closes bold and code spans
-       with it. A plain reset would snap a dim body back to full foreground
+       with it. A plain reset would lose the measured secondary foreground
        after the first closed span. *)
     | ( Masc_tui_message_layout.Inbound
       | Masc_tui_message_layout.Keeper
@@ -662,7 +658,7 @@ module Chat_theme = struct
       ; markdown_close = Ansi.reset ^ opening
       ; inline_restore = Ansi.reset ^ opening
       ; link_restore
-      ; palette_generation = 0
+      ; palette_generation = snapshot.palette_generation
       ; ambient_background = false
       }
 end

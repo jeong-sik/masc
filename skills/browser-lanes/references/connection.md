@@ -25,7 +25,8 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     `web_extension` 연결만 한다. `activate_tab`은 `web_extension`·`webdriver_bidi`
     둘 다 하지만 `webdriver_bidi`는 브라우저 창에 포커스도 준다. 읽기
     (`mode=text`·`elements`·`scene`·`screenshot`)는 셋 다 한다. `mode=snapshot`
-    (ego 자신의 접근성 트리와 ref)은 `ego_task_space` 연결만 한다. `ego_task_space`
+    (ego 자신의 접근성 트리와 ref)과 click·fill 의 `target`(그 ref, 또는 role·이름이나
+    보이는 글로 고른 대상)은 `ego_task_space` 연결만 한다. `ego_task_space`
     연결은 읽기, `open_tab`, `close_tab`, `back`·`forward`·`reload`, `accept_dialog`·`dismiss_dialog`, `BrowserGoto`,
     그리고 click·`click_at`·`double_click`·hover·drag·`scroll`·`scroll_at`·fill·
     `select_option`·`follow_link`·`type_text`·`press_key` 를 한다. 터치·

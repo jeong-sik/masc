@@ -121,7 +121,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                     | Browser_lane.Hover_at _ | Browser_lane.Click_at _
                     | Browser_lane.Tap_at _ | Browser_lane.Swipe _
                     | Browser_lane.Drag _ | Browser_lane.Follow_link _
-                    | Browser_lane.Click_node _ | Browser_lane.Fill_node _ )
+                    | Browser_lane.Click_node _ | Browser_lane.Fill_node _
+                    | Browser_lane.Click_target _ | Browser_lane.Fill_target _ )
                 ; _
                 } ) -> "Interacting with selected browser viewport…", Theme.info ()
         | Loading (_, Screenshot _) ->

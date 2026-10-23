@@ -5931,6 +5931,7 @@ module Browser_lane_view = struct
     | Viewport_capture -> "screenshot"
     | Scene_read -> "scene"
     | Accessibility_snapshot -> "snapshot"
+    | Snapshot_target_input -> "snapshot target"
     | Dom_interaction -> "click/fill"
     | Point_click -> "point click"
     | Point_scroll -> "point scroll"
@@ -7238,7 +7239,7 @@ module Browser_lane_view = struct
                                                 | Click_at _ | Drag _
                                                 | Tap_at _ | Swipe _
                                                 | Follow_link _ | Click_node _
-                                                | Fill_node _)
+                                                | Fill_node _ | Click_target _ | Fill_target _)
                                           ; _ } )
                                   | Loading
                                       ( _

@@ -123,6 +123,7 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Viewport_capture -> Page_capture {tab_id=2}
   | Scene_read -> Page_scene {tab_id=2; max_chars=1000; view=Content; scope=None}
   | Accessibility_snapshot -> Page_snapshot {tab_id=2; max_chars=1000; scope=Snapshot_viewport}
+  | Snapshot_target_input -> interact (Click_target (Target_ref 12))
   | Dom_interaction -> interact (Click "#button")
   | Point_click -> interact (Click_at {point;viewport;button=Pointer.Primary})
   | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
@@ -149,9 +150,9 @@ let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the extension has no pointer the browser trusts"
-    Lane.[Accessibility_snapshot; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_answer; Frame_read] (unserved Lane.Web_extension);
+    Lane.[Accessibility_snapshot; Snapshot_target_input; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_answer; Frame_read] (unserved Lane.Web_extension);
   check (list capability) "the BiDi peer has no ego snapshot or browser zoom"
-    Lane.[Accessibility_snapshot; Browser_zoom] (unserved Lane.Webdriver_bidi);
+    Lane.[Accessibility_snapshot; Snapshot_target_input; Browser_zoom] (unserved Lane.Webdriver_bidi);
   check (list capability) "the ego connection has no document source, touch, zoom, resize, activation or frame reads"
     Lane.[Document_source; Touch_input; Browser_zoom; Viewport_resize; Tab_activation; Frame_read]
     (unserved Lane.Ego_task_space);

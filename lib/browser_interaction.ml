@@ -3,7 +3,7 @@ type request = { route : Browser_selection.preference; tab_id : int; frame_path 
   expected_url : string option; action : Browser_lane.interaction }
 let ( let* ) = Result.bind
 let route_names = ["lane"; "clientId"]
-let wire_fields = ["tabId"; "framePath"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"; "width"; "height"; "value"]
+let wire_fields = ["tabId"; "framePath"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"; "width"; "height"; "value"; "target"]
 let parse = function
   | `Assoc fields ->
     let allowed = route_names @ wire_fields in
@@ -61,8 +61,19 @@ let parse = function
       let keys = match List.assoc_opt "action" fields with
         | Some (`String "select_option") -> keys
         | _ -> "value" :: keys in
+      let keys = match List.assoc_opt "action" fields with
+        | Some (`String ("click" | "fill")) -> keys
+        | _ -> "target" :: keys in
       if List.exists (fun key -> List.mem_assoc key fields) keys
       then Error "arguments do not match the selected interaction action" else Ok () in
+    (* An ego snapshot target, given alone and on a page the caller observed. *)
+    let snapshot_target () = match List.assoc_opt "target" fields with
+      | None -> Ok None
+      | Some raw ->
+        let* () = if List.exists (fun key -> List.mem_assoc key fields) ["selector";"documentId";"nodeId"]
+          then Error "give target alone, without selector or documentId/nodeId" else Ok () in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "a snapshot target requires expectedUrl" in
+        Result.map Option.some (Browser_lane.snapshot_target_of_json raw) in
     let required key = match List.assoc_opt key fields with
       | Some value -> Ok value
       | None -> Error ("pointer action requires " ^ key) in
@@ -170,16 +181,22 @@ let parse = function
         Ok Browser_lane.Activate_tab
       | Some (`String "click") ->
         let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
-        let* target = node_target () in
-        (match target with Some target -> Ok (Browser_lane.Click_node target)
-         | None -> let* selector = selector () in Ok (Browser_lane.Click selector))
+        let* snapshot = snapshot_target () in
+        (match snapshot with
+         | Some target -> Ok (Browser_lane.Click_target target)
+         | None ->
+           let* target = node_target () in
+           (match target with Some target -> Ok (Browser_lane.Click_node target)
+            | None -> let* selector = selector () in Ok (Browser_lane.Click selector)))
       | Some (`String "fill") ->
         let* () = excludes ["x"; "y"; "point"; "from"; "to"; "viewport"] in
-        let* target = node_target () in
+        let* snapshot = snapshot_target () in
+        let* target = match snapshot with None -> node_target () | Some _ -> Ok None in
         (match List.assoc_opt "text" fields with
-         | Some (`String text) -> (match target with
-             | Some target -> Ok (Browser_lane.Fill_node {target;text})
-             | None -> let* selector = selector () in Ok (Browser_lane.Fill {selector;text}))
+         | Some (`String text) -> (match snapshot, target with
+             | Some target, _ -> Ok (Browser_lane.Fill_target {target;text})
+             | None, Some target -> Ok (Browser_lane.Fill_node {target;text})
+             | None, None -> let* selector = selector () in Ok (Browser_lane.Fill {selector;text}))
          | _ -> Error "fill requires string text (empty text clears the input)")
       | Some (`String "select_option") ->
         let* () = excludes ["text"; "documentId"; "nodeId"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
@@ -254,7 +271,8 @@ let parse = function
         | Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _
         | Browser_lane.Press_key _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Scroll_at _
         | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _
-        | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _) ->
+        | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _
+        | Browser_lane.Click_target _ | Browser_lane.Fill_target _) ->
         Error "framePath applies only to click, fill, select_option and scroll with a selector" in
     Ok { route = base.route; tab_id; frame_path; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
@@ -652,7 +670,8 @@ let needs_pointer_resolution = function
   | Browser_lane.Click _ | Click_node _ | Double_click _ | Hover _ | Drag_to _ -> true
   | Browser_lane.Activate_tab | Fill _ | Select_option _ | Set_zoom _ | Set_viewport _
   | Double_click_at _ | Type_text _ | Press_key _ | Scroll _ | Hover_at _ | Tap_at _
-  | Swipe _ | Click_at _ | Scroll_at _ | Drag _ | Follow_link _ | Fill_node _ -> false
+  | Swipe _ | Click_at _ | Scroll_at _ | Drag _ | Follow_link _ | Fill_node _
+  | Click_target _ | Fill_target _ -> false
 
 let resolve_pointer_input action = function
   | `Assoc fields ->
@@ -678,7 +697,8 @@ let resolve_pointer_input action = function
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
      | Browser_lane.Tap_at _ | Browser_lane.Swipe _
      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
-     | Browser_lane.Fill_node _ -> Error "semantic pointer action required" in
+     | Browser_lane.Fill_node _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _ ->
+       Error "semantic pointer action required" in
     let* url = required "url" in
     (match url with
      | `String url -> Ok (Some url, native)

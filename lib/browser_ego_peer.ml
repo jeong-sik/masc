@@ -797,6 +797,78 @@ let dom_input t ~id ~label ~deadline ~verb input =
         | Some (`Bool false) -> Error (Live.Before_effect reason)
         | Some _ | None -> Error (Live.Outcome_unknown (reason ^ "; " ^ unknown))
 
+(* ego finds a snapshot target itself. The run refuses before any effect when
+   a JavaScript dialog blocks the page, the page is not at the observed URL,
+   or the target does not name exactly one element; ego's wait says which. A
+   receipt lists the pages the action opened and a JavaScript dialog it
+   raised. The tab's row in the space says where the page is after, also
+   while that dialog is open. *)
+let target_wait_ms = 2000
+let ego_locator = function
+  | Browser_lane.Target_ref node -> "@" ^ string_of_int node
+  | Target_role {role;name;exact} ->
+    Printf.sprintf "loc=role:%s[name%s%s]" role (if exact then "=" else "*=") (Yojson.Safe.to_string (str name))
+  | Target_text {text;exact} -> "text=" ^ (if exact then Yojson.Safe.to_string (str text) else text)
+let target_input t ~id ~label ~deadline ~verb ~expected_url ~target ~text =
+  let unknown = Printf.sprintf "read tab %d before another step" id in
+  let response = run_step t ~window_s:(left t deadline) ~step:"page.target_input"
+      ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",str expected_url;"target",str (ego_locator target);
+        "text",(match text with Some text -> str text | None -> `Null);"waitMs",`Int target_wait_ms])
+      (String.concat "\n" [
+        "  const reason = " ^ message ^ ";";
+        unblocked_agent_page;
+        "    const page = task.page(args.label);";
+        "    let refusal = null, urlBefore = null;";
+        "    try { urlBefore = await page.url(); } catch (error) { refusal = reason(error); }";
+        "    if (refusal === null && urlBefore !== args.expectedUrl)";
+        "      refusal = \"the tab is at \" + urlBefore + \", not at expectedUrl; read it again\";";
+        "    if (refusal === null) {";
+        "      try { await page.waitForSelector(args.target, {state: \"attached\", timeout: args.waitMs}); }";
+        "      catch (error) { refusal = reason(error); }";
+        "    }";
+        "    if (refusal === null) {";
+        "      try { urlBefore = await page.url(); } catch (error) { refusal = reason(error); }";
+        "      if (refusal === null && urlBefore !== args.expectedUrl)";
+        "        refusal = \"the tab is at \" + urlBefore + \", not at expectedUrl; read it again\";";
+        "    }";
+        "    if (refusal !== null) emit({ok: false, before: true, error: refusal});";
+        "    else {";
+        "      let receipt = null, failure = null;";
+        "      try { receipt = await (args.text === null ? page.click(args.target) : page.fill(args.target, args.text)); }";
+        "      catch (error) { failure = reason(error); }";
+        "      const after = " ^ row_after ^ ";";
+        "      emit({ok: true, value: {urlBefore, receipt, error: failure, tab: after === undefined ? null : {url: after.url, title: after.title}}});";
+        "    }";
+        "  }" ]) in
+  match response with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value ->
+    let outcome detail = Error (Live.Outcome_unknown (detail ^ "; " ^ unknown)) in
+    match field "error" value, field "urlBefore" value, field "receipt" value, field "tab" value with
+    | Some (`String error), _, _, _ -> outcome (head error)
+    | Some `Null, Some (`String url_before), Some (`Assoc receipt), Some ((`Null | `Assoc _) as tab) ->
+      let popups = match List.assoc_opt "popups" receipt with
+        | None -> Ok []
+        | Some (`List popups) ->
+          List.fold_right (fun popup acc -> match acc, field "label" popup with
+            | Ok rows, Some (`String label) when label <> "" ->
+              Ok (obj ["tabId",`Int (remember t (Managed label));"label",str label] :: rows)
+            | Ok _, _ -> Error "ego reported a popup without its page label"
+            | (Error _ as error), _ -> error) popups (Ok [])
+        | Some _ -> Error "ego reported popups that are not a list" in
+      let dialog = match List.assoc_opt "dialog" receipt with
+        | None | Some `Null -> Ok []
+        | Some json -> Result.map (fun dialog -> ["dialog",Browser_surface.dialog_json dialog]) (ego_dialog json) in
+      (match popups, dialog with
+       | Ok popups, Ok dialog ->
+         Ok (obj (["tabId",`Int id;"action",str verb;"target",Browser_lane.snapshot_target_to_json target;
+                   "urlBefore",str url_before]
+                  @ tab_fields (Some tab)
+                  @ (match popups with [] -> [] | _ :: _ -> ["popups",`List popups])
+                  @ dialog))
+       | Error detail, _ | _, Error detail -> outcome detail)
+    | _ -> outcome "ego answered the input outside its answer frame"
+
 let interact t args =
   let before result = Result.map_error (fun detail -> Live.Before_effect detail) result in
   let* fields = before (match args with `Assoc fields -> Ok fields | _ -> Error "invalid interaction") in
@@ -823,7 +895,7 @@ let interact t args =
     | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
     | Browser_lane.Click_at _ | Browser_lane.Scroll_at _ | Browser_lane.Follow_link _
     | Browser_lane.Fill_node _ | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _
-    | Browser_lane.Double_click _ -> Ok () in
+    | Browser_lane.Double_click _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _ -> Ok () in
   let* expected_url, action =
     if Browser_interaction.needs_pointer_resolution request.action then
       let* resolved = resolve t ~label ~deadline (input ~expected_url:request.expected_url request.action) in
@@ -846,6 +918,9 @@ let interact t args =
         "        pointerReleased = outcome.released;";
         "        if (outcome.error !== null) throw new Error(outcome.error);"]
       ~fields:["path",`List (List.map pixels path)] in
+  let on_target ~target ~text = match expected_url with
+    | Some expected_url -> target_input t ~id ~label ~deadline ~verb ~expected_url ~target ~text
+    | None -> Error (Live.Before_effect "a snapshot target requires expectedUrl") in
   match action with
   | Browser_lane.Click_at {point; viewport; button} -> pointer viewport point (Press {button; count = 1})
   | Browser_lane.Double_click_at {point; viewport} -> pointer viewport point (Press {button = Browser_lane.Pointer.Primary; count = 2})
@@ -862,6 +937,8 @@ let interact t args =
     dom_input t ~id ~label ~deadline ~verb (input ~expected_url action)
   | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _ | Browser_lane.Double_click _ ->
     Error (Live.Before_effect "unresolved semantic pointer target")
+  | Browser_lane.Click_target target -> on_target ~target ~text:None
+  | Browser_lane.Fill_target {target; text} -> on_target ~target ~text:(Some text)
   | Browser_lane.Drag_to _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
   | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Activate_tab -> refused
 

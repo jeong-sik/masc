@@ -216,7 +216,7 @@ let test_ego_table () =
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
   check (list string) "reads, capture, the tab list, its own tabs, their history, input and dialogs on them"
-    ["list_tabs";"open_tab";"close_tab";"navigate";"follow_link";"back";"forward";"reload";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";
+    ["list_tabs";"open_tab";"close_tab";"navigate";"follow_link";"back";"forward";"reload";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"click_snapshot_target";"fill_snapshot_target";
      "click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
      "fill";"type_text";"press_key";"key_chord";"select_option";"read_dialog";"accept_dialog";"dismiss_dialog"]
     (List.map Cap.operation_name reachable);
@@ -227,12 +227,15 @@ let test_ego_table () =
     | Cap.Available _ | Cap.Unsupported _ -> failf "%s is not conditional on ego" (Cap.operation_name operation))
     (List.filter (fun operation -> not (List.mem operation [Cap.List_tabs; Cap.Open_tab])) reachable)
 
-(* ego's own accessibility snapshot is claimed by the ego connection alone. *)
+(* ego's own accessibility snapshot, and acting on the targets it names, are
+   claimed by the ego connection alone. *)
 let test_snapshot_table () =
   List.iter (fun (backend, label, claimed) ->
-    check bool (label ^ (if claimed then " claims" else " does not claim") ^ " the ego snapshot") claimed
-      (match Cap.support backend Cap.Read_snapshot with
-       | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false))
+    List.iter (fun operation ->
+      check bool (label ^ (if claimed then " claims " else " does not claim ") ^ Cap.operation_name operation) claimed
+        (match Cap.support backend operation with
+         | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false))
+      [Cap.Read_snapshot; Cap.Click_snapshot_target; Cap.Fill_snapshot_target])
     [Cap.Connected Lane.Ego_task_space, "ego", true;
      Cap.Connected Lane.Webdriver_bidi, "BiDi", false;
      Cap.Connected Lane.Web_extension, "the extension", false;

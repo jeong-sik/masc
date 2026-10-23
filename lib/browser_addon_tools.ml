@@ -119,6 +119,10 @@ let prepare ~keeper_name ~upload_paths tool json =
   | C.Read -> prepare_read ~keeper_name json
   | Interact ->
       let* request=Browser_interaction.parse json in
+      let* ()=match request.route with
+        | Browser_selection.Exact (B.Automation_route|B.Stagehand_route) when B.acts_on_snapshot_target request.action ->
+            Error B.snapshot_target_refused
+        | Automatic|Exact (Live_route _|Automation_route|Stagehand_route) -> Ok () in
       Ok {preference=request.route;required_actions=[];projection=Raw;
         verb=B.Page_interact {tab_id=request.tab_id;frame_path=request.frame_path;expected_url=request.expected_url;action=request.action}}
   | Act ->

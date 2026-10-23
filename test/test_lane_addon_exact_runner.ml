@@ -452,7 +452,8 @@ let retain_capture ~store capture =
   Owner.retain ~store ~scope:Capture.scope
     ~request_id:(Capture.Request_id.to_string (Capture.request_id capture))
     ~installation_id:destination.installation_id ~package_id:destination.package_id
-    ~tool:destination.tool ~request:(Capture.to_json capture)
+    ~tool:destination.tool ~summary:(Capture.Summary.to_json (get (Capture.summary capture)))
+    ~request:(Capture.to_json capture)
   |> Result.map_error Owner.error_to_string |> get
 let classification_capture ~base_path =
   let workspace = get (Capture.observe_workspace ~base_path) in

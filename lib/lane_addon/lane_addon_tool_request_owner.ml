@@ -14,12 +14,28 @@ let installation_of_id encoded =
     | _ -> Error "invalid original installation identity" in
   if String.equal encoded (installation_id installation) then Ok installation
   else Error "original installation identity is not canonical"
+(* A record as discovery reads it: everything but the request body. *)
+module Record = struct
+  type t = {
+    scope : string; request_id : string; installation_id : string;
+    package_id : string; tool : string; request_digest : string; summary : Yojson.Safe.t;
+    progress : Lane_addon_request_progress.t;
+  }
+  let scope r = r.scope
+  let request_id r = r.request_id
+  let installation_id r = r.installation_id
+  let package_id r = r.package_id
+  let tool r = r.tool
+  let request_digest r = r.request_digest
+  let summary r = r.summary
+  let progress r = r.progress
+end
 type retained = {
   scope : string; request_id : string; installation_id : string;
-  package_id : string; tool : string; request_digest : string; request : Yojson.Safe.t;
-  progress : Lane_addon_request_progress.t;
+  package_id : string; tool : string; request_digest : string; summary : Yojson.Safe.t;
+  request : Yojson.Safe.t; progress : Lane_addon_request_progress.t;
 }
-let schema = "lane.addon.tool-request-owner.v3"
+let schema = "lane.addon.tool-request-owner.v4"
 let validate_identity fields =
   match List.find_opt (fun (_, value) -> String.trim value = "") fields with
   | None -> Ok ()
@@ -27,18 +43,21 @@ let validate_identity fields =
 let digest request = Lane_addon_store.digest (Yojson.Safe.to_string request)
 let request_digest request = Result.map digest (Lane_addon_action.canonical request)
 (* The record names its request by digest; the body is stored once beside it,
-   so progress rewrites only this record. *)
+   so progress rewrites only this record. The summary is the consumer's own
+   index of the request, fixed at retain like the request. *)
 let to_json (r : retained) = `Assoc ["schema", `String schema;
   "scope", `String r.scope; "request_id", `String r.request_id;
   "installation_id", `String r.installation_id; "package_id", `String r.package_id;
-  "tool", `String r.tool; "request_digest", `String r.request_digest;
+  "tool", `String r.tool; "request_digest", `String r.request_digest; "summary", r.summary;
   "progress", Lane_addon_request_progress.to_json r.progress]
-(* The record's digest, and the retained value it forms with its request. *)
+let with_request (r : Record.t) request : retained =
+  {scope=r.scope; request_id=r.request_id; installation_id=r.installation_id; package_id=r.package_id;
+   tool=r.tool; request_digest=r.request_digest; summary=r.summary; request; progress=r.progress}
 let decode ~scope ~request_id json =
   let* fields = match json with
     | `Assoc fields when List.sort String.compare (List.map fst fields) =
         List.sort String.compare ["schema"; "scope"; "request_id";
-          "installation_id"; "package_id"; "tool"; "request_digest"; "progress"] -> Ok fields
+          "installation_id"; "package_id"; "tool"; "request_digest"; "summary"; "progress"] -> Ok fields
     | _ -> Error "invalid original request record fields" in
   let text key = match List.assoc key fields with
     | `String value when String.trim value <> "" -> Ok value
@@ -53,11 +72,15 @@ let decode ~scope ~request_id json =
   let* package_id = text "package_id" in
   let* tool = text "tool" in
   let* request_digest = text "request_digest" in
-  let* () = if Lane_addon_store.is_digest request_digest then Ok ()
+  let* () = if String_util.is_lowercase_sha256_hex request_digest then Ok ()
     else Error "original request digest is not a SHA-256 digest" in
+  (* Like the body, the summary must already be the canonical form retain wrote. *)
+  let stored_summary = List.assoc "summary" fields in
+  let* summary = Lane_addon_action.canonical stored_summary in
+  let* () = if String.equal (Yojson.Safe.to_string summary) (Yojson.Safe.to_string stored_summary) then Ok ()
+    else Error "original request summary is not canonical" in
   let* progress = Lane_addon_request_progress.of_json (List.assoc "progress" fields) in
-  Ok (request_digest, fun request ->
-    {scope; request_id; installation_id; package_id; tool; request_digest; request; progress})
+  Ok ({Record.scope; request_id; installation_id; package_id; tool; request_digest; summary; progress} : Record.t)
 (* The body a record names: present, its bytes named by that digest, and the
    canonical JSON of the request. *)
 let request_of_body ~request_digest = function
@@ -78,11 +101,11 @@ let same_record (a : retained) (b : retained) =
   String.equal a.scope b.scope && String.equal a.request_id b.request_id
   && String.equal a.installation_id b.installation_id && String.equal a.package_id b.package_id
   && String.equal a.tool b.tool && String.equal a.request_digest b.request_digest
-  && a.progress = b.progress
+  && Yojson.Safe.equal a.summary b.summary && a.progress = b.progress
 let restore ~store ~scope ~request_id json =
-  let* request_digest, make = decode ~scope ~request_id json in
-  let* request = load_request ~store ~scope ~request_digest in
-  Ok (make request)
+  let* record = decode ~scope ~request_id json in
+  let* request = load_request ~store ~scope ~request_digest:record.request_digest in
+  Ok (with_request record request)
 let load ~store ~scope ~request_id =
   let* () = validate_identity ["scope", scope; "request_id", request_id] in
   let* previous = Lane_addon_store.load_tool_request_owner store ~scope ~request_id
@@ -91,7 +114,6 @@ let load ~store ~scope ~request_id =
   | None -> Ok None
   | Some json -> restore ~store ~scope ~request_id json
       |> Result.map Option.some |> Result.map_error (fun detail -> Store_unavailable detail)
-module Bodies = Map.Make (String)
 let discover ~store ~scope =
   let* () = validate_identity ["scope",scope] in
   let unavailable value = Result.map_error (fun detail -> Store_unavailable detail) value in
@@ -108,20 +130,7 @@ let discover ~store ~scope =
         else Error (Store_unavailable "original request filename does not match its ID") in
       let* record = decode ~scope ~request_id json |> unavailable in
       decode_all (record :: records) rest in
-  let* records = decode_all [] rows in
-  (* The records' hold is released; the bodies they name are read under one
-     hold of the bodies directory, not one per record. *)
-  let* bodies = Lane_addon_store.load_tool_request_bodies store ~scope
-      ~request_digests:(List.sort_uniq String.compare (List.map fst records)) |> unavailable in
-  let bodies = List.fold_left (fun map (request_digest, body) -> Bodies.add request_digest body map)
-      Bodies.empty bodies in
-  let rec restore_all retained = function
-    | [] -> Ok (List.rev retained)
-    | (request_digest, make) :: rest ->
-      let* request = request_of_body ~request_digest (Option.join (Bodies.find_opt request_digest bodies))
-        |> unavailable in
-      restore_all (make request :: retained) rest in
-  restore_all [] records
+  decode_all [] rows
 let check_published ~read_body ~directory_name ~file_name json =
   let field key = match json with
     | `Assoc fields -> (match List.assoc_opt key fields with
@@ -130,22 +139,24 @@ let check_published ~read_body ~directory_name ~file_name json =
     | _ -> Error "invalid original request record" in
   let* scope = field "scope" in
   let* request_id = field "request_id" in
-  let* request_digest, _ = decode ~scope ~request_id json in
-  let* bytes = read_body ~scope ~request_digest in
-  let* _ = request_of_body ~request_digest bytes in
+  let* record = decode ~scope ~request_id json in
+  let* bytes = read_body ~scope ~request_digest:record.request_digest in
+  let* _ = request_of_body ~request_digest:record.request_digest bytes in
   if not (String.equal directory_name (Lane_addon_store.digest scope))
   then Error "original request directory does not match its scope"
   else if not (String.equal file_name (Lane_addon_store.digest request_id ^ ".json"))
   then Error "original request filename does not match its ID"
   else Ok ()
-let retain ~store ~scope ~request_id ~installation_id ~package_id ~tool ~request =
+let retain ~store ~scope ~request_id ~installation_id ~package_id ~tool ~summary ~request =
   let* () = validate_identity ["scope", scope; "request_id", request_id;
     "installation_id", installation_id; "package_id", package_id; "tool", tool] in
   let* request = Lane_addon_action.canonical request
     |> Result.map_error (fun detail -> Invalid_request detail) in
+  let* summary = Lane_addon_action.canonical summary
+    |> Result.map_error (fun detail -> Invalid_request detail) in
   let bytes = Yojson.Safe.to_string request in
   let expected = {scope; request_id; installation_id; package_id; tool;
-    request_digest = Lane_addon_store.digest bytes; request; progress=Lane_addon_request_progress.captured} in
+    request_digest = Lane_addon_store.digest bytes; summary; request; progress=Lane_addon_request_progress.captured} in
   let* previous = load ~store ~scope ~request_id in
   match previous with
   | Some previous ->
@@ -174,10 +185,10 @@ let advance ~store ~(expected : retained) ~event =
   | Some json ->
     (* Progress reads and rewrites only the record. A record naming another
        body differs from [expected] in its digest. *)
-    let* stored_digest, make = decode ~scope:expected.scope ~request_id:expected.request_id json
+    let* stored = decode ~scope:expected.scope ~request_id:expected.request_id json
       |> Result.map_error unavailable in
-    if not (String.equal stored_digest expected.request_digest) then Error State_conflict else
-    let previous = make expected.request in
+    if not (String.equal stored.request_digest expected.request_digest) then Error State_conflict else
+    let previous = with_request stored expected.request in
     if same_record previous next then Ok (Already_stored previous)
     else if not (same_record previous expected) then Error State_conflict
     else match Lane_addon_store.save_tool_request_owner store

@@ -68,12 +68,13 @@ let validate_sources sources =
 
 let pass_is_current ~keys ~contract (building : building) =
   String.equal building.contract contract && subset building.target keys
-let batch_is_current ~sources ~contract batch =
+let state_is_current ~sources ~contract t =
   let* () = validate_sources sources in
-  match batch.state.building with
-  | None -> Error "briefing batch has no active pass"
+  match t.building with
+  | None -> Error "briefing state has no active pass"
   | Some building ->
     Ok (pass_is_current ~keys:(source_keys sources) ~contract building)
+let batch_is_current ~sources ~contract batch = state_is_current ~sources ~contract batch.state
 
 let needs_refresh ~sources ~contract t =
   match sources with

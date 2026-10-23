@@ -116,7 +116,7 @@ let scenario domain () =
       let destination=Capture.destination original in
       owned (Owner.retain ~store ~scope:Capture.scope ~request_id:original_id
         ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
-        ~request:(Capture.to_json original));
+        ~summary:(Capture.Summary.to_json (get (Capture.summary original))) ~request:(Capture.to_json original));
       let reopened=Store.create ~root:(Store.root store) in
       let retained=match owned (Owner.load ~store:reopened ~scope:Capture.scope ~request_id:original_id) with
         | Some value -> value | None -> fail "original host capture must precede the worker RPC" in
@@ -213,7 +213,7 @@ let with_original_consumer f =
       let destination=Capture.destination original in
       owned (Owner.retain ~store ~scope:Capture.scope ~request_id
         ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
-        ~request:(Capture.to_json original));
+        ~summary:(Capture.Summary.to_json (get (Capture.summary original))) ~request:(Capture.to_json original));
       let resume call=Consumer.For_testing.resume ~store:(Store.create ~root:(Store.root store))
         ~base_path ~request_id ~call in
       let reply state fields=Ok { (Mcp_protocol.Mcp_types.tool_result_of_text "original worker state") with
@@ -403,7 +403,7 @@ let test_a_submit_the_worker_cannot_list_is_a_typed_refusal_the_host_narrows () 
     let original_id=Capture.Request_id.to_string request_id in
     owned (Owner.retain ~store ~scope:Capture.scope ~request_id:original_id
       ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
-      ~request:(Capture.to_json original));
+      ~summary:(Capture.Summary.to_json (get (Capture.summary original))) ~request:(Capture.to_json original));
     let refused=Exact.Call_final (Exact.Input_refused Exact.Request_body_refused) in
     (match Consumer.For_testing.resume ~store ~base_path ~request_id:original_id ~call:call_worker
            |> Result.map_error Consumer.error_to_string |> get with

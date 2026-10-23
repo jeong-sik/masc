@@ -187,6 +187,10 @@ let batch_schema = "workspace.memory.classification-batch.v4"
 let size_to_json = function
   | Fill_frame -> `Null
   | Up_to count -> `Int count
+let size_of_json = function
+  | `Null -> Ok Fill_frame
+  | `Int count when count >= 1 -> Ok (Up_to count)
+  | _ -> Error "up_to must be null or a positive fact count"
 
 let batch_to_json (batch : batch) =
   let stats = batch.index_stats in
@@ -222,10 +226,7 @@ let batch_of_json ~ledger ~render json =
         ["schema"; "up_to"; "input"; "facts"; "claims"; "conflicts"; "index_stats"] json in
     let* schema = snapshot_text (List.assoc "schema" fields) in
     let* () = if String.equal schema batch_schema then Ok () else Error "unknown classification batch schema" in
-    let* size = match List.assoc "up_to" fields with
-      | `Null -> Ok Fill_frame
-      | `Int count when count >= 1 -> Ok (Up_to count)
-      | _ -> Error "batch snapshot up_to must be null or a positive fact count" in
+    let* size = size_of_json (List.assoc "up_to" fields) in
     let* fact_ids = snapshot_pairs "fact" Ledger.fact_ref_of_json (List.assoc "facts" fields) in
     let* claim_ids = snapshot_pairs "claim_id" snapshot_text (List.assoc "claims" fields) in
     let* conflict_ids = snapshot_pairs "conflict_id" snapshot_text (List.assoc "conflicts" fields) in

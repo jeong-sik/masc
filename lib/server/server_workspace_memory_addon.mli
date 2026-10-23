@@ -70,6 +70,10 @@ type successor_result = Indivisible of Lane_addon_tool_request_owner.retained
   | Successor_waiting of Lane_addon_tool_request_owner.retained
   | Successor_ready of { parent:Lane_addon_tool_request_owner.retained;
       child:Lane_addon_tool_request_owner.retained }
+val restore_original : config:Workspace.config -> request_id:string ->
+  (Workspace_memory_execution_capture.t, error) Stdlib.result
+(** Strictly load one original and restore its capture with its acknowledged
+    ancestry, for a pass that acts on that original. *)
 val successor_is_current : config:Workspace.config -> capture:Workspace_memory_execution_capture.t ->
   (bool, error) Stdlib.result
 (** Observe whether an original candidate belongs to the current continuation
@@ -95,18 +99,24 @@ val narrow : config:Workspace.config -> request_id:string -> (successor_result, 
     Briefing preserves its original prepared state.
     Caller holds the workspace process lease throughout, including retries. *)
 type original = private {
-  capture : Workspace_memory_execution_capture.t;
-  record : Lane_addon_tool_request_owner.retained;
+  id : Workspace_memory_execution_capture.Request_id.t;
+  record : Lane_addon_tool_request_owner.Record.t;
+  summary : Workspace_memory_execution_capture.Summary.t;
 }
 val discover : config:Workspace.config -> (original list, error) Stdlib.result
-(** Strict complete original discovery and physical/ancestry validation precede
+(** Read every original record and its summary, without reading a request body
+    or restoring a capture. Strict link validation of the forest, including
+    that every original was captured in this physical workspace, precedes
     every recovery write. Recover only already durable Subdividing intentions,
     including child-retained-before-parent-ACK. Without a recoverable intention,
-    restore the already validated inventory from this pass. After any recovery,
-    freshly discover and fully restore every original. A missing acknowledged
-    child, malformed member or incomplete publication rejects the inventory;
-    no partial list is complete.
-    Works locally while Off, minting no ID or new successor intention. It does
+    return the inventory this pass already validated; after any recovery, read
+    the records again. A missing acknowledged child, an original of another
+    workspace, a malformed record or summary, or incomplete publication rejects
+    the inventory; no partial list is complete. A capture is restored, and its
+    derivation and summary are checked, when the pass acts on it. A body is
+    checked when its original is loaded, so an original no pass acts on is not
+    checked again.
+    Works locally while Off, publishing no new ID or successor intention. It does
     not dispatch, settle domains, prepare observers or schedule new roots.
     Caller holds the workspace process lease and serializes the entire pass;
     the result is an observation, not a grant to bypass fresh effect checks. *)
@@ -165,9 +175,14 @@ module For_testing : sig
     (successor_result, error) Stdlib.result
   (** Same actual strict parent/child journal and ancestry; no substituted
       publication edge or worker. *)
+  val recover_successor : store:Lane_addon_store.t -> base_path:string -> request_id:string ->
+    (unit, error) Stdlib.result
+  (** The step {!discover} runs for each recoverable parent: it completes the
+      successor intent the parent's record holds. A parent that holds none is
+      refused; no child is derived or published for it. *)
   val discover : store:Lane_addon_store.t -> base_path:string ->
     (original list, error) Stdlib.result
-  (** Same actual complete discovery, physical forest validation and existing
+  (** Same record and summary discovery, forest link validation and existing
       successor recovery. Only the store root/workspace is supplied. *)
   val discover_observed : store:Lane_addon_store.t -> base_path:string ->
     after_inventory:(unit -> unit) -> (original list, error) Stdlib.result

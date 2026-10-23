@@ -11,11 +11,11 @@ module Exact = Lane_addon_exact
 let ( let* ) = Result.bind
 let io work=Eio_unix.run_in_systhread work
 let consumer value=Result.map_error Consumer.error_to_string value
-let id (original : Consumer.original)=original.record.request_id
-let phase (original : Consumer.original)=Progress.phase original.record.progress
+let id (original : Consumer.original)=Owner.Record.request_id original.record
+let phase (original : Consumer.original)=Progress.phase (Owner.Record.progress original.record)
 type kind = Classification | Synthesis
-let kind (original : Consumer.original)=match Capture.work original.capture with
-  | Capture.Classification _ -> Classification | Capture.Briefing _ -> Synthesis
+let kind (original : Consumer.original)=match original.summary.Capture.Summary.batch with
+  | Capture.Summary.Classification _ -> Classification | Capture.Summary.Briefing _ -> Synthesis
 let active = function
   | Progress.Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ -> true
   | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false
@@ -25,19 +25,19 @@ let leaves originals=List.filter (fun original -> match phase original with
   | Finished _ | Conflicted _ | Rejected _ -> true) originals
 let size_refusal (original : Consumer.original)=match phase original with
   | Progress.Rejected {stage=Progress.Execution;evidence} ->
-    let* final=Exact.final_of_json ~schema:(Capture.output_schema original.capture) evidence in
+    let* final=Exact.final_of_json ~schema:(Capture.Summary.output_schema original.summary) evidence in
     (match final with
      | Exact.Call_final (Exact.Input_refused (Exact.Input_capacity | Context_overflow | Request_body_refused)) -> Ok true
      | Exact.Call_final (Exact.Output_limit_reached _) ->
-       (match Capture.work original.capture with Capture.Classification _ -> Ok true | Capture.Briefing _ -> Ok false)
+       (match kind original with Classification -> Ok true | Synthesis -> Ok false)
      | Exact.Call_final (Exact.Answered _ | Invalid_output _ | Input_refused Invalid_request)
      | Exact.Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok false)
   | Progress.Rejected {stage=Progress.Before_dispatch;_}
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok false
-let divisible (original : Consumer.original)=match Capture.work original.capture with
-  | Capture.Classification {batch;_} -> (match batch.selected with _::_::_ -> true | [] | [_] -> false)
-  | Capture.Briefing batch -> Briefing.selected_count batch > 1
+let divisible (original : Consumer.original)=match original.summary.Capture.Summary.batch with
+  | Capture.Summary.Classification {selected;_} -> (match selected with _::_::_ -> true | [] | [_] -> false)
+  | Capture.Summary.Briefing {selected_count;_} -> selected_count > 1
 let changed original record=phase original <> Progress.phase record.Owner.progress
 let narrow ~config original =
   let* result=Consumer.narrow ~config ~request_id:(id original) |> consumer in
@@ -58,6 +58,15 @@ let step ~config ~new_work original =
       | Some current -> Ok current | None -> Error "Original Curator terminal vanished before successor evaluation" in
     let* eligible=size_refusal current in
     if new_work && eligible && divisible current then narrow ~config current else Ok (changed original record)
+(* Whether an original's observer receipts need no work: registration is
+   acknowledged, and completion is acknowledged or not due yet. *)
+let observed (original : Consumer.original) =
+  match Progress.observer (Owner.Record.progress original.record) with
+  | {Lane_addon_request_receipt.registration=Acknowledged _; completion=Acknowledged _} -> true
+  | {registration=Acknowledged _; completion=Unobserved} -> active (phase original)
+  | {registration=(Unobserved | Pending _); _} | {registration=Acknowledged _; completion=Pending _} -> false
+(* Only originals with observer work are restored; an observed one costs a
+   record read. *)
 let observe ~config ~on_observation_failure originals =
   List.fold_left (fun complete original ->
     match Consumer.deliver_observation ~config ~request_id:(id original) with
@@ -71,7 +80,7 @@ let observe ~config ~on_observation_failure originals =
       on_observation_failure ();
       Log.Server.error "workspace curator original observation %s: %s" (id original)
         (Consumer.observation_error_to_string error);
-      false) true originals
+      false) true (List.filter (fun original -> not (observed original)) originals)
 let one_active originals=match List.filter (fun original -> active (phase original)) originals with
   | [] -> Ok None | [original] -> Ok (Some original)
   | _::_::_ -> Error "Multiple active Curator originals have no unique domain frontier"
@@ -82,16 +91,16 @@ let one_successor ~config originals =
     | original::rest ->
       let* size=size_refusal original in
       let* current=if size && divisible original then
-        Consumer.successor_is_current ~config ~capture:original.capture |> consumer
+        let* capture=Consumer.restore_original ~config ~request_id:(id original) |> consumer in
+        Consumer.successor_is_current ~config ~capture |> consumer
         else Ok false in
       collect (if current then original::acc else acc) rest in
   collect [] originals
 let classification_blocked originals (fact:Ledger.pending_fact) =
-  List.exists (fun (original : Consumer.original) -> match Capture.work original.capture with
-    | Capture.Briefing _ -> false
-    | Capture.Classification {batch;_} -> match phase original with
-      | Progress.Rejected _ ->
-        List.exists (fun (pending : Ledger.pending_fact) -> pending.fact=fact.Ledger.fact) batch.selected
+  List.exists (fun (original : Consumer.original) -> match original.summary.Capture.Summary.batch with
+    | Capture.Summary.Briefing _ -> false
+    | Capture.Summary.Classification {selected;_} -> match phase original with
+      | Progress.Rejected _ -> List.mem fact.Ledger.fact selected
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
       | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> false) originals
 let classify_new ~config ~originals ~new_work =
@@ -115,7 +124,7 @@ let classify_new ~config ~originals ~new_work =
   (* The last answered classification this pass still keeps decides how many
      facts the next one may hold. *)
   let size=Capture.classification_size
-      (List.map (fun (original : Consumer.original) -> original.capture,phase original) originals) in
+      (List.map (fun (original : Consumer.original) -> original.id,original.summary,phase original) originals) in
   (* Preparation owns its CPU-pool boundary. A raw system thread here would
      remove the Eio handler and make the index's nested CPU submits inline
      on this domain instead. Only captured inputs cross the boundary. *)
@@ -129,19 +138,18 @@ let classify_new ~config ~originals ~new_work =
     let* _=Consumer.capture_classification ~config ~request_id ~prompt:resolution ~ledger:change.ledger ~batch
       |> consumer in
     Ok true
+(* A refused or finished Briefing that prepared exactly this state, for a pass
+   still current, blocks preparing the same batch again. *)
 let briefing_blocked ~sources ~contract ~state originals =
-  let rec loop = function
-    | [] -> Ok false
-    | (original : Consumer.original)::rest ->
-      (match Capture.work original.capture with
-       | Capture.Classification _ -> loop rest
-       | Capture.Briefing batch -> match phase original with
-         | Progress.Rejected _ | Finished _ ->
-           let* current=Briefing.batch_is_current ~sources ~contract batch in
-           if current && Yojson.Safe.equal (Briefing.to_json state) (Briefing.to_json (Briefing.prepared_state batch))
-           then Ok true else loop rest
-         | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-         | Conflicted _ | Subdividing _ | Subdivided _ -> loop rest) in loop originals
+  let* state_sha256=Capture.briefing_state_sha256 state in
+  let prepared_this_state=List.exists (fun (original : Consumer.original) ->
+      match original.summary.Capture.Summary.batch, phase original with
+      | Capture.Summary.Briefing {prepared_state;_}, (Progress.Rejected _ | Finished _) ->
+        String.equal prepared_state state_sha256
+      | Capture.Summary.Briefing _, (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+                                    | Commit_unknown _ | Conflicted _ | Subdividing _ | Subdivided _)
+      | Capture.Summary.Classification _, _ -> false) originals in
+  if prepared_this_state then Briefing.state_is_current ~sources ~contract state else Ok false
 let briefing_new ~config ~originals ~new_work ~busy =
   let base_path=config.Workspace.base_path in
   let directory=Ledger.directory ~base_path in
@@ -325,7 +333,7 @@ let start ~sw ~config =
         if item.package_id=Capture.package_id then Option.map (fun owner -> owner.Lane_addon_runtime.id) item.configuration
         else None) inventory.instances in
       let retained=List.filter_map (fun (original : Consumer.original) ->
-        match Owner.installation_of_id original.record.installation_id with
+        match Owner.installation_of_id (Owner.Record.installation_id original.record) with
         | Ok (Owner.Configuration id) -> Some id
         | Ok (Owner.Manual _) | Error _ -> None) originals in
       let wanted=List.sort_uniq String.compare (installed @ retained)

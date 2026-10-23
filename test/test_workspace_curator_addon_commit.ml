@@ -72,7 +72,8 @@ let advance store record event=match Owner.advance ~store ~expected:record ~even
 let retain_capture store capture =
   let request_id=Capture.Request_id.to_string (Capture.request_id capture) in
   owned (Owner.retain ~store ~scope:Capture.scope ~request_id ~installation_id:destination.installation_id
-    ~package_id:destination.package_id ~tool:destination.tool ~request:(Capture.to_json capture));
+    ~package_id:destination.package_id ~tool:destination.tool
+    ~summary:(Capture.Summary.to_json (get (Capture.summary capture))) ~request:(Capture.to_json capture));
   let record=match owned (Owner.load ~store ~scope:Capture.scope ~request_id) with
     | Some record -> record | None -> fail "missing original capture" in
   record
@@ -378,7 +379,7 @@ let test_conflicting_child_cannot_change_parent_intent ()=with_workspace (fun ba
   let destination=Capture.destination child in
   owned (Owner.retain ~store ~scope:Capture.scope ~request_id:intended.request_id
     ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
-    ~request:(`Assoc ["unrelated",`Bool true]));
+    ~summary:(Capture.Summary.to_json (get (Capture.summary child))) ~request:(`Assoc ["unrelated",`Bool true]));
   check bool "conflict cannot retarget or mint another child" true (Result.is_error (narrow base_path store parent));
   check json "original intent remains authoritative" (Progress.to_json parent.progress)
     (Progress.to_json (original store capture).progress);
@@ -843,15 +844,20 @@ let discover base_path store = Consumer.For_testing.discover
   ~store:(Store.create ~root:(Store.root store)) ~base_path
 let observed_discover base_path store ~after_inventory = Consumer.For_testing.discover_observed
   ~store:(Store.create ~root:(Store.root store)) ~base_path ~after_inventory
-let discovered_id (original : Consumer.original) = original.record.request_id
-let check_discovered originals capture =
+let discovered_id (original : Consumer.original) = Owner.Record.request_id original.record
+(* Discovery reads the record and its summary; the full input is read by a
+   load of that record. *)
+let check_discovered store originals capture =
   let id=Capture.Request_id.to_string (Capture.request_id capture) in
-  match List.find_opt (fun (original : Consumer.original) -> original.record.request_id=id) originals with
+  match List.find_opt (fun (original : Consumer.original) -> discovered_id original=id) originals with
   | None -> fail "strict discovery lost an original request"
-  | Some original ->
-    check json "discovered capture keeps its full original input" (Capture.to_json capture)
-      (Capture.to_json original.capture);
-    original.record
+  | Some discovered ->
+    check json "discovery keeps the original's summary" (Capture.Summary.to_json (get (Capture.summary capture)))
+      (Capture.Summary.to_json discovered.summary);
+    let record=match owned (Owner.load ~store ~scope:Capture.scope ~request_id:id) with
+      | Some record -> record | None -> fail "a discovered original has no record to load" in
+    check json "the discovered original keeps its full input" (Capture.to_json capture) record.request;
+    record
 let bytes path = Fs_compat.load_file path
 let test_discovery_empty_does_not_publish ()=with_workspace (fun base_path store ->
   let inventories=ref 0 in
@@ -869,11 +875,12 @@ let test_discovery_preserves_active_original_and_fresh_resume ()=with_workspace 
       ignore (advance store retained (Progress.Refused {stage=Progress.Before_dispatch;
         evidence=`Assoc ["reason",`String "Original owner refused before admission"]})))) in
   check int "active original discovery reads one complete inventory" 1 !inventories;
-  let observed=check_discovered originals capture in
+  let observed=match List.find_opt (fun original -> discovered_id original=retained.request_id) originals with
+    | Some observed -> observed | None -> fail "strict discovery lost an original request" in
   check json "discovery retains its original validated observation"
-    (Progress.to_json Progress.captured) (Progress.to_json observed.progress);
+    (Progress.to_json Progress.captured) (Progress.to_json (Owner.Record.progress observed.record));
   let current=original store capture in
-  (match no_worker_resume base_path store observed with
+  (match no_worker_resume base_path store retained with
    | Ok (Consumer.Settled actual) ->
      check string "resume keeps the same active owner identity" retained.request_id actual.request_id;
      check json "resume reloads current progress without worker dispatch"
@@ -889,9 +896,19 @@ let test_discovery_parks_original_without_new_successor ()=with_workspace (fun b
   let records=accepted (observed_discover base_path store ~after_inventory:(fun () -> incr inventories)) in
   check int "cold non-recovery discovery performs one actual complete inventory" 1 !inventories;
   check int "discovery cannot turn refusal into new admission" 1 (List.length records);
-  let restored=check_discovered records capture in
+  let restored=check_discovered store records capture in
   check json "size refusal remains without a new intent" (Progress.to_json parent.progress) (Progress.to_json restored.progress);
   check string "parked original is not rewritten" before (bytes path))
+let test_recovery_mints_no_child_for_a_parent_without_an_intent ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Recovered parent source a";"Recovered parent source b"] in
+  let parent=refuse store capture size_input in
+  let path=child_record_path store parent in
+  let before=bytes path in
+  check bool "recovery refuses a size refusal that holds no intent" true
+    (Result.is_error (Consumer.For_testing.recover_successor ~store:(Store.create ~root:(Store.root store))
+       ~base_path ~request_id:parent.request_id));
+  check string "the parent is not rewritten" before (bytes path);
+  check int "no child is retained" 1 (List.length (owned (Owner.discover ~store ~scope:Capture.scope))))
 let test_discovery_recovers_existing_intent child_present ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Retained parent source a";"Retained parent source b"] in
   let _,child,_=intent store capture size_input in
@@ -904,14 +921,15 @@ let test_discovery_recovers_existing_intent child_present ()=with_workspace (fun
   let records=accepted (observed_discover base_path store ~after_inventory:(fun () -> incr inventories)) in
   check int "actual recovery requires the fresh complete inventory" 2 !inventories;
   check int "recover exactly original parent and intended child" 2 (List.length records);
-  let parent=check_discovered records capture in
-  let retained=check_discovered records child in
+  let parent=check_discovered store records capture in
+  let retained=check_discovered store records child in
   check json "child is unexecuted after local recovery" (Progress.to_json Progress.captured) (Progress.to_json retained.progress);
   (match Progress.phase parent.progress with
    | Progress.Subdivided (_,intent) -> check string "ACK keeps original child ID" retained.request_id intent.request_id
    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
    | Finished _ | Conflicted _ | Rejected _ | Subdividing _ -> fail "existing parent intent was not acknowledged");
-  let paths=List.map (fun (original : Consumer.original) -> child_record_path store original.record) records in
+  let paths=List.map (fun original -> Filename.concat (Store.root store) (Filename.concat "tool-request-owners"
+      (Filename.concat (Store.digest Capture.scope) (Store.digest (discovered_id original) ^ ".json")))) records in
   let before=List.map bytes paths in
   inventories:=0;
   let again=accepted (observed_discover base_path store ~after_inventory:(fun () -> incr inventories)) in
@@ -954,21 +972,37 @@ let test_discovery_rejects_acknowledged_missing_child ()=with_workspace (fun bas
   check bool "incomplete acknowledged forest is not empty or partial" true (Result.is_error (discover base_path store));
   check bool "missing acknowledged child is never recreated" false (Sys.file_exists path);
   check json "parent history is preserved" (Progress.to_json parent.progress) (Progress.to_json (original store capture).progress))
-let retain_bad_capture store capture request =
+let retain_bad_capture ?summary store capture request =
   let target=Capture.destination capture in
+  let summary=match summary with Some summary -> summary
+    | None -> Capture.Summary.to_json (get (Capture.summary capture)) in
   owned (Owner.retain ~store ~scope:Capture.scope ~request_id:(Capture.Request_id.to_string (Capture.request_id capture))
-    ~installation_id:target.installation_id ~package_id:target.package_id ~tool:target.tool ~request)
+    ~installation_id:target.installation_id ~package_id:target.package_id ~tool:target.tool ~summary ~request)
 let test_discovery_validates_every_member_before_recovery ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Valid pending source a";"Valid pending source b"] in
   let parent,child,_=intent store capture size_input in
   let unrelated,_=classification base_path ["Unrelated malformed original capture"] in
-  retain_bad_capture store unrelated (`Assoc ["unrelated",`Bool true]);
+  retain_bad_capture ~summary:`Null store unrelated (`Assoc ["unrelated",`Bool true]);
   let before=bytes (child_record_path store parent) in
-  check bool "one malformed original rejects the entire forest before repair" true
+  check bool "one malformed original record rejects the entire forest before repair" true
     (Result.is_error (discover base_path store));
   check string "valid pending parent was not partially repaired" before (bytes (child_record_path store parent));
   check bool "validation failure creates no child" true
     (owned (Owner.load ~store ~scope:Capture.scope ~request_id:(Capture.Request_id.to_string (Capture.request_id child)))=None))
+(* Discovery reads records and summaries. A malformed request body of an
+   unrelated original does not stop the recovery of another chain; that
+   original is refused when something restores it. *)
+let test_an_unrelated_malformed_body_is_refused_when_restored ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Recovered pending source a";"Recovered pending source b"] in
+  let _,child,_=intent store capture size_input in
+  let unrelated,_=classification base_path ["Unrelated original with a malformed body"] in
+  retain_bad_capture store unrelated (`Assoc ["unrelated",`Bool true]);
+  check int "the pending chain is recovered beside the unrelated original" 3
+    (List.length (accepted (discover base_path store)));
+  check bool "the recovered child is retained" true
+    (owned (Owner.load ~store ~scope:Capture.scope ~request_id:(Capture.Request_id.to_string (Capture.request_id child)))<>None);
+  check bool "the unrelated original is refused when restored" true
+    (Result.is_error (restore_capture base_path store (original store unrelated))))
 let test_discovery_refuses_conflicting_or_started_pending_child started ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Pending child source a";"Pending child source b"] in
   let parent,child,_=intent store capture size_input in
@@ -994,8 +1028,9 @@ let test_an_intent_naming_another_request_is_refused ()=with_workspace (fun base
     (Result.is_error (narrow base_path store (original store capture)));
   check int "no child is written for that intent" 1 (List.length (owned (Owner.discover ~store ~scope:Capture.scope)));
   check bool "discovery refuses that intent" true (Result.is_error (discover base_path store)))
-(* The child and the parent's intent agree with each other, but the child is
-   not what the parent derives: only the derivation check refuses it. *)
+(* The child, its summary and the parent's intent agree with each other, but
+   the child is not what the parent derives: only the derivation check, made
+   when the child is restored, refuses it. *)
 let test_a_child_the_parent_does_not_derive_is_refused ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Derived source a";"Derived source b"] in
   let parent,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
@@ -1009,7 +1044,8 @@ let test_a_child_the_parent_does_not_derive_is_refused ()=with_workspace (fun ba
     match get (Store.load_tool_request_owner store ~scope:Capture.scope ~request_id:record.request_id) with
     | Some wire -> get (Store.save_tool_request_owner store ~scope:Capture.scope ~request_id:record.request_id (edit wire))
     | None -> fail "missing original record" in
-  rewrite child (replace_field "request_digest" (`String digest));
+  rewrite child (fun wire -> wire |> replace_field "request_digest" (`String digest)
+    |> replace_field "summary" (replace_field "up_to" (`Int 2) (Yojson.Safe.Util.member "summary" wire)));
   let history=match Progress.to_json parent.progress with
     | `List events -> `List (List.map (fun event ->
         if Yojson.Safe.Util.member "event" event=`String "successor_intended"
@@ -1023,7 +1059,8 @@ let test_a_child_the_parent_does_not_derive_is_refused ()=with_workspace (fun ba
        (Yojson.Safe.Util.member "work" reloaded.request))) (`Int 2));
   check bool "restoring a child the parent does not derive is refused" true
     (Result.is_error (restore_capture base_path store reloaded));
-  check bool "discovery refuses it" true (Result.is_error (discover base_path store)))
+  check bool "discovery reads records and summaries, which agree with each other" true
+    (Result.is_ok (discover base_path store)))
 let test_discovery_nested_existing_intents ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Nested source a";"Nested source b";"Nested source c";"Nested source d"] in
   let _,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
@@ -1032,9 +1069,9 @@ let test_discovery_nested_existing_intents ()=with_workspace (fun base_path stor
   retain_capture store grandchild |> ignore;
   let records=accepted (discover base_path store) in
   check int "one acknowledged chain with an interrupted next link" 3 (List.length records);
-  check_discovered records capture |> ignore;
-  check_discovered records child_capture |> ignore;
-  check_discovered records grandchild |> ignore)
+  check_discovered store records capture |> ignore;
+  check_discovered store records child_capture |> ignore;
+  check_discovered store records grandchild |> ignore)
 let test_discovery_rejects_dangling_parent ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Missing predecessor source a";"Missing predecessor source b"] in
   let child=match get (Capture.narrow ~request_id:(Capture.Request_id.fresh ()) ~final:size_input capture) with
@@ -1043,7 +1080,29 @@ let test_discovery_rejects_dangling_parent ()=with_workspace (fun base_path stor
   let before=bytes (child_record_path store retained) in
   check bool "an orphan cannot become an independent root" true (Result.is_error (discover base_path store));
   check string "orphan evidence remains unchanged" before (bytes (child_record_path store retained)))
+(* The same store read in another physical place, as when the workspace is
+   copied or restored from a backup. *)
 let test_discovery_rejects_foreign_workspace ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Workspace-bound original"] in
+  ignore (retain_capture store capture);
+  check int "the workspace that captured an original discovers it" 1 (List.length (accepted (discover base_path store)));
+  let copy=Filename.concat base_path "copied-workspace" in
+  Unix.mkdir copy 0o700;
+  check bool "another physical workspace refuses the whole inventory" true (Result.is_error (discover copy store)))
+(* The same path names a new directory holding the same files, as after a
+   restore from a backup in place. *)
+let test_discovery_rejects_a_workspace_restored_in_place ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Workspace-bound original"] in
+  ignore (retain_capture store capture);
+  let moved=base_path ^ ".before-restore" in
+  Unix.rename base_path moved;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree moved) (fun () ->
+    Unix.mkdir base_path 0o700;
+    Array.iter (fun name -> Unix.rename (Filename.concat moved name) (Filename.concat base_path name))
+      (Sys.readdir moved);
+    check bool "the same path on another directory refuses the whole inventory" true
+      (Result.is_error (discover base_path store))))
+let test_restore_refuses_a_capture_naming_another_workspace ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Workspace-bound original"] in
   let request=match Capture.to_json capture with
     | `Assoc fields -> `Assoc (List.map (fun (name,value) ->
@@ -1054,13 +1113,18 @@ let test_discovery_rejects_foreign_workspace ()=with_workspace (fun base_path st
         else name,value) fields)
     | _ -> fail "expected capture" in
   retain_bad_capture store capture request;
-  check bool "foreign physical workspace is not new work" true (Result.is_error (discover base_path store)))
+  check int "discovery reads the record, whose summary names this workspace" 1
+    (List.length (accepted (discover base_path store)));
+  check bool "a capture naming another workspace is refused when restored" true
+    (Result.is_error (restore_capture base_path store (original store capture))))
 let test_discovery_rejects_duplicate_inventory_id ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["One original request identity"] in
-  let record=retain_capture store capture in
+  ignore (retain_capture store capture);
+  let links=owned (Owner.discover ~store ~scope:Capture.scope) |> List.map (fun record ->
+    record,get (Capture.Summary.of_json (Owner.Record.summary record))) in
   check bool "duplicate rows are not a valid complete forest" true
     (Result.is_error (Capture.recoverable_successors ~workspace:(get (Capture.observe_workspace ~base_path))
-      [record;record])))
+       (links @ links))))
 let test_live_briefing_contract_on_recovery after_saved ()=with_workspace (fun base_path store ->
   Eio.Switch.run @@ fun sw ->
   let prompts=Filename.concat base_path "guarded-prompts" in
@@ -1164,11 +1228,14 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "empty discovery publishes no owner state" `Quick test_discovery_empty_does_not_publish;
   test_case "single-scan discovery preserves the active original and fresh resume" `Quick test_discovery_preserves_active_original_and_fresh_resume;
   test_case "discovery does not mint a child from a size refusal" `Quick test_discovery_parks_original_without_new_successor;
+  test_case "recovery mints no child for a parent without an intent" `Quick test_recovery_mints_no_child_for_a_parent_without_an_intent;
   test_case "discovery recovers durable intent before child retain" `Quick (test_discovery_recovers_existing_intent false);
   test_case "discovery recovers retained child before parent ACK" `Quick (test_discovery_recovers_existing_intent true);
   test_case "fresh recovery inventory refuses a newly malformed member" `Quick test_discovery_rejects_error_in_fresh_recovery_inventory;
   test_case "discovery refuses acknowledged missing child" `Quick test_discovery_rejects_acknowledged_missing_child;
   test_case "complete forest validation precedes every recovery write" `Quick test_discovery_validates_every_member_before_recovery;
+  test_case "an unrelated malformed body is refused when restored" `Quick
+    test_an_unrelated_malformed_body_is_refused_when_restored;
   test_case "discovery refuses conflicting pending child" `Quick (test_discovery_refuses_conflicting_or_started_pending_child false);
   test_case "discovery refuses execution before parent ACK" `Quick (test_discovery_refuses_conflicting_or_started_pending_child true);
   test_case "an intent naming another request is refused before any child" `Quick
@@ -1177,6 +1244,8 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "discovery recovers nested original chain" `Quick test_discovery_nested_existing_intents;
   test_case "discovery refuses a missing original predecessor" `Quick test_discovery_rejects_dangling_parent;
   test_case "discovery refuses another physical workspace" `Quick test_discovery_rejects_foreign_workspace;
+  test_case "discovery refuses a workspace restored in place" `Quick test_discovery_rejects_a_workspace_restored_in_place;
+  test_case "restore refuses a capture naming another workspace" `Quick test_restore_refuses_a_capture_naming_another_workspace;
   test_case "discovery refuses duplicate original IDs" `Quick test_discovery_rejects_duplicate_inventory_id;
   test_case "Briefing recovery reads the changed live contract on its original fiber" `Quick
     (test_live_briefing_contract_on_recovery false);

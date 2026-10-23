@@ -76,7 +76,7 @@ let event_of_json json =
     let* fields = fields ["request_id";"request_digest"] in
     (match List.assoc "request_id" fields, List.assoc "request_digest" fields with
      | `String request_id, `String request_digest
-       when String.trim request_id <> "" && Lane_addon_store.is_digest request_digest ->
+       when String.trim request_id <> "" && String_util.is_lowercase_sha256_hex request_digest ->
        Ok (Successor_intended {request_id;request_digest})
      | _ -> Error "successor intent requires a nonblank child ID and its request digest")
   | "successor_observed" ->

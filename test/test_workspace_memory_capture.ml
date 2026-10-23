@@ -23,7 +23,7 @@ let with_store f =
     let root = Filename.concat parent "store" in f root (Store.create ~root))
 let retain ?(installation_id = "original-installation") ?(package_id = "curator")
     ?(tool = "classify") ~request_id ~request store =
-  Owner.retain ~store ~scope:"workspace-curator" ~request_id ~installation_id ~package_id ~tool ~request
+  Owner.retain ~store ~scope:"workspace-curator" ~request_id ~installation_id ~package_id ~tool ~summary:`Null ~request
 let load store request_id = Owner.load ~store ~scope:"workspace-curator" ~request_id
 let render input = Ok ("Original captured prompt:\n" ^ Yojson.Safe.to_string input)
 let fact ?path keeper claim : Ledger.pending_fact =

@@ -9,15 +9,16 @@ an intermediate E02 source change, not installed extraction or UI parity.
 
 One owner per physical workspace preserves its existing pending wake, scoped
 Keeper commit subscription, in-flight revision deduplication and switch lifetime.
-Each domain pass first strictly discovers the entire original forest and locally
-repairs only already durable successor intentions. Malformed inventory fails the
-whole pass; it cannot authorize an empty replacement frontier. A pass with no
-recoverable intention restores its first validated inventory without repeating
-the full scan. Actual recovery still requires a fresh complete inventory and
-forest validation before returning originals. Nothing is cached across passes;
-resume, settlement and narrowing retain their fresh original reads and effect
-checks. This reduces duplicate inventory work, not retained request size, and
-does not establish an installed latency improvement. Classification
+Each domain pass first strictly discovers the entire original forest from its
+records and summaries and locally repairs only already durable successor
+intentions. Malformed inventory fails the whole pass; it cannot authorize an
+empty replacement frontier. A pass with no recoverable intention keeps the
+inventory it validated instead of reading the records again; actual recovery
+still requires a fresh complete inventory and forest validation before
+returning originals. Nothing is cached across passes; resume, settlement and
+narrowing keep their fresh original reads and effect checks. The pass restores
+a capture only for an original it acts on; an observed finished original costs
+one record read. Classification
 and Briefing then independently advance their unique active original. Ambiguous
 active frontiers fail rather than picking file order. Separate passes preserve
 classification failure versus existing Briefing progress.

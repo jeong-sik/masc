@@ -160,6 +160,71 @@ let to_json t = `Assoc ["schema",`String capture_schema;
   "destination",destination_json t.destination;"prompt",prompt_json t.prompt;
   "work",work_json t.work;"rendered_prompt_sha256",`String (sha256 (rendered t.work));
   "output_schema",schema t.work]
+(* What a pass reads about an original without restoring it. It is derived
+   from the capture, kept in the owner record, and checked against the
+   capture on every restore. *)
+module Summary = struct
+  let schema = "workspace.memory.execution-summary.v1"
+  type batch =
+    | Classification of { up_to : Request.size; selected : Ledger.fact_ref list }
+    | Briefing of { selected_count : int; prepared_state : string }
+  type t = { predecessor : Request_id.t option; workspace : workspace; batch : batch }
+  let output_schema t = match t.batch with
+    | Classification _ -> Decision.output_schema | Briefing _ -> Brief.output_schema
+  let to_json t = `Assoc (("schema", `String schema)
+    :: ("predecessor", optional (Option.map Request_id.to_string t.predecessor))
+    :: ("workspace", workspace_json t.workspace) ::
+    match t.batch with
+    | Classification {up_to; selected} -> ["kind",`String "classification";"up_to",Request.size_to_json up_to;
+        "selected",`List (List.map Ledger.fact_ref_to_json selected)]
+    | Briefing {selected_count; prepared_state} -> ["kind",`String "briefing";
+        "selected_count",`Int selected_count;"prepared_state_sha256",`String prepared_state])
+  let of_json json =
+    let field key = match json with `Assoc f -> List.assoc_opt key f | _ -> None in
+    let* () = match field "schema" with
+      | Some (`String version) when String.equal version schema -> Ok ()
+      | _ -> Error "unknown Curator summary schema" in
+    let kind = field "kind" in
+    let predecessor f = match List.assoc "predecessor" f with
+      | `Null -> Ok None
+      | `String value -> Result.map Option.some (Request_id.of_string value)
+      | _ -> Error "a Curator summary predecessor must be a request ID or null" in
+    match kind with
+    | Some (`String "classification") ->
+      let* f = fields ["schema";"predecessor";"workspace";"kind";"up_to";"selected"] json in
+      let* predecessor = predecessor f in
+      let* workspace = workspace_of_json (List.assoc "workspace" f) in
+      let* up_to = Request.size_of_json (List.assoc "up_to" f) in
+      let* selected = match List.assoc "selected" f with
+        | `List (_ :: _ as refs) -> List.fold_right (fun json selected ->
+            let* selected = selected in
+            let* fact = Ledger.fact_ref_of_json json in Ok (fact :: selected)) refs (Ok [])
+        | _ -> Error "a Curator classification summary selects at least one fact" in
+      Ok {predecessor; workspace; batch=Classification {up_to; selected}}
+    | Some (`String "briefing") ->
+      let* f = fields ["schema";"predecessor";"workspace";"kind";"selected_count";"prepared_state_sha256"] json in
+      let* predecessor = predecessor f in
+      let* workspace = workspace_of_json (List.assoc "workspace" f) in
+      let* selected_count = match List.assoc "selected_count" f with
+        | `Int count when count >= 1 -> Ok count
+        | _ -> Error "a Curator Briefing summary selects at least one entry" in
+      let* prepared_state = match List.assoc "prepared_state_sha256" f with
+        | `String digest when String_util.is_lowercase_sha256_hex digest -> Ok digest
+        | _ -> Error "a Curator Briefing summary names its prepared state by SHA-256" in
+      Ok {predecessor; workspace; batch=Briefing {selected_count; prepared_state}}
+    | _ -> Error "unknown Curator summary kind"
+end
+let briefing_state_sha256 state =
+  Result.map (fun json -> sha256 (Yojson.Safe.to_string json)) (Lane_addon_action.canonical (Brief.to_json state))
+let summary t =
+  let* batch = match t.work with
+    | Classification {batch;_} ->
+      Ok (Summary.Classification {up_to=batch.size;
+        selected=List.map (fun (fact : Ledger.pending_fact) -> fact.fact) batch.selected})
+    | Briefing batch ->
+      let* prepared_state = briefing_state_sha256 (Brief.prepared_state batch) in
+      Ok (Summary.Briefing {selected_count=Brief.selected_count batch; prepared_state}) in
+  Ok {Summary.predecessor=t.predecessor; workspace=t.workspace; batch}
 let restore_record ~workspace (retained : Owner.retained) =
   let* f = fields ["schema";"request_id";"predecessor";"workspace";"destination";"prompt";"work";
                    "rendered_prompt_sha256";"output_schema"] retained.request in
@@ -187,24 +252,31 @@ let restore_record ~workspace (retained : Owner.retained) =
   let* () = if String.equal sent (sha256 (rendered work)) then Ok ()
     else Error "Curator capture now renders a different prompt than the one it recorded" in
   let* () = check ~prompt work in
-  Ok {id;predecessor;workspace;destination;prompt;work}
+  let t = {id;predecessor;workspace;destination;prompt;work} in
+  let* summary = summary t in
+  if Yojson.Safe.equal retained.summary (Summary.to_json summary) then Ok t
+  else Error "Curator capture differs from the summary its owner record keeps"
+(* One answered classification: when it was minted, whether it is a root,
+   the size it was prepared for and how many facts it held. *)
+type answered = { minted : Request_id.t; root : bool; prepared : Request.size; held : int }
 let classification_size originals =
-  let answered = List.filter_map (fun (t, (phase : Progress.phase)) ->
-      match t.work, phase with
-      | Classification {batch;_}, (Finished _ | Conflicted _) -> Some (t, batch)
-      | Classification _, (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-                          | Commit_unknown _ | Rejected _ | Subdividing _ | Subdivided _)
-      | Briefing _, _ -> None) originals in
-  let latest = List.fold_left (fun latest (t, batch) -> match latest with
-      | Some (newer, _) when Request_id.compare newer.id t.id > 0 -> latest
-      | Some _ | None -> Some (t, batch)) None answered in
+  let answered = List.filter_map (fun (minted, (summary : Summary.t), (phase : Progress.phase)) ->
+      match summary.Summary.batch, phase with
+      | Summary.Classification {up_to; selected}, (Finished _ | Conflicted _) ->
+        Some {minted; root=Option.is_none summary.Summary.predecessor; prepared=up_to; held=List.length selected}
+      | Summary.Classification _, (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+                                  | Commit_unknown _ | Rejected _ | Subdividing _ | Subdivided _)
+      | Summary.Briefing _, _ -> None) originals in
+  let latest = List.fold_left (fun latest answer -> match latest with
+      | Some newer when Request_id.compare newer.minted answer.minted > 0 -> latest
+      | Some _ | None -> Some answer) None answered in
   match latest with
   | None -> Request.Fill_frame
-  | Some ({predecessor = Some _; _}, (batch : Request.batch)) -> Request.Up_to (List.length batch.selected)
-  | Some ({predecessor = None; _}, batch) ->
-    (match batch.size with
+  | Some {root=false; held; _} -> Request.Up_to held
+  | Some {root=true; prepared; held; _} ->
+    (match prepared with
      | Request.Fill_frame -> Request.Fill_frame
-     | Request.Up_to target when List.length batch.selected < target -> Request.Up_to target
+     | Request.Up_to target when held < target -> Request.Up_to target
      | Request.Up_to target -> Request.Up_to (2 * target))
 let narrow ~request_id ~final t =
   let* () = if Request_id.to_string request_id <> Request_id.to_string t.id then Ok ()
@@ -267,36 +339,58 @@ let restore_with ~pending ~workspace ~load retained =
   walk [] retained
 let restore ~workspace ~load retained = restore_with ~pending:false ~workspace ~load retained
 module Originals = Map.Make (String)
+(* Records and summaries only. A restore of an original walks its chain and
+   checks every derivation; this checks the links between records and that
+   every original was captured in this physical workspace. *)
 let recoverable_successors ~workspace originals =
   let rec index records = function
     | [] -> Ok records
-    | (original : Owner.retained)::rest ->
-      if Originals.mem original.request_id records then Error "duplicate original Curator request ID"
-      else index (Originals.add original.request_id original records) rest in
+    | ((record, summary) as original : Owner.Record.t * Summary.t)::rest ->
+      let id = Owner.Record.request_id record in
+      if Originals.mem id records then Error "duplicate original Curator request ID"
+      else if summary.Summary.workspace <> workspace then Error "Curator request belongs to another physical workspace"
+      else index (Originals.add id original records) rest in
   let* records = index Originals.empty originals in
-  let load ~request_id = Ok (Originals.find_opt request_id records) in
+  let rec ancestry seen ((record, summary) : Owner.Record.t * Summary.t) =
+    let id = Owner.Record.request_id record in
+    if List.mem id seen then Error "cyclic Curator predecessor chain" else
+    match summary.Summary.predecessor with
+    | None -> Ok ()
+    | Some predecessor ->
+      let* parent = match Originals.find_opt (Request_id.to_string predecessor) records with
+        | Some parent -> Ok parent | None -> Error "original Curator predecessor is absent" in
+      let* successor = match Progress.phase (Owner.Record.progress (fst parent)) with
+        | Progress.Subdivided (_,successor) -> Ok successor
+        | Progress.Subdividing (_,successor) when Progress.events (Owner.Record.progress record)=[] -> Ok successor
+        | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
+        | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _
+        | Progress.Rejected _ | Progress.Subdividing _ ->
+          Error "original Curator predecessor has not acknowledged this child" in
+      let* () = if String.equal successor.request_id id
+          && String.equal successor.request_digest (Owner.Record.request_digest record) then Ok ()
+        else Error "Curator child differs from its predecessor's original intent" in
+      ancestry (id :: seen) parent in
+  let child_of parent (intent : Progress.successor) (child, (child_summary : Summary.t)) =
+    if String.equal (Owner.Record.request_digest child) intent.request_digest
+       && Option.map Request_id.to_string child_summary.Summary.predecessor = Some parent then Ok ()
+    else Error "Curator child differs from its parent's original intent" in
   let rec validate pending = function
     | [] -> Ok (List.rev pending)
-    | (record : Owner.retained)::rest ->
-      let* original = restore_with ~pending:true ~workspace ~load record in
-      let* pending = match Progress.phase record.progress with
-        | Progress.Subdividing (refusal,intent) ->
-          let* _ = expected_successor original refusal intent in
+    | ((record, _) as original)::rest ->
+      let id = Owner.Record.request_id record in
+      let* () = ancestry [] original in
+      let* pending = match Progress.phase (Owner.Record.progress record) with
+        | Progress.Subdividing (_,intent) ->
           let* () = match Originals.find_opt intent.request_id records with
             | None -> Ok ()
-            | Some child ->
-              let* () = if String.equal child.request_digest intent.request_digest
-                           && Progress.events child.progress=[] then Ok ()
-                else Error "unacknowledged Curator child differs from its original initial capture" in
-              let* _ = restore_with ~pending:true ~workspace ~load child in Ok () in
-          Ok (record.request_id::pending)
-        | Progress.Subdivided (refusal,intent) ->
-          let* _ = expected_successor original refusal intent in
-          let* child = match Originals.find_opt intent.request_id records with Some child -> Ok child
+            | Some ((child, _) as found) ->
+              if Progress.events (Owner.Record.progress child)=[] then child_of id intent found
+              else Error "an unacknowledged Curator child has already started" in
+          Ok (id::pending)
+        | Progress.Subdivided (_,intent) ->
+          let* found = match Originals.find_opt intent.request_id records with Some found -> Ok found
             | None -> Error "acknowledged original Curator child is absent" in
-          let* () = if String.equal child.request_digest intent.request_digest then Ok ()
-            else Error "acknowledged Curator child differs from its original intent" in
-          let* _ = restore ~workspace ~load child in Ok pending
+          let* () = child_of id intent found in Ok pending
         | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
         | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _
         | Progress.Rejected _ -> Ok pending in

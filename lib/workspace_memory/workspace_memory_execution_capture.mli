@@ -52,7 +52,31 @@ val work : t -> work
 val rendered_prompt : t -> string
 val output_schema : t -> Yojson.Safe.t
 val to_json : t -> Yojson.Safe.t
-val classification_size : (t * Lane_addon_request_progress.phase) list -> Workspace_memory_request.size
+(** What a pass reads about an original without restoring it: its
+    predecessor, the physical workspace that captured it, and for
+    classification the size it was prepared for and the facts it selected,
+    for Briefing how many entries it selected and the SHA-256 of the state it
+    prepared. The owner record keeps it; every restore refuses a capture
+    whose summary differs. *)
+module Summary : sig
+  val schema : string
+  (** [workspace.memory.execution-summary.v1]. A summary naming another
+      schema is refused. *)
+  type batch =
+    | Classification of { up_to : Workspace_memory_request.size; selected : Workspace_memory_ledger.fact_ref list }
+    | Briefing of { selected_count : int; prepared_state : string }
+  type t = private { predecessor : Request_id.t option; workspace : workspace; batch : batch }
+  val output_schema : t -> Yojson.Safe.t
+  (** The domain output schema of the original's kind. *)
+  val to_json : t -> Yojson.Safe.t
+  val of_json : Yojson.Safe.t -> (t, string) result
+end
+val summary : t -> (Summary.t, string) result
+val briefing_state_sha256 : Workspace_memory_briefing.t -> (string, string) result
+(** The SHA-256 of a Briefing state's canonical JSON, as a summary names the
+    state its batch prepared. *)
+val classification_size :
+  (Request_id.t * Summary.t * Lane_addon_request_progress.phase) list -> Workspace_memory_request.size
 (** The size of the next classification batch
     (RFC-workspace-curator-curates-changed-facts 2.4, "다음 묶음"), from the
     latest-minted classification a provider answered ([Finished] or
@@ -66,7 +90,8 @@ val classification_size : (t * Lane_addon_request_progress.phase) list -> Worksp
       that answer says nothing about [n].
     - With no answered classification, [Fill_frame].
     Briefing and every other phase are not evidence. Each pass reads the
-    originals it keeps; the batch records the size it was prepared for. *)
+    summaries of the originals it keeps, each with its request ID; the summary
+    records the size its batch was prepared for. *)
 val narrow : request_id:Request_id.t -> final:Lane_addon_exact.final -> t -> (t option, string) result
 (** Pure whole-row/whole-entry bisection using the original captured template,
     ledger, physical workspace and destination. Input_capacity, Context_overflow
@@ -89,14 +114,16 @@ val restore : workspace:workspace ->
     child whose parent is still Subdividing cannot execute. This is neither
     restart enumeration nor a commit journal. *)
 val recoverable_successors : workspace:workspace ->
-  Lane_addon_tool_request_owner.retained list -> (string list, string) result
-(** Validate the complete freshly discovered original forest before recovery.
-    Every capture, physical workspace and whole predecessor/child derivation
-    must agree. A Subdividing parent may have no child yet, or exactly its
-    initial Captured child with no events; this known publication window is
-    validated without granting that child execution authority. An acknowledged
-    child must exist. Duplicate, dangling, cyclic or conflicting records reject
-    the whole inventory, including malformed unrelated members.
+  (Lane_addon_tool_request_owner.Record.t * Summary.t) list -> (string list, string) result
+(** Validate the links of the freshly discovered original forest before
+    recovery, from records and summaries only: every original was captured in
+    [workspace], every predecessor is present and names its child by request
+    ID and digest, an acknowledged child exists, and a Subdividing parent has
+    no child yet or exactly its initial child with no events. An original of
+    another physical workspace, or a duplicate, dangling, cyclic or
+    conflicting link, rejects the whole inventory. Captures and each
+    whole-batch derivation are checked when an original is restored, not
+    here.
     Return only parent IDs with already durable successor intentions. No new
     ID, intent, admission, worker call or domain effect is authorized. Caller
     must re-read each parent under the original lease/serializer and perform

@@ -1,6 +1,7 @@
 (** Original host-side request and progress. The request body is stored once,
-    named by its digest; one small record holds the identity, that digest and
-    the progress, and only the record is rewritten as progress advances.
+    named by its digest; one small record holds the identity, that digest, the
+    consumer's summary of the request and the progress, and only the record is
+    rewritten as progress advances.
     Caller holds the workspace process lease and serializes retains and
     progress updates. *)
 type error = Binding_conflict | Store_unavailable of string | Invalid_identity of string
@@ -13,6 +14,20 @@ val installation_of_id : string -> (installation, string) result
 (** Decode only the complete canonical identity produced by [installation_id].
     Missing/unknown kinds, blank names and noncanonical JSON are errors. This
     identifies an original owner; it does not establish live export authority. *)
+(** One record as {!discover} reads it, without the request body. *)
+module Record : sig
+  type t
+  val scope : t -> string
+  val request_id : t -> string
+  val installation_id : t -> string
+  val package_id : t -> string
+  val tool : t -> string
+  val request_digest : t -> string
+  val summary : t -> Yojson.Safe.t
+  (** The consumer's canonical index of the request, fixed at {!retain}. The
+      store does not read it; the consumer checks it against the request. *)
+  val progress : t -> Lane_addon_request_progress.t
+end
 type retained = private {
   scope : string;
   request_id : string;
@@ -20,6 +35,7 @@ type retained = private {
   package_id : string;
   tool : string;
   request_digest : string;
+  summary : Yojson.Safe.t;
   request : Yojson.Safe.t;
   progress : Lane_addon_request_progress.t;
 }
@@ -33,13 +49,16 @@ val load : store:Lane_addon_store.t -> scope:string -> request_id:string ->
     bytes do not match the record's digest, are errors. This restores a known
     ID, not restart discovery or permission to dispatch or commit. The caller
     owns workspace authority. *)
-val discover : store:Lane_addon_store.t -> scope:string -> (retained list, error) result
-(** Read and strictly validate every published original request in this scope,
-    including its exact hashed filename and complete input/progress history.
-    Any malformed, misnamed, vanished or unreadable published record rejects the
-    inventory; no partial list is returned as complete. No directories, requests
-    or dispatches are created. Results are observations; load/advance and actual
-    workspace authority must be revalidated by the original serialized owner. *)
+val discover : store:Lane_addon_store.t -> scope:string -> (Record.t list, error) result
+(** Read and strictly validate every published record in this scope, including
+    its exact hashed filename, canonical summary and complete progress
+    history, without reading any request body; {!load} reads and checks the
+    body. Any
+    malformed, misnamed, vanished or unreadable published record rejects the
+    inventory; no partial list is returned as complete. No directories,
+    requests or dispatches are created. Results are observations; load/advance
+    and actual workspace authority must be revalidated by the original
+    serialized owner. *)
 val check_published :
   read_body:(scope:string -> request_digest:string -> (string option, string) result) ->
   directory_name:string -> file_name:string -> Yojson.Safe.t -> (unit, string) result
@@ -48,11 +67,12 @@ val check_published :
     [read_body] returns for its digest, and its scope directory and filename.
     Reads nothing else and writes nothing. *)
 val retain : store:Lane_addon_store.t -> scope:string -> request_id:string ->
-  installation_id:string -> package_id:string -> tool:string -> request:Yojson.Safe.t -> (unit, error) result
+  installation_id:string -> package_id:string -> tool:string -> summary:Yojson.Safe.t ->
+  request:Yojson.Safe.t -> (unit, error) result
 (** Persist the complete canonical request before dispatch: its body first,
-    then the record that names it. Same input and original destination is
-    idempotent and preserves advanced progress; the comparison uses the
-    request digest. Invalid JSON is refused before writing. A retain
+    then the record that names it with [summary]. Same input, summary and
+    original destination is idempotent and preserves advanced progress; the
+    request is compared by its digest. Invalid JSON is refused before writing. A retain
     interrupted between the two writes leaves a body no record names.
     Retaining the same request again writes that body again; otherwise nothing
     reads it or removes it. A record whose body is missing is an error.

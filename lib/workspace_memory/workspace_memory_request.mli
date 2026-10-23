@@ -17,6 +17,10 @@ type error =
     frame holds. [Up_to n] takes at most [n], a count earlier provider answers
     support (RFC-workspace-curator-curates-changed-facts 2.4, "다음 묶음"). *)
 type size = Fill_frame | Up_to of int
+val size_to_json : size -> Yojson.Safe.t
+(** [null] for [Fill_frame], the count for [Up_to]. *)
+val size_of_json : Yojson.Safe.t -> (size, string) result
+(** The inverse of {!size_to_json}; a count below one is refused. *)
 
 val error_to_string : error -> string
 

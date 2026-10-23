@@ -10,8 +10,6 @@ val digest : string -> string
     Bounded C feeds allow the runtime to service another systhread between
     chunks; they neither cap the input nor introduce an Eio suspension. The
     caller still owns CPU scheduling and cancellation of the complete work. *)
-val is_digest : string -> bool
-(** Whether the text has the shape {!digest} returns: lowercase hex SHA-256. *)
 val blob_reference : string -> Lane_addon_types.evidence
 (** Content-addressed reference without writing. It may be used to measure a
     complete acquisition envelope; publish it only after [write_blob] succeeds. *)
@@ -135,11 +133,6 @@ val load_tool_request_body : t -> scope:string -> request_digest:string -> (stri
 (** Strict read of one published body with the same owned-descriptor checks
     as {!load_tool_request_owner}. [None] means no body has that name; the
     caller compares the bytes with the digest it holds. *)
-val load_tool_request_bodies : t -> scope:string -> request_digests:string list ->
-  ((string * string option) list, string) result
-(** {!load_tool_request_body} for every digest, in order, under one held
-    listing of the scope's bodies directory. Call it outside any other hold of
-    the same scope: both use one non-reentrant serializer. *)
 val tool_request_owner_inventory : t -> scope:string -> ((string * Yojson.Safe.t) list, string) result
 (** Complete sorted published [.json] records in one scope, with filenames for
     the consumer's exact key/schema validation. Missing descendants under an

@@ -106,8 +106,8 @@ val tool_export_reading : config:Workspace.config -> access:Lane_addon_sources.a
     explicitly. Visibility follows verified caller authority; an installation
     the caller cannot read is in neither list. *)
 val retain_tool_request_owner : config:Workspace.config -> access:Lane_addon_sources.access ->
-  reserved:string list -> export:tool_export -> scope:string -> request_id:string -> request:Yojson.Safe.t ->
-  (unit, tool_call_error) result
+  reserved:string list -> export:tool_export -> scope:string -> request_id:string -> summary:Yojson.Safe.t ->
+  request:Yojson.Safe.t -> (unit, tool_call_error) result
 (** Trusted host consumer boundary, before any RPC for an original request.
     Durably binds its scope/ID and captured request to this logical installation,
     package and tool. A restarted worker on that installation retains ownership;
@@ -141,12 +141,13 @@ val with_tool_request_destination : config:Workspace.config -> access:Lane_addon
     is not authority for an effect after the callback returns. *)
 val capture_tool_request_owner : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> export:tool_export -> scope:string -> request_id:string ->
-  capture:(tool_request_destination -> ('a * Yojson.Safe.t, string) result) ->
+  capture:(tool_request_destination -> ('a * Yojson.Safe.t * Yojson.Safe.t, string) result) ->
   ('a, tool_call_error) result
 (** New configured work only. Under the shared configuration/action serializers,
     revalidate the live export and freshly read enabled declaration, invoke the pure host
     capture factory with its original destination/revisions, and durably retain
-    that exact JSON before returning the host value. The callback must not yield,
+    the request and summary it returns, in that order after the host value,
+    before returning the host value. The callback must not yield,
     perform effects or call Runtime. A failed publication may already be visible;
     discover the original ID rather than minting another one. This does not
     dispatch, commit or authorize a later RPC. Manual/missing/conflicting

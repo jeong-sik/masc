@@ -131,7 +131,7 @@ let test_real_worker_resumes_the_server_consumer () =
       let store = Lane_addon_store.create ~root:(Filename.concat base_path "request-ownership") in
       let retain ~request_id ~request = Lane_addon_tool_request_owner.retain ~store
         ~scope:"candle-appraisals" ~request_id ~installation_id:"original-installation"
-        ~package_id:package.id ~tool:"candle_appraise" ~request
+        ~package_id:package.id ~tool:"candle_appraise" ~summary:`Null ~request
         |> Result.map_error (fun error -> Lane_addon_runtime.Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
       let run registry = Server_candle_appraiser.For_testing.run ~registry ~base_path ~retain ~call:port ~identity request in
       (match run registry with

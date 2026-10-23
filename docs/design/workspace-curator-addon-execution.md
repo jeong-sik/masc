@@ -245,8 +245,8 @@ original capture before any RPC. The same configured destination is rechecked
 for resumed calls, while original captured revisions remain immutable audit
 facts rather than being replaced by today's values.
 
-Every pass strictly reloads the original host record and restores its physical
-workspace. New work reads before admission and submits only after a newly stored
+Every pass that acts on an original strictly reloads its host record and
+restores its physical workspace. New work reads before admission and submits only after a newly stored
 intent. An explicit capacity non-admission permits another read/admission of the
 same original ID. Pending, unknown, missing-after-dispatch, uncertain journal
 publication and Already_stored cannot send another submit. A complete late
@@ -412,21 +412,37 @@ matches it. The captured ledger is the classification before-state and also
 holds the claim and conflict texts the input cites. The observer registration
 receipt names the capture by its request digest instead of holding a copy.
 
-An original owner record (`lane.addon.tool-request-owner.v3`) holds the
-identity, the request digest and the progress. The request body is written
-once, before any record names it, beside the scope's records at
-`tool-request-bodies/<scope digest>/<request digest>.json`. Progress rewrites
-only the record, and retain and progress compare the request by its digest, so
-a progress event reads and writes a record whose size does not depend on the
-request; it still holds the commit's before and after domain states. Discovery
-reads the scope's records under one hold and then every body they name under
-one hold of the bodies directory. A record whose body is missing, changed or
-not canonical JSON is an error, not absence. A retain interrupted between the
-two writes leaves a body no record names: retaining the same request again
-writes it again, and nothing else reads or removes it. A record and the body it
-names move together; moving only one of them breaks discovery of the scope. The
-deploy store check reads each record with the body it names, by path, as it
-reads records. Candle Appraiser keeps its originals in the same store.
+An original owner record (`lane.addon.tool-request-owner.v4`) holds the
+identity, the request digest, the consumer's summary of the request and the
+progress. The request body is written once, before any record names it, beside
+the scope's records at `tool-request-bodies/<scope digest>/<request digest>.json`.
+Progress rewrites only the record, and retain and progress compare the request
+by its digest, so a progress event reads and writes the record, not the
+request. The record still grows with the request through the summary, one
+fact reference per selected fact of a classification, and it holds the
+commit's before and after domain states. Discovery reads the scope's records
+only. Loading one original reads the body its record names, and a body that
+is missing, changed or not canonical JSON is an error, not absence. A body is
+checked when its original is loaded, so the body of an original no pass acts
+on is not checked again. A retain interrupted between the two
+writes leaves a body no record names: retaining the same request again writes
+it again, and nothing else reads or removes it. A record and the body it names
+move together; a record moved without its body fails every load of that
+original. The deploy store check reads each record with the body it names, by
+path, as it reads records. Candle Appraiser keeps its originals in the same
+store with a null summary, because it reads them by ID only.
+
+The Curator summary (`workspace.memory.execution-summary.v1`) is an index of
+the capture, computed from it when the original is retained: the predecessor,
+the physical workspace that captured it, and for classification the size the
+batch was prepared for and the selected fact references, for Briefing the
+selected count and the SHA-256 of the prepared state. A restore computes the
+summary again and refuses a record whose summary differs, so the capture stays
+the authority. A summary that is not in canonical form is refused when its
+record is read. From summaries alone a pass knows whether every original
+belongs to this workspace, each original's domain, whether it can be halved,
+which facts a Rejected classification holds back, whether a Briefing original
+still holds its pass and how large the next batch starts.
 
 The capture format requires an explicit nullable predecessor. Root constructors
 emit null; a child records its immediate original parent. The decoder is strict: missing predecessor and old-format
@@ -526,11 +542,15 @@ initial prepared-state/capture reconciliation and installed UI remain pending.
 ## Complete original discovery before production cutover
 
 `Server_workspace_memory_addon.discover` provides the local recovery boundary
-for the future production scheduler. It first strictly discovers all original
-owners, observes the actual physical workspace and validates the entire capture
-forest. This includes the full immutable intent/whole-prefix derivation of each
-successor, all predecessor links and each acknowledged child. It never treats a
-malformed unrelated record as an empty or partial successful inventory.
+for the production owner. It reads every original record and its summary,
+without a request body, and validates the forest from them: every original
+captured in the physical workspace it observes once per scan, no repeated ID,
+every predecessor present, no cycle, each child named by its parent's
+successor intent with the same request digest and a summary naming that
+parent, and the child of every Subdivided parent present. A workspace copied
+or restored to another place therefore refuses its whole inventory. It never
+treats a malformed unrelated record or summary as an empty or partial
+successful inventory.
 
 A legitimate interrupted publication has a Subdividing parent and either no
 child yet or its exact initial Captured child before the parent ACK. Ordinary
@@ -542,14 +562,20 @@ retain/read/ACK sequence using the original child ID. It never narrows a merely
 Rejected original or mints another ID. An acknowledged missing child is an error
 and is never recreated.
 
-After recovery, the host repeats complete discovery/physical forest validation
-and ordinary strict restore before returning any original captures. Recovery
-errors or uncertainty return no partial successful inventory. The caller must
-hold the workspace process lease and serialize the whole operation; a returned
+After a recovery, the host reads the records again and repeats the link
+validation. Recovery errors or uncertainty return no partial successful
+inventory. A capture is restored only for an original a pass acts on: the
+active original it advances, each size-refused leaf that could be halved, to
+see whether it is still the current frontier, and an original whose observer
+receipts still need work. That restore reads the request body
+and its ancestors' bodies and checks the whole derivation, the workspace and the
+summary. Any other original costs one record read. The caller must hold the
+workspace process lease and serialize the whole operation; a returned
 observation does not replace fresh authority at any later effect edge. This is
 not a cross-process transaction, a worker admission or a new-work grant. The map
 exists only for one pure inventory check; record order is not execution priority.
-Complete scans, domain decoding and repeated ancestry/strict reads remain costs.
+Every pass still reads every record of the scope, so its cost grows with the
+retained originals; finished chains stay in the scope.
 
 The port uses local original journals and can recover an already stored intent
 without a live worker or model route. New root/new successor admission still

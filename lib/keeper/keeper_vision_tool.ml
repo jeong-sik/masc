@@ -64,8 +64,16 @@ let vision_runtime_candidates ~now =
   (* Only [runtime.media_failover] qualifies. Capability admission uses the
      same predicate as the Keeper media reroute. *)
   Runtime_agent.media_candidates ()
-  |> Runtime_quota_window.demote_order ~now ~quota_scope_of:(fun (rt : Runtime_instance.t) ->
-       Some (Runtime_instance.quota_scope_of_runtime rt))
+  |> Runtime_candidate_standing.order ~now
+       ~policy:(Runtime_candidate_standing.Rate_rest_only
+         {rest_sec=(fun ~retry_after -> Keeper_runtime_failure_route.path_rest_sec
+           ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+           ~retry_class:Keeper_runtime_failure_route.Rate_limited
+           ~retry_after_hint:retry_after)})
+       ~quota_scope_of:(fun (rt : Runtime_instance.t) ->
+         Some (Runtime_instance.quota_scope_of_runtime rt))
+       ~candidate_backpressure_of:(fun (rt : Runtime_instance.t) ->
+         Some rt.candidate_backpressure)
   |> List.filter_map (fun (rt : Runtime_instance.t) ->
        let caps = Runtime_agent.input_capabilities_of_runtime rt in
        if not (Runtime_agent.caps_admit_required_modalities caps [ "image" ])
@@ -626,22 +634,6 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
     Effect_outcome_unknown
 ;;
 
-(* A 402 states the binding's account cannot pay. The keeper walk records the
-   same fact for a typed [PaymentRequired]; the read walk meets it as HTTP and
-   records it here so the next read starts elsewhere (RFC-0440 §3). Any answer
-   that got through clears an observation on that account. *)
-let note_candidate_account ~(runtime : Runtime_instance.t) = function
-  | Llm_provider.Http_client.HttpError { code = 402; _ } ->
-    Runtime_quota_window.note_observed_exhausted
-      ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
-  | Llm_provider.Http_client.HttpError _
-  | Llm_provider.Http_client.NetworkError _
-  | Llm_provider.Http_client.TimeoutError _
-  | Llm_provider.Http_client.ProviderFailure _
-  | Llm_provider.Http_client.AcceptRejected _
-  | Llm_provider.Http_client.ProviderTerminal _ -> ()
-;;
-
 let run_candidates_outcome
     ?base_path
     ?complete
@@ -769,6 +761,9 @@ let run_candidates_outcome
             | Llm_provider.Http_client.AcceptRejected _
             | Llm_provider.Http_client.ProviderTerminal _
             | Llm_provider.Http_client.ProviderFailure _ ) as err) ->
+            Runtime_candidate_standing.observe_http_error ~now:(Eio.Time.now clock)
+              ~candidate:rt.Runtime_instance.candidate_backpressure
+              ~quota_scope:(Runtime_instance.quota_scope_of_runtime rt) err;
             if candidate_capacity_http_error err
             then (
               record_vision_candidate_attempt
@@ -793,7 +788,6 @@ let run_candidates_outcome
                 })
             else if candidate_policy_http_error err
             then (
-              note_candidate_account ~runtime:rt err;
               record_vision_candidate_attempt
                 ?tool_use_id ?trace_id ~runtime_id ~result:"error"
                 ~reason:"candidate_policy_error" ~duration_ms:0.0
@@ -821,8 +815,10 @@ let run_candidates_outcome
                 ; detail = Provider_http_error.to_message err
                 })
        | Ok response ->
-            Runtime_quota_window.note_succeeded
-              ~scope:(Runtime_instance.quota_scope_of_runtime rt);
+            Runtime_candidate_standing.observe
+              ~candidate:(Some rt.Runtime_instance.candidate_backpressure)
+              ~quota_scope:(Some (Runtime_instance.quota_scope_of_runtime rt))
+              Runtime_candidate_standing.Answered;
             (match
                outcome_of_response_with_failure
                  ~invalid_response:(record_invalid ~runtime_id ~attempt_index)

@@ -60,7 +60,7 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
      messages = [Agent_core.Types.user_msg "Pending conversation evidence."];
      tool_observations = []; counterpart_observations = []} in
   let cli_calls = ref [] in
-  let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let cli_runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     cli_calls := !cli_calls @ [runtime_id];
     Error (List.assoc runtime_id cli_errors) in
   let refused = ref 0 and committed = ref false and observed_limit = ref None in
@@ -288,7 +288,7 @@ let test_prefit_real_continuity ~base_path () =
     if continuity then Alcotest.(check int) "continuity requires nonempty text" 1
       (state |> member "minLength" |> to_int) in
   let invalid_calls = ref [] in
-  let invalid_runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt:_ =
+  let invalid_runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema ~prompt:_ =
     check_working_state_schema ~continuity:true output_schema;
     invalid_calls := !invalid_calls @ [runtime_id];
     Ok (Yojson.Safe.to_string
@@ -317,7 +317,7 @@ let test_prefit_real_continuity ~base_path () =
     let answer = match missing_state with
       | `Assoc fields -> `Assoc (("working_state", working_state) :: fields)
       | _ -> Alcotest.fail "expected fixture object" in
-    let ordinary_runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt:_ =
+    let ordinary_runner ~runtime:_ ~system_prompt:_ ~output_schema ~prompt:_ =
       check_working_state_schema ~continuity:false output_schema;
       Ok (Yojson.Safe.to_string answer) in
     match Runtime.For_testing.execute_exact_output_classified ~continuity:None
@@ -363,7 +363,7 @@ let test_prefit_real_continuity ~base_path () =
     let input = input prepared in
     let expected = rendered prepared input in
     let answered_by = ref None in
-    let runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt =
+    let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema ~prompt =
       check_working_state_schema ~continuity:true output_schema;
       calls := prompt :: !calls;
       answered_by := Some runtime_id;
@@ -711,7 +711,7 @@ let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~regi
      keeper_instructions="Preserve evidence."; current=None;
      working_context=Keeper_librarian_context.empty; messages=P.messages prepared;
      tool_observations=[];counterpart_observations=[]} in
-  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     Ok (Yojson.Safe.to_string
           (`Assoc ["working_state", `String "State the refused snapshot must not keep."])) in
   let committed = ref false and refusals = ref [] in

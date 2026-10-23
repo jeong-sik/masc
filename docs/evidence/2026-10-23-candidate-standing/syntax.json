@@ -1,0 +1,197 @@
+{
+  "scope": "syntax only; no typing or native execution",
+  "files": [
+    {
+      "path": "docs/evidence/2026-10-23-candidate-standing/boundary_ports.ml",
+      "sha256": "f2d0041f0b02b0f0f3c76cf2b53ea4fa640dd8617c0f36e59bf9e1f0d084115f",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "docs/evidence/2026-10-23-candidate-standing/cases.ml",
+      "sha256": "655c603aed38145fef19a5bfd8511deba67707b95cf58e9853e8f8b1912c5128",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/fusion/fusion_official_client.ml",
+      "sha256": "6670d987cc0a499c27d74e74860400bcd1e07c426362830d6fd4e18734ff18e1",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/fusion/fusion_official_client.mli",
+      "sha256": "19b037aa2fbcaf93958389ceee68285d5cee34c4dcbf97d9e65336c61dbf2a9c",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/keeper/keeper_lane_cli_oneshot.ml",
+      "sha256": "b29e6fc58edc66fccc157dc6202981500ebc97e174e58ad5dd8788ef3b4fd4ba",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/keeper/keeper_lane_cli_oneshot.mli",
+      "sha256": "543456afd870873917e399f8d2b0a2c45a8d383700ba4de9881045c05dcedad8",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/keeper/keeper_turn_driver.ml",
+      "sha256": "69ebb8862658fc4ceda5c0bf45f124245d76a4fff5489b96033563943e51d38d",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/keeper/keeper_turn_driver.mli",
+      "sha256": "d1acd3482e9e6de91c20fe17fa31ffc9fdd5b17cc4fda3563d8f02dbbe8fc99b",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/keeper/keeper_vision_tool.ml",
+      "sha256": "4082c750e39cd7a24daf0d0834d564456627f45a2e58db44ad99ad6a61b72763",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/keeper/keeper_vision_tool.mli",
+      "sha256": "8d8946628534715e7f78dc9e567fd5aa5ebc9b098a23fc9da49824c916ee7c04",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/runtime/runtime_candidate_standing.ml",
+      "sha256": "2fb88964beb0c4b76bb760e2348ce01af2821bdd1f7ecbfb2f683cb88f91b9da",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/runtime/runtime_candidate_standing.mli",
+      "sha256": "20facdc7cbc30ed18b42a6ff1a0f7b227a83a4a4fb3811c036889f73062909b0",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/runtime/runtime_exact_lane_backpressure.ml",
+      "sha256": "1ec307937a242d5b8410e5d072285ea14dd82957e6d75a8d9cae65d1624a065e",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/runtime/runtime_exact_lane_backpressure.mli",
+      "sha256": "4b083309f8535f13a43c57e463dc526ea6a265934dbb2ef60c957bb53310a74c",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/exact_output.ml",
+      "sha256": "b929cd863bcd187708e4b14a26e76fcf6d3938b87693616103071e08a954c3db",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/exact_output.mli",
+      "sha256": "22b1b26a1792e3347c9a1fd169307e085c55844c39da6c7d4b0831b98155e7af",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "packages/agent_core/test/test_exact_output_flow.ml",
+      "sha256": "d1820748d3e94a2eac06b5149acb18356711851aa9a1641c81e310630fb33f13",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_browser_stagehand_model.ml",
+      "sha256": "a7c850c6ca430d4a3df6449657d268c1890c08e32efe41c35b8b66c1e1875902",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_hitl_summary_worker.ml",
+      "sha256": "434f78fde60534b14c8edd376103626c4c031263459ef4e849f8fd4c356a79f7",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_keeper_board_attention_exact_flow.ml",
+      "sha256": "f07a5b746ceae28e0ffd0e57eb0e66777e4c84b9a397fec72bca3a2655b5a949",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_keeper_continuity_cancel_recovery.ml",
+      "sha256": "eaaf09ec6113ab3d1b50036a9d5667b8ca1fc0090982278ef09e86881a1a2b7a",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_keeper_lane_cli_oneshot.ml",
+      "sha256": "c5e6287e46403847cbc734b951b2c0d601ce6d04cecdda70fea3e3c16e58946f",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_keeper_librarian_capacity_callback.ml",
+      "sha256": "366cf23197e58547179963116c9ae2dbc776b766064a099c15c7895ce8a6d981",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_keeper_librarian_cli_lane.ml",
+      "sha256": "fd4024ba0e1edd5e16675f17dcf64de53a069712c3b4b33543401d583e41e42f",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_keeper_librarian_continuity.ml",
+      "sha256": "86cfa41cf9bdeef15ec8ddba44966d8bf0ff667f227a9b8a8732e727a3e796a2",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_keeper_librarian_durable_consumer.ml",
+      "sha256": "a2e8647c07a19af5958767a614735302526a9b3bd69eef2b0b688f68e4e197fc",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_keeper_librarian_preflight.ml",
+      "sha256": "4f9e78d52d79a8ce9686f4c983098a262ae2fa9830d4e72bba2bde7a19772022",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_keeper_memory_admission_export.ml",
+      "sha256": "b27fbbfecd2b932f17e831a0877b84326e97d0723a9f25ba0761fa4d644ef96f",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_keeper_memory_admission_replay.ml",
+      "sha256": "0075fae851f9097f80ae2484e8f92affe63d5e9589abdd5c906e2800a04a4b70",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_keeper_vision_tool.ml",
+      "sha256": "fd5450b88859e7494e174d40b106640dc5049e92c26f96b454b27571be20bac9",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_lane_addon_exact_runner.ml",
+      "sha256": "b83de5d368964c89d0b42450f9c6b0486c044f4c1e9b292d7ee3a59cfc5669de",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_runtime_exact_lane_backpressure.ml",
+      "sha256": "ab336e36dfa5e8bae1c94cbb3a2c9c44bcdb0363b86f4e9b1c7362b158e459af",
+      "exit": 0,
+      "output": ""
+    }
+  ]
+}

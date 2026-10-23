@@ -92,7 +92,7 @@ let run ?runner ~runtime_id () =
     ()
 ;;
 
-let unreachable_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+let unreachable_runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
   failf "the runner must not run for %s" runtime_id
 ;;
 
@@ -118,7 +118,7 @@ let test_non_official_ids_are_refused_before_the_runner () =
 let test_prompt_carries_the_exact_agent_core_schema_sentence () =
   with_runtime (fun () ->
     let seen_prompt = ref None in
-    let runner ~runtime_id:_ ~system_prompt ~output_schema:_ ~prompt =
+    let runner ~runtime:_ ~system_prompt ~output_schema:_ ~prompt =
       check string "system prompt passes through" "You judge." system_prompt;
       seen_prompt := Some prompt;
       Ok {|{"verdict":"pass"}|}
@@ -151,7 +151,7 @@ let test_prompt_carries_the_exact_agent_core_schema_sentence () =
 let test_the_runner_receives_the_callers_own_schema () =
   with_runtime (fun () ->
     let seen_schema = ref None in
-    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt:_ =
+    let runner ~runtime:_ ~system_prompt:_ ~output_schema ~prompt:_ =
       seen_schema := Some output_schema;
       Ok {|{"verdict":"pass"}|}
     in
@@ -175,7 +175,7 @@ let test_the_runner_receives_the_callers_own_schema () =
 let test_the_prompt_keeps_its_instruction_alongside_the_schema () =
   with_runtime (fun () ->
     let both = ref None in
-    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt =
+    let runner ~runtime:_ ~system_prompt:_ ~output_schema ~prompt =
       both := Some (output_schema, prompt);
       Ok {|{"verdict":"pass"}|}
     in
@@ -196,7 +196,7 @@ let test_the_prompt_keeps_its_instruction_alongside_the_schema () =
 
 let test_a_fenced_answer_is_invalid_output_not_repaired () =
   with_runtime (fun () ->
-    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
       Ok "```json\n{\"verdict\":\"pass\"}\n```"
     in
     match run ~runner ~runtime_id:official_client_runtime () with
@@ -211,7 +211,7 @@ let test_observer_retains_rejected_raw_output () =
   with_runtime (fun () ->
     List.iter (fun text ->
       let seen = ref [] in
-      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Ok text in
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Ok text in
       let result = Cli_oneshot.walk ~runner ~observe:(fun event -> seen := event :: !seen)
         ~base_dir:"/tmp" ~cli_slots:[official_client_runtime] ~system_prompt:"" ~requirement
         ~prompt:"Judge this." ~validate:(fun _ -> Error "rejected by domain") ~on_failure:(fun _ -> ()) () in
@@ -227,7 +227,7 @@ let test_observer_retains_rejected_raw_output () =
 
 let test_walk_advances_and_keeps_every_failure_in_order () =
   with_runtime (fun () ->
-    let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
       if String.equal runtime_id official_client_runtime
       then Ok {|{"verdict":"pass"}|}
       else Error (Masc.Fusion_official_client.Setup_failure "spawn failed")
@@ -260,7 +260,7 @@ let test_walk_advances_and_keeps_every_failure_in_order () =
 
 let test_walk_exhaustion_returns_every_failure () =
   with_runtime (fun () ->
-    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Error (Masc.Fusion_official_client.Setup_failure "quota") in
+    let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Error (Masc.Fusion_official_client.Setup_failure "quota") in
     match
       Cli_oneshot.walk ~validate:Result.ok ~on_failure:ignore
         ~runner
@@ -564,7 +564,7 @@ let test_an_antigravity_slot_is_told_to_answer_through_finish () =
   with_quota_fixture (fun ~dir:_ ~path:_ ~marker:_ ~claude_cli:_ ~load_config:_ ~env:_ ->
     let prompt_for runtime_id =
       let seen = ref None in
-      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
         seen := Some prompt;
         Ok {|{"verdict":"pass"}|}
       in
@@ -689,6 +689,164 @@ let test_codex_usage_limit_is_read_by_the_next_walk () =
     walk_real ~dir [c; b] |> require_b;
     check (list string) "the next walk begins with the account that can answer"
       ["C"; "B"; "B"] (calls marker))
+;;
+
+let runtime_exn id =
+  match Runtime.get_runtime_by_id id with
+  | Some runtime -> runtime
+  | None -> failf "missing fixture runtime %s" id
+;;
+
+let candidate_state runtime =
+  Runtime_candidate_backpressure.candidate_backpressure ~now:(Time_compat.now ())
+    ~candidate:runtime.Runtime_instance.candidate_backpressure
+;;
+
+let seed_candidate runtime =
+  let candidate = runtime.Runtime_instance.candidate_backpressure in
+  Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 3600.);
+  Runtime_candidate_backpressure.note_failed_attempt ~candidate
+    ~failure:Runtime_candidate_backpressure.Network_transient
+    ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"fixture-owner")
+;;
+
+let codex_error_terminal info =
+  Yojson.Safe.to_string
+    (`Assoc ["method", `String "error"; "params", `Assoc
+      ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+       "willRetry", `Bool false; "error", `Assoc
+         ["message", `String "fixture refusal"; "codexErrorInfo", `String info;
+          "additionalDetails", `Null]]])
+;;
+
+let test_preseeded_rate_dispatches_other_cli_candidate () =
+  with_quota_fixture (fun ~dir ~path:_ ~marker ~claude_cli:_ ~load_config:_ ~env:_ ->
+    let original = runtime_exn a1 in
+    Runtime_candidate_backpressure.note_rate_limit
+      ~candidate:original.candidate_backpressure ~retry_after:(Some 3600.);
+    (match walk_real ~dir [a1; b] with
+     | Ok (id, _) -> check string "unrested actual adapter dispatched first" b id
+     | Error _ -> fail "unrested adapter must answer");
+    check (list string) "A never dispatched" ["B"] (calls marker);
+    check bool "B answer does not clear A" true (Option.is_some (candidate_state original));
+    check (list string) "unknown declared identity survives ordering"
+      ["missing.runtime"; b; a1] (Cli_oneshot.order_slots [a1; "missing.runtime"; b]))
+;;
+
+let test_real_rate_is_candidate_only_across_walks () =
+  with_quota_fixture (fun ~dir ~path ~marker ~claude_cli:_ ~load_config:_ ~env:_ ->
+    let runtime = runtime_exn c in
+    let codex_cli = path "codex" in
+    write_file ~path:codex_cli ~perm:0o700
+      (codex_script ~marker ~terminal:(codex_error_terminal "rateLimitExceeded"));
+    let require_b = function
+      | Ok (id, _) -> check string "other candidate answered" b id
+      | Error _ -> fail "other candidate must answer" in
+    walk_real ~dir [c; b] |> require_b;
+    (match candidate_state runtime with
+     | Some {Runtime_candidate_backpressure.rate_limit=Some _; failed_attempt=None} -> ()
+     | Some _ | None -> fail "typed rate must record candidate rate only");
+    check bool "coarse rate does not exhaust shared account" false
+      (Runtime_quota_window.is_exhausted ~scope:(scope c) ~now:(Time_compat.now ()));
+    walk_real ~dir [c; b] |> require_b;
+    check (list string) "a separate walk sees actual adapter refusal" ["C"; "B"; "B"] (calls marker);
+    Runtime_candidate_backpressure.note_candidate_success ~candidate:runtime.candidate_backpressure;
+    write_file ~path:codex_cli ~perm:0o700
+      (codex_script ~marker ~terminal:(codex_error_terminal "serverOverloaded"));
+    ignore (walk_real ~dir [c]);
+    check bool "overload creates no ownerless failure or rate" true
+      (Option.is_none (candidate_state runtime));
+    let recorder = Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"existing-walk" in
+    Runtime_candidate_backpressure.note_failed_attempt ~candidate:runtime.candidate_backpressure
+      ~failure:Runtime_candidate_backpressure.Network_transient ~recorded_by:recorder;
+    ignore (walk_real ~dir [c]);
+    match candidate_state runtime with
+    | Some {Runtime_candidate_backpressure.rate_limit=None;
+            failed_attempt=Some (Runtime_candidate_backpressure.Failed_attempt {recorded_by; _})} ->
+      check bool "ownerless overload preserves existing failure owner" true
+        (Runtime_candidate_backpressure.same_recorder recorder recorded_by)
+    | Some _ | None -> fail "existing owner observation must survive ownerless overload")
+;;
+
+let test_dispatch_observer_keeps_actual_runtime () =
+  with_quota_fixture (fun ~dir ~path ~marker ~claude_cli:_ ~load_config ~env:_ ->
+    let original = runtime_exn a1 in
+    let replacement_cli = path "replacement-claude" in
+    write_file ~path:replacement_cli ~perm:0o700
+      (claude_script ~marker ~body:(claude_answer {|{"replacement":true}|}));
+    let observe = function
+      | Cli_oneshot.Dispatching _ -> load_config (fixture ~claude_cli:replacement_cli ())
+      | Cli_oneshot.Raw_response _ -> () in
+    (match Cli_oneshot.run ~observe ~base_dir:dir ~runtime_id:a1 ~system_prompt:""
+       ~requirement ~prompt:"Judge this." () with
+     | Error (Cli_oneshot.Execution_failed {cause=Masc.Fusion_official_client.Claude_failure
+         (Runtime_claude_code.Quota_blocked _); _}) -> ()
+     | Error _ | Ok _ -> fail "default transport must execute the admitted original runtime");
+    let replacement = runtime_exn a1 in
+    check bool "rebind made a new candidate" false
+      (original.candidate_backpressure == replacement.candidate_backpressure);
+    check (list string) "only the original rejecting adapter ran" ["A:claude-sonnet-5"] (calls marker))
+;;
+
+let test_rate_observation_stays_on_dispatch_snapshot () =
+  with_quota_fixture (fun ~dir ~path ~marker ~claude_cli ~load_config ~env:_ ->
+    let original = runtime_exn c in
+    write_file ~path:(path "codex") ~perm:0o700
+      (codex_script ~marker ~terminal:(codex_error_terminal "rateLimitExceeded"));
+    let replacement_cli = path "replacement-codex" in
+    let observe = function
+      | Cli_oneshot.Dispatching _ ->
+        load_config (quota_fixture ~claude_cli ~agy_cli:(path "agy")
+          ~codex_cli:replacement_cli ~oauth_source:(path "oauth.json"))
+      | Cli_oneshot.Raw_response _ -> () in
+    (match Cli_oneshot.run ~observe ~base_dir:dir ~runtime_id:c ~system_prompt:""
+       ~requirement ~prompt:"Judge this." () with
+     | Error (Cli_oneshot.Execution_failed _) -> ()
+     | Error _ | Ok _ -> fail "original rate-refused adapter must fail its turn");
+    let replacement = runtime_exn c in
+    check bool "rebind has another candidate cell" false
+      (original.candidate_backpressure == replacement.candidate_backpressure);
+    (match candidate_state original with
+     | Some {Runtime_candidate_backpressure.rate_limit=Some _; failed_attempt=None} -> ()
+     | Some _ | None -> fail "rate observation must stay on original candidate");
+    check bool "replacement never receives original refusal" true
+      (Option.is_none (candidate_state replacement));
+    check (list string) "original Codex adapter actually ran" ["C"] (calls marker))
+;;
+
+let test_success_observation_precedes_usage_rebind_and_json () =
+  with_quota_fixture (fun ~dir ~path ~marker ~claude_cli ~load_config ~env:_ ->
+    let original = runtime_exn a1 in
+    let original_scope = Runtime_instance.quota_scope_of_runtime original in
+    seed_candidate original;
+    Runtime_quota_window.note_observed_exhausted ~scope:original_scope;
+    write_file ~path:claude_cli ~perm:0o700 (claude_script ~marker ~body:(claude_answer "not JSON"));
+    (match walk_real ~dir [a1] with
+     | Error [Cli_oneshot.Invalid_json_output _] -> ()
+     | Ok _ | Error _ -> fail "actual answer must reach strict JSON rejection");
+    check bool "transport answer clears candidate despite JSON rejection" true
+      (Option.is_none (candidate_state original));
+    seed_candidate original;
+    Runtime_quota_window.note_observed_exhausted ~scope:original_scope;
+    let replacement_cli = path "replacement-claude" in
+    let callbacks = ref 0 in
+    let on_usage _ =
+      incr callbacks;
+      check bool "answer clears original before final usage callback" true
+        (Option.is_none (candidate_state original));
+      check bool "undated quota clears before final usage callback" false
+        (Runtime_quota_window.is_exhausted ~scope:original_scope ~now:(Time_compat.now ()));
+      load_config (fixture ~claude_cli:replacement_cli ());
+      seed_candidate (runtime_exn a1) in
+    (match Masc.Fusion_official_client.run_with_images ~on_usage ~images:[]
+       ~base_dir:dir ~runtime:original ~system_prompt:"" ~prompt:"Judge this." () with
+     | Ok _ -> ()
+     | Error error -> failf "original adapter failed: %s"
+         (Masc.Fusion_official_client.failure_detail ~runtime_id:a1 error));
+    check int "final usage observed once" 1 !callbacks;
+    check bool "callback replacement keeps its own standing" true
+      (Option.is_some (candidate_state (runtime_exn a1)));
+    check bool "old candidate stays cleared" true (Option.is_none (candidate_state original)))
 ;;
 
 let test_catalog_reload_does_not_move_inflight_quota () =
@@ -1052,6 +1210,11 @@ let () =
         [ test_case "new and prior rejection order account siblings" `Quick test_real_quota_reorders_siblings_and_next_walk
         ; test_case "absolute reset and transport success before JSON parsing" `Quick test_provider_reset_and_success_before_json_validation
         ; test_case "Codex usage limit is read by the next walk" `Quick test_codex_usage_limit_is_read_by_the_next_walk
+        ; test_case "preseeded rate orders actual CLI dispatch" `Quick test_preseeded_rate_dispatches_other_cli_candidate
+        ; test_case "typed rate crosses walks without account quota" `Quick test_real_rate_is_candidate_only_across_walks
+        ; test_case "dispatch observer retains original runtime" `Quick test_dispatch_observer_keeps_actual_runtime
+        ; test_case "rate observation keeps dispatch snapshot" `Quick test_rate_observation_stays_on_dispatch_snapshot
+        ; test_case "success clears before usage rebind and JSON rejection" `Quick test_success_observation_precedes_usage_rebind_and_json
         ; test_case "catalog reload keeps in-flight scope" `Quick test_catalog_reload_does_not_move_inflight_quota ])
     ; ( "cli one-shot"
       , [ test_case

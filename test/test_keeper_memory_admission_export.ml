@@ -111,7 +111,7 @@ let export cohort () = with_workspace @@ fun ~base_path ->
       working_context=Masc.Keeper_librarian_context.empty;
       messages=[]; tool_observations=[]; counterpart_observations=[] } in
   let captured = ref [] in
-  let runner ~runtime_id ~system_prompt ~output_schema ~prompt =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt ~output_schema ~prompt =
     captured := (runtime_id,system_prompt,output_schema,prompt) :: !captured;
     Ok (Yojson.Safe.to_string (`Assoc [
       "memory", `Assoc ["working_contexts",`List []; "new_claims",`List []; "dropped",`List []];

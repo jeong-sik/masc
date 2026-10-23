@@ -3548,7 +3548,7 @@ let test_runtime_checkpoint_memory_floor ?native case () =
       | Rewritten_checkpoint_source | Appended_checkpoint_suffix | Restarted_checkpoint_history
       | Moved_checkpoint_progress | Interrupted_checkpoint_progress -> `OK,F.openai_response (selection index))) in
   let native_answers = Option.fold ~none:[] ~some:native_descent_answers native in
-  let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+  let cli_runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt =
     incr cli_calls;
     match native with
     | None ->
@@ -3858,7 +3858,7 @@ let test_runtime_official_memory_floor ?native case () =
       | Partial_official_hole | All_official_holes | Late_official_failure
       | Rewritten_official_message | Rewritten_official_observation | Appended_official_turn
       | Interrupted_official_progress -> `OK,F.openai_response selection)) in
-  let cli_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
+  let cli_runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt =
     check string "the actual official native slot serves the whole turn and exact messages" F.cli_primary_runtime runtime_id;
     let index = List.length !requests in
     before_request index prompt;

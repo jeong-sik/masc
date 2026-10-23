@@ -1022,6 +1022,153 @@ let test_vision_candidates_follow_quota_window () =
 
 (* RFC-0440 §3: a 402 from the read walk is recorded on that account, the walk
    moves on at once, and the answering account is recorded as live. *)
+let vision_standing_runtime id =
+  match Runtime.get_runtime_by_id id with
+  | Some runtime -> runtime
+  | None -> Alcotest.fail ("missing vision runtime " ^ id)
+
+let vision_has_rate (runtime : Runtime_instance.t) =
+  match Runtime_candidate_backpressure.candidate_backpressure
+    ~now:(Time_compat.now ()) ~candidate:runtime.candidate_backpressure with
+  | Some {rate_limit=Some _; _} -> true
+  | Some {rate_limit=None; _} | None -> false
+
+let with_vision_standing ?(runtime_text=vision_failover_runtime_toml) f =
+  with_temp_runtime_toml runtime_text (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    let a = vision_standing_runtime "p1.vision-a" in
+    let b = vision_standing_runtime "p2.vision-b" in
+    List.iter (fun (rt : Runtime_instance.t) ->
+      Runtime_candidate_backpressure.note_candidate_success ~candidate:rt.candidate_backpressure) [a;b];
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        let run ?runtime_id complete =
+          Vt.run_vision ?runtime_id ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env) ~query:"read the screenshot"
+            ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" () in
+        f ~a ~b ~run))))
+
+let vision_rate_error = Llm_provider.Http_client.HttpError
+  {code=429; body=Received {|{"error":{"retry_after":180}}|}; retry_after_header=Some 360.0}
+
+let test_vision_dispatch_reads_existing_candidate_rate () =
+  with_vision_standing (fun ~a ~b:_ ~run ->
+    Runtime_candidate_backpressure.note_rate_limit ~candidate:a.candidate_backpressure
+      ~retry_after:(Some 180.0);
+    let calls = ref [] in
+    let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+      calls := config.Llm_provider.Provider_config.model_id :: !calls;
+      Ok (ok_response "available candidate answered") in
+    ignore (run complete);
+    Alcotest.(check (list string)) "actual dispatch skips the rate-limited head"
+      ["vision-b"] (List.rev !calls);
+    Alcotest.(check bool) "a different candidate's answer preserves head evidence" true (vision_has_rate a))
+
+let test_vision_rate_survives_other_answers_and_clears_before_validation () =
+  List.iter (fun valid_json ->
+    with_vision_standing (fun ~a ~b:_ ~run ->
+      let calls = ref [] in
+      let first ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+        let model = config.Llm_provider.Provider_config.model_id in
+        calls := model :: !calls;
+        if String.equal model "vision-a" then Error vision_rate_error
+        else Ok (ok_response "fallback answered") in
+      ignore (run first);
+      Alcotest.(check (list string)) "first invocation reaches fallback" ["vision-a";"vision-b"] (List.rev !calls);
+      let answer ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+        calls := config.Llm_provider.Provider_config.model_id :: !calls;
+        Ok (ok_response "candidate answered") in
+      calls := []; ignore (run answer);
+      Alcotest.(check (list string)) "separate invocation begins with live sibling" ["vision-b"] (List.rev !calls);
+      Alcotest.(check bool) "sibling answer does not clear original refusal" true (vision_has_rate a);
+      (match Runtime_candidate_backpressure.candidate_backpressure
+         ~now:(Time_compat.now ()) ~candidate:a.candidate_backpressure with
+       | Some {rate_limit=Some (Unknown_scope_rate_limit {retry_after;_});_} ->
+         Alcotest.(check (option (float 0.0))) "body retry hint wins over header" (Some 180.0) retry_after
+       | Some {rate_limit=None;_} | None -> Alcotest.fail "missing actual 429 observation");
+      let scope = Runtime_instance.quota_scope_of_runtime a in
+      Runtime_quota_window.note_observed_exhausted ~scope;
+      Runtime_candidate_backpressure.note_failed_attempt ~candidate:a.candidate_backpressure
+        ~failure:Server_error ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"vision-owner");
+      let actual_answer ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        Ok (if valid_json then ok_response "head answered" else text_response "not JSON") in
+      let outcome = run ~runtime_id:a.id actual_answer in
+      Alcotest.(check bool) "transport answer has expected semantic result" valid_json
+        (match outcome with
+         | Vt.Vo_ok _ -> true
+         | Vt.Vo_invalid_request _ | Vt.Vo_no_runtime _ | Vt.Vo_timeout
+         | Vt.Vo_invalid_structured_response _ | Vt.Vo_official_failure _
+         | Vt.Vo_empty | Vt.Vo_truncated | Vt.Vo_provider _ -> false);
+      Alcotest.(check bool) "answer clears rate and Fleet failure even if JSON is invalid" true
+        (Option.is_none (Runtime_candidate_backpressure.candidate_backpressure
+          ~now:(Time_compat.now ()) ~candidate:a.candidate_backpressure));
+      Alcotest.(check bool) "answer clears undated account observation" false
+        (Runtime_quota_window.is_exhausted ~scope ~now:(Time_compat.now ()));
+      calls := []; ignore (run answer);
+      Alcotest.(check (list string)) "actual dispatch returns to original head" ["vision-a"] (List.rev !calls)))
+    [true;false]
+
+let test_vision_typed_quota_and_candidate_rate_have_distinct_scope () =
+  let credentials = {|
+[providers.p1.credentials]
+type = "env"
+key = "VISION_SHARED_TEST_KEY"
+[providers.p2.credentials]
+type = "env"
+key = "VISION_SHARED_TEST_KEY"
+|} in
+  with_env "VISION_SHARED_TEST_KEY" "synthetic-no-network" (fun () ->
+    with_vision_standing ~runtime_text:(vision_failover_runtime_toml ^ credentials)
+      (fun ~a ~b ~run ->
+        let scope = Runtime_instance.quota_scope_of_runtime a in
+        Alcotest.(check bool) "fixture siblings share the quota owner" true
+          (Runtime_quota_window.scope_equal scope (Runtime_instance.quota_scope_of_runtime b));
+        let refusal error ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () = Error error in
+        ignore (run ~runtime_id:a.id (refusal vision_rate_error));
+        Alcotest.(check bool) "coarse 429 leaves shared account quota available" false
+          (Runtime_quota_window.is_exhausted ~scope ~now:(Time_compat.now ()));
+        Alcotest.(check bool) "coarse 429 affects only attempted candidate" false (vision_has_rate b);
+        List.iter (fun retry_after ->
+          Runtime_quota_window.reset_for_testing ();
+          let before = Time_compat.now () in
+          ignore (run ~runtime_id:a.id (refusal (Llm_provider.Http_client.ProviderFailure
+            {kind=Hard_quota {retry_after}; message="typed provider account refusal"})));
+          let after = Time_compat.now () in
+          Alcotest.(check bool) "typed quota reaches shared account" true
+            (Runtime_quota_window.is_exhausted ~scope:(Runtime_instance.quota_scope_of_runtime b) ~now:after);
+          match retry_after, Runtime_quota_window.active_until ~scope ~now:after with
+          | None,None -> ()
+          | Some seconds,Some reset ->
+            Alcotest.(check bool) "typed provider duration is preserved as an absolute reset" true
+              (reset >= before +. seconds && reset <= after +. seconds)
+          | None,Some _ | Some _,None -> Alcotest.fail "typed quota reset was invented or lost")
+          [None;Some 180.0]))
+
+let test_vision_inflight_rate_stays_on_frozen_candidate () =
+  with_vision_standing (fun ~a ~b:_ ~run ->
+    let rebound = ref None in
+    let calls = ref [] in
+    let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+      let model = config.Llm_provider.Provider_config.model_id in
+      calls := model :: !calls;
+      if String.equal model "vision-a" then (
+        let path = match !runtime_config_stack with
+          | path::_ -> path | [] -> Alcotest.fail "missing fixture config" in
+        let updated = String.concat "https://rebound.example/v1"
+          (Str.split_delim (Str.regexp_string "https://p1.example/v1") vision_failover_runtime_toml) in
+        (match Runtime.save_config_text ~runtime_config_path:path updated with
+         | Ok _ -> () | Error detail -> Alcotest.fail detail);
+        rebound := Some (vision_standing_runtime a.id);
+        Error vision_rate_error)
+      else Ok (ok_response "fallback answered old request") in
+    ignore (run complete);
+    Alcotest.(check (list string)) "frozen walk completes through its fallback" ["vision-a";"vision-b"] (List.rev !calls);
+    let replacement = match !rebound with Some rt -> rt | None -> Alcotest.fail "catalog was not rebound" in
+    Alcotest.(check bool) "rebound runtime owns a new candidate" false
+      (a.candidate_backpressure == replacement.candidate_backpressure);
+    Alcotest.(check bool) "old response records the actual old candidate" true (vision_has_rate a);
+    Alcotest.(check bool) "old response does not mark replacement candidate" false (vision_has_rate replacement))
+
 let test_vision_402_marks_the_account_exhausted_and_moves_on () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
@@ -2631,6 +2778,12 @@ let test_native_image_admission_continues_turn () =
             | _ -> false) blocks in
           assert (saw_pixels = accepts_image_input)))))) [true; false]
 
+let run_candidate_standing () =
+  test_vision_dispatch_reads_existing_candidate_rate ();
+  test_vision_rate_survives_other_answers_and_clears_before_validation ();
+  test_vision_typed_quota_and_candidate_rate_have_distinct_scope ();
+  test_vision_inflight_rate_stays_on_frozen_candidate ()
+
 let run_all () =
   test_native_image_admission_continues_turn ();
   test_native_image_read_artifact_and_authority ();
@@ -2699,6 +2852,7 @@ let run_all () =
   test_delegates_media_matches_antigravity_transport ();
   test_vision_candidates_follow_quota_window ();
   test_vision_402_marks_the_account_exhausted_and_moves_on ();
+  run_candidate_standing ();
   print_endline "test_keeper_vision_tool: all assertions passed"
 
 let () =
@@ -2707,4 +2861,7 @@ let () =
   | [_; "--browser-screenshot"] ->
       test_browser_screenshot_reaches_vision_reader ();
       print_endline "test_keeper_vision_tool: browser screenshot scenario passed"
-  | _ -> invalid_arg "usage: test_keeper_vision_tool.exe [--browser-screenshot]"
+  | [_; "--candidate-standing"] ->
+      run_candidate_standing ();
+      print_endline "test_keeper_vision_tool: candidate standing scenarios passed"
+  | _ -> invalid_arg "usage: test_keeper_vision_tool.exe [--browser-screenshot|--candidate-standing]"

@@ -23,8 +23,8 @@ val order :
     window -- behind the slots that are not, keeping
     declaration (or operator preference) order inside each group. A slot id
     that names no runtime carries no evidence and stays in place. CLI slots
-    are not reordered here: [Keeper_lane_cli_oneshot.walk] orders them by the
-    same {!Runtime_quota_window} before each dispatch. Read at the wall clock
+    are not reordered here: [Keeper_lane_cli_oneshot.walk] reads the same
+    quota/rate standing before each dispatch. Read at the wall clock
     of the call. *)
 
 val order_at :
@@ -42,5 +42,8 @@ val observe :
 (** Record what one finished flow observed: every candidate refused as
     [Rate_limited] notes a rate limit on its runtime with the provider's
     Retry-After when one was sent, and every candidate that returned a
-    response -- accepted or semantically rejected -- clears the frozen runtime
-    observation captured in [resolved]. No live ID lookup occurs at completion. *)
+    response -- accepted or semantically rejected -- clears candidate evidence
+    and undated quota for the frozen runtime observation captured in [resolved].
+    A payment refusal or dispatched typed hard-quota failure records quota on
+    that frozen scope. A failure before generation dispatch contributes no
+    provider observation. No live ID lookup occurs at completion. *)

@@ -217,6 +217,140 @@ let test_rebound_account_observation env ~rate_limited () =
   check bool "old result preserves new account" (not rate_limited) (limited new_candidate);
   check int "one real generation request" 1 (Atomic.get server.posts)
 
+let execute_first_slot env (resolved : Registry.resolved_lane) ~validate =
+  let module Exact = Agent_core.Exact_output in
+  let slot = List.hd resolved.selected_slots in
+  let first = Exact.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target
+    |> require_ok "freeze actual HTTP candidate" in
+  let requirement = Exact.make_output_requirement
+    ~schema:(`Assoc ["type",`String "object"]) ~minimum_guarantee:Exact.Json_syntax in
+  let snapshot = Exact.snapshot_flow ~first ~rest:[]
+    ~messages:[Agent_core.Types.user_msg "return JSON"] requirement
+    |> require_ok "freeze actual HTTP flow" in
+  let attempt = Exact.start_flow ~admission_class:Llm_provider.Admission_class.Standard snapshot
+    |> require_ok "start actual HTTP flow" in
+  Exact.execute_flow_once ~net:env#net ~clock:env#clock
+    ~before_measurement_dispatch:(fun _ -> Ok ())
+    ~on_measurement_terminal:(fun _ -> Ok ()) ~before_dispatch:(fun _ -> Ok ())
+    ~before_advance:(fun ~failed:_ ~next:_ -> Ok ()) ~validate attempt
+
+let with_http_observation_fixture ?(unreachable=false) env behavior f =
+  Eio.Switch.run @@ fun sw ->
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock behavior in
+  let endpoint = if unreachable then "http://127.0.0.1:1" else server.base_url in
+  let runtime_text = String.concat endpoint
+    (Str.split_delim (Str.regexp_string "https://openrouter.ai/api/v1") runtime_toml) in
+  with_lane_config ~runtime_text @@ fun ~path:_ resolved ->
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect ~finally:Runtime_quota_window.reset_for_testing @@ fun () ->
+  f ~server resolved
+
+let runtime_scope id =
+  match Runtime.get_runtime_by_id id with
+  | Some runtime -> Runtime_instance.quota_scope_of_runtime runtime
+  | None -> fail ("missing runtime scope " ^ id)
+
+let test_http_payment_records_account_and_provider_reset env () =
+  List.iter (fun retry_after ->
+    let body = Yojson.Safe.to_string (`Assoc ["error",`Assoc
+      (match retry_after with
+       | None -> ["message",`String "account cannot pay"]
+       | Some seconds -> ["retry_after",`Float seconds])]) in
+    with_http_observation_fixture env
+      (Exact_output_fixture.Reply_with (fun _ _ -> `Payment_required,body))
+      (fun ~server resolved ->
+        let before = Unix.gettimeofday () in
+        let result = execute_first_slot env resolved
+          ~validate:(fun _ -> Agent_core.Exact_output.Accept ()) in
+        check bool "actual payment refusal ends the single-candidate flow" true (Result.is_error result);
+        Lane.observe ~resolved result;
+        let after = Unix.gettimeofday () in
+        let scope = runtime_scope primary in
+        check bool "the declared slots share account quota authority" true
+          (Runtime_quota_window.scope_equal scope (runtime_scope secondary));
+        check bool "HTTP 402 records the shared account fact" true
+          (Runtime_quota_window.is_exhausted ~scope:(runtime_scope secondary) ~now:after);
+        (match retry_after,Runtime_quota_window.active_until ~scope ~now:after with
+         | None,None -> ()
+         | Some seconds,Some reset ->
+           check bool "actual provider reset is preserved without a fallback cap" true
+             (reset >= before +. seconds && reset <= after +. seconds)
+         | None,Some _ | Some _,None -> fail "402 reset was invented or discarded");
+        check bool "payment refusal creates no candidate rate or fake Fleet owner" true
+          (Option.is_none (Backpressure.candidate_backpressure ~now:after ~candidate:(candidate primary)));
+        check (list string) "both exhausted siblings remain in declared order" declared
+          (slot_ids (Lane.order_at ~now:after resolved));
+        check int "one actual HTTP generation refusal" 1 (Atomic.get server.posts)))
+    [None;Some 3600.0]
+
+let test_http_answer_clears_undated_account_before_semantic_validation env () =
+  List.iter (fun (reject,stated_reset) ->
+    with_http_observation_fixture env
+      (Exact_output_fixture.Reply (Exact_output_fixture.openai_response (`Assoc ["ok",`Bool true])))
+      (fun ~server resolved ->
+        let scope = runtime_scope primary in
+        let reset = Unix.gettimeofday () +. 3600.0 in
+        if stated_reset then Runtime_quota_window.note_exhausted ~scope ~resets_at:reset
+        else Runtime_quota_window.note_observed_exhausted ~scope;
+        Backpressure.note_rate_limit ~candidate:(candidate primary) ~retry_after:(Some 180.0);
+        Backpressure.note_failed_attempt ~candidate:(candidate primary) ~failure:Server_error
+          ~recorded_by:(Backpressure.keeper_recorder ~keeper_name:"exact-answer-fixture");
+        let result = execute_first_slot env resolved ~validate:(fun _ ->
+          if reject then Agent_core.Exact_output.Reject_and_advance "domain rejected the answer"
+          else Agent_core.Exact_output.Accept ()) in
+        check bool "actual response has the expected semantic result" (not reject) (Result.is_ok result);
+        Lane.observe ~resolved result;
+        let now = Unix.gettimeofday () in
+        check bool "actual answer clears candidate rate and old Fleet mark" true
+          (Option.is_none (Backpressure.candidate_backpressure ~now ~candidate:(candidate primary)));
+        check bool "answer clears undated quota and preserves a stated window" stated_reset
+          (Runtime_quota_window.is_exhausted ~scope ~now);
+        if stated_reset then
+          check (option (float 0.0)) "stated reset remains exact" (Some reset)
+            (Runtime_quota_window.active_until ~scope ~now);
+        check int "semantic validation never dispatches another candidate" 1 (Atomic.get server.posts)))
+    [false,false;true,false;false,true]
+
+(* The real HTTP attempt supplies all receipt, candidate and flow evidence.
+   Only its public failure cause is replaced with a typed Hard_quota port;
+   the loopback provider itself did not return that typed transport result. *)
+let test_typed_quota_uses_actual_generation_dispatch_receipt env () =
+  List.iter (fun unreachable ->
+    with_http_observation_fixture ~unreachable env
+      (Exact_output_fixture.Reply_with (fun _ _ -> `Service_unavailable,"unavailable"))
+      (fun ~server resolved ->
+        let module Exact = Agent_core.Exact_output in
+        let result = execute_first_slot env resolved ~validate:(fun _ -> Exact.Accept ()) in
+        let substituted = match result with
+          | Error (Exact.Flow_execution_terminal
+              {cause=Exact.Flow_exact_execution_failed {candidate;cause;evidence};prior_rejections}) ->
+            let dispatch = Exact.flow_evidence_generation_dispatch evidence in
+            check bool "actual evidence has the expected dispatch fact" (not unreachable)
+              (match dispatch with Exact.Generation_dispatch_started -> true | Exact.No_generation_dispatch -> false);
+            check int "the actual receipt retains its generation count" (if unreachable then 0 else 1)
+              (Exact.receipt_dispatch_count cause.receipt);
+            let cause = {cause with Exact.cause=Exact.Completion_failed
+              {error=Llm_provider.Http_client.ProviderFailure
+                 {kind=Hard_quota {retry_after=None};message="typed quota fixture port"};dispatch}} in
+            Error (Exact.Flow_execution_terminal
+              {cause=Exact.Flow_exact_execution_failed {candidate;cause;evidence};prior_rejections})
+          | Ok _ | Error (Exact.Flow_execution_terminal
+              {cause=(Exact.Flow_attempt_already_started _ | Exact.Flow_attempt_start_failed _
+                | Exact.Flow_measurement_start_failed _ | Exact.Flow_before_measurement_dispatch_callback_failed _
+                | Exact.Flow_measurement_terminal_callback_failed _ | Exact.Flow_before_dispatch_callback_failed _
+                | Exact.Flow_before_advance_callback_failed _ | Exact.Flow_candidates_exhausted _);_})
+          | Error (Exact.Flow_semantic_candidates_exhausted _) ->
+            fail "fixture did not produce an actual generation failure receipt" in
+        Lane.observe ~resolved substituted;
+        check bool "only dispatched typed quota records account authority" (not unreachable)
+          (Runtime_quota_window.is_exhausted ~scope:(runtime_scope primary) ~now:(Unix.gettimeofday ()));
+        check bool "typed quota creates no ownerless Fleet failure" true
+          (Option.is_none (Backpressure.candidate_backpressure ~now:(Unix.gettimeofday ())
+             ~candidate:(candidate primary)));
+        check int "observed dispatch count agrees with actual server requests" (if unreachable then 0 else 1)
+          (Atomic.get server.posts)))
+    [false;true]
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -238,4 +372,11 @@ let () =
         test_case "old refusal does not rate-limit new account" `Quick
           (test_rebound_account_observation env ~rate_limited:true);
         test_case "old success does not clear new account rest" `Quick
-          (test_rebound_account_observation env ~rate_limited:false) ] ]
+          (test_rebound_account_observation env ~rate_limited:false) ];
+      "HTTP account observations", [
+        test_case "actual payment refusal records account and provider reset" `Quick
+          (test_http_payment_records_account_and_provider_reset env);
+        test_case "actual answer clears undated quota before semantic validation" `Quick
+          (test_http_answer_clears_undated_account_before_semantic_validation env);
+        test_case "typed quota port respects actual generation dispatch receipts" `Quick
+          (test_typed_quota_uses_actual_generation_dispatch_receipt env) ] ]

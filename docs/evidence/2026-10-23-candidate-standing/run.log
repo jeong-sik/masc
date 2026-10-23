@@ -1,0 +1,13 @@
+/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-standing-check-m9dx_h0x/check.exe
+PASS keeper fresh / other / EveryMark preserve three classes and rows
+PASS RateRestOnly ignores Fleet failed attempts
+PASS provider hint beyond fallback cap is preserved
+PASS unhinted rate uses explicit caller callback and leaves no TTL in state
+PASS all resting candidates and unresolved row are preserved
+PASS typed rate never contaminates same-scope sibling quota
+PASS typed HardQuota records account and preserves provider reset after answer
+PASS answered clears actual candidate / undated quota before semantic rejection
+PASS capacity / network / local timeout never creates ownerless failed mark
+TOTAL 9 cases passed
+
+exit=0

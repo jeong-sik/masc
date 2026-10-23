@@ -302,8 +302,9 @@ type execution_error_cause =
       ; refusal : provider_refusal
       ; retry_after_s : float option
           (** The provider's Retry-After, in seconds, when a [Rate_limited]
-              refusal carried a parseable one; [None] for every other
-              refusal. Not part of flow evidence. *)
+              or [Payment_required] refusal carried a parseable body/header
+              hint (body takes priority). [None] for other refusals.
+              Not part of flow evidence. *)
       }
   | Output_limit_reached
       (** The normalized provider stop reason is [Types.MaxTokens]. No JSON

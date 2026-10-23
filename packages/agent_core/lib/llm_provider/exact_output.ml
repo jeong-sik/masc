@@ -808,14 +808,17 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
 
 (* The one wait a refusal names, kept beside the collapsed refusal so a caller
    that holds per-binding rate-limit evidence can honour the provider's own
-   Retry-After instead of guessing one. Only a rate limit carries it. *)
-let retry_after_of_api_error : Retry.api_error -> float option = function
+   Retry-After instead of guessing one. A payment refusal may state the
+   account's reset through the same body/header contract. *)
+let retry_after_of_api_error ~body ~retry_after_header : Retry.api_error -> float option = function
   | Retry.RateLimited { retry_after; _ } -> retry_after
+  | Retry.PaymentRequired _ ->
+    Retry.resolve_retry_after ~body:(Http_client.refusal_body_text body)
+      ~header:retry_after_header
   | Retry.Overloaded _
   | Retry.ServerError _
   | Retry.AuthError _
   | Retry.AuthorizationError _
-  | Retry.PaymentRequired _
   | Retry.InvalidRequest _
   | Retry.NotFound _
   | Retry.ContextOverflow _
@@ -831,7 +834,7 @@ let execution_error_cause ~http_status ~dispatch = function
     Provider_response_refused
       { http_status = code
       ; refusal = provider_refusal_of_api_error api_error
-      ; retry_after_s = retry_after_of_api_error api_error
+      ; retry_after_s = retry_after_of_api_error ~body ~retry_after_header api_error
       }
   | Exec.Provider_error
       (Http_client.ProviderFailure { kind = Http_client.Context_overflow _; _ } as error) ->

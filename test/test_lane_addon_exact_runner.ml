@@ -232,7 +232,7 @@ let test_output_limit_keeps_the_original_cli_tail ~valid () =
     let server=F.start_server ~sw ~net ~clock (F.Reply limited_response) in
     publish ~base_path ~cli_slots:[F.cli_primary_runtime] [{F.id="limited";base_url=server.base_url}];
     let calls=ref 0 in
-    let cli_runner : Keeper_lane_cli_oneshot.runner = fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+    let cli_runner : Keeper_lane_cli_oneshot.runner = fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
       incr calls;Ok (if valid then Yojson.Safe.to_string question else "not JSON; output_limit_reached is only text here") in
     let runner=Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner in
     let outcome=run_request ~runner ~base_path ~store "output-limit-cli" in
@@ -346,7 +346,7 @@ let test_the_cli_tail_answers_after_the_http_slots () =
     publish ~base_path ~cli_slots:[ F.cli_primary_runtime ] [ { F.id = "http"; base_url = server.base_url } ];
     let prompts = ref [] in
     let cli_runner : Keeper_lane_cli_oneshot.runner =
-      fun ~runtime_id:_ ~system_prompt ~output_schema:_ ~prompt ->
+      fun ~runtime:_ ~system_prompt ~output_schema:_ ~prompt ->
       prompts := (system_prompt, prompt) :: !prompts;
       Ok (Yojson.Safe.to_string question)
     in
@@ -395,7 +395,7 @@ let test_cli_refuses_assistant_without_dispatch () =
     publish ~base_path ~cli_slots:[F.cli_primary_runtime] [{F.id="http";base_url=server.base_url}];
     let cli_calls = ref 0 in
     let cli_runner : Keeper_lane_cli_oneshot.runner =
-      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+      fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
         incr cli_calls; Ok (Yojson.Safe.to_string question)
     in
     let runner = Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner in
@@ -519,7 +519,7 @@ let test_original_curator_semantics_advance_the_cli_tail () =
     publish ~lane_id:"quiz/classification" ~base_path
       ~cli_slots:[F.cli_primary_runtime;F.cli_secondary_runtime] [{F.id="http";base_url=wrong.base_url}];
     let prompts=ref [] in
-    let cli_runner : Keeper_lane_cli_oneshot.runner = fun ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt ->
+    let cli_runner : Keeper_lane_cli_oneshot.runner = fun ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt ->
       prompts := (runtime_id,prompt)::!prompts;
       Ok (Yojson.Safe.to_string (if runtime_id=F.cli_primary_runtime then bad else good)) in
     let runner=Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner in
@@ -721,7 +721,7 @@ let test_cli_dispatch_veto_never_advances () =
           if !checks=1 then Ok () else Error "original configuration changed before CLI");
         with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
     let cli_runner : Keeper_lane_cli_oneshot.runner =
-      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+      fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
         incr calls;Ok (Yojson.Safe.to_string question) in
     let original=request "cli-authority-veto" in
     let execute ()=get (Exact.run ~store ~declaration_id ~package ~authorize_request
@@ -804,7 +804,7 @@ let test_original_cli_prior_failure_proof () =
     publish ~base_path ~cli_slots:[F.cli_primary_runtime;F.cli_secondary_runtime]
       [{F.id="size";base_url=size.base_url}];
     let calls=ref [] in
-    let cli_runner : Keeper_lane_cli_oneshot.runner = fun ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+    let cli_runner : Keeper_lane_cli_oneshot.runner = fun ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
       calls:=runtime_id::!calls;
       Ok (if runtime_id=F.cli_primary_runtime then "not JSON" else Yojson.Safe.to_string question) in
     let runner=Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner in

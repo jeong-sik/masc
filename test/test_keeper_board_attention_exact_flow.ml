@@ -522,7 +522,7 @@ let contains_substring ~needle haystack =
    actually travelled, not just that an answer came back. *)
 let recording_runner reply =
   let seen = ref None in
-  let runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt =
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema ~prompt =
     seen := Some (runtime_id, output_schema, prompt);
     reply runtime_id
   in
@@ -591,7 +591,7 @@ let check_cli_run_selected ~before ~slot_id =
 ;;
 
 let cli_success_runner candidate calls =
-  fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+  fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
     incr calls;
     Ok
       (Yojson.Safe.to_string
@@ -676,7 +676,7 @@ let test_mixed_semantic_rejection_and_cli_failure_keep_both_causes () =
         | Error _ -> Alcotest.fail "mixed semantic failure lane did not prepare"
       in
       let before = board_attention_run_ids () in
-      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
         Error (Masc.Fusion_official_client.Setup_failure "client unavailable")
       in
       (match
@@ -922,7 +922,7 @@ let test_mixed_cli_failure_keeps_http_evidence () =
         | Error _ -> Alcotest.fail "mixed CLI-failure lane did not prepare"
       in
       let cli_calls = ref 0 in
-      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
         incr cli_calls;
         Error (Masc.Fusion_official_client.Setup_failure "client unavailable")
       in
@@ -982,7 +982,7 @@ let test_mixed_cli_cancellation_propagates_once () =
       in
       let before = board_attention_run_ids () in
       let cli_calls = ref 0 in
-      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
         incr cli_calls;
         raise (Eio.Cancel.Cancelled (Failure "synthetic cli cancellation"))
       in
@@ -1023,7 +1023,7 @@ let test_cli_only_executes_without_http_provenance () =
         | Ok prepared -> prepared
         | Error _ -> Alcotest.fail "CLI-only Board lane must prepare" in
       let calls = ref 0 in
-      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
         incr calls;
         Ok (Yojson.Safe.to_string (judgment_output ~candidate_id:candidate.Candidate.candidate_id)) in
       match Exact_flow.execute ~cli_runner:runner
@@ -1056,7 +1056,7 @@ let test_cli_only_failure_keeps_the_walked_slots () =
         | Ok prepared -> prepared
         | Error _ -> Alcotest.fail "CLI-only Board lane must prepare"
       in
-      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
         Ok "not json"
       in
       match
@@ -1171,7 +1171,7 @@ let test_cli_tail_advances_after_wrong_candidate () =
           ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime]
           candidate in
       let attempted = ref [] in
-      let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
         attempted := !attempted @ [runtime_id];
         let candidate_id =
           if String.equal runtime_id Fixture.cli_primary_runtime then "another-candidate"

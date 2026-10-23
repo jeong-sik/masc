@@ -45,7 +45,7 @@ checks: `54c64fa3925e3699c65e9e0e10ebeb83621c9f0d`.
   and arrangement duration. Response review read the fix and direct consumers.
 
 [Receipt](../docs/evidence/2026-10-23-ump-time/receipt.json),
-[native receive evidence](../docs/evidence/2026-10-23-ump-time/native-wire.log),
+[native receive evidence](../docs/evidence/2026-10-23-ump-time/native-wire.json),
 [source TUI file verification](../docs/evidence/2026-10-23-ump-time/source-tui-verification.json).
 
 These are source/focused-protocol observations, not default installed Ghostty,

@@ -96,10 +96,11 @@ val space_id : t -> int
     contract, require zero duration and release the button in the same run.
     Unconfirmed release blocks further input on this peer; read/finish remain
     available. End this task space before opening a fresh peer. Frames are read
-    through the snapshot. It does not
-    serve explicit framePath operations. Snapshot-target click, fill, hover and
-    double-click use ego's native element resolver, including iframe refs;
-    expectedUrl still identifies the top-level page. Verbs this
+    through the snapshot. Snapshot-target click, fill, hover and double-click
+    use ego's native element resolver, including iframe refs; expectedUrl still
+    identifies the top-level page. Explicit input framePath is refused here
+    with guidance to snapshot targets; frame-path reads are rejected by the
+    live transport gate before this peer. Verbs this
     connection does not serve are refused before any effect; selection
     refuses them earlier ({!Browser_lane.live_transport_serves}). *)
 val dispatch

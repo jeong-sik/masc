@@ -62,8 +62,12 @@ let parse json =
       |Page_instruct _|Page_locate _|Page_extract _),_::_ ->
         Error "requiredActions applies only to initial tab discovery or session open" in
   let* ()=match preference,verb with
-    | Browser_selection.Exact (B.Live_route None),B.Page_act (B.Action.Open_tab _|Open_window _) ->
-        Error "live open_tab and open_window require an explicit observed clientId"
+    | Browser_selection.Exact (B.Live_route None),B.Page_act (B.Action.Open_tab _|Open_window _|Control _)
+    | Automatic,B.Page_act (B.Action.Control _) ->
+        Error "live open_tab, open_window, hand_off and take_over require an explicit observed clientId"
+    | Exact (B.Automation_route|Stagehand_route),B.Page_act (B.Action.Control _) ->
+        Error B.handoff_refused
+    | Exact (B.Live_route (Some _)),B.Page_act (B.Action.Control _) -> Ok ()
     | (Automatic|Exact (Live_route _|Automation_route|Stagehand_route)),
       (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
       |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (B.Action.Open_tab _|Open_window _|On_tab _)|Page_context _
@@ -76,7 +80,7 @@ let parse json =
 let command arguments = parse arguments |> Result.map (fun (_,verb,_,_) -> verb)
 let bound = function
   | B.Page_read {tab_id;_}|Page_elements {tab_id;_} -> Option.is_some tab_id
-  | Page_act (B.Action.Open_tab _|Open_window _) | Tabs_list | Session_open _ | Session_status -> false
+  | Page_act (B.Action.Open_tab _|Open_window _|Control _) | Tabs_list | Session_open _ | Session_status -> false
   | Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Session_close
   | Page_goto _|Page_act (B.Action.On_tab _)|Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> true
 let transferable verb upload_id = match verb,upload_id with
@@ -85,11 +89,11 @@ let transferable verb upload_id = match verb,upload_id with
       Error "upload requires a private host snapshot grant; no command was dispatched"
   | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
   | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
-  | Page_act (B.Action.Open_tab _|Open_window _)
+  | Page_act (B.Action.Open_tab _|Open_window _|Control _)
   | Page_act (B.Action.On_tab {interaction=(Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests);_})
   | Page_context _|Page_instruct _|Page_locate _|Page_extract _),None -> Ok ()
   | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
-    |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Open_tab _|Open_window _
+    |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Open_tab _|Open_window _|Control _
       |On_tab {interaction=Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
     |Page_context _|Page_instruct _|Page_locate _|Page_extract _),Some _ -> Error "uploadId applies only to an upload command"
 let result ~start_time ~failed ~disposition data message : S.tool_result =

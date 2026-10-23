@@ -84,20 +84,47 @@ let step_failure_message = function
   | Unanswered failure -> run_failure_message failure
   | Unreadable detail | Refused detail | Failed detail -> detail
 
+(* ego's owner of a task space, as a TaskSpace handle and listTaskSpaces
+   name it. The agent holds a space it opened until it hands the space to
+   the operator, or the operator takes it over in ego; ego then stops every
+   call on the space with EGO_TASK_SPACE_USER_IN_CONTROL until the agent
+   takes it back. A space the operator made ("user") is theirs. *)
+let agent_ownership = "agent"
+let delegated_ownership = "agentDelegatedToUser"
+
+(* Who must hold the space for a script's body to run. Every step needs the
+   agent to hold it, taking the space back needs the operator to, and
+   opening the connection reads the owner itself. The frame checks before
+   the body runs, so a step on a space the operator holds is refused before
+   any effect. *)
+type holder = Agent_holds | Operator_holds | Either_holds
+let operator_holds_refused = "the operator holds this ego task space, so nothing was done; take it back with take_over only after the operator says they are done. ego ownership: "
+let agent_holds_refused = "the agent already holds this ego task space; there is nothing to take over"
+let held_by holder body = match holder with
+  | Either_holds -> [body]
+  | Agent_holds ->
+    ["  if (task.ownership !== " ^ Yojson.Safe.to_string (str agent_ownership) ^ ") emit({ok: false, before: true, error: "
+       ^ Yojson.Safe.to_string (str operator_holds_refused) ^ " + task.ownership});";
+     "  else {"; body; "  }"]
+  | Operator_holds ->
+    ["  if (task.ownership === " ^ Yojson.Safe.to_string (str agent_ownership) ^ ") emit({ok: false, before: true, error: "
+       ^ Yojson.Safe.to_string (str agent_holds_refused) ^ "});";
+     "  else {"; body; "  }"]
+
 (* Every script has the same frame. [args] is written into it as JSON: ego's
    Node does not see the caller's environment. It writes exactly one answer
    line whatever happens inside. The first line names the step, for a test
    runner that stands in for ego. *)
-let script ~step ~space ~args body = String.concat "\n" [
+let script ~step ~space ~holder ~args body = String.concat "\n" ([
   "// masc-ego: " ^ step;
   "const emit = answer => console.log(" ^ Yojson.Safe.to_string (str result_marker) ^ " + JSON.stringify(answer));";
   "const args = " ^ Yojson.Safe.to_string args ^ ";";
   "try {";
-  "  const task = await taskSpace(" ^ Yojson.Safe.to_string space ^ ");";
-  body;
+  "  const task = await taskSpace(" ^ Yojson.Safe.to_string space ^ ");" ]
+  @ held_by holder body @ [
   "} catch (error) {";
   "  emit({ok: false, error: String(error && error.message || error)});";
-  "}" ]
+  "}" ])
 
 let answer output =
   let marked = List.filter_map (fun line ->
@@ -116,21 +143,25 @@ let answer output =
       | Some (`Bool false), None, Some (`String error), None -> Error (Failed (head error))
       | _ -> Error (Unreadable "ego-browser nodejs answered outside its answer frame")
 
-let asked run ~window_s ~step ~space ~args body = match run ~window_s (script ~step ~space ~args body) with
+let asked run ~window_s ~step ~space ~holder ~args body = match run ~window_s (script ~step ~space ~holder ~args body) with
   | Error failure -> Error (Unanswered failure)
   | Ok output -> answer output
-let run_step t ~window_s ~step ~args body = asked t.run ~window_s ~step ~space:(`Int t.space_id) ~args body
+let run_step t ~window_s ~step ~args body = asked t.run ~window_s ~step ~space:(`Int t.space_id) ~holder:Agent_holds ~args body
 (* A read has no effect, so however it failed, nothing happened. *)
 let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
 
 let open_space ~run ~now ~space ~version ~capture_directory =
   let* () = if String.trim space = "" then Error "the ego task space needs a name" else Ok () in
-  let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:(str space) ~args:`Null
+  let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:(str space) ~holder:Either_holds ~args:`Null
       "  emit({ok: true, value: {spaceId: task.spaceId, ownership: task.ownership}});"
     |> Result.map_error step_failure_message in
+  (* A space the agent handed to the operator is still the agent's: a
+     connection opened while they hold it refuses every step until take_over,
+     so a restart during a hand-off does not strand the space. *)
   match field "spaceId" opened, field "ownership" opened with
-  | Some (`Int space_id), Some (`String "agent") ->
+  | Some (`Int space_id), Some (`String ownership)
+    when String.equal ownership agent_ownership || String.equal ownership delegated_ownership ->
     Ok {run; now; space_id; version; capture_directory; pointer_state=Released; pages=[]; next_tab=0; captures=0}
   | Some (`Int _), Some (`String ownership) ->
     Error (Printf.sprintf "ego task space %S belongs to %s, not to an agent" space ownership)
@@ -942,10 +973,40 @@ let interact t args =
   | Browser_lane.Drag_to _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
   | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Activate_tab -> refused
 
+(* The whole space goes to the operator for a step only a person can take;
+   from then on the frame refuses every step until take_over. A handOff that
+   failed may still have happened, and the next step says who holds it. *)
+let hand_off t =
+  let unknown = "the operator may hold the space now; the next step on it says who does" in
+  match run_step t ~window_s:(window_s (Browser_lane.Page_act (Browser_lane.Action.Control Browser_lane.Action.Hand_off)))
+          ~step:"space.hand_off" ~args:`Null "    await task.handOff();\n    emit({ok: true, value: null});" with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok _ -> Ok (obj ["action",str "hand_off"])
+
+(* The Keeper takes the space back on the operator's word, which neither ego
+   nor masc checks. ego names the tab that was active then; a tab the
+   operator opened has no label, so it is listed later and not adopted. *)
+let take_over t =
+  let unknown = "list this connection's tabs before another step" in
+  match asked t.run ~window_s:(window_s (Browser_lane.Page_act (Browser_lane.Action.Control Browser_lane.Action.Take_over)))
+          ~step:"space.take_over" ~space:(`Int t.space_id) ~holder:Operator_holds ~args:`Null (String.concat "\n" [
+      "    const back = await takeOverTaskSpace(task.spaceId);";
+      "    const active = back.userPage();";
+      "    emit({ok: true, value: {active: active ? (active.label ?? null) : null}});" ]) with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value ->
+    match field "active" value with
+    | Some (`String label) when label <> "" ->
+      Ok (obj ["action",str "take_over";"activeTabId",`Int (remember t (Managed label))])
+    | Some `Null -> Ok (obj ["action",str "take_over"])
+    | Some _ | None -> Error (Live.Outcome_unknown ("ego answered the take over outside its answer frame; " ^ unknown))
+
 let act t args =
   match Browser_lane.Action.parse args with
   | Error detail -> Error (Live.Before_effect detail)
   | Ok (Browser_lane.Action.Open_tab url) -> open_tab t url
+  | Ok (Browser_lane.Action.Control Browser_lane.Action.Hand_off) -> hand_off t
+  | Ok (Browser_lane.Action.Control Browser_lane.Action.Take_over) -> take_over t
   | Ok (Browser_lane.Action.Open_window _) ->
     Error (Live.Before_effect "an ego connection does not open windows")
   | Ok (Browser_lane.Action.On_tab {frame_path = _ :: _; _}) ->
@@ -964,7 +1025,7 @@ let act t args =
       | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
-    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog and dismiss_dialog only")
+    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, hand_off and take_over only")
 
 let dispatch t ~verb args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

@@ -424,6 +424,7 @@ type live_capability =
   | Tab_creation
   | Dialog_answer
   | Frame_read
+  | Operator_handoff
 [@@deriving enumerate]
 
 let live_capability_to_wire = function
@@ -435,6 +436,7 @@ let live_capability_to_wire = function
   | Scene_read -> "scene_read"
   | Accessibility_snapshot -> "accessibility_snapshot"
   | Snapshot_target_input -> "snapshot_target_input"
+  | Operator_handoff -> "operator_handoff"
   | Dom_interaction -> "dom_interaction"
   | Point_click -> "point_click"
   | Point_scroll -> "point_scroll"
@@ -487,6 +489,7 @@ let live_capability = function
   | Page_snapshot _ -> Some Accessibility_snapshot
   | Page_interact { action; _ } -> Some (live_capability_of_interaction action)
   | Page_act (Action.Open_tab _ | Action.Open_window _) -> Some Tab_creation
+  | Page_act (Action.Control (Action.Hand_off | Action.Take_over)) -> Some Operator_handoff
   | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Some Tab_history
   | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Some Tab_closing
   | Page_goto _ -> Some Tab_navigation
@@ -507,12 +510,15 @@ let verb_allowed_on_live verb = Option.is_some (live_capability verb)
 let sentence_verbs_refused = "act and extract require the stagehand lane"
 let snapshot_refused = "an accessibility snapshot is served only by an ego connection on the live lane"
 let snapshot_target_refused = "a snapshot target is acted on only by an ego connection on the live lane"
+let handoff_refused = "hand_off and take_over apply only to an ego connection on the live lane"
 (* Why the automation lane does not serve a verb, if it does not.
    Model-assisted locate is admitted separately by the installed executor. *)
 let automation_refusal = function
   | Page_interact {action; _} when acts_on_snapshot_target action -> Some snapshot_target_refused
+  | Page_act (Action.Control (Action.Hand_off | Action.Take_over)) -> Some handoff_refused
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _
-  | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _
+  | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _
+  | Page_act (Action.Open_tab _ | Action.Open_window _ | Action.On_tab _)
   | Page_locate _ -> None
   | Page_instruct _ | Page_extract _ -> Some sentence_verbs_refused
   | Page_snapshot _ -> Some snapshot_refused
@@ -531,7 +537,7 @@ let verb_allowed_on_stagehand = function
   | Page_read _ | Page_elements _ | Page_scene _ | Page_interact _ | Page_instruct _ | Page_locate _
   | Page_extract _ -> true
   | Page_act (Action.Open_tab _) -> true
-  | Page_act (Action.Open_window _) -> false
+  | Page_act (Action.Open_window _ | Action.Control (Action.Hand_off | Action.Take_over)) -> false
   | Page_act (Action.On_tab {frame_path;interaction;_}) ->
     (match interaction with
      | Action.Back | Forward | Reload | Close_tab -> frame_path = []
@@ -622,8 +628,9 @@ let live_transport_of_string = function
    The ego connection runs fixed scripts in one ego lite task space
    (RFC-browser-live-ego). It reads that space's pages with the same page
    scripts as the other connections, and opens, moves and closes only the
-   pages an agent opened there; test_browser_ego_peer holds its column to
-   what Browser_ego_peer does. *)
+   pages an agent opened there. It alone hands its space to the operator and
+   takes it back; test_browser_ego_peer holds its column to what
+   Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
   | ( (Web_extension | Webdriver_bidi)
@@ -633,16 +640,17 @@ let live_transport_serves transport capability =
   | Web_extension, Browser_zoom -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input) -> false
+                    | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input
+                    | Operator_handoff) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read) -> true
-  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input) -> false
+  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Operator_handoff) -> false
   | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_answer
-                    | Snapshot_target_input) -> true
+                    | Snapshot_target_input | Operator_handoff) -> true
   | Ego_task_space, (Document_source | Touch_input | Browser_zoom | Viewport_resize
                     | Tab_activation | Frame_read) -> false
 ;;

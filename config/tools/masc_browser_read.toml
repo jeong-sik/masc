@@ -33,9 +33,9 @@ description = "Optional advanced browser override. Omit only for initial discove
 [[params]]
 name = "mode"
 type = "string"
-enum = ["text", "elements", "scene", "regions", "screenshot", "frames", "dialog", "downloads", "console", "network", "cookies"]
+enum = ["text", "elements", "scene", "regions", "snapshot", "screenshot", "frames", "dialog", "downloads", "console", "network", "cookies"]
 default = "text"
-description = "text: page text; elements: controls (or explicit CSS matches with selector); scene: viewport content/geometry and documentId/nodeId (explicit tabId); regions: landmarks for scoped reads. Geometry does not prove occlusion. Optional sourceContext is a dev-source hint: verify checkout/SHA-256 before edits. screenshot: viewport PNG (explicit tabId). frames: iframe selectors (automation Firefox or live BiDi). dialog/downloads: automation, explicit tabId; reads pending prompt or pending/completed/canceled/interrupted files. console: owned Firefox (automation) only, explicit tabId; the tab's console messages and uncaught errors since the session opened, oldest first, at most 200 kept (dropped says how many older ones were not), each text cut at 4000 bytes (textCut). unattributedEntries counts entries Firefox gave no tab for, and malformedEvents counts events that were not what BiDi documents (with the last reason); neither ends the session. The text is whatever the page printed. network: owned Firefox (automation) only, explicit tabId; the tab's requests since the session opened, oldest first, at most 200 kept (dropped counts the rest): method, address, state (pending, completed or failed), and for a completed one the status, mimeType and bytesReceived. Header values, cookies and bodies are never returned: only header names are. The address keeps its path but every query value is replaced with REDACTED, and user info and the fragment are removed. cookies: owned Firefox (automation) only, explicit tabId; the cookies the tab's page can see, at most 200: name, domain, path, secure, httpOnly, sameSite and expiry, plus the localStorage and sessionStorage key names and IndexedDB database names under storage (at most 100 each; counts included). No cookie or storage value is returned. The value is never returned (valuesWithheld is true)."
+description = "text: page text; elements: controls (or explicit CSS matches with selector); scene: viewport content/geometry and documentId/nodeId (explicit tabId); regions: landmarks for scoped reads. Geometry does not prove occlusion. snapshot: an ego connection's own accessibility tree, explicit tabId; each actionable node carries a ref (ref=12) that names the page as read. Optional sourceContext is a dev-source hint: verify checkout/SHA-256 before edits. screenshot: viewport PNG (explicit tabId). frames: iframe selectors (automation Firefox or live BiDi). dialog/downloads: automation, explicit tabId; reads pending prompt or pending/completed/canceled/interrupted files. console: owned Firefox (automation) only, explicit tabId; the tab's console messages and uncaught errors since the session opened, oldest first, at most 200 kept (dropped says how many older ones were not), each text cut at 4000 bytes (textCut). unattributedEntries counts entries Firefox gave no tab for, and malformedEvents counts events that were not what BiDi documents (with the last reason); neither ends the session. The text is whatever the page printed. network: owned Firefox (automation) only, explicit tabId; the tab's requests since the session opened, oldest first, at most 200 kept (dropped counts the rest): method, address, state (pending, completed or failed), and for a completed one the status, mimeType and bytesReceived. Header values, cookies and bodies are never returned: only header names are. The address keeps its path but every query value is replaced with REDACTED, and user info and the fragment are removed. cookies: owned Firefox (automation) only, explicit tabId; the cookies the tab's page can see, at most 200: name, domain, path, secure, httpOnly, sameSite and expiry, plus the localStorage and sessionStorage key names and IndexedDB database names under storage (at most 100 each; counts included). No cookie or storage value is returned. The value is never returned (valuesWithheld is true)."
 
 [[params]]
 name = "framePath"
@@ -73,6 +73,17 @@ required = true
 name = "nodeId"
 type = "string"
 required = true
+
+[[params]]
+name = "snapshotScope"
+type = "string"
+enum = ["viewport", "full_page", "subtree"]
+description = "snapshot only: the viewport (when omitted), the whole page, or the subtree under root."
+
+[[params]]
+name = "root"
+type = "string"
+description = "snapshot subtree only: a ref an earlier snapshot of the same page printed, such as @12 or ref=12."
 
 [[params]]
 name = "expectedUrl"

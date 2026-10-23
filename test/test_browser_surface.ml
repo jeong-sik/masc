@@ -391,7 +391,8 @@ let test_automatic_selection_keeps_observed_browser () =
         | Browser_lane.Session_status | Browser_lane.Page_goto _ | Browser_lane.Page_elements _
         | Browser_lane.Page_act _ | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
         | Browser_lane.Page_locate _ | Browser_lane.Page_extract _
-        | Browser_lane.Page_console _ | Browser_lane.Page_network _ | Browser_lane.Page_cookies _ ->
+        | Browser_lane.Page_console _ | Browser_lane.Page_network _ | Browser_lane.Page_cookies _
+        | Browser_lane.Page_snapshot _ ->
           fail "unexpected command during automatic browser scenario" in
       Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
       Browser_lane.install_stagehand_executor (Some (fun ~actor:_ verb -> execute verb));
@@ -469,6 +470,27 @@ let test_malformed_arguments_reach_no_browser () =
   check bool "a well-formed text read goes on to find the browser Add-on" true
     (reaches_the_addon_lookup (read ["mode",`String "text"]))
 
+(* An ego snapshot is read over a live connection only, with its scope and
+   root given to that mode alone and a root that is a ref. *)
+let test_a_snapshot_read_is_checked_before_any_browser () =
+  let module Cap = Masc.Browser_capabilities in
+  let live fields = addon_tool Cap.Read (("lane",`String "live")
+    :: ("clientId",`String "0c000000-0000-4000-8000-000000000001") :: ("tabId",`Int 1) :: fields) in
+  let snapshot fields = live (("mode",`String "snapshot") :: fields) in
+  List.iter (fun (name, result) -> check bool name true (refused_as_input result))
+    [ "a snapshot on the automation browser",
+      addon_tool Cap.Read ["lane",`String "automation";"tabId",`Int 1;"mode",`String "snapshot"]
+    ; "a snapshot scope on a text read", live ["mode",`String "text";"snapshotScope",`String "full_page"]
+    ; "a root on a scene read", live ["mode",`String "scene";"root",`String "@12"]
+    ; "a subtree with no root", snapshot ["snapshotScope",`String "subtree"]
+    ; "a root that is not a ref", snapshot ["snapshotScope",`String "subtree";"root",`String "12"]
+    ; "a root on a viewport snapshot", snapshot ["root",`String "@12"]
+    ; "an unknown snapshot scope", snapshot ["snapshotScope",`String "page"]
+    ; "a snapshot in a frame", snapshot ["framePath",`List [`String "#frame"]] ];
+  List.iter (fun (name, result) -> check bool name true (reaches_the_addon_lookup result))
+    [ "a viewport snapshot goes on to find the browser Add-on", snapshot []
+    ; "and a subtree under a ref", snapshot ["snapshotScope",`String "subtree";"root",`String "ref=12"] ]
+
 (* BrowserRead keeps a screenshot under its Keeper's workspace, so a caller
    with no owning Keeper is refused as input before the tool looks for a
    browser Add-on. *)
@@ -483,6 +505,7 @@ let test_screenshot_requires_an_owning_keeper () =
 let () = run "browser surface" ["behavior",[
   test_case "a screenshot needs an owning Keeper" `Quick test_screenshot_requires_an_owning_keeper;
   test_case "malformed tool arguments reach no browser" `Quick test_malformed_arguments_reach_no_browser;
+  test_case "a snapshot read is checked before any browser" `Quick test_a_snapshot_read_is_checked_before_any_browser;
   test_case "automatic discovery binds subsequent observations and input" `Quick test_automatic_selection_keeps_observed_browser;
   test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
   test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;

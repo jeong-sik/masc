@@ -70,7 +70,7 @@ let stagehand_serves verb = Lane.verb_allowed_on_stagehand verb && match verb wi
   | Lane.Page_interact {action=(Lane.Tap_at _ | Lane.Swipe _);_} -> false
   | Lane.Page_interact {action=Lane.Set_viewport (Lane.Fit _);_} -> true
   | Lane.Tabs_list | Lane.Page_read _ | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_console _ | Lane.Page_network _ | Lane.Page_cookies _
-  | Lane.Page_capture _ | Lane.Page_scene _ | Lane.Session_open _ | Lane.Session_close | Lane.Session_status
+  | Lane.Page_capture _ | Lane.Page_scene _ | Lane.Page_snapshot _ | Lane.Session_open _ | Lane.Session_close | Lane.Session_status
   | Lane.Page_goto _ | Lane.Page_elements _ | Lane.Page_act _ | Lane.Page_context _ | Lane.Page_instruct _
   | Lane.Page_locate _ | Lane.Page_extract _
   | Lane.Page_interact {action=(Lane.Double_click _ | Lane.Double_click_at _ | Lane.Type_text _ | Lane.Press_key _ | Lane.Click _ | Lane.Fill _ | Lane.Select_option _ | Lane.Scroll _ | Lane.Hover _ | Lane.Hover_at _
@@ -78,7 +78,7 @@ let stagehand_serves verb = Lane.verb_allowed_on_stagehand verb && match verb wi
 let automation_serves verb = Lane.verb_allowed_on_automation verb && match verb with
   | Lane.Page_interact {action=(Lane.Activate_tab | Lane.Set_zoom _);_} -> false
   | Lane.Tabs_list | Lane.Page_read _ | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_console _ | Lane.Page_network _ | Lane.Page_cookies _
-  | Lane.Page_capture _ | Lane.Page_scene _ | Lane.Session_open _ | Lane.Session_close | Lane.Session_status
+  | Lane.Page_capture _ | Lane.Page_scene _ | Lane.Page_snapshot _ | Lane.Session_open _ | Lane.Session_close | Lane.Session_status
   | Lane.Page_goto _ | Lane.Page_elements _ | Lane.Page_act _ | Lane.Page_context _ | Lane.Page_instruct _
   | Lane.Page_locate _ | Lane.Page_extract _
   | Lane.Page_interact {action=(Lane.Set_viewport _ | Lane.Double_click _ | Lane.Double_click_at _ | Lane.Type_text _ | Lane.Press_key _ | Lane.Click _ | Lane.Fill _ | Lane.Select_option _ | Lane.Scroll _ | Lane.Hover _ | Lane.Drag_to _
@@ -90,7 +90,7 @@ let choose_candidates ~verb ~bound ~snapshot preference =
   let lifecycle_inspection_or_cleanup = match verb with
     | Lane.Session_status | Lane.Session_close -> true
     | Lane.Session_open _ | Lane.Page_goto _ | Lane.Tabs_list | Lane.Page_read _
-    | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_console _ | Lane.Page_network _ | Lane.Page_cookies _ | Lane.Page_capture _ | Lane.Page_scene _
+    | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_console _ | Lane.Page_network _ | Lane.Page_cookies _ | Lane.Page_capture _ | Lane.Page_scene _ | Lane.Page_snapshot _
     | Lane.Page_interact _ | Lane.Page_elements _ | Lane.Page_act _ | Lane.Page_context _
     | Lane.Page_instruct _ | Lane.Page_locate _ | Lane.Page_extract _ -> false in
   let ready state = state.registered &&
@@ -99,7 +99,7 @@ let choose_candidates ~verb ~bound ~snapshot preference =
     | Lane.Stagehand_route -> stagehand_serves verb && (not (Lane.verb_uses_model verb) || state.locate)
     | Lane.Automation_route -> automation_serves verb &&
         (match verb with Lane.Page_locate _ -> state.locate
-         | Lane.Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_interact _
+         | Lane.Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
          | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _
          | Page_instruct _|Page_extract _ -> true)
     | Lane.Live_route _ -> false in
@@ -135,7 +135,7 @@ let choose_candidates ~verb ~bound ~snapshot preference =
     | Lane.Session_open _ | Lane.Session_status -> (match owned with [] -> configured () | _::_ -> one Existing_work_session owned)
     | Lane.Session_close | Lane.Page_goto _ -> one Existing_work_session owned
     | Lane.Tabs_list | Lane.Page_read _ | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_console _ | Lane.Page_network _ | Lane.Page_cookies _
-    | Lane.Page_capture _ | Lane.Page_scene _ | Lane.Page_interact _ | Lane.Page_elements _
+    | Lane.Page_capture _ | Lane.Page_scene _ | Lane.Page_snapshot _ | Lane.Page_interact _ | Lane.Page_elements _
     | Lane.Page_act _ | Lane.Page_context _ | Lane.Page_instruct _ | Lane.Page_locate _ | Lane.Page_extract _ ->
       (* Both carry a login: the Keeper's own Firefox over BiDi, and the
          operator's ego profile, whose cookies every task space shares. With

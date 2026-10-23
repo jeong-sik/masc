@@ -3,7 +3,7 @@ type backend = Connected of Browser_lane.live_transport | Owned_gecko
 type operation =
   | List_tabs | Open_tab | Close_tab | Activate_tab | List_windows | Create_window | Close_window
   | Navigate | Follow_link | Back | Forward | Reload | Session_lifecycle
-  | Read_text | Read_html | Read_elements | Read_scene | Read_regions | Screenshot
+  | Read_text | Read_html | Read_elements | Read_scene | Read_regions | Read_snapshot | Screenshot
   | Click | Double_click | Right_click | Middle_click | Pointer_down | Pointer_up | Hover | Pointer_drag | Html5_drop
   | Scroll_page | Scroll_at | Fill | Type_text | Press_key | Key_chord | Select_option
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
@@ -23,7 +23,7 @@ let backend_of_target = function
   | Browser_lane.Stagehand -> Owned_chromium
 let operations = [List_tabs;Open_tab;Close_tab;Activate_tab;List_windows;Create_window;Close_window;
   Navigate;Follow_link;Back;Forward;Reload;Session_lifecycle;
-  Read_text;Read_html;Read_elements;Read_scene;Read_regions;Screenshot;
+  Read_text;Read_html;Read_elements;Read_scene;Read_regions;Read_snapshot;Screenshot;
   Click;Double_click;Right_click;Middle_click;Pointer_down;Pointer_up;Hover;Pointer_drag;Html5_drop;Scroll_page;Scroll_at;
   Fill;Type_text;Press_key;Key_chord;Select_option;Read_frames;Frame_interaction;
   Read_dialog;Accept_dialog;Dismiss_dialog;Upload_file;List_downloads;Page_zoom;
@@ -150,6 +150,13 @@ let support backend operation = match backend with
     | Read_elements -> read backend (invoke ~mode:"elements" Read) []
     | Read_scene -> read backend (invoke ~mode:"scene" Read) [observed;"Explicit tabId; viewport scene may be truncated. Geometry is not an occlusion guarantee."]
     | Read_regions -> read backend (invoke ~mode:"regions" Read) [observed;"Explicit tabId; copy observed region references for scoped reads."]
+    | Read_snapshot -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~mode:"snapshot" Read
+          [observed;"Explicit tabId; ego's own accessibility tree, each actionable node with a ref (ref=12). snapshotScope is viewport (default), full_page, or subtree with root, a ref an earlier snapshot of the same page printed.";
+           "A ref names the page as it was read; read again after an effect or a page change.";ego_pages]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium ->
+          Unsupported "Only an ego connection returns its own accessibility snapshot; read scene or elements instead."
+      | Safari_unavailable -> missing)
     | Screenshot -> read backend (invoke ~mode:"screenshot" Read)
         [observed;"Requires an owning Keeper and explicit tabId; captures the viewport, not the whole document."]
     | Click -> (match backend with
@@ -325,7 +332,7 @@ let operation_name = function
   | Navigate -> "navigate" | Follow_link -> "follow_link" | Back -> "back" | Forward -> "forward"
   | Reload -> "reload" | Session_lifecycle -> "session_lifecycle" | Read_text -> "read_text"
   | Read_html -> "read_html" | Read_elements -> "read_elements" | Read_scene -> "read_scene"
-  | Read_regions -> "read_regions" | Screenshot -> "screenshot" | Click -> "click"
+  | Read_regions -> "read_regions" | Read_snapshot -> "read_snapshot" | Screenshot -> "screenshot" | Click -> "click"
   | Double_click -> "double_click" | Right_click -> "right_click" | Middle_click -> "middle_click"
   | Pointer_down -> "pointer_down" | Pointer_up -> "pointer_up" | Hover -> "hover"
   | Pointer_drag -> "pointer_drag" | Html5_drop -> "html5_drop" | Scroll_page -> "scroll_page"

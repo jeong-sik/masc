@@ -30,6 +30,10 @@ let failed error = Ok (Peer.result_marker ^ Yojson.Safe.to_string (obj ["ok",`Bo
 
 let field name json = Yojson.Safe.Util.member name json
 let text json = Yojson.Safe.Util.to_string json
+let contains text part =
+  let n = String.length part in
+  let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
+  at 0
 
 (* Every directory a case made, removed with what is left in it once the run ends. *)
 let created = ref []
@@ -516,6 +520,7 @@ let test_the_scripts_parse_as_modules () =
     | "page.goto" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
     | "page.reload" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Back"]])
+    | "page.snapshot" -> answered (obj ["label",str "p1";"url",str "u";"title",str "T";"snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
   let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -524,6 +529,7 @@ let test_the_scripts_parse_as_modules () =
     [ Live.Page_read, obj ["tabId",`Int 1];
       Live.Page_elements, obj ["tabId",`Int 1;"within",str "#main"];
       Live.Page_scene, obj ["tabId",`Int 1];
+      Live.Page_snapshot, obj ["tabId",`Int 1;"maxChars",`Int 1000;"scope",str "subtree";"root",str "@12"];
       Live.Page_capture, obj ["tabId",`Int 1];
       Live.Page_act, act_args (Lane.Action.Open_tab "https://example.test/");
       Live.Page_goto, obj ["tabId",`Int 1;"url",str "https://example.test/"];
@@ -538,7 +544,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
-    ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.capture";
+    ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.snapshot";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.drag";"page.input";
      "page.close";"page.reload";"page.history";"space.finish"]
     (List.rev_map fst !scripts);
@@ -594,6 +600,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
         "before",(state ~url:"https://app.slack.com/" ~width:800);
         "after",(state ~url:"https://app.slack.com/" ~width:800)])
     | "page.read" | "page.elements" | "page.scene" -> page_answer ~label:"p1" (obj ["url",str "https://app.slack.com/"])
+    | "page.snapshot" -> answered (obj ["label",str "p1";"url",str "https://app.slack.com/";"title",str "Slack";
+        "snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/new";"title",str "New";"active",`Bool true]])
     | "page.goto" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
@@ -612,6 +620,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Element_inventory -> Page_elements {tab_id=Some 1;filter={within=None;selector=None}}
     | Viewport_capture -> Page_capture {tab_id=1}
     | Scene_read -> Page_scene {tab_id=1; max_chars=1000; view=Content; scope=None}
+    | Accessibility_snapshot -> Page_snapshot {tab_id=1; max_chars=1000; scope=Snapshot_viewport}
     | Dom_interaction -> interact (Click "#button")
     | Point_click -> interact (Click_at {point;viewport;button=Pointer.Primary})
     | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
@@ -691,6 +700,82 @@ let in_node script =
   match Unix.waitpid [] pid with
   | _, Unix.WEXITED 0 -> In_channel.with_open_bin out In_channel.input_all
   | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> fail "node did not run the step"
+
+(* The snapshot script runs in node against a stand-in for ego whose one agent
+   page answers [text]; it prints the options each snapshot call got. *)
+let snapshot_stand_in text = Printf.sprintf {js|
+const seen = [];
+process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
+const page = {
+  snapshot: async options => { seen.push(options === undefined ? "no options" : options); return %s; },
+  url: async () => "https://app.slack.com/",
+  title: async () => "Slack",
+};
+const taskSpace = async () => ({
+  tabs: async () => [{label: "p1", url: "https://app.slack.com/", title: "Slack", active: true}],
+  page: () => page,
+});
+|js} (Yojson.Safe.to_string (`String text))
+
+let test_a_snapshot_reads_egos_own_tree () =
+  let text = ref "" and asked = ref [] and output = ref "" in
+  let run ~window_s script =
+    let sent = sent_of ~window_s script in
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "tabs.list" -> answered tabs
+    | "page.snapshot" ->
+      asked := sent :: !asked;
+      output := in_node (snapshot_stand_in !text ^ script);
+      Ok !output
+    | other -> failf "unexpected step %s" other in
+  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+    | Ok peer -> peer | Error detail -> fail detail in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let snapshot ?(tab_id=1) ?(max_chars=1000) scope =
+    dispatch peer Live.Page_snapshot
+      (Yojson.Safe.Util.member "args" (Lane.verb_json (Lane.Page_snapshot {tab_id;max_chars;scope}))) in
+  let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.to_string (Yojson.Safe.from_string (after ~prefix:"seen " line))
+    | None -> fail "the stand-in did not say what it saw" in
+  let expected ~scope ~snapshot ~truncated ~chars = Yojson.Safe.to_string (obj (
+    ["tabId",`Int 1;"url",str "https://app.slack.com/";"title",str "Slack"] @ scope
+    @ ["snapshot",str snapshot;"truncated",`Bool truncated;"chars",`Int chars])) in
+  let answer label = function
+    | Ok answer -> Yojson.Safe.to_string answer
+    | other -> failf "%s was %s" label (failure_kind other) in
+  text := "root\n  button \"Send\" [ref=12]";
+  check string "the viewport is ego's own tree, whole"
+    (expected ~scope:["scope",str "viewport"] ~snapshot:!text ~truncated:false ~chars:(String.length !text))
+    (answer "viewport" (snapshot Lane.Snapshot_viewport));
+  check string "a viewport snapshot passes no options" {|["no options"]|} (seen ());
+  check bool "it runs within the read window" true ((List.hd !asked).window_s
+    < Lane.reply_timeout_sec (Lane.Page_snapshot {tab_id=1;max_chars=1000;scope=Lane.Snapshot_viewport}));
+  check string "the subtree answer names its root"
+    (expected ~scope:["scope",str "subtree";"root",str "@12"] ~snapshot:!text ~truncated:false ~chars:(String.length !text))
+    (answer "subtree" (snapshot (Lane.Snapshot_subtree 12)));
+  check string "and ego is asked for that subtree" {|[{"scope":"subtree","root":"@12"}]|} (seen ());
+  ignore (answer "full page" (snapshot Lane.Snapshot_full_page));
+  check string "a full page snapshot asks for the whole page" {|[{"scope":"full_page"}]|} (seen ());
+  (* "ab", one emoji (two UTF-16 units), "cd": six units. *)
+  text := "ab\xF0\x9F\x98\x80cd";
+  check string "a cut never splits a surrogate pair"
+    (expected ~scope:["scope",str "viewport"] ~snapshot:"ab" ~truncated:true ~chars:6)
+    (answer "cut" (snapshot ~max_chars:3 Lane.Snapshot_viewport));
+  check string "a cut after the pair keeps it"
+    (expected ~scope:["scope",str "viewport"] ~snapshot:"ab\xF0\x9F\x98\x80" ~truncated:true ~chars:6)
+    (answer "cut" (snapshot ~max_chars:4 Lane.Snapshot_viewport));
+  let runs = List.length !asked in
+  let refused label result = match result with
+    | Error (Live.Before_effect detail) -> detail
+    | other -> failf "%s was %s" label (failure_kind other) in
+  check bool "an operator tab is refused" true
+    (contains (refused "operator tab" (snapshot ~tab_id:2 Lane.Snapshot_viewport)) "opened by the operator");
+  ignore (refused "no tab" (dispatch peer Live.Page_snapshot (obj ["maxChars",`Int 10;"scope",str "viewport"])));
+  check bool "a root that is not a ref is refused" true
+    (contains (refused "root" (dispatch peer Live.Page_snapshot
+       (obj ["tabId",`Int 1;"maxChars",`Int 10;"scope",str "subtree";"root",str "12"]))) "ref");
+  check int "and none of them ran a script" runs (List.length !asked)
 
 let test_history_moves_one_entry () =
   let current = ref 1 and navigation = ref "" and detaches = ref false and same_url = ref false and load = ref "" in
@@ -783,5 +868,6 @@ let () =
       test_case "a capture reads and removes its file" `Quick test_capture_reads_and_removes_the_file;
       test_case "effects answer what happened" `Quick test_effects_answer_what_happened;
       test_case "history moves one entry and waits for it" `Quick test_history_moves_one_entry;
+      test_case "a snapshot reads ego's own tree" `Quick test_a_snapshot_reads_egos_own_tree;
       test_case "input acts through the shared page scripts" `Quick test_input_acts_through_the_shared_page_scripts;
       test_case "the peer serves what the lane table says" `Quick test_the_peer_serves_what_the_lane_table_says ] ]

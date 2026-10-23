@@ -5930,6 +5930,7 @@ module Browser_lane_view = struct
     | Element_inventory -> "elements"
     | Viewport_capture -> "screenshot"
     | Scene_read -> "scene"
+    | Accessibility_snapshot -> "snapshot"
     | Dom_interaction -> "click/fill"
     | Point_click -> "point click"
     | Point_scroll -> "point scroll"

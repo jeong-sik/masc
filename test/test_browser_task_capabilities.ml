@@ -216,7 +216,7 @@ let test_ego_table () =
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
   check (list string) "reads, capture, the tab list, its own tabs, their history and input on them"
-    ["list_tabs";"open_tab";"close_tab";"navigate";"follow_link";"back";"forward";"reload";"read_text";"read_elements";"read_scene";"read_regions";"screenshot";
+    ["list_tabs";"open_tab";"close_tab";"navigate";"follow_link";"back";"forward";"reload";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";
      "click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
      "fill";"type_text";"press_key";"key_chord";"select_option"]
     (List.map Cap.operation_name reachable);
@@ -226,6 +226,19 @@ let test_ego_table () =
         (List.exists (fun constraint_ -> String_util.contains_substring constraint_ "operator opened") constraints)
     | Cap.Available _ | Cap.Unsupported _ -> failf "%s is not conditional on ego" (Cap.operation_name operation))
     (List.filter (fun operation -> not (List.mem operation [Cap.List_tabs; Cap.Open_tab])) reachable)
+
+(* ego's own accessibility snapshot is claimed by the ego connection alone. *)
+let test_snapshot_table () =
+  List.iter (fun (backend, label, claimed) ->
+    check bool (label ^ (if claimed then " claims" else " does not claim") ^ " the ego snapshot") claimed
+      (match Cap.support backend Cap.Read_snapshot with
+       | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false))
+    [Cap.Connected Lane.Ego_task_space, "ego", true;
+     Cap.Connected Lane.Webdriver_bidi, "BiDi", false;
+     Cap.Connected Lane.Web_extension, "the extension", false;
+     Cap.Owned_gecko, "automation Firefox", false;
+     Cap.Owned_chromium, "Stagehand Chromium", false;
+     Cap.Safari_unavailable, "Safari", false]
 
 let () = run "task-aware browser choice" ["scenarios",[
   test_case "a bound request is not reselected by required actions" `Quick test_bound_request_keeps_its_browser;
@@ -241,4 +254,5 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "touch is claimed only where a touch pointer is sent" `Quick test_touch_table;
   test_case "select_option is claimed where the shared script runs" `Quick test_select_option_table;
   test_case "window listing is claimed only where tabs name their window" `Quick test_list_windows_table;
-  test_case "an ego connection is claimed only for what its peer does" `Quick test_ego_table]]
+  test_case "an ego connection is claimed only for what its peer does" `Quick test_ego_table;
+  test_case "the ego snapshot is claimed by the ego connection alone" `Quick test_snapshot_table]]

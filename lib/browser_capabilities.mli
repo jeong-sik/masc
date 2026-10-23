@@ -7,7 +7,7 @@ type backend = Connected of Browser_lane.live_transport | Owned_gecko
 type operation =
   | List_tabs | Open_tab | Close_tab | Activate_tab | List_windows | Create_window | Close_window
   | Navigate | Follow_link | Back | Forward | Reload | Session_lifecycle
-  | Read_text | Read_html | Read_elements | Read_scene | Read_regions | Screenshot
+  | Read_text | Read_html | Read_elements | Read_scene | Read_regions | Read_snapshot | Screenshot
   | Click | Double_click | Right_click | Middle_click | Pointer_down | Pointer_up | Hover | Pointer_drag | Html5_drop
   | Scroll_page | Scroll_at | Fill | Type_text | Press_key | Key_chord | Select_option
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog

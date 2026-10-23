@@ -192,7 +192,7 @@ let target ~verb ~snapshot route =
           |> List.sort (fun left right -> String.compare (Lane.client_id_to_string left) (Lane.client_id_to_string right))))
 let bound = function
   | Lane.Page_read {tab_id;_} | Lane.Page_elements {tab_id;_} -> Option.is_some tab_id
-  | Lane.Page_act (Lane.Action.Open_tab _ | Lane.Action.Open_window _) | Lane.Tabs_list | Lane.Session_open _ | Lane.Session_status -> false
+  | Lane.Page_act (Lane.Action.Open_tab _ | Lane.Action.Open_window _ | Lane.Action.Control _) | Lane.Tabs_list | Lane.Session_open _ | Lane.Session_status -> false
   | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_console _ | Lane.Page_network _ | Lane.Page_cookies _ | Lane.Page_capture _
   | Lane.Page_scene _ | Lane.Page_snapshot _ | Lane.Page_interact _ | Lane.Session_close | Lane.Page_goto _ | Lane.Page_act (Lane.Action.On_tab _)
   | Lane.Page_context _ | Lane.Page_instruct _ | Lane.Page_locate _ | Lane.Page_extract _ -> true

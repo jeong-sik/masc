@@ -86,9 +86,11 @@ let control_identity ~sw ~owner =
             | `String message -> Some message | _ -> None)))
         ["automatic",[];"unnamed live",["lane",`String "live"];
          "automation",["lane",`String "automation"];"stagehand",["lane",`String "stagehand"]];
-      List.iter (fun input -> check bool "an observed client admits control" true
-        (ok (Tool.command input)=verb))
-        [arguments verb;`Assoc ["clientId",`String (B.client_id_to_string client_id);"command",B.verb_json verb]];
+      check bool "the named host-selected client admits control" true
+        (ok (Tool.command (arguments verb))=(B.Live_route (Some client_id),verb));
+      check bool "a worker route still requires its lane" true
+        (Result.is_error (Tool.command (`Assoc ["clientId",`String (B.client_id_to_string client_id);
+          "command",B.verb_json verb])));
       let polled=if index=0 then first_poll else poll () in
       let pending=Eio.Fiber.fork_promise ~sw (fun () ->
         Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") (arguments verb)) in

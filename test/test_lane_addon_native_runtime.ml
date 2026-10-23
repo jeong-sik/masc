@@ -517,6 +517,14 @@ hooks = ["validate_input", "validate_output"]
     "command",Browser_lane.verb_json (Browser_lane.Page_read {tab_id=Some 7;max_chars=None})]);
   host_refusal "a live tab is opened only on a named client" (`Assoc ["lane",`String "live";
     "command",Browser_lane.verb_json (Browser_lane.Page_act (Browser_lane.Action.Open_tab "https://example.org/"))]);
+  List.iter (fun control ->
+    List.iter (fun (label,selection) ->
+      host_refusal (label ^ ": space control keeps its observed live identity")
+        (`Assoc (selection @ ["command",Browser_lane.verb_json
+          (Browser_lane.Page_act (Browser_lane.Action.Control control))])))
+      ["automatic",[];"unnamed live",["lane",`String "live"];
+       "automation",["lane",`String "automation"];"stagehand",["lane",`String "stagehand"]])
+    [Browser_lane.Action.Hand_off;Take_over];
   host_refusal "a repeated field is refused as input" (`Assoc ["command",Browser_lane.verb_json Browser_lane.Tabs_list;
     "command",Browser_lane.verb_json Browser_lane.Tabs_list]);
   write (Filename.concat root ("lose-snapshot-"^id)) "once";

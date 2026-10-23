@@ -96,8 +96,12 @@ let dispatch ?upload_id ~required_actions t ~preference verb ~start_time =
       |Page_instruct _|Page_locate _|Page_extract _),_::_ ->
         refuse "requiredActions applies only to initial tab discovery or session open" in
   let* ()=match preference,verb with
-    | Browser_selection.Exact (Browser_lane.Live_route None),Browser_lane.Page_act (Browser_lane.Action.Open_tab _|Open_window _) ->
-        refuse "live open_tab and open_window require an explicit observed clientId"
+    | Browser_selection.Exact (Browser_lane.Live_route None),Browser_lane.Page_act (Browser_lane.Action.Open_tab _|Open_window _|Control _)
+    | Automatic,Browser_lane.Page_act (Browser_lane.Action.Control _) ->
+        refuse "live open_tab, open_window, hand_off and take_over require an explicit observed clientId"
+    | Exact (Browser_lane.Automation_route|Stagehand_route),Browser_lane.Page_act (Browser_lane.Action.Control _) ->
+        refuse Browser_lane.handoff_refused
+    | Exact (Browser_lane.Live_route (Some _)),Browser_lane.Page_act (Browser_lane.Action.Control _) -> Ok ()
     | (Automatic|Exact (Live_route _|Automation_route|Stagehand_route)),
       (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
       |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Browser_lane.Action.Open_tab _|Open_window _|On_tab _)|Page_context _

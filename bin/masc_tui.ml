@@ -26023,7 +26023,7 @@ and is loaded on demand through keeper_skill.
           it back. Enter does not close it, so a second Enter, pressed while
           the answer was on its way, cannot close the card it opens. [y] copies
           the link to the terminal clipboard and says so without naming it.
-          F2 is left to its arm below: a terminal that ignores OSC 52 has
+          F2 is handled by the earlier global arm: a terminal that ignores OSC 52 has
           only the mouse to copy the link with, and this is a screen worth
           copying from. *)
        | Some k

@@ -34,7 +34,7 @@ val context_fields :
     completed turn),
     [conversation_cumulative_usage] (only conversation-wide usage is available),
     [turn_total_usage] (usage is summed across a client turn),
-    [usage_scope_unavailable] (the provider did not identify its usage scope),
+    [usage_scope_unavailable] (the recorded usage has no known scope),
     [context_tokens_exceed_window] (reported per-request input exceeds the
     reported/configured window). These last four carry [usage_scope] and any
     available [raw_input_tokens]/[context_window] evidence; no occupancy is

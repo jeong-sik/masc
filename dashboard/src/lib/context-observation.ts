@@ -37,7 +37,7 @@ const MESSAGES: Record<KeeperContextNotObservedReason, ContextObservationMessage
   },
   usage_scope_unavailable: {
     severity: 'info', label: '사용량의 집계 범위 미확인',
-    detail: '제공자가 사용량의 집계 범위를 밝히지 않아 점유율을 계산하지 않습니다.',
+    detail: '기록된 사용량의 집계 범위를 알 수 없어 점유율을 계산하지 않습니다.',
   },
   context_tokens_exceed_window: {
     severity: 'warning', label: '보고된 입력 토큰이 창 크기를 초과함',

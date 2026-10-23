@@ -266,7 +266,7 @@ let tab_action ~tabs ~call =
           | Some _ | None -> Error (malformed "page.close" "closed=true") in
         Tabs.forget_page tabs page_id;
         Ok (`Assoc ["tabId",`Int tab_id;"action",`String "close_tab";"closed",`Bool true])
-      | Browser_lane.Action.Upload _ | Accept_dialog _ | Dismiss_dialog -> unsupported ()
+      | Browser_lane.Action.Upload _ | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ -> unsupported ()
 ;;
 
 let capture ~tabs ~call ~tab_id =

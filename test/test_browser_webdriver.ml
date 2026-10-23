@@ -452,6 +452,69 @@ let test_set_viewport_resizes_the_window () =
      | Lane.Answered _ -> check bool "restoring twice changes nothing" true (!outer = (1366, 768))
      | _ -> fail "restoring an unsized window is a no-op"))
 
+let test_cookies_are_set_for_the_page_host_and_never_echoed () =
+  Eio_main.run (fun _ ->
+    let posted = ref [] and deleted = ref [] in
+    let request ~method_ ~path ~body = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET, "/session/owned/window" -> Ok (`String "tab")
+      | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/execute/sync" -> Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture"])
+      | `POST, "/session/owned/cookie" -> posted := Option.get body :: !posted; Ok `Null
+      | `DELETE, p when String.length p > 22 && String.sub p 0 22 = "/session/owned/cookie/" ->
+        deleted := p :: !deleted; Ok `Null
+      | _ -> fail ("unexpected request " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    let act interaction = Driver.execute driver (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})) in
+    let cookie : Lane.Action.cookie = {name="theme";value="TOPSECRETVALUE";path="/app";secure=true;http_only=true;
+      same_site=Some Lane.Action.Lax;max_age_sec=Some 3600} in
+    (match act (Lane.Action.Set_cookie cookie) with
+     | Lane.Answered json ->
+       check bool "the value never reaches the answer" false
+         (let text = Yojson.Safe.to_string json in
+          try ignore (Str.search_forward (Str.regexp_string "TOPSECRETVALUE") text 0); true with Not_found -> false)
+     | _ -> fail "the cookie must be set");
+    (match !posted with
+     | [ body ] ->
+       let c = Yojson.Safe.Util.member "cookie" body in
+       check bool "the driver gets the value, scope and flags" true
+         (Yojson.Safe.Util.member "value" c = `String "TOPSECRETVALUE"
+          && Yojson.Safe.Util.member "path" c = `String "/app"
+          && Yojson.Safe.Util.member "sameSite" c = `String "Lax"
+          && Yojson.Safe.Util.member "secure" c = `Bool true);
+       check bool "no domain is ever sent: the driver scopes it to the page host" true
+         (Yojson.Safe.Util.member "domain" c = `Null);
+       check bool "the lifetime becomes an absolute expiry within the cap" true
+         (match Yojson.Safe.Util.member "expiry" c with
+          | `Int expiry -> let now = int_of_float (Unix.gettimeofday ()) in expiry > now + 3000 && expiry <= now + 3700
+          | _ -> false)
+     | _ -> fail "one cookie must be posted");
+    (match act (Lane.Action.Delete_cookie "theme") with
+     | Lane.Answered _ -> check (list string) "the cookie is deleted by name" ["/session/owned/cookie/theme"] !deleted
+     | _ -> fail "the cookie must be deleted");
+    let parse fields = Lane.Action.parse (`Assoc (["action",`String "set_cookie";"tabId",`Int 1] @ fields)) in
+    let base = ["cookieName",`String "a";"cookieValue",`String "b"] in
+    check bool "a minimal cookie parses" true (Result.is_ok (parse base));
+    List.iter (fun (label, fields) -> check bool label true (Result.is_error (parse fields)))
+      [ "a lifetime above 7 days", base @ ["cookieMaxAgeSec",`Int 700000]
+      ; "a zero lifetime", base @ ["cookieMaxAgeSec",`Int 0]
+      ; "a name with a semicolon", ["cookieName",`String "a;b";"cookieValue",`String "b"]
+      ; "a name with a space", ["cookieName",`String "a b";"cookieValue",`String "b"]
+      ; "a value with a control character", ["cookieName",`String "a";"cookieValue",`String "b\nc"]
+      ; "a value over 4096 bytes", ["cookieName",`String "a";"cookieValue",`String (String.make 4097 'x')]
+      ; "SameSite None without Secure", base @ ["cookieSameSite",`String "None"]
+      ; "a relative path", base @ ["cookiePath",`String "app"]
+      ; "a domain argument", base @ ["cookieDomain",`String "evil.example"]
+      ; "a framePath", base @ ["framePath",`List [`String "iframe"]] ];
+    check bool "SameSite None with Secure parses" true
+      (Result.is_ok (parse (base @ ["cookieSameSite",`String "None";"cookieSecure",`Bool true])));
+    let round = Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Set_cookie cookie} in
+    check bool "a cookie survives the wire" true (Lane.Action.parse (Lane.Action.to_json round) = Ok round))
+
 let test_open_window_asks_for_a_window () =
   Eio_main.run (fun _ ->
     let kinds = ref [] and navigations = ref [] in
@@ -927,6 +990,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
   test_case "semantic clicks use native input" `Quick test_semantic_click_uses_native_pointer_input;
   test_case "set_viewport resizes the window" `Quick test_set_viewport_resizes_the_window;
+  test_case "cookies are set for the page host and never echoed" `Quick test_cookies_are_set_for_the_page_host_and_never_echoed;
   test_case "open_window asks the driver for a window" `Quick test_open_window_asks_for_a_window;
   test_case "framed interaction enters the frame first" `Quick test_interact_enters_frames;
   test_case "pointer release failure recovery" `Quick test_pointer_release_recovery;

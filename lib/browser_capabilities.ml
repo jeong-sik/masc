@@ -300,7 +300,9 @@ let support backend operation = match backend with
     | Read_storage -> gecko_only backend (invoke ~mode:"cookies" Read)
         [observed;"The cookies the tab's page can see, at most 200, with the total. Name, domain, path, secure, httpOnly, sameSite and expiry; the value is never returned.";
          "The reply also lists the page origin's localStorage and sessionStorage key names and its IndexedDB database names (at most 100 each, names cut at 200 characters) under storage, with counts. Storage values are never read."]
-    | Write_storage -> missing
+    | Write_storage -> gecko_only backend (invoke ~action:"set_cookie" Act)
+        [observed;"Sets one cookie for the tab's current page host (the domain is never a parameter): cookieName, cookieValue, optional cookiePath, cookieSecure, cookieHttpOnly, cookieSameSite and cookieMaxAgeSec. A cookie lives at most 7 days, with no lifetime it is a session cookie, and a value is at most 4096 bytes. delete_cookie removes one by name.";
+         "Only on an automation browser the Keeper owns. The value is never returned. Web storage cannot be written."]
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations
 let operation_name = function
   | List_tabs -> "list_tabs" | Open_tab -> "open_tab" | Close_tab -> "close_tab"

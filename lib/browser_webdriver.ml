@@ -244,6 +244,21 @@ let interact t session ~perform_effect = function
   | Browser_lane.Action.Dismiss_dialog ->
     let* _ = call t session `GET "/alert/text" None in
     perform_effect `POST "/alert/dismiss" (Some (`Assoc []))
+  | Browser_lane.Action.Set_cookie {name;value;path;secure;http_only;same_site;max_age_sec} ->
+    (* The cookie is scoped to the tab's current document by the driver; the
+       value is the caller's and is never part of the answer. *)
+    let expiry = match max_age_sec with
+      | Some age -> ["expiry",`Int (int_of_float (Unix.gettimeofday ()) + age)] | None -> [] in
+    let cookie = `Assoc (["name",`String name;"value",`String value;"path",`String path;
+      "secure",`Bool secure;"httpOnly",`Bool http_only]
+      @ (match same_site with Some site -> ["sameSite",`String (Browser_lane.Action.same_site_wire site)] | None -> [])
+      @ expiry) in
+    let* _ = perform_effect `POST "/cookie" (Some (`Assoc ["cookie",cookie])) in
+    Ok (`Assoc ["name",`String name;"path",`String path;"secure",`Bool secure;"httpOnly",`Bool http_only;
+                "sessionCookie",`Bool (max_age_sec = None);"valueWithheld",`Bool true])
+  | Browser_lane.Action.Delete_cookie name ->
+    let* _ = perform_effect `DELETE ("/cookie/" ^ Uri.pct_encode ~component:`Path name) None in
+    Ok (`Assoc ["name",`String name])
   | Browser_lane.Action.Back -> perform_effect `POST "/back" (Some (`Assoc []))
   | Browser_lane.Action.Forward -> perform_effect `POST "/forward" (Some (`Assoc []))
   | Browser_lane.Action.Reload -> perform_effect `POST "/refresh" (Some (`Assoc []))
@@ -294,7 +309,8 @@ let execute_action t action =
         (match result with `List [] -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources session | _ -> ());
         Ok (`Assoc ["tabId",`Int id;"closed",`Bool true])
       | Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back | Browser_lane.Action.Forward
-      | Browser_lane.Action.Reload | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ ->
+      | Browser_lane.Action.Reload | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _
+      | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _ ->
         (* Do not issue another fallible browser request after an effect.
            The caller observes the resulting page with a separate read. *)
         Ok (`Assoc ["tabId",`Int id;"performed",`Bool true;"result",result]))

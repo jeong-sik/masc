@@ -106,6 +106,21 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     check "sessionStorage key names are listed" (member "keys" (member "sessionStorage" storage) = `List [`String "probe-session-key"]);
     check "IndexedDB names are read or reported" (member "count" (member "indexedDb" storage) <> `Null || member "unsupported" (member "indexedDb" storage) <> `Null);
     check "no storage value reaches the reply" (not (contains (Yojson.Safe.to_string cookie_read) "probe-secret-value"));
+    (* A cookie is written for the tab's own host, read back by name only, then removed. *)
+    let cookie_names () = success (run (Browser_lane.Page_cookies {tab_id=first})) |> member "cookies"
+      |> Yojson.Safe.Util.to_list |> List.map (fun c -> member "name" c |> string) in
+    act first (Browser_action.Set_cookie {name="probe-cookie";value="probe-cookie-secret";path="/";secure=false;
+      http_only=false;same_site=Some Browser_action.Lax;max_age_sec=Some 600});
+    check "the written cookie is listed by name" (List.mem "probe-cookie" (cookie_names ()));
+    check "the written cookie's value never reaches a read"
+      (not (contains (Yojson.Safe.to_string (success (run (Browser_lane.Page_cookies {tab_id=first})))) "probe-cookie-secret"));
+    let page_cookie = request ~method_:`POST ~path:("/session/" ^ remote ^ "/execute/sync")
+      ~body:(Some (`Assoc ["script",`String "return document.cookie;";"args",`List []])) in
+    (match page_cookie with
+     | Ok value -> check "the page itself sees the cookie value" (contains (Yojson.Safe.to_string value) "probe-cookie=probe-cookie-secret")
+     | Error error -> failwith (Driver.error_message error));
+    act first (Browser_action.Delete_cookie "probe-cookie");
+    check "the deleted cookie is gone" (not (List.mem "probe-cookie" (cookie_names ())));
     let window_tab = success (run (Browser_lane.Page_act (Browser_action.Open_window (fixture_url ^ "/second")))) |> member "tabId" |> integer in
     check "open_window returns a tab that reads as its own page" (member "url" (read window_tab) = `String (fixture_url ^ "/second"));
     check "the window's tab id is new" (window_tab <> first && window_tab <> second);

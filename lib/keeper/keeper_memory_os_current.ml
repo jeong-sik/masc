@@ -3148,6 +3148,10 @@ type disposition_basis =
   ; expected_facts : Keeper_memory_os_types.fact list option
   }
 
+type disposition_error =
+  | Basis_superseded of t option
+  | Disposition_store_failed of string
+
 type program_source =
   | Atom_program_source of
       { range : durable_range_id
@@ -3225,7 +3229,9 @@ let apply_program_with_io ?write_snapshot ?sync_snapshot ?finalize_journal ?on_c
 let apply_program ?on_committed ?clock ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
   apply_program_with_io ?on_committed ?clock ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program
 
-let apply_disposition
+let apply_disposition_with_error
+      ~store_error
+      ~basis_superseded
       ?expected_basis
       ?on_committed
       ?clock
@@ -3324,7 +3330,7 @@ let apply_disposition
        , plan.claims_refused
        , revisions_applied );
     Keeper_memory_absorbed.append_all ~keepers_dir ~keeper_id rows
-    |> Result.map_error Keeper_memory_absorbed.append_error_to_string
+    |> Result.map_error (fun error -> store_error (Keeper_memory_absorbed.append_error_to_string error))
   in
   update_locked_with_output
     ?on_committed:
@@ -3340,7 +3346,7 @@ let apply_disposition
     ~declared_revisions:revisions
     ~before_replace:write_absorbed_rows
     ~equal_facts:Keep_stored
-    ~store_error:Fun.id
+    ~store_error
     ~keepers_dir
     ~keeper_id
     ~now
@@ -3351,15 +3357,38 @@ let apply_disposition
            let revision = Option.map (fun (snapshot : t) -> snapshot.revision) previous in
            let facts = Option.map (fun (snapshot : t) -> snapshot.facts) previous in
            if revision = basis.expected_revision && facts = basis.expected_facts
-           then Ok () else Error "current Memory OS disposition basis changed" in
+           then Ok () else Error (basis_superseded previous) in
        let plan = plan_of previous in
        let* next = make_snapshot_from_maintained ~previous ~now ~source ~facts:plan.facts
-         ~invalidated:plan.invalidated () in
+         ~invalidated:plan.invalidated () |> Result.map_error store_error in
        let actual = ids_of next.facts in
        match List.find_opt (fun identity -> not (Set_util.StringSet.mem identity actual)) required_memory_ids with
-       | Some identity -> Error ("explicit admission destination is not current: " ^ identity)
+       | Some identity -> Error (store_error ("explicit admission destination is not current: " ^ identity))
        | None -> Ok (next, ()))
   |> Result.map (fun (snapshot, commit, ()) -> disposition_of snapshot commit)
+;;
+
+let apply_disposition
+      ?expected_basis ?on_committed ?clock ?dropped_statements ?durable_range_id
+      ?official_range_id ?explicit_candidate_ids ?admission_recall ?required_memory_ids
+      ~absorbed ~revisions ~keepers_dir ~keeper_id ~now ~source ~new_claims () =
+  apply_disposition_with_error
+    ~store_error:Fun.id
+    ~basis_superseded:(fun _ -> "current Memory OS disposition basis changed")
+    ?expected_basis ?on_committed ?clock ?dropped_statements ?durable_range_id
+    ?official_range_id ?explicit_candidate_ids ?admission_recall ?required_memory_ids
+    ~absorbed ~revisions ~keepers_dir ~keeper_id ~now ~source ~new_claims ()
+
+let apply_disposition_guarded
+      ~expected_basis ?on_committed ?clock ?dropped_statements ?durable_range_id
+      ?official_range_id ?explicit_candidate_ids ?admission_recall ?required_memory_ids
+      ~absorbed ~revisions ~keepers_dir ~keeper_id ~now ~source ~new_claims () =
+  apply_disposition_with_error
+    ~store_error:(fun detail -> Disposition_store_failed detail)
+    ~basis_superseded:(fun current -> Basis_superseded current)
+    ~expected_basis ?on_committed ?clock ?dropped_statements ?durable_range_id
+    ?official_range_id ?explicit_candidate_ids ?admission_recall ?required_memory_ids
+    ~absorbed ~revisions ~keepers_dir ~keeper_id ~now ~source ~new_claims ()
 ;;
 
 let replace

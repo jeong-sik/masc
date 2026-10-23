@@ -97,6 +97,22 @@ let apply_disposition
   |> Result.map (fun (disposition : Current.disposition) -> disposition.snapshot)
 ;;
 
+let apply_disposition_guarded
+      ~keepers_dir ~expected_basis ?dropped_statements ?durable_range_id
+      ?official_range_id ?(absorbed = []) ?(revisions = []) ?(new_claims = []) () =
+  Current.apply_disposition_guarded
+    ~expected_basis ?dropped_statements ?durable_range_id ?official_range_id
+    ~absorbed ~revisions ~keepers_dir ~keeper_id:"keeper" ~now:200.0
+    ~source:(source Current.Librarian) ~new_claims ()
+  |> Result.map (fun (disposition : Current.disposition) -> disposition.snapshot)
+;;
+
+let require_disposition_ok = function
+  | Ok snapshot -> snapshot
+  | Error (Current.Basis_superseded _) -> fail "fresh disposition basis was refused"
+  | Error (Current.Disposition_store_failed detail) -> fail detail
+;;
+
 let require_ok = function
   | Ok value -> value
   | Error message -> fail message
@@ -1755,13 +1771,16 @@ let test_disposition_basis_refuses_effects change () = with_temp_keepers @@ fun 
       {basis with expected_facts=Some different},captured in
   let before=disposition_store_bytes ~keepers_dir in
   let together=fact ~claim:"Original A condensed" () in
-  let result=apply_disposition ~keepers_dir ~expected_basis:basis
+  let result=apply_disposition_guarded ~keepers_dir ~expected_basis:basis
     ~durable_range_id ~official_range_id
     ~absorbed:[{Types.absorbed=Types.memory_id a;into=Types.memory_id together}]
     ~dropped_statements:[{Types.memory_id=Types.memory_id b;reason="Original basis retired B"}]
     ~new_claims:[together] () in
-  (match result with Error detail -> check string "complete locked basis refuses this new disposition"
-      "current Memory OS disposition basis changed" detail
+  (match result with
+   | Error (Current.Basis_superseded observed) ->
+     check bool "typed basis refusal returns the exact locked current snapshot" true
+       (observed=Some actual)
+   | Error (Current.Disposition_store_failed detail) -> failf "basis refusal became a storage failure: %s" detail
    | Ok _ -> fail "a changed complete Memory basis was committed");
   check bool "refusal writes no new Memory, journal, archive, absorbed rows or range receipts" true
     (before=disposition_store_bytes ~keepers_dir);
@@ -1771,11 +1790,11 @@ let test_disposition_fresh_basis_publishes_original_effects () = with_temp_keepe
   let a=fact ~claim:"Original A to absorb" () and b=fact ~claim:"Original B to retire" () in
   let captured=replace ~keepers_dir ~facts:[a;b] () |> require_ok in
   let together=fact ~claim:"Original A condensed" () in
-  let committed=apply_disposition ~keepers_dir ~expected_basis:(basis_of_snapshot captured)
+  let committed=apply_disposition_guarded ~keepers_dir ~expected_basis:(basis_of_snapshot captured)
     ~durable_range_id ~official_range_id
     ~absorbed:[{Types.absorbed=Types.memory_id a;into=Types.memory_id together}]
     ~dropped_statements:[{Types.memory_id=Types.memory_id b;reason="Original basis retired B"}]
-    ~new_claims:[together] () |> require_ok in
+    ~new_claims:[together] () |> require_disposition_ok in
   check (list string) "the fresh original basis publishes exactly its complete disposition"
     [together.claim] (List.map (fun (value:Types.fact) -> value.claim) committed.facts);
   check int "fresh basis creates one new revision" (captured.revision+1) committed.revision;
@@ -1792,6 +1811,22 @@ let test_disposition_fresh_basis_publishes_original_effects () = with_temp_keepe
   let retired=Current.read_dropped ~keepers_dir ~keeper_id:"keeper" ~current_facts:committed.facts |> require_ok in
   check (list string) "fresh original retirement archives its actual original fact" [b.claim]
     (List.map (fun (row:Current.archived_fact) -> row.original.claim) retired)
+;;
+
+let test_disposition_guarded_storage_failure_is_not_basis_superseded () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let captured=replace ~keepers_dir ~facts:[fact ~claim:"Original stored basis" ()] () |> require_ok in
+  let path=Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file path "{corrupt durable receipt ledger";
+  let before=disposition_store_bytes ~keepers_dir in
+  (match apply_disposition_guarded ~keepers_dir ~expected_basis:(basis_of_snapshot captured)
+      ~new_claims:[fact ~claim:"Must not publish" ()] () with
+   | Error (Current.Disposition_store_failed detail) ->
+     check bool "actual unreadable store retains its diagnostic" true (String.length detail>0)
+   | Error (Current.Basis_superseded _) -> fail "an unreadable receipt store became a definite basis refusal"
+   | Ok _ -> fail "an unreadable receipt store authorized a disposition");
+  check bool "storage failure preserves corrupt bytes and all existing store evidence" true
+    (before=disposition_store_bytes ~keepers_dir)
 ;;
 
 let unread_receipt_fixture () =
@@ -5002,7 +5037,9 @@ let () =
         test_case "same revision with a different complete fact value refuses all effects" `Quick
           (test_disposition_basis_refuses_effects Different_fact_at_same_revision);
         test_case "fresh complete basis publishes real Memory archive and range receipts" `Quick
-          test_disposition_fresh_basis_publishes_original_effects]);
+          test_disposition_fresh_basis_publishes_original_effects;
+        test_case "unreadable store is typed as uncertain storage failure rather than basis refusal" `Quick
+          test_disposition_guarded_storage_failure_is_not_basis_superseded]);
       ("ordered identity recall", [
         test_case "raw same-ID replacement cannot revive bindings" `Quick test_successor_recall_rejects_raw_same_identity_incarnation;
         test_case "explicit ordered net-zero edges remain Following rather than direct aliases" `Quick test_successor_recall_follows_ordered_net_zero_incarnation;

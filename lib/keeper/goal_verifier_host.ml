@@ -195,6 +195,15 @@ let commit_proof ~config ~store ~registry retained =
     && Goal_store.criterion_equal verdict.criterion subject.criterion
     && verdict.verification_run_id = run.run_id && verdict.authority = Workspace_goals.verifier_authority
     && verdict.evidence = evidence in
+  let proof_phase = function
+    | Goal_phase.Verifying -> `Partial
+    | Paused Resume_verifying | Blocked Resume_verifying -> `Settled
+    | Awaiting_confirmation | Completed
+    | Paused Resume_awaiting_confirmation | Blocked Resume_awaiting_confirmation ->
+      (match outcome with Goal_verification.Proven -> `Settled | Refuted _ -> `Different)
+    | Executing | Paused Resume_executing | Blocked Resume_executing ->
+      (match outcome with Goal_verification.Refuted _ -> `Settled | Proven -> `Different)
+    | Dropped -> `Different in
   let observe_once change =
     let* before = authenticate change in
     read_goal (fun goal record ->
@@ -205,17 +214,17 @@ let commit_proof ~config ~store ~registry retained =
           | Human_confirmed (verdict,_)); _} as record) -> criterion_matches && matches record verdict
         | None | Some {completion=(Completion_idle | Proof_pending _); _} -> false in
       if exact_proof then
-        match goal.phase, outcome with
-        | Goal_phase.Verifying, _ -> Ok (`Partial)
-        | (Paused Resume_verifying | Blocked Resume_verifying), _
-        | (Awaiting_confirmation | Completed), Goal_verification.Proven
-        | Executing, Refuted _ -> Ok (`Observed change.after)
-        | (Executing | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _), _ ->
+        match proof_phase goal.phase with
+        | `Partial -> Ok (`Partial)
+        | `Settled -> Ok (`Observed change.after)
+        | `Different ->
           Ok (`Observed (`Assoc ["phase",Goal_phase.to_yojson goal.phase; "proof",before_json record]))
       else
         let admitted = match goal.phase with
           | Goal_phase.Verifying | Paused Resume_verifying | Blocked Resume_verifying -> true
-          | Executing | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _ -> false in
+          | Executing | Awaiting_confirmation | Completed | Dropped
+          | Paused (Resume_executing | Resume_awaiting_confirmation)
+          | Blocked (Resume_executing | Resume_awaiting_confirmation) -> false in
         if admitted && criterion_matches && Yojson.Safe.equal (before_json record) (before_json before)
             && (match record with Some record -> bound_pending original record | None -> false)
         then Ok (`Observed change.before)

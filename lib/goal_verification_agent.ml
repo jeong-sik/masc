@@ -351,6 +351,20 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
   let publish retained outcome = Host.publish ~registry retained ~outcome
     |> Result.map_error Host.error_to_string in
   let fail_original detail = defer ~goal_id:work.goal_id (Proof_lookup_unavailable {detail}) in
+  let conflict_outcome retained detail =
+    let subject = Original.subject (Worker.original retained) in
+    match Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id with
+    | Error observation -> defer ~goal_id:work.goal_id (Commit_refused {detail=observation})
+    | Ok record ->
+      let replacement = match record with
+        | Some {Goal_verification.completion=Proof_pending pending; _} -> pending.request_id <> subject.request_id
+        | Some {completion=(Proof_proven verdict | Proof_refuted verdict | Human_confirmed (verdict,_)); _} ->
+          verdict.request_id <> subject.request_id
+        | None | Some {completion=Completion_idle; _} -> false in
+      let observation = if replacement then Registry.Superseded {detail} else Registry.Deferred {detail} in
+      (match publish retained observation with
+       | Error detail -> defer ~goal_id:work.goal_id (Commit_refused {detail})
+       | Ok () -> if replacement then Superseded else defer ~goal_id:work.goal_id (Commit_refused {detail})) in
   let commit retained =
     let subject = Original.subject (Worker.original retained) in
     match Host.commit_proof ~config ~store ~registry retained with
@@ -359,9 +373,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
         subject.goal_id (Worker.run_identity retained).run_id;
       Committed
     | Error (Host.Conflict detail) ->
-      (match publish retained (Registry.Superseded {detail}) with
-       | Ok () -> Superseded
-       | Error detail -> defer ~goal_id:work.goal_id (Commit_refused {detail}))
+      conflict_outcome retained detail
     | Error (Host.Unavailable detail | Invalid_original detail) ->
       let detail = match publish retained (Registry.Deferred {detail}) with
         | Ok () -> detail | Error observation -> detail ^ " | observation: " ^ observation in
@@ -382,8 +394,9 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
             | Superseded -> committed, failed
             | Deferred deferral -> committed, Some (deferral_detail deferral))
          | Conflicted _ ->
-           (match publish retained (Registry.Superseded {detail="original proof conflicted with a later Goal state"}) with
-            | Ok () -> committed, failed | Error detail -> committed, Some detail)
+           (match conflict_outcome retained "original proof conflicted with a later Goal state" with
+            | Committed | Superseded -> committed, failed
+            | Deferred deferral -> committed, Some (deferral_detail deferral))
          | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
            (match publish retained (Registry.Deferred {detail="retained original review has no settled Goal proof"}) with
             | Ok () -> committed, failed | Error detail -> committed, Some detail)))

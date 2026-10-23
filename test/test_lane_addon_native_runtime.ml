@@ -768,9 +768,14 @@ fcntl.lockf(fd,fcntl.LOCK_EX)
 open(sys.argv[2],"w").close()
 time.sleep(600)
 |}
+(* A signal the pass sent has reached its holder by then, so a holder still
+   running was not signalled. *)
+let signal_settle_seconds = 0.5
 (* The configuration pass sweeps the Gecko profiles of an instance whose record
    says its allocation was released, or that no record names. It never
-   signals the holder of a retained or failed instance's profile. *)
+   signals the holder of a live, retained or failed instance's profile, nor of
+   one an unreadable record names, and an unreadable record that names no
+   instance holds back the whole pass. *)
 let gecko_sweep_follows_records () = with_fixture (fun clock root config ->
   let manifest = write_native_manifest root in
   let id = dispatch config R.Attach ["manifest_path",`String manifest;
@@ -815,17 +820,19 @@ let gecko_sweep_follows_records () = with_fixture (fun clock root config ->
       Unix.stdin Unix.stdout Unix.stderr in
     wait clock (fun () -> Sys.file_exists ready);
     (profile, pid) in
-  let holders = List.map (fun id -> id, held id) [released; retained; failed; unrecorded] in
+  let holders = ref (List.map (fun id -> id, held id) [released; retained; failed; unrecorded]) in
+  let hold id = holders := (id, held id) :: !holders in
   let ended = Hashtbl.create 4 in
   let status pid = match Hashtbl.find_opt ended pid with
     | Some status -> Some status
     | None -> match Unix.waitpid [Unix.WNOHANG] pid with
       | 0, _ -> None
       | _, status -> Hashtbl.replace ended pid status; Some status in
-  let pid id = snd (List.assoc id holders) and profile id = fst (List.assoc id holders) in
+  let pid id = snd (List.assoc id !holders) and profile id = fst (List.assoc id !holders) in
+  let still_runs id = Option.is_none (status (pid id)) in
   Fun.protect ~finally:(fun () -> List.iter (fun (_, (_, pid)) -> match status pid with
       | Some _ -> ()
-      | None -> Unix.kill pid Sys.sigkill; ignore (Unix.waitpid [] pid)) holders) (fun () ->
+      | None -> Unix.kill pid Sys.sigkill; ignore (Unix.waitpid [] pid)) !holders) (fun () ->
     let directory = Filename.concat root "declarations" in Unix.mkdir directory 0o700;
     let reconcile () = ignore (require (R.reconcile_configuration ~config ~directory)) in
     reconcile ();
@@ -833,13 +840,46 @@ let gecko_sweep_follows_records () = with_fixture (fun clock root config ->
     check bool "the released instance's holder got SIGTERM" true (status (pid released) = Some (Unix.WSIGNALED Sys.sigterm));
     check bool "an instance no record names had its holder sent SIGTERM" true
       (status (pid unrecorded) = Some (Unix.WSIGNALED Sys.sigterm));
-    check bool "the retained instance's holder still runs" true (Option.is_none (status (pid retained)));
-    check bool "the failed instance's holder still runs" true (Option.is_none (status (pid failed)));
+    Eio.Time.sleep clock signal_settle_seconds;
+    check bool "the retained instance's holder still runs" true (still_runs retained);
+    check bool "the failed instance's holder still runs" true (still_runs failed);
     reconcile ();
     check bool "the next pass removes the released instance's profile" false (Sys.file_exists (profile released));
     check bool "the next pass removes the profile no record names" false (Sys.file_exists (profile unrecorded));
     check bool "the retained instance's profile stays" true (Sys.file_exists (profile retained));
-    check bool "the failed instance's profile stays" true (Sys.file_exists (profile failed))))
+    check bool "the failed instance's profile stays" true (Sys.file_exists (profile failed));
+    (* A live instance, and one whose record cannot be read, keep their holders
+       while a released one beside them is swept. *)
+    let live = dispatch config R.Attach ["manifest_path",`String manifest;
+      "run_id",`String "native-world";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
+    wait clock (fun () -> match lifecycle live with
+      | Lane_addon_lifecycle.Attached | Observing -> true
+      | Failed failure -> fail (Lane_addon_lifecycle.failure_detail failure.cause)
+      | Detaching _ | Detached _ -> fail "the live fixture retired");
+    let unreadable = fresh () and released_beside = fresh () in
+    write (Filename.concat (Lane_addon_store.root store) (Lane_addon_store.binding_path unreadable))
+      (Yojson.Safe.to_string (`Assoc ["instance_id",`String unreadable]));
+    seed ~instance_id:released_beside (Lane_addon_lifecycle.Detached
+      (Lane_addon_lifecycle.Native_released {installation_id=released_beside;instance_id=released_beside}));
+    List.iter hold [live; unreadable; released_beside];
+    reconcile ();
+    wait clock (fun () -> not (still_runs released_beside));
+    Eio.Time.sleep clock signal_settle_seconds;
+    check bool "a live instance's holder still runs" true (still_runs live);
+    check bool "the holder of an instance an unreadable record names still runs" true (still_runs unreadable);
+    (* An unreadable record that names no instance may be any of them. *)
+    write (Filename.concat (Filename.concat (Lane_addon_store.root store) Lane_addon_store.bindings_directory)
+      "unattributed.json") "[]";
+    let released_after = fresh () in
+    seed ~instance_id:released_after (Lane_addon_lifecycle.Detached
+      (Lane_addon_lifecycle.Native_released {installation_id=released_after;instance_id=released_after}));
+    hold released_after;
+    reconcile ();
+    Eio.Time.sleep clock signal_settle_seconds;
+    check bool "an unattributed record holds back the whole pass" true (still_runs released_after);
+    ignore (dispatch config R.Detach ["instance_id",`String live]);
+    wait clock (fun () -> match lifecycle live with
+      | Lane_addon_lifecycle.Detached _ -> true | Attached | Observing | Failed _ | Detaching _ -> false)))
 let () =
   if Array.length Sys.argv<>2 then fail "expected native admission launcher path";
   launcher := Unix.realpath Sys.argv.(1);

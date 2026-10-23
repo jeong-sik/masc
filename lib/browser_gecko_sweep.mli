@@ -12,17 +12,20 @@
       the grace after its SIGTERM is sent SIGKILL.
 
     The grace bounds how long a process masc started may outlive its
-    instance; it gates no work. Pending SIGTERMs are kept in memory, so after
-    a restart the next pass starts again with SIGTERM. *)
+    instance; it gates no work. Pending SIGTERMs are kept in memory until the
+    profile is gone, so after a restart the next pass starts again with
+    SIGTERM. *)
 
 type t
 
 val termination_grace_seconds : float
-(** 70 s, the grace the host uses. Firefox's shutdown watchdog crashes a
-    shutdown that has not finished after [toolkit.asyncshutdown.crash_timeout]
-    (60 s by default) plus [toolkit.asyncshutdown.crash_timeout_additional_wait]
-    (10 s), in [toolkit/components/terminator/nsTerminator.cpp]. A holder still
-    there after that is not shutting down. *)
+(** 70 s, the grace the host uses. It is the time Firefox's shutdown watchdog
+    gives one shutdown phase before it crashes the browser:
+    [toolkit.asyncshutdown.crash_timeout] (60 s by default) plus
+    [toolkit.asyncshutdown.crash_timeout_additional_wait] (10 s), in
+    [toolkit/components/terminator/nsTerminator.cpp]. It is the bound masc
+    chose for how long a browser it started may outlive its instance; a
+    shutdown that still progresses can take longer. *)
 
 val create : termination_grace_seconds:float -> t
 

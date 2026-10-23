@@ -120,6 +120,18 @@ let a_holder_that_stays_is_killed_after_the_grace () = with_profile (fun ~root ~
     Alcotest.(check bool) "the holder ended on SIGKILL" true (ended_by child = Unix.WSIGNALED Sys.sigkill);
     removed profile (pass sweep ~root ~sweepable:ended_instance)))
 
+let a_pending_sigterm_outlives_a_pass_that_skips_it () =
+  with_profile (fun ~root ~instance_id:_ ~instance:_ ~profile ->
+    let sweep = Sweep.create ~termination_grace_seconds:0. in
+    let child = holding_child ~term:Sys.Signal_ignore profile in
+    Fun.protect ~finally:(fun () -> stop child) (fun () ->
+      terminated child (pass sweep ~root ~sweepable:ended_instance);
+      ignore (pass sweep ~root ~sweepable:(fun _ -> false));
+      let outcomes = pass sweep ~root ~sweepable:ended_instance in
+      Alcotest.(check bool) ("the grace kept running, so the holder is sent SIGKILL: " ^ describe outcomes) true
+        (List.exists (function Sweep.Killed { pid; _ } -> pid = child
+           | Sweep.Removed _ | Sweep.Terminated _ | Sweep.Kept _ -> false) outcomes)))
+
 let a_relaunched_holder_starts_with_termination () = with_profile (fun ~root ~instance_id:_ ~instance:_ ~profile ->
   let sweep = Sweep.create ~termination_grace_seconds:0. in
   let first = holding_child ~term:Sys.Signal_default profile in
@@ -167,6 +179,8 @@ let () = Alcotest.run "browser gecko sweep" [
     Alcotest.test_case "a holder within the grace is left alone" `Quick a_holder_within_the_grace_is_left_alone;
     Alcotest.test_case "a holder that stays gets SIGKILL after the grace" `Quick
       a_holder_that_stays_is_killed_after_the_grace;
+    Alcotest.test_case "a pending SIGTERM outlives a pass that skips it" `Quick
+      a_pending_sigterm_outlives_a_pass_that_skips_it;
     Alcotest.test_case "a relaunched holder starts with SIGTERM" `Quick a_relaunched_holder_starts_with_termination;
     Alcotest.test_case "names masc did not make are kept" `Quick names_masc_did_not_make_are_kept;
     Alcotest.test_case "a symlinked root is refused" `Quick a_symlinked_root_is_refused;

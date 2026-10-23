@@ -106,13 +106,12 @@ let step t path = with_lock_file path (fun lock_file ->
 
 (* Each profile's outcome is its own: a failure in one keeps the signals
    already sent to the others in the report. *)
-let sweep_instance t ~seen instance =
+let sweep_instance t instance =
   match Gecko.check_instance instance with
   | Error reason -> [Kept { path = instance; reason }]
   | Ok () ->
     let profiles = List.concat_map (fun name ->
         let path = Filename.concat instance name in
-        Hashtbl.replace seen path ();
         if not (Gecko.is_masc_name name) then [Kept { path; reason = "it is not a profile masc made" }]
         else match step t path with
           | outcomes -> outcomes
@@ -124,16 +123,22 @@ let sweep_instance t ~seen instance =
         | exception (Unix.Unix_error _ | Sys_error _ as exn) -> profiles @ [failure instance exn])
     | _ :: _ -> profiles
 
+(* Kept while unsure, so a pass that could not read a profile does not restart
+   its grace. *)
+let gone path = match Unix.lstat path with
+  | _ -> false
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
+  | exception Unix.Unix_error _ -> false
+
 let pass t plan = Mutex.protect t.gate (fun () ->
-  let seen = Hashtbl.create 8 in
   let outcomes = List.concat_map (fun instance ->
-      match sweep_instance t ~seen instance with
+      match sweep_instance t instance with
       | outcomes -> outcomes
       | exception (Unix.Unix_error _ | Sys_error _ as exn) -> [failure instance exn])
     plan.instances in
-  (* A pending SIGTERM whose profile is gone is forgotten. *)
+  (* A pending SIGTERM is forgotten once its profile is gone. *)
   Hashtbl.filter_map_inplace (fun path pending ->
-      if Hashtbl.mem seen path then Some pending else (Profile.release pending.holder; None)) t.terminated;
+      if gone path then (Profile.release pending.holder; None) else Some pending) t.terminated;
   plan.kept @ outcomes)
 
 let signalled_to_string { profile; pid; executable } =

@@ -212,8 +212,8 @@ receipts remain distinct from successful contract validation.
    allocation was released, or that no record names, and that this process
    neither runs nor recovers. It removes a profile nobody holds under its own
    lock and sends SIGTERM to the process that holds one. It sends SIGKILL when
-   the same process still holds the profile 70 s after the SIGTERM: by then
-   Firefox's own shutdown watchdog has ended a shutdown that hung.
+   the same process still holds the profile 70 s after the SIGTERM, the time
+   Firefox's own shutdown watchdog gives one shutdown phase.
    Downloads are staged privately but publication/upload and shared persistent
    profiles still require their host brokers. Chrome now has the owned controller
    described below, including dedicated persistent-profile admission. Gecko

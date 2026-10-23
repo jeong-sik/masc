@@ -253,218 +253,13 @@ let runtime_yield_reason request =
     Runtime_agent.Durable_stimulus_waiting
 ;;
 
-(* Constitution exception (named bound + rationale): loop detection is
-   inherently a repetition count, so no closed variant can replace the
-   number — what counts as "the same call" is already typed (tool name +
-   input/output fingerprints in [same_exact_tool_call]). The yield is a
-   cooperative turn boundary, not a keeper lifecycle gate: the keeper loop
-   stays active and decides the next cycle from the yielded outcome. 3 =
-   the first call plus two identical repeats: a single repeat (count 2) can
-   still be legitimate (an idempotent poll or a deliberate re-read while the
-   model waits for state to change); a second repeat with an unchanged input
-   AND output fingerprint means the world did not change and the model made
-   no progress — a deterministic loop. The repeats need not be adjacent: a
-   provider alternating between two stalled calls is the same loop. *)
-let repeated_tool_call_yield_threshold = 3
-
-(* Constitution exception (named bound + rationale): same shape as
-   [repeated_tool_call_yield_threshold] — loop detection is inherently a
-   repetition count, and what counts as "the same text" is already typed
-   (byte equality on the turn's accumulated [Text] blocks, no normalization).
-   3 = the first emission plus two identical repeats: a single repeat can be a
-   legitimate restatement after new tool evidence, but a second byte-identical
-   repeat means the model is narrating the same plan without acting on it.
-   Unlike the tool axis, the repeats must be the trailing consecutive turns:
-   the text axis has no output fingerprint proving "the world did not change",
-   so a non-adjacent recurrence (a deliberate re-summary several turns later)
-   is not loop evidence. Blank text never counts; it only breaks a streak. *)
-let repeated_assistant_text_yield_threshold = 3
-
-let same_present_fingerprint left right =
-  match left, right with
-  | Some left, Some right -> String.equal left right
-  | None, None
-  | Some _, None
-  | None, Some _ ->
-    false
-;;
-
-let same_exact_tool_call
-      (left : Keeper_agent_result.tool_call_detail)
-      (right : Keeper_agent_result.tool_call_detail)
-  =
-  String.equal left.tool_name right.tool_name
-  && same_present_fingerprint left.input_fingerprint right.input_fingerprint
-  && same_present_fingerprint left.output_fingerprint right.output_fingerprint
-;;
-
-let repeated_exact_tool_call ~threshold tool_calls =
-  match tool_calls with
-  | [] -> None
-  | latest :: previous ->
-    (* Every earlier identical call counts, not only the ones immediately
-       before [latest]. The old fold stopped at the first different call, so it
-       measured a run rather than a total, and a provider alternating between
-       two stalled calls never reached the threshold: one keeper ran
-       [git status --short --branch] 48 times with identical input in one
-       dispatch, always with a Read or a git diff in between, and the count
-       never left 1. That dispatch made 279 tool calls over 31 minutes and
-       produced no answer.
-
-       The identity test is unchanged -- input and output must both match, so
-       this still fires only on a call whose result did not move. The contract
-       in the .mli says "repeated exact tool input and output"; adjacency was
-       never part of it. Measured over 815 recorded dispatches: catches that
-       loop on call 73 instead of never, and reaches 93 of the 116 dispatches
-       that ended without an answer. The 47 answered dispatches it also stops
-       lose nothing -- a repeat yield persists a checkpoint and resumes. *)
-    let repeated_count =
-      List.fold_left
-        (fun count call -> if same_exact_tool_call latest call then count + 1 else count)
-        1
-        previous
-    in
-    if threshold > 1 && repeated_count >= threshold
-    then Some (latest.tool_name, repeated_count)
-    else None
-;;
-
-(* Constitution exception (named bound + rationale): a repetition count like
-   the two axes above (3 each there, 5 here), on the one key they cannot use.
-
-   [same_exact_tool_call] requires the output fingerprint to match, and that is
-   deliberate -- an unchanged output is the proof that the world did not move.
-   A call whose result moves while nothing advances -- a clock read is the
-   plain case -- has no such proof available: identical input, a different
-   output every time, so no threshold on that axis can ever fire. The case
-   that showed it (masc #33021) was one keeper making 280 of a single turn's
-   281 tool calls to a clock-reading tool, writing the same sentence between
-   them with only the timestamp changed, and neither the tool axis nor the
-   text axis saw it.
-
-   So this axis drops the output and keeps adjacency instead. Adjacency is what
-   the output fingerprint was buying: consecutive identical calls with nothing
-   in between is the same "nothing happened" evidence, without asking the
-   result to stand still.
-
-   5 = the first call plus four consecutive repeats. It was read off three
-   days of live tool calls (2026-09-01..03): adjacent runs of 3-4 of an
-   identical (tool, input) pair were ordinary work (keeper_tasks_list 101,
-   keeper_spawn_read 40, masc_board_post_get 60, Execute 33), while 35 of the
-   36 runs reaching 5 were that clock-reading tool under the two keepers that
-   were looping. The Keeper surface has no dedicated clock tool now, and a
-   round after tool results carries no [Temporal] line, so a Keeper that wants
-   the time mid-turn runs [Execute date] -- the same shape, and this axis still
-   catches it. The count has not been measured against the calls that remain
-   (masc #36503). A yield here persists a checkpoint and resumes, so a run that
-   reaches it costs one resume. *)
-let repeated_tool_call_input_yield_threshold = 5
-
-let same_tool_call_input
-      (left : Keeper_agent_result.tool_call_detail)
-      (right : Keeper_agent_result.tool_call_detail)
-  =
-  String.equal left.tool_name right.tool_name
-  && same_present_fingerprint left.input_fingerprint right.input_fingerprint
-;;
-
-(* A call whose handler declared [Progress] is the world moving, which is
-   the one thing this axis cannot otherwise tell: it dropped the output
-   fingerprint to catch a result that moves while nothing advances, and a
-   tool that advances an emulator by a fixed number of frames has that same
-   shape -- identical input, a different result every time -- while being the
-   opposite thing. One keeper's every game turn ended in this yield after five
-   [masc_msx_step {frames: 300}] in a row (2026-09-14, receipts all day), the
-   reply deferred each time. A call that declares nothing is still caught. *)
-let declared_progress (call : Keeper_agent_result.tool_call_detail) =
-  match call.typed_outcome with
-  | Some Keeper_tool_outcome.Progress -> true
-  | Some (Keeper_tool_outcome.No_progress _ | Keeper_tool_outcome.Error _) | None -> false
-;;
-
-(* Newest-first, so the head is the latest call and the streak runs back from
-   it. Unlike [repeated_exact_tool_call] the repeats must be adjacent: without
-   the output fingerprint, two identical inputs far apart in a dispatch are
-   ordinary re-reads, not a loop. A declared [Progress] anywhere in the streak
-   ends it: those calls are evidence of movement, not of its absence. *)
-let repeated_tool_call_input ~threshold tool_calls =
-  match tool_calls with
-  | [] -> None
-  | latest :: _ when declared_progress latest -> None
-  | latest :: previous ->
-    let rec streak count = function
-      | call :: rest
-        when same_tool_call_input latest call && not (declared_progress call) ->
-        streak (count + 1) rest
-      | _ -> count
-    in
-    let repeated_count = streak 1 previous in
-    if threshold > 1 && repeated_count >= threshold
-    then Some (latest.tool_name, repeated_count)
-    else None
-;;
-
-(* The official-client host calls this after every settled dynamic tool call,
-   on Direct and Autonomous turns alike, and skips its own exact-adjacent
-   counter while it is installed. The observations come from the turn
-   accumulator: the post_tool_use hook fills it on every lane, and setup
-   seeds it from the transcript when no execution scope was admitted -- the
-   same reading [native_tool_boundary] makes for AGENT_CORE. An admitted
-   scope contributes only its latched observation failure; it is not what
-   makes the boundary exist (#34083). *)
-let official_client_tool_boundary
-      ~repetition_execution ~tool_calls ~input_tool_calls () =
+(** The official-client boundary preserves authoritative observation failures.
+    Repeated input/output receipts do not establish absence of world progress. *)
+let official_client_tool_boundary ~repetition_execution () =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
-  | None ->
-    let repetition_stop () =
-      let repeated =
-        match repeated_exact_tool_call
-                ~threshold:repeated_tool_call_yield_threshold tool_calls with
-        | Some _ as repeated -> repeated
-        | None ->
-          repeated_tool_call_input
-            ~threshold:repeated_tool_call_input_yield_threshold input_tool_calls
-      in
-      Ok (Option.map (fun (tool_name, repeated_count) ->
-        Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
-    in
-    (* Official clients own their conversation history. A returned tool
-       result is not yet a durable resume checkpoint, so queued chat alone
-       cannot stop this turn here. Existing repetition stops still apply;
-       their cold-resume result retention needs separate proof. No queue
-       snapshot is needed here. *)
-    repetition_stop ()
-;;
-
-let assistant_text_is_blank text =
-  String.for_all
-    (fun ch -> ch = ' ' || ch = '\t' || ch = '\n' || ch = '\r')
-    text
-;;
-
-(* [assistant_turn_texts] is newest-first with one entry per completed
-   provider turn ("" for a turn without a [Text] block), so a streak from the
-   head is exactly "the last N consecutive turns". Comparison is
-   [String.equal] on the accumulated text — byte equality, no trimming or
-   other normalization; blankness only gates entry, it never rewrites the
-   compared text. *)
-let repeated_assistant_text ~threshold assistant_turn_texts =
-  match assistant_turn_texts with
-  | [] -> None
-  | latest :: previous ->
-    if assistant_text_is_blank latest
-    then None
-    else (
-      let rec streak count = function
-        | text :: rest when String.equal text latest -> streak (count + 1) rest
-        | _ :: _ | [] -> count
-      in
-      let repeated_count = streak 1 previous in
-      if threshold > 1 && repeated_count >= threshold
-      then Some repeated_count
-      else None)
+  | None -> Ok None
 ;;
 
 let keeper_raw_trace_sink
@@ -700,7 +495,7 @@ let raw_trace_reference_for_turn ~turn_trace_ref ~sink =
 
 let terminal_effect_boundary_decision = Keeper_tool_terminal_boundary.decision
 
-let tool_boundary_before_repetition ~repetition_execution state =
+let tool_boundary_state ~repetition_execution state =
   match terminal_effect_boundary_decision state with
   | Error _ as error -> error
   | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
@@ -711,95 +506,22 @@ let tool_boundary_before_repetition ~repetition_execution state =
     | None -> Ok Runtime_agent.Continue
 ;;
 
-(* Native AGENT_CORE installs this boundary for both Direct and Autonomous.
-   An absent explicit execution scope selects transcript-seeded observations;
-   it does not disable repetition detection. *)
-let native_tool_boundary
-      ~keeper_name
-      ~repetition_execution
-      ~terminal_effect_state
-      ~tool_calls
-      ~input_tool_calls
-      ~assistant_turn_texts
-      ~yield_requested
-  =
-  (match
-     tool_boundary_before_repetition ~repetition_execution
-       terminal_effect_state
-   with
-   | Error _ as error -> error
-   | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
-   | Ok Runtime_agent.Continue ->
-     (* Tool axis first: its input+output fingerprints are the
-        stronger no-progress proof and carry the tool name.
-        The text axis runs only when tool fingerprints still
-        move — the observed loop shape, where every turn's tool
-        batch differed but the plan sentence never did. *)
-     let repeated_loop_decision () =
-           (match
-              repeated_exact_tool_call
-                ~threshold:repeated_tool_call_yield_threshold
-                tool_calls
-            with
-            | Some (tool_name, repeated_count) ->
-              Log.Keeper.warn
-                ~keeper_name
-                "yielding repeated exact tool loop tool=%s \
-                 count=%d"
-                tool_name
-                repeated_count;
-              Ok
-                (Runtime_agent.Yield
-                   (Runtime_agent.Repeated_tool_call
-                      { tool_name; repeated_count }))
-            | None ->
-              (match
-                 repeated_tool_call_input
-                   ~threshold:
-                     repeated_tool_call_input_yield_threshold
-                   input_tool_calls
-               with
-               | Some (tool_name, repeated_count) ->
-                 Log.Keeper.warn
-                   ~keeper_name
-                   "yielding repeated tool input loop tool=%s \
-                    count=%d"
-                   tool_name
-                   repeated_count;
-                 Ok
-                   (Runtime_agent.Yield
-                      (Runtime_agent.Repeated_tool_call
-                         { tool_name; repeated_count }))
-               | None ->
-              (match
-                 repeated_assistant_text
-                   ~threshold:
-                     repeated_assistant_text_yield_threshold
-                   assistant_turn_texts
-               with
-               | None -> Ok Runtime_agent.Continue
-               | Some repeated_count ->
-                 Log.Keeper.warn
-                   ~keeper_name
-                   "yielding repeated assistant text count=%d"
-                   repeated_count;
-                 Ok
-                   (Runtime_agent.Yield
-                      (Runtime_agent.Repeated_assistant_text
-                         { repeated_count })))))
-     in
-     (match yield_requested with
-      | None -> repeated_loop_decision ()
-      | Some requested ->
-        (match requested () with
-         | Ok (Some request) ->
-           Ok (Runtime_agent.Yield (runtime_yield_reason request))
-         | Ok None -> repeated_loop_decision ()
-         | Error detail ->
-           Error
-             (Agent_core.Error.Internal
-                ("keeper cooperative-yield snapshot failed: "
-                 ^ detail)))))
+(** Only explicit lifecycle/effect evidence and host requests stop this boundary.
+    Tool receipts and repeated assistant text are observations, not a progress
+    verdict: the same key or action can legitimately change external state. *)
+let native_tool_boundary ~repetition_execution ~terminal_effect_state ~yield_requested =
+  match tool_boundary_state ~repetition_execution terminal_effect_state with
+  | Error _ as error -> error
+  | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
+  | Ok Runtime_agent.Continue ->
+    match yield_requested with
+    | None -> Ok Runtime_agent.Continue
+    | Some requested ->
+      match requested () with
+      | Ok None -> Ok Runtime_agent.Continue
+      | Ok (Some request) -> Ok (Runtime_agent.Yield (runtime_yield_reason request))
+      | Error detail ->
+        Error (Agent_core.Error.Internal ("keeper cooperative-yield snapshot failed: " ^ detail))
 ;;
 
 let finalize_turn_surface ~response_text ~stop_reason terminal_effect_state =
@@ -834,7 +556,7 @@ let finalize_turn_surface ~response_text ~stop_reason terminal_effect_state =
 module For_testing = struct
   let finalize_turn_surface = finalize_turn_surface
   let native_tool_boundary = native_tool_boundary
-  let tool_boundary_before_repetition = tool_boundary_before_repetition
+  let tool_boundary_state = tool_boundary_state
   let official_client_tool_boundary = official_client_tool_boundary
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
@@ -846,9 +568,6 @@ module For_testing = struct
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let prune_raw_traces_after_turn_record = prune_raw_traces_after_turn_record
   let runtime_yield_reason = runtime_yield_reason
-  let repeated_exact_tool_call = repeated_exact_tool_call
-  let repeated_tool_call_input = repeated_tool_call_input
-  let repeated_assistant_text = repeated_assistant_text
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission
   let turn_record_raw_trace_run_ref = turn_record_raw_trace_run_ref
@@ -1725,65 +1444,8 @@ let run_turn
           how the error path below knows the turn ran on an official client. *)
        let last_dispatched_checkpoint_owner = ref None in
        let turn_result =
-         (* A repetition yield advances the two source positions independently.
-            The current Agent Core checkpoint owns the history coordinate;
-            committed ledger appends own the other. Direct scopes record their
-            own observations and do not move this autonomous boundary. *)
-         let record_repetition_judged () =
-           match s.acc.history_pairs_at_setup with
-           | None -> ()
-           | Some history_pairs_at_setup ->
-             (match Keeper_repetition_judged.read shared_context with
-              | Error error -> Log.Keeper.warn ~keeper_name:meta.name "%s"
-                  (Keeper_repetition_judged.error_to_string error)
-              | Ok previous ->
-                let history_pairs = match !agent_ref, !last_dispatched_checkpoint_owner with
-                  | Some agent, _ ->
-                    (* The Agent Core checkpoint is the persisted history, and
-                       an Agent Core attempt that ran tools before failing over
-                       to an official client still left its pairs there. The
-                       run accumulator also holds the official-client attempts,
-                       so only the checkpoint's own pairs move the boundary. *)
-                    let checkpoint = Agent_core.Agent.checkpoint agent in
-                    Keeper_run_tools_setup.initial_tool_calls
-                      ~base_path:config.base_path
-                      ~history_memo:(Keeper_tool_progress_identity.history_memo
-                        ~base_path:config.base_path ~keeper_name:meta.name)
-                      ~history_messages:checkpoint.messages ()
-                    |> List.length
-                  | None, Some Runtime_execution.Masc_agent_core ->
-                    Log.Keeper.warn ~keeper_name:meta.name
-                      "repetition history judgment retained: dispatched agent is unavailable";
-                    history_pairs_at_setup
-                  | None, (Some Runtime_execution.Official_client | None) ->
-                    history_pairs_at_setup in
-                let frontier =
-                  match Keeper_run_tools_setup.flush_ledger () with
-                  | Error detail -> Error detail
-                  | Ok () -> Keeper_tool_call_log.current_frontier ~keeper_name:meta.name
-                      |> Result.map_error (function Keeper_tool_call_log.Index_unavailable detail -> detail) in
-                let ledger_frontier = match frontier with
-                  | Ok frontier -> frontier
-                  | Error detail ->
-                    Log.Keeper.warn ~keeper_name:meta.name
-                      "repetition ledger judgment was not advanced: %s" detail;
-                    previous.ledger_frontier in
-                Keeper_repetition_judged.record shared_context
-                  { previous with history_pairs = max previous.history_pairs history_pairs; ledger_frontier })
-         in
          let on_official_client_tool_boundary () =
-           match
-             official_client_tool_boundary ~repetition_execution
-               ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
-               ~input_tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_input_repetition s.acc)
-               ()
-           with
-           | Ok (Some (Keeper_official_client_host.Repeated_tool_call _)) as stop ->
-             record_repetition_judged ();
-             stop
-           | ( Ok (Some (Keeper_official_client_host.Terminal_tool_boundary _))
-             | Ok None
-             | Error _ ) as other -> other
+           official_client_tool_boundary ~repetition_execution ()
          in
          let cooperative_yield_probe =
            Some
@@ -1793,27 +1455,10 @@ let run_turn
                      checkpoint have persisted. A descriptor-typed terminal
                      effect therefore either completes the turn or fails it;
                      neither state can re-enter the provider loop. *)
-                  (match
-                     native_tool_boundary
-                       ~keeper_name:meta.name
-                       ~repetition_execution
-                       ~terminal_effect_state:(s.terminal_effect_state ())
-                       ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
-                       ~input_tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_input_repetition s.acc)
-                       ~assistant_turn_texts:s.acc.assistant_turn_texts
-                       ~yield_requested
-                   with
-                   | Ok (Runtime_agent.Yield (Runtime_agent.Repeated_tool_call _)) as decision ->
-                     record_repetition_judged ();
-                     decision
-                   | ( Ok
-                         (Runtime_agent.Yield
-                            ( Runtime_agent.Operation_queued
-                            | Runtime_agent.Durable_stimulus_waiting
-                            | Runtime_agent.Repeated_assistant_text _
-                            | Runtime_agent.Terminal_tool_completed ))
-                     | Ok Runtime_agent.Continue
-                     | Error _ ) as other -> other)
+                  native_tool_boundary
+                    ~repetition_execution
+                    ~terminal_effect_state:(s.terminal_effect_state ())
+                    ~yield_requested
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->

@@ -25,10 +25,6 @@ let record state scope call =
 let count state scope =
   Runtime.tool_calls state ~scope |> require "scope observations" |> List.length
 
-let detector state scope =
-  Runtime.tool_calls state ~scope |> require "scope observations"
-  |> Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
-
 let checkpoint_restore state =
   let context = Masc.Keeper_context_core.create ~eio:false ~system_prompt:"scope test" in
   let checkpoint = Masc.Keeper_context_core.checkpoint_of_context context in
@@ -52,12 +48,11 @@ let test_a_b_restart_a () =
   let state = record (record state a call) a call in
   let state = S.admit state (S.Fresh b) |> require "admit B" in
   let state = record state b call in
-  check (option (pair string int)) "new B does not inherit A" None (detector state b);
+  check int "new B does not inherit A" 1 (count state b);
   let state = checkpoint_restore state in
   let state = S.admit state (S.Fresh a) |> require "readmit A" in
   let state = record state a call in
-  check (option (pair string int)) "resumed A reaches its own threshold"
-    (Some ("Execute", 3)) (detector state a);
+  check int "resumed A retains its own observations" 3 (count state a);
   check int "B remains isolated" 1 (count state b);
   Runtime.tool_calls state ~scope:a |> require "restored evidence"
   |> List.iter (fun evidence ->
@@ -71,8 +66,7 @@ let test_same_fresh_and_two_plus_two () =
   let state = S.admit state (S.Fresh a) |> require "duplicate admission" in
   check int "same Fresh preserves previous evidence" 2 (count state a);
   let state = record (record state a call) a call in
-  check (option (pair string int)) "attempt split2+2 does not reset"
-    (Some ("Execute", 4)) (detector state a)
+  check int "attempt split2+2 does not reset observations" 4 (count state a)
 
 let test_unknown_scope_record () =
   let missing = id "missing-operation" in
@@ -96,8 +90,7 @@ let test_observations_are_valid_before_save () =
   check bool "constructor and decoder agree"
     true (S.to_json state = S.to_json (checkpoint_restore state));
   let state = record (record state a call) a call in
-  check (option (pair string int)) "canonical fingerprints compare before and after restore"
-    (Some ("Execute", 3)) (detector state a)
+  check int "observations survive canonical checkpoint restore" 3 (count (checkpoint_restore state) a)
 
 let test_invalid_snapshot_does_not_clear_target () =
   let a = id "retained-operation" in
@@ -170,10 +163,6 @@ let test_direct_retry_without_provider_checkpoint () =
   let prior_calls = prepare retry_target in
   check int "same admitted operation retains two observations" 2 (List.length prior_calls);
   Runtime.Execution.observe execution ~target:retry_target call;
-  check bool "existing detector catches third call across attempts" true
-    (Option.is_some
-       (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call
-          ~threshold:3 (call :: prior_calls)));
   let restored = Runtime.load retry_target |> require "projected checkpoint" |> checkpoint_restore in
   check int "tool-boundary checkpoint contains all three observations" 3
     (count restored (id "direct-a"));
@@ -252,7 +241,7 @@ let test_native_terminal_evidence_precedes_scope_failure () =
   let execution = Runtime.Execution.direct_operation (operation "direct-terminal") in
   ignore (Runtime.Execution.prepare execution ~source ~target |> require "prepare");
   Runtime.Execution.observe execution ~target { call with output_fingerprint = Some "invalid" };
-  let decide = Masc.Keeper_agent_run.For_testing.tool_boundary_before_repetition
+  let decide = Masc.Keeper_agent_run.For_testing.tool_boundary_state
       ~repetition_execution:(Some execution) in
   let completed = Masc.Keeper_tools_agent_core.Terminal_effect_completed
       (Masc.Keeper_tool_execution.Surface_post_completed

@@ -83,22 +83,16 @@ module For_testing : sig
     (Keeper_turn_outcome.t * Keeper_tool_execution.terminal_effect_receipt option,
      Agent_core.Error.t) result
   val native_tool_boundary :
-    keeper_name:string ->
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
     terminal_effect_state:Keeper_tools_agent_core.terminal_effect_state ->
-    tool_calls:Keeper_agent_result.tool_call_detail list ->
-    input_tool_calls:Keeper_agent_result.tool_call_detail list ->
-    assistant_turn_texts:string list ->
     yield_requested:(unit -> (yield_request option, string) result) option ->
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
-  val tool_boundary_before_repetition :
+  val tool_boundary_state :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
     Keeper_tools_agent_core.terminal_effect_state ->
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
   val official_client_tool_boundary :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
-    tool_calls:Keeper_agent_result.tool_call_detail list ->
-    input_tool_calls:Keeper_agent_result.tool_call_detail list ->
     unit ->
     (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
   val registry_progress_on_event
@@ -165,49 +159,6 @@ module For_testing : sig
   val runtime_yield_reason
     :  yield_request
     -> Runtime_agent.cooperative_yield_reason
-
-  (** Native AGENT_CORE evaluates these detectors on both Direct and
-      Autonomous tool boundaries, and the official-client tool hook is
-      installed on the same terms: both read the turn accumulator. Without
-      [repetition_execution] that accumulator is seeded from the visible
-      checkpoint transcript; with it, observations belong to the explicit
-      admitted execution scope. Assistant text observations are local to the
-      current dispatch, and only the native boundary reads them.
-
-      Direct turns supply an admitted scope; Autonomous turns do not. The
-      scope ID codec supports autonomous admission UUIDs, but journal
-      admission and resumption are not wired into that lane. An autonomous
-      official-client turn therefore counts repeats across the provider
-      attempts of one dispatch plus whatever the transcript seeds, and an
-      admitted scope adds only its latched observation failure (#34083). *)
-  val repeated_exact_tool_call
-    :  threshold:int
-    -> tool_call_detail list
-    -> (string * int) option
-
-  (** Newest-first tool calls; [Some (tool, streak)] when the last [threshold]+
-      calls share a tool name and input fingerprint, whatever their outputs did.
-
-      The axis {!repeated_exact_tool_call} cannot answer for a call whose
-      output moves on every call while nothing advances (a clock read, for
-      one), so the output fingerprint it uses as no-progress proof never
-      matches. This one drops the output and requires the repeats to be
-      adjacent instead. A call whose handler declared
-      [Keeper_tool_outcome.Progress] ends the streak and is never the latest
-      of one: a tool that moves a world by a fixed amount has that same shape
-      on this axis and is the opposite thing; a call that declares nothing
-      stays in the streak. *)
-  val repeated_tool_call_input
-    :  threshold:int
-    -> tool_call_detail list
-    -> (string * int) option
-
-  (** Newest-first per-turn assistant texts; [Some streak] when the last
-      [threshold]+ consecutive turns carry the same non-blank text. *)
-  val repeated_assistant_text
-    :  threshold:int
-    -> string list
-    -> int option
 
   val dispatch_after_provider_transcript_admission
     :  messages:Agent_core.Types.message list

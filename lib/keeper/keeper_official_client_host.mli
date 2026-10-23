@@ -715,8 +715,7 @@ val dynamic_tools :
     an image-bearing result becomes a delivery error before settlement, rather
     than a payload the provider rejects after the tool has already run.
 
-    [on_tool_boundary], when supplied, replaces the provider-local repetition
-    detector. It runs after tool settlement and result observers, including when
+    [on_tool_boundary] runs after tool settlement and result observers, including when
     exact terminal evidence already stops the turn. Its errors are recorded in
     [terminal_error] and close the host loop without inventing a checkpoint.
     An existing terminal result takes priority over a callback stop.
@@ -730,11 +729,8 @@ val dynamic_tools :
 
     Required rather than optional so a new runtime lane cannot inherit [None]
     by saying nothing. Silence is how one lane came to offer a decision the
-    other refused. Three consecutive
-    calls with the same tool, canonical input, disposition, and output produce
-    [abort_turn]; this is the official-client equivalent of Agent Core's
-    repeated exact tool boundary and prevents a vendor-owned loop from holding
-    one Keeper and host resources indefinitely. *)
+    other refused. Repeated tool names, inputs or receipts do not establish
+    lack of external progress and never synthesize [abort_turn]. *)
 
 val persist_pre_tool_rejects :
   keeper_name:string ->

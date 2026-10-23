@@ -164,8 +164,8 @@ let test_a_source_bound_rewrite_is_named_by_its_hash () =
        (fingerprint ~source_sha256:"sha256:11" ~revision:7)
        (fingerprint ~source_sha256:"sha256:22" ~revision:7))
 
-(* The detector the turn runs, fed the fingerprints the turn computes. *)
-let test_a_third_memory_rewrite_stops_the_turn () =
+(* Receipt identity is telemetry, not a turn-stop verdict. *)
+let test_memory_rewrite_identity_stays_stable () =
   let call revision : Masc.Keeper_agent_result.tool_call_detail =
     let io =
       P.digest_tool_io ~tool_name:"keeper_memory_write"
@@ -185,10 +185,9 @@ let test_a_third_memory_rewrite_stops_the_turn () =
     ; output_fingerprint = Option.map (fun (io : P.io_fingerprints) -> io.output_fingerprint) io
     }
   in
-  check (option (pair string int)) "the third identical rewrite yields"
-    (Some ("keeper_memory_write", 3))
-    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
-       [ call 3; call 2; call 1 ])
+  check (option string) "receipt identity does not judge external progress"
+    (call 1).output_fingerprint (call 3).output_fingerprint
+;;
 
 let test_memory_identity_survives_changing_inputs () =
   let call ~tool_name ~memory_id ~content ~revision =
@@ -227,26 +226,6 @@ let test_memory_identity_survives_changing_inputs () =
   in
   check string "same claim despite changed input"
     first.P.input_fingerprint repeated.P.input_fingerprint;
-  let detail content revision : Masc.Keeper_agent_result.tool_call_detail =
-    let io =
-      call ~tool_name:"keeper_memory_write" ~memory_id:"sha256:aa" ~content
-        ~revision
-    in
-    { tool_name = "keeper_memory_write"
-    ; provider = "test"
-    ; execution_outcome = Tool_result.Ok
-    ; typed_outcome = None
-    ; latency_ms = 1.
-    ; task_id = None
-    ; route_evidence = None
-    ; input_fingerprint = Some io.P.input_fingerprint
-    ; output_fingerprint = Some io.P.output_fingerprint
-    }
-  in
-  check (option (pair string int)) "changing write payload still reaches repeat threshold"
-    (Some ("keeper_memory_write", 3))
-    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
-       [ detail "10:03Z" 3; detail "10:02Z" 2; detail "10:01Z" 1 ]);
   check string "same claim despite changed receipt"
     first.P.output_fingerprint repeated.P.output_fingerprint;
   check bool "different claim keeps its own identity" false
@@ -258,8 +237,7 @@ let test_memory_identity_survives_changing_inputs () =
 
 (* A memory write receipt too large to travel inline reaches the model as a
    blob marker. Read from verified blob bytes, it must name the same claim its
-   inline form names, so a rewrite loop with a changing request reaches the
-   repeated-call yield either way. *)
+   inline form names, independent of the changing request or transport receipt. *)
 let test_a_stored_memory_rewrite_keeps_memory_identity () =
   let base_path = Filename.temp_file "masc-memory-write-identity" "" in
   Sys.remove base_path;
@@ -319,18 +297,6 @@ let test_a_stored_memory_rewrite_keeps_memory_identity () =
   let stored_io ~memory_id ~revision ~at =
     io ~base_path ~at (stored (receipt ~memory_id ~revision ~at))
   in
-  let detail fingerprints : Masc.Keeper_agent_result.tool_call_detail =
-    { tool_name = "keeper_memory_write"
-    ; provider = "test"
-    ; execution_outcome = Tool_result.Ok
-    ; typed_outcome = None
-    ; latency_ms = 1.
-    ; task_id = None
-    ; route_evidence = None
-    ; input_fingerprint = Some fingerprints.P.input_fingerprint
-    ; output_fingerprint = Some fingerprints.P.output_fingerprint
-    }
-  in
   let first = receipt ~memory_id:"sha256:aa" ~revision:1 ~at:"10:01Z" in
   let first_stored = stored first in
   let inline = io ~at:"10:01Z" (Yojson.Safe.to_string first) in
@@ -339,13 +305,7 @@ let test_a_stored_memory_rewrite_keeps_memory_identity () =
     inline.P.input_fingerprint stored_first.P.input_fingerprint;
   check string "a stored receipt names the claim its inline form names (output)"
     inline.P.output_fingerprint stored_first.P.output_fingerprint;
-  check (option (pair string int)) "stored rewrites with a changing request yield"
-    (Some ("keeper_memory_write", 3))
-    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
-       [ detail (stored_io ~memory_id:"sha256:aa" ~revision:3 ~at:"10:03Z")
-       ; detail (stored_io ~memory_id:"sha256:aa" ~revision:2 ~at:"10:02Z")
-       ; detail stored_first
-       ]);
+
   check bool "a stored receipt for another claim keeps its own identity" false
     (String.equal stored_first.P.input_fingerprint
        (stored_io ~memory_id:"sha256:bb" ~revision:2 ~at:"10:02Z").P.input_fingerprint);
@@ -385,17 +345,6 @@ let test_selection_receipts_do_not_create_false_progress () =
   let first=selection_receipt "selection-first" and second=selection_receipt "selection-second" in
   check string "different evaluation receipts are the same useful answer"
     (selection_fingerprint first) (selection_fingerprint second);
-  let call value : Masc.Keeper_agent_result.tool_call_detail =
-    let io=P.digest_tool_io ~tool_name:"keeper_memory_select" ~input:(`Assoc ["purpose",`String "E17 production approval"])
-      ~output_text:(Yojson.Safe.to_string value) () in
-    {tool_name="keeper_memory_select";provider="fixture";execution_outcome=Tool_result.Ok;
-     typed_outcome=None;latency_ms=1.;task_id=None;route_evidence=None;
-     input_fingerprint=Option.map (fun (io : P.io_fingerprints) -> io.input_fingerprint) io;
-     output_fingerprint=Option.map (fun (io : P.io_fingerprints) -> io.output_fingerprint) io} in
-  check (option (pair string int)) "receipt-only retries reach the existing repeated-call yield"
-    (Some ("keeper_memory_select",3))
-    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
-       [call (selection_receipt "selection-third");call second;call first]);
   List.iter (fun (name,changed) -> check bool (name ^ " still changes progress identity") false
     (selection_fingerprint first=selection_fingerprint changed))
     ["claim",replace_field "selected" (`List [selected_memory ~claim:"Owner approval required" ~use:"current_decision"]) second;
@@ -622,7 +571,7 @@ let () =
         ; test_case "a manifest-wrapped execute keeps identity" `Quick
             test_a_manifest_wrapped_execute_keeps_identity
         ; test_case "a third memory rewrite stops the turn" `Quick
-            test_a_third_memory_rewrite_stops_the_turn
+            test_memory_rewrite_identity_stays_stable
         ; test_case "memory identity survives changing inputs" `Quick
             test_memory_identity_survives_changing_inputs
         ; test_case "a stored memory rewrite keeps memory identity" `Quick

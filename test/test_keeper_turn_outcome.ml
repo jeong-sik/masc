@@ -456,226 +456,6 @@ let tool_call ?(input = Some "input") ?(output = Some "output") ?typed_outcome t
   ; output_fingerprint = output
   }
 
-(* The moving-result axis. [repeated_exact_tool_call] needs the output
-   fingerprint to stand still as proof that nothing advanced, so a call whose
-   result is a timestamp escapes it by construction: live, one keeper made 280
-   of a turn's 281 tool calls to a clock read and neither the tool axis nor the
-   text axis saw it (masc #33021). This axis drops the output and requires the
-   repeats to be adjacent instead. The clock read here is one shell command
-   run again. *)
-let test_repeated_tool_call_input_boundary () =
-  let detect =
-    Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5
-  in
-  let clock n =
-    List.init n (fun i ->
-      tool_call
-        ~input:(Some "date -u")
-        ~output:(Some (Printf.sprintf "11:07:%02dZ" i))
-        "Execute")
-  in
-  check
-    (option (pair string int))
-    "a moving result no longer hides the loop"
-    (Some ("Execute", 5))
-    (detect (clock 5));
-  check
-    (option (pair string int))
-    "the exact axis cannot see the same calls"
-    None
-    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call
-       ~threshold:5
-       (clock 5));
-  check
-    (option (pair string int))
-    "four consecutive is still ordinary work"
-    None
-    (detect (clock 4));
-  check
-    (option (pair string int))
-    "a different input breaks the streak"
-    None
-    (detect
-       (tool_call ~input:(Some "a") "Execute"
-        :: tool_call ~input:(Some "b") "Execute"
-        :: List.init 4 (fun _ -> tool_call ~input:(Some "a") "Execute")));
-  check
-    (option (pair string int))
-    "non-adjacent repeats are re-reads, not a loop"
-    None
-    (detect
-       [ tool_call ~input:(Some "a") "Read"
-       ; tool_call ~input:(Some "b") "Read"
-       ; tool_call ~input:(Some "a") "Read"
-       ; tool_call ~input:(Some "b") "Read"
-       ; tool_call ~input:(Some "a") "Read"
-       ; tool_call ~input:(Some "b") "Read"
-       ]);
-  check
-    (option (pair string int))
-    "missing fingerprints never guess"
-    None
-    (detect (List.init 5 (fun _ -> tool_call ~input:None "Execute")));
-  (* The emulator step has a clock's shape on this axis -- identical input,
-     a different frame every time -- and is the opposite thing: the frames
-     ran. Its handler declares [Progress] beside the observation, and the
-     declaration ends the streak. One keeper's every game turn ended in this
-     yield after five [masc_msx_step {frames: 300}] on 2026-09-14. *)
-  let step i =
-    tool_call
-      ~output:(Some (Printf.sprintf "frame %d" (336775 + (300 * i))))
-      ~typed_outcome:Keeper_tool_outcome.Progress
-      "masc_msx_step"
-  in
-  check
-    (option (pair string int))
-    "five steps that declared progress are play, not a loop"
-    None
-    (detect (List.init 5 step));
-  (* step_until_change declares progress only when the screen changed. Five
-     asks on a key-wait scene are a loop; one changed screen in the middle of
-     them is the game moving, and it ends the streak on both sides. *)
-  let wait ?(changed = false) () =
-    tool_call
-      ~output:(Some (if changed then "changed" else "settled"))
-      ?typed_outcome:(if changed then Some Keeper_tool_outcome.Progress else None)
-      "masc_msx_step_until_change"
-  in
-  check
-    (option (pair string int))
-    "a declared progress inside the streak ends it"
-    None
-    (detect [ wait (); wait (); wait ~changed:true (); wait (); wait () ]);
-  check
-    (option (pair string int))
-    "five asks on a key-wait scene are still a loop"
-    (Some ("masc_msx_step_until_change", 5))
-    (detect (List.init 5 (fun _ -> wait ())));
-  check
-    (option (pair string int))
-    "five reads that declared nothing still yield"
-    (Some ("masc_msx_screen", 5))
-    (detect
-       (List.init 5 (fun i ->
-          tool_call ~output:(Some (Printf.sprintf "screen %d" i)) "masc_msx_screen")));
-  check
-    (option (pair string int))
-    "a declared no-progress is no shelter"
-    (Some ("keeper_tasks_list", 5))
-    (detect
-       (List.init 5 (fun _ ->
-          tool_call
-            ~typed_outcome:
-              (Keeper_tool_outcome.No_progress
-                 { reason = Keeper_tool_outcome.No_work_available })
-            "keeper_tasks_list")))
-;;
-
-let test_repeated_exact_tool_call_boundary () =
-  let detect =
-    Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
-  in
-  check (option (pair string int)) "three exact calls yield"
-    (Some ("keeper_tasks_list", 3))
-    (detect
-       [ tool_call "keeper_tasks_list"
-       ; tool_call "keeper_tasks_list"
-       ; tool_call "keeper_tasks_list"
-       ]);
-  check (option (pair string int)) "changed output proves progress" None
-    (detect
-       [ tool_call ~output:(Some "new") "keeper_tasks_list"
-       ; tool_call ~output:(Some "old") "keeper_tasks_list"
-       ; tool_call ~output:(Some "old") "keeper_tasks_list"
-       ]);
-  check (option (pair string int)) "missing fingerprints never guess" None
-    (detect
-       [ tool_call ~input:None "keeper_tasks_list"
-       ; tool_call ~input:None "keeper_tasks_list"
-       ; tool_call ~input:None "keeper_tasks_list"
-       ]);
-  (* The shape the old counter missed. A keeper ran the same git status 48 times
-     in one dispatch, always with another call in between, so a counter that
-     stopped at the first different call never left 1 and the dispatch ran 279
-     calls over 31 minutes with no answer. The list is newest-first. *)
-  check (option (pair string int)) "repeats separated by other calls still yield"
-    (Some ("Execute", 3))
-    (detect
-       [ tool_call "Execute"
-       ; tool_call "Read"
-       ; tool_call "Execute"
-       ; tool_call "Grep"
-       ; tool_call "Execute"
-       ]);
-  (* Interleaving does not make a different call look repeated. *)
-  check (option (pair string int)) "a call below threshold stays silent" None
-    (detect
-       [ tool_call "Execute"
-       ; tool_call "Read"
-       ; tool_call "Execute"
-       ; tool_call "Grep"
-       ]);
-  (* Output identity still gates it: an interleaved repeat whose result moved
-     is progress, not a loop. *)
-  check (option (pair string int)) "interleaved repeats with moving output are progress"
-    None
-    (detect
-       [ tool_call ~output:(Some "c") "Execute"
-       ; tool_call "Read"
-       ; tool_call ~output:(Some "b") "Execute"
-       ; tool_call "Grep"
-       ; tool_call ~output:(Some "a") "Execute"
-       ])
-
-(* task-1204 / #26057 — the cross-turn shape. The detector folds over the
-   run-local hook accumulator ([Keeper_run_tools.hook_accumulator], created
-   fresh per Agent.run execution), while the persisted checkpoint keeps only
-   the AGENT_CORE message history. A keeper that repeats the identical call
-   across a checkpoint restart therefore presents each new run with an empty
-   accumulator: the fold below counts what one run saw, not what the keeper
-   did. Four identical calls split 2 + 2 across two runs escape both axes at
-   threshold 3 — the same four in one run are caught on the third call.
-   This is the reproduction the #26057 handoff asked for: a repeat that is
-   only visible across the restart boundary. *)
-let test_repeated_exact_tool_call_reset_across_checkpoint_restart () =
-  let detect =
-    Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
-  in
-  (* Run 1: two identical calls, then a yield persists the checkpoint.
-     Newest-first, as in [test_repeated_exact_tool_call_boundary]. *)
-  let run_1_saw = [ tool_call "keeper_tasks_list"; tool_call "keeper_tasks_list" ] in
-  check (option (pair string int)) "two identical calls inside one run stay silent" None
-    (detect run_1_saw);
-  (* Restart: the next run's accumulator starts empty; the checkpoint history
-     is not folded in, so the two earlier identical calls are invisible. *)
-  let run_2_saw = [ tool_call "keeper_tasks_list"; tool_call "keeper_tasks_list" ] in
-  check (option (pair string int))
-    "restart hides the earlier identical calls from the fold" None
-    (detect run_2_saw);
-  (* Control: the same four calls in a single run are caught on the third. *)
-  check (option (pair string int)) "the same four in one run are caught"
-    (Some ("keeper_tasks_list", 4))
-    (detect
-       [ tool_call "keeper_tasks_list"
-       ; tool_call "keeper_tasks_list"
-       ; tool_call "keeper_tasks_list"
-       ; tool_call "keeper_tasks_list"
-       ])
-
-(* task-1204 / #26057 — post-fix verification at the seeding seam. The
-   pre-fix shape above is preserved as the boundary test: without seeding,
-   run 2 starts from an empty accumulator. The fix seeds the accumulator
-   from the checkpoint's message history ([Keeper_run_tools_setup]), so the
-   pairs the previous run executed are what run 2's detector folds over.
-   This exercises the real production function on real [Agent_core.Types]
-   messages — not a hand-built list — so it fails before the fix lands and
-   passes after. *)
-(* [digest_tool_io] keeps the answers it has already computed, because the
-   history walk asks for them again on every turn. What the memo must not do
-   is answer for bytes that are no longer there: checkpoint purge replaces a
-   result body with a placeholder and keeps the tool_use_id, so an entry held
-   under anything coarser than the bytes would hand back a fingerprint for a
-   body that has been cleared. *)
 let digest tool_name input output_text =
   match
     Masc.Keeper_tool_progress_identity.digest_tool_io ~tool_name ~input ~output_text ()
@@ -683,6 +463,23 @@ let digest tool_name input output_text =
   | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
     input_fingerprint, output_fingerprint
   | None -> fail "digest_tool_io refused the fixture"
+;;
+
+let test_explicit_native_boundary_reasons () =
+  let decide yield_requested = Masc.Keeper_agent_run.For_testing.native_tool_boundary
+    ~repetition_execution:None
+    ~terminal_effect_state:Masc.Keeper_tools_agent_core.Terminal_effect_open
+    ~yield_requested in
+  check bool "open effect state continues" true (decide None = Ok Runtime_agent.Continue);
+  check bool "no host request continues" true
+    (decide (Some (fun () -> Ok None)) = Ok Runtime_agent.Continue);
+  check bool "queued operation still yields" true
+    (decide (Some (fun () -> Ok (Some
+       { Masc.Keeper_agent_run.reason = Masc.Keeper_agent_run.Operation_queued })))
+      = Ok (Runtime_agent.Yield Runtime_agent.Operation_queued));
+  (match decide (Some (fun () -> Error "authoritative queue unavailable")) with
+   | Error (Agent_core.Error.Internal _) -> ()
+   | Ok _ | Error _ -> fail "authoritative queue failure was hidden")
 ;;
 
 let test_tool_io_digest_is_keyed_on_the_bytes () =
@@ -725,74 +522,6 @@ let test_tool_io_digest_is_keyed_on_the_bytes () =
     (digest "keeper_tasks_list" input body)
 ;;
 
-let test_page_cursor_distinguishes_repeated_input_without_log_leak () =
-  let input cursor =
-    `Assoc [ "query", `String "voices"; "next_page_token", `String cursor ]
-  in
-  let call cursor =
-    let input_fingerprint, _ = digest "masc_voices_list" (input cursor) "{}" in
-    tool_call ~input:(Some input_fingerprint) "masc_voices_list"
-  in
-  let detect =
-    Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5
-  in
-  check (option (pair string int))
-    "advancing pages do not trip the repeated-input yield"
-    None
-    (detect (List.map call [ "page-e"; "page-d"; "page-c"; "page-b"; "page-a" ]));
-  check (option (pair string int))
-    "the same page still trips the repeated-input yield"
-    (Some ("masc_voices_list", 5))
-    (detect (List.init 5 (fun _ -> call "page-a")));
-  let logged =
-    input "page-a"
-    |> Masc.Observability_redact.redact_json_value
-    |> Masc.Observability_redact.redact_json_strings
-  in
-  check string "the observability cursor remains masked"
-    {|{"query":"voices","next_page_token":"[REDACTED]"}|}
-    (Yojson.Safe.to_string logged);
-  let nested_secret cursor =
-    `Assoc [ "client_secret_v2", `Assoc [ "next_page_token", `String cursor ] ]
-  in
-  check string "a secret-bearing parent cannot restore its cursor-shaped child"
-    (fst (digest "masc_voices_list" (nested_secret "opaque-a") "{}"))
-    (fst (digest "masc_voices_list" (nested_secret "opaque-b") "{}"))
-;;
-
-let test_confirmation_tokens_distinguish_actions_without_log_leak () =
-  let input token =
-    `Assoc [ "confirm_token", `String token; "decision", `String "confirm" ] in
-  let token index = Printf.sprintf "00000000-0000-0000-0000-%012d" index in
-  let call index =
-    let fingerprint, _ = digest "masc_operator_confirm" (input (token index)) "{}" in
-    tool_call ~input:(Some fingerprint) "masc_operator_confirm" in
-  let detect = Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5 in
-  check (option (pair string int)) "distinct pending actions do not falsely yield"
-    None (detect (List.init 5 call));
-  check (option (pair string int)) "the same action still yields"
-    (Some ("masc_operator_confirm", 5)) (detect (List.init 5 (fun _ -> call 0)));
-  check (option string) "confirmation tokens stay masked in tool logs"
-    (Some {|{"confirm_token":"[REDACTED]","decision":"confirm"}|})
-    (Option.map Yojson.Safe.to_string
-       (Masc.Observability_redact.redacted_tool_input_json
-          ~tool_name:"masc_operator_confirm" (input (token 0))));
-  check string "other tools do not give credentials action identity"
-    (fst (digest "other_tool" (input (token 0)) "{}"))
-    (fst (digest "other_tool" (input (token 1)) "{}"));
-  let nested index = `Assoc ["client_secret_v2", input (token index)] in
-  check string "nested secret fields do not get action identity"
-    (fst (digest "masc_operator_confirm" (nested 0) "{}"))
-    (fst (digest "masc_operator_confirm" (nested 1) "{}"))
-;;
-
-(* Forty calls that differ only in their tail, three tool names between
-   them. Each has to keep its own answer, and a second pass in the opposite
-   order has to agree with the first -- a memo that let two near-identical
-   keys share an entry would show up as a repeated fingerprint here or as a
-   disagreement there. The bodies stay under the preview truncation
-   ([Observability_redact.redact_preview] cuts at 4000 characters) so the
-   part that differs is the part that is hashed. *)
 let test_tool_io_digest_keeps_similar_calls_apart () =
   let shared = String.make 1024 'a' in
   let calls =
@@ -858,10 +587,8 @@ let test_checkpoint_history_is_not_current_tool_execution () =
   check int "a resumed no-tool invocation has no executed calls" 0
     (List.length acc.tool_calls);
   acc.tool_calls <- [ tool_call "Execute" ];
-  check (option (pair string int)) "cross-resume loop detection is preserved"
-    (Some ("Execute", 3))
-    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
-       (Acc.tool_calls_for_repetition acc));
+  check int "historical observations remain separate from this invocation" 3
+    (List.length (Acc.tool_calls_for_repetition acc));
   check int "historical evidence remains immutable" 2
     (List.length acc.historical_tool_calls)
 ;;
@@ -869,72 +596,6 @@ let test_checkpoint_history_is_not_current_tool_execution () =
 (* HTTP A1..A4, then an official-client B5, then HTTP A6 are not five
    consecutive A inputs. Outputs differ, so this exercises the input axis
    rather than the order-independent exact fingerprint count. *)
-let test_mixed_provider_history_does_not_invent_adjacency () =
-  let module Acc = Masc.Keeper_run_tools_hook_accumulator in
-  let module Run = Masc.Keeper_agent_run.For_testing in
-  let meta = Masc_test_deps.meta_of_json_fixture
-    (`Assoc [ "name", `String "mixed-provider-repetition" ]) |> Result.get_ok in
-  let call input output =
-    { (tool_call "read") with
-      input_fingerprint = Some input; output_fingerprint = Some output } in
-  let a n = call "A" (string_of_int n) in
-  let make ~history ~ledger =
-    let historical_tool_calls, historical_order =
-      Masc.Keeper_run_tools_setup.combine_repetition_seeds ~history ~ledger in
-    Acc.create ~meta ~historical_tool_calls ~historical_order
-      ~history_pairs_at_setup:(Some (List.length history))
-      ~tool_surface:
-        { turn_lane = Masc.Keeper_agent_tool_surface.Lane_text_only
-        ; config_root = "fixture"; runtime_config_path = None } in
-  let official acc =
-    Run.official_client_tool_boundary ~repetition_execution:None
-      ~tool_calls:(Acc.tool_calls_for_repetition acc)
-      ~input_tool_calls:(Acc.tool_calls_for_input_repetition acc) () in
-  let native acc =
-    Run.native_tool_boundary ~keeper_name:meta.name ~repetition_execution:None
-      ~terminal_effect_state:Masc.Keeper_tools_agent_core.Terminal_effect_open
-      ~tool_calls:(Acc.tool_calls_for_repetition acc)
-      ~input_tool_calls:(Acc.tool_calls_for_input_repetition acc)
-      ~assistant_turn_texts:[] ~yield_requested:None in
-  let acc = make ~history:[a 4; a 3; a 2; a 1] ~ledger:[call "B" "5"] in
-  acc.tool_calls <- [a 6];
-  check (option (pair string int)) "the unqualified join would falsely stop"
-    (Some ("read", 5))
-    (Run.repeated_tool_call_input ~threshold:5 (Acc.tool_calls_for_repetition acc));
-  (match official acc, native acc with
-   | Ok None, Ok Runtime_agent.Continue -> ()
-   | _ -> fail "provider transition invented a consecutive-input streak");
-  (* Real new observations remain ordered even when their seed is not. *)
-  acc.tool_calls <- [a 10; a 9; a 8; a 7; a 6];
-  (match official acc, native acc with
-   | Ok (Some (Masc.Keeper_official_client_host.Repeated_tool_call
-       { repeated_count = 5; _ })),
-     Ok (Runtime_agent.Yield (Runtime_agent.Repeated_tool_call
-       { repeated_count = 5; _ })) -> ()
-   | _ -> fail "the unordered seed disabled a real current-run input streak");
-  let exact = call "A" "same" in
-  let exact_acc = make ~history:[exact] ~ledger:[exact] in
-  exact_acc.tool_calls <- [exact];
-  (match official exact_acc, native exact_acc with
-   | Ok (Some (Masc.Keeper_official_client_host.Repeated_tool_call
-       { repeated_count = 3; _ })),
-     Ok (Runtime_agent.Yield (Runtime_agent.Repeated_tool_call
-       { repeated_count = 3; _ })) -> ()
-   | _ -> fail "disjoint streams lost the exact-repeat count");
-  List.iter (fun (history, ledger) ->
-    let ordered = make ~history ~ledger in
-    ordered.tool_calls <- [a 6];
-    match official ordered with
-    | Ok (Some (Masc.Keeper_official_client_host.Repeated_tool_call
-        { repeated_count = 5; _ })) -> ()
-    | _ -> fail "single-source history lost its known adjacency")
-    [([a 4; a 3; a 2; a 1], []); ([], [a 4; a 3; a 2; a 1])]
-;;
-
-(* 턴마다 같은 Keeper 의 history memo 로 히스토리를 다시 걷는다. 두 번째 걷기는
-   앞 걷기의 답을 쓰지만, purge 가 본문을 바꾼 결과는 바뀐 바이트로 다시 답해야
-   한다(tool_use_id 는 그대로다). 그리고 memo 의 답은 live hook 이 같은 바이트로
-   구한 지문과 같아야 detector 가 둘을 같은 호출로 본다. *)
 let test_history_memo_answers_a_purged_body_from_its_new_bytes () =
   let open Agent_core.Types in
   let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
@@ -977,179 +638,6 @@ let test_history_memo_answers_a_purged_body_from_its_new_bytes () =
   check string "and it is answered from its own bytes" (live "[tool result cleared]") cleared
 ;;
 
-let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
-  let open Agent_core.Types in
-  let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
-  let tool_use id name input =
-    ToolUse { id; name; input = `Assoc [ ("argv", `List [ `String input ]) ] }
-  in
-  let tool_result id output =
-    ToolResult
-      { tool_use_id = id
-      ; content = output
-      ; outcome = Tool_succeeded
-      ; json = None
-      ; content_blocks = None
-      }
-  in
-  (* Prior run: two identical keeper_tasks_list calls, oldest first, each
-     answered by its ToolResult. *)
-  let prior_run_history =
-    [ message Assistant [ tool_use "u1" "keeper_tasks_list" "list" ]
-    ; message User [ tool_result "u1" "{\"ok\":true}" ]
-    ; message Assistant [ tool_use "u2" "keeper_tasks_list" "list" ]
-    ; message User [ tool_result "u2" "{\"ok\":true}" ]
-    ]
-  in
-  let seed =
-    Masc.Keeper_run_tools_setup.seed_tool_calls_from_history
-      ~history_memo:(Masc.Keeper_tool_progress_identity.History_memo.create ())
-      ~history_messages:prior_run_history ()
-  in
-  (* Newest first, matching the live accumulator's order. *)
-  check int "seed keeps both prior-run calls" 2 (List.length seed);
-  check bool "seed is newest-first" true
-    (match seed with
-     | first :: _ -> String.equal first.Masc.Keeper_agent_result.tool_name "keeper_tasks_list"
-     | [] -> false);
-  (* The fingerprinted seed must be byte-identical to what the live hook
-     records, or the detector would not match them. *)
-  List.iter
-    (fun (detail : Masc.Keeper_agent_result.tool_call_detail) ->
-       let live =
-         Masc.Keeper_tool_progress_identity.digest_tool_io
-           ~tool_name:detail.tool_name
-           ~input:(`Assoc [ ("argv", `List [ `String "list" ]) ])
-           ~output_text:"{\"ok\":true}" ()
-       in
-       match live with
-       | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
-         check string "seed input fingerprint matches live digest"
-           input_fingerprint
-           (Option.value ~default:"" detail.input_fingerprint);
-         check string "seed output fingerprint matches live digest"
-           output_fingerprint
-           (Option.value ~default:"" detail.output_fingerprint)
-       | None -> fail "digest_tool_io refused the fixture input")
-    seed;
-  (* Unmatched ToolUse (a yield interrupted before the result) must not
-     seed: it has no output fingerprint, so it could never match a live
-     call and would only pad the count. *)
-  let unmatched_history =
-    [ message Assistant [ tool_use "u9" "keeper_tasks_list" "list" ] ]
-  in
-  check int "unanswered tool use does not seed" 0
-    (List.length
-       (Masc.Keeper_run_tools_setup.seed_tool_calls_from_history
-          ~history_memo:(Masc.Keeper_tool_progress_identity.History_memo.create ())
-          ~history_messages:unmatched_history ()));
-  (* The wiring seam: production acc creation goes through
-     [initial_tool_calls], so this is what run 2's detector actually folds
-     over after a checkpoint restart with [prior_run_history] persisted. *)
-  let run_2_starts_from =
-    Masc.Keeper_run_tools_setup.initial_tool_calls
-      ~history_memo:(Masc.Keeper_tool_progress_identity.History_memo.create ())
-      ~history_messages:prior_run_history ()
-  in
-  (* Run 2 then executes the same two identical calls live. Build them with
-     the production digest so their fingerprints are byte-identical to the
-     seed's. *)
-  let live_call () =
-    match
-      Masc.Keeper_tool_progress_identity.digest_tool_io
-        ~tool_name:"keeper_tasks_list"
-        ~input:(`Assoc [ ("argv", `List [ `String "list" ]) ])
-        ~output_text:"{\"ok\":true}" ()
-    with
-    | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
-      { Masc.Keeper_agent_result.tool_name = "keeper_tasks_list"
-      ; provider = "run2"
-      ; execution_outcome = Tool_result.Ok
-      ; typed_outcome = None
-      ; latency_ms = 1.
-      ; task_id = None
-      ; route_evidence = None
-      ; input_fingerprint = Some input_fingerprint
-      ; output_fingerprint = Some output_fingerprint
-      }
-    | None -> fail "digest_tool_io refused the fixture input"
-  in
-  let detect =
-    Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
-  in
-  (* Newest first: run 2's two calls sit in front of the seeded pair. With
-     the seed, the fold sees four identical calls and fires -- without it
-     (the pre-fix empty accumulator) it saw only run 2's two and stayed
-     silent. That difference is the whole fix. *)
-  let run_2_view = live_call () :: live_call () :: run_2_starts_from in
-  check (option (pair string int))
-    "resumed run is caught when it repeats the prior run's exact calls"
-    (Some ("keeper_tasks_list", 4))
-    (detect run_2_view);
-  (* Control below threshold: one live call over one seeded pair is only
-     two -- a legitimate retry, not a loop. *)
-  check (option (pair string int))
-    "single retry after restart stays silent" None
-    (detect [ live_call (); List.hd run_2_starts_from ]);
-  (* The native production boundary is also installed for autonomous runs
-     without a Direct execution scope. Exercise that exact boundary with the
-     transcript seed, not merely the detector with a test-only threshold. *)
-  let native ?(requested = fun () -> Ok None) calls =
-    Masc.Keeper_agent_run.For_testing.native_tool_boundary
-      ~keeper_name:"native-autonomous-repetition-fixture"
-      ~repetition_execution:None
-      ~terminal_effect_state:Masc.Keeper_tools_agent_core.Terminal_effect_open
-      ~tool_calls:calls ~input_tool_calls:calls
-      ~assistant_turn_texts:[]
-      ~yield_requested:(Some requested)
-  in
-  (match native (live_call () :: run_2_starts_from) with
-   | Ok (Runtime_agent.Yield
-       (Runtime_agent.Repeated_tool_call
-          { tool_name = "keeper_tasks_list"; repeated_count = 3 })) -> ()
-   | _ -> fail "native autonomous boundary lost transcript-seeded repetition");
-  (match native [ live_call (); List.hd run_2_starts_from ] with
-   | Ok Runtime_agent.Continue -> ()
-   | _ -> fail "ordinary retry was not allowed to continue");
-  (match native
-      ~requested:(fun () -> Ok (Some
-        { Masc.Keeper_agent_run.reason = Masc.Keeper_agent_run.Operation_queued }))
-      (live_call () :: run_2_starts_from) with
-   | Ok (Runtime_agent.Yield Runtime_agent.Operation_queued) -> ()
-   | _ -> fail "new durable work lost priority to repetition");
-  (match native ~requested:(fun () -> Error "queue fixture unreadable")
-      (live_call () :: run_2_starts_from) with
-   | Error (Agent_core.Error.Internal _) -> ()
-   | _ -> fail "unreadable durable queue was hidden by repetition");
-  (* The official-client hook is installed on the same terms (#34083): with
-     no Direct execution scope it reads the same transcript-seeded accumulator
-     and reports the same streak as a host stop. *)
-  let official calls =
-    Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-      ~repetition_execution:None
-      ~tool_calls:calls ~input_tool_calls:calls
-      ()
-  in
-  (match official (live_call () :: run_2_starts_from) with
-   | Ok (Some (Masc.Keeper_official_client_host.Repeated_tool_call
-       { tool_name = "keeper_tasks_list"; repeated_count = 3 })) -> ()
-   | _ -> fail "official-client boundary without a scope lost transcript-seeded repetition");
-  (match official [ live_call (); List.hd run_2_starts_from ] with
-   | Ok None -> ()
-   | _ -> fail "official-client boundary without a scope stopped an ordinary retry")
-
-(* A yield is the judgment; the calls behind it are not evidence again.
-   The seed from checkpoint history stops where the previous repetition
-   yield already judged, so a keeper that reads the same idle screen three
-   times in a day is not stopped on every later read of it. *)
-(* task-627 / #26088 — the ledger seed's dedup seam. A checkpoint-resumed
-   lane has both records of the same call: the checkpoint history holds the
-   ToolUse/ToolResult pair, and the call ledger holds the row the hook
-   wrote for the same execution. The seed must count that call once, so
-   rows whose tool_use_id the history already represents are dropped.
-   Without the drop the resumed run's detector would fold the same call
-   twice and a 2+2 restart shape would fire on the second live call —
-   one call earlier than the threshold. *)
 let test_ledger_seed_drops_rows_the_history_already_represents () =
   let open Agent_core.Types in
   let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
@@ -1264,11 +752,8 @@ let test_first_activation_excludes_retained_repetition () =
      | Ok _ -> () | Error error -> fail (Judged.error_to_string error));
     let first = seed cold in
     check int "activation does not move on resume" 1 (List.length first);
-    let detect = Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3 in
-    check (option (pair string int)) "two old plus one new is not a repetition" None (detect first);
     append (); append ();
-    check (option (pair string int)) "three post-activation exact calls still yield"
-      (Some ("keeper_tasks_list", 3)) (detect (seed cold));
+    check int "new observations remain available after activation" 3 (List.length (seed cold));
     let retained = match Ledger.read_recent ~keeper_name ~n:10 () with
       | Ok rows -> rows
       | Error (Ledger.Index_unavailable detail) -> fail detail in
@@ -1356,27 +841,6 @@ let test_judged_boundary_rides_the_context () =
   | Error (Judged.Invalid_record _) -> ()
   | Ok n -> failf "a record that does not decode read as %d rather than an error" n
 ;;
-
-let test_repeated_assistant_text_boundary () =
-  let detect =
-    Masc.Keeper_agent_run.For_testing.repeated_assistant_text ~threshold:3
-  in
-  (* The shape: one plan sentence, byte-identical on consecutive model
-     turns, while every turn's tool batch kept changing and reporting ok. The
-     list is newest-first, one entry per provider turn. *)
-  let plan = "I will now inspect the queue and then drain the backlog." in
-  check (option int) "three identical texts yield" (Some 3)
-    (detect [ plan; plan; plan ]);
-  check (option int) "a changed latest text is progress" None
-    (detect [ "done: queue drained"; plan; plan ]);
-  check (option int) "two identical repeats stay below the threshold" None
-    (detect [ plan; plan; "an earlier different reply" ]);
-  check (option int) "blank texts never count" None
-    (detect [ " \n"; " \n"; " \n" ]);
-  check (option int) "a textless turn breaks the streak" None
-    (detect [ plan; ""; plan; plan ]);
-  check (option int) "a longer streak reports its full length" (Some 4)
-    (detect [ plan; plan; plan; plan ])
 
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
@@ -1944,7 +1408,8 @@ let () =
     [
       ( "codec",
         [
-          test_case "label round trip" `Quick test_label_round_trip;
+          test_case "native stops use explicit lifecycle reasons" `Quick test_explicit_native_boundary_reasons;
+        test_case "label round trip" `Quick test_label_round_trip;
           test_case "unknown label is None" `Quick test_unknown_label_is_none;
           test_case "the parked-call label still decodes" `Quick
             test_parked_call_label_still_decodes;
@@ -1967,16 +1432,8 @@ let () =
             test_terminal_effect_defer_kinds_remain_distinct;
           test_case "applied Gate replay seeds terminal settlement" `Quick
             test_applied_gate_replay_seeds_terminal_settlement;
-          test_case "repeated exact tool call boundary" `Quick
-            test_repeated_exact_tool_call_boundary;
-          test_case "repeated exact tool call reset across checkpoint restart" `Quick
-            test_repeated_exact_tool_call_reset_across_checkpoint_restart;
-          test_case "mixed provider history preserves adjacency boundaries" `Quick
-            test_mixed_provider_history_does_not_invent_adjacency;
           test_case "checkpoint history is not current execution" `Quick
             test_checkpoint_history_is_not_current_tool_execution;
-          test_case "repeated exact tool call seeded from checkpoint history" `Quick
-            test_repeated_exact_tool_call_seeded_from_checkpoint_history;
           test_case "first activation excludes retained repetition" `Quick
             test_first_activation_excludes_retained_repetition;
           test_case "ledger seed drops rows the history already represents" `Quick
@@ -1985,22 +1442,14 @@ let () =
             test_history_memo_answers_a_purged_body_from_its_new_bytes;
           test_case "tool io digest is keyed on the bytes" `Quick
             test_tool_io_digest_is_keyed_on_the_bytes;
-          test_case "page cursors retain identity while logs mask them" `Quick
-            test_page_cursor_distinguishes_repeated_input_without_log_leak;
-          test_case "confirmation tokens retain action identity while logs mask them" `Quick
-            test_confirmation_tokens_distinguish_actions_without_log_leak;
           test_case "tool io digest keeps similar calls apart" `Quick
             test_tool_io_digest_keeps_similar_calls_apart;
           test_case "tool io digest survives eviction" `Quick
             test_tool_io_digest_survives_eviction;
-          test_case "repeated tool input boundary" `Quick
-            test_repeated_tool_call_input_boundary;
           test_case "the seed stops where a yield already judged" `Quick
             test_seed_stops_where_a_yield_already_judged;
           test_case "the judged boundary rides the context" `Quick
             test_judged_boundary_rides_the_context;
-          test_case "repeated assistant text boundary" `Quick
-            test_repeated_assistant_text_boundary;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
           test_case "terminal externalization failure contract" `Quick

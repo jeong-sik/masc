@@ -294,172 +294,6 @@ let test_cancellation_records_terminal_raw_observation () =
     check int "one tool finish" 1 (count Agent_core.Raw_trace.Tool_execution_finished))
 ;;
 
-let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
-  with_active_raw_trace (fun ~path:_ ~active ->
-    let executions = ref 0 in
-    let tool, terminal_error =
-      one_dynamic_tool ~active (fun _input ->
-        incr executions;
-        Error
-          { Agent_core.Types.message = "same deterministic failure"
-          ; recoverable = false
-          ; error_class = Some Agent_core.Types.Deterministic
-          })
-    in
-    let call index =
-      let input =
-        if index mod 2 = 0
-        then `Assoc [ "second", `Int 2; "first", `Int 1 ]
-        else `Assoc [ "first", `Int 1; "second", `Int 2 ]
-      in
-      tool.call
-        ~call_id:(Printf.sprintf "repeat-%d" index)
-        input
-    in
-    let first = call 1 in
-    let second = call 2 in
-    let third = call 3 in
-    check int "three calls executed" 3 !executions;
-    check bool "first call continues" true (Option.is_none first.abort_turn);
-    check bool "second call continues" true (Option.is_none second.abort_turn);
-    (match third.abort_turn with
-     | Some (Repeated_tool_call { tool_name; repeated_count }) ->
-       (* [one_dynamic_tool] names its fixture "effect"; "masc_probe" belongs
-          to the hand-built stop below, which never goes through the host. *)
-       check string "repeated tool" "effect" tool_name;
-       check int "repeat count" 3 repeated_count
-     | Some (Terminal_tool_boundary _) ->
-       fail "ordinary repeated tool produced a terminal-tool stop"
-     | None -> fail "reordered object did not produce a typed host stop");
-    check (option string) "host stop is not a terminal error" None !terminal_error)
-;;
-
-(* The host's own counter runs when no boundary is installed, and it hashes
-   the result text. A memory rewrite answers with a new [revision] and
-   [recorded_at] every call (2026-10-05: twelve claims rewritten 1,861 times),
-   so the counter compares the answer the tool reads, not the receipt. *)
-let memory_rewrite_receipt ~memory_id ~revision =
-  Printf.sprintf
-    {|{"ok":true,"error_kind":"","identity_disposition":"reobserved","what_committed":"w","rows_written":1,"revision":%d,"recorded_at":"2026-10-05T21:%02d:00Z","outcome":"persisted_current_snapshot","store":"current_memory_snapshot","memory_id":%S,"basis":{"kind":"observed"}}|}
-    revision revision memory_id
-;;
-
-let test_repeated_memory_rewrite_aborts_on_its_answer () =
-  let run ~memory_id_of_call =
-    with_active_raw_trace (fun ~path:_ ~active ->
-      let executions = ref 0 in
-      let tool, terminal_error =
-        one_dynamic_tool ~active ~name:"keeper_memory_write" (fun _input ->
-          incr executions;
-          Ok
-            { Agent_core.Types.content =
-                memory_rewrite_receipt
-                  ~memory_id:(memory_id_of_call !executions)
-                  ~revision:(3760 + !executions)
-            ; content_blocks = None
-            ; _meta = None
-            })
-      in
-      let input = `Assoc [ "title", `String "t"; "content", `String "c" ] in
-      let results =
-        List.map
-          (fun index -> tool.call ~call_id:(Printf.sprintf "rewrite-%d" index) input)
-          [ 1; 2; 3 ]
-      in
-      check int "three calls executed" 3 !executions;
-      check (option string) "no terminal error" None !terminal_error;
-      results)
-  in
-  (match run ~memory_id_of_call:(fun _ -> "sha256:aa") with
-   | [ first; second; third ] ->
-     check bool "first rewrite continues" true (Option.is_none first.abort_turn);
-     check bool "second rewrite continues" true (Option.is_none second.abort_turn);
-     (match third.abort_turn with
-      | Some (Repeated_tool_call { tool_name; repeated_count }) ->
-        check string "repeated tool" "keeper_memory_write" tool_name;
-        check int "repeat count" 3 repeated_count
-      | Some (Terminal_tool_boundary _) ->
-        fail "a memory rewrite produced a terminal-tool stop"
-      | None -> fail "a third identical rewrite did not stop the turn")
-   | _ -> fail "expected three results");
-  (* Another claim each call is another answer, so the counter restarts. *)
-  List.iter
-    (fun (result : Host.dynamic_tool_result) ->
-      check bool "a different claim continues" true (Option.is_none result.abort_turn))
-    (run ~memory_id_of_call:(Printf.sprintf "sha256:%02d"))
-;;
-
-(* Exercise the provider-call host, with real bridge storage and an explicit
-   owned base. Alternating inline and stored delivery must not reset progress. *)
-let test_selection_bridge_identity_through_official_host () =
-  let base_path = Filename.temp_file "official-selection-identity-" "" in
-  Sys.remove base_path;
-  Unix.mkdir base_path 0o700;
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
-  let claim = String.concat "\n" (List.init
-      (Tool_output.inline_ceiling_bytes Tool_output.default_model_projection / 32 + 1)
-      (fun i -> Printf.sprintf "Release R%04d requires two approvals." i)) in
-  let receipt index claim =
-    let fact = Keeper_memory_os_types.observed ~claim ~category:Fact ~now:100.
-        ~origin:{kind=Authored;trace_id="official-selection-fixture"} in
-    let id = Keeper_memory_os_types.memory_id fact in
-    `Assoc ["status",`String "completed";"purpose",`String "release approval";
-      "selection_id",`String (Printf.sprintf "selection-%d" index);
-      "selected",`List [`Assoc ["id",`String id;"use",`String "current_decision";
-        "current",`Assoc ["store",`String "current_memory_snapshot";"memory_id",`String id;
-          "current_fact",Keeper_memory_os_types.fact_to_json fact;
-          "direct_admission_witness_count",`Int 0;"successor_witness_count",`Int 0]]];
-      "deferred",`List [];"unavailable",`List [];"assessed_count",`Int 1;
-      "selected_count",`Int 1;"not_needed_count",`Int 0;"truncated_count",`Int 0;
-      "incomplete",`Bool false;"snapshot_revision",`Int 1;"guidance",`String "Scope applies."] in
-  let bridge ~inline index claim =
-    let data = receipt index claim in
-    let raw = Yojson.Safe.to_string data in
-    check bool "fixture is a valid producer answer" true
-      (Option.is_some (Keeper_tool_answer.answer ~tool_name:"keeper_memory_select" ~output_text:raw));
-    let projection = if inline then Tool_output.Inline_up_to {maximum_bytes=String.length raw+1024}
-      else Tool_output.default_model_projection in
-    Tool_bridge.to_agent_core_typed_result ~base_path ~model_projection:projection
-      ~answer_reader:(fun output_text ->
-        Keeper_tool_answer.answer ~tool_name:"keeper_memory_select" ~output_text)
-      (Tool_result.make_ok ~tool_name:"keeper_memory_select"
-        ~start_time:(Tool_timing.start ()) ~data ()) in
-  let forged_fingerprint = ref None in
-  let run ~forge = with_active_raw_trace (fun ~path:_ ~active ->
-    let calls = ref 0 in
-    let tool, terminal_error = one_dynamic_tool ~active ~base_path ~name:"keeper_memory_select"
-      (fun _ ->
-        incr calls;
-        let result = bridge ~inline:(not forge && !calls=2) !calls
-            (if forge then claim ^ string_of_int !calls else claim) in
-        match result with
-        | Error error -> fail error.Agent_core.Types.message
-        | Ok delivered ->
-          match Tool_output.decode_from_agent_core delivered.content with
-          | Tool_output.Decoded reference when forge ->
-            if !calls=1 then forged_fingerprint := reference.answer_fingerprint;
-            let reference = match Tool_output.with_answer_fingerprint reference !forged_fingerprint with
-              | Ok reference -> reference | Error _ -> fail "fingerprint fixture rejected" in
-            Ok {delivered with content=Tool_output.encode_for_agent_core (Tool_output.Stored reference)}
-          | Tool_output.Decoded _ -> Ok delivered
-          | Tool_output.Not_marker when not forge && !calls=2 -> Ok delivered
-          | _ -> fail "expected real bridge artifact") in
-    let results = List.init 3 (fun i -> tool.call ~call_id:(Printf.sprintf "selection-call-%d" i)
-        (`Assoc ["purpose",`String "release approval"])) in
-    check (option string) "no terminal error" None !terminal_error;
-    results) in
-  (match run ~forge:false with
-   | [first;second;third] ->
-     check bool "first stored receipt continues" true (Option.is_none first.abort_turn);
-     check bool "inline receipt shares first answer" true (Option.is_none second.abort_turn);
-     (match third.abort_turn with
-      | Some (Repeated_tool_call {tool_name="keeper_memory_select";repeated_count=3}) -> ()
-      | _ -> fail "stored-inline-stored same answer must yield at three")
-   | _ -> fail "expected three provider calls");
-  List.iter (fun (result : Host.dynamic_tool_result) ->
-    check bool "forged equal declarations cannot collapse changed answers" true
-      (Option.is_none result.abort_turn)) (run ~forge:true)
-;;
 
 let scoped_observation : Masc.Keeper_agent_result.tool_call_detail =
   let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
@@ -484,6 +318,41 @@ let prepare_direct_execution () =
   execution, source, target
 ;;
 
+(* Stateful input can have an identical URL receipt after every action. *)
+let test_repeated_browser_input_remains_deliverable () =
+  let shift_enter = `Assoc ["action", `String "press_key"; "key", `String "Enter";
+    "modifiers", `List [`String "Shift"]] in
+  let text value = `Assoc ["action", `String "type_text"; "text", `String value] in
+  let editing = [text "line one"; shift_enter; text "line two"; shift_enter;
+    text "line three"; shift_enter; text "line four"] in
+  let movement = List.init 6 (fun _ -> `Assoc ["action", `String "press_key";
+    "key", `String "ArrowDown"]) in
+  List.iter (fun runtime_label ->
+    List.iter (fun with_boundary ->
+      List.iter (fun inputs -> with_active_raw_trace (fun ~path:_ ~active ->
+        let executed = ref [] and handed_off = ref 0 in
+        let scope, _, target = prepare_direct_execution () in
+        let on_tool_boundary = if with_boundary then
+            Some (fun () -> Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
+              ~repetition_execution:(Some scope) ()) else None in
+        let tool, terminal_error = one_dynamic_tool ~active ~runtime_label ~name:"BrowserInteract"
+          ?on_tool_boundary
+          ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
+            incr handed_off;
+            Masc.Keeper_repetition_scope.Execution.observe scope ~target scoped_observation)
+          (fun input -> executed := input :: !executed;
+            Ok {Agent_core.Types.content = "{\"tabId\":4,\"url\":\"https://example.test/editor\"}";
+                content_blocks = None; _meta = None}) in
+        List.iteri (fun i input ->
+          let result = tool.call ~call_id:(Printf.sprintf "editor-%d" i) input in
+          check bool "each input succeeds" true result.success;
+          check bool "repeated receipt never invents a stop" true (Option.is_none result.abort_turn)) inputs;
+        check bool "all intended inputs executed in order" true (List.rev !executed = inputs);
+        check int "all results handed off" (List.length inputs) !handed_off;
+        check (option string) "no fabricated terminal error" None !terminal_error)) [editing; movement])
+      [false; true]) ["Codex"; "Claude Code"; "Antigravity"]
+;;
+
 let test_scoped_boundary_spans_official_attempts () =
   List.iter (fun runtime_label ->
     with_active_raw_trace (fun ~path:_ ~active ->
@@ -503,17 +372,15 @@ let test_scoped_boundary_spans_official_attempts () =
         ~on_tool_boundary:(fun () ->
           incr boundary_calls;
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~tool_calls:!calls ~input_tool_calls:!calls ())
+            ~repetition_execution:(Some execution) ())
         (fun _ -> incr executions;
           Ok { Agent_core.Types.content = "same-output"; content_blocks = None; _meta = None })
       in
       let result = tool.call ~call_id:"new-provider-first-call" (`Assoc []) in
       check int (runtime_label ^ " executes once") 1 !executions;
       check int "boundary follows handoff once" 1 !boundary_calls;
-      (match result.abort_turn with
-       | Some (Repeated_tool_call { tool_name = "effect"; repeated_count = 3 }) -> ()
-       | _ -> fail (runtime_label ^ " discarded prior-attempt repetition"));
-      check (option string) "repeat stop is not failure" None !terminal_error))
+      check bool "prior observations do not synthesize a host stop" true (Option.is_none result.abort_turn);
+      check (option string) "observation is not failure" None !terminal_error))
     [ "Codex"; "Claude Code"; "Antigravity" ]
 ;;
 
@@ -525,142 +392,6 @@ let test_scoped_boundary_spans_official_attempts () =
    the official client wiring (identical input, moving output, as when a tool
    appends to a file) and holds two lines: below the input threshold the turn
    keeps going, at the threshold it aborts with the measured streak. *)
-let test_moving_output_input_loop_aborts_at_input_threshold () =
-  List.iter (fun runtime_label ->
-    with_active_raw_trace (fun ~path:_ ~active ->
-      let module Scope = Masc.Keeper_repetition_scope in
-      let execution, _source, target = prepare_direct_execution () in
-      let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
-      let annotate_input = hash "annotate --file log.txt --line done" in
-      let calls = ref [] in
-      let appended = ref 0 in
-      let observation () =
-        incr appended;
-        { scoped_observation with
-          input_fingerprint = Some annotate_input
-        ; output_fingerprint =
-            Some (hash (Printf.sprintf "appended line %d" !appended)) }
-      in
-      let tool, terminal_error = one_dynamic_tool ~active ~runtime_label
-        ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
-          let observation = observation () in
-          Scope.Execution.observe execution ~target observation;
-          calls := observation :: !calls)
-        ~on_tool_boundary:(fun () ->
-          Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~tool_calls:!calls ~input_tool_calls:!calls ())
-        (fun _input ->
-          Ok { Agent_core.Types.content =
-                 Printf.sprintf "appended line %d" (!appended + 1)
-             ; content_blocks = None; _meta = None })
-      in
-      ignore (tool.call ~call_id:"input-loop-call-1" (`Assoc []));
-      ignore (tool.call ~call_id:"input-loop-call-2" (`Assoc []));
-      let third = tool.call ~call_id:"input-loop-call-3" (`Assoc []) in
-      check bool "moving output keeps the turn below the input threshold"
-        true (Option.is_none third.abort_turn);
-      let fourth = tool.call ~call_id:"input-loop-call-4" (`Assoc []) in
-      check bool "the fourth call still runs below the input threshold"
-        true (Option.is_none fourth.abort_turn);
-      (* The boundary counts the current call together with the recorded
-         observations, so the fifth identical-input call's boundary sees a
-         streak of five and aborts the turn. *)
-      let fifth = tool.call ~call_id:"input-loop-call-5" (`Assoc []) in
-      (match fifth.abort_turn with
-       | Some (Repeated_tool_call { tool_name = "effect"; repeated_count = 5 }) -> ()
-       | _ -> fail (runtime_label ^ " missed the identical-input loop"));
-      check (option string) "input-loop stop is not failure" None !terminal_error))
-    [ "Codex"; "Claude Code"; "Antigravity" ]
-;;
-
-(* #34083: an autonomous official-client turn admits no execution scope, and
-   until this boundary was installed for it the host kept only its own
-   exact-adjacent counter. The production boundary now runs for that turn
-   too, reading the turn accumulator without a scope. Reproduce the issue's
-   shape -- the Execute command one keeper ran 186 times with byte-identical
-   input -- through the host wiring and hold both axes: identical output
-   stops at [repeated_tool_call_yield_threshold] (3), moving output at
-   [repeated_tool_call_input_yield_threshold] (5). *)
-let execute_command_input =
-  `Assoc
-    [ "cwd", `String "."
-    ; "command", `String "hostname; id -un; uname -m; pwd; cat /proc/1/comm"
-    ; "shell", `String "sh"
-    ]
-;;
-
-let execute_observation ~output_text : Masc.Keeper_agent_result.tool_call_detail =
-  match
-    Masc.Keeper_tool_progress_identity.digest_tool_io
-      ~tool_name:"Execute"
-      ~input:execute_command_input
-      ~output_text ()
-  with
-  | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
-    { scoped_observation with
-      tool_name = "Execute"
-    ; input_fingerprint = Some input_fingerprint
-    ; output_fingerprint = Some output_fingerprint
-    }
-  | None -> fail "digest_tool_io refused the Execute fixture input"
-;;
-
-let test_autonomous_official_boundary_stops_execute_loop_without_scope () =
-  List.iter (fun runtime_label ->
-    let run ~label ~(output_text : int -> string) ~stops_at =
-      with_active_raw_trace (fun ~path:_ ~active ->
-        let calls = ref [] in
-        let boundary_calls = ref 0 in
-        let executions = ref 0 in
-        let tool, terminal_error =
-          one_dynamic_tool ~active ~runtime_label ~name:"Execute"
-            ~on_result_handoff:(fun ~invocation:_ ~content ->
-              calls := execute_observation ~output_text:content :: !calls)
-            ~on_tool_boundary:(fun () ->
-              incr boundary_calls;
-              Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-                ~repetition_execution:None ~tool_calls:!calls ~input_tool_calls:!calls ())
-            (fun _input ->
-              incr executions;
-              Ok { Agent_core.Types.content = output_text !executions; content_blocks = None; _meta = None })
-        in
-        let call index =
-          tool.call ~call_id:(Printf.sprintf "%s-%d" label index) execute_command_input
-        in
-        for index = 1 to stops_at - 1 do
-          check bool
-            (Printf.sprintf "%s %s call %d continues" runtime_label label index)
-            true
-            (Option.is_none (call index).abort_turn)
-        done;
-        (match (call stops_at).abort_turn with
-         | Some (Repeated_tool_call { tool_name; repeated_count }) ->
-           check string (label ^ " repeated tool") "Execute" tool_name;
-           check int (label ^ " repeat count") stops_at repeated_count
-         | Some (Terminal_tool_boundary _) ->
-           fail (label ^ " produced a terminal-tool stop instead of a repeat stop")
-         | None ->
-           fail
-             (Printf.sprintf
-                "%s %s: autonomous official-client loop was not stopped at call %d"
-                runtime_label label stops_at));
-        check int (label ^ " boundary decided every call") stops_at !boundary_calls;
-        check int (label ^ " every call executed") stops_at !executions;
-        check (option string) (label ^ " repeat stop is not failure") None !terminal_error)
-    in
-    (* The issue's shape: the container answers the same bytes every time. *)
-    run ~label:"identical-output"
-      ~output_text:(fun _ -> "host-a\nkeeper\naarch64\n/work\nsh\n")
-      ~stops_at:3;
-    (* Moving output: the exact axis cannot match, the input axis still can,
-       and the host's own counter could never have fired here because it
-       fingerprints the output. *)
-    run ~label:"moving-output"
-      ~output_text:(fun n -> Printf.sprintf "host-a\nkeeper\naarch64\n/work\nsh\n%d\n" n)
-      ~stops_at:5)
-    [ "Codex"; "Claude Code"; "Antigravity" ]
-;;
-
 let test_scoped_boundary_error_stops_immediately () =
   List.iter (fun runtime_label ->
     with_active_raw_trace (fun ~path:_ ~active ->
@@ -672,7 +403,7 @@ let test_scoped_boundary_error_stops_immediately () =
             { scoped_observation with input_fingerprint = Some "invalid-hash" })
         ~on_tool_boundary:(fun () ->
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~tool_calls:[] ~input_tool_calls:[] ())
+            ~repetition_execution:(Some execution) ())
         (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
       in
       let result = tool.call ~call_id:"invalid-scope-observation" (`Assoc []) in
@@ -784,7 +515,7 @@ let test_scoped_boundary_preserves_terminal_priority () =
     | _ -> fail "repeat stop replaced stronger terminal evidence")
 ;;
 
-let test_scoped_boundary_replaces_local_counter () =
+let test_explicit_boundary_observes_each_settled_call () =
   with_active_raw_trace (fun ~path:_ ~active ->
     let checks = ref 0 in
     let tool, _ = one_dynamic_tool ~active
@@ -877,7 +608,7 @@ let test_settled_official_tool_keeps_turn_running () =
           incr boundary_calls;
           check bool "tool result handed off before boundary decision" true !handed_off;
           Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:None ~tool_calls:[] ~input_tool_calls:[] ())
+            ~repetition_execution:None ())
         (fun _ ->
           Ok { Agent_core.Types.content = "settled result"; content_blocks = None; _meta = None })
     in
@@ -1085,7 +816,7 @@ let test_codex_tool_result_image_data_is_checked_before_settling () =
 (* The projector sends the blocks and never [content] when blocks are present,
    so a flat receipt that varies -- a timestamp, an elapsed duration -- used to
    change the fingerprint and let a model repeat an identical call forever. *)
-let test_repeated_structured_result_aborts_under_a_varying_flat_receipt () =
+let test_identical_structured_results_remain_deliverable () =
   with_active_raw_trace (fun ~path:_ ~active ->
     let calls = ref 0 in
     let tool, _terminal_error = one_dynamic_tool ~active (fun _ ->
@@ -1099,13 +830,13 @@ let test_repeated_structured_result_aborts_under_a_varying_flat_receipt () =
       (Option.is_none (call 1).abort_turn);
     check bool "one exact retry may be deliberate" true
       (Option.is_none (call 2).abort_turn);
-    match (call 3).abort_turn with
-    | Some (Repeated_tool_call { repeated_count; _ }) ->
-      check int "the third identical structured result stops the turn" 3 repeated_count
-    | _ -> fail "a varying flat receipt hid an identical structured result")
+    let third = call 3 in
+    check bool "identical structured answer remains deliverable" true (Option.is_none third.abort_turn);
+    check bool "structured answer is preserved" true
+      (third.content_blocks = Some [Agent_core.Types.Text "the same structured answer"]))
 ;;
 
-let test_text_only_results_still_fingerprint_their_content () =
+let test_text_only_results_remain_deliverable () =
   with_active_raw_trace (fun ~path:_ ~active ->
     let calls = ref 0 in
     let tool, _terminal_error = one_dynamic_tool ~active (fun _ ->
@@ -3439,26 +3170,13 @@ let () =
             "cancellation records terminal RAW observation"
             `Quick
             test_cancellation_records_terminal_raw_observation
-        ; test_case
-            "repeated exact dynamic tool call aborts the turn"
-            `Quick
-            test_repeated_exact_dynamic_tool_call_aborts_the_turn
-        ; test_case
-            "repeated memory rewrite aborts on its answer"
-            `Quick
-            test_repeated_memory_rewrite_aborts_on_its_answer
-        ; test_case "selection bridge identity reaches official host" `Quick
-            test_selection_bridge_identity_through_official_host
+
+
+
         ; test_case "scope repetition survives official provider replacement" `Quick
             test_scoped_boundary_spans_official_attempts
-        ; test_case
-            "identical-input loop with moving output aborts at the input threshold"
-            `Quick
-            test_moving_output_input_loop_aborts_at_input_threshold
-        ; test_case
-            "autonomous official-client Execute loop stops without a scope"
-            `Quick
-            test_autonomous_official_boundary_stops_execute_loop_without_scope
+
+
         ; test_case "scope observation failure stops official tool call" `Quick
             test_scoped_boundary_error_stops_immediately
         ; test_case "a carried MASC boundary error keeps no JSON in its message"
@@ -3466,7 +3184,7 @@ let () =
         ; test_case "scope stop preserves exact terminal priority" `Quick
             test_scoped_boundary_preserves_terminal_priority
         ; test_case "scope callback replaces provider-local counter" `Quick
-            test_scoped_boundary_replaces_local_counter
+            test_explicit_boundary_observes_each_settled_call
         ; test_case
             "dynamic tool progress does not trip repeat guard"
             `Quick
@@ -3499,10 +3217,10 @@ let () =
             test_codex_tool_result_image_media_type_is_checked_before_settling
         ; test_case "codex tool-result image data checked before settling" `Quick
             test_codex_tool_result_image_data_is_checked_before_settling
-        ; test_case "repeated structured result aborts under a varying receipt" `Quick
-            test_repeated_structured_result_aborts_under_a_varying_flat_receipt
-        ; test_case "text-only results still fingerprint their content" `Quick
-            test_text_only_results_still_fingerprint_their_content
+        ; test_case "identical structured results remain deliverable" `Quick
+            test_identical_structured_results_remain_deliverable
+        ; test_case "text-only results remain deliverable" `Quick
+            test_text_only_results_remain_deliverable
         ; test_case
             "ordinary post-effect failure aborts official-client turn"
             `Quick
@@ -3652,6 +3370,8 @@ let () =
             "the loading plan names the on-demand tools"
             `Quick
             test_loading_plan_names_the_on_demand_tools
+        ; test_case "repeated editor input settles on every official lane" `Quick
+            test_repeated_browser_input_remains_deliverable
         ; test_case
             "the result bound follows the bundle bounds"
             `Quick

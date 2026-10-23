@@ -1270,70 +1270,6 @@ let record_terminal_error terminal_error detail =
   if Option.is_none !terminal_error then terminal_error := Some detail
 ;;
 
-type repeated_call_state =
-  { fingerprint : string
-  ; count : int
-  }
-
-(* One exact retry may be deliberate; the third identical outcome proves two
-   consecutive transitions made no progress, matching the Agent Core guard. *)
-let repeated_call_abort_threshold = 3
-
-(* Hash what the model is shown, branching the way projection branches:
-   [None] delivers [content], [Some blocks] delivers the blocks and never
-   [content]. Hashing both let a tool whose unused flat receipt carries a
-   timestamp or a duration look like progress on every identical call, so the
-   repeated-call abort never fired on it. A text result whose tool reads an
-   answer out of it hashes that answer, for the same reason inside the text:
-   a receipt that stamps a revision or a clock on every identical call
-   ({!Keeper_tool_answer}). The shape tag keeps a text-only result, an answer
-   and a block result from colliding on the same bytes. *)
-let dynamic_tool_fingerprint ?base_path ~tool_name ~input result =
-  let open Digestif.SHA256 in
-  let context = feed_string empty tool_name in
-  let context = feed_string context (input |> Yojson.Safe.sort |> Yojson.Safe.to_string) in
-  let context = feed_string context (if result.success then "success" else "failure") in
-  let context = match result.content_blocks with
-    | None ->
-      (match Tool_output.decode_from_agent_core result.content with
-       | Tool_output.Decoded _ ->
-         (match Option.bind base_path (fun base_path ->
-            Keeper_tool_answer.verified_stored_answer ~base_path ~tool_name
-              ~output_text:result.content) with
-          | Some answer ->
-            feed_string
-              (feed_string context "answer")
-              (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string |> digest_string |> to_hex)
-          | None -> feed_string (feed_string context "text-only") result.content)
-       | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-        (match Keeper_tool_answer.answer ~tool_name ~output_text:result.content with
-       | Some answer ->
-         feed_string
-           (feed_string context "answer")
-           (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string |> digest_string |> to_hex)
-       | None -> feed_string (feed_string context "text-only") result.content))
-    | Some blocks ->
-      feed_string
-        (feed_string context "content-blocks")
-        (`List (List.map Llm_provider.Api_common.content_block_to_json blocks)
-         |> Yojson.Safe.to_string)
-  in
-  get context |> to_hex
-;;
-
-let rec observe_repeated_call state fingerprint =
-  let before = Atomic.get state in
-  let after =
-    match before with
-    | Some previous when String.equal previous.fingerprint fingerprint ->
-      { fingerprint; count = previous.count + 1 }
-    | Some _ | None -> { fingerprint; count = 1 }
-  in
-  if Atomic.compare_and_set state before (Some after)
-  then after.count
-  else observe_repeated_call state fingerprint
-;;
-
 type raw_trace_stage =
   | Run_start
   | Reasoning_effort
@@ -1605,9 +1541,9 @@ let masc_observation_sentence masc =
           | Keeper_internal_error.Runtime_reported_interrupt ->
             "reported this turn as interrupted"
           | Keeper_internal_error.Repeated_tool_call ->
-            "stopped this invocation after repeated tool calls without progress; completed effects were not replayed"
+            "reported a repeated-tool stop; completed effects were not replayed"
           | Keeper_internal_error.Repeated_assistant_text ->
-            "stopped this invocation after repeated assistant text without progress; completed effects were not replayed")
+            "reported a repeated-text stop; completed effects were not replayed")
      | Keeper_internal_error.Runtime_connection_closed
          { runtime_id; detail; turn_accepted } ->
        Printf.sprintf
@@ -1651,7 +1587,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
     ~turn_count ~context ~tools ~loading_plan
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
-    ~next_dynamic_invocation_index ~repeated_call_state ~on_tool_boundary ~on_result_handoff
+    ~next_dynamic_invocation_index ~on_tool_boundary ~on_result_handoff
     (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
@@ -1916,22 +1852,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                  as abort_turn) -> { result with abort_turn = Some abort_turn }
             | None -> result
           in
-          let final_result =
-            match on_tool_boundary, result.abort_turn with
-            | Some _, _ | None, Some _ -> result
-            | None, None ->
-              let fingerprint =
-                dynamic_tool_fingerprint ?base_path ~tool_name:tool.schema.name ~input result
-              in
-              let repeated_count = observe_repeated_call repeated_call_state fingerprint in
-              if repeated_count < repeated_call_abort_threshold then result
-              else (
-                Log.Keeper.warn ~keeper_name
-                  "repeated exact dynamic tool call detected: tool=%s count=%d"
-                  tool.schema.name repeated_count;
-                { result with abort_turn = Some
-                    (Repeated_tool_call { tool_name = tool.schema.name; repeated_count }) })
-          in
+          let final_result = result in
           (try on_result_handoff ~invocation ~content:final_result.content with
            | exn -> (* cancel-guard-ok: reraise_if_reserved re-raises Cancelled *)
              Llm_provider.Reserved_exn.reraise_if_reserved exn;
@@ -2012,7 +1933,6 @@ let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_appro
          (runtime_label ^ " dynamic tools require the Keeper shared context"))
   | tools, Some context ->
     let next_dynamic_invocation_index = Atomic.make 0 in
-    let repeated_call_state = Atomic.make None in
     Ok
       (List.map
          (dynamic_tool_of_agent_core
@@ -2034,7 +1954,6 @@ let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_appro
             ~pre_tool_rejects
             ~raw_trace_run
             ~next_dynamic_invocation_index
-            ~repeated_call_state
             ~on_tool_boundary
             ~on_result_handoff)
          tools)

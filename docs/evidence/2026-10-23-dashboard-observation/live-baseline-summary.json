@@ -1,0 +1,121 @@
+{
+  "observed_at": "2026-10-23T09:55:36.932164+00:00",
+  "base_url": "http://127.0.0.1:8935",
+  "interval_s": 0.5,
+  "accept_encoding": "identity",
+  "concurrent": false,
+  "scope": "sequential HTTP roundtrip including transfer; no injected load; not objective readiness",
+  "timing_scope": "total_ms ends at wire body receipt; decode_ms measures decompression and JSON/SSE parsing; client_total_ms sums these durations. Concurrent rounds defer decoding until all wire reads finish; the first round includes connection setup.",
+  "same_runtime": true,
+  "scheduler_before": {
+    "pool_domains": 14,
+    "probe": "running",
+    "interval_ms": 100.0,
+    "window_s": 60.0,
+    "stall_threshold_ms": 1000.0,
+    "lag": {
+      "samples": 600,
+      "p50_ms": 1.1573749999999883,
+      "p95_ms": 15.313082999999992,
+      "p99_ms": 119.856417,
+      "max_ms": 2301.045875,
+      "mean_ms": 9.562580643333321,
+      "stalls": 1,
+      "over_50ms_count": 15,
+      "over_200ms_count": 3
+    }
+  },
+  "scheduler_after": {
+    "pool_domains": 14,
+    "probe": "running",
+    "interval_ms": 100.0,
+    "window_s": 60.0,
+    "stall_threshold_ms": 1000.0,
+    "lag": {
+      "samples": 600,
+      "p50_ms": 1.1817909999999876,
+      "p95_ms": 17.855499999999996,
+      "p99_ms": 119.856417,
+      "max_ms": 2301.045875,
+      "mean_ms": 12.144895981666647,
+      "stalls": 2,
+      "over_50ms_count": 16,
+      "over_200ms_count": 4
+    }
+  },
+  "source_commit": "68ec8fb2c52545c68600928524dcc12945e55ee7",
+  "summary": {
+    "/health": {
+      "samples": 25,
+      "valid": 25,
+      "stale_samples": 0,
+      "statuses": {
+        "200": 25
+      },
+      "p50_ms": 2.279042,
+      "p95_ms": 179.588916,
+      "p99_ms": 1269.747875,
+      "max_ms": 1269.747875
+    },
+    "/api/v1/dashboard/shell?light=true": {
+      "samples": 25,
+      "valid": 25,
+      "stale_samples": 0,
+      "statuses": {
+        "200": 25
+      },
+      "p50_ms": 2.864666,
+      "p95_ms": 35.251333,
+      "p99_ms": 62.309416,
+      "max_ms": 62.309416
+    },
+    "/api/v1/dashboard/execution": {
+      "samples": 25,
+      "valid": 25,
+      "stale_samples": 0,
+      "statuses": {
+        "200": 25
+      },
+      "p50_ms": 53.741875,
+      "p95_ms": 639.85025,
+      "p99_ms": 1492.063458,
+      "max_ms": 1492.063458
+    },
+    "/api/v1/dashboard/tools": {
+      "samples": 25,
+      "valid": 25,
+      "stale_samples": 0,
+      "statuses": {
+        "200": 25
+      },
+      "p50_ms": 0.940666,
+      "p95_ms": 4.501459,
+      "p99_ms": 4.810333,
+      "max_ms": 4.810333
+    },
+    "/api/v1/dashboard/telemetry/summary": {
+      "samples": 25,
+      "valid": 25,
+      "stale_samples": 0,
+      "statuses": {
+        "200": 25
+      },
+      "p50_ms": 1.380667,
+      "p95_ms": 5.344417,
+      "p99_ms": 5.392084,
+      "max_ms": 5.392084
+    },
+    "mcp_ping": {
+      "samples": 25,
+      "valid": 25,
+      "stale_samples": 0,
+      "statuses": {
+        "200": 25
+      },
+      "p50_ms": 2.633542,
+      "p95_ms": 19.256667,
+      "p99_ms": 46.731958,
+      "max_ms": 46.731958
+    }
+  }
+}

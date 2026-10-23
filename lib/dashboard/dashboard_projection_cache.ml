@@ -75,53 +75,44 @@ let with_current_keeper_observations_using ~read ~(config : Workspace_utils.conf
   let request_sequence = Atomic.fetch_and_add candle_read_sequence 1 in
   let candle = read () in
   let equipment = Candle_observe.equipment candle in
-  let revisions = Hashtbl.create 16 in
-  let account_revision keeper =
-    match Hashtbl.find_opt revisions keeper with
-    | Some revision -> revision
-    | None ->
-      let revision = Candle_observe.account_revision candle ~keeper in
-      Hashtbl.add revisions keeper revision;
-      revision
-  in
   let summary = Candle_observation.to_json (Candle_observe.summary candle) in
   let set key value fields =
     if List.mem_assoc key fields then
       List.map (fun (name, previous) -> name, if name = key then value else previous) fields
     else (key, value) :: fields in
-  (* Address reads belong after both metadata and encoded HTTP caches. Board
-     delivery reads effective metadata at event time too. Memoize only within
-     this response because the same Keeper may appear in several sections. *)
-  let board_addresses = Hashtbl.create 8 in
-  let board_address keeper =
-    match Hashtbl.find_opt board_addresses keeper with
-    | Some address -> address
+  (* Keep exactly the fields inserted below as the observation identity.
+     The opaque ledger view also contains replay timestamps: those may change
+     without changing any public value. Read authority on every request and
+     share each Keeper's immutable result across this response's sections. *)
+  let keeper_observations = Hashtbl.create 16 in
+  let observed_fields keeper =
+    match Hashtbl.find_opt keeper_observations keeper with
+    | Some fields -> fields
     | None ->
-      let address = Keeper_board_address.read config keeper |> Keeper_board_address.to_yojson in
-      Hashtbl.add board_addresses keeper address;
-      address
+      let portrait, balance, revision, address = match keeper with
+        | Some keeper ->
+          let portrait = match equipment ~keeper with
+            | Ok value -> Keeper_portrait_equipment.Ready value
+            | Error reason -> Keeper_portrait_equipment.Unavailable reason in
+          portrait, Candle_observe.balance candle ~keeper,
+          Candle_observe.account_revision candle ~keeper,
+          Keeper_board_address.read config keeper
+        | None ->
+          Keeper_portrait_equipment.Unavailable "Keeper name unavailable", None, None,
+          Keeper_board_address.Unavailable Keeper_board_address.Metadata_absent in
+      let fields = [
+        "board_address", Keeper_board_address.to_yojson address;
+        "portrait", Keeper_portrait_equipment.reading_to_json portrait;
+        "candle_balance_milli", Json_util.option_to_yojson (fun value -> `String value) balance;
+        "candle_account_revision", Json_util.option_to_yojson (fun value -> `String value) revision;
+      ] in
+      Hashtbl.add keeper_observations keeper fields;
+      fields
   in
   let row = function
     | `Assoc fields as json ->
-      let portrait = match Json_util.assoc_string_opt "name" json with
-        | Some keeper -> (match equipment ~keeper with
-            | Ok value -> Keeper_portrait_equipment.Ready value
-            | Error reason -> Keeper_portrait_equipment.Unavailable reason)
-        | None -> Keeper_portrait_equipment.Unavailable "Keeper name unavailable" in
-      let value = Keeper_portrait_equipment.reading_to_json portrait in
-      let balance = match Json_util.assoc_string_opt "name" json with
-        | Some keeper -> Candle_observe.balance candle ~keeper
-        | None -> None in
-      let account_revision = match Json_util.assoc_string_opt "name" json with
-        | Some keeper -> account_revision keeper
-        | None -> None in
-      let address = match Json_util.assoc_string_opt "name" json with
-        | Some keeper -> board_address keeper
-        | None -> Keeper_board_address.to_yojson
-            (Keeper_board_address.Unavailable Keeper_board_address.Metadata_absent) in
-      `Assoc (fields |> set "board_address" address |> set "portrait" value
-        |> set "candle_balance_milli" (Json_util.option_to_yojson (fun value -> `String value) balance)
-        |> set "candle_account_revision" (Json_util.option_to_yojson (fun value -> `String value) account_revision))
+      let observation = observed_fields (Json_util.assoc_string_opt "name" json) in
+      `Assoc (List.fold_left (fun fields (key, value) -> set key value fields) fields observation)
     | json -> json in
   let section fields = List.map (function
     | "items", `List rows -> "items", `List (List.map row rows)
@@ -139,10 +130,10 @@ let with_current_keeper_observations_using ~read ~(config : Workspace_utils.conf
     (* This ordering witness covers every fresh row observation, including
        addresses. Equal Candle state alone must not let a delayed response
        restore an older alias after a newer configuration was displayed. *)
-    let addresses = Hashtbl.to_seq board_addresses |> List.of_seq
-      |> List.sort (fun (left, _) (right, _) -> String.compare left right) in
+    let observations = Hashtbl.to_seq keeper_observations |> List.of_seq
+      |> List.sort (fun (left, _) (right, _) -> Option.compare String.compare left right) in
     let observation_sequence = candle_observation_sequence
-      ~base_path:config.base_path ~request_sequence (candle, addresses) in
+      ~base_path:config.base_path ~request_sequence (summary, observations) in
     let projected = set "candle_observation_sequence" (`Int observation_sequence) projected in
     (match List.assoc_opt "keepers" fields with
      | Some (`Assoc _) -> `Assoc projected

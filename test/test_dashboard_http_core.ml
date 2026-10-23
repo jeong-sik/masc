@@ -3652,6 +3652,18 @@ beanie = 200
       ["HTTP execution", execution, [["keepers"]; ["continuity_briefs"]];
        "HTTP briefing", mission, [["keeper_briefs"]; ["operator_targets"; "keepers"]];
        "SSE payload preparation", broadcast, [["keepers"]; ["continuity_briefs"]]] in
+  (* Distinct whole-second reads must not invalidate encoded responses when
+     authoritative public observations are identical (half-life is off here).
+     A same-second test misses the ledger's internal replay-clock change. *)
+  let view_at at = Candle_observe.read ~now:(fun () -> at) ~base_path in
+  let earlier = view_at 1790640000. in
+  let later = view_at 1790640002. in
+  check bool "the replay clock really advanced" false (earlier = later);
+  let project view = Dashboard_projection_cache.For_test.with_current_keeper_observations
+    ~read:(fun () -> view) ~config execution_seed in
+  let first_observation = project earlier in
+  check bool "clock-only reads preserve the full prepared-response observation" true
+    (project later = first_observation);
   let first = execution_payload ~state ~sw ~clock req in
   (match Surface.dashboard_execution_cached_http_representation (context ()) with
    | Some (body, etag, _) ->

@@ -2702,11 +2702,9 @@ let test_stale_chat_interrupt_cannot_cancel_a_successor () =
   ignore (await_terminal owner second 1_000)
 ;;
 
-(* When a turn has already returned, its child switch has ended and only the
-   durable settle (and any settle hooks) is pending. A chat stop at that point
-   has nothing left to cancel: the Owner reports Operation_settling without
-   cancelling the durable settle, and the slot is released when that settle
-   completes. *)
+(* Projection runs on the Owner after its durable commit. An interrupt queued
+   while that callback is still running is processed after projection releases
+   the actor and must not cancel the already accepted operation. *)
 let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
   Eio_main.run @@ fun env ->
   let clock = env#clock in
@@ -2724,8 +2722,8 @@ let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
     Owner.
       { ready = (fun ~keeper_name:_ -> true)
       ; execute = operation_executor
-      ; on_execution_settled = (fun ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution:_ ->
-          Eio.Promise.resolve mark_settling ();
+      ; on_execution_settled = (fun ~keeper_name:_ ~operations ~claimed_operation_id:_ ~execution:_ ->
+          Eio.Promise.resolve mark_settling operations;
           Eio.Promise.await release)
       }
   in
@@ -2747,12 +2745,18 @@ let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
   check bool "started" true
     (Chat_operation.Operation_id.equal only (next_started ~clock started));
   let token = observed_token owner in
-  Eio.Promise.await settling;
-  (match interrupt_turn owner (Observed_turn { interrupt_token = token }) with
-   | Owner.Operation_settling -> () | _ -> fail "a returned execution was reported as cancellable");
-  (match interrupt_turn owner (Direct_operation only) with
-   | Owner.Operation_settling -> () | _ -> fail "a returned operation was reported as cancellable");
+  (match Eio.Promise.await settling with
+   | [{ Chat_operation.state = Succeeded {outcome_ref="ok";_}; _ }] -> ()
+   | _ -> fail "projection began before the accepted durable success");
+  let interrupted, resolve_interrupted = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let observed = interrupt_turn owner (Observed_turn { interrupt_token = token }) in
+    let direct = interrupt_turn owner (Direct_operation only) in
+    Eio.Promise.resolve resolve_interrupted (observed, direct));
   Eio.Promise.resolve allow_release ();
+  (match Eio.Promise.await interrupted with
+   | Owner.Operation_not_current _, Owner.Operation_not_current _ -> ()
+   | _ -> fail "an interrupt cancelled or retained the already settled execution");
   ignore (await_terminal owner only 1_000);
   (match interrupt_turn owner (Observed_turn { interrupt_token = token }) with
    | Owner.Operation_not_current _ -> () | _ -> fail "a released slot reported settling");

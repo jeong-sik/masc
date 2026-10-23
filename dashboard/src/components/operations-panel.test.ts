@@ -17,8 +17,8 @@ async function loadPanel() {
   vi.doMock('./ops', () => ({
     Ops: () => html`<div data-testid="ops">Ops</div>`,
   }))
-  vi.doMock('./approvals/approvals-surface', () => ({
-    ApprovalsSurface: () => html`<div data-testid="gate-hitl">Gate / HITL</div>`,
+  vi.doMock('./keeper-asks/keeper-asks-surface', () => ({
+    KeeperAsksSurface: () => html`<div data-testid="keeper-asks">Questions</div>`,
   }))
   vi.doMock('./server-config', () => ({
     ServerConfig: () => html`<div data-testid="server-config">ServerConfig</div>`,
@@ -43,17 +43,17 @@ describe('OperationsPanel', () => {
     vi.resetModules()
     vi.doUnmock('../router')
     vi.doUnmock('./ops')
-    vi.doUnmock('./approvals/approvals-surface')
+    vi.doUnmock('./keeper-asks/keeper-asks-surface')
     vi.doUnmock('./server-config')
   })
 
-  it('renders Ops and Gate/HITL when view is not set (default)', async () => {
+  it('renders interventions and keeper questions by default', async () => {
     const { OperationsPanel } = await loadPanel()
     render(html`<${OperationsPanel} />`, container)
     await flushUi()
 
     expect(container.textContent).toContain('Ops')
-    expect(container.textContent).toContain('Gate / HITL')
+    expect(container.querySelector('[data-testid="keeper-asks"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="surfaces"]')).toBeNull()
   })
 
@@ -64,37 +64,8 @@ describe('OperationsPanel', () => {
     await flushUi()
 
     expect(container.querySelector('[data-testid="ops"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="gate-hitl"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-asks"]')).toBeNull()
     expect(container.querySelector('[data-testid="surfaces"]')).toBeNull()
-  })
-
-  it('renders only Gate/HITL when view is gate', async () => {
-    route.value.params = { section: 'operations', view: 'gate' }
-    const { OperationsPanel } = await loadPanel()
-    render(html`<${OperationsPanel} />`, container)
-    await flushUi()
-
-    expect(container.textContent).not.toContain('Ops')
-    expect(container.textContent).toContain('Gate / HITL')
-    expect(container.querySelector('[data-testid="surfaces"]')).toBeNull()
-  })
-
-  it('renders FilterChips options for the current operations views', async () => {
-    const { OperationsPanel } = await loadPanel()
-    render(html`<${OperationsPanel} />`, container)
-    await flushUi()
-
-    const tablist = container.querySelector('[role="tablist"]')
-    const buttons = tablist?.querySelectorAll('[role="tab"]') ?? []
-    expect(buttons.length).toBe(5)
-    const labels = Array.from(buttons).map(b => b.textContent?.trim())
-    expect(labels).toContain('All')
-    expect(labels).toContain('Intervene')
-    expect(labels).toContain('Gate / HITL')
-    // Its own chip rather than a section of Gate: nothing is held waiting on a
-    // question, so it is not part of the approval queue's backlog.
-    expect(labels).toContain('질문')
-    expect(labels).toContain('Inspector')
   })
 
   it('wraps the panel in the v2 command surface class', async () => {
@@ -112,21 +83,18 @@ describe('OperationsPanel', () => {
     await flushUi()
 
     expect(container.textContent).toContain('Ops')
-    expect(container.textContent).toContain('Gate / HITL')
+    expect(container.querySelector('[data-testid="keeper-asks"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="surfaces"]')).toBeNull()
   })
 
-  it('marks the active chip with aria-selected=true', async () => {
-    route.value.params = { section: 'operations', view: 'gate' }
+  it('opens server configuration without intervention or question panels', async () => {
+    route.value.params = { section: 'operations', view: 'inspector' }
     const { OperationsPanel } = await loadPanel()
     render(html`<${OperationsPanel} />`, container)
     await flushUi()
 
-    const buttons = container.querySelectorAll('button[type="button"]')
-    const gateButton = Array.from(buttons).find(b => b.textContent?.trim() === 'Gate / HITL')
-    expect(gateButton?.getAttribute('aria-selected')).toBe('true')
-
-    const defaultBtn = Array.from(buttons).find(b => b.textContent?.trim() === 'All')
-    expect(defaultBtn?.getAttribute('aria-selected')).toBe('false')
+    expect(container.querySelector('[data-testid="server-config"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="ops"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-asks"]')).toBeNull()
   })
 })

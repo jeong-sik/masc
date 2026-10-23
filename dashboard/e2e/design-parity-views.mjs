@@ -54,10 +54,8 @@ export const VIEWS = [
   { id: 'work-kanban', surface: 'work', clicks: ['.wk-viewseg button:nth-of-type(2)'] },
   { id: 'work-verify', surface: 'work', clicks: ['.wk-viewseg button:nth-of-type(3)'] },
 
-  // Command — CMD_VIEWS. `?surface=command` lands on 'All'; the other three are
-  // section tabs, and the live app carries the same operations surface.
+  // Command — compare interventions and configuration. Gate has its own surface.
   { id: 'command-ops', surface: 'command', clicks: ['.fl-sec:nth-of-type(2)'] },
-  { id: 'command-gate', surface: 'command', clicks: ['.fl-sec:nth-of-type(3)'] },
   { id: 'command-inspector', surface: 'command', clicks: ['.fl-sec:nth-of-type(4)'] },
 
   // Lab — compare the backed tools, harness and keeper-memory-health routes.

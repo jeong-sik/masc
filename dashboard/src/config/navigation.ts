@@ -228,7 +228,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'command',
     label: 'Command',
     icon: 'command',
-    description: 'Intervention, Gate decisions, and HITL',
+    description: 'Interventions, keeper messages, and questions',
     defaultTab: 'command',
     defaultParams: { section: 'operations' },
     tabs: ['command'],
@@ -394,7 +394,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'operations',
       label: 'Actions',
-      description: 'Broadcasts, keeper messages, Gate/HITL, and inspector controls.',
+      description: 'Broadcasts, keeper messages, questions, and server configuration.',
       params: { section: 'operations' },
     },
   ],
@@ -545,7 +545,6 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
 
   // Dashboard consolidation Phase 1+6: command surface
   'command:intervene':    { section: 'operations' },
-  'command:gate':         { section: 'operations', view: 'gate' },
   'command:inspector':    { section: 'operations', view: 'inspector' },
 
   // Dashboard consolidation Phase 1: workspace surface

@@ -120,11 +120,11 @@ export function CmdGateLinks() {
   return html`
     <section class="lab-panel" data-testid="cmd-gate-links">
       <h4>Gate / HITL</h4>
-      <p class="ia-note">이 view 는 Gate surface 와 같은 컴포넌트입니다. 비계층 3모드(Always Allow · LLM Auto Judge · HITL)와 exact Always 규칙은 Gate 에서 관리합니다.</p>
+      <p class="ia-note">외부 작업의 승인 요청과 Always 규칙은 Gate에서 확인하고 관리합니다.</p>
       <div class="cmd-gatelinks">
         <button
           class="tm-lane"
-          onClick=${() => replaceRoute('command', { section: 'operations', view: 'gate' })}
+          onClick=${() => replaceRoute('approvals')}
         >
           <span class="tm-lane-t">Gate 열기${pending > 0 ? ` · 대기 ${pending}` : ''}</span>
           <span class="tm-lane-m">approvals · nonblocking HITL 큐 + exact Always 규칙</span>

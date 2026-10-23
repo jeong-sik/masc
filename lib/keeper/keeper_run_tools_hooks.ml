@@ -729,9 +729,6 @@ let assemble_hooks
                usage))
         ~on_after_turn_response:
           (fun ~response ->
-             Keeper_run_tools_hook_accumulator.record_assistant_turn_text
-               acc
-               response;
              Keeper_run_tools_hook_accumulator.record_wire_prompt_tokens
                acc
                response)

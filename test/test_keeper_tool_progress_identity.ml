@@ -570,7 +570,7 @@ let () =
             test_large_selection_projection_keeps_answer_identity
         ; test_case "a manifest-wrapped execute keeps identity" `Quick
             test_a_manifest_wrapped_execute_keeps_identity
-        ; test_case "a third memory rewrite stops the turn" `Quick
+        ; test_case "memory rewrite identity stays stable" `Quick
             test_memory_rewrite_identity_stays_stable
         ; test_case "memory identity survives changing inputs" `Quick
             test_memory_identity_survives_changing_inputs

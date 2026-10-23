@@ -522,6 +522,52 @@ let test_tool_io_digest_is_keyed_on_the_bytes () =
     (digest "keeper_tasks_list" input body)
 ;;
 
+let test_page_cursor_distinguishes_repeated_input_without_log_leak () =
+  let input cursor =
+    `Assoc [ "query", `String "voices"; "next_page_token", `String cursor ]
+  in
+  check bool "different pages keep different opaque identity" false
+    (String.equal
+       (fst (digest "masc_voices_list" (input "page-a") "{}"))
+       (fst (digest "masc_voices_list" (input "page-b") "{}")));
+  let logged =
+    input "page-a"
+    |> Masc.Observability_redact.redact_json_value
+    |> Masc.Observability_redact.redact_json_strings
+  in
+  check string "the observability cursor remains masked"
+    {|{"query":"voices","next_page_token":"[REDACTED]"}|}
+    (Yojson.Safe.to_string logged);
+  let nested_secret cursor =
+    `Assoc [ "client_secret_v2", `Assoc [ "next_page_token", `String cursor ] ]
+  in
+  check string "a secret-bearing parent cannot restore its cursor-shaped child"
+    (fst (digest "masc_voices_list" (nested_secret "opaque-a") "{}"))
+    (fst (digest "masc_voices_list" (nested_secret "opaque-b") "{}"))
+;;
+
+let test_confirmation_tokens_distinguish_actions_without_log_leak () =
+  let input token =
+    `Assoc [ "confirm_token", `String token; "decision", `String "confirm" ] in
+  let token index = Printf.sprintf "00000000-0000-0000-0000-%012d" index in
+  check bool "different pending actions keep different opaque identity" false
+    (String.equal
+       (fst (digest "masc_operator_confirm" (input (token 0)) "{}"))
+       (fst (digest "masc_operator_confirm" (input (token 1)) "{}")));
+  check (option string) "confirmation tokens stay masked in tool logs"
+    (Some {|{"confirm_token":"[REDACTED]","decision":"confirm"}|})
+    (Option.map Yojson.Safe.to_string
+       (Masc.Observability_redact.redacted_tool_input_json
+          ~tool_name:"masc_operator_confirm" (input (token 0))));
+  check string "other tools do not give credentials action identity"
+    (fst (digest "other_tool" (input (token 0)) "{}"))
+    (fst (digest "other_tool" (input (token 1)) "{}"));
+  let nested index = `Assoc ["client_secret_v2", input (token index)] in
+  check string "nested secret fields do not get action identity"
+    (fst (digest "masc_operator_confirm" (nested 0) "{}"))
+    (fst (digest "masc_operator_confirm" (nested 1) "{}"))
+;;
+
 let test_tool_io_digest_keeps_similar_calls_apart () =
   let shared = String.make 1024 'a' in
   let calls =
@@ -565,19 +611,15 @@ let test_tool_io_digest_survives_eviction () =
     (digest "masc_status" input body)
 ;;
 
-(* Restoring history for the repetition detector must not replay those calls
-   into the new invocation's receipt, visible result, or librarian evidence. *)
+(* A new invocation reports only calls actually executed in that invocation. *)
 let test_checkpoint_history_is_not_current_tool_execution () =
   let module Acc = Masc.Keeper_run_tools_hook_accumulator in
-  let prior = tool_call "Execute" in
   let meta =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc [ "name", `String "history-probe" ]) |> Result.get_ok
   in
   let acc =
-    Acc.create ~meta ~historical_tool_calls:[ prior; prior ]
-      ~historical_order:Acc.Ordered
-      ~history_pairs_at_setup:(Some 2)
+    Acc.create ~meta
       ~tool_surface:
         { turn_lane = Masc.Keeper_agent_tool_surface.Lane_text_only
         ; config_root = "fixture"
@@ -587,37 +629,20 @@ let test_checkpoint_history_is_not_current_tool_execution () =
   check int "a resumed no-tool invocation has no executed calls" 0
     (List.length acc.tool_calls);
   acc.tool_calls <- [ tool_call "Execute" ];
-  check int "historical observations remain separate from this invocation" 3
-    (List.length (Acc.tool_calls_for_repetition acc));
-  check int "historical evidence remains immutable" 2
-    (List.length acc.historical_tool_calls)
+  check int "only this invocation's executed call is reported" 1
+    (List.length acc.tool_calls)
 ;;
 
-(* HTTP A1..A4, then an official-client B5, then HTTP A6 are not five
-   consecutive A inputs. Outputs differ, so this exercises the input axis
-   rather than the order-independent exact fingerprint count. *)
 let test_history_memo_answers_a_purged_body_from_its_new_bytes () =
-  let open Agent_core.Types in
-  let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
   let input = `Assoc [ ("argv", `List [ `String "status" ]) ] in
-  let history body =
-    [ message Assistant [ ToolUse { id = "u1"; name = "masc_status"; input } ]
-    ; message
-        User
-        [ ToolResult
-            { tool_use_id = "u1"; content = body; outcome = Tool_succeeded; json = None; content_blocks = None }
-        ]
-    ]
-  in
   let history_memo = Masc.Keeper_tool_progress_identity.History_memo.create () in
   let walk body =
     match
-      Masc.Keeper_run_tools_setup.seed_tool_calls_from_history
-        ~history_memo
-        ~history_messages:(history body) ()
+      Masc.Keeper_tool_progress_identity.digest_history_pairs history_memo
+        [ { tool_name = "masc_status"; input; output_text = body } ]
     with
-    | [ { Masc.Keeper_agent_result.output_fingerprint = Some output; _ } ] -> output
-    | calls -> failf "expected one seeded call, got %d" (List.length calls)
+    | [ Some { Masc.Keeper_tool_progress_identity.output_fingerprint; _ } ] -> output_fingerprint
+    | _ -> fail "expected one fingerprinted history pair"
   in
   let live body =
     match
@@ -636,141 +661,6 @@ let test_history_memo_answers_a_purged_body_from_its_new_bytes () =
   let cleared = walk "[tool result cleared]" in
   check bool "a purged body is not answered from the old one" false (String.equal first cleared);
   check string "and it is answered from its own bytes" (live "[tool result cleared]") cleared
-;;
-
-let test_ledger_seed_drops_rows_the_history_already_represents () =
-  let open Agent_core.Types in
-  let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
-  let tool_use id name input =
-    ToolUse { id; name; input = `Assoc [ ("argv", `List [ `String input ]) ] }
-  in
-  let tool_result id output =
-    ToolResult
-      { tool_use_id = id
-      ; content = output
-      ; outcome = Tool_succeeded
-      ; json = None
-      ; content_blocks = None
-      }
-  in
-  (* The checkpoint history holds one answered call, tool_use_id "u1". *)
-  let history =
-    [ message Assistant [ tool_use "u1" "keeper_tasks_list" "list" ]
-    ; message User [ tool_result "u1" "{\"ok\":true}" ]
-    ]
-  in
-  let history_ids =
-    Masc.Keeper_run_tools_setup.history_tool_use_ids history
-  in
-  check (list string) "the history's tool_use ids are collected" [ "u1" ] history_ids;
-  (* (tool_use_id, fingerprints) as the row should be written: the last one
-     is a pre-fingerprint-era row and carries none. *)
-  let rows =
-    [ Some "u1", Some ("in-u1", "out-u1")   (* the history already holds this call *)
-    ; Some "u2", Some ("in-u2", "out-u2")   (* a call only the ledger holds *)
-    ; None,      Some ("in-none", "out-none") (* no join key: cannot be proven represented *)
-    ; None,      None                       (* no fingerprints: skipped *)
-    ]
-  in
-  let store = Filename.temp_file "task-627-ledger-seed-" "" in
-  Sys.remove store;
-  Unix.mkdir store 0o755;
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_tool_call_log.reset_for_testing ())
-    (fun () ->
-       (* Point the ledger at the fixture store without Eio: the seeder only
-          reads rows back, and the synchronous append path needs no fiber. *)
-       let dir = Filename.concat store ".masc" in
-       Unix.mkdir dir 0o755;
-       let config_dir = Filename.concat dir "config" in
-       Unix.mkdir config_dir 0o755;
-       Masc.Keeper_tool_call_log.init ~base_path:store ();
-       List.iter
-         (fun (tool_use_id, fingerprints) ->
-            let tool = "keeper_tasks_list" in
-            let input_fingerprint, output_fingerprint =
-              match fingerprints with
-              | Some (input, output) -> Some input, Some output
-              | None -> None, None
-            in
-            Masc.Keeper_tool_call_log.log_call
-              ~keeper_name:"dedup-fixture" ~tool_name:tool
-              ~input:(`Assoc []) ~output_text:"{}"
-              ~wire_outcome:Tool_result.Ok ~duration_ms:1.0
-              ?tool_use_id
-              ?input_fingerprint ?output_fingerprint ())
-         rows;
-       Masc.Keeper_tool_call_log.flush_now ();
-       let seeded =
-         Masc.Keeper_run_tools_setup.seed_tool_calls_from_ledger
-           ~history_tool_use_ids:history_ids
-           ~keeper_name:"dedup-fixture"
-           ()
-       in
-       check int "only the ledger-only calls seed" 2 (List.length seeded);
-       check string "the newest seeded call is the last ledger-only call" "in-none"
-         (match seeded with
-          | detail :: _ -> Option.value ~default:"" detail.input_fingerprint
-          | [] -> fail "unexpected seed shape"))
-;;
-
-let test_first_activation_excludes_retained_repetition () =
-  let module Setup = Masc.Keeper_run_tools_setup in
-  let module Judged = Masc.Keeper_repetition_judged in
-  let module Ledger = Masc.Keeper_tool_call_log in
-  let context = Agent_core.Context.create_sync () in
-  let store = Filename.temp_file "repetition-activation-" "" in
-  Sys.remove store;
-  Unix.mkdir store 0o755;
-  Fun.protect ~finally:Ledger.reset_for_testing (fun () ->
-    let masc = Filename.concat store ".masc" in
-    Unix.mkdir masc 0o755;
-    Unix.mkdir (Filename.concat masc "config") 0o755;
-    Ledger.init ~base_path:store ();
-    let keeper_name = "activation-fixture" in
-    let append () = Ledger.log_call ~keeper_name ~tool_name:"keeper_tasks_list"
-      ~input:(`Assoc []) ~output_text:"same" ~wire_outcome:Tool_result.Ok
-      ~duration_ms:1.0 ~input_fingerprint:"same-input" ~output_fingerprint:"same-output" () in
-    append (); append ();
-    let history = [tool_call "keeper_tasks_list"; tool_call "keeper_tasks_list"] in
-    let activate context =
-      match Setup.activate_repetition_boundary ~context ~keeper_name ~history_pairs:(List.length history) with
-      | Ok boundary -> boundary | Error detail -> fail detail in
-    let boundary = activate context in
-    check int "history remains intact" 2 (List.length history);
-    check int "pre-policy history is outside comparison" 0
-      (List.length (Judged.seed_beyond ~judged:boundary.history_pairs history));
-    let seed context =
-      let boundary = activate context in
-      Setup.seed_tool_calls_from_ledger ~judged:boundary.ledger_frontier
-        ~history_tool_use_ids:[] ~keeper_name () in
-    check int "old ledger remains but is not seeded" 0 (List.length (seed context));
-    append ();
-    let cold = Agent_core.Context.create_sync () in
-    (match Judged.restore ~source:(Agent_core.Context.copy context) ~target:cold with
-     | Ok _ -> () | Error error -> fail (Judged.error_to_string error));
-    let first = seed cold in
-    check int "activation does not move on resume" 1 (List.length first);
-    append (); append ();
-    check int "new observations remain available after activation" 3 (List.length (seed cold));
-    let retained = match Ledger.read_recent ~keeper_name ~n:10 () with
-      | Ok rows -> rows
-      | Error (Ledger.Index_unavailable detail) -> fail detail in
-    check int "ledger history is preserved" 5 (List.length retained);
-    let fresh = Agent_core.Context.create_sync () in
-    (match Judged.reset_history fresh with
-     | Error error -> fail (Judged.error_to_string error)
-     | Ok reset -> check bool "pre-activation purge does not invent activation" true
-         (Judged.read_opt reset = Ok None));
-    let empty = Agent_core.Context.create_sync () in
-    Judged.record empty {Judged.history_generation=Initial; history_pairs=0;
-      ledger_frontier=Keeper_tool_call_index.empty_frontier};
-    let restored = Agent_core.Context.create_sync () in
-    (match Judged.restore ~source:empty ~target:restored with
-     | Error error -> fail (Judged.error_to_string error)
-     | Ok boundary -> check bool "explicit empty activation survives restore" true
-         (Judged.read_opt restored = Ok (Some boundary))))
 ;;
 
 let test_seed_stops_where_a_yield_already_judged () =
@@ -1434,12 +1324,12 @@ let () =
             test_applied_gate_replay_seeds_terminal_settlement;
           test_case "checkpoint history is not current execution" `Quick
             test_checkpoint_history_is_not_current_tool_execution;
-          test_case "first activation excludes retained repetition" `Quick
-            test_first_activation_excludes_retained_repetition;
-          test_case "ledger seed drops rows the history already represents" `Quick
-            test_ledger_seed_drops_rows_the_history_already_represents;
           test_case "history memo answers a purged body from its new bytes" `Quick
             test_history_memo_answers_a_purged_body_from_its_new_bytes;
+          test_case "page cursors retain identity while logs mask them" `Quick
+            test_page_cursor_distinguishes_repeated_input_without_log_leak;
+          test_case "confirmation tokens retain action identity while logs mask them" `Quick
+            test_confirmation_tokens_distinguish_actions_without_log_leak;
           test_case "tool io digest is keyed on the bytes" `Quick
             test_tool_io_digest_is_keyed_on_the_bytes;
           test_case "tool io digest keeps similar calls apart" `Quick

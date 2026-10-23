@@ -384,14 +384,7 @@ let test_scoped_boundary_spans_official_attempts () =
     [ "Codex"; "Claude Code"; "Antigravity" ]
 ;;
 
-(* #28971: a keeper repeated a successful tool call with identical arguments 31
-   times in one turn while every success changed the tool's own state, so the
-   output never repeated either. The exact axis is blind to that shape by
-   construction — its fingerprint includes the output — and the incident was
-   filed before the input axis existed. This pin reproduces the shape through
-   the official client wiring (identical input, moving output, as when a tool
-   appends to a file) and holds two lines: below the input threshold the turn
-   keeps going, at the threshold it aborts with the measured streak. *)
+(* A malformed scope observation remains a real boundary error. *)
 let test_scoped_boundary_error_stops_immediately () =
   List.iter (fun runtime_label ->
     with_active_raw_trace (fun ~path:_ ~active ->
@@ -529,16 +522,13 @@ let test_explicit_boundary_observes_each_settled_call () =
     check int "scope callback owns every decision" 3 !checks)
 ;;
 
-let test_dynamic_tool_progress_does_not_trip_the_repeat_guard () =
+let test_dynamic_tool_failures_do_not_invent_a_host_stop () =
   with_active_raw_trace (fun ~path:_ ~active ->
     let executions = ref 0 in
     let tool, terminal_error =
       one_dynamic_tool ~active (fun _input ->
         incr executions;
-        (* Identical in every field to the repeat-guard fixture above except
-           the message, which is the variable under test: the guard
-           fingerprints the tool's output, so a message that changes must not
-           accumulate toward the repeat threshold. *)
+        (* Tool failures remain visible results for the provider. *)
         Error
           { Agent_core.Types.message =
               Printf.sprintf "changing failure %d" !executions
@@ -554,8 +544,8 @@ let test_dynamic_tool_progress_does_not_trip_the_repeat_guard () =
       in
       check bool "changing result continues" true (Option.is_none result.abort_turn)
     done;
-    check int "all progressing calls execute" 10 !executions;
-    check (option string) "progress is not terminal" None !terminal_error)
+    check int "all calls execute" 10 !executions;
+    check (option string) "tool result does not synthesize a terminal stop" None !terminal_error)
 ;;
 
 let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
@@ -846,7 +836,7 @@ let test_text_only_results_remain_deliverable () =
          ; _meta = None })
     in
     let call index = tool.call ~call_id:(Printf.sprintf "text-%d" index) (`Assoc []) in
-    check bool "distinct text results are progress, not repetition" true
+    check bool "distinct text results remain deliverable" true
       (List.for_all (fun index -> Option.is_none (call index).abort_turn) [ 1; 2; 3 ]))
 ;;
 
@@ -3173,7 +3163,7 @@ let () =
 
 
 
-        ; test_case "scope repetition survives official provider replacement" `Quick
+        ; test_case "scope observations survive a shared-host attempt replacement" `Quick
             test_scoped_boundary_spans_official_attempts
 
 
@@ -3186,9 +3176,9 @@ let () =
         ; test_case "scope callback replaces provider-local counter" `Quick
             test_explicit_boundary_observes_each_settled_call
         ; test_case
-            "dynamic tool progress does not trip repeat guard"
+            "dynamic tool failures do not invent a host stop"
             `Quick
-            test_dynamic_tool_progress_does_not_trip_the_repeat_guard
+            test_dynamic_tool_failures_do_not_invent_a_host_stop
         ; test_case
             "repeated host stop is a checkpoint yield"
             `Quick
@@ -3370,7 +3360,7 @@ let () =
             "the loading plan names the on-demand tools"
             `Quick
             test_loading_plan_names_the_on_demand_tools
-        ; test_case "repeated editor input settles on every official lane" `Quick
+        ; test_case "repeated editor input settles through the shared host" `Quick
             test_repeated_browser_input_remains_deliverable
         ; test_case
             "the result bound follows the bundle bounds"

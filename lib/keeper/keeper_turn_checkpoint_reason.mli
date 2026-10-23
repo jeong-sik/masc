@@ -18,9 +18,8 @@ type t =
       { tool_name : string
       ; repeated_count : int
       }
-      (** The runtime's loop guard ended the turn: the same tool was called
-          [repeated_count] times with byte-identical input and output
-          ([Keeper_agent_run.repeated_tool_call_yield_threshold]). *)
+      (** An explicit runtime/host stop reported repeated calls. This carrier
+          preserves that report; Keeper does not infer it from equal receipts. *)
   | Repeated_assistant_text of { repeated_count : int }
-      (** The loop guard ended the turn after [repeated_count] byte-identical
-          assistant messages with no tool call between them. *)
+      (** An explicit runtime/host stop reported repeated assistant text.
+          Equal text alone does not authorize a Keeper-generated stop. *)

@@ -4266,9 +4266,8 @@ candidates = [%s]
                        | Ok () ->
                          let config = Workspace.default_config base_path in
                          (* The call ledger is initialized by the server
-                            bootstrap, which this fixture does not run; a
-                            production turn does not start without it
-                            (activate_repetition_boundary). *)
+                            bootstrap, which this fixture does not run; initialize it to
+                            capture the fixture's actual tool receipts. *)
                          Keeper_tool_call_log.init ~base_path ();
                          let meta = production_keeper_meta ~base_path ~trace_id in
                          (match Keeper_meta_store.replace_snapshot config meta with

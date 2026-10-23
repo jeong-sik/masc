@@ -46,7 +46,16 @@ val prepare_process :
     is already active, call [before_exec] to preserve the existing lease,
     prepare [<base_path>/.masc/runtime/events] through no-follow directory
     checks, then exec [executable_path] with the unchanged [argv] and an
-    environment containing that directory.
+    environment containing that directory. OCaml snapshots the variable at
+    process initialization, so setting it before [Runtime_events.start] in
+    this process would be too late. A successful exec keeps the PID; its
+    directory environment prevents a second exec.
+
+    A configured directory, including an empty value, is preserved. Disabled
+    events and an already active ring also leave the process unchanged and
+    do not call [before_exec]. In particular, a ring preloaded through
+    [OCAML_RUNTIME_EVENTS_START] is not relocated or unlinked; that launch
+    must set its directory before entering OCaml.
 
     Expected directory/exec failures return [Error] without fallback. Exec
     failure does not change this process's environment. The caller releases

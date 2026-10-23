@@ -3,11 +3,14 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
+import {Worker} from 'node:worker_threads'
+import {once} from 'node:events'
 import JZZ from 'jzz'
 import midiFiles from 'jzz-midi-smf'
 import {newEditor,editorCommand,selectedNotes} from '../sequencer-editor.mjs'
 import {importMidiSource,midiSourcePattern} from '../midi-source.mjs'
 import {saveProject,loadProject,projectMidi} from '../sequencer-files.mjs'
+import {phraseDocument} from '../phrase-arrangement.mjs'
 midiFiles(JZZ)
 const command=(editor,line)=>editorCommand(editor,line).editor
 const commands=(editor,lines)=>lines.reduce(command,editor)
@@ -115,4 +118,25 @@ test('release-boundary raw attacks follow actual cross-track event order even wi
       assert.deepEqual(command(next,'undo').project,editor.project)
     }
   }
+})
+
+test('actual harmony and arrangement workers consume edited source release times and retain portable editable gates',async()=>{
+  const editor=commands(newEditor(source()),['channel 1','select-all','duration-notes 1/7'])
+  const worker=new Worker(new URL('../sequencer-worker.mjs',import.meta.url))
+  const directory=await mkdtemp(join(tmpdir(),'masc-duration-flow-'));let id=0
+  const request=async options=>{
+    const reply=once(worker,'message');worker.postMessage({id:++id,project:editor.project,cancel:new SharedArrayBuffer(4),options})
+    const result=(await reply)[0];assert.equal(result.ok,true,result.error);return result.result
+  }
+  try {
+    const harmony=await request({format:'harmony',scope:{kind:'track',id:'0',channel:0}})
+    assert.deepEqual(harmony.rows.map(row=>[row.start,row.end,row.pitches]),[[0,143,[60]],[143,1001,[]],[1001,1144,[64]],[1144,4004,[]]])
+    const arranged=await request({format:'arrangement'})
+    assert.deepEqual(phraseDocument(arranged.project,arranged.asset),editor.project)
+    const path=join(directory,'arrangement.json');await saveProject(path,arranged.project)
+    const reopened=(await loadProject(path)).project
+    assert.deepEqual(phraseDocument(reopened,arranged.asset),editor.project)
+    const exported=midiSourcePattern(importMidiSource(projectMidi(phraseDocument(reopened,arranged.asset))))
+    assert.deepEqual(exported.notes.filter(n=>n.track===0&&n.channel===0).map(n=>n.duration),[143,143])
+  }finally{await worker.terminate();await rm(directory,{recursive:true,force:true})}
 })

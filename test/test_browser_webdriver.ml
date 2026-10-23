@@ -396,6 +396,62 @@ let test_semantic_click_uses_native_pointer_input () =
      | Lane.Answered _ | Lane.Refused _ | Lane.Lane_absent | Lane.Timed_out -> fail "stale native guard must reject before input");
     check int "failed guard sends no input or fallback" 2 !inputs)
 
+(* Firefox sizes windows, not viewports: the driver asks for the viewport plus
+   the browser's own chrome (outer minus inner) and reads the result back. *)
+let test_set_viewport_resizes_the_window () =
+  Eio_main.run (fun _ ->
+    (* The fake window: the chrome is 85 pixels tall while maximized (1366 wide) and 73 once resized, as on Firefox 158;
+       never narrower than 500 or shorter than 120. *)
+    let outer = ref (1366, 768) and rects = ref [] in
+    let inner () = let w, h = !outer in (w, h - (if w >= 1366 then 85 else 73)) in
+    let request ~method_ ~path ~body = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET, "/session/owned/window" -> Ok (`String "tab")
+      | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
+      | `GET, "/session/owned/window/rect" ->
+        let w, h = !outer in Ok (`Assoc ["x",`Int 0;"y",`Int 0;"width",`Int w;"height",`Int h])
+      | `POST, "/session/owned/window/rect" ->
+        let get key = Yojson.Safe.Util.(Option.get body |> member key |> to_int) in
+        let w = max 500 (get "width") and h = max 120 (get "height") in
+        rects := (get "width", get "height") :: !rects; outer := (w, h);
+        Ok (`Assoc ["width",`Int w;"height",`Int h])
+      | `POST, "/session/owned/execute/sync" ->
+        let args = Yojson.Safe.Util.(Option.get body |> member "args" |> to_list) in
+        let script = Yojson.Safe.Util.(Option.get body |> member "script" |> to_string) in
+        let iw, ih = inner () in
+        if String.length script > 6 && String.sub script 0 6 = "return" && args = [] && String.contains script 'w' && String.contains script ':'
+           && String.length script < 60 then Ok (`Assoc ["w",`Int iw;"h",`Int ih])
+        else if args = [] then Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture";
+            "innerWidth",`Int iw;"innerHeight",`Int ih;"devicePixelRatio",`Int 1])
+        else Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture";"scrollX",`Int 0;"scrollY",`Int 0])
+      | _ -> fail ("unexpected request " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    let resize size = Driver.execute driver (Lane.Page_interact {frame_path=[];tab_id=1;
+      expected_url=Some "https://example.org";action=Lane.Set_viewport size}) in
+    (match resize (Lane.Fit {width=800;height=600}) with
+     | Lane.Answered (`Assoc fields) ->
+       let data = List.assoc "data" fields in
+       check bool "the page reports the asked viewport" true
+         (Yojson.Safe.Util.member "innerWidth" data = `Int 800 && Yojson.Safe.Util.member "innerHeight" data = `Int 600
+          && Yojson.Safe.Util.member "action" data = `String "set_viewport")
+     | _ -> fail "a 800 x 600 viewport must be set");
+    check bool "the first request used the maximized chrome, the second corrected it" true
+      (List.rev !rects |> fun asked -> List.length asked >= 2 && List.hd asked = (800, 685) && List.nth asked 1 = (800, 673));
+    (match resize (Lane.Fit {width=300;height=100}) with
+     | Lane.Refused detail -> check bool "a clamped request is reported with the size kept" true
+         (String.length detail > 0 && (let s = detail in let rec has i = i + 3 <= String.length s && (String.sub s i 3 = "500" || has (i+1)) in has 0))
+     | _ -> fail "a request below the smallest window must be refused");
+    (match resize Lane.Browser_default with
+     | Lane.Answered _ -> check bool "the first size returns" true (!outer = (1366, 768))
+     | _ -> fail "the browser's own size must return");
+    (match resize Lane.Browser_default with
+     | Lane.Answered _ -> check bool "restoring twice changes nothing" true (!outer = (1366, 768))
+     | _ -> fail "restoring an unsized window is a no-op"))
+
 let test_open_window_asks_for_a_window () =
   Eio_main.run (fun _ ->
     let kinds = ref [] and navigations = ref [] in
@@ -855,6 +911,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "optional document never selects or blocks owner" `Quick test_optional_document_never_selects_or_blocks_owner;
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
   test_case "semantic clicks use native input" `Quick test_semantic_click_uses_native_pointer_input;
+  test_case "set_viewport resizes the window" `Quick test_set_viewport_resizes_the_window;
   test_case "open_window asks the driver for a window" `Quick test_open_window_asks_for_a_window;
   test_case "framed interaction enters the frame first" `Quick test_interact_enters_frames;
   test_case "pointer release failure recovery" `Quick test_pointer_release_recovery;

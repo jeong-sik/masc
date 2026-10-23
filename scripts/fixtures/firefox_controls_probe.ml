@@ -98,6 +98,14 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     check "open_window returns a tab that reads as its own page" (member "url" (read window_tab) = `String (fixture_url ^ "/second"));
     check "the window's tab id is new" (window_tab <> first && window_tab <> second);
     act window_tab Browser_action.Close_tab;
+    let resize size = success (interact_raw first ~expected_url:(fixture_url ^ "/first") (Browser_lane.Set_viewport size)) in
+    let sized = resize (Browser_lane.Fit {width=800;height=600}) in
+    check "the resized page reports the asked viewport" (member "innerWidth" sized = `Int 800 && member "innerHeight" sized = `Int 600);
+    (match interact_raw first ~expected_url:(fixture_url ^ "/first") (Browser_lane.Set_viewport (Browser_lane.Fit {width=300;height=100})) with
+     | Browser_lane.Refused _ -> check "a viewport below the smallest window is refused with the size kept" true
+     | _ -> failwith "a viewport below the smallest window was accepted");
+    let restored = resize Browser_lane.Browser_default in
+    check "the window's first size returns" (member "innerWidth" restored <> `Int 800);
     let rejected = interact_raw first (Browser_lane.Click "input") in
     check "ambiguous selector rejected before effect" (match rejected with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
     input first (Browser_lane.Scroll {x=0;y=400});

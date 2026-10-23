@@ -7,7 +7,7 @@ type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:
 type pointer_state = Released | Release_required
 type located_node = { node_id : string; description : string }
 type locate = scene:Browser_scene.t -> instruction:string option -> (located_node list, string) result
-type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
+type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable window_sizes : (string * (int * int)) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
 type t = { start_downloads : Browser_downloads.start; binary : string option; locate : locate option; request : request; mutex : Eio.Mutex.t; active : int Atomic.t; mutable session : session option; mutable next_tab : int; observed_session : Browser_lane.session_observation Atomic.t }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -153,6 +153,70 @@ let enter_frames t session selectors =
         `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id]])) in
       enter rest in
   enter selectors
+(* Firefox sizes a window; the WebDriver rect is the outer size. The browser's
+   own chrome is outer minus inner, so the window is asked for the viewport
+   plus that difference and the inner size is read back. Headless Firefox keeps
+   a window at least 500 x 120 outer pixels (probed on Firefox 158): a smaller
+   request leaves the viewport larger than asked, which is reported, not hidden.
+   The first resize of a window remembers its outer size for [Browser_default]. *)
+let set_viewport t session size args =
+  let failure ~started message =
+    Ok (`Assoc ["interactionFailure",`Assoc ["message",`String message;"effectStarted",`Bool started]]) in
+  match script t session Browser_interaction.url_guard_script [args] with
+  | Error error -> failure ~started:false (error_message error)
+  | Ok observed ->
+    let int key json = match field key json with
+      | Some (`Int n) -> Ok n
+      | _ -> Error (Protocol ("window measurement lacks " ^ key)) in
+    let* handle = match call t session `GET "/window" None with
+      | Ok (`String handle) -> Ok handle
+      | Ok _ -> Error (Protocol "invalid current browser window")
+      | Error error -> Error error in
+    let measure () =
+      let* rect = call t session `GET "/window/rect" None in
+      let* outer_w = int "width" rect in
+      let* outer_h = int "height" rect in
+      let* inner = script t session "return {w:innerWidth,h:innerHeight};" [] in
+      let* inner_w = int "w" inner in
+      let* inner_h = int "h" inner in
+      Ok (outer_w, outer_h, inner_w, inner_h) in
+    let* (first_w, first_h, _, _) as start = measure () in
+    (* The chrome around the viewport differs between a maximized and a normal
+       window (85 then 73 pixels on Firefox 158), so the first request can land
+       a few pixels off; measure again and correct, a bounded number of times. *)
+    let rec settle attempts (outer_w, outer_h, inner_w, inner_h) = match size with
+      | Browser_lane.Browser_default ->
+        (match List.assoc_opt handle session.window_sizes with
+         | None -> Ok ()
+         | Some (w,h) ->
+           let* _ = call t session `POST "/window/rect" (Some (`Assoc ["width",`Int w;"height",`Int h])) in Ok ())
+      | Browser_lane.Fit {width;height} ->
+        if inner_w = width && inner_h = height || attempts = 0 then Ok ()
+        else
+          let* _ = call t session `POST "/window/rect"
+            (Some (`Assoc ["width",`Int (width + outer_w - inner_w);"height",`Int (height + outer_h - inner_h)])) in
+          let* measured = measure () in
+          if measured = (outer_w, outer_h, inner_w, inner_h) then Ok () else settle (attempts - 1) measured in
+    let* () = match size with
+      | Browser_lane.Fit _ when not (List.mem_assoc handle session.window_sizes) ->
+        session.window_sizes <- (handle,(first_w,first_h)) :: session.window_sizes; Ok ()
+      | Browser_lane.Fit _ | Browser_lane.Browser_default -> Ok () in
+    let* () = settle 3 start in
+    (match size with
+     | Browser_lane.Browser_default -> session.window_sizes <- List.remove_assoc handle session.window_sizes
+     | Browser_lane.Fit _ -> ());
+    let* after = script t session Browser_interaction.viewport_receipt_script [] in
+    let* old_url = string_field "url" observed in
+    let* after_w = int "innerWidth" after in
+    let* after_h = int "innerHeight" after in
+    (match size with
+     | Browser_lane.Fit {width;height} when after_w <> width || after_h <> height ->
+       failure ~started:true (Printf.sprintf
+         "Firefox kept the viewport at %d x %d instead of %d x %d; its smallest window is larger than that" after_w after_h width height)
+     | Browser_lane.Fit _ | Browser_lane.Browser_default ->
+       (match after with
+        | `Assoc fields -> Ok (`Assoc (("action",`String "set_viewport")::("urlBefore",`String old_url)::fields))
+        | _ -> Error (Protocol "invalid post-resize observation")))
 let dialog_text t session =
   match call t session `GET "/alert/text" None with
   | Ok (`String text) -> Ok (`Assoc ["open",`Bool true;"text",`String text])
@@ -294,7 +358,7 @@ let rec execute_unlocked t = function
              | Transport _ | Protocol _ -> Browser_lane.Browser_unknown);Error error
          | exception exn -> Atomic.set t.observed_session Browser_lane.Browser_unknown;raise exn in
        let* id = string_field "sessionId" result in
-       let owned = { pointer_state = Released; id; handles = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
+       let owned = { pointer_state = Released; id; handles = []; window_sizes = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
        t.session <- Some owned;
        Eio.Switch.run (fun setup_sw ->
          let committed = ref false in
@@ -467,7 +531,7 @@ let rec execute_unlocked t = function
         let args = Browser_lane.interaction_args ~tab_id ~frame_path ~expected_url action in
         match action with
         | Browser_lane.Set_zoom _ -> Error (Protocol "set_zoom requires a connected WebExtension browser")
-        | Browser_lane.Set_viewport _ -> Error (Protocol "set_viewport requires a live BiDi connection or Stagehand")
+        | Browser_lane.Set_viewport size -> set_viewport t session size args
         | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
           Error (Protocol "unresolved semantic pointer target")
         | Browser_lane.Type_text {text;_} ->
@@ -675,8 +739,6 @@ let execute t verb =
     match verb with
     | Browser_lane.Page_interact {action=Browser_lane.Set_zoom _;_} ->
       Browser_lane.Rejected_before_effect "set_zoom requires a connected WebExtension browser"
-    | Browser_lane.Page_interact {action=Browser_lane.Set_viewport _;_} ->
-      Browser_lane.Rejected_before_effect "set_viewport requires a live BiDi connection or Stagehand"
     | Browser_lane.Page_interact {action=Browser_lane.Activate_tab;_} ->
       Browser_lane.Rejected_before_effect "activate_tab requires live lane; automation observations already select their explicit tab"
     | Browser_lane.Page_instruct _ | Browser_lane.Page_extract _ ->
@@ -690,7 +752,7 @@ let execute t verb =
     | Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | Browser_lane.Page_network _ | Browser_lane.Page_cookies _ | Browser_lane.Page_capture _ | Browser_lane.Page_scene _
     | Browser_lane.Page_interact
         { action =
-            ( Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
+            ( Browser_lane.Set_viewport _ | Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
             | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Scroll _
             | Browser_lane.Hover _ | Browser_lane.Drag_to _
             | Browser_lane.Hover_at _ | Browser_lane.Click_at _

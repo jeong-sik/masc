@@ -366,8 +366,7 @@
    * Verified via getComputedStyle (2026-06-30): skin-v2.css (html[data-skin=v2],
    * spec 0,3,1) wins for the app (lg10/md6/sm4); generated tokens.generated.css
    * wins with no skin (lg12/md6/sm4). The :root lg6/md4/sm3 never render. SSOT
-   * is skin-v2.css (app) / generated (preview). .gd-board sets its own xs/pill
-   * on the element (LIVE). Do not re-add :root --radius-lg/md/sm. */
+   * is skin-v2.css (app) / generated (preview). Do not re-add :root --radius-lg/md/sm. */
   --header-h: 72px;
 
   /* Font-size scale — aliases to the canonical Tailwind v4 @theme tokens
@@ -596,9 +595,8 @@
    * Verified via getComputedStyle across data-theme × data-volt (2026-06-30):
    * the :root value never renders. skin-v2.css (html[data-skin=v2], specificity
    * 0,3,1) wins :root for default/dark-fantasy (0 1px 3px/.5); paper and
-   * styleseed set their own; .gd-board declares its own on the element
-   * (0 2px 8px/.35, LIVE via self-declaration beating inheritance). The SSOT
-   * for card shadow is skin-v2.css — do not re-add a :root --shadow-card.
+   * styleseed set their own. The SSOT for card shadow is skin-v2.css —
+   * do not re-add a :root --shadow-card.
    * shadow-elevated/modal stay: skin-v2 does not redefine them, so :root is
    * the live source. */
   --shadow-elevated:      0 4px 12px rgba(0, 0, 0, 0.08);

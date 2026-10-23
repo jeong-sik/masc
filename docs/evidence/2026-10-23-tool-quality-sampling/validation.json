@@ -50,5 +50,10 @@
   "full_regression": "not run",
   "ci": "not run",
   "installed_runtime": "not changed",
-  "ui_performance": "not measured"
+  "ui_performance": "not measured",
+  "baseline_check": {
+    "log": "baseline-http.log",
+    "sha256": "38c1245babcbfa3d11ecc3a0b4de013980fe87a895ca091f7de8f27be16c3bb3",
+    "result": "positive-window preparation assertion failed: expected 1, observed 2; recent and NaN controls passed"
+  }
 }

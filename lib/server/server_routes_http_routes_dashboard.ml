@@ -3403,7 +3403,7 @@ let add_routes ~sw ~clock router =
              (fun () -> dashboard_briefing_sections_http_json ~state ~sw ~clock req)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tool-quality" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_public_read (fun state req reqd ->
          let n =
            let raw = match Server_utils.query_param req "n" with
              | Some s -> int_of_string_opt s |> Option.value ~default:5000
@@ -3420,10 +3420,13 @@ let add_routes ~sw ~clock router =
            | None -> None
          in
          let cache_key =
-           Printf.sprintf "tool_quality:%d:%s" n
-             (match window_hours with
-              | Some w -> Printf.sprintf "%.2f" w
-              | None -> "-")
+           Server_dashboard_http_core_cache.dashboard_cache_key
+             (Mcp_server.workspace_config state) "tool_quality"
+             (Yojson.Safe.to_string (`List [
+               `Int n;
+               Json_util.option_to_yojson
+                 (fun hours -> `String (Printf.sprintf "%h" hours)) window_hours;
+             ]))
          in
          (* TTL extended 5s→30s — [aggregate ~n:5000] over a 24h window was
             measured at 30s cache miss (curl --max-time 30 timeout in the

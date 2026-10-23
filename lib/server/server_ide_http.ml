@@ -198,10 +198,12 @@ let repository_activity_json ~repo_id ~window_hours =
 
 let file_activity_cache_ttl_sec = 10.0
 
-let cached_file_activity_json ~codebase ~repo_id ~file_path ~window_hours =
+let cached_file_activity_json ~base_path ~codebase ~repo_id ~file_path ~window_hours =
   let cache_key =
-    Printf.sprintf "ide:file-activity:%s:%s:%s:%.1f"
-      codebase repo_id file_path window_hours
+    "ide:file-activity:" ^ Yojson.Safe.to_string (`List [
+      `String base_path; `String codebase; `String repo_id; `String file_path;
+      `String (Printf.sprintf "%h" window_hours);
+    ])
   in
   Dashboard_cache.get_or_compute cache_key ~ttl:file_activity_cache_ttl_sec (fun () ->
     file_activity_json ~codebase ~repo_id ~file_path ~window_hours)
@@ -549,7 +551,7 @@ let add_routes router =
                  | Ok _ ->
                    Http.Response.json_value ~compress:true ~request
                      (json_ok
-                        (cached_file_activity_json
+                        (cached_file_activity_json ~base_path:(base_path_of_state state)
                            ~codebase ~repo_id ~file_path ~window_hours))
                      reqd)))
       request reqd)

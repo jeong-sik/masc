@@ -559,6 +559,24 @@ let test_get_file_activity_resolves_the_project_checkout_exactly () =
       (json_string_member "file activity" "schema" data))
 ;;
 
+let test_file_activity_cached_windows_keep_exact_query () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    Fun.protect ~finally:Dashboard_cache.invalidate_all (fun () ->
+    Dashboard_cache.invalidate_all ();
+    let repository = repository_fixture ~id:"query-masc" ~url:masc_remote ~local_path:base_path in
+    (match Repo_store.save_all ~base_path [repository] with
+     | Ok () -> () | Error detail -> fail detail);
+    let token = create_admin_token base_path "operator" in
+    List.iter (fun window ->
+      let response = dispatch router (http_request ~meth:`GET ~token:(Some token)
+        ~path:("/api/v1/ide/file-activity?repo_id=query-masc&file_path=bin/x.ml&window_hours=" ^ window) ()) in
+      check_status "file activity query succeeds" 200 response;
+      let data = response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
+      check (float 1e-12) "file activity retains the exact window"
+        (float_of_string window) Json.(data |> member "window_hours" |> to_float))
+      ["1.01"; "1.04"; "1.010"]))
+;;
+
 let test_repository_activity_covers_all_writers () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let repository = repository_fixture ~id:"masc" ~url:masc_remote ~local_path:base_path in
@@ -840,6 +858,8 @@ let () =
             test_get_file_activity_rejects_invalid_window
         ; test_case "GET file activity resolves project checkout" `Quick
             test_get_file_activity_resolves_the_project_checkout_exactly
+        ; test_case "file activity cache retains exact windows" `Quick
+            test_file_activity_cached_windows_keep_exact_query
         ; test_case "GET file activity without a token returns 401" `Quick
             test_file_activity_requires_auth
         ] )

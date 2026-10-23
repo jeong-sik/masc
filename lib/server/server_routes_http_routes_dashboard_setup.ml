@@ -165,21 +165,16 @@ let handle_telemetry request reqd =
         ]
     in
     let timing = Server_timing.create () in
-    let sources_key =
-      sources
-      |> List.map Telemetry_unified.source_to_string
-      |> List.sort String.compare
-      |> String.concat ","
-    in
-    let opt_str = function None -> "" | Some s -> s in
-    let opt_ts = function None -> "" | Some f -> Printf.sprintf "%.3f" f in
+    (* The echoed query preserves absent/empty filters and raw source choices.
+       Encode field boundaries rather than concatenate unescaped user values.
+       Float witnesses retain sub-millisecond bounds beyond JSON formatting. *)
+    let exact_time value = Json_util.option_to_yojson
+        (fun timestamp -> `String (Printf.sprintf "%h" timestamp)) value in
     let cache_key =
-      Printf.sprintf
-        "telemetry:%s:%s:src=%s:n=%d:off=%d:k=%s:s=%s:o=%s:w=%s:since=%s:until=%s"
-        base_path masc_root sources_key n offset
-        (opt_str keeper_name) (opt_str session_id)
-        (opt_str operation_id) (opt_str worker_run_id)
-        (opt_ts since_ts) (opt_ts until_ts)
+      Server_dashboard_http_core_cache.dashboard_cache_key config "telemetry"
+        (Yojson.Safe.to_string (`List [
+          `String base_path; query_json; exact_time since_ts; exact_time until_ts;
+        ]))
     in
     let dashboard_telemetry_cache_ttl_sec = 1.0 in
     let compute () =

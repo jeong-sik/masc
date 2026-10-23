@@ -1,0 +1,65 @@
+{
+  "baseline_source": "376e0f1abdd03163f7af4b4791c24ad46dd043f0",
+  "explicit_build_targets": [
+    "test/test_dashboard_http_core.exe",
+    "test/test_server_ide_http.exe"
+  ],
+  "checks": [
+    {
+      "binary": "test_dashboard_http_core.exe",
+      "arguments": [
+        "test",
+        "exact_query_cache_identity"
+      ],
+      "passed": 5
+    },
+    {
+      "binary": "test_server_ide_http.exe",
+      "arguments": [
+        "test",
+        "query_parsing"
+      ],
+      "passed": 9
+    },
+    {
+      "binary": "test_dashboard_http_core.exe",
+      "arguments": [
+        "test",
+        "executor_pool",
+        "13-15"
+      ],
+      "passed": 3
+    },
+    {
+      "binary": "test_dashboard_http_core.exe",
+      "arguments": [
+        "test",
+        "executor_pool",
+        "60"
+      ],
+      "passed": 1
+    }
+  ],
+  "total_passed": 18,
+  "new_cases_original_failures": 6,
+  "new_cases_candidate_passes": 6,
+  "source_sha256": {
+    "lib/server/server_dashboard_http_keeper_api.ml": "809624e2225201b6f9edbf8a6b3293f307bf3ff60b17e3ed27fff750892d1591",
+    "lib/server/server_ide_http.ml": "ca00089eef1558ebea38a1956b92e8580758738813cb39763da24a2a5c4862be",
+    "lib/server/server_routes_http_routes_dashboard.ml": "3c3346f4bb830d7b8df0847a8467a8c3423349c9ebd13c0acbd08b3cdd4ef28a",
+    "lib/server/server_routes_http_routes_dashboard_setup.ml": "dfc481676b5999859bac968b82c09e6dddc4b0fe41ca2ac0301ab861412922af",
+    "test/test_dashboard_http_core.ml": "1cd2b4b2b00f5cbcc9df29b393c4ec815fd0800d773c4b61d0d11724fa22d9f3",
+    "test/test_server_ide_http.ml": "991b0bfa5c76f667fc231c0e34f1070669a04fcb1a7b772310f02071f40649f0"
+  },
+  "log_sha256": {
+    "before-final-dashboard.log": "9a5499563fd427acf7fe65fcfa5adc6e9cb3d53ba2b1e46a5bfc0ac6e16f7e50",
+    "before-final-ide.log": "6d78e1ae838b1a801c0038c7f84fa5845c155997a91b1ea176a92a72ba71a5fe",
+    "final-dashboard.log": "c54c8ca84d9d5f132a53b733cf3ec6c46e874c2d09ae44b8531add2ef844c69a",
+    "final-ide.log": "6f8661b455eb28b9b9f48a56919279381c065f48eaa67086cd245c96f457bfce",
+    "final-query-partition.log": "d8e12ea347d2527cde8438a831c4b9540786bb849500f18ba9d4755ce495e46e",
+    "final-prepared-reads.log": "d8f2ae574dccf71da5bc19bde57d7138c2a6ac93ca1ffe4bb5d1690523b7cb5a"
+  },
+  "full_regression": "not run; latest full-regression run identity not inspected",
+  "full_ci": "not run",
+  "candidate_installed": false
+}

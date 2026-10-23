@@ -5199,6 +5199,107 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
       ; "/api/v1/workspace/children?path=fixture-dir"
       ])
 
+(* Exact parsed queries must own distinct cached responses. Exercise the real
+   router and response cache, including the echoed query and retained rows. *)
+let with_exact_query_router f =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () ->
+    Server_auth.For_testing.restore_server_state previous_state;
+    Masc.Keeper_tool_call_log.reset_for_testing ();
+    Dashboard_cache.invalidate_all ()) (fun () ->
+    Dashboard_cache.invalidate_all ();
+    let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+    let config = Lib.Mcp_server.workspace_config state in
+    ignore (Workspace.init config ~agent_name:None);
+    Server_auth.For_testing.restore_server_state (Some state);
+    Auth.save_auth_config config.base_path
+      { Types.default_auth_config with enabled = true; require_token = true };
+    let token = match Auth.create_token config.base_path ~agent_name:"query-reader" ~role:Types.Admin with
+      | Ok (token, _) -> token
+      | Error error -> fail (Types.masc_error_to_string error) in
+    Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+    let store = match Masc.Keeper_tool_call_log.store () with
+      | Some store -> store | None -> fail "tool-call fixture unavailable" in
+    Fun.protect ~finally:(fun () -> Dated_jsonl.prepare_for_directory_removal store) (fun () ->
+    Dated_jsonl.append store (`Assoc [
+      "ts", `Float (Time_compat.now () -. 1.025 *. 3600.);
+      "keeper", `String "query-keeper"; "tool", `String "keeper_lane_status";
+      "wire_outcome", `String "ok"; "duration_ms", `Float 1. ]);
+    let router = Server_routes_http_routes_dashboard.add_routes ~sw
+      ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ()) in
+    let read target =
+      let status, headers, body = tools_h1_wire_response ~router
+        ~headers:["authorization", "Bearer " ^ token; "accept-encoding", "identity"] target in
+      check int (target ^ " status") 200 status;
+      headers, Yojson.Safe.from_string body in
+    f read))
+
+let test_keeper_cached_windows_keep_exact_query () =
+  with_exact_query_router @@ fun read ->
+  let first_etag = ref None in
+  let prepared = ref 0 in
+  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
+  List.iteri (fun index (window, count) ->
+    let headers, json = read ("/api/v1/keepers/query-keeper/file-changes?window_hours=" ^ window) in
+    let etag = List.assoc_opt "etag" headers in
+    check bool "validator is present" true (Option.is_some etag);
+    if index = 0 then first_etag := etag;
+    if index = 2 then check (option string) "equivalent windows retain the validator" !first_etag etag;
+    check (float 1e-12) "effective window is the requested window"
+      (float_of_string window) Yojson.Safe.Util.(json |> member "window_hours" |> to_float);
+    check int "window boundary selects the requested retained calls" count
+      Yojson.Safe.Util.(json |> member "calls_in_window" |> to_int))
+    ["1.01", 0; "1.04", 1; "1.010", 0]);
+  check int "two distinct windows prepare two payloads; the alias reuses one" 2 !prepared
+
+let test_tool_quality_cached_windows_keep_exact_query () =
+  with_exact_query_router @@ fun read ->
+  List.iter (fun window ->
+    let _, json = read ("/api/v1/dashboard/tool-quality?window_hours=" ^ window) in
+    check (float 1e-12) "sampling window is the requested window"
+      (float_of_string window) Yojson.Safe.Util.(json |> member "window_hours" |> to_float))
+    ["1.001"; "1.004"; "1.0010"]
+
+let test_telemetry_cached_queries_keep_exact_boundaries () =
+  with_exact_query_router @@ fun read ->
+  let root = "/api/v1/dashboard/telemetry?source=tool_call_io&n=1" in
+  List.iter (fun parameter ->
+    List.iter (fun window ->
+      let _, json = read (root ^ "&" ^ parameter ^ "=" ^ window) in
+      check (float 1e-9) "fractional millisecond boundary is retained"
+        (float_of_string window)
+        Yojson.Safe.Util.(json |> member "query" |> member parameter |> to_float))
+      ["1000.01"; "1000.04"; "1000.010"])
+    ["since_ms"; "until_ms"]
+
+let test_telemetry_cached_queries_keep_exact_filters () =
+  with_exact_query_router @@ fun read ->
+  let root = "/api/v1/dashboard/telemetry?source=tool_call_io&n=1" in
+  List.iter (fun (suffix, session, operation) ->
+    let _, json = read (root ^ suffix) in
+    let query = Yojson.Safe.Util.member "query" json in
+    check bool "session filter is preserved" true
+      (Yojson.Safe.Util.member "session_id" query = session);
+    check bool "operation filter is preserved" true
+      (Yojson.Safe.Util.member "operation_id" query = operation))
+    ["", `Null, `Null;
+     "&session_id=", `String "", `Null;
+     "&session_id=a%3Ao%3Db&operation_id=c", `String "a:o=b", `String "c";
+     "&session_id=a&operation_id=b%3Ao%3Dc", `String "a", `String "b:o=c";
+     "&session_id=a", `String "a", `Null;
+     "&session_id=%20a%20", `String " a ", `Null]
+
+let test_telemetry_cached_queries_keep_source_echo () =
+  with_exact_query_router @@ fun read ->
+  List.iter (fun (suffix, expected) ->
+    let _, json = read ("/api/v1/dashboard/telemetry?n=1" ^ suffix) in
+    check bool "raw source remains distinct even when it resolves to all sources" true
+      (Yojson.Safe.Util.(json |> member "query" |> member "source") = expected))
+    ["", `Null; "&source=all", `String "all";
+     "&source=unknown-one", `String "unknown-one";
+     "&source=unknown-two", `String "unknown-two"]
+
 (* A timeout envelope goes out as 504 whoever produced it: the cache (origin
    [Timeout]) or a builder with a shorter ceiling of its own, whose envelope
    the cache keeps as a computed page. Both envelopes here pass 8 KB, past the
@@ -8232,6 +8333,13 @@ let test_skill_evidence_joins_activation_and_composition () =
 let () =
   run "dashboard_http_core"
     [
+      ("exact_query_cache_identity", [
+        test_case "Keeper windows retain distinct responses" `Quick test_keeper_cached_windows_keep_exact_query;
+        test_case "tool quality windows retain distinct responses" `Quick test_tool_quality_cached_windows_keep_exact_query;
+        test_case "telemetry boundaries retain distinct responses" `Quick test_telemetry_cached_queries_keep_exact_boundaries;
+        test_case "telemetry filters retain distinct responses" `Quick test_telemetry_cached_queries_keep_exact_filters;
+        test_case "telemetry source echoes retain distinct responses" `Quick test_telemetry_cached_queries_keep_source_echo;
+      ]);
       ( "executor_pool",
         [
           test_case "no pool stays on caller domain" `Quick

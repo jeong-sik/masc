@@ -17,12 +17,14 @@ let keeper_composite_cache_ttl_s = 5.0
 let keeper_file_changes_cache_ttl_s = 10.0
 
 let keeper_file_changes_cache_key ~masc_root ~keeper_name ~window_hours =
-  Printf.sprintf
-    "keeper:file-changes:%s:%s:%.1f:%d"
-    masc_root
-    keeper_name
-    window_hours
-    (Keeper_tool_call_log.committed_revision ~keeper_name)
+  (* Keep the exact effective window and field boundaries. Display rounding
+     must not merge distinct reads, nor may a path contain key separators. *)
+  "keeper:file-changes:" ^ Yojson.Safe.to_string (`List [
+    `String masc_root;
+    `String keeper_name;
+    `String (Printf.sprintf "%h" window_hours);
+    `Int (Keeper_tool_call_log.committed_revision ~keeper_name);
+  ])
 ;;
 
 let tool_call_entries ~keeper_name ~limit =

@@ -83,8 +83,13 @@ let create_token_exn base_path ~agent_name ~role =
       ("create_token failed: " ^ Masc_domain.masc_error_to_string error)
 ;;
 
-let http_request ~path ?token () =
+let http_request ~path ?token ?origin () =
   let headers = [ "host", "localhost"; "content-length", "0" ] in
+  let headers =
+    match origin with
+    | None -> headers
+    | Some value -> ("origin", value) :: headers
+  in
   let headers =
     match token with
     | None -> headers
@@ -359,6 +364,60 @@ let test_generated_audio_workspace_receipt () =
         Alcotest.(check string) "receipt is scoped to the bound request" payload original))
 ;;
 
+let test_generated_media_cors_and_read_authority () =
+  with_temp_base_path (fun base_path ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let token =
+      create_token_exn base_path ~agent_name:"media-reader" ~role:Masc_domain.Worker
+    in
+    let saved = Server_auth.For_testing.snapshot_server_state () in
+    Fun.protect
+      ~finally:(fun () -> Server_auth.For_testing.restore_server_state saved)
+      (fun () ->
+        let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+        Server_auth.For_testing.restore_server_state (Some state);
+        let payload = "RIFF\000\255media\128bytes" in
+        let path =
+          match Masc.Keeper_chat_media_store.persist_result
+            ~base_dir:base_path ~media_type:"audio/wav" ~data:payload with
+          | Ok (_, path) -> path
+          | Error detail -> Alcotest.fail detail
+        in
+        let router = Server_routes_http_routes_voice.add_routes (Http.Router.create ()) in
+        List.iter (fun (origin, expected_origin) ->
+          let response = dispatch router (http_request ~path ~token ?origin ()) in
+          Alcotest.(check int) "authenticated reader receives media" 200
+            (status_of_response response);
+          let headers, body = headers_and_body response in
+          Alcotest.(check string) "the complete media body is preserved" payload body;
+          Alcotest.(check (option string)) "only an admitted Origin is reflected"
+            expected_origin (Httpun.Headers.get headers "access-control-allow-origin");
+          Alcotest.(check (option string)) "credentials follow Origin admission"
+            (Option.map (fun _ -> "true") expected_origin)
+            (Httpun.Headers.get headers "access-control-allow-credentials");
+          Alcotest.(check (option string)) "responses vary by Origin" (Some "Origin")
+            (Httpun.Headers.get headers "vary");
+          Alcotest.(check (option string)) "the media MIME type is preserved"
+            (Some "audio/wav") (Httpun.Headers.get headers "content-type");
+          Alcotest.(check (option string)) "the media length is preserved"
+            (Some (string_of_int (String.length payload)))
+            (Httpun.Headers.get headers "content-length"))
+          [ Some "http://localhost", Some "http://localhost"
+          ; Some "https://foreign.example", None
+          ; Some "not a serialized origin", None
+          ; None, None
+          ];
+        List.iter (fun origin ->
+          let response = dispatch router (http_request ~path ~origin ()) in
+          Alcotest.(check int) "a content locator alone grants no read authority" 401
+            (status_of_response response);
+          let _, body = headers_and_body response in
+          Alcotest.(check bool) "unauthenticated response excludes media" false
+            (Astring.String.is_infix ~affix:payload body))
+          [ "http://localhost"; "https://foreign.example" ]))
+;;
+
 (* --- blob_response shape --- *)
 
 let assert_json_field key expected json =
@@ -403,6 +462,8 @@ let () =
             test_artifact_route_enforces_admin_token
         ; Alcotest.test_case "generated audio retains workspace receipt" `Quick
             test_generated_audio_workspace_receipt
+        ; Alcotest.test_case "generated media checks Origin and read authority" `Quick
+            test_generated_media_cors_and_read_authority
         ] );
       ( "blob_response",
         [

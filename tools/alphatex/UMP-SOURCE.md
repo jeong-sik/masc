@@ -1,7 +1,7 @@
 # Native captured UMP experiments
 
 In an arrangement, `:edit-ump [ASSET]` opens a captured performance's MIDI2
-notes and recorded per-note expression. This edits a separate overlay on the
+notes, recorded per-note expression and event times. This edits a separate overlay on the
 verified original packets. It does not convert notes, velocities or clocks into MIDI1/960 PPQ. Original WAV, UMP,
 packet boundaries, source/group/channel identities and timestamp-origin flags
 remain stored under their original hashes.
@@ -16,6 +16,10 @@ bend and poly pressure; `:notes` returns to attacks. Expression-only takes open
 directly in their expression view. `:scope` selects the first matching event in
 the current view; `:select-expression PACKET:WORD` selects an exact original
 expression message.
+
+`:events` shows every original UMP message, including NoteOff, MIDI1, SysEx and
+opaque messages. `:select-event PACKET:WORD` selects one exact original event.
+Up/Down moves within this view. A take containing only other messages opens here.
 
 ```
 pitch-absolute 60.5
@@ -53,7 +57,7 @@ still depends on the recorded sensitivity and device state. Registered and
 assignable controller meanings are not inferred. In particular, the pitch
 controller's Q7.25 word differs from NoteOn's Q7.9 attribute.
 
-These edits keep the first address word, source/group/channel, note index,
+Expression value edits keep the first address word, source/group/channel, note index,
 controller index, original message order, packet boundaries, integer host ticks
 and timestamp-origin flags. They do not infer a unique attack owner, move a
 controller to another note, or rewrite detach/reset management messages. A
@@ -65,6 +69,48 @@ expression edits retain each other, share undo/redo, and travel together through
 the existing native playback, arrangement variant, portable save and raw export.
 Note commands require the note view; expression-value commands require the
 expression view, preventing edits to a hidden target.
+
+## Native event time and explicit note length
+
+In any view, `:time HOST_TICKS` sets the selected message's authored UInt64 host
+time; `:shift-time SIGNED_TICKS` moves it by an exact integer offset. Use
+`:reset-time` to restore its original timestamp. The list retains the original
+packet/word ID and shows original and authored times together. Time edits never
+round through floating-point seconds or a PPQ projection. Even messages recorded
+inside one packet can move independently. Derived packets contain complete UMP
+messages in host-time order; equal times retain original presentation order.
+
+In the note view, `:note-time OFF_ID START_HOST END_HOST` moves the selected
+attack and the explicitly selected MIDI2 release in one undo revision.
+`:duration-ticks OFF_ID TICKS` leaves the attack in place and sets that release
+to a positive exact duration after it. The release must share the source,
+group, channel and Note Index. Choose its original ID in the all-event view,
+then return with `:select ATTACK_ID`. The editor does not infer which release
+belongs to repeated attacks on one index; this is an explicit event edit,
+not a claim about a receiver's voice allocation or acoustic note duration.
+Controllers, per-note management, pedals and WAV audio do not follow an attack
+automatically. Use their own event selections when an experiment calls for it.
+
+Sources containing embedded JR or delta-clock utilities require an embedded
+clock editor before host-time changes. These sources remain readable and keep
+pitch/value edits; timing in other source streams remains editable. Rewriting
+host times while retaining conflicting embedded timestamps is refused.
+
+The `timing` overlay stores original identities and authored host times separately
+from note/value patches. All three share history and preserve each other.
+The original recording parts, manifest and MIDI bounds stay under their hashes.
+An edited playback/export snapshot can split packets and marks changed times
+`timestampOrigin: authored`, retaining `recordedHostTime` and
+`recordedTimestampOrigin`. Reimporting that export as a new take keeps this
+recorded provenance when another authored layer is applied.
+
+Time editing preserves the original source clock span, extending it when events
+move outside either edge. Moving a last release inward retains the original end
+as silence; it does not shorten the take or move the WAV. The derived session
+manifest has the edited packet count, an explicit `umpSourceSpan`, and an origin
+matching that span. Standalone inspection/audition and arrangement placement
+consume this same span. Export/import does not restore prior editor history;
+save the arrangement for that.
 
 `:revoice SYMBOL MODE [OCTAVE [INVERSION]]` changes the exact-onset group sharing
 the selected attack's source, group and channel. Voices sort by their current
@@ -105,7 +151,7 @@ once. Playback preparation validates the original parts and edit targets before
 materializing an owned edited snapshot for standalone or arrangement transport.
 
 `:export NEW_DIRECTORY` refuses an existing target. It writes the edited UMP
-JSONL, original WAV/audio blocks/session clock, original MIDI JSONL and
+JSONL, original WAV/audio blocks, a session manifest, original MIDI JSONL and
 `ump-source.json` with original hashes, overlay and edited-MIDI hash. The packet
 times stay integer host ticks; no clip-tempo conversion occurs. Export streams
 independent files to the chosen directory, including across volumes. A failed or
@@ -114,16 +160,19 @@ an archival/native-take export; importing its edited session as a take treats
 those edited packets as a new source, rather than reconstructing editor history.
 The saved arrangement is the portable editable document. The captured viewer's
 separate MIDI2 Clip export still declares its 1000 PPQ quantization.
+Without time edits the session manifest remains the original bytes; with time
+edits it describes the derived packet count/span. `ump-source.json` retains the
+original manifest hash and clock, alongside the exact overlay.
 
-This native editor does not yet add time/structure edits, insertion/removal of
-expression messages, raw practice-take editing or MIDI2 Clip import. These remain
+This native editor does not yet add automatic voice pairing or grouped
+controller-following edits, message insertion/removal, raw practice-take editing or MIDI2 Clip import. These remain
 part of the sequencer objective tracked by #44748. Focused source/worker/controller
 and native-protocol checks do not establish installed Ghostty or physical-device
 behavior.
 
 On macOS, run `node tools/alphatex/native/test-edited-ump-wire.mjs` from the
 repository root to check edited capture packets through the actual Worker and
-unchanged native source transport into private CoreMIDI MIDI2 destinations.
+native source transport into private CoreMIDI MIDI2 destinations.
 It compares per-source received words against explicit pitch/velocity/index/
 controller/release values, observes both sources' active-note and pedal cleanup
 on cancellation after their receive acknowledgements,
@@ -131,6 +180,9 @@ and emits a receipt with actual received words and retired owner state. It uses
 the Swift compiler and CoreMIDI, without opening an existing instrument or
 replacing the installed application. This is virtual-endpoint evidence; it does
 not establish physical latency, audio/MIDI sample alignment or visible Ghostty.
+Add `--time-edits` to exercise a split/reordered attack and a later release,
+comparing exact authored tick deltas at the native scheduling boundary as well
+as actual received words. This does not measure receive-callback timing accuracy.
 
 Protocol: [MMA/AMEI UMP 1.1.2](https://amei-music.github.io/midi2.0-docs/amei-pdf/M2-104-UM_v1-1-2_UMP_and_MIDI_2-0_Protocol_Specification.pdf),
 §7.4.2–7.4.4, §7.4.12, §7.4.14–7.4.15.3 and Appendix C. Attribute 3 makes Note
@@ -139,3 +191,6 @@ Number an index; absolute pitch overrides previous tuning for that attack only. 
 with original `packet`/`word` plus optional unsigned 16-bit `pitch`/`velocity`.
 Optional `expressions` edits use the same original identity with one unsigned
 32-bit `value`; duplicate or cross-kind identities are refused.
+Optional `timing` edits have original `packet`/`word` and exact decimal
+`hostTime`. An event may have both a time edit and a note/value edit; duplicate
+time identities are refused separately.

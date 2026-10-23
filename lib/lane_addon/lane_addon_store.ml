@@ -70,13 +70,13 @@ let canonical_blob_kind t hash = protect (fun () ->
       ~ownership_root:t.root (Filename.concat t.root "evidence")
     |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string in
   Ok (Fs_compat.exact_path_kind ~follow:false (Filename.concat t.root (blob_path hash))))
-let blob_reference bytes =
-  let hash = digest bytes in
+let blob_reference_of_hash hash =
   { uri = "lane-evidence:" ^ hash; sha256 = Some hash }
+let blob_reference bytes = blob_reference_of_hash (digest bytes)
 let write_blob t bytes =
   let hash = digest bytes in
   let* () = write t (blob_path hash) bytes in
-  Ok (blob_reference bytes)
+  Ok (blob_reference_of_hash hash)
 let recovery_blob_path hash = Filename.concat "sampling-evidence" (hash ^ ".json")
 let write_sampling_blob t bytes =
   match write_blob t bytes with

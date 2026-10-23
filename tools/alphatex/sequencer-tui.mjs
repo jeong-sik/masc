@@ -64,7 +64,7 @@ const help = [
   ':harmony mix|track lists key-set changes; arrows choose, Enter returns to notes, Esc closes',
   ':harmony-export PATH saves the complete ready analysis without replacing a file',
   ':progression 0 4 rootless Dm7 G7 Cmaj7',
-  ':progression-led 0 4 drop2 C3 C5 Dm7 G7 Cmaj7 minimizes total movement inside an inclusive register',
+  ':progression-led 0 4 drop2 C3 C5 Dm7 G7 Cmaj7 minimizes total movement inside an inclusive register (phrase or source)',
   ':tempo 120    :length 32    :meter 3 4    :loop 4 12',
   ':loop START END selects and enables repetition; l toggles it while retaining the range.',
   ':transpose -12    :quantize 0.25    :duplicate 8   (selected track)',

@@ -11,18 +11,22 @@
 
 (** {1 Stop reason} *)
 
-(** Why a worker run terminated. *)
+(** Why a worker run terminated. Completed/yielded outcomes carry their
+    producer's exact provider ordinal; runtime turn counts are not a substitute.
+    InputRequired does not claim a completed provider response. *)
 type stop_reason =
-  | Completed
-  | Yielded_to_operation_queued of { turns_used : int }
-  | Yielded_to_durable_stimulus of { turns_used : int }
+  | Completed of { provider_turn_ordinal : int }
+  | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
+  | Yielded_to_durable_stimulus of { turns_used : int; provider_turn_ordinal : int }
   | Yielded_after_repeated_tool_call of {
       turns_used : int;
+      provider_turn_ordinal : int;
       tool_name : string;
       repeated_count : int;
     }
   | Yielded_after_repeated_assistant_text of {
       turns_used : int;
+      provider_turn_ordinal : int;
       repeated_count : int;
     }
   | InputRequired of {

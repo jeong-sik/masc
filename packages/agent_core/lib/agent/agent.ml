@@ -807,18 +807,25 @@ module Advanced = struct
 
   type yielded =
     { turn : int
+    ; provider_turn_ordinal : int
     ; checkpoint_stage : checkpoint_stage
     ; checkpoint : Checkpoint.t
     }
 
   type terminal_tool_completed =
     { turn : int
+    ; provider_turn_ordinal : int
     ; receipt : Terminal_tool_receipt.t
     ; checkpoint : Checkpoint.t
     }
 
+  type completed =
+    { response : Types.api_response
+    ; provider_turn_ordinal : int
+    }
+
   type run_outcome =
-    | Completed of Types.api_response
+    | Completed of completed
     | Yielded of yielded
     | Terminal_tool_completed of terminal_tool_completed
 
@@ -829,7 +836,7 @@ module Advanced = struct
   ;;
 
   let classify_trace_success = function
-    | Completed response ->
+    | Completed { response; _ } ->
       Run_completed
         { final_text = final_text_of_response response
         ; stop_reason = Some (Types.show_stop_reason response.stop_reason)
@@ -887,7 +894,7 @@ module Advanced = struct
             ~turn_index
             ~model:response.model
             ~stop:(stop_reason_label response.stop_reason);
-          Ok (Completed response)
+          Ok (Completed { response; provider_turn_ordinal = turn_index })
         | Ok (`ToolsExecuted checkpoint_stage) ->
           log_turn
             ~run_start
@@ -903,6 +910,7 @@ module Advanced = struct
              Ok
                (Yielded
                   { turn = boundary.turn
+                  ; provider_turn_ordinal = turn_index
                   ; checkpoint_stage = boundary.checkpoint_stage
                   ; checkpoint
                   }))
@@ -915,7 +923,10 @@ module Advanced = struct
             ~stop:"terminal_tool_completed";
           Ok
             (Terminal_tool_completed
-               { turn = agent.state.turn_count; receipt; checkpoint = checkpoint agent }))
+               { turn = agent.state.turn_count
+               ; provider_turn_ordinal = turn_index
+               ; receipt
+               ; checkpoint = checkpoint agent }))
     in
     loop Held
   ;;
@@ -982,7 +993,7 @@ module Advanced = struct
     with_classified_run_lifecycle_events
       agent
       ~classify_success:(function
-        | Completed response -> Agent_lifecycle_events.Completed response
+        | Completed { response; _ } -> Agent_lifecycle_events.Completed response
         | Yielded { turn; _ } -> Agent_lifecycle_events.Yielded { turn }
         | Terminal_tool_completed { receipt; _ } ->
           Agent_lifecycle_events.Completed receipt.response)
@@ -1077,7 +1088,7 @@ module Advanced = struct
     with_classified_run_lifecycle_events
       agent
       ~classify_success:(function
-        | Completed response -> Agent_lifecycle_events.Completed response
+        | Completed { response; _ } -> Agent_lifecycle_events.Completed response
         | Yielded { turn; _ } -> Agent_lifecycle_events.Yielded { turn }
         | Terminal_tool_completed { receipt; _ } ->
           Agent_lifecycle_events.Completed receipt.response)

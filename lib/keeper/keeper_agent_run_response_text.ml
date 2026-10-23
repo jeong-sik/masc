@@ -11,7 +11,7 @@ let stop_reason_suppresses_visible_response = function
   | Runtime_agent.Yielded_after_repeated_tool_call _
   | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     true
-  | Runtime_agent.Completed
+  | Runtime_agent.Completed _
   | Runtime_agent.InputRequired _ ->
     false
 ;;

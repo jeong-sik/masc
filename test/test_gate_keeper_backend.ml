@@ -3836,7 +3836,7 @@ let test_runtime_run_blocks_appends_multimodal_input_to_agent_core_agent () =
    with
    | Ok result -> (
        match result.Runtime_agent.stop_reason with
-       | Runtime_agent.Completed -> fail "invalid provider endpoint completed"
+       | Runtime_agent.Completed _ -> fail "invalid provider endpoint completed"
        | stop_reason ->
            failf "unexpected stop reason after exit-condition proof: %s"
              (Keeper_execution_receipt_types.stop_reason_to_string stop_reason))

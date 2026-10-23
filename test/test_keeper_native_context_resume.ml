@@ -262,7 +262,7 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
     check bool "first BeforeTurn pause preserves its typed request" true
       (match first.stop_reason with
        | Runtime_agent.InputRequired {request;_} -> request.request_id = pending.request.request_id
-       | Completed | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+       | Completed _ | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
        | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ -> false);
     let retained_pending () =
       let call = match Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id

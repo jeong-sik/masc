@@ -1174,7 +1174,7 @@ let test_public_edits_overlap_through_handler_and_bridge () =
   public_bundle env sw config meta recovery @@ fun meta task_id cell causal bundle ->
   let hooks = Keeper_hooks_agent_core.make_hooks ~config ~meta_ref:(ref meta)
       ~turn_ctx_cell:cell ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ~keeper_turn_id:13 ~on_after_turn_ordinal:(fun _ -> ())
+      ~keeper_turn_id:13
       ~tool_result_commit_required:(fun () -> true) () in
   let left = Filename.concat root "public-parent/left" and right = Filename.concat root "public-parent/right" in
   write left "left-before"; write right "right-before";

@@ -278,7 +278,7 @@ let checkpoint_for_replay_persistence
       ~(session_id : string)
       ~(response_text : string)
       ?(suppress_visible_response = false)
-      ?(stop_reason = Runtime_agent.Completed)
+      ~stop_reason
       ~exclude_thought_from_replay
       (checkpoint : Agent_core.Checkpoint.t)
   =
@@ -313,7 +313,7 @@ let checkpoint_for_replay_persistence
     (* A control-boundary checkpoint retains the current-turn tool result so
        resumption cannot repeat an already committed effect. *)
     observation_replay_checkpoint ~history_messages ~session_id checkpoint
-  | Runtime_agent.Completed ->
+  | Runtime_agent.Completed _ ->
     canonical_success_replay_checkpoint
       ~history_messages
       ~session_id

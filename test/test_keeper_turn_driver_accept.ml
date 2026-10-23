@@ -60,7 +60,7 @@ let run_result ?content ?stop_reason ?checkpoint () : Runtime_agent.run_result =
     run_validation = None;
     runtime_observation = None;
     cooperative_boundary = None;
-    stop_reason = Runtime_agent.Completed;
+    stop_reason = (Runtime_agent.Completed { provider_turn_ordinal = 0 });
   }
 
 let input_required_request () : Agent_core.Error.input_required =
@@ -185,10 +185,11 @@ let test_empty_terminal_completion_requires_this_attempt_saved_checkpoint () =
   let saved_count () = Attempt.For_testing.tool_result_save_count progress in
   let checkpoint = checkpoint_with_messages [] in
   let decide ~before ?(checkpoint = Some checkpoint)
+      ?(observed_provider_turn_ordinal = Some 17)
       ?(stop_reason = Agent_core.Types.EndTurn) () =
     Attempt.complete_saved_tool_terminal
       ~tool_results_saved_in_attempt:(saved_count () > before)
-      ~checkpoint (Error (empty_terminal_error stop_reason))
+      ~observed_provider_turn_ordinal ~checkpoint (Error (empty_terminal_error stop_reason))
   in
   let check_decision label expected decision =
     Alcotest.(check bool) label expected (Result.is_ok decision)
@@ -201,6 +202,17 @@ let test_empty_terminal_completion_requires_this_attempt_saved_checkpoint () =
   check_decision "reaching the tool-save stage does not complete" false (decide ~before ());
   Attempt.observe_checkpoint_saved progress Agent_core.Agent.After_tool_results_appended;
   check_decision "this attempt's saved tool result completes" true (decide ~before ());
+  let no_ordinal = empty_terminal_error Agent_core.Types.EndTurn in
+  (match Attempt.complete_saved_tool_terminal
+       ~tool_results_saved_in_attempt:true ~observed_provider_turn_ordinal:None
+       ~checkpoint:(Some checkpoint) (Error no_ordinal) with
+   | Error retained -> Alcotest.(check bool) "no observed provider ordinal retains exact original failure"
+       true (retained == no_ordinal)
+   | Ok _ -> Alcotest.fail "checkpoint counts fabricated a provider ordinal");
+  (match decide ~before () with
+   | Ok completed -> Alcotest.(check (option int)) "same-attempt ordinal survives synthesis"
+       (Some 17) (Runtime_agent.final_provider_turn_ordinal completed.stop_reason)
+   | Error error -> Alcotest.fail (Agent_core.Error.to_string error));
   check_decision "checkpoint must be available" false
     (decide ~before ~checkpoint:None ());
   List.iter (fun stop_reason ->
@@ -226,14 +238,21 @@ let test_empty_terminal_completion_requires_this_attempt_saved_checkpoint () =
     (decide ~before:next_attempt ());
   let unrelated = Agent_core.Error.Internal "unrelated" in
   let unchanged = Attempt.complete_saved_tool_terminal
-      ~tool_results_saved_in_attempt:true ~checkpoint:(Some checkpoint)
+      ~tool_results_saved_in_attempt:true ~observed_provider_turn_ordinal:(Some 17) ~checkpoint:(Some checkpoint)
       (Error unrelated) in
   (match unchanged with
    | Error actual -> Alcotest.(check bool) "unrelated failure retained" true (actual == unrelated)
    | Ok _ -> Alcotest.fail "unrelated failure was completed");
+  let input_error = Agent_core.Error.InputRequired (input_required_request ()) in
+  (match Attempt.complete_saved_tool_terminal
+       ~tool_results_saved_in_attempt:true ~observed_provider_turn_ordinal:None
+       ~checkpoint:(Some checkpoint) (Error input_error) with
+   | Error retained -> Alcotest.(check bool) "input request without an inference ordinal stays input-required"
+       true (retained == input_error)
+   | Ok _ -> Alcotest.fail "input required became inference completion");
   let original = run_result () in
   let unchanged = Attempt.complete_saved_tool_terminal
-      ~tool_results_saved_in_attempt:true ~checkpoint:(Some checkpoint) (Ok original) in
+      ~tool_results_saved_in_attempt:true ~observed_provider_turn_ordinal:(Some 17) ~checkpoint:(Some checkpoint) (Ok original) in
   (match unchanged with
    | Ok actual -> Alcotest.(check bool) "successful result unchanged" true (actual == original)
    | Error _ -> Alcotest.fail "successful result was rejected")
@@ -285,8 +304,16 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
   let tool = Core.Tool.create ~name:"observe" ~description:"Observe once" ~parameters:[]
       (fun _ -> incr tool_executions; executed_names := "observe" :: !executed_names;
         Ok {Core.Types.content="observed"; content_blocks=None; _meta=None}) in
+  let observed_provider_turn_ordinal = ref None in
+  let hooks = { Core.Hooks.empty with after_turn = Some (function
+    | Core.Hooks.AfterTurn { turn; _ } ->
+      observed_provider_turn_ordinal := Some turn; Core.Hooks.Continue
+    | Core.Hooks.BeforeTurn _ | Core.Hooks.BeforeTurnParams _
+    | Core.Hooks.PreToolUse _ | Core.Hooks.PostToolUse _
+    | Core.Hooks.PostToolUseFailure _ | Core.Hooks.OnStop _
+    | Core.Hooks.OnError _ | Core.Hooks.OnToolError _ -> Core.Hooks.Continue) } in
   let options = {Core.Agent.default_options with
-      provider_config=Some provider_config; transport=Some transport} in
+      provider_config=Some provider_config; transport=Some transport; hooks} in
   let newer = { (checkpoint_with_messages [message ~role:Core.Types.User [Core.Types.Text "newer canonical"]])
       with session_id; model="mock-model"; turn_count=100 } in
   (match store_case with
@@ -326,6 +353,7 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
   let result = Attempt.complete_saved_tool_terminal
       ~tool_results_saved_in_attempt:
         (Attempt.For_testing.tool_result_save_count progress > before)
+      ~observed_provider_turn_ordinal:!observed_provider_turn_ordinal
       ~checkpoint:(Some checkpoint) (Error error) in
   Alcotest.(check int) "one real tool execution" 1 !tool_executions;
   Alcotest.(check bool) "observed checkpoint boundary prevents same-run replay" false
@@ -338,6 +366,11 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
   match store_case, result with
   | Fresh_checkpoint, Ok completed ->
     Alcotest.(check int) "tool request then empty terminal" 2 !provider_calls;
+    Alcotest.(check bool) "this SDK invocation observed a provider ordinal" true
+      (Option.is_some !observed_provider_turn_ordinal);
+    Alcotest.(check (option int)) "synthetic completion retains the actual hook ordinal"
+      !observed_provider_turn_ordinal
+      (Runtime_agent.final_provider_turn_ordinal completed.stop_reason);
     Alcotest.(check bool) "actual checkpoint owner saved" true (!saves > 0);
     let durable = match Store.load_agent_core ~session_dir ~session_id with
       | Ok checkpoint -> checkpoint

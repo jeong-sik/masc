@@ -93,7 +93,6 @@ let make_runtime_hooks () : Agent_core.Hooks.hooks =
     ~turn_ctx_cell
     ~trace_id:"introspection-trace"
     ~keeper_turn_id:1
-    ~on_after_turn_ordinal:ignore
     ()
 
 let runtime_slots_of (hooks : Agent_core.Hooks.hooks) =

@@ -1212,6 +1212,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             ~model:(Option.value config.model ~default:runtime_id)
             ~session_id
             ~turn_id
+            ~provider_turn_ordinal:turn_count
             ~turns_used:turn_count
             ~latency_ms:
               (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
@@ -1544,7 +1545,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
              ; run_validation = None
              ; runtime_observation = Some runtime_observation
              ; cooperative_boundary = None
-             ; stop_reason = Completed
+             ; stop_reason = Completed { provider_turn_ordinal = turn_count }
              })
       with
       (* A stop the owner raised is not an ambiguity: it knows the turn did

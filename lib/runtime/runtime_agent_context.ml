@@ -6,20 +6,21 @@
     [Agent.resume] calls. *)
 
 type stop_reason =
-  | Completed
-  | Yielded_to_operation_queued of { turns_used : int }
+  | Completed of { provider_turn_ordinal : int }
+  | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
     (* The autonomous lane's AGENT_CORE run stopped at a turn boundary because a
         durable Dashboard/connector operation is queued behind the Owner child.
        Progress is checkpointed and the keeper resumes on the next cycle — the
        same checkpoint disposition as a turn-limit observation, but a distinct
        reason so receipts do not conflate an on-demand yield with an AGENT_CORE loop
        observation. *)
-  | Yielded_to_durable_stimulus of { turns_used : int }
+  | Yielded_to_durable_stimulus of { turns_used : int; provider_turn_ordinal : int }
     (* The current autonomous cycle completed at least one AGENT_CORE provider turn,
        then released its lane because another durable stimulus was queued
        behind the stimulus already leased by this cycle. *)
   | Yielded_after_repeated_tool_call of
       { turns_used : int
+      ; provider_turn_ordinal : int
       ; tool_name : string
       ; repeated_count : int
       }
@@ -28,6 +29,7 @@ type stop_reason =
        The exact post-tool checkpoint is retained for a later cycle. *)
   | Yielded_after_repeated_assistant_text of
       { turns_used : int
+      ; provider_turn_ordinal : int
       ; repeated_count : int
       }
     (* The last [repeated_count] provider turns each emitted the same

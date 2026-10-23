@@ -91,7 +91,7 @@ let completed_run_result () : Runtime_agent.run_result =
   ; run_validation = None
   ; runtime_observation = None
   ; cooperative_boundary = None
-  ; stop_reason = Runtime_agent.Completed
+  ; stop_reason = (Runtime_agent.Completed { provider_turn_ordinal = 0 })
   }
 
 let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.message =
@@ -4045,17 +4045,26 @@ let test_a_quota_hint_that_names_no_time_is_recorded_as_observed () =
 let test_the_production_answer_test_reads_provider_turns () =
   let yielded =
     { (completed_run_result ()) with
-      stop_reason = Runtime_agent.Yielded_to_durable_stimulus { turns_used = 0 }
-    }
+      stop_reason = Runtime_agent.Yielded_to_durable_stimulus
+        { turns_used = 0; provider_turn_ordinal = 17 } }
   in
-  Alcotest.(check bool) "a yield before any provider turn did not hear the candidate" false
+  Alcotest.(check bool) "actual yield ordinal witnesses an answer even when count is zero" true
     (Driver.For_testing.run_result_answered yielded);
-  Alcotest.(check bool) "a yield after a provider turn did" true
+  Alcotest.(check bool) "restored count does not replace the successful ordinal" true
     (Driver.For_testing.run_result_answered
-       { yielded with stop_reason = Runtime_agent.Yielded_to_durable_stimulus { turns_used = 1 } });
-  Alcotest.(check bool) "a completed run did" true
+       { yielded with stop_reason = Runtime_agent.Yielded_to_durable_stimulus
+           { turns_used = 91; provider_turn_ordinal = 17 } });
+  Alcotest.(check bool) "the valid first ordinal zero witnesses a completed response" true
     (Driver.For_testing.run_result_answered
-       { yielded with stop_reason = Runtime_agent.Completed })
+       { yielded with stop_reason = Runtime_agent.Completed { provider_turn_ordinal = 0 } });
+  let request : Agent_core.Error.input_required =
+    { request_id = "restored-input-only"; participant_name = None
+    ; question = "Which repository?"; schema = None; timeout_s = None
+    ; created_at = 1_000.0 } in
+  Alcotest.(check bool) "a large restored input-required count cannot clear candidate evidence" false
+    (Driver.For_testing.run_result_answered
+       { yielded with turns = 91
+       ; stop_reason = Runtime_agent.InputRequired { turns_used = 91; request } })
 ;;
 
 (* RFC-provider-path-rest §3.3 and #34653: the head of a deferred suffix in
@@ -6112,18 +6121,18 @@ let test_repetition_stop_does_not_resume_saved_operation () =
     Alcotest.(check int) "no saved-operation retry" 0 (List.length hints);
     Alcotest.(check (list string)) "no continuation decision" [] rows)
     [ Runtime_agent.Yielded_after_repeated_tool_call
-        {turns_used=2; tool_name="masc_board_list"; repeated_count=3},
+        {turns_used=2; tool_name="masc_board_list"; repeated_count=3; provider_turn_ordinal = 17 },
         Driver.Repeated_tool_call
     ; Runtime_agent.Yielded_after_repeated_assistant_text
-        {turns_used=2; repeated_count=3}, Driver.Repeated_assistant_text ];
+        {turns_used=2; repeated_count=3; provider_turn_ordinal = 17 }, Driver.Repeated_assistant_text ];
   List.iter (fun stop_reason ->
     let stopped = { (completed_run_result ()) with Runtime_agent.stop_reason } in
     match Try_provider.apply_accept ~runtime_id:"only" ~accept:(fun _ -> false) stopped with
     | Ok observed -> Alcotest.(check bool) "cooperative yield retains its checkpoint"
         true (observed = stopped)
     | Error _ -> Alcotest.fail "cooperative yield became a failure")
-    [Runtime_agent.Yielded_to_operation_queued {turns_used=2};
-     Runtime_agent.Yielded_to_durable_stimulus {turns_used=2}]
+    [Runtime_agent.Yielded_to_operation_queued {turns_used=2; provider_turn_ordinal = 17 };
+     Runtime_agent.Yielded_to_durable_stimulus {turns_used=2; provider_turn_ordinal = 17 }]
 ;;
 
 let guarded_accept_rejection ?(content = []) stop_reason =

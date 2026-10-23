@@ -78,14 +78,14 @@ let sample ~sw ~net ~scenario ~run_id ~sample_index ~runtime_id =
                           ; "output", `String (T.text_of_response response)
                           ];
                         (match result.stop_reason, response.stop_reason with
-                         | Runtime_agent.Completed, (T.EndTurn | T.StopSequence) ->
+                         | Runtime_agent.Completed _, (T.EndTurn | T.StopSequence) ->
                              (match T.assistant_message_of_response response with
                               | Error _ ->
                                   failure "history_provenance_missing"
                                     "Cannot replay reasoning without provider provenance"
                               | Ok assistant ->
                                   turns (index + 1) (history @ [ T.user_msg prompt; assistant ]) rest)
-                         | (Runtime_agent.Completed, (T.StopToolUse | (T.MaxTokens | (T.Refusal | (T.ContentFilter | (T.RepetitionTruncation | (T.PauseTurn | (T.Compaction | (T.ContextWindowExceeded | (T.UnmatchedToolCalls | T.Unknown _))))))))))
+                         | (Runtime_agent.Completed _, (T.StopToolUse | (T.MaxTokens | (T.Refusal | (T.ContentFilter | (T.RepetitionTruncation | (T.PauseTurn | (T.Compaction | (T.ContextWindowExceeded | (T.UnmatchedToolCalls | T.Unknown _))))))))))
                          | ((Runtime_agent_context.Yielded_to_operation_queued _ | (Runtime_agent_context.Yielded_to_durable_stimulus _ | (Runtime_agent_context.Yielded_after_repeated_tool_call _ | (Runtime_agent_context.Yielded_after_repeated_assistant_text _ | Runtime_agent_context.InputRequired _)))), _) -> failure "incomplete_turn"
                                   "Execution did not finish a complete assistant turn")
               in

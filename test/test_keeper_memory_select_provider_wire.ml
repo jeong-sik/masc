@@ -163,7 +163,7 @@ let replay ~provider_wire () =
       ~system_prompt:meta.instructions ~tools:bundle.tools in
     (match Runtime_agent.run_blocks ~sw ~net ~config:runtime_config
       [Agent_core.Types.Text (jstring "query" query)] with
-     | Ok {Runtime_agent.stop_reason=Runtime_agent.Completed;response;_} ->
+     | Ok {Runtime_agent.stop_reason=Runtime_agent.Completed _;response;_} ->
        check bool "runtime consumes the expected final provider answer" true
          (List.exists (function Agent_core.Types.Text text -> text="Selection inspected." | _ -> false) response.content)
      | Ok _ -> fail "provider wire run did not complete normally"

@@ -972,7 +972,7 @@ let test_tasks_list_revision_covers_projected_contents () =
 let test_response_finalization_keeps_visible_reply_only () =
   let finalized =
     Response_text.finalize
-      ~stop_reason:Runtime_agent.Completed
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~raw_response_text:"Completed with typed tool evidence."
       ()
   in
@@ -982,7 +982,7 @@ let test_response_finalization_keeps_visible_reply_only () =
     finalized.response_text;
   let suppressed =
     Response_text.finalize
-      ~stop_reason:Runtime_agent.Completed
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~raw_response_text:"Internal completion text"
       ~suppress_response_text:true
       ()

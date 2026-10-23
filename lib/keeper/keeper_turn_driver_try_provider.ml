@@ -632,7 +632,7 @@ let apply_accept
       (Keeper_internal_error.core_error_of_masc_internal_error
          (Keeper_internal_error.Host_stopped_turn
             { runtime_id; stop = Keeper_internal_error.Repeated_assistant_text }))
-  | Runtime_agent.Completed ->
+  | Runtime_agent.Completed _ ->
     if accept run_result.response
     then Ok run_result
     else
@@ -655,9 +655,10 @@ let is_end_turn_empty_completion (error : Agent_core.Error.t) =
   | Agent_core.Error.Internal _
   | Agent_core.Error.Internal_carried _ -> false
 
-let complete_saved_tool_terminal ~tool_results_saved_in_attempt ~checkpoint result =
-  match result, tool_results_saved_in_attempt, checkpoint with
-  | Error error, true, Some (checkpoint : Agent_core.Checkpoint.t)
+let complete_saved_tool_terminal ~tool_results_saved_in_attempt
+    ~observed_provider_turn_ordinal ~checkpoint result =
+  match result, tool_results_saved_in_attempt, checkpoint, observed_provider_turn_ordinal with
+  | Error error, true, Some (checkpoint : Agent_core.Checkpoint.t), Some provider_turn_ordinal
     when is_end_turn_empty_completion error ->
     (* The shared SDK still rejects empty completions. Only this Keeper owns
        proof that its tool results were saved in this attempt. The failure
@@ -679,9 +680,9 @@ let complete_saved_tool_terminal ~tool_results_saved_in_attempt ~checkpoint resu
       ; trace_ref = None
       ; run_validation = None
       ; runtime_observation = None
-      ; stop_reason = Runtime_agent.Completed
+      ; stop_reason = Runtime_agent.Completed { provider_turn_ordinal }
       }
-  | Ok _, _, _ | Error _, _, _ -> result
+  | Ok _, _, _, _ | Error _, _, _, _ -> result
 ;;
 
 (** Run a single provider attempt within the runtime.
@@ -2075,6 +2076,25 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
      narrower fact: this attempt wrote a tool-result checkpoint. Earlier
      attempts and context-only saves do not authorize a quiet terminal. *)
   let tool_result_saves_before = tool_result_save_count ctx.checkpoint_progress in
+  (* This cell belongs to this SDK invocation only. It is a witness for the
+     saved-tool empty-terminal normalization, never normal success authority.
+     A replay that emitted no new AfterTurn leaves it empty and stays failed. *)
+  let observed_provider_turn_ordinal = ref None in
+  let capture_provider_ordinal (config : Runtime_agent.config) =
+    let capture = { Agent_core.Hooks.empty with after_turn = Some (function
+      | Agent_core.Hooks.AfterTurn { turn; _ } ->
+        observed_provider_turn_ordinal := Some turn;
+        Agent_core.Hooks.Continue
+      | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
+      | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _
+      | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _
+      | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _ ->
+        Agent_core.Hooks.Continue) } in
+    let hooks = match config.hooks with
+      | None -> capture
+      | Some outer -> Agent_core.Hooks.compose ~outer ~inner:capture in
+    { config with hooks = Some hooks }
+  in
   let last_request = state.last_request in
   (* Named so the trace attributes runs during the provider attempt (request
      assembly, streaming, tool loop) to [turn:provider]. *)
@@ -2418,6 +2438,11 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 Native.config prepared, Native.prepared_checkpoint prepared,
                 Native.prepared_input prepared)
               |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in
+          let prepared = Result.map
+            (fun (config, checkpoint, input) ->
+              observed_provider_turn_ordinal := None;
+              capture_provider_ordinal config, checkpoint, input)
+            prepared in
           match prepared with
           | Error _ as error -> error
           | Ok (config, checkpoint, Native.Continue_from_checkpoint) ->
@@ -2576,6 +2601,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
            rejected)
       | Error _ as err ->
         complete_saved_tool_terminal
+          ~observed_provider_turn_ordinal:!observed_provider_turn_ordinal
           ~tool_results_saved_in_attempt:
             (tool_result_save_count ctx.checkpoint_progress > tool_result_saves_before)
           ~checkpoint:checkpoint_after

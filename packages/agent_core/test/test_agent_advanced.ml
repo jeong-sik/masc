@@ -203,8 +203,10 @@ let test_advanced_run_emits_lifecycle_events () =
        agent
        [ Types.Text "finish" ]
    with
-   | Ok (Agent.Advanced.Completed response) ->
-     Alcotest.(check string) "response" "done" (Types.visible_text_of_response response)
+   | Ok (Agent.Advanced.Completed completed) ->
+     Alcotest.(check string) "response" "done" (Types.visible_text_of_response completed.response);
+     Alcotest.(check int) "first provider ordinal" 0 completed.provider_turn_ordinal;
+     Alcotest.(check int) "completed turn count remains one" 1 (Agent.state agent).turn_count
    | Ok (Agent.Advanced.Yielded _) -> Alcotest.fail "advanced run unexpectedly yielded"
    | Ok (Agent.Advanced.Terminal_tool_completed _) ->
      Alcotest.fail "advanced run unexpectedly completed a terminal tool"
@@ -328,7 +330,7 @@ let test_advanced_continue_does_not_append_user_input () =
       ~tool:(time_tool ignore)
   in
   let original_user = Types.user_msg "original request" in
-  Agent.set_state agent { (Agent.state agent) with messages = [ original_user ] };
+  Agent.set_state agent { (Agent.state agent) with messages = [ original_user ]; turn_count = 4 };
   (match
      Agent.Advanced.continue
        ~sw
@@ -336,11 +338,13 @@ let test_advanced_continue_does_not_append_user_input () =
        ~on_tool_boundary:(fun _ -> Agent.Advanced.Continue)
        agent
    with
-   | Ok (Agent.Advanced.Completed response) ->
+   | Ok (Agent.Advanced.Completed completed) ->
      Alcotest.(check string)
        "response"
        "continued"
-       (Types.visible_text_of_response response)
+       (Types.visible_text_of_response completed.response);
+     Alcotest.(check int) "continued provider ordinal" 4 completed.provider_turn_ordinal;
+     Alcotest.(check int) "continued count stays distinct from ordinal" 5 (Agent.state agent).turn_count
    | Ok (Agent.Advanced.Yielded _) ->
      Alcotest.fail "checkpoint continuation unexpectedly yielded"
    | Ok (Agent.Advanced.Terminal_tool_completed _) ->
@@ -418,6 +422,7 @@ let test_yield_after_context_checkpoint () =
            lease_events := "tool" :: !lease_events))
       ()
   in
+  Agent.set_state agent { (Agent.state agent) with turn_count = 7 };
   let callback_count = ref 0 in
   let on_tool_boundary (boundary : Agent.Advanced.tool_boundary) =
     lease_events := "boundary" :: !lease_events;
@@ -431,7 +436,7 @@ let test_yield_after_context_checkpoint () =
          true
          (latest.Agent.stage = Agent.After_context_injection)
      | [] -> Alcotest.fail "callback ran without a successful checkpoint");
-    Alcotest.(check int) "boundary turn" 1 boundary.turn;
+    Alcotest.(check int) "boundary turn count" 8 boundary.turn;
     Alcotest.(check bool)
       "boundary stage"
       true
@@ -464,8 +469,9 @@ let test_yield_after_context_checkpoint () =
    | Ok (Agent.Advanced.Terminal_tool_completed _) ->
      Alcotest.fail "expected cooperative yield"
    | Ok (Agent.Advanced.Yielded yielded) ->
-     Alcotest.(check int) "yielded turn" 1 yielded.turn;
-     Alcotest.(check int) "checkpoint turn" 1 yielded.checkpoint.turn_count;
+     Alcotest.(check int) "yielded turn count" 8 yielded.turn;
+     Alcotest.(check int) "yielded provider ordinal" 7 yielded.provider_turn_ordinal;
+     Alcotest.(check int) "checkpoint turn count" 8 yielded.checkpoint.turn_count;
      Alcotest.(check bool)
        "yielded checkpoint stage"
        true
@@ -555,11 +561,12 @@ let test_continue_reaches_terminal_completion () =
    | Ok (Agent.Advanced.Yielded _) -> Alcotest.fail "expected terminal completion"
    | Ok (Agent.Advanced.Terminal_tool_completed _) ->
      Alcotest.fail "expected provider terminal completion"
-   | Ok (Agent.Advanced.Completed response) ->
+   | Ok (Agent.Advanced.Completed completed) ->
      Alcotest.(check string)
        "visible response"
        "done"
-       (Types.visible_text_of_response response));
+       (Types.visible_text_of_response completed.response);
+     Alcotest.(check int) "terminal answer follows tool provider ordinal" 1 completed.provider_turn_ordinal);
   Alcotest.(check int) "callback count" 1 !callback_count;
   Alcotest.(check (list string))
     "continue release-boundary-resume ordering"
@@ -952,6 +959,7 @@ let test_terminal_success_stops_advanced_before_next_provider () =
            ~descriptor:(Tool.terminal_descriptor Tool_contract.Effect_outcome_unknown)
            (fun () -> incr handler_count))
   in
+  Agent.set_state agent { (Agent.state agent) with turn_count = 9 };
   (match
      Agent.Advanced.run_blocks
        ~sw
@@ -967,6 +975,8 @@ let test_terminal_success_stops_advanced_before_next_provider () =
    | Ok (Agent.Advanced.Yielded _) ->
      Alcotest.fail "terminal tool completion must not yield"
    | Ok (Agent.Advanced.Terminal_tool_completed completion) ->
+     Alcotest.(check int) "terminal provider ordinal" 9 completion.provider_turn_ordinal;
+     Alcotest.(check int) "terminal turn count" 10 completion.turn;
      Alcotest.(check string)
        "exact invocation"
        "call_1"
@@ -975,7 +985,7 @@ let test_terminal_success_stops_advanced_before_next_provider () =
        "checkpoint stage"
        true
        (completion.receipt.checkpoint_stage = Agent.After_tool_results_appended);
-     Alcotest.(check int) "checkpoint turn" 1 completion.checkpoint.turn_count);
+     Alcotest.(check int) "checkpoint turn count" 10 completion.checkpoint.turn_count);
   Alcotest.(check int) "one handler" 1 !handler_count;
   Alcotest.(check int) "one provider call" 1 !call_count
 ;;

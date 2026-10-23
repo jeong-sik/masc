@@ -2998,6 +2998,77 @@ let test_agent_run_resumes_settled_closed_turn_boundary =
   test_agent_run_resumes_settled_closed_turn ~window:Window_turn_closed
 ;;
 
+(* The same durable crash window as the tool fixture above, with no ToolUse
+   turn: the provider answer and turn are closed, but the root is Running.
+   Replay must retain the persisted frontier, not depend on a new AfterTurn. *)
+let test_advanced_replays_nonzero_settled_terminal_ordinal () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun runtime_sw ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let runtime = match Agent.create_execution_runtime ~sw:runtime_sw ~domain_mgr ~domain_count:1 with
+    | Ok value -> value | Error error -> Alcotest.fail (Error.to_string error) in
+  let writer_runtime = match Internal_runtime.create ~sw:runtime_sw ~domain_mgr ~domain_count:1 with
+    | Ok value -> value | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error) in
+  let codec = Internal_codec.of_runtime writer_runtime in
+  let native_path = Filename.temp_file "agent-core-settled-terminal-ordinal-" ".dir" in
+  Sys.remove native_path;
+  let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
+  Fun.protect ~finally:(fun () -> Eio.Path.rmtree ~missing_ok:true dir) (fun () ->
+    Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 dir;
+    let config = {(Types.default_config ~model:"test-model") with name="settled-terminal-ordinal"} in
+    let provider_config = Provider_mock.to_provider_config () in
+    let binding = match Internal_binding.of_provider_config ~transport:Internal_binding.Injected provider_config with
+      | Ok value -> value | Error detail -> Alcotest.fail detail in
+    let persisted = {(Provider_mock.text_response "persisted terminal answer" []) with
+      Types.id="persisted-turn-seven";
+      usage=Some {Types.input_tokens=17;output_tokens=23;cache_creation_input_tokens=5;
+        cache_read_input_tokens=7;cost_usd=Some 0.125}} in
+    let locator_json = ref None in
+    let scope_ok = function
+      | Ok value -> value | Error error -> Alcotest.fail (Internal_scope.error_to_string error) in
+    (match Internal_writer.run ~codec ~dir (fun ~sw:_ writer ->
+       let scope = scope_ok (Internal_scope.start ~writer ~agent_name:config.name) in
+       locator_json := Some (Internal_scope.scope_locator_to_yojson (Internal_scope.scope_locator scope));
+       let turn = scope_ok (Internal_scope.open_turn scope ~ordinal:7) in
+       let provider = scope_ok (Internal_scope.open_provider_attempt turn ~ordinal:0 binding) in
+       record_durable_provider_response provider persisted;
+       scope_ok (Internal_scope.close_provider_attempt provider Internal.Execution_event.Succeeded);
+       scope_ok (Internal_scope.close_turn turn Internal.Execution_event.Succeeded)) with
+     | Ok () -> () | Error failure -> Alcotest.fail (Internal_writer.scope_failure_to_string failure));
+    let locator = match !locator_json with
+      | None -> Alcotest.fail "fixture did not retain durable root"
+      | Some json -> (match Agent.execution_locator_of_yojson json with
+        | Ok value -> value | Error detail -> Alcotest.fail detail) in
+    let provider_calls = ref 0 in
+    let transport : Llm_provider.Llm_transport.t =
+      {complete_sync=(fun _ -> incr provider_calls;
+         {Llm_provider.Llm_transport.response=Ok (Provider_mock.text_response "unexpected new answer" []);latency_ms=Some 0});
+       complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> incr provider_calls;
+         Ok (Provider_mock.text_response "unexpected new answer" []))} in
+    let after_turns = ref 0 in
+    let hooks = {Hooks.empty with after_turn=Some (fun _ -> incr after_turns; Hooks.Continue)} in
+    let options = {Agent.default_options with transport=Some transport;
+      provider_config=Some provider_config;hooks} in
+    let agent = Agent.create ~net:(Eio.Stdenv.net env) ~config ~tools:[] ~options () in
+    Agent.set_state agent {config;messages=[Types.user_msg "finish this request";
+      Types.make_message ~role:Types.Assistant persisted.content];turn_count=8;usage=Types.empty_usage};
+    let execution_store = Agent.execution_store ~runtime ~dir ~resume:locator () in
+    (match Agent.Advanced.run_blocks ~sw:runtime_sw ~execution_store ~api_strategy:Agent.Sync
+       ~on_tool_boundary:(fun _ -> Alcotest.fail "text replay reached a tool boundary")
+       agent [Types.Text "finish this request"] with
+     | Ok (Agent.Advanced.Completed completed) ->
+       Alcotest.(check int) "replay returns the original nonzero provider ordinal" 7 completed.provider_turn_ordinal;
+       Alcotest.(check bool) "persisted response identity, content and usage remain exact" true
+         (completed.response=persisted)
+     | Ok (Agent.Advanced.Yielded _ | Agent.Advanced.Terminal_tool_completed _) ->
+       Alcotest.fail "text replay changed the terminal outcome kind"
+     | Error error -> Alcotest.fail (Error.to_string error));
+    Alcotest.(check int) "settled terminal replay makes no provider call" 0 !provider_calls;
+    Alcotest.(check int) "settled terminal replay invokes no new AfterTurn" 0 !after_turns;
+    Alcotest.(check int) "restored turn count stays distinct and is not advanced again" 8
+      (Agent.state agent).turn_count)
+;;
+
 let test_agent_run_resumes_terminal_after_descriptor_drift () =
   test_agent_run_resumes_settled_closed_turn
     ~persisted_completion:
@@ -4261,6 +4332,10 @@ let () =
             "Agent.run resumes settled turn after turn-close crash (#2683)"
             `Quick
             test_agent_run_resumes_settled_closed_turn_boundary
+        ; Alcotest.test_case
+            "Advanced settled terminal replay retains nonzero ordinal without provider or AfterTurn"
+            `Quick
+            test_advanced_replays_nonzero_settled_terminal_ordinal
         ; Alcotest.test_case
             "terminal resume ignores current descriptor drift"
             `Quick

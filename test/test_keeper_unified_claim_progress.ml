@@ -41,7 +41,7 @@ let test_empty_no_tool_response_is_no_visible_output () =
   let result ~response_text_present =
     KAR.Contract_helpers.observed_completion_evidence
       ~actual_keeper_tool_names:[]
-      ~stop_reason:Runtime_agent.Completed
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~response_text_present
     |> Masc.Keeper_execution_receipt.completion_contract_result_to_string
   in

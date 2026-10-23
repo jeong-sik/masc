@@ -118,12 +118,12 @@ let lifecycle_outcome = function
   | Error error -> Agent_core.Agent_lifecycle_events.Failed error
   | Ok ({ response; stop_reason; _ } : Runtime_agent.run_result) ->
     (match stop_reason with
-     | Runtime_agent.Completed ->
+     | Runtime_agent.Completed _ ->
        Agent_core.Agent_lifecycle_events.Completed response
      | Runtime_agent.InputRequired { request; _ } ->
        Agent_core.Agent_lifecycle_events.Input_required request
-     | Runtime_agent.Yielded_to_operation_queued { turns_used }
-     | Runtime_agent.Yielded_to_durable_stimulus { turns_used }
+     | Runtime_agent.Yielded_to_operation_queued { turns_used; _ }
+     | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ }
      | Runtime_agent.Yielded_after_repeated_tool_call { turns_used; _ }
      | Runtime_agent.Yielded_after_repeated_assistant_text { turns_used; _ } ->
        Agent_core.Agent_lifecycle_events.Yielded { turn = turns_used })
@@ -174,6 +174,7 @@ let host_stop_result
       ~model
       ~session_id
       ~turn_id
+      ~provider_turn_ordinal
       ~turns_used
       ~latency_ms
       ~request_context
@@ -210,11 +211,11 @@ let host_stop_result
       match stop with
       | Repeated_tool_call { tool_name; repeated_count } ->
         Runtime_agent.Yielded_after_repeated_tool_call
-          { turns_used; tool_name; repeated_count }
+          { turns_used; provider_turn_ordinal; tool_name; repeated_count }
       | Terminal_tool_boundary { outcome = Terminal_completed; _ } ->
-        Runtime_agent.Completed
+        Runtime_agent.Completed { provider_turn_ordinal }
       | Terminal_tool_boundary { outcome = Durable_stimulus_deferred; _ } ->
-        Runtime_agent.Yielded_to_durable_stimulus { turns_used }
+        Runtime_agent.Yielded_to_durable_stimulus { turns_used; provider_turn_ordinal }
       | Terminal_tool_boundary { outcome = Terminal_failed _; _ } -> assert false
     in
     (* masc#31312: this host-stop path was the one producer that returned

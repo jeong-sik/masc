@@ -37,22 +37,34 @@ let transport_error_kind_of_exception exn =
 
 type stop_reason =
   Runtime_agent_context.stop_reason =
-  | Completed
-  | Yielded_to_operation_queued of { turns_used : int }
-  | Yielded_to_durable_stimulus of { turns_used : int }
+  | Completed of { provider_turn_ordinal : int }
+  | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
+  | Yielded_to_durable_stimulus of { turns_used : int; provider_turn_ordinal : int }
   | Yielded_after_repeated_tool_call of
       { turns_used : int
+      ; provider_turn_ordinal : int
       ; tool_name : string
       ; repeated_count : int
       }
   | Yielded_after_repeated_assistant_text of
       { turns_used : int
+      ; provider_turn_ordinal : int
       ; repeated_count : int
       }
   | InputRequired of {
       turns_used : int;
       request : Agent_core.Error.input_required;
     }
+
+let final_provider_turn_ordinal = function
+  | Completed { provider_turn_ordinal }
+  | Yielded_to_operation_queued { provider_turn_ordinal; _ }
+  | Yielded_to_durable_stimulus { provider_turn_ordinal; _ }
+  | Yielded_after_repeated_tool_call { provider_turn_ordinal; _ }
+  | Yielded_after_repeated_assistant_text { provider_turn_ordinal; _ } ->
+    Some provider_turn_ordinal
+  | InputRequired _ -> None
+;;
 
 type cooperative_yield_reason =
   | Operation_queued
@@ -892,19 +904,19 @@ let select_agent_result ~checkpoint ~resume ~build =
   | Some checkpoint -> resume checkpoint
   | None -> build ()
 
-let stop_reason_of_cooperative_yield ~turns_used = function
-  | Operation_queued -> Yielded_to_operation_queued { turns_used }
+let stop_reason_of_cooperative_yield ~provider_turn_ordinal ~turns_used = function
+  | Operation_queued -> Yielded_to_operation_queued { turns_used; provider_turn_ordinal }
   | Durable_stimulus_waiting ->
-    Yielded_to_durable_stimulus { turns_used }
+    Yielded_to_durable_stimulus { turns_used; provider_turn_ordinal }
   | Repeated_tool_call { tool_name; repeated_count } ->
     Yielded_after_repeated_tool_call
-      { turns_used; tool_name; repeated_count }
+      { turns_used; provider_turn_ordinal; tool_name; repeated_count }
   | Repeated_assistant_text { repeated_count } ->
-    Yielded_after_repeated_assistant_text { turns_used; repeated_count }
+    Yielded_after_repeated_assistant_text { turns_used; provider_turn_ordinal; repeated_count }
   (* The provider loop yielded at AGENT_CORE's durable post-tool boundary because
      the typed reply effect already completed. This is successful completion,
      not a continuation checkpoint that should replay on the next cycle. *)
-  | Terminal_tool_completed -> Completed
+  | Terminal_tool_completed -> Completed { provider_turn_ordinal }
 ;;
 
 let cooperative_boundary_callback
@@ -998,7 +1010,7 @@ let run_duration_ms_since started_at =
   Float.max 0.0 ((Unix.gettimeofday () -. started_at) *. 1000.0)
 
 let dashboard_status_of_stop_reason = function
-  | Completed -> Dashboard_agent_core_bridge.Success
+  | Completed _ -> Dashboard_agent_core_bridge.Success
   | Yielded_to_operation_queued _ ->
       Dashboard_agent_core_bridge.Cancelled { reason = "yielded_to_operation_queued" }
   | Yielded_to_durable_stimulus _ ->
@@ -1106,7 +1118,7 @@ let resume_from_checkpoint
            ()))
 
 type classified_advanced_outcome =
-  | Advanced_completed of Agent_core.Types.api_response
+  | Advanced_completed of Agent_core.Agent.Advanced.completed
   | Advanced_yielded of
       cooperative_yield_reason
       * Agent_core.Agent.Advanced.yielded
@@ -1114,13 +1126,13 @@ type classified_advanced_outcome =
 
 let classify_advanced_outcome ~yield_reason ~boundary_response outcome =
   match outcome with
-  | Agent_core.Agent.Advanced.Completed response ->
-    Ok (Advanced_completed response)
-  | Agent_core.Agent.Advanced.Terminal_tool_completed { receipt; _ } ->
+  | Agent_core.Agent.Advanced.Completed completion ->
+    Ok (Advanced_completed completion)
+  | Agent_core.Agent.Advanced.Terminal_tool_completed { receipt; provider_turn_ordinal; _ } ->
     (* The run ended because a terminal-contract tool completed its effect;
        the receipt's provider response is the completion payload — the same
        classification Agent Core's own lifecycle events apply. *)
-    Ok (Advanced_completed receipt.Agent_core.Terminal_tool_receipt.response)
+    Ok (Advanced_completed { Agent_core.Agent.Advanced.response = receipt.Agent_core.Terminal_tool_receipt.response; provider_turn_ordinal })
   | Agent_core.Agent.Advanced.Yielded yielded ->
     (match yield_reason, boundary_response with
      | Some reason, Some response ->
@@ -1240,67 +1252,37 @@ let run_blocks_internal
           let boundary_probe = cooperative_yield_probe in
           match boundary_probe with
             | None ->
-              (match run_input with
-               | New_input { blocks = goal_blocks; metadata = input_metadata } ->
-                 (match on_event with
-                  | Some cb ->
-                    Agent_core.Agent.run_stream_blocks
-                      ~sw
-                      ?clock
-                      ?execution_store:config.execution_store
-                      ?on_yield
-                      ?on_resume
-                      ~input_metadata
-                      ~on_event:cb
-                      agent
-                      goal_blocks
-                  | None ->
-                    Agent_core.Agent.run_blocks
-                      ~sw
-                      ?clock
-                      ?execution_store:config.execution_store
-                      ?on_yield
-                      ?on_resume
-                      ~input_metadata
-                      agent
-                      goal_blocks)
-                 |> Result.map (fun response -> `Completed response)
-               | Continue_from_checkpoint ->
-                 let api_strategy =
-                   match on_event with
-                   | None -> Agent_core.Agent.Sync
-                   | Some on_event ->
-                     let on_telemetry =
-                       Option.map
-                         (fun bus ->
-                            Agent_core.Telemetry_bus.publish
-                              (Agent_core.Telemetry_bus.of_event_bus bus))
-                         (Agent_core.Agent.options agent).event_bus
-                     in
-                     Agent_core.Agent.Stream { on_event; on_telemetry }
-                 in
-                 (match
-                    Agent_core.Agent.Advanced.continue
-                      ~sw
-                      ?clock
-                      ?execution_store:config.execution_store
-                      ?on_yield
-                      ?on_resume
-                      ~api_strategy
-                      ~on_tool_boundary:(fun _ -> Agent_core.Agent.Advanced.Continue)
-                      agent
-                  with
-                  | Ok (Agent_core.Agent.Advanced.Completed response) ->
-                    Ok (`Completed response)
-                  | Ok
-                      (Agent_core.Agent.Advanced.Terminal_tool_completed completion)
-                    ->
-                    Ok (`Completed completion.receipt.response)
-                  | Ok (Agent_core.Agent.Advanced.Yielded _) ->
-                    Error
-                      (Agent_core.Error.Internal
-                         "checkpoint continuation yielded without a cooperative probe")
-                  | Error _ as error -> error))
+              let api_strategy =
+                match on_event with
+                | None -> Agent_core.Agent.Sync
+                | Some on_event ->
+                  let on_telemetry =
+                    Option.map
+                      (fun bus -> Agent_core.Telemetry_bus.publish
+                        (Agent_core.Telemetry_bus.of_event_bus bus))
+                      (Agent_core.Agent.options agent).event_bus in
+                  Agent_core.Agent.Stream { on_event; on_telemetry }
+              in
+              let on_tool_boundary _ = Agent_core.Agent.Advanced.Continue in
+              let advanced = match run_input with
+                | New_input { blocks; metadata = input_metadata } ->
+                  Agent_core.Agent.Advanced.run_blocks ~sw ?clock
+                    ?execution_store:config.execution_store ?on_yield ?on_resume
+                    ~input_metadata ~api_strategy ~on_tool_boundary agent blocks
+                | Continue_from_checkpoint ->
+                  Agent_core.Agent.Advanced.continue ~sw ?clock
+                    ?execution_store:config.execution_store ?on_yield ?on_resume
+                    ~api_strategy ~on_tool_boundary agent
+              in
+              (match advanced with
+               | Ok (Agent_core.Agent.Advanced.Completed completion) -> Ok (`Completed completion)
+               | Ok (Agent_core.Agent.Advanced.Terminal_tool_completed completion) ->
+                 Ok (`Completed { Agent_core.Agent.Advanced.response=completion.receipt.response;
+                                  provider_turn_ordinal=completion.provider_turn_ordinal })
+               | Ok (Agent_core.Agent.Advanced.Yielded _) ->
+                 Error (Agent_core.Error.Internal
+                   "checkpoint continuation yielded without a cooperative probe")
+               | Error _ as error -> error)
             | Some probe ->
               let probe_error = ref None in
               let yield_decision = ref None in
@@ -1397,7 +1379,7 @@ let run_blocks_internal
       | None -> None
     in
     (match result with
-    | Ok (`Completed response) ->
+    | Ok (`Completed { Agent_core.Agent.Advanced.response; provider_turn_ordinal }) ->
       close_after_success ();
       record_dashboard_agent_core_response ~config
         ~total_duration_ms:run_total_duration_ms
@@ -1421,12 +1403,13 @@ let run_blocks_internal
           trace_ref;
           run_validation;
           runtime_observation = Some runtime_observation;
-          stop_reason = Completed;
+          stop_reason = Completed { provider_turn_ordinal };
         }
     | Ok (`Yielded (decision, yielded, response)) ->
       close_after_success ();
       let stop_reason =
         stop_reason_of_cooperative_yield
+          ~provider_turn_ordinal:yielded.provider_turn_ordinal
           ~turns_used:yielded.turn
           decision
       in

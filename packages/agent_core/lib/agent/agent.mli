@@ -334,18 +334,30 @@ module Advanced : sig
 
   type yielded =
     { turn : int
+    ; provider_turn_ordinal : int
+        (** The exact zero-based pipeline frontier that produced this outcome,
+            including a durable replay. [turn] retains its turn-count meaning. *)
     ; checkpoint_stage : checkpoint_stage
     ; checkpoint : Checkpoint.t
     }
 
   type terminal_tool_completed =
     { turn : int
+    ; provider_turn_ordinal : int
     ; receipt : Terminal_tool_receipt.t
     ; checkpoint : Checkpoint.t
     }
 
+  type completed =
+    { response : Types.api_response
+    ; provider_turn_ordinal : int
+        (** The provider turn named by the resolved pipeline frontier. A
+            persisted terminal replay returns its original ordinal without
+            requiring a new provider response or AfterTurn hook. *)
+    }
+
   type run_outcome =
-    | Completed of Types.api_response
+    | Completed of completed
     | Yielded of yielded
     | Terminal_tool_completed of terminal_tool_completed
 

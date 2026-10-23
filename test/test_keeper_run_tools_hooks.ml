@@ -957,8 +957,7 @@ let test_codex_receipts_reach_live_and_cancelled_history () =
           ~config:(Masc.Workspace.default_config base_path)
           ~meta_ref:(ref (make_meta "codex-receipts"))
           ~turn_ctx_cell:(Log.create_turn_ctx_cell ())
-          ~trace_id:"codex-receipts-trace" ~keeper_turn_id:1
-          ~on_after_turn_ordinal:ignore () in
+          ~trace_id:"codex-receipts-trace" ~keeper_turn_id:1 () in
       let hooks = Receipts.hooks receipts { original with pre_tool_use=None } in
       let invoke hook event = match hook with
         | Some hook -> ignore (hook event) | None -> fail "receipt hook missing" in
@@ -1060,8 +1059,7 @@ let test_retained_observation_commits_through_production_hook () =
           ~config:(Masc.Workspace.default_config base_path)
           ~meta_ref:(ref (make_meta "observation-reader"))
           ~turn_ctx_cell:(Log.create_turn_ctx_cell ())
-          ~trace_id:"observation-trace" ~keeper_turn_id:1
-          ~on_after_turn_ordinal:ignore () in
+          ~trace_id:"observation-trace" ~keeper_turn_id:1 () in
       let post = match hooks.Agent_core.Hooks.post_tool_use with
         | Some hook -> hook | None -> fail "post tool hook missing" in
       let event invocation = Agent_core.Hooks.PostToolUse {
@@ -1107,8 +1105,7 @@ let test_the_turn_observation_names_its_keeper_turn () =
       ~config:(Masc.Workspace.default_config base_path)
       ~meta_ref:(ref (make_meta "observation-keeper"))
       ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
-      ~trace_id:"observation-trace" ~keeper_turn_id:2275
-      ~on_after_turn_ordinal:ignore () in
+      ~trace_id:"observation-trace" ~keeper_turn_id:2275 () in
   let after_turn = match hooks.Agent_core.Hooks.after_turn with
     | Some hook -> hook | None -> fail "after_turn hook missing" in
   let response : Agent_core.Types.api_response =
@@ -1174,7 +1171,6 @@ let test_the_completion_hook_rows_by_attempt () =
         ~meta_ref:(ref (make_meta "ledger-keeper"))
         ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
         ~trace_id:"ledger-trace" ~keeper_turn_id:7
-        ~on_after_turn_ordinal:ignore
         ~current_attempt_usage:(fun () -> attempt)
         ~trajectory_acc:
           (Trajectory.create_accumulator
@@ -1295,8 +1291,7 @@ let test_plain_tool_commits_before_hook_returns ~success () =
           ~config:(Masc.Workspace.default_config base_path)
           ~meta_ref:(ref (make_meta "plain-reader"))
           ~turn_ctx_cell:(Log.create_turn_ctx_cell ())
-          ~trace_id:"plain-trace" ~keeper_turn_id:1
-          ~on_after_turn_ordinal:ignore () in
+          ~trace_id:"plain-trace" ~keeper_turn_id:1 () in
       let invocation = Agent_core.Tool_contract.Invocation.create
           ~tool_use_id:"plain-call" ~turn:1
           ~completion:Agent_core.Tool_contract.Continue_after_success
@@ -1344,7 +1339,6 @@ let test_projection_failure_keeps_execution_and_wire_outcomes_separate () =
            ~turn_ctx_cell:(Log.create_turn_ctx_cell ())
            ~trace_id:"projection-failure-trace"
            ~keeper_turn_id:1
-           ~on_after_turn_ordinal:ignore
            ()
        in
        let invocation =
@@ -1418,8 +1412,7 @@ let rejected_rows_for ?on_tool_result_ready ~stage () =
        let hooks =
          Masc.Keeper_hooks_agent_core.make_hooks
            ~config ~meta_ref ~turn_ctx_cell 
-           ~trace_id:"rejection-trace" ~keeper_turn_id:1
-           ~on_after_turn_ordinal:ignore ?on_tool_result_ready ()
+           ~trace_id:"rejection-trace" ~keeper_turn_id:1 ?on_tool_result_ready ()
        in
        let hook =
          match hooks.Agent_core.Hooks.post_tool_use_failure with
@@ -1596,8 +1589,7 @@ let test_codex_cancelled_hooks_only_report_committed_rows () =
               ~config:(Masc.Workspace.default_config base_path)
               ~meta_ref:(ref (make_meta "cancelled-receipt"))
               ~turn_ctx_cell:(Log.create_turn_ctx_cell ())
-              ~trace_id:"cancelled-receipt-trace" ~keeper_turn_id:1
-              ~on_after_turn_ordinal:ignore () in
+              ~trace_id:"cancelled-receipt-trace" ~keeper_turn_id:1 () in
           let invocation = Agent_core.Tool_contract.Invocation.create
               ~tool_use_id:"cancelled-call" ~turn:1
               ~completion:Agent_core.Tool_contract.Continue_after_success
@@ -1667,7 +1659,6 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
            ~turn_ctx_cell
            ~trace_id:"cancelled-observer-trace"
            ~keeper_turn_id:1
-           ~on_after_turn_ordinal:ignore
            ~on_tool_executed:
              (fun
                ~tool_name:_ ~input:_ ~output_text:_ ~execution_evidence:_ ~observation:_ ~success:_
@@ -1806,7 +1797,6 @@ let test_canonical_fact_precedes_stalled_observer () =
               ~meta_ref:(ref (make_meta keeper_name))
               ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
               ~trace_id:(keeper_name ^ "-trace") ~keeper_turn_id:19
-              ~on_after_turn_ordinal:ignore
               ~attribute_tool_input:(fun _ -> incr attributions; !current_attribution)
               ~on_tool_executed:(fun ~tool_name:_ ~input:_ ~output_text:_
                   ~execution_evidence:_ ~observation ~success:_ ~duration_ms:_

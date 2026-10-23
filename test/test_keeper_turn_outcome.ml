@@ -94,35 +94,35 @@ let test_of_stop_reason () =
     }
   in
   check outcome "completed -> visible" TO.Visible_reply
-    (TO.of_stop_reason Runtime_agent.Completed);
+    (TO.of_stop_reason (Runtime_agent.Completed { provider_turn_ordinal = 17 }));
   check outcome "chat yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
-       (Runtime_agent.Yielded_to_operation_queued { turns_used = 2 }));
+       (Runtime_agent.Yielded_to_operation_queued { turns_used = 2 ; provider_turn_ordinal = 17 }));
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
-       (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
+       (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 ; provider_turn_ordinal = 17 }));
   check outcome "repeated tool yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_after_repeated_tool_call
           { turns_used = 2
           ; tool_name = "keeper_tasks_list"
           ; repeated_count = 3
-          }));
+          ; provider_turn_ordinal = 17 }));
   check outcome "repeated assistant text yield -> checkpoint"
     TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_after_repeated_assistant_text
-          { turns_used = 2; repeated_count = 3 }));
+          { turns_used = 2; repeated_count = 3 ; provider_turn_ordinal = 17 }));
   check outcome "typed input required -> visible" TO.Visible_reply
     (TO.of_stop_reason
        (Runtime_agent.InputRequired { turns_used = 2; request }))
 
 let test_of_result_surface () =
   check outcome "completed with text -> visible" TO.Visible_reply
-    (TO.of_result_surface ~response_text:"done" Runtime_agent.Completed);
+    (TO.of_result_surface ~response_text:"done" (Runtime_agent.Completed { provider_turn_ordinal = 17 }));
   check outcome "completed with empty text -> no visible reply"
     TO.No_visible_reply
-    (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed)
+    (TO.of_result_surface ~response_text:"   " (Runtime_agent.Completed { provider_turn_ordinal = 17 }))
 
 let test_progress_post_keeps_typed_continuation () =
   let receipt = Masc.Keeper_tool_execution.Surface_post_completed
@@ -140,14 +140,14 @@ let test_progress_post_keeps_typed_continuation () =
       check bool "delivery evidence survives alongside continuation" true
         (retained_receipt = Some receipt)
     | Error error -> fail (Agent_core.Error.to_string error))
-    [ Runtime_agent.Yielded_to_operation_queued { turns_used = 1 }
-    ; Runtime_agent.Yielded_to_durable_stimulus { turns_used = 1 }
+    [ Runtime_agent.Yielded_to_operation_queued { turns_used = 1 ; provider_turn_ordinal = 17 }
+    ; Runtime_agent.Yielded_to_durable_stimulus { turns_used = 1 ; provider_turn_ordinal = 17 }
     ; Runtime_agent.Yielded_after_repeated_tool_call
-        { turns_used = 1; tool_name = "probe"; repeated_count = 3 }
+        { turns_used = 1; tool_name = "probe"; repeated_count = 3 ; provider_turn_ordinal = 17 }
     ; Runtime_agent.Yielded_after_repeated_assistant_text
-        { turns_used = 1; repeated_count = 3 }
+        { turns_used = 1; repeated_count = 3 ; provider_turn_ordinal = 17 }
     ];
-  (match finish Runtime_agent.Completed posted with
+  (match finish (Runtime_agent.Completed { provider_turn_ordinal = 17 }) posted with
    | Ok (turn_outcome, retained_receipt) ->
      check outcome "completed operation keeps terminal delivery" TO.Terminal_effect_settled turn_outcome;
      check bool "terminal delivery retains receipt" true (retained_receipt = Some receipt)
@@ -157,7 +157,7 @@ let test_progress_post_keeps_typed_continuation () =
     ; effect_disposition = Tool_result.Proven_post_effect
     ; detail = Keeper_terminal_effect_detail.Output_artifact_unstored { message = "disk unavailable" }
     } in
-  match finish (Runtime_agent.Yielded_to_operation_queued { turns_used = 1 }) failed with
+  match finish (Runtime_agent.Yielded_to_operation_queued { turns_used = 1 ; provider_turn_ordinal = 17 }) failed with
   | Error error ->
     (match Keeper_internal_error.classify_masc_internal_error error with
      | Some (Keeper_internal_error.Terminal_effect_failed
@@ -764,17 +764,18 @@ let test_autonomous_yield_boundary_contract () =
   check bool "repeated exact call yield preserves its evidence" true
     (match
        Runtime_agent.For_testing.stop_reason_of_cooperative_yield
-         ~turns_used:8
+         ~provider_turn_ordinal:17 ~turns_used:8
          (Runtime_agent.Repeated_tool_call
             { tool_name = "keeper_tasks_list"; repeated_count = 3 })
      with
      | Runtime_agent.Yielded_after_repeated_tool_call
          { turns_used = 8
+         ; provider_turn_ordinal = 17
          ; tool_name = "keeper_tasks_list"
          ; repeated_count = 3
          } ->
        true
-     | Runtime_agent.Completed
+     | Runtime_agent.Completed _
      | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.Yielded_after_repeated_tool_call _
@@ -784,13 +785,13 @@ let test_autonomous_yield_boundary_contract () =
   check bool "repeated assistant text yield preserves its evidence" true
     (match
        Runtime_agent.For_testing.stop_reason_of_cooperative_yield
-         ~turns_used:8
+         ~provider_turn_ordinal:17 ~turns_used:8
          (Runtime_agent.Repeated_assistant_text { repeated_count = 3 })
      with
      | Runtime_agent.Yielded_after_repeated_assistant_text
-         { turns_used = 8; repeated_count = 3 } ->
+         { turns_used = 8; provider_turn_ordinal = 17; repeated_count = 3 } ->
        true
-     | Runtime_agent.Completed
+     | Runtime_agent.Completed _
      | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.Yielded_after_repeated_tool_call _
@@ -800,10 +801,11 @@ let test_autonomous_yield_boundary_contract () =
   check bool "terminal tool yield settles as completion" true
     (match
        Runtime_agent.For_testing.stop_reason_of_cooperative_yield
-         ~turns_used:3
+         ~provider_turn_ordinal:17 ~turns_used:3
          Runtime_agent.Terminal_tool_completed
      with
-     | Runtime_agent.Completed -> true
+     | Runtime_agent.Completed { provider_turn_ordinal = 17 } -> true
+     | Runtime_agent.Completed _ -> false
      | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.Yielded_after_repeated_tool_call _

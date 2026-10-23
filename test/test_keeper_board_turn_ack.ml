@@ -72,7 +72,7 @@ let completed_record config =
   | [Dated_jsonl.Parsed row] ->
     let record = Turn_record.of_json row |> get Fun.id in
     require (record.finish_reason = Some
-      (Keeper_execution_receipt.stop_reason_to_string Runtime_agent.Completed))
+      (Keeper_execution_receipt.stop_reason_to_string (Runtime_agent.Completed { provider_turn_ordinal = 17 })))
       "actual turn did not record Completed";
     row
   | [] | _ :: _ -> failwith "one strict completed TurnRecord was required"

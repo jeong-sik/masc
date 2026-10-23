@@ -10,7 +10,7 @@ let normalize_response_text_for_finalization
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Yielded_after_repeated_tool_call _
   | Runtime_agent.Yielded_after_repeated_assistant_text _
-  | Runtime_agent.Completed
+  | Runtime_agent.Completed _
   | Runtime_agent.InputRequired _ ->
   if
     Keeper_agent_run_response_text.stop_reason_suppresses_visible_response

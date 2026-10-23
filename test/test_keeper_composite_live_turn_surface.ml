@@ -397,8 +397,7 @@ let test_late_predecessor_cannot_finish_successor () =
       ~config:(Masc.Workspace.default_config base)
       ~meta_ref:(ref (make_meta name))
       ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
-      ~trace_id:"ownership-test" ~keeper_turn_id:1
-      ~on_after_turn_ordinal:ignore ()
+      ~trace_id:"ownership-test" ~keeper_turn_id:1 ()
   in
   let fire_before_turn hooks =
     match hooks.Agent_core.Hooks.before_turn with

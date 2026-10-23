@@ -22380,11 +22380,11 @@ let mouse_tracking_disable = "\x1b[?1006;1002;1000l"
 (* Tracking is what the wheel costs the terminal: with reports on, a drag is a
    report and the terminal never highlights anything. A drag is read here
    instead: it selects inside the pane it started in and is copied on release
-   ([Masc_tui_pane_selection]). Ctrl-T hands the mouse back, for a selection
+   ([Masc_tui_pane_selection]). F2 hands the mouse back, for a selection
    the terminal draws itself, and takes it again. A letter would not do -- in
    the composer every letter is text. *)
 let mouse_tracking_on = Atomic.make true
-let toggle_mouse_tracking_key = "\020"
+let toggle_mouse_tracking_key = Masc_tui_keys.mouse_toggle_key
 
 (* Ctrl-B, as an editor toggles its side bar. The roster beside a keeper chat
    costs 30 of the terminal's columns, and a reader who knows which keeper
@@ -26008,7 +26008,7 @@ and is loaded on demand through keeper_skill.
           it back. Enter does not close it, so a second Enter, pressed while
           the answer was on its way, cannot close the card it opens. [y] copies
           the link to the terminal clipboard and says so without naming it.
-          Ctrl-T is left to its arm below: a terminal that ignores OSC 52 has
+          F2 is left to its arm below: a terminal that ignores OSC 52 has
           only the mouse to copy the link with, and this is a screen worth
           copying from. *)
        | Some k
@@ -30617,19 +30617,7 @@ and is loaded on demand through keeper_skill.
        | Some k when Masc_tui_keys.opens_keepers ~message_mode k ->
            state.detail_focus_recovery <- None;
            state.view <- Keepers Keeper_list
-       (* Ctrl-] follows the reference under the cursor, and Esc on the surface
-          it lands on comes back. vim's tag key for the going; for the coming
-          back it was Ctrl-T, which never ran: the mouse-tracking toggle
-          claims the same byte 1200 lines above this in the same ordered
-          match, and its [when] guard stops the compiler from calling the
-          later arm unreachable. So following worked and returning did not.
-
-          Esc rather than another chord. It is what a reader presses to leave
-          a screen anyway, and where they were is a better answer than
-          Overview -- which is where Esc used to drop them, having thrown away
-          the fact that they had come from somewhere. [Y] already copies the
-          same reference; following it is what an operator did with the copy
-          by hand. *)
+       (* Following preserves the source surface; Esc returns to it. *)
        | Some "\x1d" ->
            (match
               Option.bind (presented_surface_reference ()) (fun reference ->

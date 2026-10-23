@@ -35,6 +35,13 @@ let test_legacy_tilde_keys () =
   check_name "end via 4" "end" "4" '~'
 ;;
 
+let test_mouse_toggle_is_separate_from_chat_queue () =
+  List.iter (fun (parameters, final) ->
+      check_name "mouse ownership key" "f2" parameters final)
+    [ "", 'Q'; "12", '~'; "57365;1", 'u' ];
+  check_name "Ctrl-T remains the queue key" "\020" "116;5" 'u'
+;;
+
 let test_msx_checkpoint_keys () =
   List.iter (fun (parameters, final, expected) ->
     check_name "checkpoint key reaches binding" expected parameters final)
@@ -191,13 +198,15 @@ let test_an_unnamed_ss3_final_stays_unnamed () =
         (Printf.sprintf "ESC O %c is not named" final)
         None
         (Masc_tui_csi.name ~parameters:"" ~final))
-    [ 'P'; 'Q'; 'R' ]
+    [ 'P'; 'R' ]
 
 let () =
   run "tui_csi"
     [ ( "legacy"
       , [ test_case "arrows keep bare names" `Quick test_legacy_arrows_keep_bare_names
         ; test_case "tilde keys" `Quick test_legacy_tilde_keys
+        ; test_case "mouse and queue keys are distinct" `Quick
+            test_mouse_toggle_is_separate_from_chat_queue
         ; test_case "Ghostty MSX checkpoint keys" `Quick test_msx_checkpoint_keys
         ; test_case "backtab is not double named" `Quick test_backtab_is_not_double_named
         ] )

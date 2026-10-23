@@ -124,6 +124,7 @@ let release_failure_is_permanent (error : Masc_domain.masc_error) =
      | Masc_domain.Task_error.NotFound _
      | Masc_domain.Task_error.AlreadyClaimed _
      | Masc_domain.Task_error.NotClaimed _
+     | Masc_domain.Task_error.TransitionRejected _
      | Masc_domain.Task_error.InvalidState _
      | Masc_domain.Task_error.VerificationSuperseded _ -> false)
   (* Spelled out rather than left to a catch-all: the release cannot raise

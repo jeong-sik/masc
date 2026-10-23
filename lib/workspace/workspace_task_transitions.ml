@@ -255,6 +255,33 @@ let perform_task_transition
           in
           match decision with
           | Ok decision -> Ok decision
+          | Error
+              (Workspace_task_lifecycle.Current_owner_required { current_assignee }) ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.TransitionRejected
+                    { task_id
+                    ; requested_agent = agent_name
+                    ; task_status = task.task_status
+                    ; action
+                    ; reason = Masc_domain.Task_error.Current_owner_required { current_assignee }
+                    ; valid_next_actions =
+                        Workspace_task_lifecycle.valid_next_actions
+                          ~same_agent:false ~task_status:task.task_status
+                    }))
+          | Error Workspace_task_lifecycle.Claim_required ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.TransitionRejected
+                    { task_id
+                    ; requested_agent = agent_name
+                    ; task_status = task.task_status
+                    ; action
+                    ; reason = Masc_domain.Task_error.Claim_required
+                    ; valid_next_actions =
+                        Workspace_task_lifecycle.valid_next_actions
+                          ~same_agent:true ~task_status:task.task_status
+                    }))
           | Error Workspace_task_lifecycle.Verification_submission_required ->
             Error
               (Masc_domain.Task
@@ -279,18 +306,11 @@ let perform_task_transition
                      handoff_context (summary or reason). The Task's author is \
                      told that sentence and nothing else"))
           | Error Workspace_task_lifecycle.Invalid_transition ->
-            let assignee_hint =
+            let assignee_hint, actions_hint =
               match task_assignee_of_status task.task_status with
               | Some a when not (same_task_actor config a agent_name) ->
-                Printf.sprintf ", current_assignee=%s" a
-              | _ -> ""
-            in
-(* Issue #7646: ownership-mismatch dominates; only show valid_next_actions when the failure isn't an ownership problem. *)
-            let actions_hint =
-              if assignee_hint <> ""
-              then ""
-              else
-                next_actions_hint task.task_status
+                Printf.sprintf ", current_assignee=%s" a, ""
+              | Some _ | None -> "", next_actions_hint task.task_status
             in
             Error
               (Masc_domain.Task

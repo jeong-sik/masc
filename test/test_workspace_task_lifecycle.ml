@@ -103,9 +103,42 @@ let test_holder_cancel_requires_a_reason () =
 
 let test_cancel_of_someone_elses_task_is_refused () =
   decide ~reason:producer_reason ~same_agent:false ~task_status:in_progress ~action:D.Cancel ()
-  |> expect_error L.Invalid_transition;
+  |> expect_error (L.Current_owner_required { current_assignee = owner });
   decide ~reason:producer_reason ~same_agent:false ~task_status:awaiting ~action:D.Cancel ()
-  |> expect_error L.Invalid_transition
+  |> expect_error (L.Current_owner_required { current_assignee = owner })
+;;
+
+(* Refusal carries the authoritative holder and never allocates a new
+   submission, including when another actor tries to supersede a pending one. *)
+let test_submit_refusal_preserves_holder_and_pending_submission () =
+  List.iter
+    (fun task_status ->
+       let allocated = ref false in
+       let result =
+         L.decide
+           ~new_verification_id:(fun () -> allocated := true; "unexpected")
+           ~same_agent:(fun _ -> false)
+           ~agent_name:"intruder" ~task_id:"task-1" ~task_status
+           ~action:D.Submit_for_verification ~now ~notes:"other actor's evidence"
+           ~reason:None
+       in
+       result |> expect_error (L.Current_owner_required { current_assignee = owner });
+       if !allocated then failwith "a refusal must not supersede the owner's submission")
+    [ D.Claimed { assignee = owner; claimed_at = now }; in_progress; awaiting ];
+  decide ~same_agent:true ~task_status:D.Todo ~action:D.Submit_for_verification ()
+  |> expect_error L.Claim_required
+;;
+
+let test_held_action_refusals_and_pending_release () =
+  List.iter
+    (fun action ->
+       decide ~reason:producer_reason ~same_agent:false ~task_status:in_progress ~action ()
+       |> expect_error (L.Current_owner_required { current_assignee = owner }))
+    [ D.Claim; D.Start; D.Done_action; D.Cancel; D.Release ];
+  decide ~same_agent:true ~task_status:awaiting ~action:D.Release ()
+  |> expect_error L.Invalid_transition;
+  decide ~same_agent:false ~task_status:awaiting ~action:D.Release ()
+  |> expect_error (L.Current_owner_required { current_assignee = owner })
 ;;
 
 let test_operator_cancel_states () =
@@ -451,6 +484,8 @@ let () =
   test_cancel_of_a_pending_submission_ends_the_task ();
   test_holder_cancel_requires_a_reason ();
   test_cancel_of_someone_elses_task_is_refused ();
+  test_submit_refusal_preserves_holder_and_pending_submission ();
+  test_held_action_refusals_and_pending_release ();
   test_cancel_cannot_undo_a_finished_task ();
   test_approval_ends_the_task_as_done ();
   test_rejection_keeps_the_focus_of_other_active_work ();

@@ -103,7 +103,7 @@ let serve_media ~base_path ~token request reqd =
         | Some body ->
             Http.Response.bytes
               ~content_type:(Keeper_chat_media_store.content_type_of_path path)
-              ~headers:(cors_headers (get_origin request)) body reqd)
+              ~headers:(public_read_cors_headers request) body reqd)
 
 
 (* Owner-route JSON respond helper. Unlike [respond_public_read_json_value],

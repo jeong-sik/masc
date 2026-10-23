@@ -96,12 +96,30 @@ let http_request ~path ?token () =
     path
 ;;
 
+let request_trust_policy =
+  match Server_request_authority.make_trust_policy
+    ~bind_host:"localhost" ~bind_port:80 ~explicit_base_url:None with
+  | Ok policy -> policy
+  | Error error ->
+    Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+;;
+
 let dispatch router request =
   Eio_main.run (fun _env ->
     let response_buf = Buffer.create 1024 in
     let conn =
       Httpun.Server_connection.create (fun reqd ->
-        Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+        let request = Httpun.Reqd.request reqd in
+        match Server_request_authority.classify_http1_request
+          ~trust_policy:request_trust_policy request with
+        | Server_request_authority.Single authority ->
+          Server_request_authority.with_current authority (fun () ->
+            Http.Router.dispatch router request reqd)
+        | Server_request_authority.Missing
+        | Server_request_authority.Multiple
+        | Server_request_authority.Malformed
+        | Server_request_authority.Untrusted ->
+          Alcotest.fail "test request must have an admitted authority")
     in
     let request_head =
       Printf.sprintf

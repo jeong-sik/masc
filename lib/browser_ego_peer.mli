@@ -71,7 +71,10 @@ val space_id : t -> int
     run that was stopped or failed where the script cannot say is
     [Outcome_unknown]. Input finds its target, checks the observed page and
     makes its DOM edits with the page scripts the BiDi connection runs, and
-    sends mouse and keys through ego. Native drags share the observed waypoint
+    sends mouse and keys through ego. Snapshot target input checks the URL
+    again after the native selector wait; this is not an atomic navigation
+    guard. Re-read a snapshot after page changes or input and on a native
+    stale/unknown ref refusal. Native drags share the observed waypoint
     contract, require zero duration and release the button in the same run.
     Unconfirmed release blocks further input on this peer; read/finish remain
     available. End this task space before opening a fresh peer. It does not

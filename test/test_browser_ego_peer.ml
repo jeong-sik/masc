@@ -900,6 +900,9 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     (contains (refused "moved page" (click (Lane.Target_ref 12))) "not at expectedUrl");
   check bool "and ego is not asked to find the target" false (contains (seen ()) "wait");
   url := observed_url;
+  find := {|page.url = async () => { throw new Error("Target closed"); }; return true;|};
+  ignore (refused "URL re-read failed" (click (Lane.Target_ref 12)));
+  check bool "a failed URL re-read sends no click" false (contains (seen ()) "click");
   find := {|throw new Error('Locator text="A" matched 2 elements (2 visible, 0 hidden). Candidates: 1. button "A"; 2. button "A".');|};
   check bool "several matches are refused before any effect, with ego's candidates" true
     (contains (refused "ambiguous" (click (Lane.Target_text {text="A";exact=true}))) "matched 2 elements");
@@ -918,7 +921,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   (match click (Lane.Target_ref 12) with
    | Error (Live.Outcome_unknown detail) -> check bool "a failed click is unknown and asks for a read" true (contains detail "read tab 1")
    | other -> failf "a failed click was %s" (failure_kind other));
-  check int "each of them was one run" (runs + 8) (List.length !asked);
+  check int "each of them was one run" (runs + 9) (List.length !asked);
   let before = List.length !asked in
   check bool "an operator tab is refused without a run" true
     (match dispatch peer Live.Page_interact (interact_args ~tab_id:2 (Lane.Click_target (Lane.Target_ref 1))) with

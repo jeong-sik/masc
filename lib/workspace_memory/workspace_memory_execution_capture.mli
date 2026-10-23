@@ -74,9 +74,8 @@ module Summary : sig
   val of_json : Yojson.Safe.t -> (t, string) result
 end
 val summary : t -> (Summary.t, string) result
-val briefing_state_sha256 : Workspace_memory_briefing.t -> (string, string) result
-(** The SHA-256 of a Briefing state's canonical JSON, as a summary names the
-    state its batch prepared. *)
+(** A Briefing summary names the state its batch prepared by that state's
+    revision ({!Workspace_memory_revision.of_briefing}). *)
 val classification_size :
   (Request_id.t * Summary.t * Lane_addon_request_progress.phase) list -> Workspace_memory_request.size
 (** The size of the next classification batch
@@ -131,8 +130,8 @@ val recoverable_successors : workspace:workspace ->
     must re-read each parent under the original lease/serializer and perform
     ordinary full restore after recovering its exact existing intention. *)
 type settling = Classifications | Briefings of { state : string }
-(** The domain whose chains to settle. Briefing names the SHA-256 of its
-    current state ({!briefing_state_sha256}). *)
+(** The domain whose chains to settle. Briefing names its current state's
+    revision ({!Workspace_memory_revision.briefing_sha256}). *)
 val settled_chains : settling ->
   (Lane_addon_tool_request_owner.Record.t * Summary.t) list ->
   (Request_id.t * Lane_addon_tool_request_owner.Record.t list) list

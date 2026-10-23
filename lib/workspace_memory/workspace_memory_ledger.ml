@@ -123,6 +123,8 @@ let to_json t =
           `Assoc (fact_ref_fields fact @ ["disposition", disposition_json disposition]))
           (dispositions t)) ) ]
 
+let sha256 t = Digestif.SHA256.(digest_string (Yojson.Safe.to_string (to_json t)) |> to_hex)
+
 let rec traverse f = function
   | [] -> Ok []
   | x :: xs ->
@@ -359,8 +361,7 @@ let observe ~base_path =
       (match stored with
        | Error detail -> Unavailable detail
        | Ok ledger ->
-         let ledger_sha256 = Digestif.SHA256.(digest_string
-           (Yojson.Safe.to_string (to_json ledger)) |> to_hex) in
+         let ledger_sha256 = sha256 ledger in
          let resolution = Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
          let contract = Workspace_memory_briefing.contract ~template:resolution.effective in
          let briefing = Workspace_memory_briefing.load ~directory:(directory ~base_path)

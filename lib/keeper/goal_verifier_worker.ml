@@ -400,7 +400,10 @@ let commit ~store ~retained ~change ~observe ~apply =
     Ok () in
   let confirm saved commit =
     match observe commit.Progress.change with
-    | Error detail -> pending ("Goal commit observation unavailable: " ^ detail)
+    | Error detail ->
+      let* _ = advance ~store saved (Progress.Commit_uncertain
+        (`Assoc ["cause", `String "goal_commit_observation_unavailable"; "detail", `String detail])) in
+      pending ("Goal commit observation unavailable: " ^ detail)
     | Ok observed when Yojson.Safe.equal observed commit.change.after ->
       let* _ = advance ~store saved (Progress.Commit_observed observed) in Ok ()
     | Ok observed when Yojson.Safe.equal observed commit.change.before ->

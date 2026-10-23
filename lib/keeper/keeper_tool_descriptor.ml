@@ -1833,39 +1833,31 @@ let run_list_output_schema =
     ~required:[ "count"; "runs" ]
 ;;
 
-(* Producer: Metrics_store_eio.agent_metrics_to_yojson (ppx-derived over the
-   11-field record in metrics_store_eio.mli). *)
+(* Producer: Metrics_store_eio.agent_metrics_to_yojson. Absence is explicit. *)
+let metric_number_schema = `Assoc [ "type", `String "number" ]
+let nullable_metric_number_schema =
+  `Assoc [ "type", `List [ `String "number"; `String "null" ] ]
+
 let agent_metrics_output_properties =
   [ "agent_id", `Assoc [ "type", `String "string" ]
-  ; "period_start", `Assoc [ "type", `String "number" ]
-  ; "period_end", `Assoc [ "type", `String "number" ]
-  ; "total_tasks", `Assoc [ "type", `String "integer" ]
-  ; "completed_tasks", `Assoc [ "type", `String "integer" ]
-  ; "failed_tasks", `Assoc [ "type", `String "integer" ]
-  ; "avg_completion_time_s", `Assoc [ "type", `String "number" ]
-  ; "task_completion_rate", `Assoc [ "type", `String "number" ]
-  ; "error_rate", `Assoc [ "type", `String "number" ]
-  ; "handoff_success_rate", `Assoc [ "type", `String "number" ]
-  ; ( "unique_collaborators"
-    , `Assoc
-        [ "type", `String "array"; "items", `Assoc [ "type", `String "string" ] ]
-    )
+  ; "period_start", metric_number_schema
+  ; "period_end", metric_number_schema
   ]
+  @ List.map (fun name -> name, `Assoc [ "type", `String "integer" ])
+      [ "record_count"; "total_tasks"; "conflicting_tasks"; "completed_tasks"; "successful_tasks"; "failed_tasks";
+        "handoff_tasks"; "completed_handoff_tasks"; "successful_handoff_tasks" ]
+  @ [ "avg_completion_time_s", nullable_metric_number_schema
+    ; "task_completion_rate", metric_number_schema
+    ; "task_success_rate", nullable_metric_number_schema
+    ; "error_rate", nullable_metric_number_schema
+    ; "handoff_task_success_rate", nullable_metric_number_schema
+    ; "unique_collaborators", `Assoc
+        [ "type", `String "array"; "items", `Assoc [ "type", `String "string" ] ]
+    ]
 ;;
 
-let agent_metrics_output_required =
-  [ "agent_id"
-  ; "period_start"
-  ; "period_end"
-  ; "total_tasks"
-  ; "completed_tasks"
-  ; "failed_tasks"
-  ; "avg_completion_time_s"
-  ; "task_completion_rate"
-  ; "error_rate"
-  ; "handoff_success_rate"
-  ; "unique_collaborators"
-  ]
+(* Every aggregate property is always emitted; absence uses a nullable value. *)
+let agent_metrics_output_required = List.map fst agent_metrics_output_properties
 ;;
 
 (* Producer: Tool_agent.handle_get_metrics serializes the observed aggregate. *)
@@ -1896,11 +1888,11 @@ let agent_fitness_output_schema =
             "components", nullable_object
               ~properties:[
                 "completion", `Assoc [ "type", `String "number" ];
-                "reliability", `Assoc [ "type", `String "number" ];
-                "speed", `Assoc [ "type", `String "number" ];
-                "handoff", `Assoc [ "type", `String "number" ];
+                "reliability", nullable_metric_number_schema;
+                "speed", nullable_metric_number_schema;
+                "handoff_task_success", nullable_metric_number_schema;
               ]
-              ~required:[ "completion"; "reliability"; "speed"; "handoff" ];
+              ~required:[ "completion"; "reliability"; "speed"; "handoff_task_success" ];
             "metrics", nullable_object ~properties:agent_metrics_output_properties
               ~required:agent_metrics_output_required;
           ] ~required:[ "agent_id"; "components"; "metrics" ];

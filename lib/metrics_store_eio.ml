@@ -31,13 +31,20 @@ type agent_metrics = {
   agent_id: string;
   period_start: float;      (* Start of measurement period *)
   period_end: float;        (* End of measurement period *)
+  record_count: int;
   total_tasks: int;
+  conflicting_tasks: int;
   completed_tasks: int;
+  successful_tasks: int;
   failed_tasks: int;
-  avg_completion_time_s: float;
-  task_completion_rate: float;  (* 0.0-1.0 *)
-  error_rate: float;            (* 0.0-1.0 *)
-  handoff_success_rate: float;  (* 0.0-1.0 *)
+  avg_completion_time_s: float option;
+  task_completion_rate: float;
+  task_success_rate: float option;
+  error_rate: float option;
+  handoff_tasks: int;
+  completed_handoff_tasks: int;
+  successful_handoff_tasks: int;
+  handoff_task_success_rate: float option;
   unique_collaborators: string list;
 } [@@deriving yojson, show]
 
@@ -83,11 +90,30 @@ type record_receipt = Enqueued | Written
 
 type record_error =
   | Invalid_metric_identity of string
+  | Invalid_metric_record of { task_id : string; message : string }
   | Metric_store_failure of { path : string; message : string }
 
 let record_error_to_string = function
   | Invalid_metric_identity name -> Printf.sprintf "invalid metric identity: %S" name
+  | Invalid_metric_record { task_id; message } ->
+      Printf.sprintf "invalid metric Task %S: %s" task_id message
   | Metric_store_failure { path; message } -> Printf.sprintf "%s: %s" path message
+
+(** Shared writer/reader validation; no storage or clock effects. *)
+let validate_metric (metric : task_metric) =
+  if String.equal (String.trim metric.task_id) "" then Error "Task identity must be nonblank"
+  else if not (List.for_all valid_agent_id metric.collaborators
+    && Option.fold ~none:true ~some:valid_agent_id metric.handoff_from
+    && Option.fold ~none:true ~some:valid_agent_id metric.handoff_to)
+  then Error "collaborator and handoff identities must be nonblank"
+  else if not (Float.is_finite metric.started_at) then Error "start time must be finite"
+  else match metric.completed_at with
+    | None -> if metric.success then Error "pending Task cannot have a successful outcome" else Ok ()
+    | Some completed_at ->
+        let duration = completed_at -. metric.started_at in
+        if not (Float.is_finite completed_at && Float.is_finite duration) || duration < 0.0
+        then Error "completed duration must be finite and nonnegative"
+        else Ok ()
 
 let store_schema = "masc.agent-metrics/v1"
 let identity_schema = "masc.agent-metric-identity/v1"
@@ -291,6 +317,8 @@ let queue_active = Atomic.make false
 let record config (metric : task_metric) =
   if not (valid_agent_id metric.agent_id) then Error (Invalid_metric_identity metric.agent_id)
   else
+    let* () = validate_metric metric
+      |> Result.map_error (fun message -> Invalid_metric_record { task_id = metric.task_id; message }) in
     let directory = agent_metrics_dir config metric.agent_id in
     expected_io directory (fun () ->
       let* () = prepare_identity config metric.agent_id in
@@ -390,10 +418,10 @@ let read_metrics_file config ~agent_id file =
              | Ok metric ->
                  if not (String.equal metric.agent_id agent_id) then
                    invalid "metric agent identity differs from directory"
-                 else if not (Float.is_finite metric.started_at)
-                   || not (Option.fold ~none:true ~some:Float.is_finite metric.completed_at) then
-                   invalid "metric timestamps must be finite"
-                 else parse (line_number + 1) (metric :: acc) rest)
+                 else
+                   let* () = validate_metric metric |> Result.map_error (fun message ->
+                     Invalid_record { path = file; line = line_number; message }) in
+                   parse (line_number + 1) (metric :: acc) rest)
       in
       parse 1 [] (String.split_on_char '\n' contents)
 
@@ -467,53 +495,110 @@ let read_recent config ~agent_id ~days =
 let get_recent config ~agent_id ~days =
   Result.map snd (read_recent config ~agent_id ~days)
 
-(** Calculate aggregated metrics for fitness - synchronous *)
+module Task_map = Map.Make (String)
+module Collaborators = Set.Make (String)
+
+type task_outcome =
+  | Pending
+  | Completed of { at : float; success : bool }
+  | Conflicting_terminal of float
+
+type task_start = Consistent_start of float | Conflicting_start
+
+type task_observation = {
+  start : task_start;
+  outcome : task_outcome;
+  has_handoff : bool;
+  collaborators : Collaborators.t;
+}
+
+(* Completion timestamps order observations, never file order or generated IDs.
+   Equal-time contradictions stay unknown until superseded by a later terminal. *)
+let latest_outcome previous next =
+  match previous, next with
+  | Pending, outcome | outcome, Pending -> outcome
+  | Completed a, Completed b ->
+      if a.at > b.at then previous
+      else if a.at < b.at then next
+      else if a.success = b.success then previous
+      else Conflicting_terminal a.at
+  | Conflicting_terminal a, Conflicting_terminal b -> Conflicting_terminal (Float.max a b)
+  | Conflicting_terminal at, Completed terminal ->
+      if terminal.at > at then next else previous
+  | Completed terminal, Conflicting_terminal at ->
+      if terminal.at > at then previous else next
+
+let observe_tasks metrics =
+  List.fold_left (fun tasks (metric : task_metric) ->
+    let outcome = match metric.completed_at with
+      | None -> Pending
+      | Some at -> Completed { at; success = metric.success } in
+    let has_handoff = Option.is_some metric.handoff_from || Option.is_some metric.handoff_to in
+    let collaborators = Collaborators.of_list metric.collaborators in
+    let observation = match Task_map.find_opt metric.task_id tasks with
+      | None -> { start = Consistent_start metric.started_at; outcome; has_handoff; collaborators }
+      | Some previous ->
+          let start = match previous.start with
+            | Consistent_start at when at = metric.started_at -> previous.start
+            | Consistent_start _ | Conflicting_start -> Conflicting_start in
+          { start; outcome = latest_outcome previous.outcome outcome;
+            has_handoff = previous.has_handoff || has_handoff;
+            collaborators = Collaborators.union previous.collaborators collaborators }
+    in
+    Task_map.add metric.task_id observation tasks) Task_map.empty metrics
+
+let outcome_ratio numerator denominator =
+  if denominator = 0 then None
+  else Some (Float.of_int numerator /. Float.of_int denominator)
+
+(** Aggregate exact Task identities; preserve missing denominators as absence. *)
 let calculate_agent_metrics config ~agent_id ~days =
   let* now, metrics = read_recent config ~agent_id ~days in
-  if Stdlib.List.length metrics = 0 then
-    Ok None
-  else
-    let period_start = now -. Masc_time_constants.days_to_seconds days in
-    let total = List.length metrics in
-    let completed = List.filter (fun m -> Option.is_some m.completed_at) metrics in
-    let successful = List.filter (fun m -> m.success) completed in
-    let failed = List.filter (fun m -> not m.success) completed in
-
-    (* Calculate average completion time *)
-    let completion_times = List.filter_map (fun m ->
-      match m.completed_at with
-      | Some t -> Some (t -. m.started_at)
-      | None -> None
-    ) metrics in
-    let avg_time = match completion_times with
-      | [] -> 0.0
-      | times ->
-        let sum = List.fold_left (+.) 0.0 times in
-        sum /. (Stdlib.Float.of_int (List.length times)) in
-
-    (* Calculate handoff success rate *)
-    let handoffs = List.filter (fun m -> Option.is_some m.handoff_from || Option.is_some m.handoff_to) metrics in
-    let successful_handoffs = List.filter (fun m -> m.success) handoffs in
-    let handoff_rate = if Stdlib.List.length handoffs > 0 then
-      Stdlib.Float.of_int (List.length successful_handoffs) /. Stdlib.Float.of_int (List.length handoffs)
-    else 1.0 in  (* No handoffs = perfect handoff rate *)
-
-    (* Unique collaborators *)
-    let all_collaborators = List.concat_map (fun m -> m.collaborators) metrics in
-    let unique_collabs = List.sort_uniq String.compare all_collaborators in
-
+  match metrics with
+  | [] -> Ok None
+  | _ :: _ ->
+    let tasks = observe_tasks metrics in
+    let observations = List.map snd (Task_map.bindings tasks) in
+    let conflicting_tasks = List.length (List.filter (fun task ->
+      match task.start, task.outcome with
+      | Conflicting_start, (Pending | Completed _ | Conflicting_terminal _)
+      | Consistent_start _, Conflicting_terminal _ -> true
+      | Consistent_start _, (Pending | Completed _) -> false) observations) in
+    let completed = List.filter_map (fun task -> match task.start, task.outcome with
+      | Conflicting_start, (Pending | Completed _ | Conflicting_terminal _)
+      | Consistent_start _, (Pending | Conflicting_terminal _) -> None
+      | Consistent_start start, Completed outcome -> Some (task, start, outcome.at, outcome.success)) observations in
+    let completed_tasks = List.length completed in
+    let successful_tasks = List.length (List.filter (fun (_, _, _, success) -> success) completed) in
+    let handoff_tasks = List.length (List.filter (fun task -> task.has_handoff) observations) in
+    let completed_handoffs = List.filter (fun (task, _, _, _) -> task.has_handoff) completed in
+    let completed_handoff_tasks = List.length completed_handoffs in
+    let successful_handoff_tasks = List.length (List.filter (fun (_, _, _, success) -> success) completed_handoffs) in
+    (* Online mean avoids overflowing the sum of individually finite durations. *)
+    let _, avg_completion_time_s = List.fold_left (fun (count, mean) (_, start, at, _) ->
+      let duration = at -. start in
+      match mean with
+      | None -> 1, Some duration
+      | Some mean ->
+          let count = count + 1 in
+          count, Some (mean +. (duration -. mean) /. Float.of_int count)) (0, None) completed in
+    let total_tasks = Task_map.cardinal tasks in
+    let failed_tasks = completed_tasks - successful_tasks in
+    let collaborators = List.fold_left (fun acc task ->
+      Collaborators.union acc task.collaborators) Collaborators.empty observations in
     Ok (Some {
       agent_id;
-      period_start;
+      period_start = now -. Masc_time_constants.days_to_seconds days;
       period_end = now;
-      total_tasks = total;
-      completed_tasks = List.length successful;
-      failed_tasks = List.length failed;
-      avg_completion_time_s = avg_time;
-      task_completion_rate = if total > 0 then Stdlib.Float.of_int (List.length successful) /. Stdlib.Float.of_int total else 0.0;
-      error_rate = if total > 0 then Stdlib.Float.of_int (List.length failed) /. Stdlib.Float.of_int total else 0.0;
-      handoff_success_rate = handoff_rate;
-      unique_collaborators = unique_collabs;
+      record_count = List.length metrics;
+      total_tasks; conflicting_tasks; completed_tasks; successful_tasks; failed_tasks;
+      avg_completion_time_s;
+      task_completion_rate = Float.of_int completed_tasks /. Float.of_int total_tasks;
+      task_success_rate = outcome_ratio successful_tasks completed_tasks;
+      error_rate = outcome_ratio failed_tasks completed_tasks;
+      handoff_tasks; completed_handoff_tasks; successful_handoff_tasks;
+      handoff_task_success_rate = outcome_ratio successful_handoff_tasks completed_handoff_tasks;
+      unique_collaborators = Collaborators.elements collaborators;
     })
 
 (** Successful inventory includes only observed agent directories. *)

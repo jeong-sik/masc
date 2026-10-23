@@ -868,13 +868,20 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
       { Masc.Metrics_store_eio.agent_id = "albini"
       ; period_start = 1755400000.0
       ; period_end = 1755500000.0
+      ; record_count = 4
       ; total_tasks = 3
+      ; conflicting_tasks = 0
       ; completed_tasks = 2
+      ; successful_tasks = 1
       ; failed_tasks = 1
-      ; avg_completion_time_s = 42.5
-      ; task_completion_rate = 0.66
-      ; error_rate = 0.33
-      ; handoff_success_rate = 1.0
+      ; avg_completion_time_s = Some 42.5
+      ; task_completion_rate = 2.0 /. 3.0
+      ; task_success_rate = Some 0.5
+      ; error_rate = Some 0.5
+      ; handoff_tasks = 1
+      ; completed_handoff_tasks = 1
+      ; successful_handoff_tasks = 1
+      ; handoff_task_success_rate = Some 1.0
       ; unique_collaborators = [ "gemini" ]
       }
   in
@@ -1079,10 +1086,10 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
                  [ "agent_id", `String "albini"
                  ; ( "components"
                    , `Assoc
-                       [ "completion", `Float 0.66
-                       ; "reliability", `Float 0.67
+                       [ "completion", `Float (2.0 /. 3.0)
+                       ; "reliability", `Float 0.5
                        ; "speed", `Float 1.0
-                       ; "handoff", `Float 1.0
+                       ; "handoff_task_success", `Float 1.0
                        ] )
                  ; "metrics", metrics_value
                  ]
@@ -1092,6 +1099,20 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
     (`Assoc [ "count", `Int 1;
       "agents", `List [ `Assoc [ "agent_id", `String "unobserved";
         "components", `Null; "metrics", `Null ] ] ]);
+  let pending_metrics = match metrics_value with
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        key, (if List.mem key ["avg_completion_time_s"; "task_success_rate"; "error_rate";
+          "handoff_task_success_rate"] then `Null
+          else if List.mem key ["completed_tasks"; "successful_tasks"; "failed_tasks";
+            "completed_handoff_tasks"; "successful_handoff_tasks"] then `Int 0
+          else if key = "task_completion_rate" then `Float 0.0 else value)) fields)
+    | other -> other in
+  accepts "masc_get_metrics" pending_metrics;
+  accepts "masc_agent_fitness"
+    (`Assoc [ "count", `Int 1; "agents", `List [ `Assoc [
+      "agent_id", `String "albini"; "metrics", pending_metrics;
+      "components", `Assoc [ "completion", `Float 0.0; "reliability", `Null;
+        "speed", `Null; "handoff_task_success", `Null ] ] ] ]);
   (* Host lane: [file_bytes] present, [via] absent; [next_offset] and
      [last_line_partial] co-occur on a window cut mid-line. *)
   accepts

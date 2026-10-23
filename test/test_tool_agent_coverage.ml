@@ -151,6 +151,53 @@ let test_agent_fitness_specific () =
     (member "metrics" row = `Null && member "components" row = `Null);
   )
 
+let test_metric_nullable_outcomes () =
+  with_ctx (fun ctx ->
+    let metric = Metrics_store_eio.create_metric ~agent_id:"Pending" ~task_id:"observed" () in
+    record_ok ctx.config metric;
+    let args = `Assoc ["agent_name", `String "Pending"] in
+    let fitness () =
+      let result = dispatch_exn ctx ~name:"masc_agent_fitness" ~args in
+      Alcotest.(check bool) "fitness succeeds" true (Tool_result.is_success result);
+      let open Yojson.Safe.Util in
+      Yojson.Safe.from_string (Tool_result.message result) |> member "agents" |> to_list |> List.hd in
+    let open Yojson.Safe.Util in
+    let row = fitness () in
+    let components = member "components" row in
+    Alcotest.(check bool) "pending completion is a measured zero" true (member "completion" components = `Float 0.0);
+    List.iter (fun key -> Alcotest.(check bool) (key ^ " is unobserved") true
+      (member key components = `Null)) ["reliability"; "speed"; "handoff_task_success"];
+    let completed = { metric with completed_at = Some metric.started_at; handoff_to = Some "next" } in
+    record_ok ctx.config completed;
+    let row = fitness () in
+    let components = member "components" row in
+    Alcotest.(check bool) "failure is a measured zero" true
+      (member "reliability" components = `Float 0.0 && member "handoff_task_success" components = `Float 0.0);
+    Alcotest.(check bool) "real zero duration has no defined speed ratio" true (member "speed" components = `Null);
+    let metrics = member "metrics" row in
+    Alcotest.(check int) "raw observations" 2 (member "record_count" metrics |> to_int);
+    Alcotest.(check int) "distinct Task" 1 (member "total_tasks" metrics |> to_int);
+    Alcotest.(check bool) "real zero duration is retained" true (member "avg_completion_time_s" metrics = `Float 0.0);
+    record_ok ctx.config { completed with success = true };
+    List.iter (fun name ->
+      let result = dispatch_exn ctx ~name ~args in
+      Alcotest.(check bool) "Task contradiction remains observable" true (Tool_result.is_success result))
+      ["masc_get_metrics"; "masc_agent_fitness"];
+    let row = fitness () in
+    let metrics = member "metrics" row in
+    Alcotest.(check int) "conflicting Task is explicit" 1 (member "conflicting_tasks" metrics |> to_int);
+    Alcotest.(check int) "conflict fabricates no completed outcome" 0 (member "completed_tasks" metrics |> to_int);
+    Alcotest.(check bool) "conflict leaves outcome and duration unknown" true
+      (member "reliability" (member "components" row) = `Null && member "avg_completion_time_s" metrics = `Null);
+    let healthy = { completed with agent_id = "Healthy"; task_id = "healthy"; success = true } in
+    record_ok ctx.config healthy;
+    let pool = dispatch_exn ctx ~name:"masc_agent_fitness" ~args:(`Assoc []) in
+    Alcotest.(check bool) "one Task cannot block the agent pool" true (Tool_result.is_success pool);
+    let rows = Yojson.Safe.from_string (Tool_result.message pool) |> member "agents" |> to_list in
+    let healthy_row = List.find (fun row -> member "agent_id" row = `String "Healthy") rows in
+    Alcotest.(check int) "unrelated agent keeps its observed completion" 1
+      (member "completed_tasks" (member "metrics" healthy_row) |> to_int))
+
 let test_metric_source_failure () =
   with_ctx (fun ctx ->
     let metric = Metrics_store_eio.create_metric ~agent_id:"Exact" ~task_id:"task" () in
@@ -256,6 +303,7 @@ let () =
     ("agent_update", [
       Alcotest.test_case "no agents" `Quick test_agent_fitness_no_agents;
       Alcotest.test_case "specific agent" `Quick test_agent_fitness_specific;
+      Alcotest.test_case "nullable Task outcomes" `Quick test_metric_nullable_outcomes;
       Alcotest.test_case "failed source is not absence" `Quick test_metric_source_failure;
       Alcotest.test_case "exact identity and query" `Quick test_metric_exact_identity_and_query;
       Alcotest.test_case "named and pool storage identity" `Quick test_metric_named_and_pool_storage_identity;

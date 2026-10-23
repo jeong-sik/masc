@@ -94,36 +94,29 @@ let handle_get_metrics ?(tool_name = Tool_schemas_agent.tool_name Get_metrics) ~
            error_result_typed ~tool_name ~start_time ~code:Not_found
              (Tool_guidance.to_string (Tool_guidance.No_metrics_found_for_agent { agent = target })))
 
-(** Calculate min avg time from metrics list *)
+(** Positive observed averages define the pool-relative speed benchmark. *)
 let min_avg_time metrics_list =
   metrics_list
   |> List.filter_map (fun (_, metrics) ->
-      Option.map (fun m -> m.Metrics_store_eio.avg_completion_time_s) metrics)
-  |> List.filter (fun t -> Stdlib.Float.compare t 0.0 > 0)
-  |> List.fold_left (fun acc t -> if Stdlib.Float.compare acc 0.0 = 0 || Stdlib.Float.compare t acc < 0 then t else acc) 0.0
+      Option.bind metrics (fun m -> m.Metrics_store_eio.avg_completion_time_s))
+  |> List.filter (fun time -> time > 0.0)
+  |> List.fold_left (fun minimum time -> match minimum with
+      | None -> Some time
+      | Some previous -> Some (Float.min previous time)) None
 
-(** Fitness components, each reported as a separate observation.
-
-    - completion: task completion rate as recorded by the metrics store.
-    - reliability: [1 - error_rate]; 0.0 when the agent has no recorded tasks.
-    - speed: [min_avg / avg_completion_time_s] capped at 1.0, where [min_avg]
-      is the fastest average duration in the queried pool; 0.0 when the agent
-      has no recorded tasks or no measured duration.
-    - handoff: handoff success rate; 0.0 when the agent has no recorded tasks.
-
-    [speed] is pool-relative by construction, so component values are only
-    comparable within a single response. *)
+(** Missing outcomes and undefined speed ratios remain null. Handoff is Task
+    success with an observed handoff reference, not a delivery receipt. *)
 let components_for ~min_avg metrics =
-  let has_data = metrics.Metrics_store_eio.total_tasks > 0 in
-  let completion = metrics.Metrics_store_eio.task_completion_rate in
-  let reliability = if has_data then 1.0 -. metrics.Metrics_store_eio.error_rate else 0.0 in
-  let handoff = if has_data then metrics.Metrics_store_eio.handoff_success_rate else 0.0 in
-  let speed =
-    if has_data && Stdlib.Float.compare metrics.Metrics_store_eio.avg_completion_time_s 0.0 > 0 && Stdlib.Float.compare min_avg 0.0 > 0 then
-      Stdlib.Float.min 1.0 (min_avg /. metrics.Metrics_store_eio.avg_completion_time_s)
-    else 0.0
-  in
-  (completion, reliability, speed, handoff)
+  let speed = match min_avg, metrics.Metrics_store_eio.avg_completion_time_s with
+    | Some minimum, Some average when average > 0.0 -> Some (Float.min 1.0 (minimum /. average))
+    | None, (None | Some _) | Some _, None | Some _, Some _ -> None in
+  let number = function None -> `Null | Some value -> `Float value in
+  `Assoc [
+    "completion", `Float metrics.Metrics_store_eio.task_completion_rate;
+    "reliability", number metrics.Metrics_store_eio.task_success_rate;
+    "speed", number speed;
+    "handoff_task_success", number metrics.Metrics_store_eio.handoff_task_success_rate;
+  ]
 
 (** Handle masc_agent_fitness. Missing observations remain in the named pool
     with null metrics/components; they never contribute fabricated zero scores. *)
@@ -171,9 +164,7 @@ let handle_agent_fitness ?(tool_name = Tool_schemas_agent.tool_name Agent_fitnes
       let components, metrics = match observation with
         | None -> `Null, `Null
         | Some metrics ->
-            let completion, reliability, speed, handoff = components_for ~min_avg metrics in
-            `Assoc [ "completion", `Float completion; "reliability", `Float reliability;
-                     "speed", `Float speed; "handoff", `Float handoff ],
+            components_for ~min_avg metrics,
             Metrics_store_eio.agent_metrics_to_yojson metrics
       in
       `Assoc [ "agent_id", `String agent_id; "components", components; "metrics", metrics ]

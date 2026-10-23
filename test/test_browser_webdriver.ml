@@ -709,10 +709,15 @@ let test_cookie_values_never_leave_the_driver_module () =
       | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
       | `GET, "/session/owned/window" -> Ok (`String "tab")
       | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
-      | `POST, "/session/owned/execute/sync" -> Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture"])
+      | `POST, "/session/owned/execute/sync" ->
+        Ok (`Assoc ["origin",`String "https://example.test";
+          "localStorage",`Assoc ["count",`Int 2;"keys",`List [`String "theme";`String "cart"];"truncated",`Bool false];
+          "sessionStorage",`Assoc ["error",`String "SecurityError"]])
       | `GET, "/session/owned/cookie" ->
         Ok (`List [`Assoc ["name",`String "sid";"value",`String "DRIVERSECRET";"domain",`String "example.test";
                            "path",`String "/";"secure",`Bool true;"httpOnly",`Bool true]])
+      | `POST, "/session/owned/execute/async" ->
+        Ok (`Assoc ["count",`Int 1;"names",`List [`String "app-db"];"truncated",`Bool false])
       | _ -> fail ("unexpected cookie request: " ^ path) in
     let driver = Driver.create ~start_downloads ~request () in
     (match Driver.execute driver (Lane.Page_cookies {tab_id=1}) with
@@ -725,7 +730,17 @@ let test_cookie_values_never_leave_the_driver_module () =
       check bool "the value never reaches the answer" false
         (try ignore (Str.search_forward (Str.regexp_string "DRIVERSECRET") text 0); true with Not_found -> false);
       check bool "the cookie's name does" true
-        (try ignore (Str.search_forward (Str.regexp_string "sid") text 0); true with Not_found -> false)
+        (try ignore (Str.search_forward (Str.regexp_string "sid") text 0); true with Not_found -> false);
+      let storage = match json with
+        | `Assoc fields -> (match List.assoc_opt "data" fields with
+            | Some data -> Yojson.Safe.Util.member "storage" data | None -> `Null)
+        | _ -> `Null in
+      check bool "localStorage lists key names and a count" true
+        (Yojson.Safe.Util.(member "localStorage" storage |> member "keys") = `List [`String "theme";`String "cart"]);
+      check bool "a forbidden area reports its error, not a failure" true
+        (Yojson.Safe.Util.(member "sessionStorage" storage |> member "error") = `String "SecurityError");
+      check bool "IndexedDB lists database names" true
+        (Yojson.Safe.Util.(member "indexedDb" storage |> member "names") = `List [`String "app-db"])
     | _ -> fail "the cookie read was not answered")
 
 let test_pointer_guard_failure_rejects_before_effect () =

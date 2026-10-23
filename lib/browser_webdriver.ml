@@ -437,7 +437,16 @@ let rec execute_unlocked t = function
     with_tab t session (Some id) (fun () ->
       let* cookies = call t session `GET "/cookie" None in
       let* projected = Result.map_error (fun detail -> Protocol detail) (Browser_cookies.of_driver cookies) in
-      Ok (match projected with `Assoc fields -> `Assoc (("tabId",`Int id)::fields) | other -> other))
+      (* Web storage names ride on the same read. A page that forbids storage
+         (a sandboxed frame, a data: URL) reports that area's error instead of
+         failing the cookie read. *)
+      let* web = script t session Browser_cookies.storage_script [] in
+      let indexeddb = match call t session `POST "/execute/async"
+          (Some (`Assoc ["script",`String Browser_cookies.indexeddb_script;"args",`List []])) with
+        | Ok answer -> answer
+        | Error error -> `Assoc ["error",`String (error_message error)] in
+      let reply = Browser_cookies.with_storage ~web ~indexeddb projected in
+      Ok (match reply with `Assoc fields -> `Assoc (("tabId",`Int id)::fields) | other -> other))
   | Browser_lane.Page_goto { url; tab_id } ->
     let* () = absolute_http_url url in
     let* session = session t in

@@ -2995,7 +2995,7 @@ let test_pending_official_sources_preserve_memory_and_ack ~mixed () =
    | `Duplicate _ -> fail "duplicate pending counterpart fixture"
    | `Error detail -> fail detail);
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
-  let external_path = Keeper_external_read_cursor.path_for_keepers_dir
+  let external_path = Masc.Keeper_external_read_cursor.path_for_keepers_dir
       ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
   let check_external ~after ~prepared =
     let open Yojson.Safe.Util in

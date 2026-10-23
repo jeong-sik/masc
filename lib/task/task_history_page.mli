@@ -30,6 +30,8 @@ val read : config:Workspace_core.config -> task_id:string -> max_events:int ->
     Appends above each source's captured ceiling are excluded. Removal,
     replacement, truncation, changed anchors, malformed data and layout refuse
     advancement. A source not yet created is explicitly reported and pinned;
-    unreadable sources and both absent are errors. Exhaustion applies only to
+    unreadable sources and both absent are errors. Reads use bounded transfer
+    blocks plus the current row, independent of the dated file's size; rows
+    may span any number of blocks. Exhaustion applies only to
     the observed stored prefix, never deleted/retained-away history. *)
 val to_json : page -> Yojson.Safe.t

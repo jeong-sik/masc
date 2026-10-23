@@ -1848,6 +1848,69 @@ let test_task_history_current_sources () = with_workspace (fun _env _sw base_pat
     match History.read ~config ~task_id ~max_events:1 ~cursor () with
     | Error History.Source_changed -> () | _ -> fail "replaced canonical source advanced original cursor"))
 
+let test_task_history_buffered_sources () = with_workspace (fun _env _sw base_path ->
+  let module History = Masc.Task.History_page in
+  let config=Workspace.default_config base_path in
+  let task_id="buffered-history-task" in
+  ignore (Activity_graph.emit config ~kind:"task.started"
+    ~actor:(Activity_graph.entity ~kind:"agent" keeper)
+    ~subject:(Activity_graph.entity ~kind:"task" "unrelated-history-task")
+    ~payload:(`Assoc ["task_id",`String "unrelated-history-task"]) ~tags:["task"] ());
+  let directory=Filename.concat (Workspace.masc_dir config) "events/2099-12" in
+  Fs_compat.mkdir_p directory;
+  let path=Filename.concat directory "31.jsonl" in
+  let row label note = Yojson.Safe.to_string (`Assoc
+    ["task_id",`String task_id;"type",`String label;"note",`String note]) ^ "\n" in
+  let aligned_row bytes label =
+    let prefix="한글" in
+    let padding=bytes-String.length (row label prefix) in
+    row label (prefix ^ String.make padding 'x') in
+  (* A complete row/newline ends on the transfer boundary; the next row spans
+     more than two blocks. These are byte offsets, including UTF-8 and blanks. *)
+  let first=aligned_row 65536 "oldest" in
+  let second=aligned_row (3*65536+17) "large" in
+  let newest=row "newest" "original" in
+  let original=first ^ "\n" ^ second ^ newest in
+  write path original;
+  let get ?cursor ()=History.read ~config ~task_id ~max_events:1 ?cursor ()
+    |> require "buffered original history page" in
+  let check_row label offset (page : History.page) =
+    match page.events with
+    | [event] ->
+      check int "physical source byte offset" offset
+        (Yojson.Safe.Util.member "offset" event |> Yojson.Safe.Util.to_int);
+      check string "original event label" label
+        (Yojson.Safe.Util.member "event" event |> Yojson.Safe.Util.member "type" |> Yojson.Safe.Util.to_string)
+    | _ -> fail "one requested original event disappeared" in
+  let top=get () in
+  check_row "newest" (String.length first+1+String.length second) top;
+  let append=open_out_gen [Open_wronly;Open_append;Open_binary] 0o600 path in
+  Fun.protect ~finally:(fun () -> close_out append)
+    (fun () -> output_string append (row "after-capture" "excluded"));
+  let middle=get ~cursor:(Option.get top.next_cursor) () in
+  check_row "large" (String.length first+1) middle;
+  let bottom=get ~cursor:(Option.get middle.next_cursor) () in
+  check_row "oldest" 0 bottom;
+  (* The page stops at the requested match, not at the last physical source.
+     Unrelated activity still remains after the final audit match. *)
+  let tail=get ~cursor:(Option.get bottom.next_cursor) () in
+  check int "remaining sources contain no observations for this Task" 0 (List.length tail.events);
+  check bool "original stored prefix exhausted" true (Option.is_none tail.next_cursor);
+  (* Early success must not eagerly validate an older malformed row, while
+     continuing into that row must still report its original physical offset. *)
+  let malformed="not-json\n" in
+  write path (malformed ^ newest);
+  let top=get () in
+  check_row "newest" (String.length malformed) top;
+  (match History.read ~config ~task_id ~max_events:1 ~cursor:(Option.get top.next_cursor) () with
+   | Error (History.Invalid_event {offset=0;_}) -> ()
+   | Ok _ | Error _ -> fail "older malformed history was hidden or validated before the requested page");
+  write path (newest ^ "unfinished");
+  (match History.read ~config ~task_id ~max_events:1 () with
+   | Error (History.Invalid_event {offset;_}) ->
+     check int "unterminated captured tail" (String.length newest+String.length "unfinished"-1) offset
+   | Ok _ | Error _ -> fail "unterminated original history tail was accepted"))
+
 let () = match Array.to_list Sys.argv with
   | [_; "--resume-child"; base_path; run_id] -> child_resume base_path run_id
   | [_; "--refuse-active-child"; base_path; run_id] -> child_refuse_active base_path run_id
@@ -1855,6 +1918,7 @@ let () = match Array.to_list Sys.argv with
   | _ -> Alcotest.run "prepared async execution journal"
       ["continuation", [
         test_case "canonical creation and both current Task history sources" `Quick test_task_history_current_sources;
+        test_case "buffered original history preserves byte offsets, anchors and ordered failures" `Quick test_task_history_buffered_sources;
         test_case "restart reuses completed data and occurrence" `Quick test_restart_reuses_completed;
         test_case "source and plan identity refuse unsafe dispatch" `Quick test_source_and_plan_identity;
         test_case "original source observations freeze once without late backfill" `Quick test_source_observation_is_frozen_at_creation;

@@ -7,6 +7,14 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root" || exit 2
 alias_target="@runtest"
 
+# task-2499: the full regression links ~1000 test executables whose debug
+# symbols exhaust the ubuntu-24.04 runner disk. Build under the ci profile
+# (declared in dune and dune-workspace) so ocamlopt strips debug symbols;
+# local dev and release builds keep them for backtraces.
+if [ -z "${DUNE_PROFILE:-}" ] && [ -z "${TARGET_SUITES:-}" ]; then
+  export DUNE_PROFILE=ci
+fi
+
 full_log_evidence() {
   local source_log="$1"
   if [ -n "${MASC_TEST_SUITE_LOG_ARTIFACT:-}" ]; then

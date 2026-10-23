@@ -14,6 +14,7 @@ import { newUmpEditor, umpEditorCommand } from '../ump-editor.mjs'
 import { prepareCapturedPlayback } from '../capture-playback.mjs'
 
 const directory = await mkdtemp(join(tmpdir(), 'masc-edited-ump-wire-'))
+const timeEdits = process.argv.includes('--time-edits')
 try {
   const main = String.raw`import Foundation
 import CoreMIDI
@@ -21,9 +22,16 @@ import CoreMIDI
 @main enum Probe {
  static func require(_ value:Bool,_ message:String)throws {if !value {throw MidiFailure(message)}}
  static func main() throws {
-  struct Input:Decodable {let timeline:UmpTimeline;let expected:[String:[UInt32]]}
+  struct Input:Decodable {let timeline:UmpTimeline;let expected:[String:[UInt32]];let expectedTicks:[String:[String]]?}
   let path=CommandLine.arguments[1]
   let original=try JSONDecoder().decode(Input.self,from:Data(contentsOf:URL(fileURLWithPath:path)))
+  if let expected=original.expectedTicks {
+   let events=try original.timeline.timedEvents()
+   for (source,ticks) in expected {
+    try require(events.filter {$0.event.source == source}.map {String($0.ticks)} == ticks,"native authored host-tick projection differs from oracle")
+   }
+   print("EDITED_UMP_TIME_PLAN_PASS: original UInt64 identity/timebase and exact authored source deltas reach native events")
+  }
   var client=MIDIClientRef(),endpoints:[MIDIEndpointRef]=[]
   try checked(MIDIClientCreate("MASC edited UMP wire probe" as CFString,nil,nil,&client),"create private probe client")
   defer {for endpoint in endpoints {MIDIEndpointDispose(endpoint)};MIDIClientDispose(client)}
@@ -152,6 +160,7 @@ import CoreMIDI
       for (const line of ['revoice Cmaj7 drop2', 'velocity 0', 'scope B 10 3', 'pitch-absolute 64.25', 'velocity 65535',
         'select-expression 0:0', 'value32 2046820353', 'select-expression 0:2', 'value32 0',
         'select-expression 2:0', 'value32 2147483648', 'select-expression 2:2', 'value32 4294967295']) editor = umpEditorCommand(editor, line).editor
+      if (timeEdits) for (const line of ['select 0:6', 'note-time 4:0 10000000000001200000 10000000000014400000']) editor = umpEditorCommand(editor, line).editor
       const variant = await request({ kind: 'import-ump', project: imported.project, asset: imported.asset, ump: editor.asset.ump, ...options })
       const snapshot = await request({ kind: 'prepare-take', project: variant.project, asset: variant.asset, ...options })
       const playback = await prepareCapturedPlayback(snapshot.directory, { directory: scratch, sourceBindings: [{ source: 'A', destination: '1' }, { source: 'B', destination: '2' }] })
@@ -163,8 +172,16 @@ import CoreMIDI
           0x43853c00, 0x12340000, 0x43854000, 0x12340000, 0x43854300, 0x12340000, 0x43854700, 0x12340000, 0x43b54000, 0],
         B: [0x49921103, 0xffff8080, 0x49821100, 0xfedc0000],
       }
+      if (timeEdits) {
+        expected.A = [0x43053c03, 0x7a000001, 0x43153cff, 0, 0x43b54000, 0xffffffff,
+          0x43954003, 0x90010000 + 60 * 512, 0x43954303, 0x90010000 + 64 * 512, 0x43954703, 0x90010000 + 71 * 512,
+          0x43953c03, 55 * 512, 0x43653c00, 0x80000000, 0x43a53c00, 0xffffffff,
+          0x43854000, 0x12340000, 0x43854300, 0x12340000, 0x43854700, 0x12340000, 0x43b54000, 0,
+          0x43853c00, 0x12340000]
+      }
       for (const [source, words] of Object.entries(expected)) assert.deepEqual(timeline.packets.filter(packet => packet.source === source).flatMap(packet => packet.words), words)
-      const input = join(directory, 'timeline.json'); await writeFile(input, JSON.stringify({ timeline, expected }))
+      const expectedTicks = timeEdits ? { A: ['0', '0', '0', '0', '0', '0', '1200000', '4800000', '4800000', '12000000', '12000000', '12000000', '12000000', '14400000'], B: ['2400000', '9600000'] } : undefined
+      const input = join(directory, 'timeline.json'); await writeFile(input, JSON.stringify({ timeline, expected, expectedTicks }))
       const result = spawnSync(join(directory, 'probe'), [input], { encoding: 'utf8' })
       assert.equal(result.status, 0, result.stdout + result.stderr)
       process.stdout.write(result.stdout)

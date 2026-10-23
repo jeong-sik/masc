@@ -5,6 +5,7 @@ import { createReadStream } from 'node:fs'
 import JZZ from 'jzz'
 import midiFiles from 'jzz-midi-smf'
 import { readWaveMetadata } from './wave-file.mjs'
+import { captureRange, captureRegionTime } from './capture-time.mjs'
 
 midiFiles(JZZ)
 
@@ -139,6 +140,10 @@ export async function readCaptureFiles(files, { signal } = {}) {
   await readWaveMetadata(files.audio, {
     sampleRate: timeline.sampleRate, channels: timeline.channels, frames: timeline.frames,
   }, { signal })
+  if (manifest.umpSourceSpan !== undefined) {
+    const asset = { manifest, midiTime: timeline.midiTime }, range = captureRange(asset)
+    timeline.duration = captureRegionTime(asset, { offset: '0', extent: range.extent }).durationSeconds
+  }
   return timeline
 }
 

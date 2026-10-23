@@ -275,8 +275,9 @@ export async function prepareArrangementCapture(project, assetID, { sourceRoot, 
       if (asset.ump.timing?.length) {
         // The portable asset still hashes the unmodified recorded manifest.
         // This owned playback/export snapshot describes the derived packets.
-        const manifest = { ...asset.manifest, midiPacketCount: String(edited.length),
-          clock: { ...asset.manifest.clock, requestedStart: captureRange(asset).origin } }
+        const span = captureRange(asset)
+        const manifest = { ...asset.manifest, midiPacketCount: String(edited.length), umpSourceSpan: span,
+          clock: { ...asset.manifest.clock, requestedStart: span.origin } }
         const derivedManifest = join(temporary, 'edited-session.json')
         await writeFile(derivedManifest, JSON.stringify(manifest) + '\n', { flag: 'wx', mode: 0o444, signal })
         signal?.throwIfAborted()

@@ -20,7 +20,7 @@ try {
   const main=`import Foundation
 func requireFailure(_ action:()throws->Void){do{try action();preconditionFailure("admitted invalid source")}catch{}}
 let clock=UmpClock(origin:"9007199254740993123",numer:125,denom:3)
-func packet(_ delta:UInt64,_ source:String,_ words:[UInt32])->UmpPacket {UmpPacket(kind:"midi",protocolID:2,hostTime:String(9007199254740993123+delta),source:source,timestampOrigin:"packet",words:words)}
+func packet(_ delta:UInt64,_ source:String,_ words:[UInt32])->UmpPacket {UmpPacket(kind:"midi",protocolID:2,hostTime:String(9007199254740993123+delta),source:source,timestampOrigin:"packet",recordedHostTime:nil,recordedTimestampOrigin:nil,words:words)}
 func timeline(_ packets:[UmpPacket],_ bindings:[UmpBinding]=[UmpBinding(source:"A",destination:"42")])->UmpTimeline {UmpTimeline(schemaVersion:4,duration:1,clock:clock,bindings:bindings,packets:packets)}
 let zeroOn:[UInt32]=[0x43953c00,0],on:[UInt32]=[0x43953c00,0x90010000],off:[UInt32]=[0x43853c00,0x12340000]
 let bend:[UInt32]=[0x43e50000,0x87654321]

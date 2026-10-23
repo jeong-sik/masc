@@ -46,7 +46,7 @@ try {
  const main=`import Foundation
 func refuses(_ action:()throws->Void){do{try action();preconditionFailure("invalid region admitted")}catch{}}
 let on:[UInt32]=[0x43953c03,0x80012345],off:[UInt32]=[0x43853c00,0x12340000],bend:[UInt32]=[0x43e50000,0x80000000]
-func packet(_ tick:UInt64,_ words:[UInt32],source:String="A")->UmpPacket{UmpPacket(kind:"midi",protocolID:2,hostTime:String(tick),source:source,timestampOrigin:"packet",words:words)}
+func packet(_ tick:UInt64,_ words:[UInt32],source:String="A")->UmpPacket{UmpPacket(kind:"midi",protocolID:2,hostTime:String(tick),source:source,timestampOrigin:"packet",recordedHostTime:nil,recordedTimestampOrigin:nil,words:words)}
 func source(_ id:String,_ rows:[UmpPacket],numer:UInt32=1,denom:UInt32=1,extent:String="1000000000",destination:String="42")->UmpRegionSource{
  UmpRegionSource(id:id,extent:extent,timeline:UmpTimeline(schemaVersion:4,duration:Double(extent)!*Double(numer)/Double(denom)/1e9,clock:UmpClock(origin:"0",numer:numer,denom:denom),bindings:[UmpBinding(source:"A",destination:destination)],packets:rows))
 }

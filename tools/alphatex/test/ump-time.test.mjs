@@ -10,7 +10,8 @@ import { materializeUmp, umpSourceEvents, editUmpTimes } from '../ump-source.mjs
 import { newUmpEditor, umpEditorCommand } from '../ump-editor.mjs'
 import { captureRange } from '../capture-time.mjs'
 import { arrangementEditor, arrangementCommand, arrangementImported } from '../arrangement-editor.mjs'
-import { readUmpCapture, saveArrangement, loadArrangement, exportUmpCapture } from '../arrangement-files.mjs'
+import { readUmpCapture, saveArrangement, loadArrangement, exportUmpCapture, importArrangementCapture } from '../arrangement-files.mjs'
+import { newArrangement } from '../arrangement.mjs'
 import { prepareCapturedPlayback } from '../capture-playback.mjs'
 import { readCapture } from '../session-data.mjs'
 
@@ -139,3 +140,36 @@ test('Worker timing variant shares extended clocks across standalone/arrangement
     for (const file of ['midi.ump.jsonl', 'session.json', 'audio.wav', 'audio-blocks.jsonl', 'original-midi.ump.jsonl', 'ump-source.json']) assert.deepEqual(await readFile(join(reexport, file)), await readFile(join(output, file)))
   } finally { await worker.terminate() }
 }, rows()))
+
+test('inward-only edits preserve the original end span in session inspection and both playback plans', () => capturedMidiFixture(async ({ root, path, imported }) => {
+  const directory = join(root, 'scratch'); await mkdir(directory)
+  const worker = new Worker(new URL('../arrangement-worker.mjs', import.meta.url)); let id = 0
+  const options = { sourceRoot: dirname(path), directory }
+  const request = async job => {
+    const response = once(worker, 'message'); worker.postMessage({ ...job, id: ++id })
+    const [message] = await response; assert.equal(message.ok, true, message.error); return message.result
+  }
+  try {
+    const source = await request({ kind: 'prepare-ump', project: imported.project, asset: imported.asset, ...options })
+    const editor = command(command(newUmpEditor(source.asset, source.packets), 'select-event 1:0'), 'shift-time -8000000')
+    const variant = await request({ kind: 'import-ump', project: imported.project, asset: imported.asset, ump: editor.asset.ump, ...options })
+    let parent = arrangementImported(arrangementEditor(imported.project), variant)
+    parent = arrangementCommand(parent, `place ${variant.asset} 0`).editor
+    const snapshot = await request({ kind: 'prepare-take', project: parent.project, asset: variant.asset, ...options })
+    const timeline = await readCapture(snapshot.directory)
+    const playback = await prepareCapturedPlayback(snapshot.directory, { directory, sourceBindings: [{ source: 'A', destination: '10' }] })
+    const standalone = JSON.parse(await readFile(playback.path)).ump
+    const arranged = await request({ kind: 'prepare-capture', project: parent.project, sourceBindings: [{ asset: variant.asset, source: 'A', destination: '10' }], ...options })
+    const arrangement = JSON.parse(await readFile(arranged.path)).umpRegions.sources[0]
+    assert.equal(timeline.midiTime.last, String(origin + 4000000n))
+    assert.equal(standalone.duration, arrangement.timeline.duration); assert.equal(timeline.duration, standalone.duration)
+    assert.equal(arrangement.extent, '12000001')
+    const reimported = await importArrangementCapture(newArrangement(), snapshot.directory, { projectPath: join(root, 'reimport/song.json') })
+    const original = await readUmpCapture(reimported.project, reimported.asset, { sourceRoot: join(root, 'reimport'), directory })
+    const extended = command(command(newUmpEditor(original.asset, original.packets), 'select-event 1:0'), 'time ' + (origin + 20000000n))
+    assert.equal(captureRange(extended.asset).extent, '20000001')
+    const decoded = materializeUmp(original.packets, extended.asset.ump, extended.asset.parts.midi.sha256)
+    assert.equal(decoded.at(-1).timestampOrigin, 'authored')
+    assert.equal(decoded.at(-1).recordedHostTime, String(origin + 12000000n))
+  } finally { await worker.terminate() }
+}, [packet(0n, 'A', [JZZ.UMP.umpNoteOn(0, 0, 60, 1)]), packet(12000000n, 'A', [JZZ.UMP.umpNoteOff(0, 0, 60, 2)])]))

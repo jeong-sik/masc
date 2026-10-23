@@ -1184,7 +1184,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   let correct = Option.is_some final && stdout_rows<>[] &&
       evidence.event_queue_ack_seen && outcome.stimuli_acked &&
       turn.trace_id=string "trace_id" fixture &&
-      turn.finish_reason=Some (Keeper_execution_receipt.stop_reason_to_string Runtime_agent.Completed) &&
+      turn.finish_reason=Some (Keeper_execution_receipt.stop_reason_to_string (Runtime_agent.Completed { provider_turn_ordinal = 17 })) &&
       pending base=[] in
   let timing = ["admission",admission;"cycle_entered",cycle_entered;"cycle_returned",cycle_returned;
       "intake_turn_entry",intake_turn_entry;

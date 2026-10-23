@@ -110,7 +110,7 @@ let test_replay_capture_omits_blank_response_text () =
 let test_replay_capture_preserves_model_reply_before_visible_capture () =
   let finalized =
     Response_text.finalize
-      ~stop_reason:Runtime_agent.Completed
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~raw_response_text:"First line from model\nVisible reply"
       ()
   in
@@ -149,7 +149,7 @@ let test_direct_response_observation_preserves_raw_response_text () =
   in
   let finalized =
     Response_text.finalize
-      ~stop_reason:Runtime_agent.Completed
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~raw_response_text
       ()
   in
@@ -168,7 +168,7 @@ let test_terminal_effect_completion_withholds_plain_provider_text_from_replay ()
   in
   let finalized =
     Response_text.finalize
-      ~stop_reason:Runtime_agent.Completed
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~raw_response_text:"The approved connector post already went out."
       ~suppress_response_text
       ()

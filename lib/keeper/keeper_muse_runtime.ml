@@ -1397,6 +1397,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
           ~model:(model_label ~runtime_id ~configured_model:config.model model)
           ~session_id
           ~turn_id
+          ~provider_turn_ordinal:hook_turn_count
           ~turns_used:turn_count
           ~latency_ms:(Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
             (* The turn's counts arrive only with [turn/completed], which a
@@ -1750,7 +1751,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
             ; run_validation = None
             ; runtime_observation = Some runtime_observation
             ; cooperative_boundary = None
-            ; stop_reason = Completed
+            ; stop_reason = Completed { provider_turn_ordinal = hook_turn_count }
             }
       with
       (* An owner stop releases an unfinished turn. Once the successful terminal

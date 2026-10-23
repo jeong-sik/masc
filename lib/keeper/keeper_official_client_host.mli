@@ -784,6 +784,7 @@ val host_stop_result :
   model:string ->
   session_id:string ->
   turn_id:string ->
+  provider_turn_ordinal:int ->
   turns_used:int ->
   latency_ms:int option ->
   request_context:Runtime_observation.request_context option ->
@@ -792,6 +793,9 @@ val host_stop_result :
 (** Build the provider-neutral checkpoint terminal after an official-client
     adapter stops its vendor-owned loop. The external client session is the
     durable continuation owner, so no Agent Core checkpoint is synthesized.
+    [provider_turn_ordinal] comes from that adapter's claimed turn, the same
+    identity sent to its completion hook; [turns_used] remains an independent
+    client count and is never used to derive the ordinal.
 
     The turn's spend is not observed: no adapter has a terminal usage frame
     after a host stop, so the response carries no usage and the scope is

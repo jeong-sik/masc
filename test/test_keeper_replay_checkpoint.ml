@@ -148,7 +148,8 @@ let test_finalization_preserves_reasoning_source_through_restore () =
     let history = [Types.user_msg "question"] in
     let original = checkpoint ~working_context:None (history @ [assistant]) in
     let finalize response_text =
-      Finalize.checkpoint_for_replay_persistence ~history_messages:history
+      Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 }) ~history_messages:history
         ~session_id:original.session_id ~response_text
         ~exclude_thought_from_replay:false original |> expect_ok |> fst in
     let unchanged = finalize "draft" in
@@ -228,6 +229,7 @@ let test_finalization_reuses_matching_pipeline_checkpoint () =
     (source_already_persisted && selected == persisted);
   let patched, replay_suffix_pruned =
     Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~history_messages:history
       ~session_id:"new-session"
       ~response_text:"final"
@@ -305,7 +307,8 @@ let test_finalization_persists_context_only_progress () =
         ~last_persisted_checkpoint:(Some persisted) updated
     in
     let patched, replay_suffix_pruned =
-      Finalize.checkpoint_for_replay_persistence ~history_messages:history
+      Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 }) ~history_messages:history
         ~session_id:persisted.session_id ~response_text:"final"
         ~exclude_thought_from_replay:false selected
       |> expect_ok
@@ -424,6 +427,7 @@ let test_contract_observation_preserves_current_turn_suffix () =
   in
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~history_messages:history
       ~session_id:"new-session"
       ~response_text:"visible result"
@@ -453,6 +457,7 @@ let test_contract_observation_rejects_mismatched_history_prefix () =
   in
   match
     Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~history_messages:expected_history
       ~session_id:"new-session"
       ~response_text:"suppressed"
@@ -493,6 +498,7 @@ let test_success_preserves_typed_replay_suffix () =
   in
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~history_messages:history
       ~session_id:"new-session"
       ~response_text:"visible answer"
@@ -537,6 +543,7 @@ let test_suppressed_response_releases_only_its_retained_context () =
     List.iter (fun (last_input, should_remove) ->
       let original = history @ executed @ [last_input; final] in
       let patched, _ = Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
           ~history_messages:history ~session_id:"session" ~response_text:"final note"
           ~suppress_visible_response ~exclude_thought_from_replay
           (checkpoint original) |> expect_ok in
@@ -547,6 +554,7 @@ let test_suppressed_response_releases_only_its_retained_context () =
        message User [Text "[system context] actual user input"], false];
     let original = history @ executed @ [context "preserved context"; final] in
     let preserved, _ = Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
         ~history_messages:history ~session_id:"session" ~response_text:"final note"
         ~suppress_visible_response:false ~exclude_thought_from_replay:false
         (checkpoint original) |> expect_ok in
@@ -562,6 +570,7 @@ let test_success_appends_missing_final_assistant () =
   in
   let patched, _reason =
     Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~history_messages:history
       ~session_id:"new-session"
       ~response_text:"visible answer"
@@ -582,6 +591,7 @@ let test_empty_success_preserves_recorded_user_turn () =
   in
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~history_messages:history
       ~session_id:"new-session"
       ~response_text:""
@@ -623,6 +633,7 @@ let test_empty_success_preserves_tool_execution_suffix () =
   in
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~history_messages:history
       ~session_id:"new-session"
       ~response_text:""
@@ -652,6 +663,7 @@ let test_terminal_effect_suppression_drops_plain_provider_response () =
   in
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~history_messages:history
       ~session_id:"terminal-effect-session"
       ~response_text:""
@@ -746,6 +758,7 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
   in
   let checkpoint_for_save, _reason =
     Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~history_messages:canonical_history
       ~session_id:"media-projection-session"
       ~response_text:"completed"
@@ -787,6 +800,7 @@ let wake_marker_text = Masc.Keeper_unified_prompt.autonomous_wake_marker
    instead to keep the Direct contract in view. *)
 let wake_persistence ~history_messages ~response_text messages =
   Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
     ~history_messages
     ~session_id:"new-session"
     ~response_text
@@ -796,6 +810,7 @@ let wake_persistence ~history_messages ~response_text messages =
 
 let direct_persistence ~history_messages ~response_text messages =
   Finalize.checkpoint_for_replay_persistence
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
     ~history_messages
     ~session_id:"new-session"
     ~response_text

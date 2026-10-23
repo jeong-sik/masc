@@ -416,7 +416,7 @@ let test_scoped_boundary_error_stops_immediately () =
            (String.ends_with
               ~suffix:cause.Keeper_request_failure_core.message
               (Option.value ~default:"" !terminal_error));
-         (match Host.host_stop_result ~runtime_id:runtime_label ~model:"fixture"
+         (match Host.host_stop_result ~provider_turn_ordinal:23 ~runtime_id:runtime_label ~model:"fixture"
              ~session_id:"session" ~turn_id:"turn" ~turns_used:1
              ~latency_ms:None ~request_context:None stop with
           | Error error ->
@@ -551,7 +551,7 @@ let test_dynamic_tool_failures_do_not_invent_a_host_stop () =
 let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
   let result =
     match
-      Host.host_stop_result
+      Host.host_stop_result ~provider_turn_ordinal:23
         ~runtime_id:"official-client-runtime"
         ~model:"official-client-model"
         ~session_id:"session-1"
@@ -580,8 +580,9 @@ let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
        (List.length observation.attempts));
   match result.stop_reason with
   | Runtime_agent.Yielded_after_repeated_tool_call
-      { turns_used; tool_name; repeated_count } ->
+      { turns_used; tool_name; repeated_count; provider_turn_ordinal } ->
     check int "typed turns" 2 turns_used;
+    check int "host ordinal is independent of turn count" 23 provider_turn_ordinal;
     check string "typed tool" "masc_probe" tool_name;
     check int "typed count" 3 repeated_count
   | _ -> fail "host stop was not projected as a repeated-tool checkpoint yield"
@@ -690,7 +691,7 @@ let test_terminal_media_delivery_failure_keeps_applied_effect () =
            ; detail=Keeper_terminal_effect_detail.Result_delivery_failed
                {message="official-client tool result cannot deliver document content"; _}
            ; _}; _} as stop) ->
-      (match Host.host_stop_result ~runtime_id:"official-fixture" ~model:"fixture"
+      (match Host.host_stop_result ~provider_turn_ordinal:23 ~runtime_id:"official-fixture" ~model:"fixture"
         ~session_id:"session-media" ~turn_id:"turn-media" ~turns_used:1
         ~latency_ms:None ~request_context:None stop with
        | Error _ -> () | Ok _ -> fail "failed media delivery completed the runtime")
@@ -975,7 +976,7 @@ let test_host_stop_carries_request_context_not_spend () =
   in
   let project request_context =
     match
-      Host.host_stop_result
+      Host.host_stop_result ~provider_turn_ordinal:23
         ~runtime_id:"claude-code"
         ~model:"claude-fixture"
         ~session_id:"session-usage"
@@ -1009,7 +1010,7 @@ let test_host_stop_carries_request_context_not_spend () =
 
 let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
   let project outcome =
-    Host.host_stop_result
+    Host.host_stop_result ~provider_turn_ordinal:23
       ~runtime_id:"official-client-runtime"
       ~model:"official-client-model"
       ~session_id:"session-terminal"
@@ -1021,7 +1022,7 @@ let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
   in
   (match project Terminal_completed with
    | Ok
-       { Runtime_agent.stop_reason = Runtime_agent.Completed
+       { Runtime_agent.stop_reason = Runtime_agent.Completed { provider_turn_ordinal = 23 }
        ; runtime_observation = Some _
        ; _
        } ->
@@ -1032,7 +1033,7 @@ let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
   (match project Durable_stimulus_deferred with
    | Ok
        { Runtime_agent.stop_reason =
-           Runtime_agent.Yielded_to_durable_stimulus { turns_used = 4 }
+           Runtime_agent.Yielded_to_durable_stimulus { turns_used = 4; provider_turn_ordinal = 23 }
        ; _
        } ->
      ()
@@ -1072,7 +1073,7 @@ let test_terminal_host_stop_runs_completion_hooks_in_order () =
     }
   in
   let projected =
-    Host.host_stop_result
+    Host.host_stop_result ~provider_turn_ordinal:23
       ~runtime_id:"official-client-runtime"
       ~model:"official-client-model"
       ~session_id:"session-terminal"

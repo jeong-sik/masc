@@ -270,7 +270,6 @@ let make_hooks
     ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
     ~(trace_id : string)
     ~(keeper_turn_id : int)
-    ~(on_after_turn_ordinal : int -> unit)
     ?(on_tool_stream_observation : tool_stream_observation -> unit = fun _ -> ())
     ?(current_runtime_attempt = fun () -> None)
     ?(current_attempt_usage = fun () -> None)
@@ -322,7 +321,6 @@ let make_hooks
     after_turn = Some (fun event ->
       match event with
       | Agent_core.Hooks.AfterTurn { turn; response; tool_source_map } ->
-        on_after_turn_ordinal turn;
         (match tool_source_map with
          | Some tool_source_map ->
            on_tool_stream_observation

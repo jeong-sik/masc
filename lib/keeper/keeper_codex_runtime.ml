@@ -1330,6 +1330,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             ~model:(Option.value client_config.model ~default:runtime_id)
             ~session_id
             ~turn_id
+            ~provider_turn_ordinal:turn_count
             ~turns_used:turn_count
             ~latency_ms:
               (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
@@ -1678,10 +1679,10 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
              (match scheduling_turn, turn.scheduling_handoff with
               | Some (_, Direct_schedule _),
                   (Runtime_codex_app_server.Handoff_pending | Handoff_accepted) ->
-                Yielded_to_operation_queued { turns_used = turn_count }
+                Yielded_to_operation_queued { turns_used = turn_count; provider_turn_ordinal = turn_count }
               | (Some (_, Autonomous_schedule) | None), _
               | Some (_, Direct_schedule _),
-                  (Handoff_unrequested | Handoff_rejected) -> Completed)
+                  (Handoff_unrequested | Handoff_rejected) -> Completed { provider_turn_ordinal = turn_count })
          })
       with
       (* A stop the owner raised is not an ambiguity: it knows the turn did

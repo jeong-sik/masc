@@ -19,16 +19,18 @@
 (** {1 Stop reason} *)
 
 type stop_reason = Runtime_agent_context.stop_reason =
-  | Completed
-  | Yielded_to_operation_queued of { turns_used : int }
-  | Yielded_to_durable_stimulus of { turns_used : int }
+  | Completed of { provider_turn_ordinal : int }
+  | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
+  | Yielded_to_durable_stimulus of { turns_used : int; provider_turn_ordinal : int }
   | Yielded_after_repeated_tool_call of {
       turns_used : int;
+      provider_turn_ordinal : int;
       tool_name : string;
       repeated_count : int;
     }
   | Yielded_after_repeated_assistant_text of {
       turns_used : int;
+      provider_turn_ordinal : int;
       repeated_count : int;
     }
   | InputRequired of {
@@ -46,6 +48,11 @@ type cooperative_yield_reason =
   | Repeated_assistant_text of { repeated_count : int }
   | Terminal_tool_completed
 
+val final_provider_turn_ordinal : stop_reason -> int option
+(** The producer's exact ordinal for completed/yielded outcomes. [None] only
+    for [InputRequired], which does not claim a completed provider response.
+    This never derives an ordinal from runtime-specific turn counts. *)
+
 type cooperative_yield_decision =
   | Continue
   | Yield of cooperative_yield_reason
@@ -53,7 +60,11 @@ type cooperative_yield_decision =
 type cooperative_yield_probe =
   Agent_core.Agent.Advanced.tool_boundary ->
   (cooperative_yield_decision, Agent_core.Error.t) result
-(** Why this single Agent Core call yielded control. [Completed] is the
+(** Every completed/yielded outcome carries the exact provider turn ordinal
+    supplied by its producer, independently of runtime-specific turn counts.
+    [InputRequired] carries no completion ordinal.
+
+    Why this single Agent Core call yielded control. [Completed] is the
     model's success path. [Yielded_to_operation_queued] fires when an
     autonomous-lane run stopped at a turn boundary to let the Owner start its
     queued Dashboard/connector operation.
@@ -70,7 +81,7 @@ type cooperative_yield_probe =
     yield variants resume through later host-owned activity boundaries. *)
 
 type classified_advanced_outcome =
-  | Advanced_completed of Agent_core.Types.api_response
+  | Advanced_completed of Agent_core.Agent.Advanced.completed
   | Advanced_yielded of
       cooperative_yield_reason
       * Agent_core.Agent.Advanced.yielded
@@ -345,7 +356,7 @@ module For_testing : sig
     exn -> Llm_provider.Http_client.network_error_kind option
 
   val stop_reason_of_cooperative_yield :
-    turns_used:int -> cooperative_yield_reason -> stop_reason
+    provider_turn_ordinal:int -> turns_used:int -> cooperative_yield_reason -> stop_reason
 
   (** Fail closed when a streaming deadline (inter-line idle or first-event,
       RFC-AC-037) is configured but [clock] is [None]. The runtime passes the

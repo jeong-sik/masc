@@ -456,9 +456,10 @@ module For_testing : sig
       [InvalidConfig]); [Dispatched] otherwise. *)
 
   val run_result_answered : Runtime_agent.run_result -> bool
-  (** Whether a successful attempt heard from its candidate: [false] for an
-      attempt that yielded before any provider turn completed, which clears no
-      failure evidence (RFC-0458 §3.4). *)
+  (** Whether the returned outcome carries a completed provider-turn witness.
+      Completed/yielded outcomes have an exact ordinal even when a client's
+      count is zero; [InputRequired] has no such witness. Runtime-specific or
+      restored turn counts alone never clear candidate failure evidence. *)
 
   val make_deferred_runtime_lane :
     assignment_id:string ->

@@ -44,7 +44,7 @@ let wire_key = "turn_outcome"
 let turn_ref_wire_key = "turn_ref"
 
 let of_stop_reason = function
-  | Runtime_agent.Completed -> Visible_reply
+  | Runtime_agent.Completed _ -> Visible_reply
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Yielded_after_repeated_tool_call _
@@ -53,7 +53,7 @@ let of_stop_reason = function
   | Runtime_agent.InputRequired _ -> Visible_reply
 
 let of_result_surface ~response_text = function
-  | Runtime_agent.Completed ->
+  | Runtime_agent.Completed _ ->
       if String.trim response_text = "" then No_visible_reply else Visible_reply
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _

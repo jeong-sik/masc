@@ -122,7 +122,7 @@ type turn_success =
   | Turn_skipped of keeper_meta
 
 let turn_success_of_stop_reason ~meta ~continuation_route = function
-  | Runtime_agent.Completed -> Turn_completed { meta; continuation_route }
+  | Runtime_agent.Completed _ -> Turn_completed { meta; continuation_route }
   | Runtime_agent.Yielded_to_operation_queued _ ->
     Turn_checkpointed { meta; checkpoint_reason = Operation_queued; continuation_route }
   | Runtime_agent.Yielded_to_durable_stimulus _ ->

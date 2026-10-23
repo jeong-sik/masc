@@ -246,7 +246,6 @@ val make_hooks :
   turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   trace_id:string ->
   keeper_turn_id:int ->
-  on_after_turn_ordinal:(int -> unit) ->
   ?on_tool_stream_observation:(tool_stream_observation -> unit) ->
   ?current_runtime_attempt:(unit -> (string * string * int) option) ->
   ?current_attempt_usage:(unit -> attempt_usage option) ->

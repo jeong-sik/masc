@@ -163,6 +163,8 @@ let run_restart () =
    | Error _ -> () | Ok _ -> Alcotest.fail "changed Agent identity was accepted");
   assert_counts root ~providers:1;
   let result = resume config goal |> or_fail in
+  Alcotest.(check (option int)) "resumed provider frontier ordinal"
+    (Some 1) (Runtime_agent.final_provider_turn_ordinal result.stop_reason);
   Alcotest.(check string) "run continues with the preserved ToolResult"
     "effect receipt preserved" (Agent_core.Types.text_of_content result.response.content);
   assert_counts root ~providers:2;

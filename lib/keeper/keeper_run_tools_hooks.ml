@@ -64,7 +64,6 @@ type agent_setup =
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list
-  ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_agent_core_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
@@ -102,7 +101,6 @@ type ctx =
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
        below, read by the post-tool hooks in Keeper_hooks_agent_core. *)
   ; answer_source_ids : string list
-  ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_agent_core_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
@@ -496,7 +494,6 @@ let assemble_hooks
   let profile_defaults = ctx.profile_defaults in
   let turn_ctx_cell = ctx.turn_ctx_cell in
   let answer_source_ids = ctx.answer_source_ids in
-  let final_agent_core_turn_ordinal_ref = ctx.final_agent_core_turn_ordinal_ref in
   let receipt_agent_core_turn_count_ref = ctx.receipt_agent_core_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
@@ -706,7 +703,6 @@ let assemble_hooks
         ~turn_ctx_cell
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~keeper_turn_id
-        ~on_after_turn_ordinal:(fun turn -> final_agent_core_turn_ordinal_ref := Some turn)
         ?on_tool_stream_observation:ctx.on_tool_stream_observation
         ~current_runtime_attempt:(fun () -> !usage_attempt)
         ~current_attempt_usage:(fun () ->
@@ -1405,7 +1401,6 @@ let assemble_hooks
       ; acc
       ; all_tool_names
       ; skill_projection_diagnostics
-      ; final_agent_core_turn_ordinal_ref
       ; receipt_agent_core_turn_count_ref
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref

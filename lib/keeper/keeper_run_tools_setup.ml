@@ -804,7 +804,6 @@ let prepare_agent_setup
     in
     ()
   in
-  let final_agent_core_turn_ordinal_ref : int option ref = ref None in
   let receipt_agent_core_turn_count_ref : int option ref = ref None in
   let receipt_model_used_ref : string option ref = ref None in
   let receipt_stop_reason_ref : Runtime_agent.stop_reason option ref =
@@ -867,7 +866,6 @@ let prepare_agent_setup
     ; profile_defaults
     ; turn_ctx_cell
     ; answer_source_ids
-    ; final_agent_core_turn_ordinal_ref
     ; receipt_agent_core_turn_count_ref
     ; receipt_model_used_ref
     ; receipt_stop_reason_ref

@@ -202,7 +202,7 @@ let run_case ?(callbacks = Persist_callbacks) ?(observer_failure = false)
        | Error error -> fail (Agent_core.Error.to_string error)
      in
      (match completed.Runtime_agent.stop_reason with
-      | Runtime_agent.Completed -> ()
+      | Runtime_agent.Completed _ -> ()
       | _ -> fail "provider answer must complete the run");
      check string "provider answer survives dispatch" answer
        (Agent_core.Types.text_of_content completed.response.content)

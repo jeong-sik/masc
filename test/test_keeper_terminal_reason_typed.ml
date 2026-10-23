@@ -628,7 +628,7 @@ let () =
 ;;
 
 let () =
-  let completed_stop = Runtime_agent.Completed in
+  let completed_stop = (Runtime_agent.Completed { provider_turn_ordinal = 0 }) in
   let receipt =
     { base_receipt with
       outcome = `Ok
@@ -1118,7 +1118,7 @@ let () =
         ])
   in
   let run_result
-        ?(stop_reason = Runtime_agent.Completed)
+        ?(stop_reason = (Runtime_agent.Completed { provider_turn_ordinal = 0 }))
         ?(usage = Masc.Inference_utils.zero_usage)
         ?(usage_scope = Runtime_usage_scope.Per_request)
         ()
@@ -1154,7 +1154,7 @@ let () =
     ; runtime_observation = None
     ; cooperative_boundary = None
     ; turn_count = 1
-    ; final_agent_core_turn_ordinal = Some 0
+    ; final_agent_core_turn_ordinal = Runtime_agent.final_provider_turn_ordinal stop_reason
     ; usage
     ; usage_reported = true
     ; usage_scope
@@ -1292,7 +1292,7 @@ max-concurrent = 1
              (member "code" fallback_reason = `String expected_code);
            check (name ^ " trust receipt fallback preserves human-action distinction")
              (member "next_action" fallback_reason = expected_action))
-        [ "queue-checkpoint", Runtime_agent.Yielded_to_operation_queued { turns_used = 53 },
+        [ "queue-checkpoint", Runtime_agent.Yielded_to_operation_queued { turns_used = 53 ; provider_turn_ordinal = 17 },
             "checkpoint", `Null
         ; "actual-input", Runtime_agent.InputRequired
             { turns_used = 2; request =
@@ -1948,11 +1948,11 @@ max-concurrent = 1
        check_repeated_yield_preserves_failure_state
          "repeated tool stop"
          (Runtime_agent.Yielded_after_repeated_tool_call
-            { turns_used = 3; tool_name = "board_post"; repeated_count = 3 });
+            { turns_used = 3; tool_name = "board_post"; repeated_count = 3 ; provider_turn_ordinal = 17 });
        check_repeated_yield_preserves_failure_state
          "repeated assistant stop"
          (Runtime_agent.Yielded_after_repeated_assistant_text
-            { turns_used = 3; repeated_count = 3 }))
+            { turns_used = 3; repeated_count = 3 ; provider_turn_ordinal = 17 }))
 ;;
 
 let () =
@@ -3010,7 +3010,7 @@ max-concurrent = 1
     ; checkpoint = None
     ; trace_ref = None
     ; run_validation = None
-    ; stop_reason = Runtime_agent.Completed
+    ; stop_reason = (Runtime_agent.Completed { provider_turn_ordinal = 0 })
     ; inference_telemetry = None
     ; wire_prompt_tokens = None
     ; tool_surface

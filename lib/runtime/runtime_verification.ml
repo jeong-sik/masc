@@ -129,19 +129,19 @@ let failure_detail = function
    and the operator needs to know which. *)
 let unfinished_run_reason (stop_reason : Runtime_agent.stop_reason) =
   match stop_reason with
-  | Runtime_agent.Completed -> "the run completed"
-  | Runtime_agent.Yielded_to_operation_queued { turns_used } ->
+  | Runtime_agent.Completed _ -> "the run completed"
+  | Runtime_agent.Yielded_to_operation_queued { turns_used; _ } ->
     Printf.sprintf "the run yielded to a queued operation after %d turns" turns_used
-  | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
+  | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
     Printf.sprintf "the run yielded to a durable stimulus after %d turns" turns_used
   | Runtime_agent.Yielded_after_repeated_tool_call
-      { turns_used; tool_name; repeated_count } ->
+      { turns_used; tool_name; repeated_count; _ } ->
     Printf.sprintf
       "the run yielded after calling %s %d times in %d turns"
       tool_name
       repeated_count
       turns_used
-  | Runtime_agent.Yielded_after_repeated_assistant_text { turns_used; repeated_count } ->
+  | Runtime_agent.Yielded_after_repeated_assistant_text { turns_used; repeated_count; _ } ->
     Printf.sprintf
       "the run yielded after repeating the same reply %d times in %d turns"
       repeated_count
@@ -887,7 +887,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                  Error (failure_of_agent_core_error error)
                | Ok result ->
                  (match result.stop_reason with
-                  | Runtime_agent.Completed ->
+                  | Runtime_agent.Completed _ ->
                     Ok
                       { model = result.response.model
                       ; text = Agent_core.Types.text_of_response result.response

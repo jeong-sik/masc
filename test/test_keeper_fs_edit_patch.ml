@@ -496,7 +496,6 @@ let test_file_change_evidence_crosses_handler_and_hook_on_exact_invocation () =
            ~turn_ctx_cell
            ~trace_id:"file-change-exact-trace"
            ~keeper_turn_id:1
-           ~on_after_turn_ordinal:ignore
            ()
        in
        let post_tool_use =

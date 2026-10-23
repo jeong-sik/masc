@@ -1235,7 +1235,6 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                 ~turn_ctx_cell
                 ~trace_id
                 ~keeper_turn_id:1
-                ~on_after_turn_ordinal:ignore
                 ~on_tool_result_ready:
                   (fun ~tool_call_id ~turn ~planned_index ~execution_id ->
                      let execution_id = Ids.Execution_id.to_string execution_id in
@@ -5172,7 +5171,7 @@ let test_deferred_web_search_keeps_the_turn_going () =
           fail
             (Masc.Keeper_approval_queue_result.storage_error_to_string error));
        (match runtime_result with
-        | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed; cooperative_boundary; _ } ->
+        | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed _; cooperative_boundary; _ } ->
           check bool "parked call does not invent a cooperative yield" true
             (Option.is_none cooperative_boundary)
         | Ok result ->

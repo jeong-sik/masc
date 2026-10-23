@@ -462,11 +462,16 @@ val apply_accept :
 
 val complete_saved_tool_terminal :
   tool_results_saved_in_attempt:bool ->
+  observed_provider_turn_ordinal:int option ->
   checkpoint:Agent_core.Checkpoint.t option ->
   (Runtime_agent.run_result, Agent_core.Error.t) result ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
 (** Keeper-owned normalization of a typed empty [EndTurn] failure after this
-    attempt saved tool results. A checkpoint is required; all other outcomes
+    attempt saved tool results. A checkpoint and an actual provider ordinal
+    observed during this SDK invocation are required; the latter is never
+    inferred from checkpoint counts or another attempt. An invocation without
+    that witness (including a restored tool turn without a fresh AfterTurn)
+    retains its original error. All other outcomes
     retain their original classification. The synthetic terminal has no
     provider response identity, usage, telemetry or cooperative-yield witness. *)
 

@@ -35,7 +35,7 @@ val checkpoint_for_replay_persistence :
   session_id:string ->
   response_text:string ->
   ?suppress_visible_response:bool ->
-  ?stop_reason:Runtime_agent.stop_reason ->
+  stop_reason:Runtime_agent.stop_reason ->
   exclude_thought_from_replay:bool ->
   Agent_core.Checkpoint.t ->
   (Agent_core.Checkpoint.t * replay_suffix_prune_reason option, string) result

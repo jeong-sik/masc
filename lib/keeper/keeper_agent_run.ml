@@ -113,7 +113,7 @@ let normalize_final_response_text ~response_policy ~keeper_name ~runtime_id
   | Error _ as error ->
     let quiet_shape =
       match run_result.stop_reason with
-      | Runtime_agent.Completed ->
+      | Runtime_agent.Completed _ ->
         Keeper_tooling.Response.quiet_final_shape
           ~policy:response_policy run_result.response
       | InputRequired _ | Yielded_to_operation_queued _
@@ -1271,9 +1271,6 @@ let run_turn
        attached tool loaded mid-turn has to reach the agent that is running,
        and a second cell here would leave that one empty forever. *)
     let agent_ref = s.Keeper_run_tools.agent_cell in
-    let final_agent_core_turn_ordinal_ref =
-      s.Keeper_run_tools.final_agent_core_turn_ordinal_ref
-    in
     let receipt_agent_core_turn_count_ref = s.Keeper_run_tools.receipt_agent_core_turn_count_ref in
     let receipt_model_used_ref = s.Keeper_run_tools.receipt_model_used_ref in
     let receipt_stop_reason_ref = s.Keeper_run_tools.receipt_stop_reason_ref in
@@ -2038,24 +2035,12 @@ let run_turn
                           finalize_turn_surface ~response_text
                             ~stop_reason:result.stop_reason terminal_effect_state
                         in
-                        let final_ordinal =
-                          match !final_agent_core_turn_ordinal_ref, result.stop_reason with
-                          | Some ordinal, _ -> Ok (Some ordinal)
-                          | None, Runtime_agent.InputRequired _ -> Ok None
-                          | None,
-                              (Runtime_agent.Completed
-                              | Yielded_to_operation_queued _
-                              | Yielded_to_durable_stimulus _
-                              | Yielded_after_repeated_tool_call _
-                              | Yielded_after_repeated_assistant_text _) ->
-                            Error
-                              (Agent_core.Error.Internal
-                                 "successful Agent.run returned without an AfterTurn ordinal")
+                        let final_agent_core_turn_ordinal =
+                          Runtime_agent.final_provider_turn_ordinal result.stop_reason
                         in
-                        (match turn_outcome, final_ordinal with
-                         | Error e, _ -> Error e
-                         | Ok _, Error error -> Error error
-                         | Ok (turn_outcome, terminal_effect_receipt), Ok final_agent_core_turn_ordinal ->
+                        (match turn_outcome with
+                         | Error e -> Error e
+                         | Ok (turn_outcome, terminal_effect_receipt) ->
                            Keeper_agent_run_finalize_response.finalize
                              ~task_context:ctx.task_context
                              ~config ~meta ~publication_recovery

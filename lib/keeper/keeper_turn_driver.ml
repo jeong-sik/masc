@@ -115,17 +115,16 @@ let selected_runtime_result ?official_client_settlement (runtime : Runtime_insta
     result
 ;;
 
-(* Whether the candidate answered at all. An attempt that stopped before any
-   provider turn completed did not, so it is no evidence the candidate is
-   back. *)
+(* Only the returned provider-turn witness establishes that this candidate
+   answered. A client count or a restored counter is not that observation. *)
 let run_result_answered (run_result : Runtime_agent.run_result) =
   match run_result.Runtime_agent.stop_reason with
-  | Runtime_agent.Completed -> true
-  | Runtime_agent.Yielded_to_operation_queued { turns_used }
-  | Runtime_agent.Yielded_to_durable_stimulus { turns_used }
-  | Runtime_agent.Yielded_after_repeated_tool_call { turns_used; tool_name = _; repeated_count = _ }
-  | Runtime_agent.Yielded_after_repeated_assistant_text { turns_used; repeated_count = _ }
-  | Runtime_agent.InputRequired { turns_used; request = _ } -> turns_used > 0
+  | Runtime_agent.Completed _
+  | Runtime_agent.Yielded_to_operation_queued _
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ -> true
+  | Runtime_agent.InputRequired _ -> false
 ;;
 
 (* The prompt-sent callback is the invocation boundary, including resumed
@@ -149,10 +148,10 @@ let official_client_observation ~runtime_id ~model_id ~prompt_sent_at ~now = fun
 let apply_official_client_accept ~runtime_id ~accept ~terminal_effect_state
     (run_result : Runtime_agent.run_result) =
   match run_result.stop_reason, terminal_effect_state () with
-  | ( Runtime_agent.Completed
+  | ( Runtime_agent.Completed _
     , Keeper_tools_agent_core.Terminal_effect_completed _ ) ->
     Ok run_result
-  | (Runtime_agent.Completed, (Keeper_tools_agent_core.Terminal_effect_open | (Keeper_tools_agent_core.Deferred_tool_result | (Keeper_tools_agent_core.External_effect_deferred | Keeper_tools_agent_core.Terminal_effect_failed _))))
+  | (Runtime_agent.Completed _, (Keeper_tools_agent_core.Terminal_effect_open | (Keeper_tools_agent_core.Deferred_tool_result | (Keeper_tools_agent_core.External_effect_deferred | Keeper_tools_agent_core.Terminal_effect_failed _))))
   | ((Runtime_agent_context.Yielded_to_operation_queued _ | (Runtime_agent_context.Yielded_to_durable_stimulus _ | (Runtime_agent_context.Yielded_after_repeated_tool_call _ | (Runtime_agent_context.Yielded_after_repeated_assistant_text _ | Runtime_agent_context.InputRequired _)))), _) -> Keeper_turn_driver_try_provider.apply_accept
       ~runtime_id
       ~accept
@@ -2703,10 +2702,10 @@ let run_named
                  run_result.Runtime_agent.stop_reason,
                  run_result.response.content
                with
-               | Runtime_agent.Completed, [ Agent_core.Types.Text text ]
+               | Runtime_agent.Completed _, [ Agent_core.Types.Text text ]
                  when String.trim text = "" ->
                  Ok run_result
-               | ( Runtime_agent.Completed
+               | ( Runtime_agent.Completed _
                  | Runtime_agent.Yielded_to_operation_queued _
                  | Runtime_agent.Yielded_to_durable_stimulus _
                  | Runtime_agent.Yielded_after_repeated_tool_call _

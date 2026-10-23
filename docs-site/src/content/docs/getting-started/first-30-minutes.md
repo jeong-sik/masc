@@ -170,8 +170,10 @@ needed only to view or click inside a logged-in site.
 - Setup: in the installer's "5 · Give imp tools (optional)" checklist, mark the
   browser row. It looks for `geckodriver` and Firefox, and shows an install menu
   if they are missing; otherwise run `masc browser-lane-setup --mode automation`
-  before starting the server. The BiDi row (attach your own Firefox) and the
-  add-on row are unmarked by default — choose them only when needed. If you have
+  before starting the server. The BiDi row (a Firefox MASC starts), the add-on
+  row (your everyday Firefox) and the ego lite row (a task space in your ego
+  lite, shown when `ego-browser` answers) are unmarked by default — choose them
+  only when needed. If you have
   already finished setup, run the same command and restart the server.
 - When the lane is off, the Browser Lane screen shows:
   - `Live lane off in runtime.toml · it serves nothing, MASC starts nothing` —

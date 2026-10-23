@@ -1164,7 +1164,12 @@ def show_presentation_readiness(readiness):
 # The programs the automation lane starts, in the order they are checked. The
 # names are the ones `masc prerequisite-actions` takes.
 BROWSER_TOOLS = ('geckodriver', 'firefox')
-BROWSER_TOOL_NAMES = {'geckodriver': 'geckodriver', 'firefox': 'Firefox'}
+# ego lite's command: looked for on its own, by its own row (ego_row).
+EGO_PROGRAM = 'ego-browser'
+# `Browser_lane_ego_setup.default_space`: the space `--mode ego` names when
+# the table is new, which is the case this step is for.
+EGO_SPACE = 'masc'
+BROWSER_TOOL_NAMES = {'geckodriver': 'geckodriver', 'firefox': 'Firefox', EGO_PROGRAM: 'ego-browser'}
 
 
 @dataclass(frozen=True)
@@ -2604,7 +2609,10 @@ def quick_sandbox(binary, base_path, backend):
 AUTOMATION_TOOL = 'automation'
 BIDI_TOOL = 'bidi'
 EXTENSION_TOOL = 'extension'
-BROWSER_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EXTENSION_TOOL)
+EGO_TOOL = 'ego'
+BROWSER_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EXTENSION_TOOL, EGO_TOOL)
+# The routes that start or attach a Firefox. The ego route runs ego lite.
+FIREFOX_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EXTENSION_TOOL)
 WEB_SEARCH_TOOL = 'web-search'
 ZAI_TOOL = 'zai'
 # The value `web_search.provider` takes for z.ai, and what `--provider` is given.
@@ -2781,14 +2789,34 @@ def firefox_route_rows(base):
                    'its cookies. Log in once, after the server starts, to the sites imp works on; its profile keeps '
                    'the login.')
     extension_notice = ('\nThe extension route attaches the Firefox you use every day. Firefox removes the add-on '
-                        'when it restarts, so you load it again from about:debugging each time. With the BiDi route '
-                        'chosen as well, a request that names no browser connection is refused as ambiguous.')
+                        'when it restarts, so you load it again from about:debugging each time. A request that names '
+                        'no browser connection goes to this Firefox only while no BiDi or ego lite connection is up '
+                        'and imp has no browser of its own open.')
     return [
         ToolRow(BIDI_TOOL, "Firefox of its own that MASC starts for imp (BiDi) · log in once · open debugging port",
                 browser_lane_command(base, (BIDI_TOOL,)), checked=False, notice=bidi_notice),
         ToolRow(EXTENSION_TOOL, 'Your everyday Firefox through the MASC add-on · load the add-on after each restart',
                 browser_lane_command(base, (EXTENSION_TOOL,)), checked=False, notice=extension_notice),
     ]
+
+
+def ego_row(binary, base):
+    """The ego lite route, shown only when ego-browser answers (RFC-browser-live-ego section 7).
+
+    It starts unmarked: imp acts there with the cookies of the reader's ego lite
+    profile. Recommending a browser is not this step's job, so with no
+    ego-browser there is nothing to ask, as with Firefox.
+    """
+    readiness, _ = browser_tool(binary, EGO_PROGRAM)
+    if not readiness.available:
+        return None
+    notice = ('\nThe ego lite route has MASC open a task space named ' + EGO_SPACE + ' in your ego lite. imp sees '
+              'only the tabs in that space, and clicks and types only on the pages it opened there. Those pages '
+              'share the cookies of your ego lite profile, so imp reads and acts as you on the sites you are '
+              'logged in to. With the BiDi route chosen as well, a request that names no browser connection is '
+              'refused as ambiguous.')
+    return ToolRow(EGO_TOOL, 'Your ego lite, in a task space of its own for imp · uses your ego lite logins',
+                   browser_lane_command(base, (EGO_TOOL,)), checked=False, notice=notice)
 
 
 def automation_row(found, base):
@@ -2967,6 +2995,14 @@ def imp_tool_rows(binary, base):
     except (SetupError, OSError) as error:
         print(terminal_text(str(error)) + '\nRun ' + automation_command(base) + ' to give imp a browser later.',
               file=sys.stderr)
+    try:
+        ego = ego_row(binary, base)
+    except (SetupError, OSError) as error:
+        print(terminal_text(str(error)) + '\nRun ' + browser_lane_command(base, (EGO_TOOL,))
+              + ' to connect ego lite later.', file=sys.stderr)
+        ego = None
+    if ego is not None:
+        rows.append(ego)
     rows.append(github_row(base))
     rows.append(web_search_row(base))
     zai = zai_row(base)
@@ -2987,7 +3023,7 @@ SETUP_SERVER_PROBE_TIMEOUT_SECONDS = 20
 # The routes that write a table of runtime.toml, which the server reads when it
 # starts. The extension route writes none: it installs the host, the manifest
 # and the add-on files, and the lane token is read for each request.
-RUNTIME_TABLE_MODES = (AUTOMATION_TOOL, BIDI_TOOL)
+RUNTIME_TABLE_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EGO_TOOL)
 
 
 def note_running_server(binary, base, port):
@@ -3044,15 +3080,19 @@ def prepare_browser_lane(binary, base, modes, port=None):
 
     The automation lane is the one that starts geckodriver. A reader who leaves
     the install menu without it loses that lane and keeps the routes they also
-    chose, which never needed it.
+    chose, which never needed it. The same holds for Firefox and the ego route,
+    which needs ego-browser and no Firefox.
     """
     remaining = list(modes)
     if AUTOMATION_TOOL in remaining and not ensure_program(
             binary, base, 'geckodriver', browser_lane_command(base, (AUTOMATION_TOOL,))):
         remaining.remove(AUTOMATION_TOOL)
-    # Every route that is left attaches or starts a Firefox.
-    if remaining and not ensure_program(binary, base, 'firefox', browser_lane_command(base, tuple(remaining))):
-        return
+    firefox_routes = tuple(mode for mode in remaining if mode in FIREFOX_MODES)
+    if firefox_routes and not ensure_program(binary, base, 'firefox', browser_lane_command(base, firefox_routes)):
+        remaining = [mode for mode in remaining if mode not in FIREFOX_MODES]
+    if EGO_TOOL in remaining and not ensure_program(
+            binary, base, EGO_PROGRAM, browser_lane_command(base, (EGO_TOOL,))):
+        remaining.remove(EGO_TOOL)
     if not remaining:
         return
     modes = tuple(remaining)

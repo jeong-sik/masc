@@ -445,7 +445,8 @@ For an MCP-only server, use `masc start --base-path "$HOME/masc-workspace"` and 
 
 After the sandbox, the setup journey asks **5 · Give imp tools (optional)**. It is
 one checklist. The Browser, GitHub and Web search rows start marked; the rows
-that connect a Firefox you choose, the z.ai row and the SearXNG row do not.
+that connect a Firefox you choose, the ego lite row, the z.ai row and the
+SearXNG row do not.
 Nothing is installed or written until you confirm it. Unmark every row to continue without any of them (on a terminal
 that shows numbers, type `0`).
 
@@ -516,11 +517,23 @@ that shows numbers, type `0`).
     time.
 
   Both write before `masc setup` starts the server, like the browser row, and
-  both can be chosen together (a request that names no connection is then
-  refused as ambiguous). With no Firefox found the journey shows neither. A Zen
+  both can be chosen together: a request that names no connection then goes to
+  the BiDi Firefox. With no Firefox found the journey shows neither. A Zen
   browser is not detected: connect it by hand with
   `masc browser-lane-setup --mode extension --manifest-dir <Zen's native
   messaging folder>`, which this guide does not verify.
+- **ego lite (not marked).** When `ego-browser` answers on `PATH` or in
+  `~/.local/bin`, where ego lite's onboarding puts it, one more row connects
+  your [ego lite](https://lite.ego.app/). Confirming it runs
+  `masc browser-lane-setup --mode ego`, which writes the `[browser.live.ego]`
+  table of `runtime.toml`. The browser Add-on then opens a task space named
+  `masc` in ego lite and serves it as a live connection. `imp` sees only the
+  tabs in that space, and clicks and types only on the pages it opened there.
+  Those pages share the cookies of your ego lite profile, so `imp` reads and
+  acts as you on the sites you are logged in to. The row needs no Firefox.
+  Chosen with the BiDi row, a request that names no connection is refused as
+  ambiguous. The server reads the table when it starts, so a server that is
+  already running needs a restart, and the journey says so.
 
 Quick setup lists every row with the command for each and whether it would be
 marked. It only looks: it runs the programs' `--version` and `gh auth status`,
@@ -534,6 +547,8 @@ masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
 masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
 # Add-on row: your everyday Firefox
 masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
+# ego lite row: a task space in your ego lite
+masc browser-lane-setup --mode ego --base-path "$HOME/masc-workspace"
 # Web search row: which providers have a key (writes nothing)
 masc web-search-setup --base-path "$HOME/masc-workspace"
 # z.ai row: z.ai is tried first for web search (reads ZAI_API_KEY from the server's environment)

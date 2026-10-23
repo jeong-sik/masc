@@ -416,8 +416,8 @@ MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 �
 ### `imp`에게 브라우저와 GitHub 로그인 주기
 
 setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 묻습니다. 체크 목록 하나이고
-브라우저, GitHub, 웹 검색 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄과 z.ai 줄,
-SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
+브라우저, GitHub, 웹 검색 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄과 ego lite 줄,
+z.ai 줄, SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
 모든 줄의 체크를 해제하면 아무것도 하지 않고 넘어갑니다(번호로 고르는 화면에서는 `0`을 입력하세요).
 
 - **브라우저.** `imp`가 자기 Firefox에서 웹 페이지를 읽습니다. geckodriver가 그 Firefox를 움직입니다.
@@ -471,11 +471,20 @@ SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에는 아무�
   - *부가기능*: 평소 쓰는 Firefox 에 MASC 부가기능으로 붙습니다. Firefox 를 다시 켜면 부가기능이
     지워져서 그때마다 `about:debugging` 에서 다시 불러야 합니다.
 
-  둘 다 브라우저 줄처럼 `masc setup` 이 서버를 시작하기 전에 씁니다. 같이 골라도 되지만, 그러면
-  연결을 지정하지 않은 요청은 모호하다고 거절됩니다. Firefox 를 못 찾으면 둘 다 나오지 않습니다.
+  둘 다 브라우저 줄처럼 `masc setup` 이 서버를 시작하기 전에 씁니다. 같이 골라도 되고, 그러면
+  연결을 지정하지 않은 요청은 BiDi Firefox 로 갑니다. Firefox 를 못 찾으면 둘 다 나오지 않습니다.
   Zen 은 감지하지 않습니다. 직접 연결하려면
   `masc browser-lane-setup --mode extension --manifest-dir <Zen의 native messaging 폴더>` 를
   실행하세요. 그 폴더 위치는 이 문서가 확인하지 않았습니다.
+- **ego lite(체크 안 됨).** `ego-browser` 가 `PATH` 나 `~/.local/bin`(ego lite 첫 실행이 두는 곳)에서
+  답하면 [ego lite](https://lite.ego.app/) 를 연결하는 줄이 하나 더 나옵니다. 고르면
+  `masc browser-lane-setup --mode ego` 를 실행해서 `runtime.toml` 에 `[browser.live.ego]` 표를 씁니다.
+  그러면 browser Add-on 이 ego lite 에 `masc` 라는 작업 공간을 열고 live 연결로 붙입니다. `imp` 는
+  그 공간의 탭만 보고, 그 안에서 자기가 연 페이지에만 클릭하고 입력합니다. 그 페이지들은 ego lite
+  프로필의 쿠키를 같이 써서, `imp` 가 로그인된 사이트에서 사용자 이름으로 읽고 움직입니다.
+  Firefox 는 필요 없습니다. BiDi 줄과 같이 고르면 연결을 지정하지 않은 요청은 모호하다고
+  거절됩니다. 서버는 시작할 때 이 표를 읽어서, 이미 떠 있는 서버는 다시 시작해야 하고 여정이
+  그렇게 알려 줍니다.
 
 빠른 설치는 모든 줄과 줄마다 명령, 체크됐을 줄인지를 보여 주기만 합니다. 프로그램의 `--version`과
 `gh auth status`를 실행하고, Docker 에 `masc-searxng` 컨테이너를 묻고, 로컬 주소가 응답하는지
@@ -488,6 +497,8 @@ masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
 masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
 # 부가기능 줄: 평소 쓰는 Firefox
 masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
+# ego lite 줄: ego lite 안의 작업 공간
+masc browser-lane-setup --mode ego --base-path "$HOME/masc-workspace"
 # 웹 검색 줄: 어느 공급자에 키가 있는지(아무것도 쓰지 않음)
 masc web-search-setup --base-path "$HOME/masc-workspace"
 # z.ai 줄: 웹 검색에서 z.ai 를 먼저 시도(서버 환경의 ZAI_API_KEY 를 읽음)

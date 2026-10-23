@@ -663,8 +663,8 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
     in
     let is_resume = Option.is_some claim_plan.previous_settlement in
     let context_frontier : Session_store.context_frontier =
-      {snapshot_sha256; message_count=List.length snapshot_messages;
-       delivery=Canonical_source_guard; acknowledged_turn=None; held_context=[]} in
+      {message_count=List.length snapshot_messages;
+       delivery=Canonical_source_guard {snapshot_sha256}; acknowledged_turn=None; held_context=[]} in
     let turn_count = claim_plan.turn_count in
     let* () =
       match prepared.reasoning_effort with

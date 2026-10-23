@@ -1662,8 +1662,9 @@ let test_operator_interrupt_preserves_older_cooperative_turn () =
 let test_context_frontier_is_acknowledged_only_by_settlement () =
   with_workspace "masc-context-frontier-" (fun base_path ->
     let keeper_name = "frontier" in
-    let frontier = {snapshot_sha256=String.make 64 'a'; message_count=3;
-      delivery=Held_by_vendor_session;
+    let snapshot_sha256 = String.make 64 'a' in
+    let frontier = {message_count=3;
+      delivery=Canonical_source_guard {snapshot_sha256};
       acknowledged_turn=Some {session_id="fabricated";turn_id="fabricated"};
       held_context=[]} in
     let claimed = claim_with_context_frontier ~context_frontier:(Some frontier)
@@ -1689,18 +1690,18 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     check bool "terminal settlement records exact vendor identity" true
       ((observed settled).acknowledged_turn = Some {session_id="session";turn_id="turn"});
     check bool "unchanged canonical context is admitted" true
-      (validate_unchanged_context ~expected:(Some settled) ~snapshot_sha256:frontier.snapshot_sha256 = Ok ());
+      (validate_unchanged_context ~expected:(Some settled) ~snapshot_sha256 = Ok ());
     check bool "changed canonical context is a typed rejection" true
       (validate_unchanged_context ~expected:(Some settled) ~snapshot_sha256:(String.make 64 'b') = Error Canonical_context_changed);
     check bool "inflight intent is never accepted as prior context proof" true
-      (validate_unchanged_context ~expected:(Some started) ~snapshot_sha256:frontier.snapshot_sha256 = Error Context_frontier_missing);
+      (validate_unchanged_context ~expected:(Some started) ~snapshot_sha256 = Error Context_frontier_missing);
     check bool "acknowledged frontier survives reopen" true
       (load ~base_path ~keeper_name = Ok (Some settled));
     let undelivered_recall =
       { context = Context_block Prompt_block_id.Memory_os_recall
       ; sha256 = String.make 64 'c' } in
     let guarded = claim_with_context_frontier
-      ~context_frontier:(Some {frontier with delivery=Canonical_source_guard;
+      ~context_frontier:(Some {frontier with
         acknowledged_turn=None; held_context=[undelivered_recall]})
       ~base_path ~keeper_name ~expected:(Some settled) ~client_kind:Codex ~owner_epoch
       ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:6.
@@ -1709,7 +1710,7 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
       ~failure:Transient_spawn_failed ~released_at:7. |> Result.get_ok in
     check bool "transient spawn failure preserves verified unchanged source"
       true (validate_unchanged_context ~expected:(Some released)
-        ~snapshot_sha256:frontier.snapshot_sha256 = Ok ());
+        ~snapshot_sha256 = Ok ());
     let resumable_plan =
       plan_claim ~expected:(Some released) ~client_kind:Codex ~runtime_id:"codex.default"
       |> Result.get_ok in
@@ -1718,7 +1719,7 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     check bool "failed dispatch does not certify its unsent Recall" true
       (held_context_for_resume resumable_plan ~expected:(Some released) = []);
     let unchanged = reconcile_context resumable_plan ~expected:(Some released)
-        ~snapshot_sha256:frontier.snapshot_sha256 in
+        ~snapshot_sha256 in
     check bool "unchanged source keeps resuming" true (unchanged.previous_settlement <> None);
     let changed = reconcile_context resumable_plan ~expected:(Some released)
         ~snapshot_sha256:(String.make 64 'b') in
@@ -1736,7 +1737,7 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
       (* Nothing shows what this session settled against, so it is not
          resumed; a fresh session starts instead of refusing every cycle. *)
       (match claim_with_context_frontier
-          ~context_frontier:(Some {frontier with delivery=Canonical_source_guard; acknowledged_turn=None})
+          ~context_frontier:(Some {frontier with acknowledged_turn=None})
           ~base_path ~keeper_name ~expected:(Some binding) ~client_kind:Codex ~owner_epoch
           ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:9. with
        | Ok {phase=Start {previous_settlement=None; _}; turn_count=1; _} -> ()
@@ -1762,7 +1763,7 @@ let test_held_context_is_read_only_from_the_acknowledged_frontier () =
                  { context = Context_section (Keeper_context_layers.Unattributed Keeper_context_layers.World_frame);
                    sha256 = String.make 64 'c' };
                  { context = Librarian_working_state; sha256 = String.make 64 'e' } ] in
-    let frontier = Some { snapshot_sha256 = String.make 64 'a'; message_count = 1;
+    let frontier = Some { message_count = 1;
       delivery = Held_by_vendor_session; acknowledged_turn = None; held_context = held } in
     let settle_turn ~expected ~turn_id ~at ~settle =
       let claimed = claim_with_context_frontier ~context_frontier:frontier ~base_path
@@ -1805,7 +1806,7 @@ let test_held_section_rows_are_named_by_their_own_digest () =
     let row ~name ~sha256 =
       { context = Context_section_row { section; row_sha256 = name }; sha256 }
     in
-    let frontier held = Some { snapshot_sha256 = String.make 64 'a'; message_count = 1;
+    let frontier held = Some { message_count = 1;
       delivery = Held_by_vendor_session; acknowledged_turn = None; held_context = held } in
     let claim ~keeper_name held =
       claim_with_context_frontier ~context_frontier:(frontier held) ~base_path ~keeper_name
@@ -1829,7 +1830,7 @@ let test_held_section_rows_are_named_by_their_own_digest () =
 let test_frontier_without_held_context_does_not_load () =
   with_workspace "masc-held-context-required-" (fun base_path ->
     let keeper_name = "held-required" in
-    let frontier = Some { snapshot_sha256 = String.make 64 'a'; message_count = 1;
+    let frontier = Some { message_count = 1;
       delivery = Held_by_vendor_session; acknowledged_turn = None; held_context = [] } in
     let _claimed = claim_with_context_frontier ~context_frontier:frontier ~base_path
       ~keeper_name ~expected:None ~client_kind:Claude_code ~owner_epoch
@@ -1862,8 +1863,8 @@ let test_frontier_without_held_context_does_not_load () =
 let test_changed_canonical_source_claims_a_fresh_session () =
   with_workspace "masc-context-fresh-" (fun base_path ->
     let keeper_name = "fresh" in
-    let guard sha = Some {snapshot_sha256=sha; message_count=3;
-      delivery=Canonical_source_guard; acknowledged_turn=None; held_context=[]} in
+    let guard snapshot_sha256 = Some {message_count=3;
+      delivery=Canonical_source_guard {snapshot_sha256}; acknowledged_turn=None; held_context=[]} in
     let claim ~expected ~sha ~at = claim_with_context_frontier ~context_frontier:(guard sha)
       ~base_path ~keeper_name ~expected ~client_kind:Codex ~owner_epoch
       ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:at in
@@ -1884,8 +1885,9 @@ let test_changed_canonical_source_claims_a_fresh_session () =
 let test_unchanged_canonical_source_still_resumes () =
   with_workspace "masc-context-resume-" (fun base_path ->
     let keeper_name = "resume" in
-    let guard = Some {snapshot_sha256=String.make 64 'a'; message_count=3;
-      delivery=Canonical_source_guard; acknowledged_turn=None; held_context=[]} in
+    let guard = Some {message_count=3;
+      delivery=Canonical_source_guard {snapshot_sha256=String.make 64 'a'};
+      acknowledged_turn=None; held_context=[]} in
     let claim ~expected ~at = claim_with_context_frontier ~context_frontier:guard
       ~base_path ~keeper_name ~expected ~client_kind:Codex ~owner_epoch
       ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:at in
@@ -1918,7 +1920,7 @@ type failure_phase = From_start | From_turn_inflight
 let failed_resume ~base_path ~keeper_name ~delivery ~fail_from =
   let runtime_id = "antigravity.default" in
   let snapshot_sha256 = String.make 64 'c' in
-  let frontier = Some { snapshot_sha256; message_count = 2; delivery;
+  let frontier = Some { message_count = 2; delivery;
     acknowledged_turn = None; held_context = [] } in
   let claim_again ~expected ~updated_at =
     claim_with_context_frontier ~context_frontier:frontier ~base_path ~keeper_name
@@ -1964,7 +1966,7 @@ let resolve ~base_path ~keeper_name failed resolution =
 
 let check_retry_resumes ~base_path ~keeper_name ~fail_from =
   let failed = failed_resume ~base_path ~keeper_name
-      ~delivery:Canonical_source_guard ~fail_from in
+      ~delivery:(Canonical_source_guard {snapshot_sha256=String.make 64 'c'}) ~fail_from in
   let retried = resolve ~base_path ~keeper_name failed Retry_previous in
   check bool "retry restores the acknowledged source" true
     (validate_unchanged_context ~expected:(Some retried)
@@ -1998,7 +2000,7 @@ let test_restart_fresh_leaves_the_frontier_unacknowledged () =
   with_workspace "masc-restart-guarded-" (fun base_path ->
     let keeper_name = "restart-guarded" in
     let failed = failed_resume ~base_path ~keeper_name
-        ~delivery:Canonical_source_guard ~fail_from:From_start in
+        ~delivery:(Canonical_source_guard {snapshot_sha256=String.make 64 'c'}) ~fail_from:From_start in
     let restarted = resolve ~base_path ~keeper_name failed Restart_fresh in
     check bool "restart is ready" true (restarted.phase = Ready);
     match restarted.context_frontier with

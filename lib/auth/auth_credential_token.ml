@@ -439,24 +439,86 @@ let file_backed_expiry config = function
     Ok (expires_at_for_auth_config auth_cfg)
 ;;
 
-let publish_requested_file_backed_token config ~agent_name ~role ~lifetime ~raw_token =
-  with_credential_transaction config (fun transaction ->
-    let ( let* ) = Result.bind in
-    let* _current = current_credential_in_transaction transaction agent_name in
-    let* _raw = raw_token_in_transaction transaction agent_name in
-    let* expires_at = file_backed_expiry config lifetime in
-    let credential = raw_token_credential ~agent_name ~role ~raw_token ~expires_at in
-    let* () = publish_file_backed_credential_in_transaction transaction credential ~raw_token
-      |> Result.map_error file_backed_publication_error in
-    Ok credential)
-  |> Result.join
+let publish_requested_file_backed_token_in_transaction
+    ((Credential_transaction config) as transaction) ~agent_name ~role ~lifetime ~raw_token =
+  let ( let* ) = Result.bind in
+  let* _current = current_credential_in_transaction transaction agent_name in
+  let* _raw = raw_token_in_transaction transaction agent_name in
+  let* expires_at = file_backed_expiry config lifetime in
+  let credential = raw_token_credential ~agent_name ~role ~raw_token ~expires_at in
+  let* () = publish_file_backed_credential_in_transaction transaction credential ~raw_token
+    |> Result.map_error file_backed_publication_error in
+  Ok credential
 ;;
 
 let save_file_backed_raw_token_credential config ~agent_name ~role ~raw_token =
   let ( let* ) = Result.bind in
   let* () = validate_raw_token raw_token in
   let* () = validate_file_backed_bearer raw_token in
-  publish_requested_file_backed_token config ~agent_name ~role ~raw_token ~lifetime:Config_expiry
+  with_credential_transaction config (fun transaction ->
+    publish_requested_file_backed_token_in_transaction transaction
+      ~agent_name ~role ~raw_token ~lifetime:Config_expiry)
+  |> Result.join
+;;
+
+type startup_admin_token_source =
+  | Stored_admin_token
+  | Minted_admin_token
+  | Supplied_admin_token
+
+let prepare_startup_admin_token config ~raw_token =
+  let ( let* ) = Result.bind in
+  let* () = match raw_token with
+    | None -> Ok ()
+    | Some raw ->
+      let* () = validate_raw_token raw in
+      validate_file_backed_bearer raw in
+  with_credential_transaction config (fun transaction ->
+    let refused detail = Error (System (System_error.ValidationError detail)) in
+    let owner_path = initial_admin_file config in
+    let* owner_present = credential_path_exists owner_path in
+    let* agent_name =
+      if not owner_present then Ok "admin"
+      else
+        let* name = read_regular_auth_file owner_path in
+        match String.trim name with
+        | "" -> refused "Startup Admin owner file is blank"
+        | name -> Ok name in
+    match raw_token with
+    | Some raw ->
+      let* credential = publish_requested_file_backed_token_in_transaction transaction
+          ~agent_name ~role:Admin ~lifetime:Config_expiry ~raw_token:raw in
+      Ok (raw, credential, Supplied_admin_token)
+    | None ->
+      let* current = current_credential_in_transaction transaction agent_name in
+      let* raw_present = credential_path_exists (raw_token_file config agent_name) in
+      let* raw = raw_token_in_transaction transaction agent_name in
+      match current, raw with
+      | None, None ->
+        if raw_present then refused "Startup Admin raw token file is blank"
+        else
+          let raw = generate_token () in
+          let* credential = publish_requested_file_backed_token_in_transaction transaction
+              ~agent_name ~role:Admin ~lifetime:Config_expiry ~raw_token:raw in
+          Ok (raw, credential, Minted_admin_token)
+      | None, Some _ -> refused "Startup Admin raw token has no credential"
+      | Some _, None ->
+        refused (if raw_present then "Startup Admin raw token file is blank"
+                 else "Startup Admin credential has no raw token")
+      | Some _, Some raw ->
+        if not raw_present then refused "Startup Admin raw token path changed during admission"
+        else
+          let* () = validate_file_backed_bearer raw in
+          let* credential = find_static_credential_in_transaction
+              ~leaf_policy:Follow_regular_symlink transaction ~token:raw in
+          if not (String.equal credential.agent_name agent_name) then
+            Error (Auth (Auth_error.InvalidToken "Startup Admin bearer belongs to another owner"))
+          else match credential.role with
+            | Admin -> Ok (raw, credential, Stored_admin_token)
+            | Worker | Player ->
+              Error (Auth (Auth_error.Forbidden
+                { agent = agent_name; action = "use a non-Admin credential for startup Admin" })))
+  |> Result.join
 ;;
 
 type login_auth_change = Auth_already_required | Auth_enabled | Require_token_enabled

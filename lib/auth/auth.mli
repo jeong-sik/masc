@@ -351,6 +351,23 @@ val save_file_backed_raw_token_credential :
     Use only for local operator credentials whose bearer must remain available
     to file-based clients after process restart. *)
 
+type startup_admin_token_source =
+  | Stored_admin_token
+  | Minted_admin_token
+  | Supplied_admin_token
+
+val prepare_startup_admin_token :
+  string -> raw_token:string option ->
+  (string * agent_credential * startup_admin_token_source, masc_error) result
+(** Prepare the startup Admin bearer under one credential transaction. Only an
+    absent initial-owner file selects [admin]; occupied blank or unreadable
+    ownership refuses. A supplied bearer retains explicit publication semantics.
+    Without one, a valid matching persisted Admin pair is reused without writes
+    or identity/role/expiry changes. Minting uses configured expiry only when both
+    paths are absent. Missing halves, invalid, unreadable or expired pairs refuse
+    without replacement. Auth enablement and internal Keeper rotation are
+    unchanged; publication failure may retain the reported partial effects. *)
+
 type file_backed_token_lifetime = Config_expiry | No_expiry | Expires_in_hours of int
 
 type login_auth_change = Auth_already_required | Auth_enabled | Require_token_enabled

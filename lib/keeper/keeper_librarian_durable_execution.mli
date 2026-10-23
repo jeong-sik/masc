@@ -8,4 +8,13 @@ val consume_one : config:Workspace.config -> keeper_name:string ->
 (** An unavailable attachment leaves the original source unread. Original
     completed local publication may still recover while the Addon is Off.
     [wake] schedules the same Memory lane after a newly observed Finished fact;
-    scheduling acceptance does not prove a Memory effect or a drained queue. *)
+    it also schedules after known basis supersession. Full scope validation
+    binds each successor to one strictly superseded predecessor and preserves
+    that predecessor's complete original source/frontier while rebasing only
+    current Memory. The parent retains its full child intent before publication
+    and acknowledges the strictly reread child before dispatch. Missing pending
+    publication recovers that same request locally while Off; a missing
+    acknowledged child refuses. Missing parents, cycles, orphaned or multiple
+    children refuse before selection or dispatch. An unresolved superseded frontier stays Pending
+    while the Addon is Off. Scheduling acceptance does not prove a Memory effect
+    or a drained queue. *)

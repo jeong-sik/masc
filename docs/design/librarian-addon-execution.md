@@ -430,12 +430,29 @@ proposal decoding or publication.
 
 [`Keeper_librarian_durable_commit`](../../lib/keeper/keeper_librarian_durable_commit.mli)
 uses the original captured gate journal, holds actual source locks, and passes
-the original revision and full current facts to `Current.apply_disposition`.
+the original revision and full current facts to `Current.apply_disposition_guarded`.
 The latter compares both inside its actual Memory write locks. Only matching
 atom/official range receipts permit external ACK and original position
 settlement, followed by Finished. A post-Memory ACK failure recovers locally
 without a second inference or disposition. Changed checkpoint prefixes,
 same-trace restarts, physical owners and Memory epochs refuse old authority.
+
+A concurrent explicit Memory write can make a completed model answer stale.
+Only a typed basis mismatch observed inside the actual Current write locks,
+followed by absence of the original range receipts, closes that original as
+`Conflicted`. Storage failures and unknown effects retain their original
+uncertainty. An already proved Memory receipt takes precedence over the typed
+mismatch; earlier journal recovery may already have published that effect.
+
+For a known basis conflict, a successor preserves the complete original source,
+external frontier and captured positions and changes only its current Memory
+input/preparation. The parent durably records the full immutable successor
+before child retention, then acknowledges that exact retained child before any
+RPC. Both links and full payloads are authenticated before resume. An unfinished
+intent recovers that same child locally; a confirmed child that disappears
+refuses rather than minting another request. The old conflict history remains
+available after its successful successor uses the same source range receipts.
+Fresh successor capture/inference requires current configured Addon authority.
 
 Addon Off prevents a new original, new gate intent and new gate evaluation.
 An existing gate intent/transcript and receipt-backed settlement may recover

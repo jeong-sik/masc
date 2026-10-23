@@ -8,13 +8,19 @@ basis comparison. Actual range receipts precede external ACK, both source
 positions, and durable Finished. Uncertain original work never authorizes a
 replacement request or another inference.
 
-Latest completed-history integration: [run39896648638](https://github.com/jeong-sik/masc/actions/runs/39896648638),
-exact `8fcdbca85b55883223c88c0cae4caa3e9ce9dfe0`, **11/11 passed in 4.606 s**.
-[The exact-head receipt](history-production-completed-execution.json) and
-[raw-log excerpt](history-production-completed-excerpt.txt) retain the actual
-component and substitution boundaries. The later review repair isolates a
-malformed global inventory from valid queued Keeper wakes; its regression is a
-separate selection.
+Latest completed selection: [run39897358407](https://github.com/jeong-sik/masc/actions/runs/39897358407),
+exact `57b06a6ee933c7571caa509a4e57876e8b15fc98`, **34 passed**:
+configured Addon owner **23/23 in 10.680 s** and completed-history integration
+**11/11 in 3.826 s**. This verifies the review repair that isolates malformed
+global inventory from valid queued Keeper wakes as well as the original history
+pipeline. [Exact-head receipt](history-wake-repair-completed-execution.json) and
+[raw-log excerpt](history-wake-repair-completed-excerpt.txt) preserve its scope.
+
+The earlier history-only [run39896648638](https://github.com/jeong-sik/masc/actions/runs/39896648638),
+exact `8fcdbca85b55883223c88c0cae4caa3e9ce9dfe0`, passed **11/11 in 4.606 s**.
+[Its receipt](history-production-completed-execution.json) remains separate.
+Subsequent basis-supersession and replacement-journal repairs require their own
+execution; neither completed run certifies those later changes.
 
 ## Recorded execution
 

@@ -555,7 +555,7 @@ let test_real_memory_receipt_then_failed_ack_recovers_while_off () = with_fixtur
       injected:=true;write cursor_path "{invalid cursor after actual Memory receipt}\n") in
     (match result with
      | Ok (Durable_owner.Publication_waiting _) -> ()
-     | Ok (Pending _ | Refused _ | Finished _) -> fail "actual post-Memory cursor failure was not retained Pending"
+     | Ok (Pending _ | Refused _ | Finished _ | Basis_superseded _) -> fail "actual post-Memory cursor failure was not retained Pending"
      | Error error -> fail (Durable_owner.error_to_string error));
     check int "the original has nonempty admitted external evidence to acknowledge" 1
       (Keeper_librarian_input_sources.external_through (Source.counterparts source));
@@ -689,6 +689,173 @@ let test_epoch_reset_refuses_old_original () = with_fixture (fun ~sw:_ fixture -
   let retained=Option.get retained in
   check json "old epoch evidence remains observable without restoring authority" original retained.Owner.request;
   check int "epoch invalidation starts no replacement provider" posts (F.post_count fixture.server))
+let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_child_after_dispatch=false) ?(recover_unacked_child=false) () = with_fixture (fun ~sw fixture ->
+  let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  let child_arrived,child_signal=Eio.Promise.create () and child_release,child_unblock=Eio.Promise.create () in
+  fixture.set_response (fun capture ->
+    if Option.is_none (Capture.predecessor capture) then (
+      ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release)
+    else if lose_child_after_dispatch then (
+      ignore (Eio.Promise.try_resolve child_signal ());Eio.Promise.await child_release);
+    `OK,F.openai_response (answer capture));
+  Fun.protect ~finally:(fun () ->
+    ignore (Eio.Promise.try_resolve unblock ());
+    ignore (Eio.Promise.try_resolve child_unblock ())) (fun () ->
+    assert_pending (run_worker fixture);Eio.Promise.await arrived;
+    let original_record,original=only_original fixture in
+    let source=Capture.source original in
+    let request_before=Capture.to_json original and positions_before=progress fixture in
+    let independent=Types.observed ~claim:"Independent explicit write" ~category:Types.Fact
+      ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="concurrent-history-writer"} in
+    let written=io (fun () -> Current.upsert_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+      ~now:(Time_compat.now ()) ~source:{kind=Current.Explicit_write;trace_id="concurrent-history-writer"}
+      independent |> Result.map_error Current.upsert_error_to_string |> get) in
+    let before_delivery= !(fixture.deliveries) in
+    ignore (Eio.Promise.try_resolve unblock ());await_delivery fixture ~after:before_delivery;
+    assert_pending (run_worker fixture);
+    let superseded_record,superseded=only_original fixture in
+    check bool "a typed pre-publication basis refusal is terminal rather than unknown" true
+      (match Progress.phase superseded_record.Owner.progress with Conflicted _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    check json "known supersession preserves the complete original source and request"
+      request_before (Capture.to_json superseded);
+    check bool "basis refusal has no additional Memory revision" true
+      (io (fun () -> current fixture.keepers_dir |> Option.map (fun (snapshot:Current.t) -> snapshot.revision))
+       =Some written.revision);
+    check (list string) "only the independent writer changed Memory" [independent.claim]
+      (io (fun () -> claims fixture.keepers_dir));
+    check bool "superseding an uncommitted basis does not ACK original positions" true
+      (positions_before=progress fixture);
+    check int "no replacement is admitted before the known refusal is durable" 1 (F.post_count fixture.server);
+    set_enabled fixture false;
+    assert_pending (run_worker fixture);
+    let parked,_=only_original fixture in
+    check json "Off wake neither retries stale commit nor grows its event history"
+      (Progress.to_json superseded_record.progress) (Progress.to_json parked.progress);
+    check int "Off cannot infer a new basis" 1 (F.post_count fixture.server);
+    if recover_unacked_child then (
+      let rebased=Source.with_current ~expected_revision:(Some written.revision)
+        ~current:(Some {Keeper_librarian.facts=written.facts}) source
+        |> Result.map_error Source.error_to_string |> get in
+      let preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input rebased) |> get in
+      let owner=Capture.physical_owner original in
+      let request_id=Capture.fresh_request_id owner in
+      let child=io (fun () -> Capture.create
+        ~predecessor:{request_id=original_record.request_id;request_digest=original_record.request_digest}
+        ~request_id ~owner ~destination:(Capture.destination original) ~source:rebased ~preparation ()) |> get in
+      let intended:Progress.successor={request_id;request=Capture.to_json child} in
+      let parent=io (fun () -> match Owner.advance ~store:fixture.store ~expected:parked
+          ~event:(Progress.Replacement_intended intended) with
+        | Ok (Owner.Stored record | Already_stored record) -> record
+        | Ok (Unconfirmed detail) -> fail detail
+        | Error error -> fail (Owner.update_error_to_string error)) in
+      check bool "full parent intent exists before any child retention" true
+        (Option.is_some (Progress.replacement parent.progress));
+      let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+        |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+      let authorize child=Server_librarian_addon_validation.authorize ~base_path:fixture.base_path
+        ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request child |> get) in
+      let retained=Durable_owner.retain ~store:fixture.store child
+        |> Result.map_error Durable_owner.error_to_string |> get in
+      (match authorize child with Error _ -> ()
+       | Ok _ -> fail "unacknowledged child reached actual host Exact authorization");
+      check bool "child remains Captured before parent acknowledgement" true
+        (Progress.phase retained.progress=Progress.Captured);
+      assert_pending (run_worker fixture);
+      let parent=io (fun () -> Owner.load ~store:fixture.store ~scope:parent.scope
+        ~request_id:parent.request_id |> owned) |> Option.get in
+      (match Progress.replacement parent.progress with
+       | Some (Preparation_confirmed successor) -> check string "Off recovery acknowledges the same child" request_id successor.request_id
+       | None | Some (Preparation_pending _) -> fail "Off did not recover the original child publication");
+      (match authorize child with
+       | Ok (Some authorization) -> check bool "Off still refuses actual dispatch after local ACK" true
+           (Result.is_error (authorization.before_dispatch ()))
+       | Error detail -> fail detail | Ok None -> fail "history request lost its actual host namespace");
+      check int "local Off publication recovery does not call provider" 1 (F.post_count fixture.server);
+      check bool "local Off publication recovery does not ACK source positions" true (progress fixture=positions_before));
+    let changed=Eio.Condition.create () in
+    let stop=Runtime.subscribe_owner_events ~config:fixture.config ~package_id:Capture.package_id
+      (fun (Configuration_observed | Export_inventory_changed | Exact_result_delivered _) ->
+        Eio.Condition.broadcast changed) in
+    Fun.protect ~finally:stop (fun () ->
+      Runtime.start_configuration_service ~config:fixture.config ~sw ~clock:fixture.clock;
+      set_enabled fixture true;
+      Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+        Eio.Condition.loop_no_mutex changed (fun () ->
+          let snapshot=Runtime.tool_export_snapshot ~config:fixture.config ~reserved:[]
+            ~access:Lane_addon_sources.Operator_configuration in
+          List.find_opt (fun (export:Runtime.tool_export) -> export.tool.name=Capture.tool) snapshot.exports))
+      |> ignore);
+    reconcile fixture;
+    if lose_child_after_dispatch then (
+      assert_pending (run_worker fixture);
+      Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () -> Eio.Promise.await child_arrived);
+      let found=observed_originals fixture in
+      let child_record,child=match List.filter (fun (_,request) -> Option.is_some (Capture.predecessor request)) found with
+        | [child] -> child | [] | _::_::_ -> fail "expected one admitted successor before physical loss" in
+      let parent,_=List.find (fun (record,_) -> record.Owner.request_id=original_record.request_id) found in
+      (match Progress.replacement parent.progress with
+       | Some (Preparation_confirmed successor) ->
+         check string "parent confirmed the exact admitted child" child_record.request_id successor.request_id;
+         check json "parent durably retains full child before its actual HTTP" (Lane_addon_action.canonical (Capture.to_json child) |> get) successor.request
+       | None | Some (Preparation_pending _) -> fail "child provider ran without durable parent acknowledgement");
+      let retained_parent=Progress.to_json parent.progress in
+      let path=Filename.concat (Store.root fixture.store)
+        (Filename.concat Store.tool_request_owners_directory
+          (Filename.concat (Store.digest child_record.scope) (Store.digest child_record.request_id ^ ".json"))) in
+      io (fun () -> Unix.unlink path);
+      let refuse_missing ()=match run_worker fixture with
+        | Error _ -> () | Ok _ -> fail "confirmed missing child was treated as new-work permission" in
+      refuse_missing ();
+      let delivered= !(fixture.deliveries) in
+      ignore (Eio.Promise.try_resolve child_unblock ());await_delivery fixture ~after:delivered;
+      refuse_missing ();
+      set_enabled fixture false;
+      refuse_missing ();
+      let parent_after,_=only_original fixture in
+      check json "child loss preserves the full immutable forward intent and ACK"
+        retained_parent (Progress.to_json parent_after.progress);
+      check int "unknown lost child never authorizes a third inference" 2 (F.post_count fixture.server);
+      check (list string) "lost child cannot publish its actual late answer"
+        [independent.claim] (io (fun () -> claims fixture.keepers_dir));
+      check bool "lost child never advances original positions" true (progress fixture=positions_before)
+    ) else (
+    drive_advanced fixture;
+    let found=observed_originals fixture in
+    let child_record,child=match List.filter (fun (_,request) -> Option.is_some (Capture.predecessor request)) found with
+      | [child] -> child | [] | _::_::_ -> fail "expected exactly one linked fresh-basis successor" in
+    let predecessor=Capture.predecessor child |> Option.get in
+    check string "successor keeps its exact original predecessor ID" original_record.request_id predecessor.request_id;
+    check string "successor keeps its exact original predecessor digest" original_record.request_digest predecessor.request_digest;
+    let rebased=Source.with_current ~expected_revision:(Some written.revision)
+      ~current:(Some {Keeper_librarian.facts=written.facts}) source
+      |> Result.map_error Source.error_to_string |> get in
+    check json "successor changes only original Memory basis, never source or external frontier"
+      (Source.to_json rebased) (Source.to_json (Capture.source child));
+    check bool "fresh-basis successor durably finishes" true
+      (match Progress.phase child_record.Owner.progress with Finished _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    check (list string) "fresh judgment preserves the explicit write and consumes original history once"
+      [independent.claim;"Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
+    check int "exactly the original and its known fresh-basis successor reached provider" 2 (F.post_count fixture.server);
+    check bool "only successful successor advances original read positions" true (progress fixture<>positions_before);
+    let parent_after,_=List.find (fun (record,_) -> record.Owner.request_id=original_record.request_id) found in
+    let expected_parent=Progress.append superseded_record.progress
+      (Progress.Replacement_intended {request_id=child_record.request_id;request=Capture.to_json child}) |> get in
+    let expected_parent=Progress.append expected_parent (Progress.Replacement_observed child_record.request_id) |> get in
+    check json "historical supersession changes only by its exact child intent and ACK"
+      (Progress.to_json expected_parent) (Progress.to_json parent_after.progress);
+    (match Progress.replacement parent_after.progress with
+     | Some (Preparation_confirmed successor) ->
+       check string "parent ACK names exact successful child" child_record.request_id successor.request_id;
+       check json "parent keeps the complete successful child" (Lane_addon_action.canonical (Capture.to_json child) |> get) successor.request
+     | None | Some (Preparation_pending _) -> fail "successful child has no confirmed parent link");
+    ignore (run_worker fixture);
+    check int "later wake validates both originals without a third inference" 2 (F.post_count fixture.server);
+    check int "later wake retains one original and one successor only" 2 (List.length (observed_originals fixture)))))
+
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
   test_case "actual original reaches Memory and source ACK" `Quick test_actual_completed_history_path;
   test_case "actual official-only original reaches Memory and official ACK" `Quick (test_actual_official_or_mixed_path Official);
@@ -703,4 +870,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_source_replacement_cannot_publish_retained_answer Restarted_history);
   test_case "purge joins actual provider and worker restart never resubmits unknown" `Quick test_purge_joins_unknown_then_worker_restart_does_not_resubmit;
   test_case "destructive Memory epoch reset refuses retained old owner" `Quick test_epoch_reset_refuses_old_original;
+  test_case "concurrent explicit Memory write closes known basis and resumes original source once" `Quick
+    (test_changed_memory_rebases_original_source_without_unknown_retry ~lose_child_after_dispatch:false);
+  test_case "confirmed successor loss refuses fresh inference and late answer" `Quick
+    (test_changed_memory_rebases_original_source_without_unknown_retry ~lose_child_after_dispatch:true);
+  test_case "unacknowledged replacement is denied by host and locally recovered while Off" `Quick
+    (test_changed_memory_rebases_original_source_without_unknown_retry ~recover_unacked_child:true);
 ]]

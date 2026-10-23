@@ -10,6 +10,10 @@ module Submit = Lane_addon_submit_once
 let ( let* ) = Result.bind
 let io = Domain_pool_ref.submit_io_or_inline
 let require condition detail = if condition then Ok () else Error detail
+let equal_json left right detail =
+  let* left=Lane_addon_action.canonical left in
+  let* right=Lane_addon_action.canonical right in
+  require (Yojson.Safe.equal left right) detail
 let runtime_error = function
   | Runtime.Unavailable detail | Outcome_unknown detail -> detail
   | Host_refusal refusal -> match refusal with
@@ -65,9 +69,9 @@ let call ~config ~reserved ~expected ~(original : Retained.retained) ~arguments 
       ~tool:expected.tool ~configuration_revision:expected.configuration_revision ~original ~arguments
     |> Result.map_error Submit.call_error_of_runtime
 let active (record : Retained.retained) = match Progress.phase record.progress with
-  | Progress.Finished _ -> false
+  | Progress.Finished _ | Conflicted _ -> false
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-  | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> true
+  | Rejected _ | Subdividing _ | Subdivided _ -> true
 let resume ~store ~config ~reserved ~wake (original,request) =
   Owner.resume ~store ~config ~reserved ~original ~request ~wake ~call:(call ~config ~reserved)
     ~publish:(fun ~original ~request ~proposal ->
@@ -75,7 +79,49 @@ let resume ~store ~config ~reserved ~wake (original,request) =
         ~fresh_authority:(fresh_authority ~config ~reserved request)
       |> Result.map_error (fun detail -> Owner.Rejected detail))
   |> Result.map_error Owner.error_to_string
-let capture ~store ~config ~reserved ~keeper_name source =
+let advance_original ~store record event =
+  io (fun () -> match Retained.advance ~store ~expected:record ~event with
+    | Ok (Retained.Stored record | Already_stored record) -> Ok record
+    | Ok (Unconfirmed detail) -> Error detail
+    | Error error -> Error (Retained.update_error_to_string error))
+let replacement_request (parent:Retained.retained) parent_request (intended:Progress.successor) =
+  let* child=Request.of_json ~owner:(Request.physical_owner parent_request) intended.request in
+  let* ()=require (Request.request_id child=intended.request_id)
+    "Original history replacement intent names another request" in
+  let* ()=match Request.predecessor child with
+    | Some predecessor -> require (predecessor.request_id=parent.request_id
+        && predecessor.request_digest=parent.request_digest)
+        "Original history replacement intent has another predecessor"
+    | None -> Error "Original history replacement intent has no predecessor" in
+  let child_source=Request.source child in
+  let* expected=Source.with_current ~expected_revision:(Source.expected_revision child_source)
+    ~current:(Source.input child_source).current (Request.source parent_request)
+    |> Result.map_error Source.error_to_string in
+  let* ()=require (Source.to_json expected=Source.to_json child_source)
+    "Original history replacement intent changed its immutable source" in
+  Ok child
+let recover_replacement ~store ((parent:Retained.retained),parent_request) =
+  let* intended,pending=match Progress.replacement parent.progress with
+    | Some (Preparation_pending intended) -> Ok (intended,true)
+    | Some (Preparation_confirmed intended) -> Ok (intended,false)
+    | None -> Error "Original history replacement publication intent is absent" in
+  let* request=replacement_request parent parent_request intended in
+  let scope=Request.scope (Request.physical_owner request) in
+  let* observed=io (fun () -> Retained.load ~store ~scope ~request_id:intended.request_id
+    |> Result.map_error Retained.error_to_string) in
+  let* child=match observed,pending with
+    | None,false -> Error "Acknowledged original history replacement is absent"
+    | None,true -> Owner.retain ~store request |> Result.map_error Owner.error_to_string
+    | Some child,(true | false) -> Ok child in
+  let* restored=io (fun () -> Request.restore ~owner:(Request.physical_owner request) child) in
+  let* ()=equal_json (Request.to_json restored) intended.request
+    "Published original history replacement differs from its full intent" in
+  let* ()=if not pending then Ok () else
+    let* ()=require (Progress.phase child.progress=Progress.Captured)
+      "Unacknowledged history replacement has execution progress" in
+    let* _=advance_original ~store parent (Progress.Replacement_observed child.request_id) in Ok () in
+  Ok (child,request)
+let capture ?replacement_parent ~store ~config ~reserved ~keeper_name source =
   let base_path=config.Workspace.base_path in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let* owner=io (fun () ->
@@ -93,9 +139,17 @@ let capture ~store ~config ~reserved ~keeper_name source =
      serializers. capture_tool_request_owner's factory is pure, so use the
      destination publication port rather than placing I/O in that factory. *)
   with_destination ~config ~reserved (fun destination ->
-    let* request=io (fun () -> Request.create ~request_id ~owner ~destination ~source ~preparation) in
-    let* original=Owner.retain ~store request |> Result.map_error Owner.error_to_string in
-    Ok (original,request))
+    let predecessor=Option.map (fun ((parent:Retained.retained),_) ->
+      {Request.request_id=parent.request_id;request_digest=parent.request_digest}) replacement_parent in
+    let* request=io (fun () -> Request.create ?predecessor ~request_id ~owner ~destination ~source ~preparation ()) in
+    match replacement_parent with
+    | None ->
+      let* original=Owner.retain ~store request |> Result.map_error Owner.error_to_string in
+      Ok (original,request)
+    | Some (parent,parent_request) ->
+      let intended:Progress.successor={request_id;request=Request.to_json request} in
+      let* parent=advance_original ~store parent (Progress.Replacement_intended intended) in
+      recover_replacement ~store (parent,parent_request))
 let completed_outcome request =
   let source=Request.source request in
   let atom=Option.map (fun (range : Current.durable_range_id) ->
@@ -108,7 +162,68 @@ let completed_outcome request =
     Consumer.Official_advanced {atom;official={Keeper_librarian_official_progress.boundary_line}}
   | None,Some progress -> Consumer.Progress_advanced progress
   | None,None -> Consumer.Nothing_to_read
-let consume_one ~config ~keeper_name ~wake =
+let validate_lineage originals =
+  let find id=List.find_opt (fun ((record:Retained.retained),_) -> record.request_id=id) originals in
+  let predecessors=List.filter_map (fun (_,request) -> Request.predecessor request) originals in
+  let parent_ids=List.map (fun (parent:Request.predecessor) -> parent.request_id) predecessors in
+  let* ()=require (List.length parent_ids=List.length (List.sort_uniq String.compare parent_ids))
+    "Original history basis supersession has multiple children" in
+  let* ()=List.fold_left (fun result ((child:Retained.retained),request) ->
+    let* ()=result in
+    match Request.predecessor request with
+    | None -> Ok ()
+    | Some predecessor ->
+      let* parent,parent_request=Option.to_result ~none:"Original history predecessor is absent"
+        (find predecessor.request_id) in
+      let* ()=require (parent.request_digest=predecessor.request_digest && parent.request_id<>child.request_id)
+        "Original history predecessor identity changed" in
+      let* superseded=Keeper_librarian_durable_commit.is_superseded ~request:parent_request ~record:parent in
+      let* ()=require superseded "Original history successor has no known superseded basis" in
+      let* intended,pending=match Progress.replacement parent.progress with
+        | Some (Preparation_pending intended) -> Ok (intended,true)
+        | Some (Preparation_confirmed intended) -> Ok (intended,false)
+        | None -> Error "Original history successor has no forward publication intent" in
+      let* ()=require (intended.request_id=child.request_id)
+        "Original history predecessor names another replacement" in
+      let* ()=equal_json intended.request (Request.to_json request)
+        "Original history successor differs from its predecessor publication intent" in
+      let* ()=require (not pending || Progress.phase child.progress=Progress.Captured)
+        "Unacknowledged original history successor has execution progress" in
+      let* ()=require (Request.owner_to_json (Request.physical_owner parent_request)
+        =Request.owner_to_json (Request.physical_owner request)) "Original history successor changed its physical owner" in
+      let child_source=Request.source request in
+      let* expected=Source.with_current ~expected_revision:(Source.expected_revision child_source)
+        ~current:(Source.input child_source).current (Request.source parent_request)
+        |> Result.map_error Source.error_to_string in
+      require (Source.to_json expected=Source.to_json child_source)
+        "Original history successor changed its immutable source or acknowledgment frontier") (Ok ()) originals in
+  let* ()=List.fold_left (fun result ((parent:Retained.retained),request) ->
+    let* ()=result in match Progress.replacement parent.progress with
+    | None -> Ok ()
+    | Some (Preparation_pending intended | Preparation_confirmed intended) ->
+      let* superseded=Keeper_librarian_durable_commit.is_superseded ~request ~record:parent in
+      let* ()=require superseded "Original history replacement intent has no superseded basis" in
+      let* _=replacement_request parent request intended in
+      (match find intended.request_id,Progress.replacement parent.progress with
+       | None,Some (Preparation_confirmed _) -> Error "Acknowledged original history replacement is missing"
+       | None,Some (Preparation_pending _) -> Ok ()
+       | Some (_,child),Some (Preparation_pending _ | Preparation_confirmed _) ->
+         equal_json (Request.to_json child) intended.request "Original history forward replacement payload changed"
+       | (None | Some _),None -> Error "Original history replacement intent disappeared")) (Ok ()) originals in
+  let rec ancestry seen request = match Request.predecessor request with
+    | None -> Ok ()
+    | Some predecessor ->
+      let* ()=require (not (List.mem predecessor.request_id seen)) "Cyclic original history predecessor lineage" in
+      let* _,parent=Option.to_result ~none:"Original history predecessor disappeared" (find predecessor.request_id) in
+      ancestry (predecessor.request_id::seen) parent in
+  let* ()=List.fold_left (fun result ((record:Retained.retained),request) ->
+    let* ()=result in ancestry [record.request_id] request) (Ok ()) originals in
+  Ok (List.filter (fun ((record:Retained.retained),_) ->
+    match Progress.phase record.progress with
+    | Progress.Conflicted _ -> not (List.mem record.request_id parent_ids)
+    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+    | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> false) originals)
+let rec consume_one ~config ~keeper_name ~wake =
   let base_path=config.Workspace.base_path in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
@@ -118,7 +233,7 @@ let consume_one ~config ~keeper_name ~wake =
     match resume ~store ~config ~reserved ~wake original with
     | Error detail -> error detail
     | Ok (Owner.Finished _) -> Ok (completed_outcome request)
-    | Ok (Pending _ | Publication_waiting _) -> Ok Consumer.Pending
+    | Ok (Pending _ | Publication_waiting _ | Basis_superseded _) -> Ok Consumer.Pending
     | Ok (Refused _) -> Ok (Consumer.Memory_not_committed []) in
   (* Discovery does not initialize an epoch or create a replacement request.
      Any malformed old original fails the full inventory before fresh selection. *)
@@ -131,11 +246,47 @@ let consume_one ~config ~keeper_name ~wake =
     match validated with
     | Error detail -> error detail
     | Ok () ->
+    match validate_lineage originals with
+    | Error detail -> error detail
+    | Ok superseded ->
+    let recoveries=List.filter (fun ((record:Retained.retained),_) ->
+      match Progress.replacement record.progress with
+      | Some (Preparation_pending _) -> true
+      | None | Some (Preparation_confirmed _) -> false) originals in
     let unfinished=List.filter (fun (record,_) -> active record) originals in
-    match unfinished with
-    | _::_::_ -> error "Completed-history Librarian has multiple unfinished original owners"
-    | [original] -> resume_original original
+    if List.length unfinished + List.length superseded > 1 then
+      error "Completed-history Librarian has multiple unfinished original frontiers"
+    else (match recoveries with
+    | _::_::_ -> error "Original history has multiple unfinished replacement publications"
+    | [parent] ->
+      (match recover_replacement ~store parent with
+       | Error detail -> error detail
+       | Ok _ -> consume_one ~config ~keeper_name ~wake)
     | [] ->
+    match unfinished,superseded with
+    | (_::_::_),_ | _,(_::_::_) | (_::_),(_::_) ->
+      error "Completed-history Librarian has multiple unfinished original frontiers"
+    | [original],[] -> resume_original original
+    | [],[(parent,request)] ->
+      (match resolve ~config ~reserved with
+       | Error detail -> error detail
+       | Ok None -> Ok Consumer.Pending
+       | Ok (Some _) ->
+         let rebased=io (fun () ->
+           let* anchor=Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper_name in
+           let snapshot=Current.program_anchor_snapshot anchor in
+           let expected_revision=Option.map (fun (snapshot:Current.t) -> snapshot.revision) snapshot in
+           let current=Option.map (fun (snapshot:Current.t) ->
+             ({Keeper_librarian.facts=snapshot.facts}:Keeper_librarian.current_selection)) snapshot in
+           Source.with_current ~expected_revision ~current (Request.source request)
+           |> Result.map_error Source.error_to_string) in
+         match rebased with
+         | Error detail -> error detail
+         | Ok source ->
+           match capture ~replacement_parent:(parent,request) ~store ~config ~reserved ~keeper_name source with
+           | Error detail -> error detail
+           | Ok original -> resume_original original)
+    | [],[] ->
       match resolve ~config ~reserved with
       | Error detail -> error detail
       | Ok None -> Ok (Consumer.Memory_not_committed [])
@@ -148,7 +299,7 @@ let consume_one ~config ~keeper_name ~wake =
             match resume ~store ~config ~reserved ~wake original with
             | Error detail -> failure:=Some detail;Consumer.Memory_pending
             | Ok (Owner.Finished _) -> Consumer.Memory_committed
-            | Ok (Pending _ | Publication_waiting _) -> Consumer.Memory_pending
+            | Ok (Pending _ | Publication_waiting _ | Basis_superseded _) -> Consumer.Memory_pending
             | Ok (Refused _) -> Consumer.Memory_refused [] in
         let result=Consumer.consume_one ~config ~keeper_name ~commit in
-        match !failure with Some detail -> error detail | None -> result
+        match !failure with Some detail -> error detail | None -> result)

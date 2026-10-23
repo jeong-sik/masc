@@ -793,7 +793,10 @@ let test_durable_runtime_returns_refusal_reports ~base_path () =
         turn_ref=Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:turn;
         history_at_start;position}} with
     | Ok () -> () | Error error -> Alcotest.fail (Keeper_turn_boundaries.append_error_to_string error) in
-  append 1 Keeper_turn_boundaries.Fresh_history baseline;
+  (* This fixture starts after an already-read turn. A Fresh_history boundary
+     means restart and correctly dispatches from atom zero instead of merely
+     establishing the first read position. *)
+  append 1 Keeper_turn_boundaries.Continued_history baseline;
   append 2 Keeper_turn_boundaries.Continued_history messages;
   let consume commit = match Keeper_librarian_durable_consumer.consume_one ~config ~keeper_name:keeper_id ~commit with
     | Ok outcome -> outcome

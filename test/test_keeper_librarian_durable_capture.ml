@@ -93,9 +93,10 @@ let with_fixture kind f =
      | Official -> ()
      | Atoms | Mixed ->
        save_checkpoint config ~trace_id first 1;
-       atom_boundary config ~trace_id ~turn:1 ~time:(now-.10.) ~history_at_start:B.Fresh_history first;
-       (match Consumer.consume_one ~config ~keeper_name ~commit:(fun _ -> Consumer.Memory_committed) with
-        | Ok (Consumer.Baseline_advanced _ | Consumer.Progress_advanced _) -> ()
+       atom_boundary config ~trace_id ~turn:1 ~time:(now-.10.) ~history_at_start:B.Continued_history first;
+       (match Consumer.consume_one ~config ~keeper_name
+          ~commit:(fun _ -> fail "baseline must not request a Memory commit") with
+        | Ok (Consumer.Baseline_advanced _) -> ()
         | Ok _ -> fail "fixture baseline did not advance"
         | Error error -> fail (Consumer.error_to_string error)));
     (match kind with Official | Mixed -> official_turn config ~trace_id ~turn:2 ~time:(now+.2.) | Atoms -> ());
@@ -103,7 +104,7 @@ let with_fixture kind f =
      | Official -> ()
      | Atoms | Mixed ->
        let source_question={(message "selected atom") with name=Some "original speaker";
-         metadata=["input_speaker",`String "first";"input_speaker",`String "second"]} in
+         metadata=["input_speaker",`String "first";"source_note",`String "second"]} in
        let messages=first @ [source_question;
          Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
            [Agent_core.Types.ToolUse {id="source-call";name="read_file";input=`Assoc ["path",`String "source"]}];
@@ -155,7 +156,8 @@ let check_roundtrip kind () = with_fixture kind @@ fun config _ original ->
     check bool "the complete source includes the prior read prefix" true
       ((List.hd checkpoint.messages).Agent_core.Types.content=[Agent_core.Types.Text "already read"]);
     let user=List.find (fun (message:Agent_core.Types.message) -> message.name=Some "original speaker") checkpoint.messages in
-    check int "duplicate ordered metadata retained" 2 (List.length user.metadata) in
+    check bool "complete ordered canonical metadata retained" true
+      (user.metadata=["input_speaker",`String "first";"source_note",`String "second"]) in
   let check_official official =
     check int "one original official trace" 1 (List.length official.Capture.traces);
     let trace=List.hd official.traces in
@@ -210,6 +212,16 @@ let test_matching_source_and_input_cannot_disagree_with_checkpoint_bytes () =
       | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _) as block ->
         block) message.content})
 let test_richer_producer_snapshot_retains_complete_tool_json () =
+  (* Complete message data can retain duplicate metadata, although the canonical
+     checkpoint codec rejects it. Keep that data-codec claim separate from the
+     actual checkpoint fixture and its persisted-field consistency check. *)
+  let raw_message={(message "raw source data") with
+    metadata=["input_speaker",`String "first";"input_speaker",`String "second"]} in
+  let restored_message=Keeper_librarian_input_capture.message_json raw_message
+    |> Yojson.Safe.to_string |> Yojson.Safe.from_string
+    |> Keeper_librarian_input_capture.message_of_json |> get in
+  check bool "complete message data codec retains duplicate ordered metadata" true
+    (raw_message=restored_message);
   with_fixture Atoms @@ fun config trace_id original ->
   let old=match Capture.source original with Capture.Checkpoint_only value -> value
     | Official_only _ | Mixed _ -> fail "expected checkpoint fixture" in

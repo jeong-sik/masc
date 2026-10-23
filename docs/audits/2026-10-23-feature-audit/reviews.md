@@ -30,3 +30,9 @@ both portable probes; checked all 63 CSV/Markdown entries, the 6,033-file /
 Source PASS with two P3 precision corrections: spell out `Board_core_persist`
 in the facade chain, and describe five false positives among six original
 mention rows. Both corrections were applied before publication.
+
+Browser-artifact delta: `connector_response` reviewed the actual image, fixture
+imports and documentation, confirming the visible mention labels and explicit
+synthetic/non-production banner. It found no P0/P1/P2 issue. Its P3 clarification
+was applied: this UI fixture passes synthetic count fields; row aggregation is
+covered by the separate source probes, not this browser capture.

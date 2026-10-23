@@ -162,13 +162,18 @@ CSV의 `mutable_markers`, `ref_markers` 등은 주석·문자열까지 포함하
 | 변경 OCaml `.ml/.mli` parsing, `git diff --check` | 성공 | 문법·공백. 전체 타입 검사·링크를 뜻하지 않는다. |
 | Dashboard focused Vitest | **47/47 성공** | 정상화 모듈과 추가된 wire-to-state 소비자 시나리오. 화면 문구·배치 snapshot 검사는 추가하지 않았다. |
 | Dashboard `tsc --noEmit` | **성공** | 변경된 wire 소비자를 포함한 Dashboard 타입 검사. 브라우저 실측이 아니다. |
+| Dashboard 격리 browser fixture | **실제 렌더링·스크린샷 확인** | 현재 코드의 normalizer와 두 실제 컴포넌트에 합성 입력을 넣었다. `멘션 1`, `멘션 메시지 1`을 확인했다. 운영 서버·통합 화면 QA는 아니다. |
 | 독립 적대적 소스 리뷰 | 네 코드 작업 단위 모두 PASS | 검토한 source/diff 범위. GitHub 승인·병합·배포를 대신하지 않는다. |
-| 전체 linked OCaml 테스트 / 전체 CI / 설치 / live runtime / browser screenshot | **미실행** | 성공으로 표시하지 않는다. |
+| 전체 linked OCaml 테스트 / 전체 CI / 설치 / live runtime / 운영 browser QA | **미실행** | 성공으로 표시하지 않는다. |
 
 
 공개 시점에 관련 OCaml 6개 스위트를 `minimal=true`로 [원격 실행 요청](https://github.com/jeong-sik/masc/actions/runs/39942599904)했다. API를 한 번 읽어 대상 head가 `ed476e2a76f21bd48330da9db38f7b651effef83`, 상태가 `in_progress`임을 확인했다. 대상은 `test_workspace`, `test_dashboard_keeper_metrics_10286`, `test_keeper_effective_meta_overlay`, `test_server_discord_trigger_policy`, `test_server_slack_trigger_policy`, `test_channel_gate_discord_state`다. 이 접수·진행 상태를 성공이나 전체 회귀 결과로 세지 않는다. CI 대기·반복 조회는 하지 않았다.
 
-[실측 출력](2026-10-23-feature-audit/observations.txt). 감사 스크립트는 매 PR의 CI gate나 새 테스트 스위트에 연결하지 않았다. 이 스냅샷을 다시 확인하는 수동 재현 도구다.
+[실측 출력](2026-10-23-feature-audit/observations.txt), [격리 화면 재현](2026-10-23-feature-audit/dashboard-fixture/README.md).
+
+![실제 Dashboard 컴포넌트의 격리 fixture: 멘션 1과 멘션 메시지 1](2026-10-23-feature-audit/dashboard-mentions.png)
+
+감사 스크립트는 매 PR의 CI gate나 새 테스트 스위트에 연결하지 않았다. 이 스냅샷을 다시 확인하는 수동 재현 도구다.
 
 ```sh
 python3 docs/audits/2026-10-23-feature-audit/inventory.py 7ceccb5c947a30f2949147e59f1e457ee5813ecf

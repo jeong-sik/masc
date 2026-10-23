@@ -32,6 +32,8 @@ type stimulus_intake_result =
   | Stimulus_ask_missing of string
   | Stimulus_ask_not_answered of string
   | Stimulus_job_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
+  | Stimulus_completion_rejection_obsolete
+  | Stimulus_completion_rejection_retry_later of string
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
@@ -39,6 +41,7 @@ type event_queue_intake_error =
   | Connector_item_missing of string
   | Ask_read_failed of Keeper_ask_store.read_error
   | Job_result_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
+  | Completion_rejection_read_failed of string
 
 let event_queue_intake_error_to_string = function
   | Pending_selection_failed detail ->
@@ -49,6 +52,8 @@ let event_queue_intake_error_to_string = function
     "connector attention item missing: " ^ event_id
   | Ask_read_failed error ->
     "ask answer intake retry: " ^ Keeper_ask_store.read_error_to_string error
+  | Completion_rejection_read_failed detail ->
+    "completion rejection authority intake retry: " ^ detail
   | Job_result_unavailable (job_id,error) ->
     "job result unavailable " ^ Keeper_owned_job_identity.Job_id.to_string job_id ^ ": "
     ^ Keeper_owned_job_store.error_to_string error
@@ -59,6 +64,7 @@ let event_queue_intake_error_reason_label = function
   | Connector_read_failed _ -> "event_queue_connector_read_failed"
   | Connector_item_missing _ -> "event_queue_connector_item_missing"
   | Ask_read_failed _ -> "event_queue_ask_read_failed"
+  | Completion_rejection_read_failed _ -> "event_queue_completion_rejection_read_failed"
   | Job_result_unavailable _ -> "event_queue_job_result_unavailable"
 ;;
 
@@ -66,6 +72,7 @@ let event_queue_intake_error_counts_as_cycle_failure = function
   | Pending_selection_failed _ -> true
   | Connector_read_failed _ | Connector_item_missing _
   | Ask_read_failed _
+  | Completion_rejection_read_failed _
   | Job_result_unavailable _ -> false
 ;;
 
@@ -75,11 +82,30 @@ let classify_pending_board_event_result = function
     Stimulus_consumed []
 ;;
 
+let completion_rejection_intake ~config ~meta_after_triage stim
+      (rejection : Keeper_event_queue.completion_authority_rejection) =
+  match Workspace_task_rejection_outbox.standing config
+    ~task_id:rejection.car_task_id ~verification_id:rejection.car_verification_id
+    ~producer:meta_after_triage.name ~reason:rejection.car_reason
+    ~authority:rejection.car_authority with
+  | Error detail -> Stimulus_completion_rejection_retry_later detail
+  | Ok Workspace_task_rejection_outbox.Obsolete -> Stimulus_completion_rejection_obsolete
+  | Ok Workspace_task_rejection_outbox.Current ->
+    (match pending_board_event_of_stimulus ~base_path:config.base_path ~meta_after_triage stim with
+     | Ok events -> Stimulus_consumed (Option.to_list events)
+     | Error unavailable ->
+       Stimulus_completion_rejection_retry_later
+         (Keeper_world_observation_board_signal.unavailable_to_string unavailable))
+;;
+
 (* A Board read that answers no row names a swept post or an id that does not
    parse, and reading again gives the same answer. The stimulus is consumed so
    it cannot be reselected on every snapshot. *)
 let pending_board_events_of_stimulus_result ~base_path ~meta_after_triage stim =
   match stim.Keeper_event_queue.payload with
+  | Keeper_event_queue.Completion_authority_rejected rejection ->
+    completion_rejection_intake ~config:(Workspace.default_config base_path)
+      ~meta_after_triage stim rejection
   | Keeper_event_queue.Owned_job_completed completion ->
     (match Keeper_world_observation.pending_board_event_of_owned_job_completion
        ~base_path ~keeper_name:meta_after_triage.name ~arrived_at:stim.arrived_at completion with
@@ -89,7 +115,7 @@ let pending_board_events_of_stimulus_result ~base_path ~meta_after_triage stim =
   | Keeper_event_queue.Bootstrap | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _ | Keeper_event_queue.Ask_answered _
-  | Keeper_event_queue.Completion_authority_rejected _ | Keeper_event_queue.Task_outcome _
+  | Keeper_event_queue.Task_outcome _
   | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
   | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ ->
   let read_result = pending_board_event_of_stimulus ~base_path ~meta_after_triage stim in
@@ -252,13 +278,7 @@ let consume_single_heartbeat_stimulus
         meta_after_triage.name;
       pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
     | Keeper_event_queue.Completion_authority_rejected rejection ->
-      Log.Keeper.info
-        "turn entry: completion authority rejection delivered task_id=%s \
-         verification_id=%s (keeper=%s)"
-        rejection.car_task_id
-        rejection.car_verification_id
-        meta_after_triage.name;
-      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+      completion_rejection_intake ~config:ctx.config ~meta_after_triage stim rejection
     | Keeper_event_queue.Task_cancelled cancellation ->
       Log.Keeper.info
         "turn entry: task cancellation delivered task_id=%s cancelled_by=%s \
@@ -405,6 +425,7 @@ let consume_single_heartbeat_stimulus
   match intake_result with
   | Stimulus_connector_retry_later _ | Stimulus_connector_missing _
   | Stimulus_ask_retry_later _ | Stimulus_ask_missing _
+  | Stimulus_completion_rejection_obsolete | Stimulus_completion_rejection_retry_later _
   | Stimulus_ask_not_answered _ | Stimulus_job_unavailable _ -> intake_result
   | Stimulus_consumed _ ->
     Otel_metric_store.inc_counter
@@ -1050,6 +1071,24 @@ let heartbeat_event_intake
               ack_terminal_ask ("ask answer source missing: " ^ ask_id)
             | Stimulus_ask_not_answered ask_id ->
               ack_terminal_ask ("ask source has no recorded answer: " ^ ask_id)
+            | Stimulus_completion_rejection_retry_later detail ->
+              let error = Completion_rejection_read_failed detail in
+              Log.Keeper.warn "turn entry: retaining unread completion rejection keeper=%s: %s"
+                keeper_name detail;
+              let first_withdrawn = match first_withdrawn with
+                | None -> Some (selection,error) | Some _ as kept -> kept in
+              loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_completion_rejection_obsolete ->
+              (match Keeper_registry_event_queue.ack_pending_result
+                 ~base_path keeper_name ~selection with
+               | Ok () ->
+                 loop remaining observations_rev selections_rev first_withdrawn rest
+               | Error message ->
+                 ( List.rev observations_rev
+                 , List.rev selections_rev
+                 , first_withdrawn
+                 , Some (selection, Pending_selection_failed
+                     ("failed to acknowledge obsolete completion rejection: " ^ message)) ))
             | Stimulus_job_unavailable (job_id,error) ->
               let error = Job_result_unavailable (job_id,error) in
               Log.Keeper.warn "turn entry: retaining unavailable job result keeper=%s: %s"

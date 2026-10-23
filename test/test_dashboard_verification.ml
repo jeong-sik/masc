@@ -710,6 +710,7 @@ let backlog_of_tasks tasks =
     `Assoc
       [ ("tasks", `List tasks)
       ; ("pending_completion_rejections", `List [])
+      ; ("delivered_completion_rejections", `List [])
       ; ("task_deletion_receipts", `List [])
       ; ("last_updated", `String "2026-09-16T00:00:00Z")
       ; ("version", `Int 1)

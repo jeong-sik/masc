@@ -85,6 +85,7 @@ let should_run_turn_after_event_intake
   | None | Some (Stimulus_intake.Connector_read_failed _)
   | Some (Stimulus_intake.Connector_item_missing _)
   | Some (Stimulus_intake.Ask_read_failed _)
+  | Some (Stimulus_intake.Completion_rejection_read_failed _)
   | Some (Stimulus_intake.Job_result_unavailable _) -> true
   | Some (Stimulus_intake.Pending_selection_failed _) -> false
 ;;

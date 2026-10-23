@@ -241,6 +241,16 @@ type enqueue_if_missing_durable_result =
   | Identity_conflict of string
   | Storage_error of string
 
+val enqueue_durable_deferred_notifications_result :
+  intake_token:Keeper_shutdown_intake_fence.intake_token ->
+  base_path:string -> string -> Keeper_event_queue.stimulus ->
+  ((unit -> unit), string) result
+(** Commit the durable row and live cell under the queue owner lock, returning
+    the inventory/Librarian notifications separately. Call the returned function
+    after releasing any enclosing backlog/lease fence. This requires a live
+    intake token, acquired before the enclosing backlog lock, and never invokes
+    arbitrary observers or a Keeper wake while that lock is held. *)
+
 val enqueue_if_missing_durable_result :
   ?intake_token:Keeper_shutdown_intake_fence.intake_token
   -> base_path:string

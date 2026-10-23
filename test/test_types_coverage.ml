@@ -648,7 +648,7 @@ let test_tempo_mode_of_yojson_wrong_type () =
    ============================================================ *)
 
 let test_backlog_to_yojson_empty () =
-  let b : Masc_domain.backlog = { tasks = []; task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = "2024-01-15T12:00:00Z"; version = 1 } in
+  let b : Masc_domain.backlog = { tasks = []; task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; delivered_completion_rejections = []; last_updated = "2024-01-15T12:00:00Z"; version = 1 } in
   let json = Masc_domain.backlog_to_yojson b in
   match json with
   | `Assoc fields ->
@@ -671,7 +671,7 @@ let test_backlog_to_yojson_with_tasks () =
     contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
     skills = [];
   } in
-  let b : Masc_domain.backlog = { tasks = [task]; task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
+  let b : Masc_domain.backlog = { tasks = [task]; task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; delivered_completion_rejections = []; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
   let json = Masc_domain.backlog_to_yojson b in
   match json with
   | `Assoc fields ->
@@ -686,6 +686,7 @@ let test_backlog_to_yojson_with_tasks () =
 let test_backlog_of_yojson_ok () =
   let json = `Assoc [
     ("tasks", `List []);
+    ("delivered_completion_rejections", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 3);
   ] in
@@ -707,6 +708,7 @@ let test_backlog_of_yojson_with_task () =
   ] in
   let json = `Assoc [
     ("tasks", `List [task_json]);
+    ("delivered_completion_rejections", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 1);
   ] in
@@ -719,6 +721,79 @@ let expect_backlog_decode_error label json =
   | Error _ -> ()
   | Ok _ -> fail ("expected backlog decode error: " ^ label)
 
+let rejection_receipt_json ?(task_id = "task-a") ?(verification_id = "verification-a") () =
+  `Assoc ["task_id", `String task_id; "verification_id", `String verification_id;
+    "producer", `String "keeper-a"; "reason", `String "Repair the submitted evidence";
+    "authority", `Assoc ["kind", `String "human_operator"; "actor", `String "operator-a"];
+    "committed_at", `String "2026-10-23T00:00:00Z"]
+
+let rejection_relation_json ~pending ~delivered =
+  `Assoc ["tasks", `List []; "last_updated", `String "2026-10-23T00:00:00Z";
+    "version", `Int 1; "pending_completion_rejections", pending;
+    "delivered_completion_rejections", delivered]
+
+let test_backlog_completion_rejection_relations_roundtrip () =
+  let document = rejection_relation_json
+    ~pending:(`List [rejection_receipt_json ()])
+    ~delivered:(`List [rejection_receipt_json ~task_id:"task-b" ~verification_id:"verification-b" ()]) in
+  match Masc_domain.backlog_of_yojson document with
+  | Error error -> fail error
+  | Ok backlog ->
+    check int "pending remains delivery work" 1 (List.length backlog.pending_completion_rejections);
+    check int "delivered remains current authority" 1 (List.length backlog.delivered_completion_rejections);
+    (match Masc_domain.backlog_of_yojson (Masc_domain.backlog_to_yojson backlog) with
+     | Error error -> fail error
+     | Ok restored ->
+       check bool "complete pending record roundtrips" true
+         (restored.pending_completion_rejections = backlog.pending_completion_rejections);
+       check bool "complete delivered record roundtrips" true
+         (restored.delivered_completion_rejections = backlog.delivered_completion_rejections))
+
+let test_backlog_requires_delivered_rejection_state () =
+  let fields = match rejection_relation_json ~pending:(`List []) ~delivered:(`List []) with
+    | `Assoc fields -> fields | _ -> fail "relation fixture must be an object" in
+  expect_backlog_decode_error "missing delivered relation is not known empty"
+    (`Assoc (List.remove_assoc "delivered_completion_rejections" fields));
+  expect_backlog_decode_error "null delivered relation"
+    (`Assoc (("delivered_completion_rejections", `Null)
+      :: List.remove_assoc "delivered_completion_rejections" fields));
+  expect_backlog_decode_error "duplicate delivered field"
+    (`Assoc (("delivered_completion_rejections", `List []) :: fields));
+  match Masc_domain.backlog_of_yojson
+    (`Assoc (List.remove_assoc "pending_completion_rejections" fields)) with
+  | Error error -> fail error
+  | Ok backlog ->
+    check int "optional missing pending delivery remains empty" 0
+      (List.length backlog.pending_completion_rejections);
+    check int "required known delivered state remains empty" 0
+      (List.length backlog.delivered_completion_rejections)
+
+let test_backlog_rejects_conflicting_rejection_states () =
+  let current = rejection_receipt_json () in
+  let replaced = rejection_receipt_json ~verification_id:"verification-b" () in
+  List.iter (fun (pending,delivered) ->
+    expect_backlog_decode_error "one current rejection per Task across both states"
+      (rejection_relation_json ~pending:(`List pending) ~delivered:(`List delivered)))
+    [ [current;current], []; [], [current;current]; [], [current;replaced];
+      [current], [current]; [current], [replaced] ]
+
+let test_backlog_rejects_malformed_delivered_rejection () =
+  let fields = match rejection_receipt_json () with
+    | `Assoc fields -> fields | _ -> fail "receipt fixture must be an object" in
+  let replace field value = `Assoc ((field,value) :: List.remove_assoc field fields) in
+  let bad_authority = `Assoc ["kind", `String "unrecognized"; "actor", `String "operator-a"] in
+  List.iter (fun delivered -> expect_backlog_decode_error "delivered authority must decode strictly"
+    (rejection_relation_json ~pending:(`List []) ~delivered))
+    [ `String "unreadable";
+      `List [replace "task_id" (`String " ")];
+      `List [replace "verification_id" (`String "")];
+      `List [replace "producer" (`String "")];
+      `List [replace "reason" (`String "")];
+      `List [replace "authority" bad_authority];
+      `List [replace "authority" (`Assoc ["kind", `String "human_operator"; "actor", `String " "])];
+      `List [`Assoc (("unexpected", `Bool true) :: fields)];
+      `List [`Assoc (("reason", `String "duplicate") :: fields)] ]
+
 let test_backlog_of_yojson_rejects_string () =
   let json = `String "not an object" in
   expect_backlog_decode_error "string document" json
@@ -726,6 +801,7 @@ let test_backlog_of_yojson_rejects_string () =
 let test_backlog_of_yojson_rejects_zero_version () =
   let json = `Assoc [
     ("tasks", `List []);
+    ("delivered_completion_rejections", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 0);
   ] in
@@ -734,6 +810,7 @@ let test_backlog_of_yojson_rejects_zero_version () =
 let test_backlog_of_yojson_rejects_negative_version () =
   let json = `Assoc [
     ("tasks", `List []);
+    ("delivered_completion_rejections", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int (-1));
   ] in
@@ -742,6 +819,7 @@ let test_backlog_of_yojson_rejects_negative_version () =
 let test_backlog_of_yojson_requires_version () =
   let json = `Assoc [
     ("tasks", `List []);
+    ("delivered_completion_rejections", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
   ] in
   expect_backlog_decode_error "missing revision" json
@@ -749,6 +827,7 @@ let test_backlog_of_yojson_requires_version () =
 let test_backlog_of_yojson_rejects_null_version () =
   let json = `Assoc [
     ("tasks", `List []);
+    ("delivered_completion_rejections", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Null);
   ] in
@@ -769,6 +848,7 @@ let test_backlog_of_yojson_rejects_tasks_without_revision () =
 
 let test_backlog_of_yojson_requires_tasks () =
   let json = `Assoc [
+    ("delivered_completion_rejections", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 1);
   ] in
@@ -781,6 +861,7 @@ let test_backlog_of_yojson_rejects_integer () =
 let test_backlog_of_yojson_rejects_non_list_tasks () =
   let json = `Assoc [
     ("tasks", `String "not_a_list");
+    ("delivered_completion_rejections", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 1);
   ] in
@@ -799,6 +880,7 @@ let test_backlog_of_yojson_rejects_corrupt_task_entries () =
   ] in
   let json = `Assoc [
     ("tasks", `List [corrupt_entry; valid_entry; corrupt_entry]);
+    ("delivered_completion_rejections", `List []);
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 1);
   ] in
@@ -834,6 +916,7 @@ let test_legacy_intents_make_the_backlog_unreadable () =
   let document =
     `Assoc
       [ "tasks", `List [ legacy_task "complete" "complete"; legacy_task "cancel" "cancel" ]
+      ; "delivered_completion_rejections", `List []
       ; "last_updated", `String "2026-07-13T00:00:00Z"
       ; "version", `Int 1
       ]
@@ -862,6 +945,7 @@ let test_malformed_lifecycle_clock_makes_the_backlog_unreadable () =
   let document tasks =
     `Assoc
       [ "tasks", `List tasks
+      ; "delivered_completion_rejections", `List []
       ; "last_updated", `String "2026-10-20T00:00:00Z"
       ; "version", `Int 1
       ]
@@ -925,6 +1009,7 @@ let test_backlog_of_yojson_with_diagnostics_reports_drop () =
   let json =
     `Assoc
       [ ("tasks", `List [ clean; corrupt ])
+      ; ("delivered_completion_rejections", `List [])
       ; ("last_updated", `String "2024-01-15T12:00:00Z")
       ; ("version", `Int 1)
       ]
@@ -950,6 +1035,7 @@ let test_backlog_of_yojson_still_drops_diagnostics () =
   let json =
     `Assoc
       [ ("tasks", `List [ corrupt ])
+      ; ("delivered_completion_rejections", `List [])
       ; ("last_updated", `String "2024-01-15T12:00:00Z")
       ; ("version", `Int 1)
       ]
@@ -963,6 +1049,7 @@ let test_backlog_of_yojson_with_diagnostics_still_propagates_contract () =
   let json =
     `Assoc
       [ ("tasks", `List [ bad ])
+      ; ("delivered_completion_rejections", `List [])
       ; ("last_updated", `String "2024-01-15T12:00:00Z")
       ; ("version", `Int 1)
       ]
@@ -1931,6 +2018,14 @@ let () =
         test_legacy_intents_make_the_backlog_unreadable;
       test_case "malformed lifecycle clock makes the backlog unreadable" `Quick
         test_malformed_lifecycle_clock_makes_the_backlog_unreadable;
+      test_case "rejection pending and delivered relations roundtrip" `Quick
+        test_backlog_completion_rejection_relations_roundtrip;
+      test_case "delivered relation is mandatory while pending remains optional" `Quick
+        test_backlog_requires_delivered_rejection_state;
+      test_case "rejection relations reject duplicates and cross-state conflicts" `Quick
+        test_backlog_rejects_conflicting_rejection_states;
+      test_case "delivered relation rejects malformed authority and identity" `Quick
+        test_backlog_rejects_malformed_delivered_rejection;
       test_case "ok" `Quick test_backlog_of_yojson_ok;
       test_case "with task" `Quick test_backlog_of_yojson_with_task;
       test_case "rejects string document" `Quick test_backlog_of_yojson_rejects_string;

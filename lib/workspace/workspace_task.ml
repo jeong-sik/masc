@@ -35,22 +35,28 @@ let deletion_receipts_r config =
 let receipt_errors receipt = List.filter_map Fun.id
   [receipt.primary_mirror_error; receipt.recovery_error; receipt.post_commit_error]
 
+let retire_rejections (backlog : Masc_domain.backlog) ~task_id =
+  let keep (item : Masc_domain.pending_completion_rejection) =
+    not (String.equal item.task_id task_id)
+  in
+  { backlog with
+    pending_completion_rejections = List.filter keep backlog.pending_completion_rejections;
+    delivered_completion_rejections = List.filter keep backlog.delivered_completion_rejections }
+
 (* The Task and durable cleanup identity are committed together. Receipts are
    retained after domain cleanup; copy consistency is a separate observation,
    including failures after the acknowledgement's primary commit. *)
 let settle_task_deletion_locked config backlog (receipt : task_deletion_receipt) task =
   let open Result.Syntax in
   let task_id = receipt.deleted_task_id in
-  let pending_completion_rejections = List.filter
-    (fun (pending : pending_completion_rejection) -> not (String.equal pending.task_id task_id))
-    backlog.pending_completion_rejections in
+  let backlog = retire_rejections backlog ~task_id in
   let pending_completion_approvals = List.filter
     (fun (pending : pending_completion_approval) -> not (String.equal pending.task_id task_id))
     backlog.pending_completion_approvals in
   let tasks = List.filter (fun (task : task) -> not (String.equal task.id task_id)) backlog.tasks in
   let receipts = if List.exists (fun old -> String.equal old.deletion_id receipt.deletion_id) backlog.task_deletion_receipts
     then backlog.task_deletion_receipts else receipt :: backlog.task_deletion_receipts in
-  let pending = {backlog with tasks; pending_completion_rejections; pending_completion_approvals; task_deletion_receipts=receipts} in
+  let pending = {backlog with tasks; pending_completion_approvals; task_deletion_receipts=receipts} in
   let protect f = match Eio_guard.execution_context () with
     | Eio_guard.Eio_fiber -> Eio.Cancel.protect f | Eio_guard.Non_eio -> f () in
   protect (fun () ->
@@ -338,7 +344,7 @@ let recover_owned_task_to_todo_r
     let* persistence =
       write_backlog_result
         config
-        { backlog with tasks }
+        { (retire_rejections backlog ~task_id) with tasks }
       |> Result.map_error (fun message ->
         Masc_domain.System (Masc_domain.System_error.IoError message))
     in
@@ -373,10 +379,6 @@ type unroutable_rejection_release =
       ; backlog_version : int
       ; post_commit_errors : string list
       }
-  | Not_held_by_producer of { task_status : Masc_domain.task_status }
-      (** The Task moved on between the verdict and this delivery — a new
-          submission, an operator recovery, a cancellation. Whatever is there
-          now answers for it, so nothing is released. *)
   | Producer_became_routable
       (** A Keeper queue appeared at the producer's name between the routing
           decision and this lock. The verdict can be delivered after all, so
@@ -385,7 +387,7 @@ type unroutable_rejection_release =
       (** The producer's route could not be read inside this lock: a file at
           its Keeper meta path that this binary does not decode, or a failed
           read. That may still be a Keeper, so the task stays where it is. *)
-  | Task_absent
+  | Rejection_superseded
 
 let release_unroutable_rejected_task_r
       config
@@ -431,13 +433,33 @@ let release_unroutable_rejected_task_r
       |> Result.map_error (fun message ->
         Masc_domain.System (Masc_domain.System_error.IoError message))
     in
+    let pending = List.find_opt
+      (fun (item : Masc_domain.pending_completion_rejection) ->
+        String.equal item.task_id task_id && String.equal item.verification_id verification_id)
+      backlog.pending_completion_rejections
+    in
+    match pending with
+    | None -> Ok Rejection_superseded
+    | Some item when not (String.equal item.producer producer
+        && String.equal item.reason reason && item.authority = authority) ->
+      Error (Masc_domain.System (Masc_domain.System_error.IoError
+        "unroutable release conflicts with its pending rejection"))
+    | Some _ ->
+    let* standing = Workspace_task_rejection_outbox.standing_in_backlog backlog
+      ~task_id ~verification_id ~producer ~reason ~authority
+      |> Result.map_error (fun detail ->
+        Masc_domain.System (Masc_domain.System_error.IoError detail)) in
+    match standing with
+    | Workspace_task_rejection_outbox.Obsolete -> Ok Rejection_superseded
+    | Workspace_task_rejection_outbox.Current ->
     match
       List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks
     with
-    | None -> Ok Task_absent
+    | None -> Error (Masc_domain.System (Masc_domain.System_error.IoError
+        "current rejection has no Task to release"))
     | Some task ->
       (match task.task_status with
-       | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }
+       | Masc_domain.InProgress { assignee; _ }
          when Workspace_task_classify.same_task_actor config assignee producer ->
          (* The route was read before this lock was taken. A Keeper meta
             landing at the producer's name in between means a queue now exists
@@ -477,7 +499,7 @@ let release_unroutable_rejected_task_r
                 backlog.tasks
             in
             let* persistence =
-              write_backlog_result config { backlog with tasks }
+              write_backlog_result config { (retire_rejections backlog ~task_id) with tasks }
               |> Result.map_error (fun message ->
                 Masc_domain.System (Masc_domain.System_error.IoError message))
             in
@@ -508,7 +530,9 @@ let release_unroutable_rejected_task_r
        | Masc_domain.Todo
        | Masc_domain.AwaitingVerification _
        | Masc_domain.Done _
-       | Masc_domain.Cancelled _ -> Ok (Not_held_by_producer { task_status = task.task_status })))
+       | Masc_domain.Cancelled _ ->
+         Error (Masc_domain.System (Masc_domain.System_error.IoError
+           "current rejection has no matching InProgress Task"))))
   |> Workspace_task_verification.flatten_lock_result
 ;;
 

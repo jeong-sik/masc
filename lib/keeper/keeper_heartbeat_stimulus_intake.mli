@@ -30,6 +30,8 @@ val pending_board_event_of_stimulus
     Open/Withdrawn resolution is terminal — the Ask store is append-only, so
     no later state can resolve the pointer — and the heartbeat loop
     acknowledges the exact pending selection instead of retaining it.
+    Completion rejection authority is checked at intake: obsolete relations
+    retire only their exact selection; unread authority retains it for retry.
     A Board read that answered no row is consumed as an empty event. *)
 type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
@@ -39,6 +41,8 @@ type stimulus_intake_result =
   | Stimulus_ask_missing of string (** Missing Ask ID. *)
   | Stimulus_ask_not_answered of string (** Open or withdrawn Ask ID. *)
   | Stimulus_job_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
+  | Stimulus_completion_rejection_obsolete
+  | Stimulus_completion_rejection_retry_later of string
 
 (** Pure boundary for one rendered Board event. A read that answered no row
     is consumed as an empty event. *)
@@ -63,6 +67,7 @@ type event_queue_intake_error =
   | Connector_item_missing of string (** Missing event ID, not a whole-store failure. *)
   | Ask_read_failed of Keeper_ask_store.read_error
   | Job_result_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
+  | Completion_rejection_read_failed of string
 
 (** Map one durable event-queue payload to its typed turn trigger. A payload
     with no dedicated trigger returns [None]; completion-authority rejection
@@ -74,7 +79,8 @@ val event_queue_intake_error_to_string : event_queue_intake_error -> string
 val event_queue_intake_error_reason_label : event_queue_intake_error -> string
 
 (** Only durable selection corruption/read failures count as a crashed cycle.
-    Connector, unread-Ask and job result source reads are retry conditions: they retain
+    Connector, unread-Ask, job result and completion rejection authority reads
+    are retry conditions: they retain
     the exact source without advancing Keeper failure state. A missing or
     unanswered Ask source is not a retry: the heartbeat loop acknowledges it
     as terminal, so it never surfaces here. A Board read that answers no row
@@ -131,7 +137,13 @@ type heartbeat_event_intake = {
 
     [?ask_rows] is the batch's strict canonical Ask snapshot, including read
     failure or missing-log evidence. An omitted value loads a fresh snapshot.
-    Only [Ask_answered] consumes this snapshot. *)
+    Only [Ask_answered] consumes this snapshot.
+
+    A completion rejection is projected only after an authoritative intake-time
+    check of its exact payload and this Keeper's current Task ownership.
+    Obsolete rejections are retired by exact queue selection without a turn;
+    unread authority retains the selection and does not block other sources.
+    This check linearizes intake, not later provider rounds or Task mutations. *)
 val consume_single_heartbeat_stimulus
   :  ctx:_ context
   -> meta_after_triage:keeper_meta

@@ -476,6 +476,12 @@ type task_creation_receipt = {
 type backlog =
   { tasks : task list
   ; pending_completion_rejections : pending_completion_rejection list
+  ; delivered_completion_rejections : pending_completion_rejection list
+    (** Required current relation after delivery ACK. Its complete record has
+        the same strict codec as pending delivery. Each Task appears at most
+        once across the two sets; lifecycle changes retire both atomically.
+        Missing, malformed, duplicate or overlapping delivered state refuses
+        the whole backlog instead of inferring an old delivery's authority. *)
   ; pending_completion_approvals : pending_completion_approval list
     (** Optional empty delivery set on the wire; an explicitly malformed or
         duplicate field/identity is rejected, never interpreted as empty. *)

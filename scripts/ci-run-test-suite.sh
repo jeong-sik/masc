@@ -180,6 +180,8 @@ disk_evidence() {
   echo "[test-suite] runner temp:"
   du -sh "$tmp" 2>/dev/null || true
   ls -lh "$log" "$trace" 2>/dev/null || true
+  echo "[test-suite] /tmp:"
+  du -xsh /tmp 2>/dev/null || true
   command -v docker >/dev/null 2>&1 && docker system df || true
 }
 watch_disk() {

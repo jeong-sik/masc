@@ -180,6 +180,16 @@ jobs:
           cache-from: type=gha,scope=masc-keeper-sandbox-${{ runner.arch }}
           cache-to: type=gha,scope=masc-keeper-sandbox-${{ runner.arch }},mode=min,ignore-error=true
 
+      # The sandbox image is built and tagged above; the buildx builder cache
+      # that produced it is dead weight the suite never reads. Full-suite runs
+      # have filled the runner root (#45218), so drop the builder cache and
+      # record the disk before the suite starts.
+      - name: Drop the image build cache the suite never reads
+        if: inputs.minimal == false
+        run: |
+          docker builder prune --all --force
+          df -h /
+
       - name: Test
         id: tests
         env:

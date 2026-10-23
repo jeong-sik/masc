@@ -79,19 +79,20 @@ let write_blob t bytes =
   Ok (blob_reference_of_hash hash)
 let recovery_blob_path hash = Filename.concat "sampling-evidence" (hash ^ ".json")
 let write_sampling_blob t bytes =
-  match write_blob t bytes with
-  | Ok reference -> Ok reference
+  let hash = digest bytes in
+  match write t (blob_path hash) bytes with
+  | Ok () -> Ok (blob_reference_of_hash hash)
   | Error detail -> protect (fun () ->
       (* A missing leaf under a symlinked parent is not an owned missing
          canonical blob and cannot authorize fallback publication. *)
-      let* kind = canonical_blob_kind t (digest bytes)
+      let* kind = canonical_blob_kind t hash
         |> Result.map_error (fun _ -> detail) in
       (* The immutable address is readable from recovery only for these
          canonical states. Do not advertise a blob behind an unreadable parent. *)
       match kind with
       | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR ->
-          let* () = write t (recovery_blob_path (digest bytes)) bytes in
-          Ok (blob_reference bytes)
+          let* () = write t (recovery_blob_path hash) bytes in
+          Ok (blob_reference_of_hash hash)
       | Fs_compat.Exact_kind (Unix.S_REG) | Fs_compat.Exact_unknown
       | Fs_compat.Exact_kind (Unix.S_CHR) | Fs_compat.Exact_kind (Unix.S_BLK)
       | Fs_compat.Exact_kind (Unix.S_LNK) | Fs_compat.Exact_kind (Unix.S_FIFO)

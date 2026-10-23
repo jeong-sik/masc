@@ -160,7 +160,7 @@ type runtime_key =
   | Reading_walk
 
 let runtime_reading_walk_help =
-  "walk the three substrate readings; the third is the Lanes surface"
+  "walk the three substrate readings; the third is the Features surface"
 
 let runtime_keys =
   [ Every_reading (b Navigate "j/k" "move / scroll")
@@ -387,7 +387,7 @@ let approval_answer =
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
 let approval_installation_results =
   b Act "g" "installation Results"
-    ~help:"after answering an installation's question, open that installation's Results in Add-ons, where the reveal appears"
+    ~help:"after answering an installation's question, open that installation's Results in Plugins, where the reveal appears"
 let approval_origin =
   b Act "o / O" "source / inspect"
     ~help:"o shows the question source; O opens that immutable turn's retained input. With no open question use the last answer's source. Esc returns to the question draft; a missing source is never replaced by the Keeper's latest turn"
@@ -646,7 +646,7 @@ let for_surface = function
          dispatch was one arm the whole time ([Some "o" | Some "O" | Some "A"]
          on Lanes), so the table says so too. Both keys stay: a PTY walk
          presses [A] and the guide's first line names it. *)
-      ; b Navigate "o / A" "Lane Add-ons"
+      ; b Navigate "o / A" "Plugins"
           ~help:"inspect Lane Add-on declarations, instances and observations"
       ; b Navigate "d" "reading" ~help:"read the selected Lane's complete configuration and observation"
       ; b Navigate "i" "read issues" ~help:"read inventory problems without hiding the Lane list"
@@ -1808,7 +1808,7 @@ let help_surfaces : (string * surface) list =
   ; "Keepers / Logs", Keepers Keeper_logs
   ; "Keepers / Calls", Keepers Keeper_calls
   ; "Keepers / Runtime", Keepers Keeper_runtime_pick
-  ; "Lanes", Lanes
+  ; "Features", Lanes
   ; "System / Runtime / Clients", Clients
   ; "Approvals", Approvals
   ; "Work / Task Review", Verification

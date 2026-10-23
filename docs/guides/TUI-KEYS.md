@@ -434,7 +434,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `d` | drop this Keeper's own binding and follow [runtime].default |
 | `Esc` | back |
 
-## Lanes
+## Features
 
 | Keys | What it does |
 |---|---|
@@ -477,7 +477,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `y / n` | y confirms, n denies the approval under the cursor |
 | `R` | only when the blocked row is safely rearmable |
 | `a` | open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it |
-| `g` | after answering an installation's question, open that installation's Results in Add-ons, where the reveal appears |
+| `g` | after answering an installation's question, open that installation's Results in Plugins, where the reveal appears |
 | `T` | while browsing Approvals, inspect the last answered Ask's canonical original Task; `o` reads Task, `h/H` stored history, `v` the next observed verification submission, `r` refreshes that exact source, `b` shows Ask origin facts, `Esc` closes |
 | `o / O` | o shows the question source; O opens that immutable turn's retained input. With no open question use the last answer's source. Esc returns to the question draft; a missing source is never replaced by the Keeper's latest turn |
 | `[ / ]` | while browsing or answering a question, move to the previous or next ask; with an approval detail open, move to the previous or next approval |
@@ -665,7 +665,7 @@ identity require their own evidence when comparing runs.
 | `Right / Enter` | show the full runtime, lane, dispatch, and probe fields |
 | `h` | toggle de-emphasis for exhausted, rate-limited, and spent runtimes |
 | `v` | read complete default and media routes, boot admission and probe diagnostics |
-| `p` | walk the three substrate readings; the third is the Lanes surface |
+| `p` | walk the three substrate readings; the third is the Features surface |
 | `c` | everyone attached to this workspace, off the ring under Runtime |
 | `e` | on all runtimes, open the selected binding in Config Models; on keeper lanes, append a candidate to the lane under the cursor |
 | `a` | name a new lane, then pick its first runtime; e adds the rest |

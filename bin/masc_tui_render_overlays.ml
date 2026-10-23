@@ -367,7 +367,7 @@ let render_palette (state : state) =
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
   let origin =
-    if Option.is_some state.lane_addons then "Lane Add-ons"
+    if Option.is_some state.lane_addons then "Plugins"
     else match List.find_opt (fun (_, surface) -> surface = state.view)
         Masc_tui_keys.help_surfaces with
       | Some (title, _) -> title
@@ -1067,7 +1067,7 @@ let render_collab state view =
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols ~surface_key:"lanes"
-    ~title:(screen_title " MASC Lane Add-ons")
+    ~title:(screen_title " MASC Plugins")
     ~hints:(if Option.is_some view.evidence_prompt then "j/k:choose  Enter:preserve  Esc:back"
       else if Option.is_some view.subscription_panel then "j/k:select  Enter:choose/save  a:add  d:remove  J/K:scroll  r:refresh  Esc:back"
       else if Option.is_some view.installer then Option.fold ~none:"" ~some:Masc_tui_lane_installer.hints view.installer

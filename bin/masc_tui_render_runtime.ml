@@ -561,13 +561,13 @@ let render_runtime (state : state) =
         let all_count =
           List.length snapshot.rss_resolved.Masc.Tui_decode.rrs_runtimes
         in
-        (* [standalone_lanes] is the Lanes screen's reading, which this one
-           does not load, so its absence is not a count of zero. *)
-        let standalone_reading =
+        (* Features counts the shared inventory, including plugins. A missing
+           inventory read is unknown rather than zero or an exact-lane count. *)
+        let feature_reading =
           Option.map
-            (fun (snapshot : Masc.Tui_decode.standalone_lanes_snapshot) ->
-              string_of_int (List.length snapshot.sls_lanes))
-            state.standalone_lanes
+            (fun (snapshot : Masc.Tui_decode_lane_inventory.snapshot) ->
+              string_of_int (List.length snapshot.rows))
+            state.lane_inventory
         in
         let lanes_active = state.runtime_mode = Masc_tui_types.Runtime_lanes in
         Printf.sprintf "%s  %s  %s%s  %s  %s"
@@ -591,7 +591,7 @@ let render_runtime (state : state) =
              ; ( tab_entry_label "All runtimes" (Some (string_of_int all_count))
                , not lanes_active
                , Press_runtime_mode Masc_tui_types.Runtime_all )
-             ; ( tab_entry_label "Lanes" standalone_reading
+             ; ( tab_entry_label "Features" feature_reading
                , false
                , Press_standalone_lanes )
              ])

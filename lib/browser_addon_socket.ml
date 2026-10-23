@@ -316,40 +316,60 @@ let cleanup ~admission ~directory = protect (fun () ->
     sync (Filename.dirname root);
     let* ()=Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (`Assoc ["state",`String "released"])) in
     Ok Allocation_released)
-let retain ~admission ~directory = protect (fun () ->
-  let* directory=slot admission directory in
-  let* status=Native_addon_lease.status admission |> Result.map_error Native_addon_lease.error_to_string in
-  let* ()=match status with
-    | Native_addon_lease.Settled -> Ok ()
-    | Awaiting_exec|Live _|Cleanup_pending _ -> Error "native browser resource cleanup is not settled" in
-  let* root=context_path admission in
-  match root with
-  | None -> Ok Allocation_released
-  | Some (root,_automation,_models,stagehand,live_bidi) ->
-    let incarnation=Native_addon_lease.instance_id admission in
-    let* ()=match stagehand with None -> Ok () | Some c ->
-      Browser_addon_stagehand.check_settled c ~incarnation ~directory:root in
-    let* ()=match live_bidi with None -> Ok () | Some c ->
-      Browser_addon_live_bidi.check_settled c ~incarnation ~directory:root in
-    let file=record admission directory in
-    let* identity=acquisition ~instance_id:incarnation ~root ~file ~directory in
-    let retained ~device ~inode =
-      let* ()=Fs_compat.save_file_atomic_strict file
-        (Yojson.Safe.to_string (allocation_json admission root ~device ~inode ~state:"retained")) in
-      Ok Allocation_retained in
-    match identity,Unix.lstat root with
-    | Released,_ -> Ok Allocation_released
-    | Retained _,_ -> Ok Allocation_retained
-    | (Acquired (device,inode)|Cleaning (device,inode)),info ->
-        let* ()=private_root root info in
-        if info.st_dev=device && info.st_ino=inode then retained ~device ~inode
-        else Error (Requirement.replaced ~label:socket_directory_label ~path:root
-          ~expected:{Requirement.device;inode} ~observed:(Requirement.identity info))
-    | Missing,info ->
-        let* ()=private_root root info in
-        retained ~device:info.st_dev ~inode:info.st_ino
-    | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
-        (match identity with
-         | Acquired (device,inode)|Cleaning (device,inode) -> retained ~device ~inode
-         | Retained _ -> Ok Allocation_retained
-         | Missing|Released -> Ok Allocation_released))
+type retain_error = Retain_refused of string | Retained_record_unconfirmed of string
+(* What [retain] decided before writing anything. *)
+type retain_plan =
+  | Already of settlement
+  | Write_retained of { file : string; root : string; device : int; inode : int }
+let retain_with ~(save:string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ~admission ~directory =
+  let plan = protect (fun () ->
+    let* directory=slot admission directory in
+    let* status=Native_addon_lease.status admission |> Result.map_error Native_addon_lease.error_to_string in
+    let* ()=match status with
+      | Native_addon_lease.Settled -> Ok ()
+      | Awaiting_exec|Live _|Cleanup_pending _ -> Error "native browser resource cleanup is not settled" in
+    let* root=context_path admission in
+    match root with
+    | None -> Ok (Already Allocation_released)
+    | Some (root,_automation,_models,stagehand,live_bidi) ->
+      let incarnation=Native_addon_lease.instance_id admission in
+      let* ()=match stagehand with None -> Ok () | Some c ->
+        Browser_addon_stagehand.check_settled c ~incarnation ~directory:root in
+      let* ()=match live_bidi with None -> Ok () | Some c ->
+        Browser_addon_live_bidi.check_settled c ~incarnation ~directory:root in
+      let file=record admission directory in
+      let* identity=acquisition ~instance_id:incarnation ~root ~file ~directory in
+      let retained ~device ~inode = Ok (Write_retained {file;root;device;inode}) in
+      match identity,Unix.lstat root with
+      | Released,_ -> Ok (Already Allocation_released)
+      | Retained _,_ -> Ok (Already Allocation_retained)
+      | (Acquired (device,inode)|Cleaning (device,inode)),info ->
+          let* ()=private_root root info in
+          if info.st_dev=device && info.st_ino=inode then retained ~device ~inode
+          else Error (Requirement.replaced ~label:socket_directory_label ~path:root
+            ~expected:{Requirement.device;inode} ~observed:(Requirement.identity info))
+      | Missing,info ->
+          let* ()=private_root root info in
+          retained ~device:info.st_dev ~inode:info.st_ino
+      | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
+          (match identity with
+           | Acquired (device,inode)|Cleaning (device,inode) -> retained ~device ~inode
+           | Retained _ -> Ok (Already Allocation_retained)
+           | Missing|Released -> Ok (Already Allocation_released))) in
+  match plan with
+  | Error detail -> Error (Retain_refused detail)
+  | Ok (Already settlement) -> Ok settlement
+  | Ok (Write_retained {file;root;device;inode}) ->
+    (* A failure after the rename leaves the record replaced; only a failure
+       before it says nothing changed. *)
+    match save file (Yojson.Safe.to_string (allocation_json admission root ~device ~inode ~state:"retained")) with
+    | Ok () -> Ok Allocation_retained
+    | Error ({stage=Fs_compat.Before_rename;_} as failure) ->
+        Error (Retain_refused ("the retained record was not written: " ^ Fs_compat.atomic_replace_failure_to_string failure))
+    | Error ({stage=Fs_compat.After_rename;_} as failure) ->
+        Error (Retained_record_unconfirmed (Fs_compat.atomic_replace_failure_to_string failure))
+    | exception ((Unix.Unix_error _|Sys_error _) as exn) -> Error (Retained_record_unconfirmed (Printexc.to_string exn))
+let retain ~admission ~directory = retain_with ~save:Fs_compat.save_file_atomic_strict_staged ~admission ~directory
+module For_testing = struct
+  let retain = retain_with
+end

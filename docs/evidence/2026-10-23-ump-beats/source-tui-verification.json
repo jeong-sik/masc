@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "originalPackets": 5,
+  "derivedMessages": 9,
+  "originalAssetRetained": true,
+  "variantPlaced": true,
+  "authoredClockAndRecordedProvenance": true,
+  "reopenedExportSixFilesIdentical": true,
+  "exportSHA256": "41bfa00fa249b96b603ba00272436720e79a21f0c2e295d7e0317a9cc916c73a",
+  "limits": [
+    "Synthetic capture fixture; no TUI playback requested",
+    "No intermediate undo/redo snapshots in this journey",
+    "No screen wording/layout assertions",
+    "Source viewer only; default installation unchanged"
+  ]
+}

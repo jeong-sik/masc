@@ -114,6 +114,43 @@ matching that span. Standalone inspection/audition and arrangement placement
 consume this same span. Export/import does not restore prior editor history;
 save the arrangement for that.
 
+## Edit in beats
+
+The arrangement lends its current project tempo to the native UMP editor.
+One beat is a quarter note, independent of the meter denominator. Inputs may
+be decimal numbers or exact signed fractions, including triplets:
+
+```
+at-beats -1/3
+shift-beats 1/6
+note-beats 4:0 1/3 1
+duration-beats 4:0 2/3
+```
+
+Positions use the same fixed original source zero as seconds. A shift is
+relative to the selected event; a duration sets the explicitly chosen release
+relative to the current attack. Other events and the WAV do not follow the
+edited event. Beat commands require an arrangement tempo; there is no guessed
+default or interpretation of captured Flex Data tempo or clip timing.
+
+The editor snapshots the opening arrangement tempo. It uses the exact binary64
+tempo already used by project scheduling, converts the authored beat rational
+directly to source-clock ticks, then rounds once to nearest tick, with exact
+half ties away from zero. It does not first round to PPQ or floating seconds.
+Invalid fractions, zero denominators, nonpositive quantized durations and
+UInt64 endpoint overflow are refused as whole immutable edits.
+
+Separate endpoint input rounds each endpoint. Duration input rounds the length
+and adds it to the current whole-tick attack, so the resulting release can differ
+by one tick. For example at 137 BPM with 125/3 ns ticks, `1/3` and `2/3` beat
+endpoints are 3,503,650 and 7,007,299 ticks; a `1/3` beat duration added to that
+attack ends at 7,007,300 ticks. `:clock` exposes the exact stored time.
+
+Only the resulting integer timing overlay is saved. Changing project tempo later
+does not retime a captured variant or stretch its WAV. Reopening the editor uses
+the new project tempo for future beat commands while preserving earlier edits.
+The event list continues to show approximate source seconds.
+
 ## Edit in seconds
 
 Use decimal source seconds when absolute host ticks are inconvenient:

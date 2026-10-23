@@ -12,7 +12,10 @@ val max_cookie_value_bytes : int
 val same_site_wire : same_site -> string
 type geolocation = { latitude : float; longitude : float; accuracy_m : float }
 (** A tab's reported environment. Each part is optional, at least one is set;
-    [Clear_emulation] gives the tab its own location, language and time zone back. *)
+    [Clear_emulation] restores its location, language and time zone overrides only.
+    Setting geolocation grants the current origin permission in the owned browser
+    session; clearing overrides leaves permissions unchanged. The grant persists
+    until that session closes. *)
 type emulation = { geolocation : geolocation option; locale : string option; timezone : string option }
 val default_accuracy_m : float
 val max_accuracy_m : float

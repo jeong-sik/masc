@@ -518,12 +518,22 @@ let test_cookies_are_set_for_the_page_host_and_never_echoed () =
 let test_emulation_goes_over_bidi_and_clears_to_the_original_values () =
   Eio_main.run (fun _ ->
     let commands = ref [] in
+    let origin = ref "https://example.org" in
+    let permissions = ref ["https://example.org", "prompt"; "https://other.example", "denied"] in
+    let origin_reads = ref 0 in
     let start_downloads ~session_id:_ ~websocket_url:_ =
       Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
         console=(fun ~context:_ -> Ok (`Assoc ["entries",`List [];"dropped",`Int 0]));
         network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
         check=(fun () -> Ok ());
-        command=(fun method_ params -> commands := (method_, params) :: !commands; Ok `Null);
+        command=(fun method_ params ->
+          commands := (method_, params) :: !commands;
+          if method_ = "permissions.setPermission" then begin
+            let target = Yojson.Safe.Util.(member "origin" params |> to_string) in
+            let state = Yojson.Safe.Util.(member "state" params |> to_string) in
+            permissions := (target,state) :: List.remove_assoc target !permissions
+          end;
+          Ok `Null);
         close=(fun () -> ())} in
     let contains script needle = try ignore (Str.search_forward (Str.regexp_string needle) script 0); true with Not_found -> false in
     let request ~method_ ~path ~body = match method_, path with
@@ -534,9 +544,9 @@ let test_emulation_goes_over_bidi_and_clears_to_the_original_values () =
       | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
       | `POST, "/session/owned/execute/sync" ->
         let script = Yojson.Safe.Util.(Option.get body |> member "script" |> to_string) in
-        if contains script "location.origin" then Ok (`String "https://example.org")
+        if contains script "location.origin" then (incr origin_reads; Ok (`String !origin))
         else if contains script "navigator.language" then Ok (`Assoc ["locale",`String "en-US";"timezone",`String "UTC"])
-        else Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture"])
+        else Ok (`Assoc ["url",`String !origin;"title",`String "Fixture"])
       | _ -> fail ("unexpected request " ^ path) in
     let driver = Driver.create ~start_downloads ~request () in
     ignore (Driver.execute driver (Lane.Session_open {headless=None}));
@@ -562,10 +572,15 @@ let test_emulation_goes_over_bidi_and_clears_to_the_original_values () =
        | Some params -> Yojson.Safe.Util.member "state" params = `String "granted"
                         && Yojson.Safe.Util.member "origin" params = `String "https://example.org"
        | None -> false);
-    (match act Lane.Action.Clear_emulation with Lane.Answered _ -> () | _ -> fail "emulation must clear");
+    (* The page can navigate between setting and clearing its overrides. *)
+    origin := "https://other.example";
+    (match act Lane.Action.Clear_emulation with
+     | Lane.Answered value -> check bool "clearing reports unchanged permissions" true
+         (Yojson.Safe.Util.(value |> member "data" |> member "result" |> member "permissionsUnchanged") = `Bool true)
+     | _ -> fail "emulation must clear");
     let cleared = sent () in
-    check (list string) "location and permission reset, then locale and time zone return"
-      ["emulation.setGeolocationOverride";"permissions.setPermission";"emulation.setLocaleOverride";"emulation.setTimezoneOverride"]
+    check (list string) "only location, locale and time zone overrides are restored"
+      ["emulation.setGeolocationOverride";"emulation.setLocaleOverride";"emulation.setTimezoneOverride"]
       (method_names cleared);
     check bool "the original locale and time zone are set back" true
       (match List.assoc_opt "emulation.setLocaleOverride" cleared, List.assoc_opt "emulation.setTimezoneOverride" cleared with
@@ -576,7 +591,19 @@ let test_emulation_goes_over_bidi_and_clears_to_the_original_values () =
        | Some params -> Yojson.Safe.Util.member "coordinates" params = `Null | None -> false);
     (match act Lane.Action.Clear_emulation with Lane.Answered _ -> () | _ -> fail "clearing twice is allowed");
     check (list string) "a second clear has no locale or time zone left to restore"
-      ["emulation.setGeolocationOverride";"permissions.setPermission"] (method_names (sent ()));
+      ["emulation.setGeolocationOverride"] (method_names (sent ()));
+    check (option string) "the earlier origin keeps the documented session grant" (Some "granted")
+      (List.assoc_opt "https://example.org" !permissions);
+    check (option string) "the navigated origin keeps its existing denial" (Some "denied")
+      (List.assoc_opt "https://other.example" !permissions);
+    let prior_permissions = !permissions in
+    let locale_only : Lane.Action.emulation = {geolocation=None;locale=Some "fr-FR";timezone=None} in
+    (match act (Lane.Action.Set_emulation locale_only) with Lane.Answered _ -> () | _ -> fail "locale must set");
+    (match act Lane.Action.Clear_emulation with Lane.Answered _ -> () | _ -> fail "locale must clear");
+    check bool "locale-only set and clear never change permissions" true
+      (List.for_all (fun (method_,_) -> method_ <> "permissions.setPermission") (sent ()));
+    check (list (pair string string)) "both origins keep their permissions" prior_permissions !permissions;
+    check int "only setting geolocation reads the permission origin" 1 !origin_reads;
     let parse fields = Lane.Action.parse (`Assoc (["action",`String "set_emulation";"tabId",`Int 1] @ fields)) in
     check bool "a locale alone parses" true (Result.is_ok (parse ["locale",`String "ko-KR"]));
     List.iter (fun (label, fields) -> check bool label true (Result.is_error (parse fields)))

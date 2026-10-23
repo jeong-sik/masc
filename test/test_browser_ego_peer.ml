@@ -192,6 +192,11 @@ let test_refusals_run_no_script () =
   ignore (before_effect "a cap past the limit" (dispatch peer Live.Page_read (obj ["tabId",`Int 1;"maxChars",`Int 100_001])));
   List.iter (fun verb -> ignore (before_effect (Live.verb_to_wire verb) (dispatch peer verb (obj ["tabId",`Int 1]))))
     [Live.Page_interact; Live.Page_act; Live.Page_goto];
+  let emulation : Lane.Action.emulation = {geolocation=None;locale=Some "ko-KR";timezone=None} in
+  List.iter (fun interaction -> ignore (before_effect "an unsupported emulation"
+    (dispatch peer Live.Page_act (Lane.Action.to_json
+      (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})))))
+    [Lane.Action.Set_emulation emulation;Lane.Action.Clear_emulation];
   check (list string) "no script ran" [] !ran
 
 let test_answers_outside_the_frame () =

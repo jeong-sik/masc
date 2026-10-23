@@ -242,13 +242,14 @@ let emulate t session ~started emulation =
     | Ok _ -> Error (Protocol "invalid current browser window")
     | Error error -> Error error in
   let contexts = ["contexts", `List [`String handle]] in
-  let* origin = script t session "return location.origin;" [] in
-  let origin = match origin with `String origin when origin <> "null" -> Some origin | _ -> None in
-  let permission state = match origin with
+  let grant_geolocation () =
+    let* origin = script t session "return location.origin;" [] in
+    let origin = match origin with `String origin when origin <> "null" -> Some origin | _ -> None in
+    match origin with
     | None -> Ok ()
     | Some origin ->
       let* _ = send "permissions.setPermission" (`Assoc ["descriptor",`Assoc ["name",`String "geolocation"];
-        "state",`String state;"origin",`String origin]) in Ok () in
+        "state",`String "granted";"origin",`String origin]) in Ok () in
   let remember_originals () =
     if List.mem_assoc handle session.emulated then Ok ()
     else
@@ -262,7 +263,7 @@ let emulate t session ~started emulation =
     let* () = match geolocation with
       | None -> Ok ()
       | Some {Browser_lane.Action.latitude; longitude; accuracy_m} ->
-        let* () = permission "granted" in
+        let* () = grant_geolocation () in
         let* _ = send "emulation.setGeolocationOverride" (`Assoc (("coordinates",`Assoc
           ["latitude",`Float latitude;"longitude",`Float longitude;"accuracy",`Float accuracy_m]) :: contexts)) in
         Ok () in
@@ -279,17 +280,19 @@ let emulate t session ~started emulation =
         | None -> [])
        @ Option.to_list (Option.map (fun l -> "locale",`String l) locale)
        @ Option.to_list (Option.map (fun z -> "timezone",`String z) timezone));
-      "note",`String "a page that already read its location, language or time zone keeps what it read; reload to see the new ones"])
+      "note",`String ("a page that already read its location, language or time zone keeps what it read; reload to see the new ones"
+        ^ (match geolocation with None -> "" | Some _ ->
+          "; the current origin geolocation grant persists in this owned browser session after clearing overrides"))])
   | None ->
     let* _ = send "emulation.setGeolocationOverride" (`Assoc (("coordinates",`Null) :: contexts)) in
-    let* () = permission "prompt" in
     let* () = match List.assoc_opt handle session.emulated with
       | None -> Ok ()
       | Some (locale,timezone) ->
         let* _ = send "emulation.setLocaleOverride" (`Assoc (("locale",`String locale) :: contexts)) in
         let* _ = send "emulation.setTimezoneOverride" (`Assoc (("timezone",`String timezone) :: contexts)) in
         session.emulated <- List.remove_assoc handle session.emulated; Ok () in
-    Ok (`Assoc ["cleared",`Bool true])
+    Ok (`Assoc ["cleared",`Bool true;"permissionsUnchanged",`Bool true;
+      "note",`String "clearing restores environment overrides only; geolocation permission grants remain until this owned browser session closes"])
 let interact t session ~perform_effect ~started = function
   | Browser_lane.Action.Set_emulation emulation -> emulate t session ~started (Some emulation)
   | Browser_lane.Action.Clear_emulation -> emulate t session ~started None

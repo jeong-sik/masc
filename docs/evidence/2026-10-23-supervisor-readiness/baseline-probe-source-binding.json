@@ -1,0 +1,6 @@
+{
+  "base": "acaaee9828a7cfaa94a28c02d62b9f97aa4ecfd4",
+  "baseline_supervisor_sha256": "f9a4de49db1d0b998e614ba8d5d67f784013a6acb0cfd029d88ad3048576deea",
+  "audit_baseline_sha256": "f9a4de49db1d0b998e614ba8d5d67f784013a6acb0cfd029d88ad3048576deea",
+  "same": true
+}

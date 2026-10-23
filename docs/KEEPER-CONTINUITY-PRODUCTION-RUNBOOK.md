@@ -1,7 +1,7 @@
 # Keeper Continuity Production Runbook
 
 **Status**: production release gate
-**Updated**: 2026-09-05
+**Updated**: 2026-10-23
 
 Keeper continuity means that one ordered Keeper lane can restore its agent core
 checkpoint, consume typed wake events, and keep making observable progress
@@ -52,9 +52,30 @@ surface its error; let unrelated lanes continue.
 
 ## Undecodable Stores at Boot
 
-Boot decodes every keeper meta (`<base>/.masc/keepers/<name>.json`) and every
-current Memory OS snapshot (`<base>/.masc/config/keepers/<name>.memory-current.json`)
-before any Keeper lane starts. When a file does not decode with this build, the
+The executable checks its own durable-store policy during owner initialization,
+including when a supervisor or a shell starts it directly. This check does not
+depend on having run `deploy.sh`. `Keeper_durable_store.reader` owns the policy;
+`Keeper_store_boot_reconcile.examine` and `admit` run before Keeper loops and
+before owner readiness is published.
+
+The supervisor promotes a candidate to the last-known-good artifact only after
+the candidate PID owns the listener and `/health/ready` returns success. Its
+`status` command checks the same endpoint. `/health` liveness can succeed while
+owner initialization is still running, so it cannot certify a completed startup
+or authorize restart of a candidate that subsequently fails initialization.
+
+| Store | Executable startup behavior | Recovery boundary |
+|---|---|---|
+| Keeper metadata | `Refuse_boot` | Preserve identity and task bindings. |
+| Current Memory OS snapshot | `Refuse_boot` | Preserve the Keeper's current memory. |
+| Official-client session binding | `Refuse_boot` | Preserve the original vendor session binding. |
+| Event queue snapshot and transition WAL | `Refuse_boot` | Read the pair with the queue's production decoder; retain both on refusal. |
+| Goal store | `Degrade_typed` | Report unreadable state once at boot; goal readers and writers retain typed unavailability. |
+| Gate pending snapshot and log | `Preflight_only` | Deployment validates snapshot and log replay; runtime Gate installation reports an unavailable queue rather than an empty queue. |
+| Board attention partitions | `Preflight_only` | Deployment validates the production partition ledger; process-start recovery refuses unreadable evidence and preserves it. |
+
+The first four stores are decoded before any Keeper lane starts.
+When a file does not decode with this build, the
 process does not start. It exits 1 and the startup log carries one line per
 file:
 
@@ -70,8 +91,9 @@ The files are not touched. Two ways forward:
    `deployment_preflight_helper validate-stores --base-path=<base>` and start
    again. This keeps the keeper's memory.
 2. Start with `--accept-store-quarantine`. Each refused file moves to
-   `<path>.rejected-<timestamp>` (kept as bytes), the snapshot's journal gets
-   a `quarantined` line, and the keeper starts with an empty store. The flag is
+   `<path>.rejected-<timestamp>` (kept as bytes), and the Keeper starts with an
+   empty store. For a Memory OS snapshot, its journal also gets a `quarantined`
+   line. The flag is
    for one start; do not put it in a launcher. Note: if a store is left in an
    unrecoverable publication state, `--accept-store-quarantine` is also refused;
    repair the store and re-verify with `validate-stores --base-path <base>`
@@ -90,10 +112,42 @@ records or replaced entries require owner repair before retrying. Only a fully
 completed and directory-synced quarantine clears the record and permits a new
 empty queue.
 
-`scripts/deploy.sh` never reaches this refusal: its `validate-stores` preflight
-stops the deploy on the same files before the executable starts. A refusal
-after a `deploy.sh` start means the preflight and boot disagree, which is a
-defect to report, not a reason to pass the flag. Design: RFC-0420.
+The deploy preflight and executable startup have different scopes. The preflight
+reads `Refuse_boot` and `Preflight_only` stores. The executable's boot examiner
+reads `Refuse_boot` and `Degrade_typed` stores; it does not scan every stored
+provider input or historical record. A successful preflight is a read at that
+time, not permission to skip startup validation or proof that no file can change
+before startup.
+
+For Gate, a successful process start does not mean approval authority is usable.
+If `install_persistence` fails, the startup log reports
+`keeper_gate: durable queue install failed` with its error. `/health?full=1`
+reports the `keeper_hitl_gate` section as unavailable with operator action;
+a liveness response alone is not this check. Preserve the pending snapshot and
+log together. With the owning server stopped, repair the reported failure and
+run the same build's `deployment_preflight_helper validate-stores
+--base-path=<base>`. An incomplete append-log tail is a refusal requiring owner
+recovery; this read-only command does not trim it. Do not clear an approval
+queue merely to obtain a healthy status: that discards pending authority.
+
+Checkpoint loading deliberately remains outside the startup inventory, following
+the recorded 2026-09-26 operator decision. A missing checkpoint and an explicitly
+superseded version have separate outcomes. A parse failure, newer version or
+read/store error refuses the affected Keeper's context preparation with a typed
+checkpoint error; it does not authorize replacing unreadable state with an empty
+checkpoint. Preserve the trace checkpoint and history, then roll back or repair
+the reader before re-admitting that lane. The quarantine flag is not a general
+checkpoint reset.
+
+The store policy and its checkpoint decision are documented in
+[RFC: every durable store has one boot policy](./rfc/RFC-every-durable-store-has-one-boot-policy.md).
+[Issue #37900](https://github.com/jeong-sik/masc/issues/37900) tracks the original
+supervised-restart gap and the later Gate/Board preflight additions. The original
+event queue gap is handled by executable startup validation; the Gate and
+checkpoint policies above are distinct boundaries, not a request to make every
+unavailable subsystem stop the whole server. These are source-level contracts;
+a repaired source or selected test is not proof that an installed binary was
+replaced or that a live restart succeeded.
 
 `validate-stores` also reads the Lane Add-on records under
 `<base>/.masc/lane-addons` (bindings, native claims, action receipts, Exact

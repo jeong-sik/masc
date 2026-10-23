@@ -1,0 +1,8 @@
+{
+  "test/test_start_masc_script.ml": true,
+  "scripts/start-masc-supervised.sh": true,
+  "scripts/masc-supervisor-control.sh": true,
+  "scripts/lib/runtime-artifact-contract.sh": true,
+  "lib/string_util/string_util.ml": true,
+  "lib/string_util/string_util.mli": true
+}

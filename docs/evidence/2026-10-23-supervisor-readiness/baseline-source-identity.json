@@ -1,0 +1,9 @@
+{
+  "head": "acaaee9828a7cfaa94a28c02d62b9f97aa4ecfd4",
+  "files": {
+    "scripts/start-masc-supervised.sh": "f9a4de49db1d0b998e614ba8d5d67f784013a6acb0cfd029d88ad3048576deea",
+    "scripts/masc-supervisor-control.sh": "7864ef23e04c1fb422348e0317707c7c6527647f6d63f50fd549d6e126c70e7e",
+    "scripts/lib/runtime-artifact-contract.sh": "379ec200781c9e29ef0e0aa534bd841f7ffadaeeb1c1f4e778cb721ea78c9692"
+  },
+  "expected_result": "new unready fixture must fail on actual baseline supervisor; second-launch fixture guard terminates a broken supervisor"
+}

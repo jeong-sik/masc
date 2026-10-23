@@ -292,9 +292,9 @@ clears the individual source bindings. The source ID is the recorded input's ID,
 which may differ from currently connected devices.
 
 During native playback, `p` pauses/resumes and `:seek SECONDS` moves audio and MIDI
-together; `:pause`, `:resume` and `:stop` are also available. Seeking restores
-stateful MIDI voices and expression only when their source baselines are known;
-an unsafe seek is refused. These controls do not change the saved take. The
+together; `:pause`, `:resume` and `:stop` are also available. Pausing, resuming
+and seeking may be refused when the captured MIDI state cannot be reconstructed
+safely. These controls do not change the saved take. The
 playhead's running position is an estimate between native acknowledgements.
 Open an existing take with:
 

@@ -169,6 +169,7 @@ let check_read_file_target ~config ~meta = function
 ;;
 
 let resolve_read_file_target
+      ~read_authority
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -200,8 +201,11 @@ let resolve_read_file_target
          endpoint's declared roots (#38593). Everything the tree accepts keeps
          the meaning it had, however a declared root is spelled. *)
       (match
-         Keeper_sandbox_remote_lane.declared_endpoint_path_of_args
-           ~config ~meta ~path:raw_path ~cwd
+         (match read_authority with
+          | None -> Keeper_sandbox_remote_lane.declared_endpoint_path_of_args ~config ~meta ~path:raw_path ~cwd
+          | Some authority ->
+            let* _ = Keeper_sandbox_remote_lane.read_authority_endpoint authority ~config ~meta in
+            Ok (Keeper_sandbox_remote_lane.read_authority_declared_path_of_args authority ~path:raw_path ~cwd))
        with
        | Ok (Some endpoint_path) -> Ok (Declared_endpoint_file endpoint_path)
        | Ok None -> Error (Read_path_error refusal)
@@ -221,25 +225,25 @@ type read_file_attempt =
       ; payload : string
       }
 
-let read_complete_sandbox_bytes ?turn_sandbox_factory ~config ~meta ~path ?cwd () =
+let read_complete_sandbox_bytes ?read_authority ?turn_sandbox_factory ~config ~meta ~path ?cwd () =
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
   let* read_target =
-    resolve_read_file_target ~config ~meta ~args ~raw_path:path
+    resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path
     |> Result.map_error (function Read_path_error refusal -> refusal.Keeper_alerting_path.message)
   in
   let* () =
     check_read_file_target ~config ~meta read_target
     |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
   in
-  Keeper_sandbox_read_backend.read_complete_file ?turn_sandbox_factory ~config ~meta
+  Keeper_sandbox_read_backend.read_complete_file ?read_authority ?turn_sandbox_factory ~config ~meta
     ~host_path:(read_file_target_path read_target)
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
 ;;
 
-let read_sandbox_raw_prefix ?turn_sandbox_factory ~config ~meta ~path ?cwd ~max_bytes () =
+let read_sandbox_raw_prefix ?read_authority ?turn_sandbox_factory ~config ~meta ~path ?cwd ~max_bytes () =
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
   let* read_target =
-    resolve_read_file_target ~config ~meta ~args ~raw_path:path
+    resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path
     |> Result.map_error (fun (Read_path_error refusal) ->
            Keeper_sandbox_read_backend.Read_refused refusal.Keeper_alerting_path.message)
   in
@@ -248,7 +252,7 @@ let read_sandbox_raw_prefix ?turn_sandbox_factory ~config ~meta ~path ?cwd ~max_
     |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) ->
            Keeper_sandbox_read_backend.Read_refused refusal.message)
   in
-  Keeper_sandbox_read_backend.read_raw_prefix ?turn_sandbox_factory ~config ~meta
+  Keeper_sandbox_read_backend.read_raw_prefix ?read_authority ?turn_sandbox_factory ~config ~meta
     ~host_path:(read_file_target_path read_target) ~max_bytes
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
 ;;
@@ -272,7 +276,7 @@ let prepared_read_confined ~config ~(meta : Keeper_meta_contract.keeper_meta) ~a
 
 let prepare_read ~sw ~config ~meta ~args =
   let path = Safe_ops.json_string ~default:"" "path" args in
-  let* target = resolve_read_file_target ~config ~meta ~args ~raw_path:path
+  let* target = resolve_read_file_target ~read_authority:None ~config ~meta ~args ~raw_path:path
     |> Result.map_error (fun (Read_path_error refusal) -> refusal.message) in
   let* () = check_read_file_target ~config ~meta target
     |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message) in
@@ -323,6 +327,7 @@ let read_prepared_window ~config ~meta ~args ~target ~window ~max_bytes prepared
 ;;
 
 let handle_read_file_with_preparation
+      ~read_authority
       ~prepared_read
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
@@ -337,7 +342,7 @@ let handle_read_file_with_preparation
   let cwd = string_opt_nonempty "cwd" args in
   let read_target =
     let* window = read_line_window_of_args args |> Result.map_error (fun e -> `Window e) in
-    let* target = resolve_read_file_target ~config ~meta ~args ~raw_path:path
+    let* target = resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path
       |> Result.map_error (fun (Read_path_error refusal) -> `Path refusal) in
     Ok (window, target)
   in
@@ -440,8 +445,11 @@ let handle_read_file_with_preparation
         let timeout_sec = Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read () in
         (* The backend streams from [window.start_line], so the byte bound is
            the window's and every line of the file is reachable. *)
+        let read_file = match read_authority with
+          | None -> Keeper_sandbox_read_runner.read_file
+          | Some authority -> Keeper_sandbox_read_backend.read_file ~read_authority:authority in
         (match
-           Keeper_sandbox_read_runner.read_file
+           read_file
              ?turn_sandbox_factory
              ~start_line:window.start_line
              ~config
@@ -468,11 +476,16 @@ let handle_read_file_with_preparation
 ;;
 
 let handle_read_file_with_outcome ~turn_sandbox_factory ~config ~meta ~args =
-  handle_read_file_with_preparation ~prepared_read:None ~turn_sandbox_factory ~config ~meta ~args
+  handle_read_file_with_preparation ~read_authority:None ~prepared_read:None ~turn_sandbox_factory ~config ~meta ~args
+;;
+
+let handle_read_file_with_authority ~read_authority ~turn_sandbox_factory ~config ~meta ~args =
+  handle_read_file_with_preparation ~read_authority:(Some read_authority)
+    ~prepared_read:None ~turn_sandbox_factory ~config ~meta ~args
 ;;
 
 let handle_prepared_read_file_with_outcome ~prepared_read ~config ~meta ~args =
-  match handle_read_file_with_preparation ~prepared_read:(Some prepared_read)
+  match handle_read_file_with_preparation ~read_authority:None ~prepared_read:(Some prepared_read)
       ~turn_sandbox_factory:None ~config ~meta ~args with
   | result -> result
   | exception (Eio.Io _ as error) ->

@@ -105,10 +105,12 @@ module Docker_backend = struct
   let container_path_of_host = Keeper_sandbox_read_backend.container_path_of_host
   let read_complete_file ~config ~meta ~host_path ~timeout_sec () =
     Keeper_sandbox_read_backend.read_complete_file ~config ~meta ~host_path ~timeout_sec ()
-  let read_file = Keeper_sandbox_read_backend.read_file
-  let run_command_with_status =
-    Keeper_sandbox_read_backend.run_command_with_status
-  let run_command = Keeper_sandbox_read_backend.run_command
+  let read_file ?turn_sandbox_factory ?start_line ~config ~meta ~host_path ~max_bytes ~timeout_sec () =
+    Keeper_sandbox_read_backend.read_file ?turn_sandbox_factory ?start_line ~config ~meta ~host_path ~max_bytes ~timeout_sec ()
+  let run_command_with_status ?turn_sandbox_factory ?ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec () =
+    Keeper_sandbox_read_backend.run_command_with_status ?turn_sandbox_factory ?ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+  let run_command ?turn_sandbox_factory ?ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec () =
+    Keeper_sandbox_read_backend.run_command ?turn_sandbox_factory ?ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
 end
 
 include Make (Docker_backend)

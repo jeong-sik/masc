@@ -40,7 +40,9 @@ val task_review_subject : task_review -> Workspace_verification_store.request_he
 val validate_task_review : task_review -> (unit, string) result
 val task_review_lookup : task_review -> Task.Anti_rationalization.lookup_surface
 (** Recheck route configuration before execution and each lookup. Actual file
-    containment and endpoint dispatch remain owned by the existing backend. *)
+    containment and endpoint dispatch remain owned by the existing backend,
+    using the same captured endpoint for path translation, Read, Grep, media
+    and layout. Configuration changes cannot redirect an admitted lookup. *)
 
 val create :
   config:Workspace.config -> producer:string ->

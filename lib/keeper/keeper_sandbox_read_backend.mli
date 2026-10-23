@@ -38,6 +38,12 @@ val container_path_of_host :
   host_path:string ->
   (string, string) result
 
+val container_path_of_host_with_authority :
+  read_authority:Keeper_sandbox_remote_lane.read_authority ->
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  host_path:string -> (string, string) result
+(** Translate against exactly the endpoint and declared roots the caller holds. *)
+
 type read_error =
   | Missing_file of string
   | Not_a_file of string
@@ -70,6 +76,7 @@ val read_window_not_a_file_exit : int
     Errors include backend image misconfiguration, backend command failure, or
     the input not being inside the playground. *)
 val read_file :
+  ?read_authority:Keeper_sandbox_remote_lane.read_authority ->
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   ?start_line:int ->
   config:Workspace.config ->
@@ -126,6 +133,7 @@ val resolve_read_dispatch :
     was up and named by facts the caller already had. *)
 
 val run_command_with_status :
+  ?read_authority:Keeper_sandbox_remote_lane.read_authority ->
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   ?ok_exit_codes:int list ->
   config:Workspace.config ->
@@ -141,6 +149,7 @@ val run_command_with_status :
     and keeps at most [n] bytes; [None] keeps the stdout bytes exactly as the
     command wrote them, so the command itself must bound what it prints. *)
 val run_command_with_capture :
+  ?read_authority:Keeper_sandbox_remote_lane.read_authority ->
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   ?ok_exit_codes:int list ->
   config:Workspace.config ->
@@ -156,6 +165,7 @@ val run_command_with_capture :
     [run_command_with_status] that drops the returned
     process status and keeps only the captured stdout bytes. *)
 val run_command :
+  ?read_authority:Keeper_sandbox_remote_lane.read_authority ->
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   ?ok_exit_codes:int list ->
   config:Workspace.config ->
@@ -168,7 +178,7 @@ val run_command :
 
 (** Raw complete endpoint or Docker read. Docker requires authoritative process
     capture EOF; completion-only fallback is refused rather than returning previews. *)
-val read_complete_file : ?turn_sandbox_factory:Keeper_sandbox_factory.t -> config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+val read_complete_file : ?read_authority:Keeper_sandbox_remote_lane.read_authority -> ?turn_sandbox_factory:Keeper_sandbox_factory.t -> config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   host_path:string -> timeout_sec:float -> unit -> (string, string) result
 
 (** Raw binary prefix. The command limits its output before transport capture;
@@ -176,7 +186,7 @@ val read_complete_file : ?turn_sandbox_factory:Keeper_sandbox_factory.t -> confi
     regular file is classified like {!read_file}'s window: the sentinel exit
     codes say so, so a caller can distinguish a missing path from a transport
     or capture fault. *)
-val read_raw_prefix : ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+val read_raw_prefix : ?read_authority:Keeper_sandbox_remote_lane.read_authority -> ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   host_path:string -> max_bytes:int -> timeout_sec:float -> unit ->
   (string, read_error) result

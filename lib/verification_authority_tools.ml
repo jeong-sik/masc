@@ -23,6 +23,7 @@ let all_tools = [ Read_file; Search_files; Web_fetch; Board_source; Fusion_sourc
 
 type t =
   { ownership_root : string
+  ; read_authority : Keeper_sandbox_remote_lane.read_authority option
   ; config : Workspace.config
   ; submitted_evidence : Workspace_verification_store.submitted_evidence_item list
   ; producer_scope : producer_scope
@@ -141,7 +142,10 @@ let create ~config ~producer ~submitted_evidence =
   let ownership_root =
     Env_config_core.strip_trailing_slashes ownership_root
   in
-  Ok { ownership_root; config; producer_scope; tools
+  let* read_authority = match producer_scope with
+    | Workspace_producer -> Ok None
+    | Keeper_producer meta -> Keeper_sandbox_remote_lane.capture_read_authority ~config ~meta () in
+  Ok { ownership_root; read_authority; config; producer_scope; tools
      ; submitted_evidence }
 ;;
 
@@ -167,7 +171,7 @@ let create_goal_proof ~(config : Workspace.config) ~submitted_evidence =
     Env_config_core.strip_trailing_slashes
       (Filename.concat project_root Playground_paths.all_playgrounds_prefix)
   in
-  Ok { ownership_root; config; producer_scope = Workspace_producer; tools
+  Ok { ownership_root; read_authority=None; config; producer_scope = Workspace_producer; tools
      ; submitted_evidence }
 ;;
 
@@ -330,7 +334,7 @@ let root_layout t =
      | Keeper_types_profile_sandbox.Shared_mount -> host_layout ()
      | Keeper_types_profile_sandbox.Endpoint_owned ->
        let* layout = Keeper_sandbox_remote_checkouts.discover_layout
-         ~timeout_sec:Repo_git.inspection_timeout_sec ~config:t.config ~meta ()
+         ?read_authority:t.read_authority ~timeout_sec:Repo_git.inspection_timeout_sec ~config:t.config ~meta ()
          |> Result.map_error Keeper_playground_checkouts.scan_error_to_string in
        let* checkout_lines = checkout_lines
          ~describe:(List.map describe_unprobed_checkout)
@@ -468,18 +472,18 @@ let run t tool ~args =
   in
   match t.producer_scope, tool with
   | Keeper_producer producer_meta, Read_file ->
-    Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
-      ~turn_sandbox_factory:None
-      ~config:t.config
-      ~meta:producer_meta
-      ~args
+    (match t.read_authority with
+     | None -> Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+         ~turn_sandbox_factory:None ~config:t.config ~meta:producer_meta ~args
+     | Some read_authority -> Keeper_tool_filesystem_runtime.handle_read_file_with_authority
+         ~read_authority ~turn_sandbox_factory:None ~config:t.config ~meta:producer_meta ~args)
     |> execution_result
   | Keeper_producer producer_meta, Search_files ->
-    Keeper_workspace_ops.handle_tool_search_files_with_outcome
-      ~turn_sandbox_factory:None
-      ~config:t.config
-      ~meta:producer_meta
-      ~args
+    (match t.read_authority with
+     | None -> Keeper_workspace_ops.handle_tool_search_files_with_outcome
+         ~turn_sandbox_factory:None ~config:t.config ~meta:producer_meta ~args
+     | Some read_authority -> Keeper_workspace_ops.handle_tool_search_files_with_authority
+         ~read_authority ~turn_sandbox_factory:None ~config:t.config ~meta:producer_meta ~args)
     |> execution_result
   | Workspace_producer, Read_file ->
     Keeper_tool_filesystem_runtime.handle_owned_read_file_with_outcome
@@ -540,17 +544,17 @@ let media_result t tool ~name ~args ~start_time =
          | Keeper_producer meta ->
            (* Probe exact bytes so non-UTF-8 box sizes cannot shift the
               signature before format detection. *)
-           (match Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+           (match Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ?read_authority:t.read_authority
                     ~config:t.config ~meta ~path ?cwd
                     ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
             | Error _ as error -> error
             | Ok probe ->
               (match (Verification_media_inspection.is_pdf path probe || Verification_media_inspection.is_presentation path || Verification_media_inspection.is_mp4 path probe), Keeper_vision_tool.sniff_image_media_type probe with
                | false, Error _ -> Ok probe
-               | true, _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+               | true, _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ?read_authority:t.read_authority
                    ~config:t.config ~meta ~path ?cwd
                    ~max_bytes:(max_media_source_bytes + 1) ()
-               | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+               | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ?read_authority:t.read_authority
                    ~config:t.config ~meta ~path ?cwd ~max_bytes:(limit + 1) ()))
          | Workspace_producer ->
            (match Keeper_tool_filesystem_runtime.read_owned_bytes
@@ -720,12 +724,17 @@ type task_review =
   ; binding : string
   }
 
+let keeper_review_route (meta : Keeper_meta_contract.keeper_meta) route =
+  `Assoc ["kind", `String "keeper"; "name", `String meta.name;
+    "profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile);
+    "network", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode);
+    "route", route]
+
 let review_route t =
   let open Result.Syntax in
   match t.producer_scope with
   | Workspace_producer -> Ok (`Assoc ["kind", `String "workspace"])
   | Keeper_producer meta ->
-    let profile = Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile in
     let* route = match meta.sandbox_profile with
       | Docker -> Ok (`Assoc ["kind", `String "shared_mount"])
       | Remote_ssh ->
@@ -737,10 +746,15 @@ let review_route t =
         Ok (`Assoc ["kind", `String "microvm";
           "argv", `List (List.map (fun x -> `String x) (Keeper_sandbox_remote.transport_argv endpoint));
           "root", `String (Keeper_sandbox_remote.workspace_root endpoint)]) in
-    Ok (`Assoc ["kind", `String "keeper"; "name", `String meta.name;
-      "profile", `String profile;
-      "network", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode);
-      "route", route])
+    Ok (keeper_review_route meta route)
+
+let captured_review_route t =
+  match t.producer_scope, t.read_authority with
+  | Keeper_producer meta, Some authority ->
+    Ok (keeper_review_route meta (Keeper_sandbox_remote_lane.read_authority_route authority))
+  | (Workspace_producer | Keeper_producer _), None -> review_route t
+  | Workspace_producer, Some _ -> Error "workspace producer cannot own a Keeper endpoint"
+
 
 let create_task_review ~config ~verification_id ~task_id ~producer ~evidence_access =
   let open Result.Syntax in
@@ -754,7 +768,7 @@ let create_task_review ~config ~verification_id ~task_id ~producer ~evidence_acc
     else
       let* review_tools = create ~config ~producer ~submitted_evidence:items in
       let* layout = root_layout review_tools in
-      let* route = review_route review_tools in
+      let* route = captured_review_route review_tools in
       let tool_json (tool : Types_core.tool_schema) =
         `Assoc ["name", `String tool.name; "description", `String tool.description;
           "input_schema", tool.input_schema] in
@@ -763,6 +777,8 @@ let create_task_review ~config ~verification_id ~task_id ~producer ~evidence_acc
         "base_path", `String config.Workspace.base_path;
         "ownership_root", `String review_tools.ownership_root;
         "route", route;
+        "read_authority", (match review_tools.read_authority with None -> `Null
+          | Some authority -> Keeper_sandbox_remote_lane.read_authority_identity authority);
         "schemas", `List (List.map tool_json (schemas review_tools));
         "submitted_evidence", `List (List.map Workspace_verification_store.submitted_evidence_item_to_yojson items)] in
       let* canonical = Lane_addon_action.canonical projection in

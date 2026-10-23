@@ -477,11 +477,12 @@ end
 
 type probe_mode = Inspect | Layout
 
-let run_probe ~timeout_sec ~(config : Workspace.config)
+let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
     ~(meta : keeper_meta) ~catalog ~mode ~parse ()
   =
   let root =
-    match Keeper_sandbox_remote_lane.workspace_root ~config ~meta with
+    match (match read_authority with None -> Keeper_sandbox_remote_lane.workspace_root ~config ~meta
+      | Some authority -> Ok (Keeper_sandbox_remote_lane.read_authority_workspace_root authority)) with
     | Ok r -> r
     | Error _ -> "."
   in
@@ -492,7 +493,9 @@ let run_probe ~timeout_sec ~(config : Workspace.config)
        lifetime has no playground to inspect — absence, not a failure. *)
     Error (Keeper_playground_checkouts.Root_missing { root })
   else
-    match Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta () with
+    match (match read_authority with
+      | None -> Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta ()
+      | Some authority -> Keeper_sandbox_remote_lane.read_authority_endpoint authority ~config ~meta) with
     | Error err ->
       (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~config ~meta () with
        | Some _ -> Error (Keeper_playground_checkouts.Root_missing { root })
@@ -576,6 +579,6 @@ let discover_and_inspect ~timeout_sec ~config ~meta ~catalog () =
   run_probe ~timeout_sec ~config ~meta ~catalog ~mode:Inspect
     ~parse:parse_probe_json ()
 
-let discover_layout ~timeout_sec ~config ~meta () =
-  run_probe ~timeout_sec ~config ~meta ~catalog:(Ok []) ~mode:Layout
+let discover_layout ?read_authority ~timeout_sec ~config ~meta () =
+  run_probe ?read_authority ~timeout_sec ~config ~meta ~catalog:(Ok []) ~mode:Layout
     ~parse:parse_layout_json ()

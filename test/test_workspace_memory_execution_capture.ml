@@ -227,6 +227,10 @@ let test_a_restore_refuses_a_summary_other_than_its_capture () = with_workspace 
   rejected (restores_with "classification-root" (replace "predecessor" (`String (C.Request_id.to_string id))
     (summary_of classified)) classified);
   rejected (restores_with "classification-no-summary" `Null classified);
+  let other_schema = replace "schema" (`String "workspace.memory.execution-summary.v0") (summary_of classified) in
+  Alcotest.(check bool) "a summary of another schema is refused when read" true
+    (Result.is_error (C.Summary.of_json other_schema));
+  rejected (restores_with "classification-other-schema" other_schema classified);
   rejected (restores_with "classification-other-workspace"
     (replace "workspace" (`Assoc ["path",`String (Filename.dirname root);"device",`Int 0;"inode",`Int 0])
       (summary_of classified)) classified);

@@ -1089,6 +1089,19 @@ let test_discovery_rejects_foreign_workspace ()=with_workspace (fun base_path st
   let copy=Filename.concat base_path "copied-workspace" in
   Unix.mkdir copy 0o700;
   check bool "another physical workspace refuses the whole inventory" true (Result.is_error (discover copy store)))
+(* The same path names a new directory holding the same files, as after a
+   restore from a backup in place. *)
+let test_discovery_rejects_a_workspace_restored_in_place ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Workspace-bound original"] in
+  ignore (retain_capture store capture);
+  let moved=base_path ^ ".before-restore" in
+  Unix.rename base_path moved;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree moved) (fun () ->
+    Unix.mkdir base_path 0o700;
+    Array.iter (fun name -> Unix.rename (Filename.concat moved name) (Filename.concat base_path name))
+      (Sys.readdir moved);
+    check bool "the same path on another directory refuses the whole inventory" true
+      (Result.is_error (discover base_path store))))
 let test_restore_refuses_a_capture_naming_another_workspace ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Workspace-bound original"] in
   let request=match Capture.to_json capture with
@@ -1231,6 +1244,7 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "discovery recovers nested original chain" `Quick test_discovery_nested_existing_intents;
   test_case "discovery refuses a missing original predecessor" `Quick test_discovery_rejects_dangling_parent;
   test_case "discovery refuses another physical workspace" `Quick test_discovery_rejects_foreign_workspace;
+  test_case "discovery refuses a workspace restored in place" `Quick test_discovery_rejects_a_workspace_restored_in_place;
   test_case "restore refuses a capture naming another workspace" `Quick test_restore_refuses_a_capture_naming_another_workspace;
   test_case "discovery refuses duplicate original IDs" `Quick test_discovery_rejects_duplicate_inventory_id;
   test_case "Briefing recovery reads the changed live contract on its original fiber" `Quick

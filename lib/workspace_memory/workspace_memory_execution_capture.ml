@@ -164,13 +164,15 @@ let to_json t = `Assoc ["schema",`String capture_schema;
    from the capture, kept in the owner record, and checked against the
    capture on every restore. *)
 module Summary = struct
+  let schema = "workspace.memory.execution-summary.v1"
   type batch =
     | Classification of { up_to : Request.size; selected : Ledger.fact_ref list }
     | Briefing of { selected_count : int; prepared_state : string }
   type t = { predecessor : Request_id.t option; workspace : workspace; batch : batch }
   let output_schema t = match t.batch with
     | Classification _ -> Decision.output_schema | Briefing _ -> Brief.output_schema
-  let to_json t = `Assoc (("predecessor", optional (Option.map Request_id.to_string t.predecessor))
+  let to_json t = `Assoc (("schema", `String schema)
+    :: ("predecessor", optional (Option.map Request_id.to_string t.predecessor))
     :: ("workspace", workspace_json t.workspace) ::
     match t.batch with
     | Classification {up_to; selected} -> ["kind",`String "classification";"up_to",Request.size_to_json up_to;
@@ -178,14 +180,18 @@ module Summary = struct
     | Briefing {selected_count; prepared_state} -> ["kind",`String "briefing";
         "selected_count",`Int selected_count;"prepared_state_sha256",`String prepared_state])
   let of_json json =
-    let kind = match json with `Assoc f -> List.assoc_opt "kind" f | _ -> None in
+    let field key = match json with `Assoc f -> List.assoc_opt key f | _ -> None in
+    let* () = match field "schema" with
+      | Some (`String version) when String.equal version schema -> Ok ()
+      | _ -> Error "unknown Curator summary schema" in
+    let kind = field "kind" in
     let predecessor f = match List.assoc "predecessor" f with
       | `Null -> Ok None
       | `String value -> Result.map Option.some (Request_id.of_string value)
       | _ -> Error "a Curator summary predecessor must be a request ID or null" in
     match kind with
     | Some (`String "classification") ->
-      let* f = fields ["predecessor";"workspace";"kind";"up_to";"selected"] json in
+      let* f = fields ["schema";"predecessor";"workspace";"kind";"up_to";"selected"] json in
       let* predecessor = predecessor f in
       let* workspace = workspace_of_json (List.assoc "workspace" f) in
       let* up_to = Request.size_of_json (List.assoc "up_to" f) in
@@ -196,7 +202,7 @@ module Summary = struct
         | _ -> Error "a Curator classification summary selects at least one fact" in
       Ok {predecessor; workspace; batch=Classification {up_to; selected}}
     | Some (`String "briefing") ->
-      let* f = fields ["predecessor";"workspace";"kind";"selected_count";"prepared_state_sha256"] json in
+      let* f = fields ["schema";"predecessor";"workspace";"kind";"selected_count";"prepared_state_sha256"] json in
       let* predecessor = predecessor f in
       let* workspace = workspace_of_json (List.assoc "workspace" f) in
       let* selected_count = match List.assoc "selected_count" f with

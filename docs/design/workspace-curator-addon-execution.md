@@ -432,18 +432,17 @@ original. The deploy store check reads each record with the body it names, by
 path, as it reads records. Candle Appraiser keeps its originals in the same
 store with a null summary, because it reads them by ID only.
 
-The Curator summary is an index of the capture, computed from it when the
-original is retained: the predecessor, the physical workspace that captured
-it, and for classification the size the batch was prepared for and the
-selected fact references, for Briefing the selected count and the SHA-256 of
-the prepared state. A restore computes the summary again and refuses a record
-whose summary differs, so the capture stays the authority. A summary that is
-not in canonical form is refused when its record is read. From summaries
-alone a pass knows whether every original belongs to this workspace, each
-original's domain,
-whether it can be halved, which facts a Rejected classification holds back,
-whether a Briefing original still holds its pass and how large the next batch
-starts.
+The Curator summary (`workspace.memory.execution-summary.v1`) is an index of
+the capture, computed from it when the original is retained: the predecessor,
+the physical workspace that captured it, and for classification the size the
+batch was prepared for and the selected fact references, for Briefing the
+selected count and the SHA-256 of the prepared state. A restore computes the
+summary again and refuses a record whose summary differs, so the capture stays
+the authority. A summary that is not in canonical form is refused when its
+record is read. From summaries alone a pass knows whether every original
+belongs to this workspace, each original's domain, whether it can be halved,
+which facts a Rejected classification holds back, whether a Briefing original
+still holds its pass and how large the next batch starts.
 
 The capture format requires an explicit nullable predecessor. Root constructors
 emit null; a child records its immediate original parent. The decoder is strict: missing predecessor and old-format

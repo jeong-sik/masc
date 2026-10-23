@@ -59,6 +59,9 @@ val to_json : t -> Yojson.Safe.t
     prepared. The owner record keeps it; every restore refuses a capture
     whose summary differs. *)
 module Summary : sig
+  val schema : string
+  (** [workspace.memory.execution-summary.v1]. A summary naming another
+      schema is refused. *)
   type batch =
     | Classification of { up_to : Workspace_memory_request.size; selected : Workspace_memory_ledger.fact_ref list }
     | Briefing of { selected_count : int; prepared_state : string }

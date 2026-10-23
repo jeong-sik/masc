@@ -187,6 +187,22 @@ let test_symlinked_git_entry_is_rejected () =
     check_paths "a symlinked .git is not a checkout" [] (C.discover ~root))
 ;;
 
+(* A .git symlink is still a checkout boundary even though it is not trusted
+   as a checkout. If the scan descends into it, a linked worktree with many
+   files exhausts the entry budget and surfaces Entry_budget_exhausted. *)
+let test_symlinked_git_entry_does_not_descend () =
+  with_temp_root (fun root ->
+    let dir = Filename.concat root "repos/x" in
+    mkdir_p dir;
+    Unix.symlink (Filename.concat root "elsewhere") (Filename.concat dir ".git");
+    for i = 1 to 200 do
+      write_file (Filename.concat dir (Printf.sprintf "f%03d.ml" i)) "x"
+    done;
+    match C.discover ~root with
+    | Ok (C.Complete []) -> ()
+    | other -> fail ("expected Complete [], got " ^ String.concat "," (paths_of other)))
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Failure is not emptiness                                            *)
 (* ------------------------------------------------------------------ *)
@@ -401,6 +417,8 @@ let () =
       , [ test_case "symlinked directory not traversed" `Quick
             test_symlinked_directory_is_not_traversed
         ; test_case "symlinked .git rejected" `Quick test_symlinked_git_entry_is_rejected
+        ; test_case "symlinked .git does not descend" `Quick
+            test_symlinked_git_entry_does_not_descend
         ] )
     ; ( "failure is not emptiness"
       , [ test_case "missing root is not an empty listing" `Quick

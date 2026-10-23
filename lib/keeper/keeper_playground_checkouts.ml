@@ -109,6 +109,19 @@ let git_link_of_dir abs =
   | Fs_compat.Exact_unknown -> None
 ;;
 
+(* A directory whose [.git] entry is a symlink is not trusted as a checkout,
+   but it is still a checkout boundary: the keeper does not own the tree it
+   points at, so the traversal must not descend into it. Without this the
+   symlinked worktree reads as an ordinary directory and the scan fans out
+   through every file inside it, which is what exhausts the entry budget. *)
+let git_symlink_of_dir abs =
+  match path_kind_no_follow (Filename.concat abs ".git") with
+  | Fs_compat.Exact_kind Unix.S_LNK -> true
+  | Fs_compat.Exact_kind Unix.(S_DIR | S_REG | S_CHR | S_BLK | S_FIFO | S_SOCK)
+  | Fs_compat.Exact_missing
+  | Fs_compat.Exact_unknown -> false
+;;
+
 let relative_of_segments = function
   | [] -> "."
   | segments -> String.concat "/" segments
@@ -244,7 +257,16 @@ let discover ~root =
                            (Truncated
                               (Checkout_budget_exhausted
                                  { budget = max_reported_checkouts }))
-                     | None -> Queue.add child_segments queue)))
+                     | None ->
+                       if git_symlink_of_dir child_abs
+                       then
+                         (* A [.git] symlink is not a trusted checkout, but it
+                            is still a boundary: do not descend into a tree the
+                            keeper does not own. Descending would fan the scan
+                            out through every file of the linked worktree and
+                            exhaust the entry budget. *)
+                         ()
+                       else Queue.add child_segments queue)))
               entries
           done
         with

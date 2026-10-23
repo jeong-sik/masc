@@ -30,9 +30,11 @@ let registration ~capture ~original ~observed_at =
   let* input = binding ~capture ~original in
   let run_id = "workspace-curator-" ^ original.Owner.request_id in
   let actor = Capture.base_path capture in
-  let payload = `Assoc ["schema",`String "workspace.memory.observer.registration.v1";
+  (* The receipt names the capture by its digest instead of holding a copy;
+     the run registry still receives the restored capture as the run input. *)
+  let payload = `Assoc ["schema",`String "workspace.memory.observer.registration.v2";
     "run_id",`String run_id;"request_id",`String original.request_id;
-    "request_digest",`String original.request_digest;"actor",`String actor;"input",input;
+    "request_digest",`String original.request_digest;"actor",`String actor;
     "timing_basis",`String "first_observer_observation"] in
   let* receipt = Receipt.make ~observed_at ~payload in
   let* () = consistent (Progress.observer original.progress).registration receipt in

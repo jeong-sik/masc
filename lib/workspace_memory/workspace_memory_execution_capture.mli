@@ -31,12 +31,13 @@ val classification : request_id:Request_id.t -> workspace:workspace -> destinati
   batch:Workspace_memory_request.batch -> (t, string) result
 val briefing : request_id:Request_id.t -> workspace:workspace -> destination:destination ->
   prompt:Prompt_registry.prompt_resolution -> batch:Workspace_memory_briefing.batch -> (t, string) result
-(** Check the original whole batch and exact rendered prompt against captured
-    template bytes. The original JSON substitution text is retained separately
-    because canonical storage can change object key order. Briefing must have
-    the same original prompt/schema contract as its prepared pass. Destination
-    revisions and prompt resolution must be supplied by the trusted host owner;
-    these constructors do not establish their external provenance or ownership. *)
+(** Check the original whole batch and its rendered prompt against the captured
+    template: a restore of the stored snapshot must render the same prompt, so
+    the capture stores the input once and only the SHA-256 of the prompt. Briefing
+    must have the same original prompt/schema contract as its prepared pass.
+    Destination revisions and prompt resolution must be supplied by the trusted
+    host owner; these constructors do not establish their external provenance
+    or ownership. *)
 val scope : string
 val package_id : string
 val tool : string
@@ -48,7 +49,6 @@ val destination : t -> destination
 val base_path : t -> string
 (** The physically captured workspace path, never today's inferred setting. *)
 val work : t -> work
-val input_text : t -> string
 val rendered_prompt : t -> string
 val output_schema : t -> Yojson.Safe.t
 val to_json : t -> Yojson.Safe.t
@@ -78,9 +78,9 @@ val restore : workspace:workspace ->
   load:(request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   Lane_addon_tool_request_owner.retained -> (t, string) result
 (** Restore only from a strict original-owner read. Match the current observed
-    physical workspace, original scope/ID/destination and domain schema; verify
-    the captured input/template/actual prompt together without reading today's
-    prompt override. The caller supplies a fresh observation under its original
+    physical workspace, original scope/ID/destination and domain schema; render
+    the prompt again with the captured template, never today's prompt override,
+    and require the SHA-256 recorded for the prompt that was sent. The caller supplies a fresh observation under its original
     workspace lease/serialization, and still revalidates live authority before
     effects. Strictly load each predecessor; require its matching acknowledged
     child and original typed size refusal, re-derive the entire child capture,

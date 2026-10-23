@@ -25,7 +25,7 @@ type destination = {
 }
 type work = Classification of {ledger : Ledger.t; batch : Request.batch} | Briefing of Brief.batch
 type t = {id : Request_id.t; predecessor : Request_id.t option; workspace : workspace; destination : destination;
-  prompt : Prompt_registry.prompt_resolution; work : work; input_text : string}
+  prompt : Prompt_registry.prompt_resolution; work : work}
 let scope = "workspace-curator"
 let package_id = "workspace-curator"
 let tool = "curate"
@@ -34,8 +34,6 @@ let predecessor t = t.predecessor
 let destination t = t.destination
 let base_path t = t.workspace.path
 let work t = t.work
-let input_text t = t.input_text
-let input = function Classification {batch;_} -> batch.Request.input | Briefing batch -> Brief.input batch
 let rendered = function Classification {batch;_} -> batch.Request.rendered_prompt | Briefing batch -> Brief.rendered_prompt batch
 let rendered_prompt t = rendered t.work
 let schema = function Classification _ -> Decision.output_schema | Briefing _ -> Brief.output_schema
@@ -49,7 +47,6 @@ let text = function
 let optional_text = function `Null -> Ok None | value -> Result.map Option.some (text value)
 let boolean = function `Bool value -> Ok value | _ -> Error "captured Curator record expects a boolean"
 let integer = function `Int value -> Ok value | _ -> Error "captured Curator workspace expects an integer"
-let parsed text = try Ok (Yojson.Safe.from_string text) with Yojson.Json_error detail -> Error detail
 let optional = Option.fold ~none:`Null ~some:(fun value -> `String value)
 let workspace_json w = `Assoc ["path",`String w.path;"device",`Int w.device;"inode",`Int w.inode]
 let workspace_of_json json =
@@ -103,35 +100,35 @@ let prompt_of_json json =
   let* has_override = boolean (List.assoc "has_override" f) in
   let p = {Prompt_registry.effective;source;file_value;override_value;file_path;file_exists;has_override} in
   let* () = validate_prompt p in Ok p
+(* Renders with the captured template only, never today's prompt override. *)
+let classification_render ~prompt input = Prompt_registry.render_resolved_prompt_template
+  Prompt_names.workspace_memory_curator prompt ["workspace_memory_changes",Yojson.Safe.to_string input]
+let briefing_render ~prompt input = Prompt_registry.render_resolved_prompt_template
+  Prompt_names.workspace_memory_briefing prompt ["workspace_memory_briefing",Yojson.Safe.to_string input]
+let renderer ~prompt = function
+  | Classification _ -> classification_render ~prompt
+  | Briefing _ -> briefing_render ~prompt
+let sha256 text = Digestif.SHA256.(digest_string text |> to_hex)
 let work_json = function
   | Classification {ledger;batch} -> `Assoc ["kind",`String "classification";
       "ledger",Ledger.to_json ledger;"batch",Request.batch_to_json batch]
   | Briefing batch -> `Assoc ["kind",`String "briefing";"batch",Brief.batch_to_json batch]
-let work_of_json json =
+let work_of_json ~prompt json =
   let kind = match json with `Assoc f -> List.assoc_opt "kind" f | _ -> None in
   match kind with
   | Some (`String "classification") ->
     let* f = fields ["kind";"ledger";"batch"] json in
     let* ledger = Ledger.of_json (List.assoc "ledger" f) in
-    let* batch = Request.batch_of_json ~ledger (List.assoc "batch" f)
+    let* batch = Request.batch_of_json ~ledger ~render:(classification_render ~prompt) (List.assoc "batch" f)
       |> Result.map_error Request.error_to_string in
     Ok (Classification {ledger;batch})
   | Some (`String "briefing") ->
     let* f = fields ["kind";"batch"] json in
-    let* batch = Brief.batch_of_json (List.assoc "batch" f) in Ok (Briefing batch)
+    let* batch = Brief.batch_of_json ~render:(briefing_render ~prompt) (List.assoc "batch" f) in
+    Ok (Briefing batch)
   | _ -> Error "unknown captured Curator request kind"
-let check ~prompt ~input_text work =
+let check ~prompt work =
   let* () = validate_prompt prompt in
-  let* original_input = parsed input_text in
-  let* original_input = Lane_addon_action.canonical original_input in
-  let* () = if Yojson.Safe.equal original_input (input work) then Ok ()
-    else Error "captured substitution bytes differ from the original batch input" in
-  let key, variable = match work with
-    | Classification _ -> Prompt_names.workspace_memory_curator, "workspace_memory_changes"
-    | Briefing _ -> Prompt_names.workspace_memory_briefing, "workspace_memory_briefing" in
-  let* expected_prompt = Prompt_registry.render_resolved_prompt_template key prompt [variable,input_text] in
-  let* () = if String.equal expected_prompt (rendered work) then Ok ()
-    else Error "captured rendered prompt differs from its original template and input bytes" in
   match work with
   | Classification _ -> Ok ()
   | Briefing batch ->
@@ -141,27 +138,33 @@ let check ~prompt ~input_text work =
 let make ~request_id ~workspace ~destination ~prompt work =
   let* destination = destination_of_json (destination_json destination) in
   let* prompt = prompt_of_json (prompt_json prompt) in
-  let input_text = Yojson.Safe.to_string (input work) in
-  (* Preserve the parent's original substitution bytes separately. Its typed
-     work uses the same canonical snapshot before and after durable retention,
-     so narrowing cannot render a different child from reordered object keys. *)
+  (* The typed work is the canonical snapshot a restore reads, so a fresh and a
+     restored capture narrow to the same child. The prompt the caller rendered
+     must be the one the captured template renders. *)
   let* snapshot = Lane_addon_action.canonical (work_json work) in
-  let* work = work_of_json snapshot in
-  let* () = check ~prompt ~input_text work in
-  Ok {id=request_id;predecessor=None;workspace;destination;prompt;work;input_text}
+  let* restored = work_of_json ~prompt snapshot in
+  let* () = if String.equal (rendered work) (rendered restored) then Ok ()
+    else Error "captured prompt differs from the one its stored snapshot renders" in
+  let* () = check ~prompt restored in
+  Ok {id=request_id;predecessor=None;workspace;destination;prompt;work=restored}
 let classification ~request_id ~workspace ~destination ~prompt ~ledger ~batch =
   make ~request_id ~workspace ~destination ~prompt (Classification {ledger;batch})
 let briefing ~request_id ~workspace ~destination ~prompt ~batch =
   make ~request_id ~workspace ~destination ~prompt (Briefing batch)
-let to_json t = `Assoc ["schema",`String "workspace.memory.execution-capture.v2";
+let capture_schema = "workspace.memory.execution-capture.v3"
+(* The model input is stored once, inside [work]; the prompt is rendered again
+   on restore and only its digest is kept. *)
+let to_json t = `Assoc ["schema",`String capture_schema;
   "request_id",`String (Request_id.to_string t.id);
   "predecessor",optional (Option.map Request_id.to_string t.predecessor);"workspace",workspace_json t.workspace;
   "destination",destination_json t.destination;"prompt",prompt_json t.prompt;
-  "work",work_json t.work;"input_text",`String t.input_text;"output_schema",schema t.work]
+  "work",work_json t.work;"rendered_prompt_sha256",`String (sha256 (rendered t.work));
+  "output_schema",schema t.work]
 let restore_record ~workspace (retained : Owner.retained) =
-  let* f = fields ["schema";"request_id";"predecessor";"workspace";"destination";"prompt";"work";"input_text";"output_schema"] retained.request in
+  let* f = fields ["schema";"request_id";"predecessor";"workspace";"destination";"prompt";"work";
+                   "rendered_prompt_sha256";"output_schema"] retained.request in
   let* () = match List.assoc "schema" f with
-    | `String "workspace.memory.execution-capture.v2" -> Ok ()
+    | `String schema when String.equal schema capture_schema -> Ok ()
     | _ -> Error "unknown Curator execution capture schema" in
   let* id_text = text (List.assoc "request_id" f) in
   let* id = Request_id.of_string id_text in
@@ -177,12 +180,14 @@ let restore_record ~workspace (retained : Owner.retained) =
       && String.equal retained.package_id destination.package_id && String.equal retained.tool destination.tool
     then Ok () else Error "Curator capture differs from its original request owner" in
   let* prompt = prompt_of_json (List.assoc "prompt" f) in
-  let* work = work_of_json (List.assoc "work" f) in
+  let* work = work_of_json ~prompt (List.assoc "work" f) in
   let* () = if Yojson.Safe.equal (List.assoc "output_schema" f) (schema work) then Ok ()
     else Error "Curator capture has a different domain output schema" in
-  let* input_text = text (List.assoc "input_text" f) in
-  let* () = check ~prompt ~input_text work in
-  Ok {id;predecessor;workspace;destination;prompt;work;input_text}
+  let* sent = text (List.assoc "rendered_prompt_sha256" f) in
+  let* () = if String.equal sent (sha256 (rendered work)) then Ok ()
+    else Error "Curator capture now renders a different prompt than the one it recorded" in
+  let* () = check ~prompt work in
+  Ok {id;predecessor;workspace;destination;prompt;work}
 let classification_size originals =
   let answered = List.filter_map (fun (t, (phase : Progress.phase)) ->
       match t.work, phase with
@@ -213,11 +218,7 @@ let narrow ~request_id ~final t =
         (Classification _ | Briefing _)
     | (Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused),(Classification _ | Briefing _) ->
       Error "the original terminal does not permit this batch to be narrowed" in
-  let key,variable = match t.work with
-    | Classification _ -> Prompt_names.workspace_memory_curator,"workspace_memory_changes"
-    | Briefing _ -> Prompt_names.workspace_memory_briefing,"workspace_memory_briefing" in
-  let render input = Prompt_registry.render_resolved_prompt_template key t.prompt
-    [variable,Yojson.Safe.to_string input] in
+  let render = renderer ~prompt:t.prompt t.work in
   let* smaller = match t.work with
     | Classification {ledger;batch} ->
       Request.narrow ~render ~ledger batch |> Result.map_error Request.error_to_string

@@ -551,6 +551,11 @@ let test_typed_observer_intents_follow_original_commit_without_runtime ()=with_w
   let capture,output=classification base_path ["Original fact for observation"] in
   let root=retain_capture store capture in
   let first=prepare_observation base_path store root ~now:(fun () -> 10.) in
+  check bool "the registration receipt names the request instead of holding a copy" false
+    (String_util.contains_substring (Yojson.Safe.to_string (Receipt.to_json first.registration.receipt))
+       "Original fact for observation");
+  check bool "the run input is still the whole captured request" true
+    (String_util.contains_substring (Yojson.Safe.to_string first.registration.input) "Original fact for observation");
   check bool "captured original has no invented completion" true (first.completion=None);
   check bool "observer intent leaves original primary phase Captured" true
     (Progress.phase first.original.progress=Progress.Captured);

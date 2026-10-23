@@ -22,13 +22,17 @@ can be varied without changing other notes or tracks.
 ## Direct verification
 
 Node focused suites: `selected-note-transforms`, `note-selection`,
-`sequencer-editor`, `midi-source-editor`: **25/25 PASS**, zero skipped/cancelled.
+`sequencer-editor`, `midi-source-editor`: **26/26 PASS**, zero skipped/cancelled.
 They exercise phrase/PPQ/SMPTE edits, actual point notes, original clock,
 release forms/velocities, other channels/tracks/controllers, selection/history,
 transactional port/collision/invalid-value refusal, project save/reopen and
 actual MIDI serialization/reimport. Initial source-clock fixture assertion used
 a nonexistent document field; corrected to the decoded performance timing,
-then all cases passed. Node syntax and `git diff --check` also pass.
+then all cases passed. Independent review found that source validation could
+retain newly introduced same-key overlaps. The quantizer now compares affected
+pitch/channel/port groups before and after, refusing new conflicts while
+retaining existing source overlaps. Regression cases include selected vs
+unselected notes and point-note collisions. Node syntax and `git diff --check` also pass.
 
 Actual source terminal proof used a private tmux server and the real
 `viewer.mjs --project` piano roll. Its saved two-track phrase contained a

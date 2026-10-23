@@ -17,7 +17,7 @@ characters) and `native-tui-scenario`:
 | `original-tool-result` | TUI, server and the four test executables | `test_keeper_tool_result_source`, `test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`, `test_tui_chat_call_reader` |
 | `code-references` | TUI, server and the five test executables | `test_lsp_workspace_pool`, `test_lsp_questions`, `test_lsp_message_router`, `test_lsp_process_manager`, `test_server_ide_lsp_proxy` |
 | `resource-reading` | TUI, server and the four test executables | `test_tui_published_reports`, `test_tui_resource_document_search`, `test_tui_resource_image_admission`, `test_tui_resource_images` |
-| `addon-lifecycle` | TUI, server and the two test executables | `test_tui_lane_addons`, `test_lane_addon_application` |
+| `addon-lifecycle` | TUI, server, native Addon launcher and the two test executables | `test_tui_lane_addons`, `test_lane_addon_application` |
 | `source-readers` | TUI, server and the seven test executables | The four `original-tool-result` suites plus `test_tui_workspace_entries`, `test_tui_keys`, `test_tui_palette_matching` |
 | `code-drafts` | TUI, server and the five test executables | `test_tui_code_draft`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality`, `test_tui_keys`, `test_tui_palette_matching` |
 
@@ -135,7 +135,7 @@ The two existing suites cover TUI request/state ownership and host application
 decisions. The selected TUI suite also contains existing presentation assertions;
 this scenario adds no new screen wording, layout or row-order tests, and does not
 classify that mixed suite as request/state-only proof. The matching server and
-TUI are packaged for separate actual On/Off/reconnect observations. Passing these
+TUI and native Addon launcher are packaged for separate actual On/Off/reconnect observations. Passing these
 suites does not prove that a container, real model or visible terminal executed.
 Both selected targets must exist; a missing target fails instead of reducing scope.
 
@@ -168,6 +168,17 @@ scenarios also check the server's `build-commit` and include it as `masc`, with
 its own digest and dependency list. The receipt records source SHA, workflow
 SHA, scenario and both binary digests; the existing TUI `sha256` field remains.
 The default scenario records no server digest.
+
+The `addon-lifecycle` scenario also builds `bin/masc_native_addon_launcher.exe`
+from the selected source and packages it as `masc-native-addon-launcher` with
+`launcher-native-dependencies.txt`. The receipt's `native_addon_launcher`
+records its path, SHA-256 and producer target; it is null for other scenarios.
+This executable has no build-commit command: its source identity comes from
+the exact-source build targets and receipt, not an embedded commit check.
+Put this verified artifact directory on the isolated server's PATH so native
+worker observation uses the candidate launcher rather than copying an installed
+one of unknown build source. This does not install an operator runtime or prove
+that a worker launched; actual lifecycle observations remain separate.
 
 `key-reference.md` contains the key reference produced by that source's actual
 generator. The receipt's `key_reference` records its artifact path, SHA-256 and

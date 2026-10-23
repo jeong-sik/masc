@@ -306,6 +306,23 @@ let test_audit_operation_match () =
          Audit.Match
          (Audit.audit_operation ~base_dir ~keeper_name ~operation_id))
 
+let test_audit_reply_followed_by_settled_failure () =
+  let base_dir = temp_base_path "keeper-chat-audit-settled-failure" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    let keeper_name = "audit-failed-keeper" and operation_id = "op-host-rejected" in
+    let delivery_key = delivery_key_of operation_id in
+    write_store_rows ~base_dir ~keeper_name ~delivery_key;
+    (match Store.append_settled_failure_once ~base_dir ~keeper_name ~delivery_key
+        ~content:"Keeper request failed: host rejected completion"
+        ~route:(lazy Store.Row_route.none) () with
+     | Ok (Store.Appended _) -> ()
+     | Ok (Store.Already_present _) -> Alcotest.fail "failure was replaced by the earlier answer"
+     | Error detail -> Alcotest.fail detail);
+    write_journal ~base_dir ~keeper_name ~operation_id
+      (match_events @ [E.Event_error {message="host rejected completion"}]);
+    Alcotest.(check verdict) "reply text and accepted failure agree independently"
+      Audit.Match (Audit.audit_operation ~base_dir ~keeper_name ~operation_id))
+
 let test_audit_operation_missing_journal () =
   let base_dir = temp_base_path "keeper-chat-journal-audit-missing" in
   Fun.protect
@@ -565,6 +582,8 @@ let () =
             "audit_operation over a real journal and store"
             `Quick
             test_audit_operation_match
+        ; Alcotest.test_case "reply followed by settled failure remains consistent" `Quick
+            test_audit_reply_followed_by_settled_failure
         ; Alcotest.test_case
             "missing journal is Journal_missing"
             `Quick

@@ -241,6 +241,16 @@ let terminal_outcome_mismatch ~terminal_event rows =
    are already the redacted view. An empty reply with no assistant row is the
    tool-calls-only / no-visible-reply shape, not a divergence. *)
 let assistant_text_mismatch ~reply_details rows =
+  (* Owner settlement records the accepted verdict, not provider reply text.
+     Compare Reply_details with the earlier stream result it describes. *)
+  let rows = List.filter (fun (row : Store.chat_message) ->
+    match row.delivery_provenance with
+    | Some { Delivery.transcript_slot = Delivery.Settled_failure; _ } -> false
+    | None
+    | Some { Delivery.transcript_slot =
+        (Delivery.Accepted_user | Terminal_result | Approval_request
+        | Approval_resolution | Approval_replay | Approval_replay_correction
+        | Approval_continuation | Tool_call _ | Tool_delivery _); _ } -> true) rows in
   match reply_details with
   | None -> false
   | Some (details : Events.reply_details) ->

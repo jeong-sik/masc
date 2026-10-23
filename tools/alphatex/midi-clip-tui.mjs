@@ -65,7 +65,7 @@ export async function viewMidiClip({ loaded, initialDocument, root, embedded = f
       [`g${group + 1}/ch${channel + 1} ${detail}`, [groupColors[group % groupColors.length]]]])
     }
     lines.push([[path, [dim]]], prompt === null ? '' : `:${prompt}`)
-    process.stdout.write('\x1b[H\x1b[2J' + lines.map(line => fitLine(line, process.stdout.columns || 80)).join('\n'))
+    process.stdout.write('\x1b[H\x1b[2J' + lines.map(line => fitLine(line, process.stdout.columns || 80)).join('\r\n'))
   }
   function enqueue(action) {
     tail = tail.then(action).catch(error => { status = error.message; failed = true }).finally(draw)

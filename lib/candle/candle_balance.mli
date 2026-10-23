@@ -76,12 +76,6 @@ val supply : t -> supply
     granted gifts. Purchases burn their recorded debit; equipment changes
     do not move currency. *)
 
-val equal_current_amounts : t -> t -> bool
-(** Compare wallet amounts and issued/burned supply, without the internal
-    replay/decay clocks. This is not equality of ledger history, ownership,
-    equipment or policy. Observers must compare those authorities separately;
-    this comparison never authorizes a monetary operation. *)
-
 (** Purchased items, in canonical catalog order. Starting portrait equipment
     does not imply ownership. *)
 val owned : t -> keeper:string -> Keeper_portrait_item.t list

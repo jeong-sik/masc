@@ -2,11 +2,6 @@
     half-life boundaries without publishing policy, repairing or truncating rows. *)
 type t
 val read : now:(unit -> float) -> base_path:string -> t
-val equal : t -> t -> bool
-(** Same observed policy, ledger facts, wallet amounts and currency supply.
-    Advancing only the internal replay clock does not change the observation.
-    Decay that changes an amount, every ledger change (including free item
-    purchases), policy changes and Disabled reasons remain distinct. *)
 val summary : t -> Candle_observation.t
 val balance : t -> keeper:string -> string option
 val equipment : t -> keeper:string -> (Keeper_portrait_look.equipment, string) result

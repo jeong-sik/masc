@@ -166,7 +166,8 @@ functions: the old function changes identity across the clock-only observation,
 the new one retains it. Free purchase, policy price changes, Disabled reason,
 address changes, real decay and delayed older reads remain distinguished.
 
-Reproduce with installed OCaml/findlib/Alcotest/yojson/ptime/zarith/digestif,
+Reproduce the recorded historical sources with installed
+OCaml/findlib/Alcotest/yojson/ptime/zarith/digestif,
 ppxlib and ppx_enumerate; no Dune build:
 
 ```sh
@@ -180,3 +181,11 @@ are extracted explicitly; ledger filesystem I/O, Eio, native HTTP handlers,
 response compression and installed runtime performance are **not** exercised.
 The broader HTTP suite includes a clock-only complete-response equality case,
 but that suite has not yet executed on this candidate.
+
+The current server uses the public inserted-field identity introduced by
+[#45594](https://github.com/jeong-sik/masc/pull/45594). The proposed whole-Candle
+equality helpers were removed during integration because this upstream identity
+already avoids clock-only invalidation. `run_candle_probe.py` now reads its
+explicit historical `--before` and `--after` sources from Git, including the
+Candle dependencies and tests, so the original evidence remains reproducible
+without leaving duplicate production helpers or mixing current code into it.

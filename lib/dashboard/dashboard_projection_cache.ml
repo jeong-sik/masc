@@ -45,16 +45,14 @@ let candle_read_sequence = Atomic.make 0
 let candle_observation_mu = Stdlib.Mutex.create ()
 let candle_observations = Hashtbl.create 4
 
-let candle_observation_sequence ~base_path ~request_sequence ((candle, addresses) as observation) =
+let candle_observation_sequence ~base_path ~request_sequence observation =
   let previous = Stdlib.Mutex.protect candle_observation_mu (fun () ->
     Hashtbl.find_opt candle_observations base_path) in
   (* Comparing immutable observations may traverse the ledger event history.
      Do that outside the short publication lock, then confirm the same memo. *)
   let unchanged_request = match previous with
-    | Some (latest_request, _, (previous_candle, previous_addresses))
-      when request_sequence = latest_request + 1
-           && Candle_observe.equal candle previous_candle
-           && addresses = previous_addresses ->
+    | Some (latest_request, _, previous)
+      when request_sequence = latest_request + 1 && observation = previous ->
       Some latest_request
     | Some _ | None -> None in
   Stdlib.Mutex.protect candle_observation_mu (fun () ->

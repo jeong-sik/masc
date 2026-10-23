@@ -3,17 +3,6 @@ type t =
   | Disabled of string
   | Ready of { policy : Candle_config.policy; balance : Candle_balance.t; events : Candle_event.t list }
 
-let equal left right = match left, right with
-  | Off, Off -> true
-  | Disabled left, Disabled right -> String.equal left right
-  | Ready left, Ready right ->
-    left.policy = right.policy
-    && left.events = right.events
-    && Candle_balance.equal_current_amounts left.balance right.balance
-  | Off, (Disabled _ | Ready _)
-  | Disabled _, (Off | Ready _)
-  | Ready _, (Off | Disabled _) -> false
-
 let read ~now ~base_path =
   match Candle_status.observed_view ~now ~base_path with
   | Ok view -> Ready {policy=view.policy;balance=view.balance;events=view.events}

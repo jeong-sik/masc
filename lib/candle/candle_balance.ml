@@ -118,12 +118,6 @@ let supply state =
   ; circulating_milli = Z.to_string (Z.sub state.issued state.burned)
   }
 
-let equal_current_amounts left right =
-  Names.equal Int.equal left.balances right.balances
-  && Z.equal left.issued right.issued
-  && Z.equal left.burned right.burned
-;;
-
 let balance state ~keeper =
   match Names.find_opt keeper state.balances with
   | Some amount -> amount

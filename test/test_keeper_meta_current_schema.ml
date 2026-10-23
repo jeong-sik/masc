@@ -144,6 +144,37 @@ let test_every_outside_field_has_one_classification () =
       (current_json () |> replace_field key (`String "ignored-value")))
 ;;
 
+let test_key_validation_order () =
+  let module Schema = Keeper_meta_json_current_schema in
+  let fields = fields_exn (current_json ()) in
+  let diagnostic label expected fields =
+    match Schema.validate_current_object (`Assoc fields) with
+    | Ok _ -> failf "%s unexpectedly accepted" label
+    | Error error ->
+      check string label
+        ("invalid current keeper meta: " ^ expected ^ "; runtime reset required")
+        (Schema.validation_error_detail error)
+  in
+  diagnostic "first repeated key wins over extras and missing fields"
+    "duplicate field outside_b"
+    [ "outside_a", `Null; "outside_b", `Null; "outside_b", `Bool true
+    ; "outside_a", `Bool false ];
+  diagnostic "extras retain input order and outrank missing fields"
+    "fields outside the current schema: outside_b, outside_a"
+    [ "outside_b", `Null; "name", `String "observed"; "outside_a", `Null ];
+  let first = List.hd Schema.current_field_names in
+  let last = List.hd (List.rev Schema.current_field_names) in
+  diagnostic "missing fields retain schema order"
+    ("missing required fields: " ^ first ^ ", " ^ last)
+    (List.rev (List.filter (fun (key, _) -> key <> first && key <> last) fields));
+  let reordered = List.rev fields in
+  match Schema.validate_current_object (`Assoc reordered) with
+  | Error error -> fail (Schema.validation_error_detail error)
+  | Ok observed ->
+    check bool "successful validation preserves field order and values"
+      true (observed = reordered)
+;;
+
 let test_retired_active_goal_ids_requires_reset () =
   expect_rejected
     "retired active_goal_ids"
@@ -281,6 +312,8 @@ let () =
             test_nullability_is_exact
         ; test_case "outside fields share one classification" `Quick
             test_every_outside_field_has_one_classification
+        ; test_case "key validation preserves diagnostic and field order" `Quick
+            test_key_validation_order
         ; test_case "retired active_goal_ids requires reset" `Quick
             test_retired_active_goal_ids_requires_reset
         ; test_case

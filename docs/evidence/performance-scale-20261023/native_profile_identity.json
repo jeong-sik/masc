@@ -1,0 +1,30 @@
+{
+  "source": "196f1f7134dc0bb3835c5e1d74e19d4cd4c6871c",
+  "binary_sha256": "794a9488148c88b3490aadead45601b83110f90d748385e1b94bb257aeb409a1",
+  "runtime_instance": "01a16872-829d-7000-bc69-8343963fa7e5",
+  "pid": 35433,
+  "scope": "intrusive CPU profiling; excluded from latency comparisons",
+  "sample_sha256": "7985ecdda7590f18a768df2e7c66041228420edf37ed72b9ff49e368e03a9ba6",
+  "sample_duration_s": 8,
+  "sample_interval_ms": 1,
+  "observed_main_thread_samples": 6225,
+  "main_poll_stack_samples": 5929,
+  "interpretation": "Mostly waiting on this observation window. Metadata validation, JSON/TOML parsing, file opens/stats, and Candle account revision occur in active stacks. No sole cause or CPU percentage attribution to these paths.",
+  "cleanup": {
+    "server_reaped": true,
+    "server_returncode": 0,
+    "model_requests": [
+      {
+        "method": "GET",
+        "path": "/v1/models"
+      }
+    ]
+  },
+  "candle_cleanup": {
+    "verified_absent": true,
+    "removed_containers": [],
+    "removed_volumes": [
+      "masc-lane-state-4ebbec021706d01d9ac79f8c134b9e5241957c2d8c072c3683560ace8591fe25"
+    ]
+  }
+}

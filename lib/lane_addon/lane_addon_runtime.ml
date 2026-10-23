@@ -1993,14 +1993,11 @@ let call_manager_browser_service m ~access ~(service:browser_service) ~command =
     let* sw=match Eio_context.get_root_switch_opt () with
       | Some sw -> Ok sw
       | None -> Error (Browser_addon_client.Unavailable "browser Add-on background owner is unavailable") in
-    (* An idle document read starts no browser effect. The worker answers it,
-       refuses it as busy or times it out by itself, and its answer changes
-       nothing the browser installation observes. A cancelled or lost read
-       therefore leaves no effect whose outcome is unknown; only its reader
-       learns that it failed. *)
-    let idle_document_read=match command with
-      | Browser_addon_wire.Issue {only_if_idle;_} -> only_if_idle
-      | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> false in
+    (* A command that changes nothing (Browser_addon_wire.changes_nothing),
+       such as a snapshot the host reads before it chooses a browser, leaves
+       no effect whose outcome is unknown when its reply is lost; only its
+       reader learns that it failed, and the worker keeps serving. *)
+    let changes_nothing=Browser_addon_wire.changes_nothing command in
     let on_cancel_after_dispatch ()=match command with
       | Browser_addon_wire.Issue {only_if_idle=true;_} -> ()
       | Browser_addon_wire.Issue {only_if_idle=false;_} ->
@@ -2019,14 +2016,14 @@ let call_manager_browser_service m ~access ~(service:browser_service) ~command =
        | Ok reply ->
            let changed=match reply with
              | Browser_addon_wire.Poll_result {state_id;_} -> Browser_addon_client.notice_poll_state client ~state_id
-             | Issue_result _ -> not idle_document_read
+             | Issue_result _ -> not changes_nothing
              | Receipt -> (match command with Browser_addon_wire.Disconnect _ -> true
                  | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Issue _ -> false)
              | Snapshot_result _|Model_reply _|Download_reply _|Service_refusal _ -> false in
            if changed && not e.stopping then wake e
        | Error (Browser_addon_client.Unavailable _) -> ()
        | Error (Browser_addon_client.Outcome_unknown detail) ->
-           if not e.stopping && not idle_document_read then (failed m e (Lifecycle.Effect_outcome_unknown detail);wake e));
+           if not e.stopping && not changes_nothing then (failed m e (Lifecycle.Effect_outcome_unknown detail);wake e));
       result)
 let call_browser_service ~config ~access ~service ~command =
   with_tool_call_owner (fun () ->

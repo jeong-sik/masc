@@ -151,6 +151,11 @@ type command = Snapshot | Retire
   | Disconnect of B.client_id
   | Issue of {route:B.route;verb:B.verb;actor:string option;timeout_sec:float;only_if_idle:bool}
 type request = {incarnation:string;command:command}
+let changes_nothing = function
+  | Snapshot | Model_requests | Model_wait _ -> true
+  | Issue {only_if_idle;_} -> only_if_idle
+  | Retire | Upload_stage _ | Upload_discard _ | Download_claim _ | Download_commit _ | Download_release _
+  | Model_result _ | Poll _ | Deliver _ | Disconnect _ -> false
 let to_json request =
   let fields = match request.command with
     | Snapshot -> ["operation",string "snapshot"]

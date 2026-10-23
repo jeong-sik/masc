@@ -165,6 +165,42 @@ running_at_deadline="$tmp/test-suite-running-at-deadline.txt"
 alcotest_outputs_at_deadline_file="$tmp/test-suite-alcotest-outputs-at-deadline.txt"
 sandbox_root="_build/.sandbox"
 
+# Run 39771196509 (2026-10-22) filled the runner root during the full suite:
+# 86G free after the pre-step cleanup, "No space left on device" at the
+# deadline, and nothing in the surviving log named the consumer. When free
+# space falls past a band edge, record what holds the bytes once per band, so
+# the next full run names its eater instead of guessing.
+disk_bands="30 20 10 5"
+disk_bands_seen=" "
+disk_evidence() {
+  echo "[test-suite] free space fell below ${1}G; what holds the bytes:"
+  df -h /
+  echo "[test-suite] largest _build entries:"
+  timeout 90 du -xh --max-depth=1 "$repo_root/_build" 2>/dev/null | sort -rh | head -15 || true
+  echo "[test-suite] runner temp:"
+  du -sh "$tmp" 2>/dev/null || true
+  ls -lh "$log" "$trace" 2>/dev/null || true
+  echo "[test-suite] /tmp:"
+  du -xsh /tmp 2>/dev/null || true
+  command -v docker >/dev/null 2>&1 && docker system df || true
+}
+watch_disk() {
+  local avail_gb band
+  avail_gb=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+  for band in $disk_bands; do
+    case " $disk_bands_seen " in
+      *" $band "*) ;;
+      *)
+        if [ "$avail_gb" -le "$band" ]; then
+          disk_bands_seen="$disk_bands_seen$band "
+          disk_evidence "$band"
+        fi
+        ;;
+    esac
+  done
+}
+
+
 # Dune is supervised here rather than under timeout(1) so that the deadline
 # can list the suites still alive before anything is killed. The log cannot
 # supply that: dune holds a suite's output until the suite exits, so the log
@@ -194,6 +230,7 @@ run_suite_under_deadline() {
       rc=124
       break
     fi
+    watch_disk
     sleep 5
   done
   wait "$dune_pid"
@@ -205,6 +242,7 @@ echo "[test-suite] dune build $alias_target (deadline ${deadline}s)"
 started=$(date +%s)
 run_suite_under_deadline
 echo "[test-suite] finished in $(( $(date +%s) - started ))s with exit ${rc}"
+df -h / | sed 's/^/[test-suite] disk after the suite: /'
 summarise_trace
 
 if [ "$rc" = 124 ]; then

@@ -4,6 +4,7 @@ import { CARD_STANDARD } from '../common/card'
 import { EmptyState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
 import { route } from '../../router'
+import { contextObservationMessage } from '../../lib/context-observation'
 import {
   operatorActionLog,
   operatorDigestError,
@@ -77,27 +78,17 @@ export function contextMetricsDiagnostics(snapshot: OperatorSnapshot | null): Co
   return [...byName.values()]
 }
 
-function renderContextMetricsDiagnostic(diagnostic: ContextMetricsDiagnostic) {
-  const { keeper, source, error } = diagnostic
+function renderContextMetricsDiagnostic({ keeper, source, error }: ContextMetricsDiagnostic) {
+  const message = contextObservationMessage(error)
   const sourceLabel = source === 'keeper' ? 'Keeper' : 'Persistent agent'
-  if (error.kind === 'not_observed') {
-    return html`
-      <li
-        data-testid="ops-context-metrics-diagnostic"
-        data-error-kind=${error.kind}
-      >
-        <span class="mono">${sourceLabel} ${keeper.name}</span> — context measurement <span class="mono">not_observed</span>
-      </li>
-    `
-  }
   return html`
     <li
       data-testid="ops-context-metrics-diagnostic"
       data-error-kind=${error.kind}
+      data-severity=${message.severity}
     >
-      <span class="mono">${sourceLabel} ${keeper.name}</span> — invalid context metrics diagnostic
-      ${error.reported_kind ? html`<span>kind: <span class="mono">${error.reported_kind}</span></span>` : null}
-      ${error.reported_reason ? html`<span>reason: <span class="mono">${error.reported_reason}</span></span>` : null}
+      <span class="mono">${sourceLabel} ${keeper.name}</span> — ${message.label}
+      <span class="block text-xs text-[var(--color-fg-secondary)]">${message.detail}</span>
     </li>
   `
 }
@@ -203,6 +194,8 @@ function renderActivityTimeline() {
 export function Ops() {
   const snapshot = operatorSnapshot.value
   const metricsDiagnostics = contextMetricsDiagnostics(snapshot)
+  const contextIssues = metricsDiagnostics.filter(d => contextObservationMessage(d.error).severity !== 'info')
+  const unobservedContext = metricsDiagnostics.filter(d => contextObservationMessage(d.error).severity === 'info')
   const workflowContext = route.value.tab === 'command' ? workflowContextForRoute(route.value) : null
   const workflowReady = workflowTargetReady(workflowContext, snapshot?.keepers ?? [])
 
@@ -232,16 +225,23 @@ export function Ops() {
     <section class="v2-command-surface flex flex-col gap-4" aria-label="Operations panel">
       ${operatorError.value ? html`<section class="ops-banner v2-command-panel rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorError.value}</section>` : null}
       ${operatorDigestError.value ? html`<section class="ops-banner v2-command-panel rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorDigestError.value}</section>` : null}
-      ${metricsDiagnostics.length > 0 ? html`
+      ${contextIssues.length > 0 ? html`
         <section
           class="ops-banner v2-command-panel cmd-banner"
           role="alert"
           data-testid="ops-context-metrics-unavailable"
         >
-          <b>Context metrics unavailable</b>
-          <ul>${metricsDiagnostics.map(renderContextMetricsDiagnostic)}</ul>
-          <span class="mono dim">스냅샷은 occupancy 를 관측하지 않습니다 — 잘못된 kind/reason 은 별도 진단으로 표시됩니다.</span>
+          <b>컨텍스트 관측 진단</b>
+          <ul>${contextIssues.map(renderContextMetricsDiagnostic)}</ul>
         </section>
+      ` : null}
+
+      ${unobservedContext.length > 0 ? html`
+        <details class="v2-command-panel rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)]" data-testid="ops-context-observation-note">
+          <summary>컨텍스트 점유율 미관측 · ${unobservedContext.length} Keeper</summary>
+          <p class="mt-2 text-xs text-[var(--color-fg-secondary)]">사용량만으로 점유율을 추정하지 않습니다. Keeper별 사유를 확인할 수 있습니다.</p>
+          <ul>${unobservedContext.map(renderContextMetricsDiagnostic)}</ul>
+        </details>
       ` : null}
 
       ${workflowContext ? html`

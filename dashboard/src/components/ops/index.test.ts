@@ -440,6 +440,43 @@ describe('Ops surface', () => {
     expect(empty?.textContent).not.toContain('paused')
   }, 60000)
 
+  it('separates expected unavailable scope from actionable token evidence without duplicate keepers', async () => {
+    const { Ops, operatorSnapshot, operatorActionLog, operatorError, operatorDigestError } = await loadOps()
+    const unobserved = {
+      name: 'scope-unavailable',
+      context_metrics_unavailable: {
+        kind: 'not_observed', reason: 'usage_scope_unavailable', usage_scope: 'unavailable',
+        raw_input_tokens: null, context_window: null,
+      },
+    }
+    operatorSnapshot.value = {
+      root: { paused: false }, sessions: [], recent_messages: [], available_actions: [],
+      keepers: [unobserved, {
+        name: 'reported-over-window',
+        context_metrics_unavailable: {
+          kind: 'not_observed', reason: 'context_tokens_exceed_window', usage_scope: 'per_request',
+          raw_input_tokens: 1001, context_window: 1000,
+        },
+      }],
+      persistent_agents: [unobserved],
+    } as unknown as OperatorSnapshot
+    operatorActionLog.value = []
+    operatorError.value = null
+    operatorDigestError.value = null
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    const note = container.querySelector('[data-testid="ops-context-observation-note"]')
+    const warning = container.querySelector('[data-testid="ops-context-metrics-unavailable"]')
+    expect(note?.querySelectorAll('[data-testid="ops-context-metrics-diagnostic"]')).toHaveLength(1)
+    expect(note?.querySelector('[role="alert"]')).toBeNull()
+    expect(warning?.getAttribute('role')).toBe('alert')
+    expect(warning?.querySelector('[data-severity="warning"]')?.textContent).toContain('reported-over-window')
+    expect(warning?.textContent).toContain('1001')
+    expect(warning?.textContent).toContain('1000')
+    expect(warning?.textContent).not.toContain('scope-unavailable')
+  })
+
   it('collapses a keeper present in both keepers and persistent_agents into one diagnostic (source keeper)', async () => {
     const { contextMetricsDiagnostics } = await loadOps()
 

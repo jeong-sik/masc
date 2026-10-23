@@ -31,15 +31,21 @@ val context_fields :
     [turn_record_without_usage] (turn completed without provider usage),
     [turn_record_trace_mismatch] (newest row belongs to a previous trace
     identity — a reseeded keeper stays typed-absent until its first
-    completed turn). *)
+    completed turn),
+    [conversation_cumulative_usage] (only conversation-wide usage is available),
+    [turn_total_usage] (usage is summed across a client turn),
+    [usage_scope_unavailable] (the provider did not identify its usage scope),
+    [context_tokens_exceed_window] (reported per-request input exceeds the
+    reported/configured window). These last four carry [usage_scope] and any
+    available [raw_input_tokens]/[context_window] evidence; no occupancy is
+    inferred from that evidence. *)
 
 val last_turn_usage_json_of_meta :
   Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 (** Provider-reported usage from the latest successful usage observation.
     Its timestamp is independent from [last_turn_ts], which also advances on
     failed turns. *)
-(** Provider-reported usage for the latest completed turn. This is not
-    context occupancy and must never feed request admission decisions. *)
+
 
 val last_turn_usage_json :
   base_path:string ->

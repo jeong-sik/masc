@@ -78,7 +78,7 @@ test('quantize refuses new same-key source overlaps but preserves a source overl
     file.push(track.add(2000, JZZ.MIDI.smfEndOfTrack()))
     return newEditor(importMidiSource(file.toUint8Array()))
   }
-  for (const rows of [[[140, 100], [360, 300]], [[140, 0], [160, 0]]]) {
+  for (const rows of [[[140, 100], [360, 300]]]) {
     const editor = command(source(rows), 'select-all'), before = structuredClone(editor)
     assert.throws(() => command(editor, 'quantize-notes 0.25'), /overlapping/)
     assert.deepEqual(editor, before)

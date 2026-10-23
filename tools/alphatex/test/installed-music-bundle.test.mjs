@@ -38,7 +38,7 @@ test('declared installed music bundle loads its real editors and cannot borrow m
     await symlink(join(source,'node_modules'),join(root,'node_modules'),process.platform === 'win32' ? 'junction' : 'dir')
     const complete = run()
     assert.equal(complete.status,0,complete.stderr)
-    for (const file of ['tick-units.mjs','note-quantize.mjs']) {
+    for (const file of ['tick-units.mjs','note-quantize.mjs','note-overlap.mjs']) {
       await rename(join(root,file),join(root,file+'.absent'))
       const missing = run()
       assert.notEqual(missing.status,0)

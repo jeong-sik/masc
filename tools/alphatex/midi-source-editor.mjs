@@ -1,4 +1,5 @@
-import { quantizedStarts } from './note-quantize.mjs'
+import { quantizeTick } from './note-quantize.mjs'
+import { assertMidiTimingOrder } from './note-overlap.mjs'
 import { Chord, Note } from 'tonal'
 import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions, orderMidiSourceExpression, tempoEvent, editMidiSourceTempos, meterEvent, editMidiSourceMeters } from './midi-source.mjs'
 import { expressionEvent } from './midi-expression.mjs'
@@ -418,8 +419,9 @@ export function sourceCommand(editor,line) {
       count(1)
       if (!editor.performance) throw new Error('Choose a MIDI pattern before quantizing')
       const grid=units(args[0]);if(!grid)throw new Error('Grid must be positive')
-      const starts = quantizedStarts(editor.performance.notes, notes, grid)
-      return {editor:apply(editor,notes.map(n=>({id:n.id,start:starts.get(n.id)})))}
+      const next=apply(editor,notes.map(n=>({id:n.id,start:quantizeTick(n.start,grid)})))
+      assertMidiTimingOrder(editor.performance,next.performance)
+      return {editor:next}
     }
     case 'duplicate':{
       count(1);const offset=units(args[0])

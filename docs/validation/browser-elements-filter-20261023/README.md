@@ -2,6 +2,15 @@
 
 Candidate implementation: `c2c3314a81b` (base `73028e4450921a3f130b7297d013c907df2e7f49`).
 
+The stack was subsequently rebased on
+`858499f2aeb5cbe2d8f271d4c9653ed93e501e56`; implementation is
+`724f988e9fc29a4a3bed0208555dc8c188466f00`. The two measured page-script files
+remain byte-identical to the candidate above. The new main's live BiDi framed
+`elements` path also forwards both filters, with a source test added for its
+wire arguments. After restacking, the Node checks still pass (9 items), all 18
+changed ML files parse, and the public tool TOML parses. The new OCaml framed
+read test was not executed; the DOM evidence is not a test of that transport.
+
 The reported live `within` request failed because its answer lacked the required
 `withinMatches` receipt. Current repository and installed-on-disk extension
 scripts already contained `within`; their SHA-256 matched. This does not prove

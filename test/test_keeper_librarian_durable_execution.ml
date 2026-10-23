@@ -713,7 +713,8 @@ let restart_actual_worker fixture ~sw =
       (List.exists (fun instance -> member "runtime_presence" instance=`String "live"
         && member "instance_id" instance=`String old) instances);
     check bool "actual replacement worker exports a different usable incarnation" true (attached.instance_id<>old))
-let test_purge_joins_unknown_then_worker_restart_does_not_resubmit () = with_fixture (fun ~sw fixture ->
+let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind () =
+  with_fixture ~history_kind (fun ~sw fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
   fixture.set_response (fun capture ->
     ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release;
@@ -722,7 +723,28 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit () = with_fix
     assert_pending (run_worker fixture);Eio.Promise.await arrived;
     let record,capture=only_original fixture in
     let original=Capture.to_json capture and before=progress fixture in
-    let posts=F.post_count fixture.server in
+    let source=Capture.source capture in
+    check int "unknown work retains actual external evidence" 1
+      (Keeper_librarian_input_sources.external_through (Source.counterparts source));
+    let runtime_keepers_dir=Workspace.keepers_runtime_dir fixture.config in
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir ~keeper_name |> get) in
+    check json "the original external preparation is actually pending"
+      (Keeper_external_read_cursor.observation_to_json (Source.external_prepared source))
+      (Keeper_external_read_cursor.observation_to_json (cursor ()));
+    check int "the pending external evidence is not acknowledged" 0
+      (Keeper_external_read_cursor.observation_offset (cursor ()));
+    let state_paths=[
+      Current.path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
+      Current.journal_path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
+      Current.durable_range_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
+      Current.publication_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
+      Keeper_librarian_continuity.path ~config:fixture.config ~keeper_name;
+      Keeper_external_read_cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+      Keeper_librarian_official_progress.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name] in
+    let state ()=io (fun () -> List.map (fun path -> path,Fs_compat.load_file_opt path) state_paths) in
+    let before_state=state () in
+    let posts=F.post_count fixture.server and before_delivery= !(fixture.deliveries) in
     check int "actual provider remains registered after ordinary unit returned" 1
       (Memory_lane.For_testing.external_active ~base_path:fixture.base_path ~keeper_name);
     (match Memory_lane.with_librarian_purge ~base_path:fixture.base_path ~keeper_name (fun () ->
@@ -731,18 +753,63 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit () = with_fix
      | Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
     ignore (Eio.Promise.try_resolve unblock ());
     no_memory fixture;
-    check bool "purge cancellation preserves original source progress" true (progress fixture=before);
     restart_actual_worker fixture ~sw;
-    (match run_worker fixture with
-     | Ok (Consumer.Pending | Memory_not_committed _) -> ()
-     | Error error -> fail (Consumer.error_to_string error)
-     | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
-       fail "unknown original became consumed after worker restart");
-    let reopened,restored=only_original fixture in
-    check string "worker restart keeps the original unknown ID" record.request_id reopened.Owner.request_id;
-    check json "worker restart keeps its complete original input/preparation" original (Capture.to_json restored);
-    check int "unknown work is never submitted to another provider" posts (F.post_count fixture.server);
-    no_memory fixture))
+    await_delivery fixture ~after:before_delivery;
+    let exact=Capture.request capture |> get in
+    let schema=match exact.Exact.schema with
+      | Some schema -> schema | None -> fail "unknown original has no schema" in
+    let assert_actual_unknown ()=
+      match io (fun () -> Exact.observe_retained ~store:fixture.store
+        ~declaration_id:"librarian" ~schema exact |> get) with
+      | Exact.Retained_terminal Exact.Outcome_unknown -> ()
+      | Retained_absent | Retained_open
+      | Retained_terminal (Call_final _ | Not_allowed _ | Request_id_reused) ->
+        fail "the actual host must retain terminal Outcome_unknown before testing later wakes" in
+    assert_actual_unknown ();
+    (* First observe the actual terminal through the ordinary owner. The old
+       behavior returned Memory_not_committed here, then selected a fresh ID. *)
+    assert_pending (run_worker fixture);
+    let retained_unknown,_=only_original fixture in
+    (match Progress.phase retained_unknown.Owner.progress with
+     | Rejected {stage=Execution;evidence} ->
+       check json "original refusal retains the actual host unknown terminal"
+         (Exact.final_to_json Exact.Outcome_unknown) evidence
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+       fail "the actual terminal was not retained on its original execution");
+    let unknown_progress=Progress.to_json retained_unknown.progress in
+    let assert_preserved ()=
+      assert_actual_unknown ();
+      let reopened,restored=only_original fixture in
+      check string "all wakes keep the original unknown ID" record.request_id reopened.Owner.request_id;
+      check json "all wakes keep its complete input and preparation" original (Capture.to_json restored);
+      check json "later wakes never rewrite the terminal original" unknown_progress (Progress.to_json reopened.progress);
+      check bool "unknown never acknowledges checkpoint history" true (progress fixture=before);
+      check (list (pair string (option string))) "unknown keeps Memory, WAL and both source preparations exact"
+        before_state (state ());
+      check bool "unknown grants no absorption judgment" true
+        (io (fun () -> Keeper_librarian_durable_gate.root ~store:fixture.store
+          ~owner:(Capture.physical_owner capture) ~capture |> get |> Option.is_none));
+      check int "unknown never authorizes another provider call" posts (F.post_count fixture.server);
+      no_memory fixture in
+    let ordinary_wake ()=
+      Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name;
+      Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
+      (match Refresh.last_measurement ~config:fixture.config ~keeper_name with
+       | Some measurement -> check bool "production wake retains terminal unknown as Pending" true
+           (measurement.Refresh.last_pass=Refresh.Pending)
+       | None -> fail "production wake did not report its durable result");
+      assert_preserved () in
+    assert_preserved ();
+    ordinary_wake ();
+    ordinary_wake ();
+    (* Restart again after Rejected/Outcome_unknown is durable, so this is
+       recovery of that phase, not only a Dispatch_pending transport observation. *)
+    restart_actual_worker fixture ~sw;
+    ordinary_wake ();
+    set_enabled fixture false;
+    assert_pending (run_worker fixture);
+    assert_preserved ()))
 let test_epoch_reset_refuses_old_original () = with_fixture (fun ~sw:_ fixture ->
   fixture.delivery_loss:=true;
   let before= !(fixture.deliveries) in
@@ -946,7 +1013,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_source_replacement_cannot_publish_retained_answer Replaced_checkpoint);
   test_case "same-trace restart cannot publish old retained checkpoint answer" `Quick
     (test_source_replacement_cannot_publish_retained_answer Restarted_history);
-  test_case "purge joins actual provider and worker restart never resubmits unknown" `Quick test_purge_joins_unknown_then_worker_restart_does_not_resubmit;
+  test_case "purge joins actual provider and worker restart never resubmits unknown" `Quick
+    (test_purge_joins_unknown_then_worker_restart_does_not_resubmit Atoms);
+  test_case "mixed checkpoint and official source stay pending after actual terminal unknown" `Quick
+    (test_purge_joins_unknown_then_worker_restart_does_not_resubmit Mixed);
   test_case "destructive Memory epoch reset refuses retained old owner" `Quick test_epoch_reset_refuses_old_original;
   test_case "concurrent explicit Memory write closes known basis and resumes original source once" `Quick
     (test_changed_memory_rebases_original_source_without_unknown_retry ~lose_child_after_dispatch:false);

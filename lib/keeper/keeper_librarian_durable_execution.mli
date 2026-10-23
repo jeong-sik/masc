@@ -6,9 +6,12 @@ val consume_one : config:Workspace.config -> keeper_name:string ->
   (Keeper_librarian_durable_consumer.outcome,
    Keeper_librarian_durable_consumer.error) result
 (** An unavailable attachment reports [Original_publication_blocked] and leaves
-    the original source unread. Terminal host refusals preserve their actual
-    diagnostic in [Memory_not_committed] without remaining an unfinished frontier;
-    a later wake may freshly select the still-unread source under a new ID.
+    the original source unread. A verified host terminal [Outcome_unknown]
+    remains the original unfinished frontier and returns [Pending] on its first
+    and later wakes, without fresh selection or a new provider call. Definite
+    terminal host refusals preserve their actual diagnostic in
+    [Memory_not_committed] without remaining an unfinished frontier; a later
+    wake may freshly select their still-unread source under a new ID.
     This does not grant consumption, capacity, message descent or skip authority. Original
     completed local publication may still recover while the Addon is Off.
     [wake] schedules the same Memory lane after a newly observed Finished fact;

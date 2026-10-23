@@ -20,10 +20,15 @@ val publish : store:Lane_addon_store.t -> config:Workspace.config ->
   fresh_authority:(unit -> (unit, string) result) ->
   (Keeper_librarian_durable_owner.publication, string) result
 
+type frontier = Unfinished | Settled
 val validate : store:Lane_addon_store.t -> request:Keeper_librarian_durable_request.t ->
-  record:Lane_addon_tool_request_owner.retained -> (unit, string) result
+  record:Lane_addon_tool_request_owner.retained -> (frontier, string) result
 (** Blocking strict full-inventory validation. Original host proof, preparation,
     complete Gate lineage, terminal and immutable commit markers are checked.
+    [Unfinished] includes an actual host terminal [Outcome_unknown]: its source
+    remains owned by this original and cannot be freshly selected. Definite
+    terminal refusals are [Settled]; a known basis conflict is also [Settled]
+    here and must separately pass the existing strict successor-lineage policy.
     Historical Finished and known typed-basis conflicts do not require today's
     moving range receipts/cursors to equal the old ones; they grant no current
     effect or ACK authority. *)

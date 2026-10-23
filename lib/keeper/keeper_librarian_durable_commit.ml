@@ -195,6 +195,7 @@ let settle_positions request =
   require (atom=Option.fold ~none:positions.current ~some:(fun value -> Some value) atom_next
     && official=Option.fold ~none:positions.official ~some:(fun value -> Some value) official_next)
     "Original history read-position settlement remains unconfirmed"
+type frontier = Unfinished | Settled
 let validate ~store ~request ~(record : Owner.retained) =
   let owner=Request.physical_owner request in
   let* restored=Request.restore ~owner record in
@@ -207,8 +208,8 @@ let validate ~store ~request ~(record : Owner.retained) =
     | Some (Preparation_pending _ | Preparation_confirmed _) ->
       Journal.validate_root_preparation ~store ~owner ~capture:request in
   match Progress.phase record.progress with
-  | Progress.Captured | Admission_wait _ | Dispatch_pending _ -> Ok ()
-  | Judged _ -> let* _=original_answer ~store request record in Ok ()
+  | Progress.Captured | Admission_wait _ | Dispatch_pending _ -> Ok Unfinished
+  | Judged _ -> let* _=original_answer ~store request record in Ok Unfinished
   | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ ->
     let* _=is_superseded ~request ~record in
     let* _,proposal=original_answer ~store request record in
@@ -227,9 +228,9 @@ let validate ~store ~request ~(record : Owner.retained) =
        let* gate=Journal.restore_size_evidence ~store ~owner ~parent_execution:request
          ~gate_request_id:latest.Owner.request_id in
        (match Gate.failure_detail ~absorbed:proposal.accepted.selection.absorbed gate with
-        | None -> Ok () | Some detail -> Error detail)
+        | None -> Ok Settled | Some detail -> Error detail)
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-     | Rejected _ | Subdividing _ | Subdivided _ -> Ok ())
+     | Rejected _ | Subdividing _ | Subdivided _ -> Ok Unfinished)
   | Rejected {stage=Progress.Execution;evidence} ->
     let* exact=Request.request request in
     let* schema=Option.to_result ~none:"Original history refusal lacks its schema" exact.schema in
@@ -237,8 +238,9 @@ let validate ~store ~request ~(record : Owner.retained) =
     let* ()=Request.confirm_final ~store request final in
     (match final with
      | Exact.Call_final (Answered _) -> Error "History refusal contains an answered host result"
+     | Outcome_unknown -> Ok Unfinished
      | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
-     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok ())
+     | Not_allowed _ | Request_id_reused -> Ok Settled)
   | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
     Error "Original history record has an unsupported domain phase"
 type preparation = Ready of Owner.retained | Unavailable of string
@@ -255,7 +257,7 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
     let* current=reload ~store request in
     let* ()=same (Progress.to_json original.progress) (Progress.to_json current.progress) in
     let* raw,proposal=original_answer ~store request current in
-    let* ()=validate ~store ~request ~record:current in
+    let* _=validate ~store ~request ~record:current in
     Ok (current,raw,proposal)) in
   let* superseded=is_superseded ~request ~record:current in
   if superseded then Ok (Publication.Publication_superseded current) else
@@ -396,7 +398,7 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
                actual original receipt check above always wins first. *)
             let* evidence=supersession_evidence request observed in
             let* _,record=event record (Progress.Commit_conflicted evidence) in
-            let* ()=io (fun () -> validate ~store ~request ~record) in
+            let* _=io (fun () -> validate ~store ~request ~record) in
             Ok (Publication.Publication_superseded record)
           | Error detail | Ok (Error (Current.Disposition_store_failed detail)) ->
             let* _,_=event record (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in

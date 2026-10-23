@@ -131,3 +131,52 @@ server/TUI measurements; file-read contention and memory profiling under the
 active fleet; controlled 35/350-agent runs with continuity checks. Existing
 Curator decisions, persistence validation and Keeper autonomy remain in scope
 as invariants, not knobs to weaken for a lower latency number.
+
+## Execution response observations and Candle clock equality
+
+A later unchanged deployment sample (`68ec8fb2c52545c68600928524dcc12945e55ee7`)
+measured the execution endpoint at p50 33.295 ms / p95 43.786 ms (10 anonymous
+HTTP/1.1 requests). One response's Server-Timing was
+`cache_lookup;dur=12.982, cache_compute;dur=14.283`, with 609,746 identity bytes.
+Raw private result: `/tmp/masc-perf-latency-surfaces-20261023.json`.
+
+The prepared-response lookup projected current Candle and Board-address data,
+then discarded that projection on change. H1/H2 now accept the fresh JSON
+from the same lookup, retaining prepared bytes only for equal observations.
+Publication/source/workspace validity is checked again after observation I/O.
+A changed source or invalidation falls back to the current publication. The
+native tests now assert actual purchase/corrupt-ledger behavior through this
+path and include mutation/replacement during observation. Source parsing and
+independent adversarial review passed; native/wire execution remains pending.
+No latency improvement from this change has yet been measured on a server.
+
+A separate reproduction found that structural equality included the internal
+Candle balance replay clocks. With decay Off, observations one second apart
+had equal wallet, supply, ownership and equipment but unequal internal balance
+records. Comparing the policy, complete event history and monetary amounts
+instead preserves the same observation sequence when only those clocks move.
+All events remain compared, so a free purchase still changes the witness.
+Address changes and out-of-order read admission retain their existing rules.
+
+Verification used the **actual pure Candle modules**, preprocessing the two
+portrait modules with their declared `ppx_enumerate`. The eleven balance
+Alcotest cases passed, including wallet transfer at unchanged aggregate supply
+and real decay. A source-extracted sequence probe checks both old/new sequence
+functions: the old function changes identity across the clock-only observation,
+the new one retains it. Free purchase, policy price changes, Disabled reason,
+address changes, real decay and delayed older reads remain distinguished.
+
+Reproduce with installed OCaml/findlib/Alcotest/yojson/ptime/zarith/digestif,
+ppxlib and ppx_enumerate; no Dune build:
+
+```sh
+python3 docs/evidence/performance-scale-20261023/run_candle_probe.py \
+  --output /tmp/masc-candle-probe-new
+```
+
+The runner records source hashes, PPX output and full test/probe output. The
+pure configuration/observation prefix and the observation-sequence functions
+are extracted explicitly; ledger filesystem I/O, Eio, native HTTP handlers,
+response compression and installed runtime performance are **not** exercised.
+The broader HTTP suite includes a clock-only complete-response equality case,
+but that suite has not yet executed on this candidate.

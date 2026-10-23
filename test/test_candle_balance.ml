@@ -243,6 +243,28 @@ let test_wallet_decay_and_policy_observation () =
   check int "only keepers >= min_active_balance_milli count as active" 1
     summary_t3_filtered.active_keepers
 
+let test_current_amounts_follow_money_not_observation_clock () =
+  let later = at "2026-09-29T01:00:00Z" in
+  let rows = [policy; row (payment "observation" 1000)] in
+  let read at = match Candle_balance.of_events ~at rows with
+    | Ok state -> state | Error error -> fail (Candle_balance.error_to_string error) in
+  let first = read now and second = read later in
+  check bool "unchanged currency survives a later observation" true
+    (Candle_balance.equal_current_amounts first second);
+  let transferred = match Candle_balance.gift first ~at:now
+      ~from_keeper:"keeper" ~to_keeper:"other" ~amount_milli:100 ~reason:"transfer" with
+    | Ok state -> state | Error error -> fail (Candle_balance.error_to_string error) in
+  check bool "transfer preserves aggregate supply" true
+    (Candle_balance.supply first = Candle_balance.supply transferred);
+  check bool "transfer still changes individual wallets" false
+    (Candle_balance.equal_current_amounts first transferred);
+  let decaying_rows = {policy with body=Candle_event.Half_life_set (Candle_decay.Hours 1)}
+    :: List.tl rows in
+  let decayed = match Candle_balance.of_events ~at:later decaying_rows with
+    | Ok state -> state | Error error -> fail (Candle_balance.error_to_string error) in
+  check bool "real decay changes the observation" false
+    (Candle_balance.equal_current_amounts first decayed)
+
 let () = run "candle_balance"
   ["ledger credits", [test_case "serialized payments cannot overflow a balance" `Quick test_cumulative_credit_boundary;
     test_case "a Goal is credited once" `Quick test_one_credit_per_goal;
@@ -253,4 +275,5 @@ let () = run "candle_balance"
     test_case "observations and other activity do not alter wallet decay" `Quick test_observation_and_nonmoney_events_do_not_change_decay;
     test_case "money requires explicit policy and known time" `Quick test_money_requires_policy_and_known_time;
     test_case "policy chronology is enforced before the first wallet" `Quick test_policy_clock_before_first_wallet;
-    test_case "wallet decay and policy observation track cumulative decay and supply summary" `Quick test_wallet_decay_and_policy_observation]]
+    test_case "wallet decay and policy observation track cumulative decay and supply summary" `Quick test_wallet_decay_and_policy_observation;
+    test_case "current amounts follow money rather than observation clocks" `Quick test_current_amounts_follow_money_not_observation_clock]]

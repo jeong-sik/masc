@@ -3826,6 +3826,14 @@ crown = %d
   let first = row () in
   let first_sequence = !observation_sequence in
   let first_view = Candle_observe.read ~now:Time_compat.now ~base_path in
+  let later_view = Candle_observe.read ~now:(fun () -> Time_compat.now () +. 2.) ~base_path in
+  let seed = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
+  let first_observation = Dashboard_projection_cache.For_test.with_current_keeper_observations
+      ~read:(fun () -> first_view) ~config seed in
+  let later_observation = Dashboard_projection_cache.For_test.with_current_keeper_observations
+      ~read:(fun () -> later_view) ~config seed in
+  check bool "unchanged authority keeps identical response across clock ticks" true
+    (first_observation = later_observation);
   let owner = match Keeper_id.Keeper_name.of_string keeper with
     | Ok owner -> owner | Error reason -> fail reason in
   let item = match Keeper_portrait_item.of_id "crown" with

@@ -666,7 +666,7 @@ let kept_reads : Yojson.Safe.t Masc_tui_kept_reads.t = Masc_tui_kept_reads.creat
 let start_read_generation () = Masc_tui_kept_reads.start_generation kept_reads
 
 (* [http_get] with request headers of the caller's and the response headers. *)
-let http_get_response_with_body_limit ~max_body_bytes ~(host : string) ~(port : int) ~(path : string) ~headers :
+let http_get_response_with_body_limit ~timeout_sec ~max_body_bytes ~(host : string) ~(port : int) ~(path : string) ~headers :
     (Masc_http_client.response, string) result =
   let url = url_of ~host ~port ~path in
   timed_with
@@ -680,28 +680,34 @@ let http_get_response_with_body_limit ~max_body_bytes ~(host : string) ~(port : 
   @@ fun () ->
   match
     Masc_http_client.get_response_sync ?clock:(request_clock ())
-      ~timeout_sec:(request_timeout_sec ()) ?max_body_bytes ~url
+      ?timeout_sec ?max_body_bytes ~url
       ~headers:(headers @ auth_headers ()) ()
   with
   | Ok response -> Ok response
   | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
 
-let http_get_response = http_get_response_with_body_limit ~max_body_bytes:None
+let http_get_response ~host ~port ~path ~headers =
+  http_get_response_with_body_limit ~timeout_sec:(Some (request_timeout_sec ()))
+    ~max_body_bytes:None ~host ~port ~path ~headers
 
 let get_workspace_bytes ~max_body_bytes ~host ~port ~path =
   Masc_tui_workspace_read.read_bytes ~host ~port ~path
     ~send:(fun ~path -> http_get_response_with_body_limit
+      ~timeout_sec:(Some (request_timeout_sec ()))
       ~max_body_bytes:(Some max_body_bytes) ~host ~port ~path ~headers:[])
 
-let get_json_decoded ~decode ~(host : string) ~(port : int) ~(path : string) :
+let get_json_decoded ~timeout_sec ~decode ~(host : string) ~(port : int) ~(path : string) :
     (Yojson.Safe.t, string) result =
   Masc_tui_workspace_read.read_json ~kept_reads
     ~address_of:(fun ~path -> url_of ~host ~port ~path)
-    ~send:(fun ~path ~headers -> http_get_response ~host ~port ~path ~headers)
+    ~send:(fun ~path ~headers -> http_get_response_with_body_limit
+      ~timeout_sec ~max_body_bytes:None ~host ~port ~path ~headers)
     ~decode ~host ~port ~path
 
-let get_json ~host ~port ~path = get_json_decoded ~decode:decode_json ~host ~port ~path
-let get_msx_json ~host ~port ~path = get_json_decoded ~decode:decode_msx_json ~host ~port ~path
+let get_json ~host ~port ~path = get_json_decoded ~timeout_sec:(Some (request_timeout_sec ()))
+  ~decode:decode_json ~host ~port ~path
+let get_msx_json ~host ~port ~path = get_json_decoded ~timeout_sec:(Some (request_timeout_sec ()))
+  ~decode:decode_msx_json ~host ~port ~path
 
 (* One live read of a workspace machine's screen (RFC machine-spectating-
    goes-through-lanes §2.1). A transport error, a refusal and a body that does
@@ -1183,7 +1189,10 @@ let read_task_history_page ~prepare ~host ~port ~(request : Masc.Tui_decode_task
   let query=["task_id",[request.hr_task_id];"limit",[string_of_int request.hr_limit]]
     @ (match request.hr_cursor with None -> [] | Some cursor -> ["cursor",[cursor]]) in
   let path=Uri.make ~path:"/api/v1/dashboard/tasks/history/page" ~query () |> Uri.to_string in
-  Result.bind (get_json ~host ~port ~path) (fun json ->
+  (* A sparse original history can still scan the captured source prefix.
+     Its owning workspace/view cancels the read when withdrawn; a shared
+     ten-second deadline must not discard an otherwise progressing read. *)
+  Result.bind (get_json_decoded ~timeout_sec:None ~decode:decode_json ~host ~port ~path) (fun json ->
     Masc_tui_response_decode.run ~name:"task.history.page.decode_wait" (fun () ->
       Masc.Tui_decode_task_inspection.history_page ~request json |> Result.map prepare))
 let fetch_task_history_page ~host ~port ~request =

@@ -34,12 +34,12 @@ type instance = {
   revision : string; phase : Row.phase; runtime_presence : runtime_presence;
   observation_seq : int; rows_count : int;
   installation_id : string option; source_path : string option; configuration_revision : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
-  skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
+  skills_directory : string option; ui_category : Masc.Lane_addon_category.t option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
   host_requests : (host_requests, string) result option;
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
-  source_path : string; installation_id : string option; enabled : bool option; desired : string option;
+  source_path : string; installation_id : string option; ui_category : Masc.Lane_addon_category.t option; enabled : bool option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
   origin : declaration_origin;
   application : Application.observation option;
@@ -116,6 +116,20 @@ let rec array parse = function
 let nullable parse = function `Null -> Ok None | value -> Result.map Option.some (parse value)
 let boolean = function `Bool value -> Ok value | _ -> Error "expected boolean"
 let optional name parse json = get (nullable parse) name json
+module Category = Masc.Lane_addon_category
+(* Wire values are the shared contract's six. Absent or null is unclassified;
+   an explicit unknown value is a decode error, never a silent default. *)
+let ui_category_value = function
+  | `String "memory_judgment" -> Ok Category.Memory_and_judgment
+  | `String "browser" -> Ok Category.Browser
+  | `String "external_communications" -> Ok Category.External_communications
+  | `String "voice_media" -> Ok Category.Voice_and_media
+  | `String "execution_environment" -> Ok Category.Execution_environment
+  | `String "analysis" -> Ok Category.Analysis
+  | _ -> Error "unknown ui_category"
+let ui_category_of fields = match List.assoc_opt "ui_category" fields with
+  | None | Some `Null -> Ok None
+  | Some value -> Result.map Option.some (ui_category_value value)
 let output_ports = function
   | `Assoc fields ->
       List.fold_right (fun (id, value) acc ->
@@ -137,7 +151,8 @@ let configuration = function
         let {Application.source_path;installation_id;enabled;desired_revision=desired;_} = application.target in
         let* applied = optional "applied_revision" text json in
         let* instance_id = optional "instance_id" text json in
-        Ok {source_path;installation_id=Some installation_id;enabled=Some enabled;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration;application=Some application})) "declarations" json in
+        let* ui_category = match json with `Assoc fields -> ui_category_of fields | _ -> Error "expected declaration object" in
+        Ok {source_path;installation_id=Some installation_id;ui_category;enabled=Some enabled;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration;application=Some application})) "declarations" json in
       let* issues = get (array (fun json ->
         let* source_path = get text "source_path" json in
         let* installation_id = optional "id" text json in
@@ -145,7 +160,7 @@ let configuration = function
       let declarations = List.fold_left (fun declarations (path, id, message) ->
         if List.exists (fun (d : declaration) -> d.source_path = path) declarations
         then List.map (fun (d : declaration) -> if d.source_path = path then {d with issues=d.issues @ [message]} else d) declarations
-        else declarations @ [{source_path=path;installation_id=id;enabled=None;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only;application=None}]) declarations issues in
+        else declarations @ [{source_path=path;installation_id=id;ui_category=None;enabled=None;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only;application=None}]) declarations issues in
       Ok (Some {directory;complete;declarations})
 let decode_configuration json =
   let* configuration = get configuration "configuration" json in
@@ -237,6 +252,7 @@ let instance json =
   let* package = field "package" json in
   let* outputs = get output_ports "outputs" package in
   let* skills_directory = optional "skills_directory" text package in
+  let* ui_category = match package with `Assoc fields -> ui_category_of fields | _ -> Error "expected package object" in
   let* incarnation = get text "incarnation" json in
   let* action_schema = optional "action_schema" (function `Assoc _ as schema -> Ok schema | _ -> Error "expected action schema") json in
   let* package_fields = match package with `Assoc fields -> Ok fields | _ -> Error "expected package object" in
@@ -251,7 +267,7 @@ let instance json =
     | `Assoc fields -> Option.map host_requests (List.assoc_opt "host_requests" fields)
     | _ -> None in
   Ok { id; run_id; addon_id; title; revision; phase; runtime_presence; observation_seq; rows_count;
-    installation_id;source_path;configuration_revision;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display;
+    installation_id;source_path;configuration_revision;binding;outputs;skills_directory;ui_category;incarnation;action_schema;binding_schema;display;
     host_requests }
 let output json =
   let* rows = field "rows" json in

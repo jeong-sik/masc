@@ -28,14 +28,20 @@ type instance = {
   revision : string; phase : Row.phase; runtime_presence : runtime_presence;
   observation_seq : int; rows_count : int;
   installation_id : string option; source_path : string option; configuration_revision : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
-  skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
+  skills_directory : string option;
+  ui_category : Masc.Lane_addon_category.t option;
+      (** The worker package's category as of its start; never rewritten. *)
+  incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
   host_requests : (host_requests, string) result option;
       (** [None]: the Inspect row carries none (a retained run). An unreadable
           value is [Error] for this field alone, so the rest still shows. *)
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
-  source_path : string; installation_id : string option; enabled : bool option; desired : string option;
+  source_path : string; installation_id : string option;
+  ui_category : Masc.Lane_addon_category.t option;
+      (** The current declaration's category from Inspect; [None] is unclassified. *)
+  enabled : bool option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
   origin : declaration_origin;
   application : Application.observation option;

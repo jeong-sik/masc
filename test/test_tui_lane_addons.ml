@@ -245,11 +245,11 @@ let configuration_and_ports () =
       desired=None;applied=None;instance_id=None;issues=["duplicate"];origin=UI.Issue_only;application=None}] true));
   check bool "invalid owned file with no recoverable ID blocks removal" true
     (Option.is_some (removal [{owned with installation_id=None;desired=None;applied=None;
-      instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only;application=None}] true));
+      instance_id=None;issues=["invalid TOML"];ui_category=None;enabled=None;origin=UI.Issue_only;application=None}] true));
   check (option string) "missing owned file permits retained worker cleanup" None (removal [] true);
   check (option string) "unrelated invalid declaration does not block cleanup" None
     (removal [{UI.installation_id=None;source_path="/config/lane-addons/unrelated.toml";
-      desired=None;applied=None;instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only;application=None}] true);
+      desired=None;applied=None;instance_id=None;issues=["invalid TOML"];ui_category=None;enabled=None;origin=UI.Issue_only;application=None}] true);
   check (option string) "manual cleanup remains available" None
     (UI.removal_block_reason overview {worker with installation_id=None;source_path=None});
 
@@ -422,7 +422,7 @@ let guided_actions () =
   let instance : UI.instance = {id="worker";incarnation="worker";run_id="run";
     addon_id="arbitrary-package";title="Useful observer";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc [];outputs=[];
-    skills_directory=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
+    skills_directory=None;ui_category=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
     host_requests=None} in
   let snapshot : UI.snapshot = {instances=[instance];configuration=None;
     output={rows=[];coverage=[]};complete=Some true} in
@@ -508,7 +508,7 @@ let guided_actions () =
     (UI.instance_standing ~off_requested:false
        {instance with phase=UI.Row.Attached;runtime_presence=UI.Retained_binding});
   let declaration = {UI.source_path="/config/lane-addons/custom.toml";installation_id=Some "custom";
-    enabled=Some true;desired=Some "1";applied=None;instance_id=None;issues=[];
+    ui_category=None;enabled=Some true;desired=Some "1";applied=None;instance_id=None;issues=[];
     origin=UI.Parsed_declaration;application=None} in
   (* The mark follows the application line drawn under the entry. *)
   let observed ~enabled state =
@@ -605,7 +605,7 @@ let context_flow_uses_declared_connections () =
   let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
     addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=Some "1";installation_id=Some "project-observer";source_path=Some "/config/project-observer.toml";binding=`Assoc ["sources",`List []];
-    outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
+    outputs=["events",UI.Row.All_lanes];skills_directory=None;ui_category=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
     host_requests=None} in
   let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
     installation_id=Some "project-metric";source_path=Some "/config/project-metric.toml";
@@ -615,7 +615,7 @@ let context_flow_uses_declared_connections () =
   let declaration installation_id instance_id : UI.declaration =
     {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
       instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[];
-      enabled=Some true;origin=UI.Parsed_declaration;application=None} in
+      ui_category=None;enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let configuration : UI.configuration = {directory="/config";complete=true;
     declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
@@ -904,7 +904,7 @@ let evidence_export_chooses_a_keeper_by_name () =
   let worker id : UI.instance = {id;incarnation=id;run_id="project";
     addon_id="fixture";title="Observed value changes";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
-    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
+    outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;
     display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row ~owner:"worker" "chosen";row ~owner:"worker" "second";row ~owner:"other" "foreign"];coverage=[]};
@@ -1019,11 +1019,11 @@ let refresh_preserves_operator_target () =
   let worker id : UI.instance = {id;incarnation=id;run_id="project";
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
-    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
+    outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;
     display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
+    instance_id=Some id;issues=[];ui_category=None;enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row "chosen";row "other"];coverage=[]};complete=Some true;
     configuration=Some {directory="/config";complete=true;
@@ -1085,11 +1085,11 @@ let detail_keeps_installation_ownership () =
   let worker id : UI.instance = {id;incarnation=id ^ "-run";run_id="project";
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=2;configuration_revision=Some "1";installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
-    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
+    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;ui_category=None;
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
+    instance_id=Some id;issues=[];ui_category=None;enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
     lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
     observed_at;subject_id=(if owner="b" && lane="last" then "guest" else "project");
@@ -1167,7 +1167,7 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
   let worker : UI.instance = {id="report-worker";incarnation="incarnation";run_id="project";
     addon_id="custom";title="Project report";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
-    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;display;host_requests=None} in
+    outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;display;host_requests=None} in
   let row : UI.Row.row = {id="report-row";lane_id="report-worker/report";kind=UI.Row.Value;
     title="Useful analysis";observed_at=1.;subject_id="project";clock=None;actor=None;
     fields=["body",`String "First finding\nSecond finding";"complete",`Bool false;
@@ -1381,7 +1381,7 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   let worker id run addon phase source_path : UI.instance = {
     id;incarnation=id;run_id=run;addon_id=addon;title="Repeated title";
     revision="1";phase;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=Some "1";installation_id=Option.map (fun _ -> addon) source_path;source_path;
-    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
+    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;ui_category=None;
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let old = worker "old-a" "project" "analysis" UI.Row.Detached (Some "/config/a.toml") in
   let current = worker "live-a" "project" "analysis" UI.Row.Attached (Some "/config/a.toml") in
@@ -1389,7 +1389,7 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   let other = worker "old-b" "project" "analysis" UI.Row.Detached (Some "/elsewhere/a.toml") in
   let declaration : UI.declaration = {source_path="/config/b.toml";installation_id=Some "b";
     desired=Some "1";applied=Some "1";instance_id=Some "old-b-config";
-    issues=["missing image"];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
+    issues=["missing image"];ui_category=None;enabled=Some true;origin=UI.Parsed_declaration;application=None} in
   let retired_declaration = worker "old-b-config" "project" "b" UI.Row.Detached (Some declaration.source_path) in
   let historical_row : UI.Row.row = {id="old-a/1/result";lane_id="old-a/result";
     kind=UI.Row.Value;title="Old result";observed_at=1.;subject_id="project";

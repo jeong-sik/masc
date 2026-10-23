@@ -1,13 +1,16 @@
 # Librarian execution as an Addon
 
 This records the original E03 extraction contract and its current implementation.
-The explicit-candidate production caller now uses the configured Librarian Addon
-for the raw proposal and the original host for absorption, Memory and ACK. This
-candidate has source/parser evidence; selected checks on earlier heads failed
-and their failure logs and repairs are recorded in the worklist. The restored,
-corrected combination has no successful execution receipt yet. Checkpoint, official-client, continuity and history purposes
-remain on their original host path. E03 is incomplete until its original memory
-lineage, pending-work and actual Keeper-continuity criteria are verified.
+The explicit-candidate caller uses its configured Addon for proposals and the
+host for absorption, Memory and ACK. The completed-history production queue now
+also uses an immutable Addon owner for checkpoint, official-client and mixed
+input. Continuity and other purposes remain on their existing host paths.
+
+[Current execution evidence](../evidence/2026-10-23-librarian-history-owner/README.md)
+separates successful Pending-foundation and Python-worker checks from the new
+host integration selection. Earlier failures and their repairs remain in the
+worklist. E03 stays incomplete until its original memory lineage, failure
+semantics, pending-work and actual Keeper-continuity criteria are verified.
 
 ## Execution must leave authority on the host
 

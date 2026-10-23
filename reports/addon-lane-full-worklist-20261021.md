@@ -805,3 +805,11 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - 이 단위의 production synchronous adapter는 아직 Pending을 생산하지 않는다. fake owner나 route flag는 없으며 실제 durable Addon source capture/restore, source-before-Memory lock, execution proof와 원래 receipt/두 cursor 복구를 다음 실제 owner 단위에서 연결해야 한다. 기반 하나로 E03·원래 A01–H06의54개 완료·provider·실제 UI·설치를 증명하지 않는다.
 
 - 위 Pending 기반의 후속 PR은 [#45298](https://github.com/jeong-sik/masc/pull/45298)이다. 기존 owner 수리의 [39886511979](https://github.com/jeong-sik/masc/actions/runs/39886511979)는 exact `3fdc42ef7e33e70f555ac10e40112875a45fff34`에서22/22 PASS이며 mixed capacity+quota 사례도 실제 통과했다. 이후 `f8c751ca7f1977a700297aa9f0e942f2dde0e995`는 실패 로그 excerpt의 공백만 바뀌었다. 이 결과를 새 Pending 코드의 실행 성공으로 확대하지 않는다.
+
+
+## E03 completed-history 원본 owner와 반영 경로 · 2026-10-23
+
+- 실제 durable queue를 configured `derive_memory` Addon owner로 연결했다. checkpoint/official/mixed 원본과 전체 입력·프롬프트·스키마·세 물리 루트를 보존하고, 새 selection 전에 저장된 원본을 복구한다. host Exact 증명과 원래 absorption journal 이후 source lock 및 실제 Memory 쓰기 잠금 안의 전체 basis 검사를 거쳐 두 range 영수증·external ACK·두 cursor·Finished를 정산한다. 부분 Memory 저장 뒤 정산 실패도 원본 Pending이며 새 추론 허가가 아니다. 원본을 복구하지 못한 오류는 이유를 유지한 채 같은 wake의 후속 Memory phase를 중단한다.
+- [실행 근거](../docs/evidence/2026-10-23-librarian-history-owner/README.md): Pending 기반은 exact a309cae8의 6suite631건 PASS, Python worker는 실제 27건 PASS다. 새 production 통합 11사례는 별도 실제 HTTP/worker/Memory fixture이며 선택 CI의 완료 결과와 이전 컴파일 실패를 각각 기록한다. source/parser 판정을 실행 성공으로 올리지 않는다.
+- 독립 소스 리뷰에서 Memory/runtime 경로 혼동, checkpoint 원문과 별도 message 불일치, 세대 변경, 쓰기 직전 Memory basis 경합, 원본 오류 뒤 후속 phase 진행 및 실제 worker 재시작 증거 누락을 찾아 수리했다. 실제 저장 API가 이미 정규화하는 richer checkpoint 필드의 정상 재시작 장애는 확정되지 않았으며, 필드 보존과 저장 표현의 일치 검사를 구분한다.
+- 원래 A01–H06의54개 항목명과 완료 기준은 baseline959eda39와 동일하다. history의 용량/실패 descent, 다른 Librarian 목적, 유료 provider·실제 absorption-model·Docker·두 native UI·운영 설치와 실제 Keeper 기억 연속성을 이번 소스/fixture만으로 완료 처리하지 않는다.

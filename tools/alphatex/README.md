@@ -506,6 +506,13 @@ intervals and the rootless dictionary. Candidates at the cursor include bass and
 inversions but do not assert a unique harmonic interpretation. `transpose -12`,
 `quantize 0.25` and `duplicate 8` operate on the selected track transactionally.
 
+`:quantize GRID` changes the complete current track, including all its imported
+MIDI channels. `:quantize-notes GRID` changes only the selected note IDs. Both
+use exact half-up snapping and refuse newly overlapping keys across source
+tracks sharing the same port/channel/pitch. Original source overlaps remain
+supported; different ports/channels and independent SMF2 patterns stay separate.
+Lengths, attack/release dynamics, other tracks and expression events are retained.
+
 For a whole-progression voice-leading comparison, use
 `:progression-led 0 4 drop2 C3 C5 Dm7 G7 Cmaj7` on a melodic phrase track.
 After start, duration and mode, give the inclusive lowest/highest MIDI keys

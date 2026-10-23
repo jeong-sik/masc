@@ -1,3 +1,4 @@
+import { quantizedStarts } from './note-quantize.mjs'
 import { Chord, Note, Interval, Voicing, VoicingDictionary, VoiceLeading } from 'tonal'
 import { validateSound } from './project-sound.mjs'
 import { tickUnits } from './tick-units.mjs'
@@ -342,7 +343,8 @@ export function editProject(project, trackId, edit) {
     case 'transpose': for (const note of track.notes) note.pitch += int(edit.semitones, 'transpose', -127, 127); break
     case 'quantize': {
       const grid = int(edit.grid, 'quantize grid', 1)
-      for (const note of track.notes) note.start = Math.round(note.start / grid) * grid
+      const starts = quantizedStarts(track.notes, track.notes, grid)
+      for (const note of track.notes) note.start = starts.get(note.id)
       break
     }
     case 'duplicate': {

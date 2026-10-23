@@ -59,3 +59,24 @@ test('actual end-tick ordering rejects a new raw overlap, including an already d
     else {const next=command(editor,line);assert.deepEqual(next.performance.notes.map(n=>[n.start,n.duration]),[[250,300]])}
   }
 })
+
+
+test('paired attacks already diagnosed by another overlapping note cannot newly cross a moved release',()=>{
+  for(const attackFirst of [false,true])for(const selected of [false,true]) {
+    const file=new JZZ.MIDI.SMF(1,1000)
+    const attack=new JZZ.MIDI.SMF.MTrk().add(550,JZZ.MIDI.noteOn(0,60,90)).add(800,JZZ.MIDI.noteOff(0,60,20)).add(2000,JZZ.MIDI.smfEndOfTrack())
+    const moved=new JZZ.MIDI.SMF.MTrk().add(140,JZZ.MIDI.noteOn(0,60,80)).add(440,JZZ.MIDI.noteOff(0,60,45)).add(2000,JZZ.MIDI.smfEndOfTrack())
+    const masking=new JZZ.MIDI.SMF.MTrk().add(300,JZZ.MIDI.noteOn(0,60,70)).add(700,JZZ.MIDI.noteOff(0,60,12)).add(2000,JZZ.MIDI.smfEndOfTrack())
+    file.push(attackFirst?attack:moved);file.push(attackFirst?moved:attack);file.push(masking)
+    let editor=command(newEditor(importMidiSource(file.toUint8Array())),`track ${attackFirst?2:1}`)
+    if(selected)editor=command(editor,'select-all')
+    const before=structuredClone(editor),line=`${selected?'quantize-notes':'quantize'} 0.25`
+    if(attackFirst){assert.throws(()=>command(editor,line),/overlapping/);assert.deepEqual(editor,before)}
+    else {
+      const next=command(editor,line),note=next.performance.notes.find(n=>n.track===0)
+      assert.deepEqual([note.start,note.duration],[250,300])
+      assert.deepEqual(command(next,'undo').project,editor.project)
+      assert.deepEqual(next.performance.diagnostics,editor.performance.diagnostics)
+    }
+  }
+})

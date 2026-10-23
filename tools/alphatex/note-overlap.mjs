@@ -16,19 +16,19 @@ export function midiTimingEvidence(performance) {
 
 // Tick intervals alone cannot decide an attack/release boundary shared by
 // tracks. The actual source sweep is ordered by tick, track and event order.
-// Compare each unclosed attack's relation to the same paired on/off IDs;
+// Compare every actual attack's relation to the same paired on/off IDs;
 // a previously diagnosed attack may still newly enter a different note.
 export function assertMidiTimingOrder(before, after) {
   const overlaps = new Set(before.diagnostics.filter(value => value.kind === 'overlapping-key').map(value => value.event))
   const refuse = () => { throw new Error('Edit creates overlapping notes of the same pitch, channel and port') }
   if (after.diagnostics.some(value => value.kind === 'overlapping-key' && !overlaps.has(value.event))) refuse()
   const ranks = performance => new Map(performance.events.map((event,index) => [event.id,index]))
-  const oldRanks = ranks(before), newRanks = ranks(after), events = new Map(before.events.map(event => [event.id,event]))
+  const oldRanks = ranks(before), newRanks = ranks(after)
   const notes = new Map(after.notes.map(note => [note.id,note])), attacks = new Map()
   const route = note => JSON.stringify([note.port,note.channel,note.pitch])
-  for (const diagnostic of before.diagnostics) {
-    if (diagnostic.kind !== 'unclosed-note') continue
-    const event = events.get(diagnostic.event), key = route({port:event.port,channel:event.bytes[0]&15,pitch:event.bytes[1]})
+  for (const event of before.events) {
+    if (event.kind !== 'channel' || (event.bytes[0]&0xf0) !== 0x90 || event.bytes[2] === 0) continue
+    const key = route({port:event.port,channel:event.bytes[0]&15,pitch:event.bytes[1]})
     if (!attacks.has(key)) attacks.set(key,[])
     attacks.get(key).push(event.id)
   }

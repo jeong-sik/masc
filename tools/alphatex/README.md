@@ -377,6 +377,26 @@ Each command is one undoable edit. Every resulting attack must remain in
 MIDI1 range 1–127; an invalid value refuses the entire selection without clipping.
 Note lengths, release velocities/forms, routing and unselected events stay intact.
 
+Use `:duration-notes 1/3` to give selected notes one exact length, or
+`:duration-add-notes -1/4` to shorten each by the same amount while preserving
+their length differences. Units are quarter-note beats for phrases/PPQ MIDI and
+frames for SMPTE MIDI. Onsets, attack dynamics, selection anchor, clipboard and
+unselected notes remain unchanged. Each command is one undoable edit, retained
+by save/reopen, MIDI export and arrangement handoff.
+
+Phrase lengths must stay positive and within the phrase. Imported MIDI permits
+zero-length point notes and can extend its performance to keep edited releases.
+Native release velocity/form and on/off IDs stay intact. Negative or fractional
+ticks, unsafe end positions, source-port changes and newly overlapping keys
+refuse the entire edit. Original overlaps remain supported. Unclosed raw attacks
+also participate in conflict checks without an inferred end; at a shared tick,
+actual source event order compares every attack against moved releases, including
+paired attacks whose existing diagnostics mask a new collision.
+Both source quantizers use these actual event-order checks, preserving existing
+endpoint overlaps. Sequential on/off point notes may share a tick without
+overlapping. Phrase documents keep their interval-based overlap policy. Pedal-derived sounding
+durations are not inferred by these key-length commands.
+
 From `/score`, press **p** to open the piano-roll editor. It also opens directly
 with `masc-alphatex --sequence`; reopen a saved document with `--project song.json`.
 The score's **p** and **a** keys carry the current score and selected track (or

@@ -135,6 +135,33 @@ jobs:
         if: inputs.minimal == false
         run: sudo apt-get install -y --no-install-recommends poppler-utils ffmpeg libreoffice-impress python3-venv
 
+      # This explicitly selected suite reads real MP4/PDF fixtures even when
+      # broad sandbox and presentation preparation is omitted. Resolve its
+      # source as the targeted runner does; a same-named suite elsewhere does
+      # not select these host dependencies.
+      - name: Install native media tools for selected minimal verifier checks
+        if: inputs.minimal
+        env:
+          TARGET_SUITES: ${{ inputs.suite }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
+          for suite in "${requested[@]}"; do
+            suite="${suite// /}"
+            [ -n "${suite}" ] || continue
+            if [ -f "test/${suite}.ml" ]; then
+              suite_source="test/${suite}.ml"
+            elif [ -f "${suite}.ml" ]; then
+              suite_source="${suite}.ml"
+            else
+              continue
+            fi
+            if [ "${suite_source}" -ef test/test_verification_authority_tools.ml ]; then
+              sudo apt-get install -y --no-install-recommends poppler-utils ffmpeg
+              break
+            fi
+          done
+
       - name: Prepare managed presentation verification inputs
         if: inputs.minimal == false
         run: python3 scripts/ci/prepare-presentation-verifier.py

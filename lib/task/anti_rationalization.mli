@@ -25,6 +25,18 @@ type review_request =
   ; evidence_images : evidence_image list
   }
 
+type lookup_projection =
+  | Projected of Agent_core.Types.tool_result
+  | Inline_budget_exceeded of string
+  | Artifact_storage_failure of string
+(** The full model-facing bridge result or its typed projection refusal.
+    Host-only result metadata is not a substitute for this projection. *)
+type project_lookup =
+  base_path:string -> model_projection:Tool_output.model_projection ->
+  Tool_result.result -> lookup_projection
+(** Supplied by the owning higher-level tool adapter. Required only by live
+    review execution; prompt-only reconstruction requires no projection port. *)
+
 (** The read-only tools the evaluator holds besides the submitted evidence
     snapshot (RFC-0361 D1). Every review is handed one: both lanes build the
     surface before the review runs and defer when they cannot, so there is no
@@ -148,6 +160,7 @@ val run
   -> render_prompt:(unit -> (string, string) result)
   -> ?goal_blocks:Agent_core.Types.content_block list
   -> lookup:lookup_surface
+  -> project_lookup:project_lookup
   -> provider_rest:(string -> provider_rest)
   -> base_path:string
   -> unit
@@ -213,6 +226,7 @@ val review
   -> question:verdict_question
   -> lookup:lookup_surface
   -> lookup_root:lookup_root
+  -> project_lookup:project_lookup
   -> provider_rest:(string -> provider_rest)
   -> base_path:string
   -> review_request

@@ -931,7 +931,7 @@ let process_task_once
               }
             in
             let result =
-              Task.Anti_rationalization.review
+              Task.Anti_rationalization.review ~project_lookup:Verification_authority_tools.project_lookup_result
                 ~base_path:runtime.config.base_path
                 ~sw:(Some runtime.sw)
                 ~lookup

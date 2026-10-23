@@ -49,7 +49,7 @@ let with_lane_and_reviewer ~slots ~reviewer f =
 ;;
 
 let review_with (req : AR.review_request) () =
-  AR.review
+  AR.review ~project_lookup:Masc.Verification_authority_tools.project_lookup_result
     ~question:
       { AR.completion_contract = None
       ; required_evidence = []
@@ -580,7 +580,7 @@ let test_explicit_override_never_consults_the_lane () =
     ~reviewer:(recording_reviewer calls [ "explicit-runtime", Ok (Some (AR.Approve "")) ])
     (fun () ->
        let result =
-         AR.review
+         AR.review ~project_lookup:Masc.Verification_authority_tools.project_lookup_result
            ~evaluator_runtime:"explicit-runtime"
            ~lookup
            ~lookup_root

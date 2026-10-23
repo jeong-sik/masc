@@ -434,7 +434,7 @@ let process_pending_work_inner
         | Ok (lookup, root_layout) ->
        let on_tool_result ~input result = observe_tool ~input result in
        let result =
-         Task.Anti_rationalization.run
+         Task.Anti_rationalization.run ~project_lookup:Verification_authority_tools.project_lookup_result
            ~base_path:config.base_path
            ~sw
            ~log_info:(fun message ->

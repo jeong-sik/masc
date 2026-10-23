@@ -709,3 +709,13 @@ let dispatch t ~name ~args =
            | Tool_result.Failed _ | Tool_result.Deferred _ -> Rejected);
        result)
 ;;
+
+let project_lookup_result ~base_path ~model_projection result =
+  let module Review = Task.Anti_rationalization in
+  let refusal = ref None in
+  let projected = Tool_bridge.to_agent_core_typed_result ~base_path ~model_projection
+    ~on_externalization_error:(fun error -> refusal := Some error) result in
+  match !refusal with
+  | None -> Review.Projected projected
+  | Some {Tool_bridge.kind=Inline_budget_exceeded;message} -> Review.Inline_budget_exceeded message
+  | Some {Tool_bridge.kind=Artifact_storage_failure;message} -> Review.Artifact_storage_failure message

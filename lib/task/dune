@@ -44,6 +44,8 @@
   masc.embedded_config
   masc.masc_tool_surface
   masc.tool_types
+  ; The review projection policy is a leaf type, not the parent Tool_bridge.
+  masc.masc_tool_blob_store
   masc.config_dir_resolver
   masc.prompt_registry
   masc.skill_reference

@@ -43,7 +43,7 @@ let with_reviewer reviewer f =
 ;;
 
 let review () =
-  AR.review
+  AR.review ~project_lookup:Masc.Verification_authority_tools.project_lookup_result
     ~evaluator_runtime:"task-reviewer"
     ~question:
       { AR.completion_contract = None
@@ -70,7 +70,7 @@ let test_explicit_base_path_reaches_reviewer () =
        Ok {AR.selected_runtime_id="task-reviewer";verdict=None})
     (fun () ->
        ignore
-         (AR.review ~evaluator_runtime:"task-reviewer"
+         (AR.review ~project_lookup:Masc.Verification_authority_tools.project_lookup_result ~evaluator_runtime:"task-reviewer"
             ~question:
               { AR.completion_contract = None
               ; required_evidence = []
@@ -375,7 +375,7 @@ let test_successful_lookup_is_exposed_to_the_reviewer () =
          })
     (fun () ->
        let result =
-         AR.review
+         AR.review ~project_lookup:Masc.Verification_authority_tools.project_lookup_result
            ~evaluator_runtime:"task-reviewer"
            ~question:
              { AR.completion_contract = None
@@ -513,7 +513,7 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
         | T.ToolUse _ | T.ToolResult _ | T.Image _ | T.Document _ | T.Audio _ -> None
       in
       let run_review () =
-        let reads = ref 0 and calls = ref [] and results = ref [] and views = ref [] in
+        let reads = ref 0 and projections = ref 0 and calls = ref [] and results = ref [] and views = ref [] in
         let source_lookup : AR.lookup_surface =
           { lookup with dispatch = (fun ~name ~args:actual ->
               Alcotest.(check string) "actual requested lookup name" "keeper_read_file" name;
@@ -527,6 +527,17 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
               results := !results @ [result];
               views := !views @ [actual_inline_review_view ~base_path:(Filename.get_temp_dir_name ()) result];
               result) }
+        in
+        let project_lookup ~base_path ~model_projection result =
+          Alcotest.(check string) "projection uses the actual review workspace"
+            (Filename.get_temp_dir_name ()) base_path;
+          Alcotest.(check bool) "projection keeps the completion-review inline policy" true
+            (model_projection = Tool_output.Inline_up_to
+              {maximum_bytes=Tool_shard_limits.verification_evidence_max_bytes});
+          Alcotest.(check bool) "projection receives the exact returned typed result" true
+            (result == List.nth !results !projections);
+          incr projections;
+          Masc.Verification_authority_tools.project_lookup_result ~base_path ~model_projection result
         in
         with_reviewer
           (fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:actual_prompt
@@ -577,12 +588,13 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
                  else Agent_core.Retry.ContextOverflow { message = "fixture context overflow"; limit = None }))
             end else Ok { AR.selected_runtime_id = evaluator_runtime; verdict = Some (AR.Approve "checked") })
           (fun () ->
-            let result = AR.run ~log_info:ignore ~log_warn:ignore
+            let result = AR.run ~project_lookup ~log_info:ignore ~log_warn:ignore
                 ~render_prompt:(fun () -> Ok prompt) ~goal_blocks:[attachment]
                 ~lookup:source_lookup ~provider_rest:(fun _ -> AR.No_stated_rest)
                 ~base_path:(Filename.get_temp_dir_name ()) () in
             Alcotest.(check (list string)) "declared slot order remains intact" slots !calls;
             Alcotest.(check int) "each failed slot performed a fresh lookup" 2 !reads;
+            Alcotest.(check int) "each actual lookup is projected once before later slots" !reads !projections;
             match result.verdict with
             | Some (AR.Approve "checked") -> ()
             | Some (AR.Approve _) | Some (AR.Reject _) | None -> Alcotest.fail "later evaluator lost its verdict")
@@ -666,7 +678,7 @@ let test_oversized_lookup_handoff_preserves_the_inline_refusal () =
             Ok { AR.selected_runtime_id = evaluator_runtime; verdict = Some (AR.Approve "checked refusal") }
           end)
         (fun () ->
-          let result = AR.run ~log_info:ignore ~log_warn:ignore
+          let result = AR.run ~project_lookup:Masc.Verification_authority_tools.project_lookup_result ~log_info:ignore ~log_warn:ignore
               ~render_prompt:(fun () -> Ok prompt) ~goal_blocks:[attachment]
               ~lookup:source_lookup ~provider_rest:(fun _ -> AR.No_stated_rest)
               ~base_path:(Filename.get_temp_dir_name ()) () in
@@ -762,7 +774,7 @@ let test_failed_lookup_handoff_uses_the_full_bridge_envelope () =
               Ok { AR.selected_runtime_id = evaluator_runtime; verdict = Some (AR.Approve "checked failure view") }
             end)
           (fun () ->
-            let result = AR.run ~log_info:ignore ~log_warn:ignore ~render_prompt:(fun () -> Ok prompt)
+            let result = AR.run ~project_lookup:Masc.Verification_authority_tools.project_lookup_result ~log_info:ignore ~log_warn:ignore ~render_prompt:(fun () -> Ok prompt)
                 ~goal_blocks:[attachment] ~lookup:source_lookup ~provider_rest:(fun _ -> AR.No_stated_rest)
                 ~base_path:(Filename.get_temp_dir_name ()) () in
             Alcotest.(check (list string)) "failure proceeds in declared slot order"

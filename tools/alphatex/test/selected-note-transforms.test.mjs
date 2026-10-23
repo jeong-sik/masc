@@ -111,4 +111,3 @@ test('selected quantize refuses invalid grids, collisions and source port change
   assert.throws(() => command(routed, 'quantize-notes 1'), /source port/)
   assert.deepEqual(routed, original)
 })
-

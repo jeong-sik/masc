@@ -360,6 +360,16 @@ Graphical notation still uses `/score` or the ordinary score-viewer entry.
 
 # Phrase sequencer
 
+After `:select-notes START END [LOW HIGH]` or `:select-all`, use
+`:quantize-notes 0.25` to snap only the selected attacks to the nearest grid
+(halfway points round forward). Lengths and dynamics stay unchanged. The grid
+uses quarter-note beats for phrases/PPQ MIDI or frames for SMPTE MIDI and must
+resolve to whole source ticks. The edit is one undoable transaction; invalid
+new same-key overlaps, source routing changes or document bounds refuse the entire edit.
+An original MIDI overlap may remain; quantization cannot introduce a new one.
+The selection anchor follows the grid so later copy/paste retains its timing.
+The existing `:quantize` command still addresses the selected track/channel.
+
 From `/score`, press **p** to open the piano-roll editor. It also opens directly
 with `masc-alphatex --sequence`; reopen a saved document with `--project song.json`.
 The score's **p** and **a** keys carry the current score and selected track (or

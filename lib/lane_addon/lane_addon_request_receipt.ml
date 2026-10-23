@@ -60,7 +60,12 @@ let event_of_json json =
   | "observer_completion_recorded" -> recorded Completion
   | _ -> Error "unknown observer event"
 let append state event =
-  let* event = event_of_json (event_to_json event) in
+  (* [receipt] is private at the interface: an intended receipt already passed
+     [make] or [of_json]. Only acknowledgements contain caller-supplied text. *)
+  let* () = match event with
+    | Intended _ -> Ok ()
+    | Recorded (_,digest) when String.trim digest <> "" -> Ok ()
+    | Recorded _ -> Error "observer acknowledgement requires its original digest" in
   match event with
   | Intended (Registration,receipt) -> (match state.registration,state.completion with
       | Unobserved,Unobserved -> Ok {state with registration=Pending receipt}

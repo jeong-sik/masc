@@ -18,6 +18,8 @@ type t = private { registration : publication; completion : publication }
 val empty : t
 val append : t -> event -> (t, string) result
 (** Retain each immutable intent once, then acknowledge only its exact digest.
+    An [Intended] event reuses the opaque receipt already validated by [make]
+    or [of_json]; it does not serialize and hash that receipt again.
     Completion may be retained while registration is pending, but cannot be
     acknowledged until registration is acknowledged. Duplicate/changed intents,
     unknown acknowledgements and out-of-order facts are refused. No I/O occurs;

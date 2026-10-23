@@ -3,10 +3,7 @@ open Inventory
 
 module Category = Masc.Lane_addon_category
 let row_category (row : row) = match row.selection with
-  | Exact (Standalone_lane.Librarian | Hitl_auto_judge | Board_attention | Verifier | Candle_appraiser) ->
-      Some Category.Memory_and_judgment
-  | Exact Standalone_lane.Browser_stagehand | Browser _ -> Some Category.Browser
-  | Machine _ -> Some Category.Execution_environment
+  | Exact _ | Browser _ | Machine _ -> row.ui_category
   | Declaration _ ->
       (match row.state with
        | Package_state {declaration=Some (Valid value);_} -> value.ui_category

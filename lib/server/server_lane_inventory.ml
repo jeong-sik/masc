@@ -245,8 +245,18 @@ let state_json = function
       "publication",str (match publication with No_screen -> "no_screen" | Stable -> "stable" | Running -> "running" | Publication_unavailable -> "unavailable")]
   | Package_state {declaration;instances} -> `Assoc ["kind",str "package";
       "declaration",optional declaration_json declaration;"instances",`List (List.map instance_json instances)]
-let row_to_json row = `Assoc ["id",str row.id;"label",str row.label;"purpose",str row.purpose;
+(* This is display metadata only. Selection and state retain their independent
+   contracts; clients must not reconstruct a role from their technical names. *)
+let builtin_category = function
+  | Exact (Standalone_lane.Librarian | Hitl_auto_judge | Board_attention | Verifier | Candle_appraiser) ->
+      Some Lane_addon_category.Memory_and_judgment
+  | Exact Standalone_lane.Browser_stagehand | Browser _ -> Some Lane_addon_category.Browser
+  | Machine _ -> Some Lane_addon_category.Execution_environment
+  | Declaration _ | Manual_instance _ -> None
+let row_to_json row = `Assoc (["id",str row.id;"label",str row.label;"purpose",str row.purpose;
   "selection",selection_json row.selection;"state",state_json row.state]
+  @ (match builtin_category row.selection with None -> []
+     | Some category -> ["ui_category",Lane_addon_category.to_json category]))
 let to_json t = `Assoc ["schema",str "masc.lane-inventory/v1";"observed_at",`Float t.observed_at;
   "rows",`List (List.map row_to_json t.rows);"exact_snapshot",Exact_projection.observation_to_json t.exact;
   "package_read",`Assoc ["directory",str t.directory;"complete",`Bool t.complete;

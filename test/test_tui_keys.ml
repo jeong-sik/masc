@@ -921,10 +921,10 @@ let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
   let module Inventory = Masc.Tui_decode_lane_inventory in
   let exact_rows = List.map (fun (lane : Tui_decode.standalone_lane) ->
       { Inventory.id = Masc.Lane_id.to_wire (Builtin (Exact lane.sl_lane));
-        label=lane.sl_label; purpose="Fixture exact lane"; selection=Inventory.Exact lane.sl_lane;
+        label=lane.sl_label; purpose="Fixture exact lane"; ui_category=None; selection=Inventory.Exact lane.sl_lane;
         state=Inventory.Exact_state (Inventory.Unconfigured "fixture has no admitted slots") })
       four_standalone_lanes in
-  let machine = { Inventory.id="machine/dos"; label="DOS"; purpose="Shared machine";
+  let machine = { Inventory.id="machine/dos"; label="DOS"; purpose="Shared machine"; ui_category=None;
     selection=Inventory.Machine Masc.Machine_lane.Dos; state=Inventory.Machine_state (Inventory.Machine_enabled, Inventory.Stable) } in
   replace_lane_inventory state { Inventory.observed_at=0.; exact_snapshot;
     rows=exact_rows @ [machine]; package_read={directory="/fixture/lane-addons";
@@ -956,7 +956,7 @@ let test_grouped_inventory_keeps_original_action_target () =
   let state=lanes_state () in
   let initial=Option.get state.lane_inventory in
   let package installation category : I.row =
-    {id="declaration//fixture/selected.toml";label="Selected package";purpose="Judges an original";
+    {id="declaration//fixture/selected.toml";label="Selected package";purpose="Judges an original";ui_category=None;
      selection=I.Declaration "/fixture/selected.toml";
      state=I.Package_state {declaration=Some (I.Valid {installation_id=installation;enabled=true;
        run_id="run";package_id="fixture-package";title="Selected package";
@@ -1005,7 +1005,7 @@ let test_inventory_category_preserves_metadata_owner () =
   let worker : I.instance = {instance_id="manual";incarnation="first";run_id="run";
     package_id="package";title="Browser sounding name";package_revision="original";
     ui_category=Some C.Analysis;presence=I.Live;phase=I.Observing;applied_revision=None} in
-  let manual : I.row = {id="instance/manual";label="Browser sounding name";purpose="fixture";
+  let manual : I.row = {id="instance/manual";label="Browser sounding name";purpose="fixture";ui_category=None;
     selection=I.Manual_instance {instance_id=worker.instance_id;incarnation=worker.incarnation};
     state=I.Package_state {declaration=None;instances=[worker]}} in
   Alcotest.(check bool) "manual category belongs to the exact original worker, not its title" true

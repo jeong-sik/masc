@@ -25,16 +25,8 @@ export function categoryLabel(group: AddonCategoryGroup): string {
 /** A current declaration never inherits the category of an older worker. */
 export function inventoryCategory(row: LaneInventoryRow): AddonCategoryGroup {
   switch (row.state.kind) {
-    case 'browser_clients': case 'browser_executor': return 'browser'
-    case 'machine': return 'execution_environment'
-    case 'exact': {
-      if (row.selection.kind !== 'exact') return 'unavailable'
-      switch (row.selection.lane_id) {
-        case 'browser_stagehand_exact': return 'browser'
-        case 'board_attention_exact': case 'hitl_auto_judge': case 'librarian_exact':
-        case 'candle_appraiser': case 'verifier_exact': return 'memory_judgment'
-      }
-    }
+    case 'browser_clients': case 'browser_executor': case 'machine': case 'exact':
+      return categoryGroup(row.ui_category)
     case 'package': break
   }
   const declaration = row.state.declaration

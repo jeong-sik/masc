@@ -13,6 +13,11 @@ snapshot; neither is decoded back from the other's JSON. Different families are
 read independently, so this is not an atomic cross-family transaction.
 
 Each row carries `id`, `label`, `purpose`, a typed `selection`, and `state`.
+Built-in rows additionally supply optional `ui_category` display metadata from
+the server's closed role mapping. Clients read that value without inferring a
+role from route names. Omission is unclassified; explicit null and unknown values
+are refused. Package roles remain on the current valid declaration and original
+worker metadata, independently of this built-in field.
 All built-in kinds come from `Lane_id.all_of_builtin`, rather than a separately
 maintained list.
 

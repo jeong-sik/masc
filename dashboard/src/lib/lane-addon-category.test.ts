@@ -25,19 +25,28 @@ const row = { id: `declaration/${current.source_path}`, label: 'Names are not ca
     phase: { kind: 'attached' }, applied_revision: 'inputs' }] } }
 
 describe('category ownership and stable navigation', () => {
-  it('groups built-in routes by their typed role while preserving their original navigation targets', () => {
+  it('groups built-in routes by the server role while preserving their original navigation targets', () => {
     const rows = parseLaneInventory(fixture).rows
     for (const row of rows) {
       const before = laneTargetFor(row, '/workspace')
       const groups = groupAddonCategories([row], inventoryCategory)
       expect(groups.flatMap(group => group.items)).toEqual([row])
       expect(laneTargetFor(groups[0]!.items[0]!, '/workspace')).toEqual(before)
-      switch (row.selection.kind) {
-        case 'browser': expect(inventoryCategory(row)).toBe('browser'); break
-        case 'machine': expect(inventoryCategory(row)).toBe('execution_environment'); break
-        case 'exact': expect(inventoryCategory(row)).toBe(row.selection.lane_id === 'browser_stagehand_exact' ? 'browser' : 'memory_judgment'); break
-        case 'declaration': case 'manual_instance': break
-      }
+      expect(inventoryCategory(row)).toBe(row.ui_category)
+    }
+  })
+  it('uses supplied builtin display metadata without changing the original navigation target', () => {
+    const browser = fixture.rows.find(row => row.id === 'browser/live')!
+    const read = (row: unknown) => parseLaneInventory({ ...fixture,
+      rows: fixture.rows.map(original => original.id === browser.id ? row : original) }).rows.find(row => row.id === browser.id)!
+    const original = read(browser), reclassified = read({ ...browser, ui_category: 'analysis' })
+    expect(inventoryCategory(reclassified)).toBe('analysis')
+    expect(laneTargetFor(reclassified, '/workspace')).toEqual(laneTargetFor(original, '/workspace'))
+    expect(reclassified.state).toEqual(original.state)
+    const { ui_category: _role, ...withoutRole } = browser
+    expect(inventoryCategory(read(withoutRole))).toBe('unclassified')
+    for (const ui_category of [null, 'unknown', 1]) {
+      expect(() => read({ ...browser, ui_category })).toThrow()
     }
   })
   it('uses the exact current owner for live workers and preserves retained originals', () => {

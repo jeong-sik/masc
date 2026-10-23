@@ -66,6 +66,9 @@ val snapshot : config:Workspace.config -> t
 val browser_presence :
   config:Workspace.config -> access:Lane_addon_sources.access -> Browser_addon_presence.t
 val to_json : t -> Yojson.Safe.t
+(** Built-in row [ui_category] is the shared display role consumed by operator
+    clients. It has no effect on selection, execution or configuration identity.
+    Package roles remain on the current declaration and original workers. *)
 module For_testing : sig
   val machine_publication :
     (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result -> machine_publication

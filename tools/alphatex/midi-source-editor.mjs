@@ -1,3 +1,4 @@
+import { quantizedStarts } from './note-quantize.mjs'
 import { Chord, Note } from 'tonal'
 import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions, orderMidiSourceExpression, tempoEvent, editMidiSourceTempos, meterEvent, editMidiSourceMeters } from './midi-source.mjs'
 import { expressionEvent } from './midi-expression.mjs'
@@ -388,7 +389,8 @@ export function sourceCommand(editor,line) {
     }
     case 'quantize':{
       count(1);const grid=units(args[0]);if(!grid)throw new Error('Grid must be positive')
-      return {editor:apply(editor,notes.map(n=>({id:n.id,start:Math.round(n.start/grid)*grid})))}
+      const starts = quantizedStarts(editor.performance.notes, notes, grid)
+      return {editor:apply(editor,notes.map(n=>({id:n.id,start:starts.get(n.id)})))}
     }
     case 'duplicate':{
       count(1);const offset=units(args[0])

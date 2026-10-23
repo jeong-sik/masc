@@ -68,6 +68,7 @@ const help = [
   ':tempo 120    :length 32    :meter 3 4    :loop 4 12',
   ':loop START END selects and enables repetition; l toggles it while retaining the range.',
   ':transpose -12    :quantize 0.25    :duplicate 8   (selected track)',
+  'Both quantizers refuse new same-key overlaps; imported original overlaps remain supported.',
   ':track-add Bass    :track 2    :program 33    :rename Bass',
   ':drum-track Drums creates GM channel 10; :note 36 0 0.25 100 inserts a drum hit',
   ':level 100    :pan 64        track level and pan, each 0–127',

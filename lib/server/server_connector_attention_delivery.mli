@@ -10,11 +10,12 @@ val deliver :
   keeper_name:string ->
   event_id:string ->
   channel:Keeper_continuation_channel.t ->
-  unit
-(** Enqueue the [Connector_attention] stimulus for [event_id], then signal the
+  (unit, string) result
+(** Durably enqueue the original [Connector_attention] stimulus once, including
+    after consumption or lost producer ACK, then signal the
     Keeper. The wake is a hint: a busy or lifecycle-deferred Keeper still finds
     the entry on its next lane cycle.
 
-    A refused entry is logged and counted, and that is the whole of it: the
+    A refused entry is logged, counted and returned as [Error]: the
     queue is what says a Keeper owes an answer, so an entry that never landed
     leaves nothing behind claiming otherwise. *)

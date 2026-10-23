@@ -155,7 +155,7 @@ let test_events_api_acks_and_emits_under_all () =
     env_events_api ~envelope_id:"E1" (mk_event_message ~mentions:false ())
   in
   let l = effects_of t (S.Envelope_received env) in
-  check string "ack + emit" "[send_ack; emit_event]"
+  check string "host admission owns ACK" "[emit_event]"
     ("[" ^ String.concat "; " l ^ "]")
 
 let test_events_api_no_ack_without_envelope_id () =
@@ -164,6 +164,20 @@ let test_events_api_no_ack_without_envelope_id () =
   let env = env_events_api (mk_event_message ()) in
   let effects = effects_of t (S.Envelope_received env) in
   check bool "no send_ack in effects" false (List.mem "send_ack" effects)
+
+let test_refused_delivery_does_not_mark_original_seen () =
+  let state = full_connect () in
+  let envelope = env_events_api ~envelope_id:"original-envelope" (mk_event_message ()) in
+  let state, first = S.step state ~now_mono:0.0 (S.Envelope_received envelope) in
+  let _state, retry = S.step state ~now_mono:1.0 (S.Envelope_received envelope) in
+  let check_original = function
+    | [S.Emit_event {envelope_id; event=S.Message_create {ts;_}}] ->
+      check (option string) "original envelope survives" (Some "original-envelope") envelope_id;
+      check string "original source survives" "1700000000.000100" ts
+    | _ -> fail "event was ACKed or suppressed before host durable receipt"
+  in
+  check_original first;
+  check_original retry
 
 let test_mention_only_suppresses_non_mention () =
   let t =
@@ -177,7 +191,7 @@ let test_mention_only_suppresses_non_mention () =
     env_events_api ~envelope_id:"E2" (mk_event_message ~mentions:false ())
   in
   let effects = effects_of t (S.Envelope_received env) in
-  check bool "acks" true (List.mem "send_ack" effects);
+  check bool "ambient admission precedes ACK" false (List.mem "send_ack" effects);
   check bool "no emit (not a mention)" false (List.mem "emit_event" effects)
 
 let test_app_mention_always_emits () =
@@ -220,7 +234,7 @@ let test_non_passing_human_message_emits_ambient () =
     env_events_api ~envelope_id:"EA1" (mk_event_message ~mentions:false ())
   in
   let l = effects_of t (S.Envelope_received env) in
-  check string "ack + ambient" "[send_ack; emit_ambient]"
+  check string "ambient host admission owns ACK" "[emit_ambient]"
     ("[" ^ String.concat "; " l ^ "]")
 
 let test_passing_message_emits_event_not_ambient () =
@@ -634,7 +648,8 @@ let () =
         ; test_case "hello completes handshake" `Quick test_hello_completes_handshake
         ]
     ; "ack"
-      , [ test_case "events_api acks + emits under All" `Quick
+      , [ test_case "refused original remains redeliverable" `Quick test_refused_delivery_does_not_mark_original_seen
+        ; test_case "events_api defers ACK to host acceptance under All" `Quick
             test_events_api_acks_and_emits_under_all
         ; test_case "no ack when envelope_id absent" `Quick
             test_events_api_no_ack_without_envelope_id

@@ -308,6 +308,17 @@ let slack_message ?(user_name = Some "operator") ~ts () =
 
    Two submissions through the real path: the first carries a name, the second
    carries none. *)
+let expect_ingress = function
+  | Ok Slack_gateway_state.Durable_accepted -> ()
+  | Ok (Slack_gateway_state.Intentionally_ignored _) -> fail "expected durable source acceptance"
+  | Error (Slack_gateway_state.Retryable_refusal detail) -> fail detail
+
+let queued_receipt ~channel ~keeper_name ~idempotency_key =
+  Gate_protocol.Reply { content="queued"; structured=None; stats=None;
+    message_request=Some {Gate_protocol.request_id=idempotency_key; destination_type="keeper";
+      destination_id=keeper_name; channel; actor_id=Some "U123"; status=Gate_protocol.Queued;
+      modalities=["text"]; transport=Some channel; metadata=[]} }
+
 let test_a_name_seen_once_is_remembered () =
   with_temp_base (fun () ->
     match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
@@ -318,19 +329,17 @@ let test_a_name_seen_once_is_remembered () =
       let ingress =
         Connector_ingress_lane.create ~sw ~on_failure:(fun _ -> ()) ()
       in
-      let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-          ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_
+      let dispatch ~channel ~channel_user_id:_ ~channel_user_name:_
+          ~channel_workspace_id:_ ~keeper_name ~idempotency_key
           ~metadata:_ ~content:_ =
-        Gate_protocol.Reply
-          { content = "queued"; structured = None; stats = None
-          ; message_request = None }
+        queued_receipt ~channel ~keeper_name ~idempotency_key
       in
       let submit ~user_name ~ts =
         G.For_testing.submit_event ~team_id:"T123" ~deliver:(fun () -> ())
           ingress ~dispatch_for_delivery:(fun _ -> dispatch)
           ~clock:(Eio.Stdenv.clock env)
           ~base_dir:(Env_config_core.base_path ())
-          (slack_message ~user_name ~ts ())
+          (slack_message ~user_name ~ts ()) |> expect_ingress
       in
       submit ~user_name:(Some "Vincent") ~ts:"1710000000.000001";
       submit ~user_name:None ~ts:"1710000000.000002";
@@ -361,15 +370,10 @@ let test_a_missing_author_name_is_not_replaced_by_the_id () =
       let ingress =
         Connector_ingress_lane.create ~sw ~on_failure:(fun _ -> ()) ()
       in
-      let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-          ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_
+      let dispatch ~channel ~channel_user_id:_ ~channel_user_name:_
+          ~channel_workspace_id:_ ~keeper_name ~idempotency_key
           ~metadata:_ ~content:_ =
-        Gate_protocol.Reply
-          { content = "queued"
-          ; structured = None
-          ; stats = None
-          ; message_request = None
-          }
+        queued_receipt ~channel ~keeper_name ~idempotency_key
       in
       G.For_testing.submit_event
         ~team_id:"T123"
@@ -378,7 +382,7 @@ let test_a_missing_author_name_is_not_replaced_by_the_id () =
         ~dispatch_for_delivery:(fun _ -> dispatch)
         ~clock:(Eio.Stdenv.clock env)
         ~base_dir:(Env_config_core.base_path ())
-        (slack_message ~user_name:None ~ts:"1710000000.999999" ());
+        (slack_message ~user_name:None ~ts:"1710000000.999999" ()) |> expect_ingress;
       match
         Keeper_external_attention.load_events
           ~base_path:(Env_config_core.base_path ())
@@ -417,16 +421,11 @@ let test_bound_message_queues_exact_slack_ts () =
       in
       let accepted_before_delivery = ref false in
       let observed_delivery = ref None in
-      let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-          ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+      let dispatch ~channel ~channel_user_id:_ ~channel_user_name:_
+          ~channel_workspace_id:_ ~keeper_name ~idempotency_key ~metadata:_
           ~content:_ =
         accepted_before_delivery := true;
-        Gate_protocol.Reply
-          { content = "queued"
-          ; structured = None
-          ; stats = None
-          ; message_request = None
-          }
+        queued_receipt ~channel ~keeper_name ~idempotency_key
       in
       let dispatch_for_delivery delivery =
         observed_delivery := Some delivery;
@@ -441,7 +440,7 @@ let test_bound_message_queues_exact_slack_ts () =
         ingress ~dispatch_for_delivery
         ~clock:(Eio.Stdenv.clock env)
         ~base_dir:(Env_config_core.base_path ())
-        (slack_message ~ts:"1710000000.123456" ());
+        (slack_message ~ts:"1710000000.123456" ()) |> expect_ingress;
       check bool "accept completed before handoff" true !accepted_before_delivery;
       (match !observed_delivery with
        | Some
@@ -514,12 +513,15 @@ let test_binding_store_failure_does_not_enqueue () =
       Gate_protocol.Unavailable_result
     in
     let dispatch_for_delivery _delivery = dispatch in
-    G.For_testing.submit_event
+    let receipt = G.For_testing.submit_event
       ~deliver:(fun () -> fail "binding failure must not schedule delivery")
       ingress ~dispatch_for_delivery
       ~clock:(Eio.Stdenv.clock env)
       ~base_dir:(Env_config_core.base_path ())
-      (slack_message ~ts:"1710000000.654321" ());
+      (slack_message ~ts:"1710000000.654321" ()) in
+    (match receipt with
+     | Error (Slack_gateway_state.Retryable_refusal _) -> ()
+     | Ok _ -> fail "binding store corruption must refuse transport ACK");
     Eio.Fiber.yield ();
     check bool "no volatile job accepted" false !dispatch_called;
     Eio.Switch.fail sw Exit)
@@ -603,6 +605,222 @@ let test_setting_the_param_moves_the_display_mirror () =
       (Option.map ps (Channel_gate_slack_state.get_trigger_policy ())))
 ;;
 
+let expect_value = function Ok value -> value | Error detail -> fail detail
+
+let test_transport_refusal_and_exception_withhold_ack () =
+  let delivery : Gw.delivery = {envelope_id=Some "original-envelope";
+    event=slack_message ~ts:"1710000001.000001" ()} in
+  let attempts = ref 0 and acks = ref [] in
+  let send_ack id = acks := id :: !acks in
+  let admit event =
+    incr attempts;
+    (match event with
+     | Gw.Message_create {ts;_} -> check string "original source on retry" "1710000001.000001" ts
+     | Gw.App_mention _ | Gw.Reaction_added _ | Gw.Ignored_event _ -> fail "changed original event");
+    if !attempts=1 then Error (Gw.Retryable_refusal "host storage refused")
+    else Ok Gw.Durable_accepted
+  in
+  (match Slack_socket_client.For_testing.deliver ~admit ~send_ack delivery with
+   | Error (Gw.Retryable_refusal _) -> () | Ok _ -> fail "refusal became ACK success");
+  check (list string) "no ACK before acceptance" [] !acks;
+  expect_ingress (Slack_socket_client.For_testing.deliver ~admit ~send_ack delivery);
+  check int "same refused event reaches host again" 2 !attempts;
+  check (list string) "only original envelope ACK" ["original-envelope"] !acks;
+  let before = !acks in
+  (match Slack_socket_client.For_testing.deliver
+    ~admit:(fun _ -> failwith "host callback failed") ~send_ack delivery with
+   | Error (Gw.Retryable_refusal _) -> () | Ok _ -> fail "exception became ACK success");
+  check (list string) "exception adds no ACK" before !acks
+
+let with_bound_slack f =
+  with_temp_base @@ fun () ->
+  with_env "SLACK_BOT_TOKEN" "" @@ fun () ->
+  match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
+  | Error detail -> fail detail
+  | Ok _ -> Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw -> f env sw (Env_config_core.base_path ())
+
+let ambient_admit env sw base =
+  let ingress = Connector_ingress_lane.create ~sw ~on_failure:(fun _ -> ()) () in
+  fun ?team_id event -> G.For_testing.submit_ambient_event ?team_id ingress
+    ~dispatch_for_delivery:(fun _delivery -> fun ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+      ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ ->
+      fail "original ambient work must not become a triggered operation")
+    ~clock:(Eio.Stdenv.clock env) ~base_dir:base event
+
+let ambient_delivery ts : Gw.delivery =
+  {envelope_id=Some ("envelope-" ^ ts); event=slack_message ~ts ()}
+
+let pending_queue base =
+  Keeper_registry_event_queue.snapshot_result ~base_path:base "luna" |> expect_value
+  |> Keeper_event_queue.to_list
+
+let test_ambient_original_survives_lost_ack_and_consumption () =
+  with_bound_slack @@ fun env sw base ->
+  let ambient = ambient_admit env sw base in
+  let delivery = ambient_delivery "1710000002.000001" in
+  let admit = ambient ~team_id:"T123" in
+  (match Slack_socket_client.For_testing.deliver ~admit
+    ~send_ack:(fun _ -> raise Exit) delivery with
+   | exception Exit -> ()
+   | Ok _ | Error _ -> fail "lost ACK was not exercised");
+  let attention () = Keeper_external_attention.load_events ~base_path:base ~keeper_name:"luna" in
+  let chat () = Keeper_chat_store.load_all ~base_dir:base ~keeper_name:"luna" in
+  check int "host attention committed before lost ACK" 1 (List.length (attention ()));
+  let original_rows = chat () in
+  check int "host user row committed before lost ACK" 1 (List.length original_rows);
+  check int "host queue committed before lost ACK" 1 (List.length (pending_queue base));
+  let acks = ref [] in
+  let send_ack id = acks := id :: !acks in
+  expect_ingress (Slack_socket_client.For_testing.deliver ~admit ~send_ack delivery);
+  check int "duplicate attention is same original" 1 (List.length (attention ()));
+  check (list string) "duplicate reuses exact transcript row" (List.map (fun row -> row.Keeper_chat_store.id) original_rows)
+    (List.map (fun row -> row.Keeper_chat_store.id) (chat ()));
+  check int "duplicate queue source is not multiplied" 1 (List.length (pending_queue base));
+  let state = Keeper_registry_event_queue.durable_state_result ~base_path:base "luna" |> expect_value in
+  let selection = match Keeper_event_queue_state.pending_selections state with
+    | [selection] -> selection | _ -> fail "expected one original pending selection" in
+  let _ = Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+    ~base_path:base "luna" ~applied_at:(Unix.gettimeofday ()) ~selection |> expect_value in
+  check int "actual terminal source consumed" 0 (List.length (pending_queue base));
+  expect_ingress (Slack_socket_client.For_testing.deliver ~admit ~send_ack delivery);
+  check int "late producer retry does not recreate consumed source" 0 (List.length (pending_queue base));
+  check int "late producer retry does not append chat" 1 (List.length (chat ()))
+
+let test_partial_ambient_failure_retains_original_without_ack () =
+  with_bound_slack @@ fun env sw base ->
+  let ambient = ambient_admit env sw base in
+  let path = Keeper_chat_store.chat_path ~base_dir:base ~keeper_name:"luna" in
+  Fs_compat.mkdir_p path;
+  let delivery = ambient_delivery "1710000003.000001" in
+  let acks = ref [] in
+  let send_ack id = acks := id :: !acks in
+  (match Slack_socket_client.For_testing.deliver
+    ~admit:(ambient ~team_id:"T123")
+    ~send_ack delivery with
+   | Error (Gw.Retryable_refusal _) -> () | Ok _ -> fail "failed transcript append authorized ACK");
+  check (list string) "no ACK on partial storage" [] !acks;
+  check int "original attention remains retained" 1
+    (List.length (Keeper_external_attention.load_events ~base_path:base ~keeper_name:"luna"));
+  check int "no queue before required transcript append" 0 (List.length (pending_queue base));
+  Unix.rmdir path;
+  (* Today's auth.test metadata is absent; recovery must keep the stored source. *)
+  expect_ingress (Slack_socket_client.For_testing.deliver
+    ~admit:(ambient ?team_id:None) ~send_ack delivery);
+  (match Keeper_chat_store.load_all ~base_dir:base ~keeper_name:"luna" with
+   | [{surface=Some (Surface_ref.Slack {team_id;_});_}] ->
+     check (option string) "stored source workspace preserved" (Some "T123") team_id
+   | _ -> fail "missing original Slack transcript surface");
+  (match pending_queue base with
+   | [{payload=Keeper_event_queue.Connector_attention {channel=Keeper_continuation_channel.Slack {team_id;_};_};_}] ->
+     check (option string) "queue keeps original workspace" (Some "T123") team_id
+   | _ -> fail "missing original Slack queue source");
+  let before = !acks in
+  (match Slack_socket_client.For_testing.deliver
+    ~admit:(ambient ~team_id:"OTHER") ~send_ack delivery with
+   | Error (Gw.Retryable_refusal _) -> () | Ok _ -> fail "old source authorized a different Slack workspace");
+  check (list string) "workspace mismatch adds no ACK" before !acks
+
+let test_triggered_unproven_dispatch_withholds_ack () =
+  with_bound_slack @@ fun env sw base ->
+  let ingress = Connector_ingress_lane.create ~sw ~on_failure:(fun _ -> ()) () in
+  let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_ ~channel_workspace_id:_
+    ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
+    Gate_protocol.Reply {content="looks successful";structured=None;stats=None;message_request=None} in
+  let acks = ref [] in
+  let delivery = ambient_delivery "1710000004.000001" in
+  let admit = G.For_testing.submit_event ~team_id:"T123" ~deliver:(fun () -> fail "no notice before durable proof")
+    ingress ~dispatch_for_delivery:(fun _ -> dispatch) ~clock:(Eio.Stdenv.clock env) ~base_dir:base in
+  (match Slack_socket_client.For_testing.deliver ~admit ~send_ack:(fun id -> acks:=id :: !acks) delivery with
+   | Error (Gw.Retryable_refusal _) -> () | Ok _ -> fail "unproven reply authorized ACK");
+  check (list string) "no ACK for a success-shaped reply" [] !acks
+
+let test_policy_changed_retry_preserves_original_ambient () =
+  with_bound_slack @@ fun env sw base ->
+  let delivery = ambient_delivery "1710000005.000001" in
+  let ambient = ambient_admit env sw base in
+  expect_ingress (Slack_socket_client.For_testing.deliver ~admit:(ambient ~team_id:"T123") ~send_ack:(fun _ -> ()) delivery);
+  let state = Keeper_registry_event_queue.durable_state_result ~base_path:base "luna" |> expect_value in
+  let selection = match Keeper_event_queue_state.pending_selections state with
+    | [selection] -> selection | _ -> fail "missing original ambient source" in
+  let _ = Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+    ~base_path:base "luna" ~applied_at:(Unix.gettimeofday ()) ~selection |> expect_value in
+  let attention_path = Keeper_external_attention.attention_path ~base_path:base ~keeper_name:"luna" in
+  let before_padding = (Unix.stat attention_path).Unix.st_size in
+  let _ = G.For_testing.record_external_attention ~base_dir:base ~keeper_name:"luna"
+    ~team_id:(Some "T123") ~channel_id:"C123" ~channel_name:None ~thread_ts:None
+    ~ts:"1710000099.000001" ~user_id:"U123" ~user_name:(Some "operator")
+    ~content:(String.make (Keeper_external_attention.dedup_window_bytes + 1) 'x')
+    ~mentions_bot:false ~route:"ambient" ~urgency:Keeper_external_attention.Ambient |> expect_value in
+  check bool "actual appended bytes exceed producer tail window" true
+    ((Unix.stat attention_path).Unix.st_size - before_padding > Keeper_external_attention.dedup_window_bytes);
+  let ingress = Connector_ingress_lane.create ~sw ~on_failure:(fun _ -> ()) () in
+  let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_ ~channel_workspace_id:_
+    ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ = fail "policy change minted a new triggered operation" in
+  let triggered = G.For_testing.submit_event ~team_id:"T123" ingress
+    ~dispatch_for_delivery:(fun _ -> dispatch) ~clock:(Eio.Stdenv.clock env) ~base_dir:base in
+  expect_ingress (Slack_socket_client.For_testing.deliver ~admit:triggered ~send_ack:(fun _ -> ()) delivery);
+  check int "consumed ambient source stays consumed after policy change" 0 (List.length (pending_queue base));
+  check int "no second chat producer" 1 (List.length (Keeper_chat_store.load_all ~base_dir:base ~keeper_name:"luna"))
+
+let test_policy_changed_retry_preserves_original_operation () =
+  with_bound_slack @@ fun env sw base ->
+  let module Store = Keeper_chat_operation_store in
+  let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error) in
+  let store = Store.open_or_create ~path:(Filename.concat base "original-operation.sqlite") |> store_ok in
+  Fun.protect ~finally:(fun () -> Store.close store |> store_ok) @@ fun () ->
+  let ingress = Connector_ingress_lane.create ~sw ~on_failure:(fun _ -> ()) () in
+  let dispatch ~channel ~channel_user_id ~channel_user_name:_ ~channel_workspace_id
+    ~keeper_name ~idempotency_key ~metadata:_ ~content =
+    let operation_id = Keeper_chat_operation.Operation_id.of_string idempotency_key |> expect_value in
+    let source = `Assoc ["channel",`String channel;"user",`String channel_user_id;"workspace",`String channel_workspace_id] in
+    let _ = Store.submit store ~now:(Unix.gettimeofday ()) ~operation_id ~source ~input:(`String content) |> store_ok in
+    queued_receipt ~channel ~keeper_name ~idempotency_key in
+  let delivery = ambient_delivery "1710000006.000001" in
+  let triggered = G.For_testing.submit_event ~team_id:"T123" ~deliver:(fun () -> ()) ingress
+    ~dispatch_for_delivery:(fun _ -> dispatch) ~clock:(Eio.Stdenv.clock env) ~base_dir:base in
+  (match Slack_socket_client.For_testing.deliver ~admit:triggered ~send_ack:(fun _ -> raise Exit) delivery with
+   | exception Exit -> () | Ok _ | Error _ -> fail "lost ACK not exercised");
+  let ambient = G.For_testing.submit_ambient_event ~team_id:"T123" ingress
+    ~dispatch_for_delivery:(fun _ -> dispatch) ~clock:(Eio.Stdenv.clock env) ~base_dir:base in
+  expect_ingress (Slack_socket_client.For_testing.deliver ~admit:ambient ~send_ack:(fun _ -> ()) delivery);
+  let inventory = Store.inventory store |> store_ok in
+  check int "one actual durable operation after policy change" 1 inventory.Store.queued_count;
+  check int "original triggered source does not become ambient queue" 0 (List.length (pending_queue base));
+  check int "no extra ambient transcript writer" 0 (List.length (Keeper_chat_store.load_all ~base_dir:base ~keeper_name:"luna"))
+
+let test_unknown_original_route_refuses_ack () =
+  with_bound_slack @@ fun env sw base ->
+  let original = G.For_testing.record_external_attention ~base_dir:base ~keeper_name:"luna"
+    ~team_id:(Some "T123") ~channel_id:"C123" ~channel_name:None ~thread_ts:None
+    ~ts:"1710000007.000001" ~user_id:"U123" ~user_name:(Some "operator") ~content:"wake the keeper"
+    ~mentions_bot:true ~route:"unknown-route" ~urgency:Keeper_external_attention.Ambient |> expect_value in
+  let ambient = ambient_admit env sw base in
+  let acks = ref [] in
+  (match Slack_socket_client.For_testing.deliver ~admit:(ambient ~team_id:"T123")
+    ~send_ack:(fun id -> acks := id :: !acks) (ambient_delivery "1710000007.000001") with
+   | Error (Gw.Retryable_refusal _) -> () | Ok _ -> fail "unknown original route fell through to current policy");
+  check (list string) "no ACK for unknown original route" [] !acks;
+  check int "no unknown-route queue admission" 0 (List.length (pending_queue base));
+  check string "retained original kept" original.Keeper_external_attention.event_id
+    (match Keeper_external_attention.load_events ~base_path:base ~keeper_name:"luna" with
+     | [Keeper_external_attention.Recorded item] -> item.event_id | _ -> fail "original lost")
+
+let test_unreadable_original_history_is_not_absence () =
+  with_bound_slack @@ fun env sw base ->
+  let _ = G.For_testing.record_external_attention ~base_dir:base ~keeper_name:"luna"
+    ~team_id:(Some "T123") ~channel_id:"C123" ~channel_name:None ~thread_ts:None
+    ~ts:"1710000008.000001" ~user_id:"U123" ~user_name:(Some "operator") ~content:"wake the keeper"
+    ~mentions_bot:true ~route:"ambient" ~urgency:Keeper_external_attention.Ambient |> expect_value in
+  let path = Keeper_external_attention.attention_path ~base_path:base ~keeper_name:"luna" in
+  Fs_compat.save_file path (Fs_compat.load_file path ^ "{invalid-complete-row}\n");
+  let ambient = ambient_admit env sw base in
+  let acks = ref [] in
+  (match Slack_socket_client.For_testing.deliver ~admit:(ambient ~team_id:"T123")
+    ~send_ack:(fun id -> acks:=id :: !acks) (ambient_delivery "1710000008.000001") with
+   | Error (Gw.Retryable_refusal _) -> () | Ok _ -> fail "unreadable original history became absence/success");
+  check (list string) "strict original read failure adds no ACK" [] !acks;
+  check int "no admission from malformed original history" 0 (List.length (pending_queue base))
+
 let () =
   run "server_slack_trigger_policy"
     [ ( "resolved_trigger_policy (env > TOML > default)"
@@ -637,7 +855,15 @@ let () =
             test_startup_error_is_operator_visible
         ] )
     ; ( "ingress handoff"
-      , [ test_case "bound message retains exact Slack ts" `Quick
+      , [ test_case "strict original history failure withholds ACK" `Quick test_unreadable_original_history_is_not_absence
+        ; test_case "policy change beyond tail window keeps original ambient admission" `Quick test_policy_changed_retry_preserves_original_ambient
+        ; test_case "policy change keeps original durable operation" `Quick test_policy_changed_retry_preserves_original_operation
+        ; test_case "unknown original route refuses ACK" `Quick test_unknown_original_route_refuses_ack
+        ; test_case "transport refusal and exception withhold ACK" `Quick test_transport_refusal_and_exception_withhold_ack
+        ; test_case "ambient original survives lost ACK and consumption" `Quick test_ambient_original_survives_lost_ack_and_consumption
+        ; test_case "partial ambient failure keeps original without ACK" `Quick test_partial_ambient_failure_retains_original_without_ack
+        ; test_case "triggered unproven reply withholds ACK" `Quick test_triggered_unproven_dispatch_withholds_ack
+        ; test_case "bound message retains exact Slack ts" `Quick
             test_bound_message_queues_exact_slack_ts
         ; test_case "a missing author name is not replaced by the id" `Quick
             test_a_missing_author_name_is_not_replaced_by_the_id

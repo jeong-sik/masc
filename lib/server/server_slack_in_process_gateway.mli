@@ -8,8 +8,8 @@
        Slack Socket Mode ({!Slack_socket_client.run}).
     2. For each triggered [Message_create] / [App_mention] event, looks up the
        channel→keeper binding and durably accepts the exact source event before
-       the socket callback returns. Network ACK delivery then runs on the
-       Keeper-scoped connector lane; the Keeper Owner operation owns the
+       the socket callback returns. The socket sends its envelope ACK only after a typed durable receipt;
+       the Keeper-scoped connector lane projects the threaded status notice; the Keeper Owner operation owns the
        eventual turn and connector reply.
 
     Ambient parity with the Discord gateway (RFC-0226): a human message that
@@ -71,7 +71,15 @@ module For_testing : sig
     clock:_ Eio.Time.clock ->
     base_dir:string ->
     Slack_socket_client.slack_event ->
-    unit
+    (Slack_gateway_state.ingress_receipt, Slack_gateway_state.ingress_refusal) result
+
+  val submit_ambient_event :
+    ?team_id:string -> ?user_directory:Slack_user_directory.t ->
+    Connector_ingress_lane.t ->
+    dispatch_for_delivery:(Gate_keeper_backend.connector_delivery -> Channel_gate.dispatch_fn) ->
+    clock:_ Eio.Time.clock -> base_dir:string -> Slack_gateway_state.slack_event ->
+    (Slack_gateway_state.ingress_receipt, Slack_gateway_state.ingress_refusal) result
+  (** Same synchronous durable ambient boundary as production. *)
 
   val resolve_event_identity :
     ?user_directory:Slack_user_directory.t ->
@@ -95,7 +103,7 @@ module For_testing : sig
     mentions_bot:bool ->
     route:string ->
     urgency:Keeper_external_attention.urgency ->
-    string option
+    (Keeper_external_attention.item, string) result
   (** The durable attention producer used by both the triggered and ambient
       lanes; exposed for durable round-trip tests. *)
 end

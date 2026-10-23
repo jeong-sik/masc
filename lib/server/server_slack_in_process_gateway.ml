@@ -17,6 +17,18 @@
 module State = Channel_gate_slack_state
 module Gw = Slack_gateway_state
 
+let ( let* ) = Result.bind
+let ingress_refusal detail = Error (Gw.Retryable_refusal detail)
+
+type original_route = Triggered_route | Ambient_route
+
+let original_route (original : Keeper_external_attention.item) =
+  match List.filter (fun (name, _) -> String.equal name "route") original.metadata with
+  | [(_, "triggered")] -> Ok Triggered_route
+  | [(_, "ambient")] -> Ok Ambient_route
+  | [] | _ :: _ -> ingress_refusal "original Slack attention has no unique known admission route"
+
+
 (* ---------------------------------------------------------------- *)
 (* Env-driven config                                                *)
 (* ---------------------------------------------------------------- *)
@@ -161,6 +173,9 @@ let slack_attention_surface ~team_id ~channel_id ~channel_name ~thread_ts =
   Keeper_external_attention.Slack
     { team_id; channel_id; channel_name; thread_ts }
 
+let slack_attention_key ~channel_id ~ts =
+  Printf.sprintf "slack:%s:%s" (slack_conversation_id ~channel_id) ts
+
 let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
     ~channel_name ~thread_ts ~ts ~user_id ~user_name ~content ~mentions_bot
     ~route ~urgency =
@@ -168,7 +183,7 @@ let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
     slack_attention_surface ~team_id ~channel_id ~channel_name ~thread_ts
   in
   let conversation_id = slack_conversation_id ~channel_id in
-  let dedupe_key = Printf.sprintf "slack:%s:%s" conversation_id ts in
+  let dedupe_key = slack_attention_key ~channel_id ~ts in
   let event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key in
   let item : Keeper_external_attention.item =
     { event_id
@@ -200,14 +215,76 @@ let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
         @ metadata_opt "slack_thread_ts" thread_ts
     }
   in
-  match Keeper_external_attention.record ~base_path:base_dir item with
-  | `Recorded -> Some event_id
-  | `Duplicate item -> Some item.event_id
-  | `Error error ->
-    Log.Server.warn
-      "slack external attention record failed (channel=%s keeper=%s): %s"
-      channel_id keeper_name error;
-    None
+  let* () = match Keeper_external_attention.record ~base_path:base_dir item with
+    | `Recorded | `Duplicate _ -> Ok ()
+    | `Error error ->
+      Log.Server.warn "slack external attention record failed (channel=%s keeper=%s): %s"
+        channel_id keeper_name error;
+      Error error
+  in
+  (* [record]'s bounded tail is an append optimization, not authority for
+     original route absence. Resolve the earliest original from the strict
+     whole log, including after the tail no longer contains this event. *)
+  let* originals = Keeper_external_attention.recorded_items_by_event_ids
+    ~base_path:base_dir ~keeper_name ~event_ids:[event_id]
+    |> Result.map_error Keeper_external_attention.read_error_to_string in
+  match originals with
+  | [(id, original)] when String.equal id event_id -> Ok original
+  | [] | _ :: _ -> Error "recorded Slack original is absent from its strict complete attention log"
+
+
+let restore_original_source ~keeper_name ~team_id ~channel_id ~thread_ts ~ts ~user_id
+    (original : Keeper_external_attention.item) =
+  let* source = match original.conversation.surface, original.actor.actor_id, original.external_message with
+    | Surface_ref.Slack surface, Some stored_user, Some message
+      when String.equal original.keeper_name keeper_name
+        && String.equal original.dedupe_key (slack_attention_key ~channel_id ~ts)
+        && String.equal original.event_id (Keeper_external_attention.event_id_of_dedupe_key original.dedupe_key)
+        && original.actor.authority = Keeper_chat_store.External
+        && String.equal original.source_label State.channel
+        && String.equal original.conversation.conversation_id (slack_conversation_id ~channel_id)
+        && String.equal stored_user user_id
+        && surface.thread_ts = thread_ts
+        && String.equal surface.channel_id channel_id
+        && String.equal message.message_id ts
+        && Surface_ref.equal message.surface original.conversation.surface
+        && (match team_id, surface.team_id with
+            | Some expected, Some observed -> String.equal expected observed
+            | None, None | Some _, None | None, Some _ -> true) ->
+      Ok (surface.team_id, surface.channel_id, surface.thread_ts, stored_user, message.message_id)
+    | (Surface_ref.Slack _ | Surface_ref.Dashboard _ | Surface_ref.Discord _
+      | Surface_ref.Webhook _ | Surface_ref.Agent | Surface_ref.Broadcast | Surface_ref.Gate _),
+      (Some _ | None), (Some _ | None) ->
+      ingress_refusal "original attention does not identify this Slack source and Keeper"
+  in
+  let* mentioned = match List.filter (fun (key, _) -> String.equal key "mentions_bot") original.metadata with
+    | [(_, "true")] -> Ok true | [(_, "false")] -> Ok false
+    | [] | _ :: _ -> ingress_refusal "original Slack attention has no unique boolean mention fact" in
+  Ok (source, mentioned)
+
+let finish_ambient_original ~base_dir ~keeper_name ~team_id ~channel_id ~thread_ts ~ts ~user_id
+    (original : Keeper_external_attention.item) =
+  let* (original_team, original_channel, original_thread, original_user, original_message), _ =
+    restore_original_source ~keeper_name ~team_id ~channel_id ~thread_ts ~ts ~user_id original in
+  let* request_id = Keeper_chat_delivery_identity.Request_id.of_string original.event_id
+    |> Result.map_error (fun detail -> Gw.Retryable_refusal detail) in
+  let* _ = Keeper_chat_store.append_user_message_once
+    ~base_dir ~keeper_name ~content:original.content_preview
+    ~delivery_key:(Keeper_chat_delivery_identity.Connector_message request_id)
+    ~surface:original.conversation.surface
+    ~conversation_id:original.conversation.conversation_id ~external_message_id:original_message
+    ~speaker:{Keeper_chat_store.speaker_id=Some original_user;
+      speaker_name=original.actor.display_name; speaker_authority=original.actor.authority} ()
+    |> Result.map_error (fun detail -> Gw.Retryable_refusal detail) in
+  let* channel = Keeper_continuation_channel.slack ~team_id:original_team
+    ~channel_id:original_channel ~thread_ts:original_thread ~user_id:original_user
+    |> Result.map_error (fun detail -> Gw.Retryable_refusal detail) in
+  let* () = Server_connector_attention_delivery.deliver ~base_path:base_dir
+    ~keeper_name ~event_id:original.event_id ~channel
+    |> Result.map_error (fun detail -> Gw.Retryable_refusal detail) in
+  Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
+  Slack_observability.record_ambient Slack_observability.Ambient_recorded;
+  Ok Gw.Durable_accepted
 
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)
@@ -217,7 +294,8 @@ type accepted_inbound =
   { channel_id : string
   ; reply_to_thread_ts : string
   ; keeper_name : string
-  ; attention_event_id : string option
+  ; attention_event_id : (Keeper_external_attention.item, string) result
+  ; operation_id : string
   ; outcome : (Channel_gate.outbound_message, Channel_gate.gate_error) result
   }
 
@@ -308,25 +386,50 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
         ~urgency
     in
     let outcome =
-      match
-        slack_delivery ~team_id ~channel_id ~channel_name ~thread_ts
-          ~reply_to_thread_ts ~user_id ~user_name ~ts
-      with
+      match attention_event_id with
       | Error detail -> Error (Channel_gate.Internal detail)
-      | Ok delivery ->
-        Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg
+      | Ok original ->
+        (match original_route original with
+         | Error (Gw.Retryable_refusal detail) -> Error (Channel_gate.Internal detail)
+         | Ok Ambient_route -> Error (Channel_gate.Internal "original Slack event belongs to ambient admission")
+         | Ok Triggered_route ->
+           match restore_original_source ~keeper_name ~team_id ~channel_id ~thread_ts ~ts ~user_id original with
+           | Error (Gw.Retryable_refusal detail) -> Error (Channel_gate.Internal detail)
+           | Ok ((stored_team, stored_channel, stored_thread, stored_user, stored_message), stored_mentioned) ->
+             let stored_name = original.actor.display_name in
+             let stored_channel_name = match original.conversation.surface with
+               | Surface_ref.Slack {channel_name;_} -> channel_name
+               | Surface_ref.Dashboard _ | Surface_ref.Discord _ | Surface_ref.Webhook _
+               | Surface_ref.Agent | Surface_ref.Broadcast | Surface_ref.Gate _ -> None in
+             let metadata = msg.metadata
+               |> List.remove_assoc "slack.team_id"
+               |> List.remove_assoc "slack.mentions_bot"
+               |> List.remove_assoc "mentions_bound_keeper" in
+             let msg = { msg with channel_user_id=stored_user;
+               channel_user_name=Option.value stored_name ~default:stored_user;
+               channel_workspace_id=Option.value stored_team ~default:"";
+               content=original.content_preview;
+               metadata=metadata @ metadata_opt "slack.team_id" stored_team
+                 @ metadata_bool "slack.mentions_bot" stored_mentioned
+                 @ metadata_bool "mentions_bound_keeper" stored_mentioned } in
+             match slack_delivery ~team_id:stored_team ~channel_id:stored_channel
+               ~channel_name:stored_channel_name ~thread_ts:stored_thread ~reply_to_thread_ts
+               ~user_id:stored_user ~user_name:stored_name ~ts:stored_message with
+             | Error detail -> Error (Channel_gate.Internal detail)
+             | Ok delivery -> Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg)
     in
     Some
       { channel_id
       ; reply_to_thread_ts
       ; keeper_name
       ; attention_event_id
+      ; operation_id = msg.idempotency_key
       ; outcome
       }
 
 let deliver_inbound ~clock ~base_dir accepted =
-  let { channel_id; reply_to_thread_ts; keeper_name; attention_event_id
-      ; outcome } = accepted
+  let { channel_id; reply_to_thread_ts; keeper_name; attention_event_id = _
+      ; operation_id = _; outcome } = accepted
   in
   match outcome with
      | Error gate_err -> (
@@ -484,6 +587,34 @@ let remember_resolved_names ~base_dir (ev : Gw.slack_event) =
        | Some name -> Gw.Message_create { message with user_name = Some name }))
   | Gw.App_mention _ | Gw.Reaction_added _ | Gw.Ignored_event _ -> ev
 
+let accepted_receipt (accepted : accepted_inbound) =
+  let* _ = accepted.attention_event_id |> Result.map_error (fun detail -> Gw.Retryable_refusal detail) in
+  match accepted.outcome with
+  | Error error ->
+    (match error with
+     | Channel_gate.Validation Gate_protocol.Empty_content ->
+       Ok (Gw.Intentionally_ignored Gw.Empty_message)
+     | Channel_gate.Validation (Gate_protocol.Content_too_long _) ->
+       Ok (Gw.Intentionally_ignored Gw.Oversized_message)
+     | Channel_gate.Validation (Gate_protocol.Empty_keeper_name
+         | Gate_protocol.Empty_channel_user_id | Gate_protocol.Empty_idempotency_key)
+     | Channel_gate.Keeper_error _ | Channel_gate.Dispatch_unavailable | Channel_gate.Internal _ ->
+       ingress_refusal (Channel_gate.gate_error_to_string error))
+  | Ok { message_request = None; _ } ->
+    ingress_refusal "connector dispatch returned no durable operation receipt"
+  | Ok { message_request = Some request; _ } ->
+    if not (String.equal request.request_id accepted.operation_id
+      && String.equal request.destination_type "keeper"
+      && String.equal request.destination_id accepted.keeper_name
+      && String.equal request.channel State.channel) then
+      ingress_refusal "connector operation receipt does not identify its original event and Keeper"
+    else
+      match request.status with
+      | Gate_protocol.Accepted | Gate_protocol.Queued | Gate_protocol.Running
+      | Gate_protocol.Done | Gate_protocol.Failed | Gate_protocol.Cancelled -> Ok Gw.Durable_accepted
+      | Gate_protocol.Acceptance_uncertain | Gate_protocol.Lost ->
+        ingress_refusal "connector operation acceptance is unconfirmed"
+
 let submit_event ?deliver ?team_id ?user_directory ingress ~dispatch_for_delivery
     ~clock ~base_dir (ev : Gw.slack_event) =
   let ev = resolve_event_identity ?user_directory ev in
@@ -492,47 +623,57 @@ let submit_event ?deliver ?team_id ?user_directory ingress ~dispatch_for_deliver
     match State.resolve_keeper_for_channel_result ~channel_id with
     | Error reason ->
       Slack_observability.record_inbound_dispatch Slack_observability.Gate_error;
-      Log.Server.error
-        "Slack ingress binding unavailable channel=%s event=%s: %s"
-        channel_id event_id
-        (Channel_gate_binding_store.binding_store_error_to_string reason)
-    | Ok resolved_binding -> (
+      let detail = Channel_gate_binding_store.binding_store_error_to_string reason in
+      Log.Server.error "Slack ingress binding unavailable channel=%s event=%s: %s" channel_id event_id detail;
+      ingress_refusal detail
+    | Ok resolved_binding ->
       match accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ev with
-      | None -> ()
+      | None -> Ok (Gw.Intentionally_ignored Gw.Unbound_channel)
       | Some accepted ->
-        let lane = Connector_ingress_lane.Keeper_lane accepted.keeper_name in
-        let ingress_event_id =
-          Connector_ingress_lane.{ source = "slack_triggered"; opaque_id = event_id }
+        let* receipt = match accepted.attention_event_id with
+          | Error detail -> ingress_refusal detail
+          | Ok original ->
+            let* route = original_route original in
+            match route with
+            | Triggered_route -> accepted_receipt accepted
+            | Ambient_route ->
+              (match ev with
+               | Gw.Message_create {user_id;thread_ts;_} | Gw.App_mention {user_id;thread_ts;_} ->
+                 finish_ambient_original ~base_dir ~keeper_name:accepted.keeper_name ~team_id
+                   ~channel_id ~thread_ts ~ts:event_id ~user_id original
+               | Gw.Reaction_added _ | Gw.Ignored_event _ -> ingress_refusal "expected original Slack message")
         in
-        let delivery =
-          match deliver with
-          | Some deliver -> deliver
-          | None -> fun () -> deliver_inbound ~clock ~base_dir accepted
-        in
-        match
-          Connector_ingress_lane.submit
-            ingress
-            ~lane
-            ~event_id:ingress_event_id
-            delivery
-        with
-        | Ok () -> ()
-        | Error error ->
-          Log.Server.error
-            "Slack ingress submission rejected lane=%s event=%s: %s"
-            (Connector_ingress_lane.lane_to_string lane)
-            (Connector_ingress_lane.event_id_to_string ingress_event_id)
-            (Connector_ingress_lane.submit_error_to_string error))
+        (match receipt with
+         | Gw.Intentionally_ignored _ -> ()
+         | Gw.Durable_accepted ->
+           (match accepted.attention_event_id with
+            | Ok original ->
+              (match original_route original with
+               | Ok Ambient_route | Error _ -> ()
+               | Ok Triggered_route ->
+           let lane = Connector_ingress_lane.Keeper_lane accepted.keeper_name in
+           let ingress_event_id = Connector_ingress_lane.{source="slack_triggered"; opaque_id=event_id} in
+           let delivery = match deliver with Some deliver -> deliver
+             | None -> fun () -> deliver_inbound ~clock ~base_dir accepted in
+           (* The durable Keeper operation owns the actual reply. This lane
+              only projects its status notice; failure is not lost ingress. *)
+           match Connector_ingress_lane.submit ingress ~lane ~event_id:ingress_event_id delivery with
+           | Ok () -> ()
+           | Error error ->
+             Log.Server.error "Slack status notice handoff failed after durable accept: %s"
+               (Connector_ingress_lane.submit_error_to_string error))
+            | Error _ -> ()));
+        Ok receipt
   in
   match ev with
   | Gw.Message_create { bot_id = Some _; _ } ->
-    (* See [accept_event]: this variant only records observability. *)
-    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ~team_id ev)
+    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ~team_id ev);
+    Ok (Gw.Intentionally_ignored Gw.Bot_echo)
   | Gw.Message_create { channel_id; ts; bot_id = None; _ }
   | Gw.App_mention { channel_id; ts; _ } -> submit ~channel_id ~event_id:ts
   | Gw.Reaction_added _ | Gw.Ignored_event _ ->
-    (* See [accept_event]: these variants only record observability. *)
-    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ~team_id ev)
+    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ~team_id ev);
+    Ok (Gw.Intentionally_ignored Gw.Observational_event)
 ;;
 
 (* Ambient lane recording: a bound-channel message that failed the trigger
@@ -540,157 +681,74 @@ let submit_event ?deliver ?team_id ?user_directory ingress ~dispatch_for_deliver
    plus a single user line, commit the exact event as a durable
    [Connector_attention] stimulus, then offer a best-effort wake hint — no
    dispatch, no turn. Unbound channels drop, as on the dispatch path. *)
-let handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
+let handle_ambient ~recover_triggered ~base_dir ~team_id ~channel_id
     ~thread_ts ~user_id ~user_name ~text ~ts ~mentions_bot () =
-  let keeper_name =
-    match resolved_keeper_name with
-    | Some keeper_name -> Ok (Some keeper_name)
-    | None -> (
-      match State.resolve_keeper_for_channel_result ~channel_id with
-      | Ok (Some resolution) -> Ok (Some resolution.State.keeper_name)
-      | Ok None -> Ok None
-      | Error _ as error -> error)
-  in
-  match keeper_name with
+  match State.resolve_keeper_for_channel_result ~channel_id with
   | Error reason ->
-    Log.Server.error
-      "Slack ambient binding lookup failed (channel=%s): %s" channel_id
-      (Channel_gate_binding_store.binding_store_error_to_string reason);
-    Slack_observability.record_ambient
-      Slack_observability.Ambient_binding_store_error
+    Slack_observability.record_ambient Slack_observability.Ambient_binding_store_error;
+    ingress_refusal (Channel_gate_binding_store.binding_store_error_to_string reason)
   | Ok None ->
-    Slack_observability.record_ambient Slack_observability.Ambient_dropped_unbound
-  | Ok (Some keeper_name) ->
-    if String.equal (String.trim text) "" then
-      Slack_observability.record_ambient Slack_observability.Ambient_dropped_empty
-    else if String.length text > Channel_gate.max_content_length () then
-      (* Same inbound bound the turn path enforces
-         ([Channel_gate.handle_inbound] validation): a message this size cannot
-         become a turn either; it is rejected, not truncated. *)
-      Slack_observability.record_ambient
-        Slack_observability.Ambient_dropped_too_long
-    else begin
-      (* Resolved once for this message: the attention record and the durable
-         chat row name the same room. *)
-      let channel_name =
-        resolve_channel_name ~base_dir
-          ~token:(Env_config_slack.bot_token_opt ()) ~channel_id
-      in
-      let attention_event_id =
-        record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
-          ~channel_name ~thread_ts ~ts ~user_id ~user_name ~content:text
-          ~mentions_bot
-          ~route:"ambient" ~urgency:Keeper_external_attention.Ambient
-      in
-      Keeper_chat_store.append_user_message
-        ~base_dir ~keeper_name ~content:text
-        ~surface:
-          (Surface_ref.Slack
-             { team_id; channel_id; channel_name; thread_ts })
-        ~conversation_id:(slack_conversation_id ~channel_id)
-        ~external_message_id:ts
-        ~speaker:
-          { Keeper_chat_store.speaker_id = Some user_id
-          ; speaker_name = user_name
-          ; speaker_authority = Keeper_chat_store.External
-          }
-        ();
-      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
-      (* Every accepted Connector event is a durable per-Keeper stimulus. The
-         event identity comes from the producer-owned external-attention row;
-         no content, channel activity, elapsed-time window, or rollout flag may
-         suppress it. The wake is only a hint after the durable commit, so a
-         busy or lifecycle-deferred Keeper retains the exact event for its next
-         lane cycle. *)
-      (match attention_event_id with
-       | Some event_id ->
-         let channel =
-           (* RFC-0320: carry the originating Slack channel+author so a woken
-              keeper replies into the same thread, not its own state. *)
-           match
-             Keeper_continuation_channel.slack ~team_id ~channel_id ~thread_ts
-               ~user_id
-           with
-           | Ok channel -> channel
-           | Error message -> invalid_arg message
-         in
-         Server_connector_attention_delivery.deliver
-           ~base_path:base_dir
-           ~keeper_name
-           ~event_id
-           ~channel
-       | None -> ());
-      Slack_observability.record_ambient Slack_observability.Ambient_recorded
-    end
+    Slack_observability.record_ambient Slack_observability.Ambient_dropped_unbound;
+    Ok (Gw.Intentionally_ignored Gw.Unbound_channel)
+  | Ok (Some resolution) ->
+    let keeper_name = resolution.State.keeper_name in
+    if String.equal (String.trim text) "" then begin
+      Slack_observability.record_ambient Slack_observability.Ambient_dropped_empty;
+      Ok (Gw.Intentionally_ignored Gw.Empty_message)
+    end else if String.length text > Channel_gate.max_content_length () then begin
+      Slack_observability.record_ambient Slack_observability.Ambient_dropped_too_long;
+      Ok (Gw.Intentionally_ignored Gw.Oversized_message)
+    end else
+      let channel_name = resolve_channel_name ~base_dir
+        ~token:(Env_config_slack.bot_token_opt ()) ~channel_id in
+      let* original = record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
+        ~channel_name ~thread_ts ~ts ~user_id ~user_name ~content:text ~mentions_bot
+        ~route:"ambient" ~urgency:Keeper_external_attention.Ambient
+        |> Result.map_error (fun detail -> Gw.Retryable_refusal detail) in
+      let* _ = restore_original_source ~keeper_name ~team_id ~channel_id ~thread_ts ~ts ~user_id original in
+      let* route = original_route original in
+      match route with
+      | Ambient_route -> finish_ambient_original ~base_dir ~keeper_name ~team_id ~channel_id ~thread_ts ~ts ~user_id original
+      | Triggered_route -> recover_triggered original
 
-let on_ambient ?resolved_keeper_name ?team_id ~base_dir (ev : Gw.slack_event) =
+let on_ambient ~recover_triggered ?team_id ~base_dir (ev : Gw.slack_event) =
   Option.iter State.record_workspace_id team_id;
   match ev with
-  | Gw.Message_create
-      { channel_id; thread_ts; user_id; user_name; text; ts; mentions_bot
-      ; bot_id = None
-      ; files
-      } ->
-    let text = Gw.text_with_files ~text ~files in
-    handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
-      ~thread_ts ~user_id ~user_name ~text ~ts ~mentions_bot ()
-  | Gw.Message_create { bot_id = Some _; _ } | Gw.App_mention _ ->
-    (* Unreachable from the FSM's ambient lane: bot echoes are dropped and an
-       app_mention always passes policy. Kept explicit — closed sum. *)
-    ()
+  | Gw.Message_create {channel_id; thread_ts; user_id; user_name; text; ts; mentions_bot;
+      bot_id=None; files} ->
+    handle_ambient ~recover_triggered ~base_dir ~team_id ~channel_id ~thread_ts ~user_id ~user_name
+      ~text:(Gw.text_with_files ~text ~files) ~ts ~mentions_bot ()
+  | Gw.Message_create {bot_id=Some _;_} | Gw.App_mention _ ->
+    Ok (Gw.Intentionally_ignored Gw.Bot_echo)
   | Gw.Reaction_added _ ->
-    (* Reactions are observability signal only; they are not attention records
-       and never start a turn (Discord parity). *)
     Slack_observability.record_gateway_event ~route:Slack_observability.Ambient
-      Slack_observability.Reaction_added
-  | Gw.Ignored_event _ -> ()
+      Slack_observability.Reaction_added;
+    Ok (Gw.Intentionally_ignored Gw.Observational_event)
+  | Gw.Ignored_event _ -> Ok (Gw.Intentionally_ignored Gw.Observational_event)
 
-let submit_ambient_event ?team_id ?user_directory ingress ~base_dir
-    (ev : Gw.slack_event) =
+let submit_ambient_event ?team_id ?user_directory ingress ~dispatch_for_delivery ~clock ~base_dir ev =
   let ev = resolve_event_identity ?user_directory ev in
   let ev = remember_resolved_names ~base_dir ev in
-  match ev with
-  | Gw.Message_create { channel_id; ts; bot_id = None; _ } -> (
-    match State.resolve_keeper_for_channel_result ~channel_id with
-    | Error reason ->
-      Log.Server.error
-        "Slack ambient binding unavailable channel=%s event=%s: %s" channel_id
-        ts
-        (Channel_gate_binding_store.binding_store_error_to_string reason);
-      Slack_observability.record_ambient
-        Slack_observability.Ambient_binding_store_error
-    | Ok None -> on_ambient ?team_id ~base_dir ev
-    | Ok (Some resolution) -> (
-      let lane =
-        Connector_ingress_lane.Keeper_lane resolution.State.keeper_name
-      in
-      let ingress_event_id =
-        Connector_ingress_lane.{ source = "slack_ambient"; opaque_id = ts }
-      in
-      match
-        Connector_ingress_lane.submit
-          ingress
-          ~lane
-          ~event_id:ingress_event_id
-          (fun () ->
-            on_ambient
-              ~resolved_keeper_name:resolution.State.keeper_name
-              ?team_id ~base_dir ev)
-      with
-      | Ok () -> ()
-      | Error error ->
-        Log.Server.error
-          "Slack ambient ingress submission rejected lane=%s event=%s: %s"
-          (Connector_ingress_lane.lane_to_string lane)
-          (Connector_ingress_lane.event_id_to_string ingress_event_id)
-          (Connector_ingress_lane.submit_error_to_string error)))
-  | Gw.Message_create { bot_id = Some _; _ }
-  | Gw.App_mention _ | Gw.Reaction_added _ | Gw.Ignored_event _ ->
-    on_ambient ?team_id ~base_dir ev
+  let recover_triggered (original : Keeper_external_attention.item) =
+    match original.conversation.surface, original.actor.actor_id, original.external_message with
+    | Surface_ref.Slack surface, Some user_id, Some message ->
+      let* _, mentions_bot = restore_original_source ~keeper_name:original.keeper_name
+        ~team_id:surface.team_id ~channel_id:surface.channel_id ~thread_ts:surface.thread_ts
+        ~ts:message.message_id ~user_id original in
+      let original_event = Gw.Message_create {channel_id=surface.channel_id;
+        thread_ts=surface.thread_ts; user_id; user_name=original.actor.display_name;
+        text=original.content_preview; ts=message.message_id; mentions_bot; bot_id=None; files=[]} in
+      submit_event ?team_id:surface.team_id ingress ~dispatch_for_delivery ~clock ~base_dir original_event
+    | (Surface_ref.Slack _ | Surface_ref.Dashboard _ | Surface_ref.Discord _ | Surface_ref.Webhook _
+      | Surface_ref.Agent | Surface_ref.Broadcast | Surface_ref.Gate _), (Some _ | None), (Some _ | None) ->
+      ingress_refusal "original triggered source has no complete Slack route"
+  in
+  on_ambient ~recover_triggered ?team_id ~base_dir ev
 ;;
 
 module For_testing = struct
   let submit_event = submit_event
+  let submit_ambient_event = submit_ambient_event
   let record_external_attention = record_external_attention
   let resolve_event_identity = resolve_event_identity
 end
@@ -774,6 +832,7 @@ let start ~sw ~env ~state =
                 (Format.asprintf "%a" Slack_rest_client.pp_error e);
               None, None, user_directory)
        in
+       let gateway_base_path = (Mcp_server.workspace_config state).Workspace.base_path in
        State.set_trigger_policy policy;
        let ingress =
          Connector_ingress_lane.create
@@ -799,7 +858,9 @@ let start ~sw ~env ~state =
              ~trigger_policy:current_trigger_policy
              ~on_event:(fun ev ->
                let config = Mcp_server.workspace_config state in
-               submit_event
+               if not (String.equal config.Workspace.base_path gateway_base_path) then
+                 ingress_refusal "Slack gateway workspace changed; reconnect its owner before accepting events"
+               else submit_event
                  ingress
                  ~dispatch_for_delivery:(dispatch_for_config config)
                  ?team_id
@@ -809,7 +870,10 @@ let start ~sw ~env ~state =
                  ev)
              ~on_ambient:(fun ev ->
                let config = Mcp_server.workspace_config state in
-               submit_ambient_event ingress ?team_id ?user_directory
+               if not (String.equal config.Workspace.base_path gateway_base_path) then
+                 ingress_refusal "Slack gateway workspace changed; reconnect its owner before accepting events"
+               else submit_ambient_event ?team_id ?user_directory ingress
+                 ~dispatch_for_delivery:(dispatch_for_config config) ~clock
                  ~base_dir:config.base_path ev)
              ()
          with

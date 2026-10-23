@@ -20,8 +20,8 @@ val run :
   bot_user_id:string option ->
   app_token:string ->
   trigger_policy:(unit -> trigger_policy) ->
-  on_event:(slack_event -> unit) ->
-  on_ambient:(slack_event -> unit) ->
+  on_event:(slack_event -> (Slack_gateway_state.ingress_receipt, Slack_gateway_state.ingress_refusal) result) ->
+  on_ambient:(slack_event -> (Slack_gateway_state.ingress_receipt, Slack_gateway_state.ingress_refusal) result) ->
   unit ->
   unit
 (** Connect to Slack Socket Mode and dispatch events that pass
@@ -39,6 +39,12 @@ val run :
       [Message_create] events that failed the trigger policy and
       [Reaction_added] events from users other than the bot itself. It must
       not start a turn.
+
+    Event callbacks must return actual durable host acceptance (or a deliberate
+    typed ignore), never an asynchronous handoff receipt. A refusal or callback
+    exception withholds ACK; cancellation propagates. Duplicate delivery keeps
+    the original event ID and reaches the host again. Control envelopes retain
+    their ordinary transport ACK. The network ACK is not a domain completion.
 
     Internally:
     1. Create {!Slack_gateway_state.t} with [trigger_policy]. [trigger_policy] is read
@@ -64,6 +70,15 @@ val connection_state : unit -> connection_state
 
 
 module For_testing : sig
+  val deliver :
+    admit:(slack_event -> (Slack_gateway_state.ingress_receipt, Slack_gateway_state.ingress_refusal) result) ->
+    send_ack:(string -> unit) ->
+    Slack_gateway_state.delivery ->
+    (Slack_gateway_state.ingress_receipt, Slack_gateway_state.ingress_refusal) result
+  (** The actual delivery boundary used by the socket loop. No ACK on host
+      refusal/exception; the ACK function runs only after the host receipt.
+      An ACK exception propagates: the durable original remains replayable. *)
+
   val step_with_current_policy :
     Slack_gateway_state.t ->
     trigger_policy:(unit -> Slack_gateway_state.trigger_policy) ->

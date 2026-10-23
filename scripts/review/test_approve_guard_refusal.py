@@ -46,11 +46,13 @@ def footer_line(head=HEAD, diff=DIFF, tail=True):
 
 def release_footer(head=HEAD, diff=DIFF):
     return (f"approve-guard: head `{head}` · release review"
-            f" · reviewed base `{BASE}` · diff sha256 `{diff}`"
-            f" · release run {RELEASE_RUN}")
+            f" · release run {RELEASE_RUN}"
+            f" · reviewed base `{BASE}` · diff sha256 `{diff}`")
 
 
 RELEASE_RUN = 5550001111
+# Release reviews stamp the release branch as base, not main.
+RELEASE_SCOPE = json.dumps({"base_ref": "release/v0.62.0", "base_sha": BASE, "stack": None}, separators=(",", ":"))
 
 
 class GuardHarness(unittest.TestCase):
@@ -237,8 +239,8 @@ class ReleaseSecondApprover(GuardHarness):
             "user": {"login": "author-keeper"}}))
 
     def release_review(self, *, who="reviewer-keeper", run=RELEASE_RUN):
-        body = (f"verdict: PASS head: {HEAD} by: {who}\nrelease notes\n\n---\n"
-                f"review-scope: {SCOPE}\n{release_footer()}")
+        body = (f"verdict: PASS head: {HEAD} run: {run} by: {who}\nrelease notes\n\n---\n"
+                f"review-scope: {RELEASE_SCOPE}\n{release_footer()}")
         return {"id": 77, "state": "APPROVED", "author_association": "COLLABORATOR",
                 "body": body, "commit_id": HEAD, "user": {"login": who},
                 "submitted_at": "2026-10-22T20:00:00Z"}
@@ -266,7 +268,7 @@ class ReleaseSecondApprover(GuardHarness):
 
     def _body_file(self):
         p = self.tmp / "body.txt"
-        p.write_text(f"verdict: PASS head: {HEAD} by: second-reviewer\nrelease notes")
+        p.write_text(f"verdict: PASS head: {HEAD} run: {RELEASE_RUN} by: second-keeper\nrelease notes")
         return p
 
 

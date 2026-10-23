@@ -164,17 +164,16 @@ let classified_load
   let agent_core_result = load ~session_dir:session.session_dir ~session_id:trace_id in
   (match agent_core_result with
    | Error (Superseded_version { expected; got }) ->
-       (* Not an error the operator has to act on: the version cut is
-          deliberate, the keeper starts fresh here, and the next save replaces
-          the file. It is counted and named so a fleet-wide cut is visible as
-          one, rather than as a wave of parse failures. *)
+       (* An intentional version cut affects this AGENT_CORE history only.
+          An official-client runtime owns its session separately and does
+          not save this checkpoint. The loader cannot promise a next save. *)
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_superseded))]
          ();
        Log.Keeper.warn
          "keeper:%s AGENT_CORE checkpoint is version %d, superseded by %d; \
-          starting fresh and replacing it on the next save"
+          saved AGENT_CORE history was not loaded; official-client session state is separate"
          trace_id got expected
    | Error (Newer_version { expected; got }) ->
        Otel_metric_store.inc_counter
@@ -212,13 +211,7 @@ let classified_load
    | Error Not_found ->
        Log.Keeper.debug "keeper:%s AGENT_CORE checkpoint not found" trace_id
    | Ok _ -> ());
-  let unread error =
-    (* Each was logged above with its own diagnostics. *)
-    Log.Keeper.warn
-      "keeper:%s AGENT_CORE checkpoint unavailable after explicit load diagnostics"
-      trace_id;
-    session, Checkpoint_unread error
-  in
+  let unread error = session, Checkpoint_unread error in
   match Keeper_checkpoint_store.turn_history_of_load agent_core_result with
   | Ok (Saved_history checkpoint) ->
     session, Checkpoint_loaded (context_of_agent_core_checkpoint checkpoint)

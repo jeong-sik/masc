@@ -1195,7 +1195,7 @@ let test_validate_args_tool_execute_rejects_empty_object_with_policy_class () =
   | Error result ->
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool)
-      "empty Execute is told the arguments did not arrive"
+      "empty Execute reports the received shape"
       true
       (string_contains msg "empty input object");
     Alcotest.(check bool)
@@ -1211,9 +1211,8 @@ let test_validate_args_tool_execute_rejects_empty_object_with_policy_class () =
       "expected empty tool_execute args to fail, got %s"
       (Yojson.Safe.to_string forwarded)
 
-(* Empty input on a schema that declares required fields gets the dedicated
-   reason, so the masc#29337-family failure (arguments lost on the wire) is
-   countable fleet-wide instead of blending into generic invalid_args. *)
+(* The dedicated reason observes an empty input on a required schema.
+   It does not claim where the empty arguments originated. *)
 let test_validate_args_empty_object_on_plain_required_schema () =
   let schema =
     make_schema ~required:[ "query" ] [ "query", "string"; "limit", "integer" ]
@@ -1224,7 +1223,7 @@ let test_validate_args_empty_object_on_plain_required_schema () =
   | Error result ->
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool)
-      "message says the arguments did not arrive"
+      "message reports the received shape"
       true
       (string_contains msg "empty input object");
     Alcotest.(check bool)

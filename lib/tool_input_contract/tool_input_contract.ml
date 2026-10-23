@@ -835,16 +835,10 @@ let empty_tool_args = function
   | _ -> false
 ;;
 
-(* Empty input on a schema that cannot accept it is almost never a deliberate
-   call: in the masc#29337 family the wire carried an empty object because the
-   arguments never arrived (2026-08-26, keeper edgar.a.poe on GLM-5-turbo:
-   Execute rejected on 5/5 attempts, masc_schedule_create 48 times), and the
-   model looped on the generic shape error without learning that its arguments
-   were lost, not merely wrong.  Say so explicitly, name the field(s) the call
-   needed, and reject under a dedicated telemetry reason so the fleet-wide rate
-   is measurable.  [one_of_branch_constraints] is [] unless every branch
-   requires a field, which is exactly when empty input cannot match any
-   branch; a schema with an all-optional branch keeps the generic path. *)
+(* Empty input is an observed shape, not evidence of a transport loss.
+   Name the required fields and reject before dispatch without guessing
+   whether the caller omitted the arguments or supplied an empty object.
+   [one_of_branch_constraints] is [] unless every branch requires a field. *)
 let empty_args_rejection schema args =
   if not (empty_tool_args args)
   then None
@@ -859,15 +853,13 @@ let empty_args_rejection schema args =
          in
          Some
            (Printf.sprintf
-              "received an empty input object: the arguments did not arrive with \
-               the call. The input must include exactly one of: %s. Re-emit the \
+              "received an empty input object. The input must include exactly one of: %s. Re-emit the \
                tool call with the input object populated."
               options))
     | required ->
       Some
         (Printf.sprintf
-           "received an empty input object: the arguments did not arrive with \
-            the call. Required field(s): %s. Re-emit the tool call with the \
+           "received an empty input object. Required field(s): %s. Re-emit the tool call with the \
             input object populated."
            (String.concat ", " required))
 ;;

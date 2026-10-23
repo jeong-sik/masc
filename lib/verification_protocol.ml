@@ -80,29 +80,29 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   ; submitted_evidence = verification_evidence.submitted_evidence
   }
 
-let warn_contract_gap (task : Masc_domain.task) =
-  (* Observability for #8272: tasks submitted without a contract land in
-     storage with empty completion_contract + empty evidence, which the
-     dashboard renders as "—". Surface this as a warn so operators can
-     trace the gap back to the task creation site instead of only
-     noticing it in the UI. No behavior change. *)
-  (match task.contract with
-   | None ->
-     Log.Task.warn
-       ~keeper_name:task.id
-       "[verification-submit] task=%s has no contract — completion_contract \
-        and evidence will be empty in the verification record"
-       task.id
-   | Some c
-     when c.completion_contract = []
-          && c.required_evidence = []
-          && c.verify_gate_evidence = [] ->
-     Log.Task.warn
-       ~keeper_name:task.id
-       "[verification-submit] task=%s has a contract but both \
-       completion_contract and verification evidence are empty"
-       task.id
-   | Some _ -> ())
+let warn_contract_gap (task : Masc_domain.task) ~verification_id ~submitted_reference_count =
+  let report ~contract_present detail =
+    Log.Task.emit Log.Warn
+      ~details:(`Assoc
+        [ "event", `String "verification_contract_gap"
+        ; "task_id", `String task.id
+        ; "verification_id", `String verification_id
+        ; "contract_present", `Bool contract_present
+        ; "completion_criteria_count", `Int 0
+        ; "submitted_reference_count", `Int submitted_reference_count
+        ])
+      (Printf.sprintf
+         "[verification-submit] task=%s %s; submitted references=%d (persistence pending)"
+         task.id detail submitted_reference_count)
+  in
+  match task.contract with
+  | None -> report ~contract_present:false "has no completion contract"
+  | Some c
+    when c.completion_contract = []
+         && c.required_evidence = []
+         && c.verify_gate_evidence = [] ->
+    report ~contract_present:true "has no completion criteria or required evidence"
+  | Some _ -> ()
 
 (* A truncated artifact cannot be judged from the snapshot — the review
    instructions order the judge to treat it as unavailable and its prefix is
@@ -128,8 +128,9 @@ let create_submit_request ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id
     ~(claim : Masc_domain.verification_claim) =
   let base_path = config.Workspace.base_path in
-  warn_contract_gap task;
   let spec = submit_request_spec ~config ~task ~assignee ~verification_id ~claim in
+  warn_contract_gap task ~verification_id
+    ~submitted_reference_count:(List.length spec.submitted_evidence);
   let open Result.Syntax in
   let collaboration_refs, other_refs = List.partition (fun reference ->
     Option.is_some (Workspace_verification_store.collaboration_reference reference)) spec.submitted_evidence in

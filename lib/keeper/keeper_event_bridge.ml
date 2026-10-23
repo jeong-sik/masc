@@ -49,13 +49,17 @@ let tool_approval_label = function
 ;;
 
 let emit_native_event_log (evt : Agent_core.Event_bus.event) (json : Yojson.Safe.t) =
-  let log_at level message =
-    Log.Agent_core_event.emit level ~details:json message
+  let turn_id =
+    Option.bind evt.meta.caller_scope (fun scope ->
+      Result.to_option (Keeper_turn_scope.keeper_turn_id scope))
   in
-  let log_routine message =
-    Log.Agent_core_event.routine ~details:json "%s" message
+  let log_at ~keeper_name level message =
+    Log.Agent_core_event.emit level ~keeper_name ?turn_id ~details:json message
   in
-  let log message = log_at Log.Info message in
+  let log_routine ~keeper_name message =
+    Log.Agent_core_event.routine ~keeper_name ?turn_id ~details:json "%s" message
+  in
+  let log ~keeper_name message = log_at ~keeper_name Log.Info message in
   (* Per-turn and per-tool lifecycle is emitted at [routine] (default Debug), not
      Info, because it is a redundant TEXT rendering of events already carried by
      two authoritative planes: (1) for keeper agents, the keeper hook logs the
@@ -71,16 +75,16 @@ let emit_native_event_log (evt : Agent_core.Event_bus.event) (json : Yojson.Safe
      uses [log_routine] for the same reason. *)
   match evt.payload with
   | Agent_core.Event_bus.AgentStarted { agent_name; task_id } ->
-    log (Printf.sprintf "agent started agent=%s task_id=%s" agent_name task_id)
+    log ~keeper_name:agent_name (Printf.sprintf "agent started agent=%s task_id=%s" agent_name task_id)
   | Agent_core.Event_bus.AgentCompleted { agent_name; task_id; elapsed; _ } ->
-    log
+    log ~keeper_name:agent_name
       (Printf.sprintf
          "agent completed agent=%s task_id=%s elapsed_s=%.3f"
          agent_name
          task_id
          elapsed)
   | Agent_core.Event_bus.AgentYielded { agent_name; task_id; turn; elapsed } ->
-    log
+    log ~keeper_name:agent_name
       (Printf.sprintf
          "agent yielded agent=%s task_id=%s turn=%d elapsed_s=%.3f"
          agent_name
@@ -88,24 +92,24 @@ let emit_native_event_log (evt : Agent_core.Event_bus.event) (json : Yojson.Safe
          turn
          elapsed)
   | Agent_core.Event_bus.AgentInputRequired { agent_name; task_id; request; _ } ->
-    log
+    log ~keeper_name:agent_name
       (Printf.sprintf
          "agent input required agent=%s task_id=%s request_id=%s"
          agent_name
          task_id
          request.request_id)
   | Agent_core.Event_bus.TurnStarted { agent_name; turn } ->
-    log_routine (Printf.sprintf "turn started agent=%s turn=%d" agent_name turn)
+    log_routine ~keeper_name:agent_name (Printf.sprintf "turn started agent=%s turn=%d" agent_name turn)
   | Agent_core.Event_bus.TurnCompleted { agent_name; turn } ->
-    log_routine (Printf.sprintf "turn completed agent=%s turn=%d" agent_name turn)
+    log_routine ~keeper_name:agent_name (Printf.sprintf "turn completed agent=%s turn=%d" agent_name turn)
   | Agent_core.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
-    log_routine (Printf.sprintf "tool called agent=%s tool_name=%s" agent_name tool_name)
+    log_routine ~keeper_name:agent_name (Printf.sprintf "tool called agent=%s tool_name=%s" agent_name tool_name)
   | Agent_core.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
-    log_routine
+    log_routine ~keeper_name:agent_name
       (Printf.sprintf "tool completed agent=%s tool_name=%s" agent_name tool_name)
   | Agent_core.Event_bus.ToolApprovalCompleted
       { agent_name; tool_name; approval; _ } ->
-    log_routine
+    log_routine ~keeper_name:agent_name
       (Printf.sprintf
          "tool approval completed agent=%s tool_name=%s approval=%s"
          agent_name
@@ -121,7 +125,7 @@ let emit_native_event_log (evt : Agent_core.Event_bus.event) (json : Yojson.Safe
     let names_hash =
       Digestif.SHA256.(digest_string (String.concat "\n" tool_names) |> to_hex)
     in
-    log_routine
+    log_routine ~keeper_name:agent_name
       (Printf.sprintf
          "[substrate:tool_surface] agent=%s turn=%d count=%d names_hash=%s"
          agent_name
@@ -723,3 +727,7 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
 let start ~sw ~clock ~(config : Workspace.config) ~bus =
   start_impl ~interval_s:(drain_interval_s ()) ~sw ~clock ~config ~bus
 ;;
+
+module For_testing = struct
+  let emit_native_event_log = emit_native_event_log
+end

@@ -34,3 +34,9 @@ val public_custom_event_type : string -> string
 (** Serialize a single AGENT_CORE event to SSE JSON.
     Exposed for unit testing. *)
 val native_event_to_json : Agent_core.Event_bus.event -> Yojson.Safe.t option
+
+module For_testing : sig
+  val emit_native_event_log : Agent_core.Event_bus.event -> Yojson.Safe.t -> unit
+  (** The production log projection. The envelope owns the Keeper turn;
+      the payload owns the agent. Session-local ordinals are never substituted. *)
+end

@@ -309,7 +309,7 @@ let with_fixture ?(history_kind=Atoms) f =
            Dispatch_pending publication cannot race source discovery. *)
         Memory_lane.For_testing.await_idle ~base_path ~keeper_name;
         let captures=originals base_path keepers_dir store in
-        let matches=List.filter (fun (_,capture) ->
+        let matches=List.filter (fun ((record:Owner.retained),capture) ->
           let original=Capture.request capture |> get in
           let schema=match original.Lane_addon_exact.schema with
             | Some schema -> schema | None -> fail "the captured admission schema is absent" in
@@ -321,7 +321,12 @@ let with_fixture ?(history_kind=Atoms) f =
                 let role=match item.role with User -> "user" | Assistant -> "assistant" in
                 message role item.text) original.messages
             @ [message "user" (Agent_core.Exact_output.schema_instruction_text requirement)] in
-          Yojson.Safe.equal (`List sent) messages) captures in
+          (* A new original may retry identical unread bytes after a terminal
+             refusal; the provider is serving the live original, not that old ID. *)
+          (match Progress.phase record.progress with Rejected _ -> false
+           | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+           | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> true)
+          && Yojson.Safe.equal (`List sent) messages) captures in
         match matches with [_,capture] -> capture
         | [] | _::_::_ -> fail "actual provider request has no unique fully restored original capture" in
       let start_server respond=F.start_server ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
@@ -371,6 +376,62 @@ let latest fixture capture = io (fun () ->
   Lane_addon_exact.read_latest_original_execution ~store:fixture.store ~declaration_id:"librarian" ~schema exact |> get)
 let no_memory fixture = check (list string) "uncommitted original has no Memory facts" []
   (io (fun () -> claims fixture.keepers_dir))
+let assert_unattached = function
+  | Error error ->
+    check bool "attachment is a blocked original publication" true (Consumer.publication_unfinished error);
+    check bool "attachment refusal has an actual diagnostic" true (String.length (Consumer.error_to_string error)>0)
+  | Ok _ -> fail "missing Addon must not silently return Pending or an empty report"
+let test_unattached_reports_without_consuming () = with_fixture (fun ~sw:_ fixture ->
+  let before=progress fixture in
+  set_enabled fixture false;
+  assert_unattached (run_worker fixture);
+  check int "unattached source creates no original" 0 (List.length (observed_originals fixture));
+  check int "unattached source calls no provider" 0 (F.post_count fixture.server);
+  check bool "unattached source remains unread" true (progress fixture=before);
+  no_memory fixture;
+  (match memory_action fixture (fun () -> Refresh.run_durable ~base_path:fixture.base_path ~keeper_name) with
+   | Refresh.Stopped error -> check bool "production queue retains blocked publication" true
+       (Consumer.publication_unfinished error)
+   | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Not_committed | Pending | Raised _ ->
+     fail "production queue must retain the attachment failure"))
+let test_terminal_refusal_allows_fresh_original () = with_fixture (fun ~sw:_ fixture ->
+  let before=progress fixture in
+  fixture.set_response (fun _ -> `Bad_request,
+    {|{"error":{"message":"fixture refusal","type":"invalid_request_error"}}|});
+  let deliveries= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:deliveries;
+  (match run_worker fixture with
+   | Ok (Consumer.Memory_not_committed [report]) ->
+     let final=Lane_addon_exact.Call_final (Input_refused Invalid_request) in
+     check string "retain the actual typed host refusal"
+       ("Original history request refused: " ^ Yojson.Safe.to_string (Lane_addon_exact.final_to_json final)) report.detail;
+     check bool "refusal grants no descent or skip" false
+       (Keeper_librarian_runtime.may_descend_messages [report]);
+     check bool "refusal invents no capacity evidence" true
+       (report.input_capacity_evidence=No_input_capacity_refusal && report.provider_input_refusals=[])
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending
+         | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
+     fail "terminal refusal must retain a nonempty diagnostic report");
+  let rejected,capture=only_original fixture in
+  let request_before=Capture.to_json capture and progress_before=Progress.to_json rejected.progress in
+  check bool "terminal refusal is retained as Rejected" true
+    (match Progress.phase rejected.progress with Rejected _ -> true
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> false);
+  check bool "refusal does not acknowledge source" true (progress fixture=before);
+  no_memory fixture;
+  fixture.set_response (fun capture -> `OK,F.openai_response (answer capture));
+  drive_advanced fixture;
+  let captures=observed_originals fixture in
+  check int "fresh selection retains a separate original ID" 2 (List.length captures);
+  let retained,restored=List.find (fun (record,_) -> record.Owner.request_id=rejected.request_id) captures in
+  check json "old refused request remains exact" request_before (Capture.to_json restored);
+  check json "old refusal never redispatched or rewritten" progress_before (Progress.to_json retained.progress);
+  check int "one refused and one successful provider call" 2 (F.post_count fixture.server);
+  check (list string) "new original alone publishes Memory"
+    ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
 let test_actual_completed_history_path () = with_fixture (fun ~sw:_ fixture ->
   check bool "actual runtime and Memory configuration roots stay distinct" true
     (Workspace.keepers_runtime_dir fixture.config<>fixture.keepers_dir);
@@ -729,7 +790,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       (positions_before=progress fixture);
     check int "no replacement is admitted before the known refusal is durable" 1 (F.post_count fixture.server);
     set_enabled fixture false;
-    assert_pending (run_worker fixture);
+    assert_unattached (run_worker fixture);
     let parked,_=only_original fixture in
     check json "Off wake neither retries stale commit nor grows its event history"
       (Progress.to_json superseded_record.progress) (Progress.to_json parked.progress);
@@ -857,6 +918,8 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
     check int "later wake retains one original and one successor only" 2 (List.length (observed_originals fixture)))))
 
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
+  test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
+  test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
   test_case "actual original reaches Memory and source ACK" `Quick test_actual_completed_history_path;
   test_case "actual official-only original reaches Memory and official ACK" `Quick (test_actual_official_or_mixed_path Official);
   test_case "actual mixed original reaches Memory and both receipt/position kinds" `Quick (test_actual_official_or_mixed_path Mixed);

@@ -7,6 +7,7 @@ module Consumer = Keeper_librarian_durable_consumer
 module Source = Keeper_librarian_durable_capture
 module Current = Keeper_memory_os_current
 module Submit = Lane_addon_submit_once
+module Exact = Lane_addon_exact
 let ( let* ) = Result.bind
 let io = Domain_pool_ref.submit_io_or_inline
 let require condition detail = if condition then Ok () else Error detail
@@ -69,9 +70,19 @@ let call ~config ~reserved ~expected ~(original : Retained.retained) ~arguments 
       ~tool:expected.tool ~configuration_revision:expected.configuration_revision ~original ~arguments
     |> Result.map_error Submit.call_error_of_runtime
 let active (record : Retained.retained) = match Progress.phase record.progress with
-  | Progress.Finished _ | Conflicted _ -> false
+  | Progress.Finished _ | Conflicted _ | Rejected _ -> false
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-  | Rejected _ | Subdividing _ | Subdivided _ -> true
+  | Subdividing _ | Subdivided _ -> true
+let refusal_report final : Keeper_librarian_runtime.not_committed =
+  let detail=match final with
+    | Exact.Call_final (Answered _) -> "Unexpected answered result in original history refusal"
+    | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+    | Outcome_unknown | Not_allowed _ | Request_id_reused ->
+      "Original history request refused: " ^ Yojson.Safe.to_string (Exact.final_to_json final) in
+  (* A terminal refusal ends this original ID, not its unread source. Preserve
+     the actual reason without granting consumption, capacity or skip authority. *)
+  {input_capacity_evidence=No_input_capacity_refusal;message_descent=No_descent_evidence;
+   provider_input_refusals=[];detail;walk_shows_size=false;smaller_range_meets_same_failure=false}
 let resume ~store ~config ~reserved ~wake (original,request) =
   Owner.resume ~store ~config ~reserved ~original ~request ~wake ~call:(call ~config ~reserved)
     ~publish:(fun ~original ~request ~proposal ->
@@ -234,7 +245,7 @@ let rec consume_one ~config ~keeper_name ~wake =
     | Error detail -> error detail
     | Ok (Owner.Finished _) -> Ok (completed_outcome request)
     | Ok (Pending _ | Publication_waiting _ | Basis_superseded _) -> Ok Consumer.Pending
-    | Ok (Refused _) -> Ok (Consumer.Memory_not_committed []) in
+    | Ok (Refused (final,_)) -> Ok (Consumer.Memory_not_committed [refusal_report final]) in
   (* Discovery does not initialize an epoch or create a replacement request.
      Any malformed old original fails the full inventory before fresh selection. *)
   match Owner.discover ~store ~base_path ~keepers_dir ~keeper_id:keeper_name with
@@ -270,7 +281,7 @@ let rec consume_one ~config ~keeper_name ~wake =
     | [],[(parent,request)] ->
       (match resolve ~config ~reserved with
        | Error detail -> error detail
-       | Ok None -> Ok Consumer.Pending
+       | Ok None -> error "Original history Addon is not attached; replacement source remains unconsumed"
        | Ok (Some _) ->
          let rebased=io (fun () ->
            let* anchor=Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper_name in
@@ -289,7 +300,7 @@ let rec consume_one ~config ~keeper_name ~wake =
     | [],[] ->
       match resolve ~config ~reserved with
       | Error detail -> error detail
-      | Ok None -> Ok (Consumer.Memory_not_committed [])
+      | Ok None -> error "Original history Addon is not attached; source remains unconsumed"
       | Ok (Some _) ->
         let failure=ref None in
         let commit source =
@@ -300,6 +311,6 @@ let rec consume_one ~config ~keeper_name ~wake =
             | Error detail -> failure:=Some detail;Consumer.Memory_pending
             | Ok (Owner.Finished _) -> Consumer.Memory_committed
             | Ok (Pending _ | Publication_waiting _ | Basis_superseded _) -> Consumer.Memory_pending
-            | Ok (Refused _) -> Consumer.Memory_refused [] in
+            | Ok (Refused (final,_)) -> Consumer.Memory_refused [refusal_report final] in
         let result=Consumer.consume_one ~config ~keeper_name ~commit in
         match !failure with Some detail -> error detail | None -> result)

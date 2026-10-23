@@ -92,7 +92,7 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 | `dom_interaction` (click·fill·select·scroll·follow_link) | click 은 `Browser_interaction.pointer_target_script` 로 대상 점을 찾고 `page.mouse.click`. 나머지는 `Browser_interaction.script` 를 `page.evaluate` 로 그대로 실행 | 한다. selector 와 node 가 BiDi 와 같은 뜻이 된다. ego 의 `page.click(selector)` 는 일치를 하나만 받고 frame 까지 찾아서 뜻이 다르다 |
 | `snapshot_target_input` (click·fill 의 `target`) | 같은 실행 안에서 탭이 `expectedUrl` 에 있는지 보고, `waitForSelector(loc, {state: "attached"})` 로 대상이 정확히 하나인지 확인하고 URL 을 다시 읽은 뒤 ego 의 `page.click`·`page.fill`. `target` 은 snapshot ref(`{ref: 12}` → `@12`), role 과 이름(`loc=role:button[name="보내기"]`, `exact: false` 면 `name*=`), 보이는 글(`text="보내기"`, `exact: false` 면 따옴표 없이) 중 하나다. locator 글은 masc 가 만든다 | 한다. ego 연결만 한다. 대화상자에 막힌 페이지는 행동 전에 거절한다. receipt 의 `popups` 는 `{tabId, label}` 로, `dialog` 는 `Browser_surface.dialog_json` 으로 돌려준다. 행동 뒤 위치는 공간의 탭 줄에서 읽어서 대화상자가 떠 있어도 URL 과 제목이 담긴다 |
 | `trusted_hover`, `trusted_keyboard` | `page.mouse.move`, `page.keyboard.type`·`press` | 한다. 입력 전에 `pointer_guard_script`·`keyboard_guard_script` 가 관측한 문서·URL·화면을 확인한다 |
-| `point_click`, `trusted_button_click`, `trusted_double_click`, `point_scroll` | `page.mouse.click`(`button`, `clickCount`), `page.mouse.wheel` | 한다 |
+| `point_click`, `trusted_button_click`, `trusted_double_click`, `point_scroll` | `page.mouse.click`(`button`, `clickCount`), `page.mouse.wheel` | 한다. 마우스 단계(`move`·`click`·`wheel`, 드래그의 `move`)마다 `label` 에 `MASC · <actor 또는 agent> · <동작>` 을 넣는다. ego 가 그 글을 자기 커서 강조 옆에 보여 줘서, 운영자가 누가 무엇을 하는지 본다. BiDi 연결의 표시(`Browser_pointer_feedback`)와 같은 조각이다 |
 | `tab_creation` | `task.newPage()` 뒤 `goto` | 한다 |
 | `tab_navigation` | `page.goto` (agent 페이지만) | 한다 |
 | `tab_closing` | `page.close()` (agent 페이지만) | 한다 |

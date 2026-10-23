@@ -30,31 +30,14 @@ val sidebar_selection : Masc_tui_terminal_palette.t option -> string
 (** A restrained neutral band derived from the terminal palette, keeping body
     text contrast. Falls back to reverse video without a usable colour palette. *)
 
-val recede
-  :  theme_mode:Masc_tui_terminal_palette.theme_mode option
-  -> Masc_tui_terminal_palette.t option
-  -> string
-(** What a row draws to sit behind the ones around it.
-
-    [Sgr.dim] is SGR 2, and SGR 2 blends the foreground toward black. On a
-    dark terminal that is a step toward the background and the row recedes.
-    On a light one it is a step away, so the row meant to be quiet comes out
-    darker than its neighbours and the page reads upside down
-    (microsoft/terminal#16493). [Sgr.gray] is no safer: Solarized and its
-    relatives remap the bright colours onto a grey ramp, so it answers to the
-    theme rather than to the background.
-
-    So this computes instead of naming: the terminal's own text stepped
-    toward the terminal's own background, projected through what the process
-    can emit.
-
-    Without a palette the page may still have been reported on its own, by
-    DECSET 996 or 2031, which a multiplexer passes through where it answers
-    no OSC colour query. Where it says light, [Sgr.gray] recedes and
-    [Sgr.dim] does not -- SGR 2 blends toward black, so on a light terminal
-    it walks away from the page. Where it says dark, or says nothing,
-    [Sgr.dim] is what every row drew before this existed and is right on a
-    dark one. Disabled colours produce [""]. *)
+val recede : Masc_tui_terminal_palette.t option -> string
+(** Secondary text remains readable normal-size text. Blend toward the known
+    background only while the emitted colour retains 4.5:1 contrast, including
+    256-colour quantization. Otherwise retain the terminal's default foreground.
+    Missing palette or unsupported colour depth also retains that foreground;
+    SGR dim and an assumed grey cannot establish contrast. This changes only
+    foreground, so callers must close an enclosing dim span before using it.
+    Disabled colours produce [""] rather than a colour override. *)
 
 (** Raw SGR sequences. Renderers normally want the semantic names below;
     these exist for the [Masc_tui_ansi] shim and for content that really is
@@ -289,17 +272,13 @@ module For_testing : sig
 
   val recede
     :  colors_enabled:bool
-    -> dim:string
-    -> gray:string
-    -> theme_mode:Masc_tui_terminal_palette.theme_mode option
+    -> default_foreground:string
     -> project:
          (Masc_tui_terminal_palette.rgb
           -> Masc_tui_terminal_palette.projected_color option)
     -> Masc_tui_terminal_palette.t option
     -> string
-  (** Pure capability/environment fixture for {!val:recede}. [dim] is the
-      fallback the production token passes, so a test can tell the computed
-      colour from the fallback without naming an escape. *)
+  (** Pure capability/environment fixture for {!val:recede}. *)
 end
 
 val selection : string

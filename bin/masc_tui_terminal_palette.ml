@@ -143,6 +143,11 @@ let project_color_for_level ~level color =
 
 let best_color color = project_color_for_level ~level:(stdout_color_level ()) color
 
+let projected_rgb = function
+  | Rgb color -> color
+  | Indexed index -> xterm_fixed_rgb index
+;;
+
 let fold_projected_color ~rgb ~indexed = function
   | Rgb color -> rgb color
   | Indexed index -> indexed index

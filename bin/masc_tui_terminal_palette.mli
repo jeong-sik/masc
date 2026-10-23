@@ -34,6 +34,10 @@ val stdout_color_level : unit -> stdout_color_level
 val best_color : rgb -> projected_color option
 (** Project for the process-local [stdout_color_level ()]. *)
 
+val projected_rgb : projected_color -> rgb
+(** RGB of the emitted colour, including quantization to the fixed xterm
+    palette. Contrast must be checked after projection. *)
+
 val fold_projected_color
   :  rgb:(rgb -> 'a)
   -> indexed:(int -> 'a)

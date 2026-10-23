@@ -216,8 +216,7 @@ let test_a_colour_that_already_reads_is_left_alone () =
 
 (* The receding token, against real themes rather than four hand-picked ones.
    It has the opposite errand and the same floor to respect. *)
-let recede_floor = 3.0
-let recede_max_ratio = 0.4
+let recede_floor = text_floor
 
 let test_receding_moves_toward_the_background_on_every_scheme () =
   List.iter
@@ -225,20 +224,17 @@ let test_receding_moves_toward_the_background_on_every_scheme () =
       let bg = background scheme in
       let fg = foreground scheme in
       match
-        Color.recede_toward ~background:bg ~floor:recede_floor
-          ~max_ratio:recede_max_ratio fg
+        Masc_tui_theme.For_testing.recede_rgb ~foreground:fg ~background:bg
       with
       | None ->
-        (* Only a theme whose own text is already under the floor. None of
-           these twelve is, so reaching here is the fixture drifting. *)
-        Alcotest.failf "%s: the theme's own text does not clear %.1f"
-          scheme.name recede_floor
+        check bool "an unreadable foreground cannot be receded" true
+          (Color.contrast_ratio fg bg < recede_floor)
       | Some receded ->
         let ratio = Color.contrast_ratio receded bg in
         check bool
           (Printf.sprintf "%s: receded text reads at %.2f" scheme.name ratio)
           true
-          (ratio >= recede_floor -. 0.01);
+          (ratio >= recede_floor);
         (* The direction SGR 2 gets wrong on a light terminal. *)
         let closer =
           Float.abs

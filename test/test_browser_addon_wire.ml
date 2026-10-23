@@ -94,7 +94,14 @@ let commands_that_change_nothing () =
     ["snapshot",W.Snapshot,true;"model listing",W.Model_requests,true;"model wait",W.Model_wait {after=None},true;
      "idle document read",issue true,true;"browser command",issue false,false;"retire",W.Retire,false;
      "native poll",W.Poll {client={B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi};window_sec=0.},false;
-     "disconnect",W.Disconnect id,false]
+     "disconnect",W.Disconnect id,false;
+     "upload stage",W.Upload_stage {id="up";actor="keeper";route;verb=B.Tabs_list},false;
+     "upload discard",W.Upload_discard "up",false;
+     "download claim",W.Download_claim {id="dl";actor="keeper";route;verb=B.Tabs_list},false;
+     "download commit",W.Download_commit {id="dl";actor="keeper";route;verb=B.Tabs_list;receipt=`Null},false;
+     "download release",W.Download_release {id="dl";actor="keeper";route;verb=B.Tabs_list},false;
+     "model result",W.Model_result `Null,false;
+     "native delivery",W.Deliver {client_id=id;id="cmd";payload=`Null},false]
 let () = run "browser addon wire" ["boundary",[
   test_case "closed verbs roundtrip" `Quick roundtrips;
   test_case "guards and competing identities" `Quick rejections;

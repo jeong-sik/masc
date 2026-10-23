@@ -102,21 +102,32 @@ let dispatch ?upload_id ~required_actions t ~preference verb ~start_time =
       (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
       |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Browser_lane.Action.Open_tab _|Open_window _|On_tab _)|Page_context _
       |Page_instruct _|Page_locate _|Page_extract _) -> Ok () in
-  let* published,snapshot=match selection_snapshot t with
-    | Ok value -> Ok value
-    | Error (Snapshot_unavailable detail) -> fail ~class_:Tool_result.Dependency_unavailable
-        ~effect_disposition:Tool_result.Proven_pre_effect
-        ("browser snapshot is unavailable; no browser command was dispatched: " ^ detail)
-    | Error (Snapshot_unreadable detail) -> fail ~class_:Tool_result.Runtime_failure
-        ~effect_disposition:Tool_result.Proven_pre_effect
-        ("browser snapshot is unreadable; no browser command was dispatched: " ^ detail) in
-  let* selected=Browser_selection.choose ~required_actions ~verb ~bound:(Browser_selection.bound verb) ~snapshot preference
-    |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
-  let* browser=Browser_selection.target ~verb ~snapshot selected.route
-    |> Result.fold ~ok:Result.ok ~error:(fun error -> refuse (Browser_lane.selection_error_message error)) in
-  let* ()=Browser_selection.require ~snapshot required_actions browser
-    |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
-  let binding=Browser_binding.of_browser selected browser in
+  let* binding=match preference,required_actions with
+    (* An explicit owned route with nothing to check against its snapshot
+       names its browser already; the worker checks the lane again before it
+       dispatches (RFC #45368 4.2). *)
+    | Browser_selection.Exact Browser_lane.Automation_route,[] ->
+        Ok (Browser_binding.of_browser {Browser_selection.route=Browser_lane.Automation_route;
+          reason=Browser_selection.Explicit_browser} Browser_selection.Owned_automation)
+    | Exact Stagehand_route,[] ->
+        Ok (Browser_binding.of_browser {Browser_selection.route=Browser_lane.Stagehand_route;
+          reason=Browser_selection.Explicit_browser} Browser_selection.Owned_stagehand)
+    | (Automatic|Exact (Live_route _)),_ | Exact (Automation_route|Stagehand_route),_::_ ->
+      let* published,snapshot=match selection_snapshot t with
+        | Ok value -> Ok value
+        | Error (Snapshot_unavailable detail) -> fail ~class_:Tool_result.Dependency_unavailable
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            ("browser snapshot is unavailable; no browser command was dispatched: " ^ detail)
+        | Error (Snapshot_unreadable detail) -> fail ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            ("browser snapshot is unreadable; no browser command was dispatched: " ^ detail) in
+      let* selected=Browser_selection.choose ~required_actions ~verb ~bound:(Browser_selection.bound verb) ~snapshot preference
+        |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
+      let* browser=Browser_selection.target ~verb ~snapshot selected.route
+        |> Result.fold ~ok:Result.ok ~error:(fun error -> refuse (Browser_lane.selection_error_message error)) in
+      let* ()=Browser_selection.require ~snapshot required_actions browser
+        |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
+      Ok (Browser_binding.of_browser selected browser) in
   let grant=match upload_id with None -> []|Some id -> ["uploadId",`String id] in
   match call t ~arguments:(`Assoc (route_arguments (Browser_binding.selected binding).route @ grant
       @ ["command",Browser_lane.verb_json verb])) with
@@ -154,7 +165,7 @@ let command t ~arguments =
   let start_time=Tool_timing.start () in
   match parse_command arguments with
   | Error detail -> Error (Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time
-      ~class_:Tool_result.Policy_rejection ~effect_disposition:Tool_result.Proven_pre_effect detail)
+      ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect detail)
   | Ok (preference,verb,required_actions,upload_id) ->
       dispatch ?upload_id ~required_actions t ~preference verb ~start_time |> Result.map snd
 let issue ?upload_paths ?(required_actions=[]) t ~preference verb =

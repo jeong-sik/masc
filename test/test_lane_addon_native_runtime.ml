@@ -506,6 +506,22 @@ hooks = ["validate_input", "validate_output"]
     (inspect id |> member "phase" |> text "kind"<>"failed"
      && (match R.browser_service_status ~config ~access ~instance_id:id with
        | R.Browser_ready _ -> true | Browser_refresh_needed _|Browser_unavailable|Browser_retired -> false));
+  (* The host refuses these before it calls the worker; the tool-call count
+     checked next stays at the one long call. *)
+  let host_refusal ?(class_=Tool_result.Workflow_rejection) name arguments =
+    check bool name true (match Browser_addon_host.command host ~arguments with
+      | Error failure -> Tool_result.failure_class failure=Some class_
+          && (Keeper_tool_execution.of_tool_result failure).failure_effect_disposition=Tool_result.Proven_pre_effect
+      | Ok _ -> false) in
+  host_refusal "requirements ride only discovery or session open" (`Assoc ["requiredActions",`List [`String "hover"];
+    "command",Browser_lane.verb_json (Browser_lane.Page_read {tab_id=Some 7;max_chars=None})]);
+  host_refusal "a live tab is opened only on a named client" (`Assoc ["lane",`String "live";
+    "command",Browser_lane.verb_json (Browser_lane.Page_act (Browser_lane.Action.Open_tab "https://example.org/"))]);
+  host_refusal "a repeated field is refused as input" (`Assoc ["command",Browser_lane.verb_json Browser_lane.Tabs_list;
+    "command",Browser_lane.verb_json Browser_lane.Tabs_list]);
+  write (Filename.concat root ("lose-snapshot-"^id)) "once";
+  host_refusal ~class_:Tool_result.Dependency_unavailable "no snapshot, no automatic choice"
+    (`Assoc ["command",Browser_lane.verb_json Browser_lane.Tabs_list]);
   check string "long MCP export dispatched once" "once\n"
     (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
   let unbound=Browser_addon_view.read host (`Assoc ["lane",`String "live";"tabId",`Int 7]) in

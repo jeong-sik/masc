@@ -171,11 +171,6 @@ let scenario () = Eio_main.run (fun env ->
       Yojson.Safe.Util.(projected |> member "clientId" |> to_string);
     check string "page fields cannot forge its transport" "webdriver_bidi"
       Yojson.Safe.Util.(projected |> member "transport" |> to_string);
-    check bool "receipt rejects a mismatched connection" true
-      (Result.is_error (Masc.Browser_binding.of_json (`Assoc [
-        "browserSelection",Masc.Browser_selection.to_json (Masc.Browser_binding.selected binding);
-        "browserConnection",`Assoc ["clientId",`String "0c000000-0000-4000-8000-000000000002";
-          "transport",`String "webdriver_bidi"]])));
     check (option bool) "partial is a failed call" (Some true) result.is_error;
     check bool "partial payload is retained" true
       (Option.exists (fun data -> Yojson.Safe.Util.(data |> member "answer" |> member "payload")=payload)

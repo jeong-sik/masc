@@ -3,21 +3,25 @@ name: browser
 description: Use the installed browser Add-on to observe pages and perform guarded browser interactions.
 ---
 
-Use the exported `browser_command` tool. Tool arguments contain browser work,
-never caller identity or a worker incarnation. The host supplies those.
+Discover and choose browsers with the host browser tools (`BrowserTabs`,
+`BrowserRead`, `BrowserSession` and the rest in a Keeper; `masc_browser_*` over
+MCP). With no tab or document binding, the host chooses from the available
+browsers without opening or navigating one. Keep `browserSelection.lane` and
+`browserSelection.clientId` from the returned receipt and repeat that identity
+for all work on its tabs/documents. An unavailable selection must not be
+replaced silently.
 
-Start with `{"command":{"verb":"tabs.list","args":{}}}`. With no tab or
-document binding, the worker chooses from available browsers without opening or
-navigating one. Keep `browserSelection.lane` and `browserSelection.clientId` from
-the returned receipt. Repeat that identity for all work on its tabs/documents.
-An unavailable selection must not be replaced silently.
+For initial discovery, give the host tool `requiredActions` such as
+`["hover","pointer_drag"]` when that work is needed. The host chooses a
+compatible available connection or refuses before dispatch; it checks explicit
+connections too. This capability declaration does not prove that a page
+accepted an interaction. An explicitly named live connection must include its
+observed client ID before creating a tab.
 
-For initial discovery, add `"requiredActions":["hover","pointer_drag"]` next to
-`command` when that work is needed. The worker chooses a compatible available
-connection or refuses before dispatch; it checks explicit connections too.
-This capability declaration does not prove that a page accepted an interaction.
-An explicitly named live connection must include its observed client ID before
-creating a tab.
+The exported `browser_command` tool runs one command on a browser you name:
+`lane`, and for live its observed `clientId`. It chooses nothing and takes no
+`requiredActions`. Tool arguments contain browser work, never caller identity
+or a worker incarnation. The host supplies those.
 
 Commands use `{"lane":"live","clientId":"<observed UUID>","command":
 {"verb":"page.read","args":{"tabId":7,"maxChars":12000}}}`. Use

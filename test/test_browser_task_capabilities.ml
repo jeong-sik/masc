@@ -134,6 +134,16 @@ let test_invalid_required_actions_reach_no_browser () =
   check bool "an accepted list goes on to find the browser Add-on" true
     (Tool_result.failure_class (invoke Cap.Tabs ["requiredActions",`List [`String "hover"]])
      = Some Tool_result.Dependency_unavailable);
+  let parse fields = Masc.Browser_addon_host.parse_command (`Assoc fields) in
+  check bool "the host refuses a repeated requiredActions field" true
+    (Result.is_error (parse ["requiredActions",`List [];"requiredActions",`List [`String "hover"];
+                             "command",Lane.verb_json Lane.Tabs_list]));
+  check bool "the host keeps the requirements for its own choice" true
+    (parse ["requiredActions",`List [`String "hover"];"command",Lane.verb_json Lane.Tabs_list]
+     = Ok (Selection.Automatic,Lane.Tabs_list,operations ["hover"],None));
+  check bool "a clientId names only a live browser" true
+    (Result.is_error (parse ["lane",`String "automation";"clientId",`String "0c000000-0000-4000-8000-000000000001";
+                             "command",Lane.verb_json Lane.Tabs_list]));
   (* The host checks requirements while it chooses; the worker runs the
      route it was given and takes none. *)
   let command fields = Worker.command (`Assoc fields) in
@@ -141,7 +151,8 @@ let test_invalid_required_actions_reach_no_browser () =
     (Result.is_error (command ["lane",`String "automation";"requiredActions",`List [`String "hover"];
                                "command",Lane.verb_json Lane.Tabs_list]));
   check bool "the worker accepts the chosen route alone" true
-    (command ["lane",`String "automation";"command",Lane.verb_json Lane.Tabs_list] = Ok Lane.Tabs_list)
+    (command ["lane",`String "automation";"command",Lane.verb_json Lane.Tabs_list]
+     = Ok (Lane.Automation_route,Lane.Tabs_list))
 
 let test_button_click_table () =
   let reaches backend operation = match Cap.support backend operation with

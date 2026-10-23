@@ -31,7 +31,8 @@ val issue : ?upload_paths:string list -> ?required_actions:Browser_capabilities.
   t -> preference:Browser_selection.preference -> Browser_lane.verb ->
   (receipt, Tool_result.result) result
 (** Choose the browser from the worker's snapshot, invoke the advertised tool
-    once on that route, and decode its success receipt. The receipt names the
+    once on that route, and decode its success receipt. An explicit owned
+    route without [required_actions] needs no snapshot. The receipt names the
     browser the host chose; the worker states no identity. A worker refusal
     after the snapshot (the client left, the lane turned off) is returned as
     given, never sent to another browser. The selected schema hooks remain
@@ -44,6 +45,9 @@ val issue : ?upload_paths:string list -> ?required_actions:Browser_capabilities.
     browser. The host prepares worker-owned copies over the original private
     connection, then uses the ordinary exported tool/hooks once. A failed or
     cancelled call is never replayed. *)
+val parse_command : Yojson.Safe.t ->
+  (Browser_selection.preference * Browser_lane.verb * Browser_capabilities.operation list * string option, string) result
+(** The public command shape, decoded before any browser is chosen. *)
 val command : t -> arguments:Yojson.Safe.t -> (Mcp_protocol.Mcp_types.tool_result, Tool_result.result) result
 (** The public command shape: [lane] and [clientId] are optional, so a missing
     lane leaves the choice to the host, and [requiredActions] and [uploadId]

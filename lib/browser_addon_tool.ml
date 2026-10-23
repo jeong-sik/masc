@@ -56,7 +56,7 @@ let parse json =
     | Some (`String raw) -> let* id=B.client_id_of_string raw in Ok (Some (B.client_id_to_string id))
     | Some _ -> Error "uploadId must be a canonical host grant UUID" in
   Ok (route,verb,upload_id)
-let command arguments = parse arguments |> Result.map (fun (_,verb,_) -> verb)
+let command arguments = parse arguments |> Result.map (fun (route,verb,_) -> route,verb)
 let transferable verb upload_id = match verb,upload_id with
   | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),Some _ -> Ok ()
   | Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),None ->

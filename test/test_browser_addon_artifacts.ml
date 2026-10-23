@@ -102,9 +102,7 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
         "command",`Assoc ["verb",`String "page.interact";"args",`Assoc ["action",`String "activate_tab";"tabId",`Int 7;"expectedUrl",`String "https://example.org/"]]] in
       let live_id=`String "0b000000-0000-4000-8000-000000000052" in
       let live_data=`Assoc ["reply",`String "issue";"answer",`Assoc ["status",`String "answered";
-        "payload",`Assoc ["ok",`Bool true;"data",`Assoc ["activated",`Bool true]]];
-        "browserSelection",`Assoc ["lane",`String "live";"clientId",live_id;"reason",`String "explicit_browser"];
-        "browserConnection",`Assoc ["clientId",live_id;"transport",`String "web_extension"]] in
+        "payload",`Assoc ["ok",`Bool true;"data",`Assoc ["activated",`Bool true]]]] in
       let live_result={raw with structured_content=Some live_data;
         content=[Mcp_protocol.Mcp_types.TextContent {type_="text";text=Yojson.Safe.to_string live_data;annotations=None}]} in
       check bool "successful live activation passes through unchanged" true
@@ -112,15 +110,13 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
           ~name:Masc.Browser_addon_tool.definition.name ~arguments:live ~principal ~result:live_result)=live_result);
       (* A live connection's download listing is finalized like the owned
          Gecko's; a row without a grant passes through as it came. *)
-      let listing transport = `Assoc ["reply",`String "issue";"answer",`Assoc ["status",`String "answered";
+      let listing = `Assoc ["reply",`String "issue";"answer",`Assoc ["status",`String "answered";
         "payload",`Assoc ["ok",`Bool true;"data",`Assoc ["tabId",`Int 7;"watchingSince",`Null;
           "downloads",`List [`Assoc ["downloadId",`String "1b000000-0000-4000-8000-000000000003";
-            "status",`String "pending";"url",`String "https://example.org/report.txt"]]]]];
-        "browserSelection",`Assoc ["lane",`String "live";"clientId",live_id;"reason",`String "explicit_browser"];
-        "browserConnection",`Assoc ["clientId",live_id;"transport",`String transport]] in
+            "status",`String "pending";"url",`String "https://example.org/report.txt"]]]]] ] in
       let live_downloads=`Assoc ["lane",`String "live";"clientId",live_id;
         "command",`Assoc ["verb",`String "page.downloads";"args",`Assoc ["tabId",`Int 7]]] in
-      let listed=listing "ego_task_space" in
+      let listed=listing in
       let listed_result={raw with structured_content=Some listed;
         content=[Mcp_protocol.Mcp_types.TextContent {type_="text";text=Yojson.Safe.to_string listed;annotations=None}]} in
       (match Masc.Browser_addon_artifacts.finalize ~socket ~client ~store
@@ -130,6 +126,7 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
          check bool "a live listing without grants passes through" true
            (Option.map rows finalized.structured_content = Some (rows listed))
        | Error detail -> failf "a live download listing was refused: %s" detail);
+
       let later=Filename.concat session "later.bin" in write later "later";Unix.chmod later 0o600;
       marker:=ok (Owner.publish_download owner later);
       let id=transfer_id (command ()) in

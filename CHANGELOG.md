@@ -2,6 +2,141 @@
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- `workspace-curator` is now package revision 0.1.1 and `candle-appraiser` 0.1.2, because both ship the shared Exact worker. Rebuild both worker images and install the new package revisions (#45200).
+- Requests the workspace-curator worker still lists after its originals are moved aside end as `not_allowed` on the first host cycle, so the hard cut keeps that worker state (#45275).
+- Metrics responses add outcome/observation counts and nullable rates; the handoff metric is `handoff_task_success_rate` and its fitness component is `handoff_task_success`. Consumers must use the current contract; raw metric storage remains unchanged (#45292).
+
+### Fresh state required
+
+- Workspace curator classification batch snapshots are now `workspace.memory.classification-batch.v3` and v2 snapshots are not read. With the server stopped, move aside `<base>/.masc/lane-addons/tool-request-owners/5e5665b70b1920c0c1dc7d16ab2b33c8d21773a7a0fab71bed62b03a8dd851e3/` (the workspace-curator original scope) (#45199).
+- Workspace curator captures are now `workspace.memory.execution-capture.v3`, classification batch snapshots `workspace.memory.classification-batch.v4`, Briefing batch snapshots `workspace.memory.briefing-batch.v2` and observer registration receipts `workspace.memory.observer.registration.v2`, and earlier records are not read. With the server stopped, move `<base>/.masc/lane-addons/tool-request-owners/5e5665b70b1920c0c1dc7d16ab2b33c8d21773a7a0fab71bed62b03a8dd851e3/` (the workspace-curator original scope) out of `<base>/.masc/lane-addons/` (#45214).
+- Original Add-on request records are now `lane.addon.tool-request-owner.v4`. A record names its request body by digest and keeps the consumer's summary of that request (#45246), and the body is a file under `<base>/.masc/lane-addons/tool-request-bodies/`. Earlier records are not read, and the deploy store check refuses each one by file. With the server stopped, move every scope directory under `<base>/.masc/lane-addons/tool-request-owners/` out of `<base>/.masc/lane-addons/` (workspace-curator is `5e5665b70b1920c0c1dc7d16ab2b33c8d21773a7a0fab71bed62b03a8dd851e3/`, candle-appraisals is `730f334f72479a09ad59258948bf7ed64bbe4d707bc3c0d1e787baeebe5d7a37/`). Candle retains each appraisal again under the same request ID and reads its retained answer from the `candle-appraiser/` worker state, so keep that state (#45228).
+- Existing nonempty `<base-path>/.masc/metrics/` directories without the current `store.json` and per-agent `identity.json` bindings are refused. Back up and remove that metrics directory during a separately coordinated transition before recording into fresh state; no automatic conversion is provided (#45268).
+
+### Added
+
+- Keeper status reports the ext4 state of each image-backed Keeper volume under `sandbox_live.volume_filesystem`, from the server's last superblock read on the maintenance pulse. When a volume starts recording errors, the server posts one Internal System_post in the `sandbox` hearth with the error count and the first and last error (#45146).
+- When a Keeper work volume records ext4 errors, the server repairs it the next time the Keeper is idle: it removes the Keeper's guests, clones the image to `<image>.pre-repair` with `clonefile`, runs `e2fsck` in a one-shot helper, and reads the superblock again to decide the outcome. An existing backup or an unknown helper image stops the repair before the guests are removed, and once the operator removes that backup the next idle pulse repairs the volume; a failed clone stops it before e2fsck. A damaged build volume is left for the next boot, which recreates it. Each repair writes a `masc.keeper.volume_repair.v1` receipt and a start and a result post in the `sandbox` hearth, and Keeper status shows a work volume's backup under `sandbox_live.volume_filesystem[].repair_backup` (#45168).
+- The browser lane knows ego lite (`ego_lite`) as a live connection over an `ego_task_space`. It reads only: tab listing, text, elements, scene and screenshots, numbered by ego's page labels. Capability listings and automatic browser selection include it (#45234).
+- The browser Add-on worker serves one ego lite task space as a live connection when `runtime.toml` names `[browser.live.ego]` `command` and `space`. Each command runs `ego-browser nodejs` once; detaching ends the space. Removing the table, or `[browser.live] enabled = false`, turns it off (#45235).
+- An ego connection serves `open_tab`, `BrowserGoto` and `close_tab` on pages an agent opened in its task space. A tab the operator opened there is refused before any run (#45236).
+- Quantize only selected piano-roll note attacks with `:quantize-notes GRID`, preserving lengths, dynamics, other notes and original MIDI clocks in one undoable edit. (#45253)
+- Set or relatively shift selected note attack velocities with `:velocity-notes VALUE` and `:velocity-add-notes DELTA`, preserving release dynamics and rejecting invalid selections as one transaction. (#45254)
+- An ego connection serves `BrowserInteract` on pages an agent opened in its task space: click, `click_at` with any button, double click, hover, `scroll`, `scroll_at`, fill, `select_option`, `follow_link`, `type_text` and `press_key`. Targets and guards run the same page scripts as the BiDi connection; ego sends the mouse and keys. Drag, touch, zoom, viewport, tab activation and frames are refused before any effect (#45256).
+- A connected BiDi Firefox reads text, elements and the iframe list inside an iframe: `masc_browser_read` with `framePath` and `mode=frames` now works on a live BiDi connection, for a cross-origin frame too. New live capability `frame_read`; the extension does not serve it. ([#45263](https://github.com/jeong-sik/masc/pull/45263))
+- Explain exact decimal and fractional timing for phrase, imported MIDI, arrangement and step-input experiments. (#45265)
+- Compose globally voice-led chord progressions directly in imported MIDI tracks using their original PPQ/SMPTE units, with explicit routing, transactional overlap checks and one-step undo. (#45295)
+- Document imported MIDI voice-led composition and verify saved experiments through harmony analysis, MIDI export and editable arrangement handoff. (#45296)
+- `masc browser-lane-setup --mode ego` writes the `[browser.live.ego]` table of `runtime.toml`. It finds `ego-browser` on `PATH`, then in `~/.local/bin`, and writes it only when `--version` names ego lite's and Chromium's versions. `--ego-command` and `--ego-space` name another; a table that is there keeps its values. `masc prerequisite-actions ego-browser` reports ego lite, ready only when it names those versions, and on a Mac opens its download page (#45302).
+- `masc setup`'s "5 · Give imp tools" checklist shows an unmarked ego lite row when `ego-browser` answers. It runs `masc browser-lane-setup --mode ego` and needs no Firefox (#45303).
+- Set or adjust selected note lengths with `:duration-notes` and `:duration-add-notes`, preserving native MIDI releases and exact beat/frame units through Undo/Redo, MIDI export, harmony analysis and arrangement handoff. See [the piano-roll guide](../tools/alphatex/README.md#phrase-sequencer). (#45309)
+- Add exact selected passage timing ratios with `:stretch-notes RATIO [ANCHOR]` for phrases and original PPQ/SMPTE MIDI. Preserve source events and reject invalid changes as one undoable edit. (#45339)
+- Document exact passage stretching, its anchor and rejection rules, and source-TUI evidence through harmony analysis and editable arrangement handoff. (#45340)
+- Record installed simultaneous audio/MIDI capture and native-parent passage stretch evidence, including clocks, hashes and explicit physical-device and intermediate-state limits. (#45344)
+- Edit captured MIDI2 per-note controller, pitch bend and poly-pressure data at full 32-bit resolution, preserving original addresses and clocks through history, native playback preparation, arrangement save/reopen and raw export. (#45351)
+- Explain native MIDI2 expression selection, exact raw32 edits and reset/history behavior, with bounded Worker, source-TUI and actual CoreMIDI receive/cleanup evidence. (#45352)
+- Edit native UMP message times and explicitly selected MIDI2 note releases while preserving original event identities, authored clock provenance, portable variants and the shared playback span. (#45370)
+- Document native UMP event time and explicit note length editing, with Worker, source TUI and private CoreMIDI evidence and remaining sequencer limits. (#45371)
+
+### Changed
+
+- An answered workspace curator classification root now leads to twice its fact count only when it held the count it was prepared for. A root the frame or a short backlog stopped keeps that count, and a root that filled the frame leads to filling it again, so a briefly short backlog no longer shrinks later batches. Each classification batch snapshot records the size it was prepared for (#45199).
+- A workspace curator capture stores the model input once. A restore builds the input again from the stored batch and renders the prompt with the captured template; the capture keeps only the SHA-256 of the prompt it sent and refuses a restore that renders a different one. A Briefing batch snapshot keeps how many unconsumed entries it selected instead of a second copy of them. The observer registration receipt names the capture by its request digest instead of holding a copy, so an original's owner record holds one copy of the model input instead of six. The captured ledger still holds the claim and conflict texts a classification input cites (#45214).
+- An original Add-on request body is written once, before the record that names it, and a record moves together with that body. Retain and progress compare the request by its digest. A Workspace Curator successor intent names its child by request ID and request digest instead of holding the whole child capture. A record whose body is missing, changed or not canonical JSON is an error, not absence (#45228).
+- An original Add-on request record keeps the consumer's summary of its request, written once at retain like the request and refused when it is not in canonical form. The Workspace Curator summary (`workspace.memory.execution-summary.v1`) names the predecessor and the physical workspace that captured the original, and for classification the size the batch was prepared for and the selected facts, for Briefing the selected count and the SHA-256 of the prepared state. A restore computes the summary again from the capture and refuses a record whose summary differs (#45246).
+- Document Curator CPU-isolation evidence and the limits of standalone scheduling measurements. #45260
+- Share exact native-tick snapping and original/new overlap decisions for piano-roll note quantization. (#45280)
+- The Keeper prompt now says when to register work: work that will not finish this turn becomes a Task the Keeper creates and claims, including requests given in conversation, and work that needs several Tasks or PRs is grouped under a Goal with a metric the judge can open and a target value. It names how to link Tasks (`goal_id` at creation, `masc_task_set_goal` afterwards), record progress with `masc_goal_measure`, and ask for verification with `request_complete` (#45287).
+- A Workspace Curator pass moves each chain of originals that no pass reads again out of the scope, into `tool-request-owners-settled/<scope digest>/<YYYY-MM-DD>/` under the UTC date its root's ID was minted. A chain moves once its leaf is Finished or Conflicted and every original in it has both observer receipts acknowledged. The latest answered classification stays, since it sizes the next batch, and so do a Briefing that prepared the current Briefing state and every Rejected original. A request the worker still lists for a moved original ends as `not_allowed` (#45300).
+- Loading an original Add-on request reads its record and the body it names under one hold of the scope lock, so an original moved between the two reads is found gone, not reported as a lost body (#45300).
+- The deploy store check (`validate-stores`), which runs beside a live server, counts a Lane Add-on record that is gone by the end of its check as absent, as it already did for one gone before its read. A settle moves the record and then the body the check reads next (#45300).
+- Define Keeper stopping authority through explicit cancellation, Gate, queue and terminal/failure state rather than repeated-call or text counts; mark the corresponding audit item as source-only pending runtime validation. (#45314)
+- Explain signed MIDI input IDs, paired WAV/UMP take playback, output routes and state-restoration limits; link the existing arrangement and practice workflows. (#45343)
+- Share Escape ownership and IME composition checks across Dashboard overlays and the command palette; import the keyboard policy directly from its source. (#45364)
+- Remove redundant compact-viewport checks from TUI surface handlers already covered by the shared compact input dispatch. (#45366)
+
+### Removed
+
+- The `ego-browser` Lane Add-on and its host companion Skill. The live ego connection serves the same work to Keepers (#45257).
+
+### Fixed
+
+- The shared Exact worker now answers a submitted request that no listing reply could carry with the typed `input_refused`/`request_body_refused` result instead of an untyped tool error. The host narrows the batch instead of leaving the original pending with an unknown outcome. The refusal is kept without the request body, so a read after a lost reply gives the same answer, and the request is never listed (#45200).
+- The shared Exact worker looks a submitted request up before checking the frame, so a request it already holds keeps its answer after the declared frame changes (#45200).
+- The browser lane check tells a browser Add-on whose attach failed
+  (`invalid`) from one the server is still starting or has not applied yet
+  (`needs_verification`), reading how the configuration maintenance pass
+  last applied its declaration. A switched-off browser declaration beside
+  one that could not be read is no longer reported as off (#45222).
+- The dashboard's browser client list reads its BiDi host paragraph with
+  the same access as its clients, so one response never names an
+  installation the list cannot see; the setup check reads the Add-on as
+  the native host poll does (#45222).
+- A Lane Add-on start that the engine refused, or that found its slot held by another container, no longer leaves a detached record once its release is confirmed. Execution authority is recorded before every create, and since #44214 it alone kept the record, so a start that kept failing added one binding per maintenance beat, which #38387 had removed. A record is now dropped when the release is confirmed and the worker never held a resource or committed an observation. An instance the operator retained (`Native_retained`) keeps its record. (#45229)
+- Feed retained-request SHA-256 calculations in bounded slices so a large Digestif C call does not hold the server domain lock for the whole input. Original bytes and content addresses are preserved; installed latency remains to be measured (#45242).
+- Reuse the current Curator pass's validated original inventory when there is no successor recovery to perform. Actual recovery still rereads and validates the complete forest, and execution and settlement still reload their original owner (#45243).
+- Reuse validated immutable Add-on observer receipts when advancing their state instead of encoding, decoding and hashing them again; preserve exact acknowledgement and transition checks. (#45249)
+- Decode retained Add-on progress events once before folding them, reducing repeated receipt hashing while preserving strict wire, payload, acknowledgement and state-transition validation. (#45250)
+- Keep Curator classification preparation on the CPU pool instead of bypassing its isolation on a raw system thread. #45259
+- Parse decimal and fractional musical positions in exact native ticks so valid decimal onsets and triplet input do not fail from floating-point rounding. (#45264)
+- Distinguish missing agent metric observations from unreadable or malformed sources, retain exact query names, and expose absent fitness values as null (#45267).
+- Store exact agent metric identities in SHA256-keyed slots with complete immutable binding publication and explicit recording outcomes (#45268).
+- Keep Board posts, comments, and votes in Board activity instead of fabricating zero-duration successful Task performance records (#45269).
+- A Lane retain whose `retained` record write fails no longer answers that nothing changed: an atomic replace can fail after its rename, so the operator now gets a runtime failure that says the allocation may already be retained and the next cleanup pass records what it finds, while a refusal still means nothing was written. A retain refused because a browser child reservation was never published now says the next cleanup pass fences it. The Chrome and live BiDi backends read their child claims through one shared module (#45216, #45272).
+- A Lane Add-on worker that lists a request whose host original is gone no longer stops every host cycle at that request. The Workspace Curator authority answers such a request as unowned: it ends as `not_allowed`, the worker drops it from its listing, and the requests listed after it run. A request that does not match the original owning its ID, or whose owner cannot be read, still stops the cycle, and nothing is written under that ID (#45275).
+- Include exact timing and quantization modules in the installed music bundle, and load copied music entry points before publishing the launcher. (#45280)
+- Phrase and imported MIDI track quantization now use the same exact timing and new-overlap checks as selected notes, preserving original clocks, note lengths and release events. (#45281)
+- Stop and replace a Lane Add-on worker whose process ended on its own, so its declaration starts a new instance instead of keeping the dead one as applied. (#45290)
+- Count distinct observed Task IDs, separate completed and successful outcomes, and preserve missing metric denominators as null instead of fabricated zero/perfect rates (#45292).
+- Use the latest terminal timestamp per Task and count contradictory latest outcomes or start times as `conflicting_tasks` without blocking other Tasks or agents; reject invalid durations or relationship identities; retain raw observation counts and name handoff-related Task success separately from transfer delivery (#45292).
+- Keep unobserved Task outcomes distinct from measured zero values in agent details, validate the exact named fitness response including unresolved Task conflict counts, and label handoff-related Task success without claiming delivery receipts (#45293).
+- The checklist's extension row no longer says that choosing it with the BiDi row is refused as ambiguous: a request that names no browser connection goes to the BiDi browser (#45303).
+- Refuse MIDI quantization that newly crosses an unclosed note attack, including same-tick releases across tracks and attacks masked by existing overlap diagnostics. Preserve original overlaps and independent ports, channels and patterns. (#45308)
+- Keep repeated browser input, equal tool receipts and repeated assistant text deliverable without synthesizing a Keeper turn stop; retain explicit scope, queue and terminal-effect boundaries. Remove obsolete repetition setup and buffers. (#45313)
+- Keep secondary chat text readable after color projection and theme changes; retain typed tool status glyphs and Results colors without parsing rendered tool prose. (#45316)
+- Dashboard 아티팩트 직접 진입에서도 작업 공간 authority를 읽고 후속 execution publication을 구독합니다. (#45329)
+- 스킬과 런타임 설정의 authority 의존 화면 8곳에서 직접 진입 시 초기 조회와 execution 구독을 연결합니다. (#45330)
+- Index original-MIDI attack ranges during note quantization and selected length edits, preserving actual event-order overlap decisions while avoiding a full comparison of every same-key note pair. (#45332)
+- Assemble original-MIDI note and metadata patches once per edit batch, retaining source bytes, patch/insertion order and existing validation while reducing long-selection edit latency. Include a reproducible manual measurement runner. (#45333)
+- An `ego-browser` refused for naming no versions is quoted to at most 400 bytes of what it printed, in the readiness JSON, the setup error and the worker's start failure (#45346).
+- Normalize enhanced-terminal Enter, Tab, Backspace and ASCII control punctuation to the key vocabulary consumed by TUI forms, chat and navigation. Package browsing accepts legacy Backspace bytes as well. (#45347)
+- Leave unsupported or malformed enhanced-key modifiers unclaimed instead of turning them into plain or Ctrl actions. (#45347)
+- Keep Ctrl-T available for the chat queue and use F2 for terminal mouse ownership, including overlays. (#45348)
+- Preserve surface inspection with i before entering an unfocused composer. Hidden forms and Add-ons no longer accept keyboard writes behind the terminal resize fallback; retained drafts and paste ownership remain intact. (#45348)
+- Keep IME confirmation keys from executing Dashboard commands, messages, Board posts and inline configuration changes. (#45349)
+- Match IDE search only within its actual focus owner and scope Copilot Escape to its dock, preserving unrelated modal and browser shortcuts. (#45349)
+- Leave composing or previously consumed Escape with its owner across Dashboard dialogs and popovers. (#45354)
+- Match declared shortcut modifiers exactly and use the same admission for the lazy command palette as the mounted host. (#45354)
+- Keep runtime TOML save and indentation from consuming IME confirmation keys or previously handled events. (#45354)
+
+### Performance
+
+- A progress event on an original Add-on request reads and rewrites only its record, not the request. The record still holds the consumer's summary (#45246) and the commit's before and after domain states. Before, each event read, compared and rewrote the whole request (#45228).
+- Original Add-on request discovery reads records only, not request bodies. A Workspace Curator pass takes each original's domain, held-back facts, Briefing state and the next batch size from record summaries, and restores a capture only for the original it advances, a size-refused leaf that could be halved and an original whose observer receipts still need work. An observed finished original costs one record read per pass (#45246).
+- A Workspace Curator pass reads its active work, its refusals and its last answers instead of every original the workspace has retained (#45300).
+- Reuse the SHA-256 already computed for an evidence blob's durable leaf when returning its immutable reference, avoiding a second hash of the same original bytes (#45305).
+- Reuse one digest throughout a sampling blob's canonical publication and recovery fallback, preserving its complete original bytes, ownership checks and durable-publication requirements (#45306).
+
+### Documentation
+
+- Record reproducible native color-module measurements across 53 TUI themes and four color depths, including startup NO_COLOR policy and explicit screen-verification limits. (#45317)
+
+### Internal
+
+- `Keeper_volume_filesystem` reads a Keeper volume's ext4 error state from the host image's superblock: the kernel's Errors detected bit, the error count, and the first and last error's time, function, line, inode, block and cause. The image path comes from `container volume inspect` (#45143).
+- The browser Add-on owner holds one live connection per transport, so a BiDi Firefox and an ego task space can attach to one worker (#45235).
+- Remove dead `Tuple`/`Variant` Yojson pattern matches in `browser_observation.ml`, `keeper_msg_async_record.ml`, `keeper_projection_change.ml`, and `keeper_tool_plan.ml`. yojson 3.0.0 cannot construct these variants, so the branches were unreachable; explicit `Yojson.Safe.t` annotations replace them (#45273).
+
+## [0.63.0] - 2026-10-23
+
+### Changed
+- TBD
+
+### Deprecated
+- TBD
+
 ## [0.62.0] - 2026-10-22
 
 ### Upgrade notes

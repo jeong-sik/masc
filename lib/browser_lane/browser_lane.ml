@@ -30,6 +30,13 @@ type scene_view = Content | Regions
 (* What an accessibility snapshot covers: the viewport, the whole page, or the
    subtree under one ref an earlier snapshot of the same page printed. *)
 type snapshot_scope = Snapshot_viewport | Snapshot_full_page | Snapshot_subtree of int
+(* What an ego connection's own element actions find: a ref an ego snapshot
+   printed, an accessibility role with its name, or page text. [exact] is the
+   whole name or text, case-sensitive; otherwise a part of it, any case. *)
+type snapshot_target =
+  | Target_ref of int
+  | Target_role of { role : string; name : string; exact : bool }
+  | Target_text of { text : string; exact : bool }
 type pointer_target = Selector of string | Scene_node of node_ref
 
 (* A CSS-pixel size the browser's viewport is forced to, or the browser's own size again. *)
@@ -58,6 +65,15 @@ type interaction = Activate_tab | Click of string | Fill of { selector : string;
   | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
   | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport; via : Pointer.point list; duration_ms : int }
   | Follow_link of node_ref | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
+  | Click_target of snapshot_target | Fill_target of { target : snapshot_target; text : string }
+
+(* Whether an interaction acts on an ego snapshot target, which only an ego
+   connection serves. *)
+let acts_on_snapshot_target = function
+  | Click_target _ | Fill_target _ -> true
+  | Activate_tab | Click _ | Fill _ | Select_option _ | Set_zoom _ | Set_viewport _ | Double_click _
+  | Double_click_at _ | Type_text _ | Press_key _ | Scroll _ | Hover _ | Drag_to _ | Hover_at _ | Tap_at _
+  | Swipe _ | Click_at _ | Scroll_at _ | Drag _ | Follow_link _ | Click_node _ | Fill_node _ -> false
 
 type elements_filter = { within : string option; selector : string option }
 
@@ -164,8 +180,8 @@ let interaction_verb = function
   | Swipe _ -> "swipe"
   | Click_at _ -> "click_at"
   | Drag _ -> "drag"
-  | Click _ | Click_node _ -> "click"
-  | Fill _ | Fill_node _ -> "fill"
+  | Click _ | Click_node _ | Click_target _ -> "click"
+  | Fill _ | Fill_node _ | Fill_target _ -> "fill"
   | Follow_link _ -> "follow_link"
   | Scroll _ -> "scroll"
 ;;
@@ -173,6 +189,44 @@ let interaction_verb = function
 let drag_fields via duration_ms =
   (match via with [] -> [] | _::_ -> ["via", `List (List.map Pointer.point_to_json via)])
   @ (if duration_ms = 0 then [] else ["durationMs", `Int duration_ms])
+
+let snapshot_target_to_json = function
+  | Target_ref node -> `Assoc ["ref",`Int node]
+  | Target_role {role;name;exact} -> `Assoc ["role",`String role;"name",`String name;"exact",`Bool exact]
+  | Target_text {text;exact} -> `Assoc ["text",`String text;"exact",`Bool exact]
+let snapshot_target_of_json = function
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let exact () = match List.assoc_opt "exact" fields with
+      | None -> Ok true
+      | Some (`Bool exact) -> Ok exact
+      | Some _ -> Error "target exact must be true or false" in
+    let nonblank key = match List.assoc_opt key fields with
+      | Some (`String value) when String.trim value <> "" -> Ok value
+      | Some _ | None -> Error ("target " ^ key ^ " must be nonblank text") in
+    (match List.sort String.compare (List.map fst fields) with
+     | ["ref"] -> (match List.assoc "ref" fields with
+         | `Int node when node >= 0 -> Ok (Target_ref node)
+         | _ -> Error "target ref is the number an ego snapshot printed, such as 12 for ref=12")
+     | ["name";"role"] | ["exact";"name";"role"] ->
+       let* role = nonblank "role" in
+       let* () = if String.for_all (fun c -> c >= 'a' && c <= 'z') role then Ok ()
+         else Error "target role is one lowercase ARIA role, such as button" in
+       let* name = nonblank "name" in
+       let* exact = exact () in
+       Ok (Target_role {role;name;exact})
+     | ["text"] | ["exact";"text"] ->
+       let* text = nonblank "text" in
+       let* exact = exact () in
+       (* Unquoted, ego reads a leading quote as an exact text and >> as a
+          chained selector. *)
+       let rec chained i = i + 1 < String.length text && ((text.[i] = '>' && text.[i + 1] = '>') || chained (i + 1)) in
+       let* () = if exact || not (String.starts_with ~prefix:"\"" text || String.starts_with ~prefix:"'" text
+                                  || chained 0) then Ok ()
+         else Error "a part-of-text target cannot start with a quote or contain >>; set exact to true" in
+       Ok (Target_text {text;exact})
+     | _ -> Error "target is {ref}, {role, name, exact} or {text, exact}")
+  | _ -> Error "target must be an object"
 
 let interaction_args ~tab_id ~frame_path ~expected_url action =
   let node_fields target = ["documentId",`String target.document_id; "nodeId",`String target.node_id] in
@@ -216,6 +270,8 @@ let interaction_args ~tab_id ~frame_path ~expected_url action =
     | Follow_link target -> verb :: node_fields target
     | Click_node target -> verb :: node_fields target
     | Fill_node {target;text} -> verb :: ("text",`String text) :: node_fields target
+    | Click_target target -> [verb;"target",snapshot_target_to_json target]
+    | Fill_target {target;text} -> [verb;"target",snapshot_target_to_json target;"text",`String text]
     | Scroll {x; y} -> [verb; "x", `Int x; "y", `Int y] in
   `Assoc (("tabId", `Int tab_id) :: fields @
     (if frame_path = [] then [] else ["framePath", `List (List.map (fun s -> `String s) frame_path)]) @
@@ -349,6 +405,7 @@ type live_capability =
   | Viewport_capture
   | Scene_read
   | Accessibility_snapshot
+  | Snapshot_target_input
   | Dom_interaction
   | Point_click
   | Point_scroll
@@ -377,6 +434,7 @@ let live_capability_to_wire = function
   | Viewport_capture -> "viewport_capture"
   | Scene_read -> "scene_read"
   | Accessibility_snapshot -> "accessibility_snapshot"
+  | Snapshot_target_input -> "snapshot_target_input"
   | Dom_interaction -> "dom_interaction"
   | Point_click -> "point_click"
   | Point_scroll -> "point_scroll"
@@ -410,6 +468,7 @@ let live_capability_of_interaction = function
   | Double_click _ | Double_click_at _ -> Trusted_double_click
   | Type_text _ | Press_key _ -> Trusted_keyboard
   | Click _ | Fill _ | Select_option _ | Scroll _ | Follow_link _ | Click_node _ | Fill_node _ -> Dom_interaction
+  | Click_target _ | Fill_target _ -> Snapshot_target_input
   | Click_at {button = Pointer.Primary; _} -> Point_click
   | Click_at {button = Pointer.Middle | Pointer.Secondary; _} -> Trusted_button_click
   | Scroll_at _ -> Point_scroll
@@ -447,9 +506,11 @@ let verb_allowed_on_live verb = Option.is_some (live_capability verb)
 (* Gecko's selected read-only locate consumer does not execute instructions. *)
 let sentence_verbs_refused = "act and extract require the stagehand lane"
 let snapshot_refused = "an accessibility snapshot is served only by an ego connection on the live lane"
+let snapshot_target_refused = "a snapshot target is acted on only by an ego connection on the live lane"
 (* Why the automation lane does not serve a verb, if it does not.
    Model-assisted locate is admitted separately by the installed executor. *)
 let automation_refusal = function
+  | Page_interact {action; _} when acts_on_snapshot_target action -> Some snapshot_target_refused
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _
   | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _
   | Page_locate _ -> None
@@ -465,6 +526,7 @@ let verb_allowed_on_automation verb = Option.is_none (automation_refusal verb)
    are served; frames, dialogs, downloads, the idle document observer and
    other BrowserAct actions are not served. *)
 let verb_allowed_on_stagehand = function
+  | Page_interact {action; _} when acts_on_snapshot_target action -> false
   | Session_open _ | Session_close | Session_status | Tabs_list | Page_goto _ | Page_capture _
   | Page_read _ | Page_elements _ | Page_scene _ | Page_interact _ | Page_instruct _ | Page_locate _
   | Page_extract _ -> true
@@ -571,15 +633,16 @@ let live_transport_serves transport capability =
   | Web_extension, Browser_zoom -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot) -> false
+                    | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read) -> true
-  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot) -> false
+  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input) -> false
   | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
-                    | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_answer) -> true
+                    | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_answer
+                    | Snapshot_target_input) -> true
   | Ego_task_space, (Document_source | Touch_input | Browser_zoom | Viewport_resize
                     | Tab_activation | Frame_read) -> false
 ;;

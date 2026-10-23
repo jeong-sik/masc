@@ -191,8 +191,9 @@ let run ~config ~identity request =
   let call ~arguments = Lane_addon_runtime.call_exported_tool_with_principal
     ~principal:(Some Lane_addon_call_context.Operator) ~config
     ~access:Lane_addon_sources.Operator_configuration ~reserved ~export ~arguments in
+  (* Candle reads its originals by ID only, so it keeps no summary of them. *)
   let retain ~request_id ~request = Lane_addon_runtime.retain_tool_request_owner
     ~config ~access:Lane_addon_sources.Operator_configuration ~reserved ~export
-    ~scope:"candle-appraisals" ~request_id ~request in
+    ~scope:"candle-appraisals" ~request_id ~summary:`Null ~request in
   run_with ~registry:(Runs.global ()) ~base_path:config.base_path ~retain ~call ~identity request
 module For_testing = struct let run = run_with end

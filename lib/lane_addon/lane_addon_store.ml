@@ -26,9 +26,6 @@ let digest bytes =
         (offset + count)
   in
   feed Digestif.SHA256.empty 0
-let is_digest text =
-  String.length text = 2 * Digestif.SHA256.digest_size
-  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) text
 let protect f =
   try f () with
   | Sys_error message -> Error message
@@ -635,26 +632,6 @@ let load_tool_request_body t ~scope ~request_digest =
       else read_owned_tool_request_bytes ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
         |> Result.map Option.some) in
   Ok (Option.join result)
-module Body_names = Set.Make (String)
-(* Every body asked for, in one held listing of the scope's bodies directory:
-   reading N bodies lists that directory once, not once per body. *)
-let load_tool_request_bodies t ~scope ~request_digests =
-  let* result = with_tool_request_scope ~namespace:tool_request_bodies_directory ~sync_parent:Unix.fsync t ~scope
-    (fun ~owner_uid held names ->
-      let present = Body_names.of_list names in
-      let rec read bodies = function
-        | [] -> Ok (List.rev bodies)
-        | request_digest :: rest ->
-          let name = request_digest ^ ".json" in
-          if not (Body_names.mem name present) then read ((request_digest, None) :: bodies) rest
-          else
-            let* bytes = read_owned_tool_request_bytes ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
-                ~owner_uid held name in
-            read ((request_digest, Some bytes) :: bodies) rest in
-      read [] request_digests) in
-  Ok (match result with
-      | Some bodies -> bodies
-      | None -> List.map (fun request_digest -> request_digest, None) request_digests)
 (* A body is named by the digest of its bytes, so writing it again publishes
    the same file; each write is atomic and synced with its directory. *)
 let save_tool_request_body t ~scope ~request_digest bytes =

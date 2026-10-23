@@ -18,7 +18,7 @@ let with_parent f =
 let with_store f = with_parent (fun parent ->
   let root = Filename.concat parent "store" in f root (Store.create ~root))
 let retain ?(scope=scope) store id = owned (Owner.retain ~store ~scope ~request_id:id
-  ~installation_id:"original-installation" ~package_id:"curator" ~tool:"classify" ~request)
+  ~installation_id:"original-installation" ~package_id:"curator" ~tool:"classify" ~summary:`Null ~request)
 let load store id = Owner.load ~store ~scope ~request_id:id
 let directory root = Filename.concat root (Filename.concat "tool-request-owners" (Store.digest scope))
 let path root id = Filename.concat (directory root) (Store.digest id ^ ".json")
@@ -37,12 +37,14 @@ let test_restart_discovers_original_input_progress_and_scope () = with_store (fu
   let records = owned (Owner.discover ~store:(Store.create ~root) ~scope) in
   let expected = ["a";"b"] |> List.sort (fun a b -> String.compare (Store.digest a) (Store.digest b)) in
   Alcotest.(check (list string)) "only original scope in stable filename order" expected
-    (List.map (fun (r : Owner.retained) -> r.request_id) records);
-  let restored = List.find (fun (r : Owner.retained) -> r.request_id="a") records in
+    (List.map Owner.Record.request_id records);
+  let restored = List.find (fun record -> Owner.Record.request_id record="a") records in
   Alcotest.check json "original progress survives restart discovery"
-    (Progress.to_json pending.progress) (Progress.to_json restored.progress);
-  Alcotest.check json "complete original input survives" request restored.request;
-  Alcotest.(check string) "destination is the original installation" "original-installation" restored.installation_id)
+    (Progress.to_json pending.progress) (Progress.to_json (Owner.Record.progress restored));
+  Alcotest.check json "complete original input survives a load of what discovery found" request
+    (some (owned (load store (Owner.Record.request_id restored)))).request;
+  Alcotest.(check string) "destination is the original installation" "original-installation"
+    (Owner.Record.installation_id restored))
 
 let test_initial_absence_requires_existing_safe_anchor_without_creation () = with_store (fun root store ->
   Alcotest.(check int) "absent descendant is an empty observation" 0 (List.length (owned (Owner.discover ~store ~scope)));
@@ -119,11 +121,10 @@ let test_symlink_hardlink_and_nonregular_records_are_refused () =
 
 let body_path root = Filename.concat root
     (Store.tool_request_body_path ~scope ~request_digest:(get (Owner.request_digest request)))
-(* The bodies directory is read through the same owned descriptors as the
-   records, so the same file shapes are refused there. *)
+(* A load reads the body through the same owned descriptors as the record,
+   so the same file shapes are refused there. Discovery reads records only. *)
 let test_symlink_hardlink_nonregular_and_writable_bodies_are_refused () =
-  let refused root store =
-    fail_inventory (Owner.discover ~store:(Store.create ~root) ~scope);fail_load (load store "original") in
+  let refused _ store = fail_load (load store "original") in
   with_store (fun root store -> retain store "original";
     let body = body_path root and outside = Filename.concat (Filename.dirname root) "outside-body.json" in
     Unix.rename body outside;Unix.symlink outside body;

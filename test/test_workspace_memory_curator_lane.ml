@@ -33,8 +33,8 @@ let ()=
   at_exit (fun () -> Fs_compat.remove_tree registry_directory);
   match Runs.install_global (Runs.replay (Filename.concat registry_directory Runs.storage_filename)) with
   | Ok () -> () | Error Runs.Already_installed -> fail "production fixture registry was already installed"
-let observer_acknowledged record=
-  let observer=Lane_addon_request_progress.observer record.Owner.progress in
+let observer_acknowledged progress=
+  let observer=Lane_addon_request_progress.observer progress in
   let acknowledged=function Lane_addon_request_receipt.Acknowledged _ -> true
     | Unobserved | Pending _ -> false in
   acknowledged observer.registration && acknowledged observer.completion
@@ -55,11 +55,15 @@ let commit_facts base_path claims =
     ~origin:{kind=Types.Authored;trace_id="actual-curator-owner-fixture"}) claims in
   Current.replace ~keepers_dir ~keeper_id ~expected_revision ~now
     ~source:{kind=Current.Librarian;trace_id="actual-curator-owner-fixture"} ~facts () |> get |> ignore
-let records store=owned (Owner.discover ~store ~scope:Capture.scope)
-let captures base_path store=records store |> List.map (fun record ->
-  let capture=get (Capture.restore ~workspace:(get (Capture.observe_workspace ~base_path))
-    ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id |> Result.map_error Owner.error_to_string) record) in
-  record,capture)
+(* Every original with its request: discovery reads records, a load reads
+   each body. *)
+let load_record store record=
+  match owned (Owner.load ~store ~scope:Capture.scope ~request_id:(Owner.Record.request_id record)) with
+  | Some retained -> retained | None -> fail "a discovered original vanished"
+let records store=owned (Owner.discover ~store ~scope:Capture.scope) |> List.map (load_record store)
+let capture_of base_path store record=get (Capture.restore ~workspace:(get (Capture.observe_workspace ~base_path))
+  ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id |> Result.map_error Owner.error_to_string) record)
+let captures base_path store=records store |> List.map (fun record -> record,capture_of base_path store record)
 let await clock condition=Eio.Time.with_timeout_exn clock F.fixture_wait_seconds (fun () ->
   let rec loop ()=if condition () then () else (Eio.Fiber.yield ();loop ()) in loop ())
 let await_owner clock base_path condition=
@@ -75,7 +79,7 @@ let reconcile_until_export clock ~config =
   await clock (fun () ->
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
     (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[])
-let is_finished record=match Progress.phase record.Owner.progress with
+let is_finished progress=match Progress.phase progress with
   | Progress.Finished _ -> true
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false
@@ -94,15 +98,16 @@ let timeout_diagnostic ~base_path ~store ~server =
     | Lane_addon_request_receipt.Unobserved -> `String "unobserved"
     | Pending receipt -> `Assoc ["pending",`String receipt.digest]
     | Acknowledged receipt -> `Assoc ["acknowledged",`String receipt.digest] in
-  let original (record:Owner.retained)=
-    let phase=match Progress.phase record.progress with
+  let original record=
+    let progress=Owner.Record.progress record in
+    let phase=match Progress.phase progress with
       | Captured -> "captured" | Admission_wait _ -> "admission_wait"
       | Dispatch_pending _ -> "dispatch_pending" | Judged _ -> "judged"
       | Committing _ -> "committing" | Commit_unknown _ -> "commit_unknown"
       | Finished _ -> "finished" | Conflicted _ -> "conflicted"
       | Rejected _ -> "rejected" | Subdividing _ -> "subdividing" | Subdivided _ -> "subdivided" in
-    let observer=Progress.observer record.progress in
-    `Assoc ["request_id",`String record.request_id;"phase",`String phase;
+    let observer=Progress.observer progress in
+    `Assoc ["request_id",`String (Owner.Record.request_id record);"phase",`String phase;
       "registration",publication observer.registration;"completion",publication observer.completion] in
   let originals=Eio_unix.run_in_systhread (fun () ->
     match Owner.discover ~store ~scope:Capture.scope with
@@ -112,7 +117,9 @@ let timeout_diagnostic ~base_path ~store ~server =
     "http_posts",`Int (F.post_count server)]
 let settle_all clock base_path store count=await_owner clock base_path (fun () ->
   List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=count && ready_summary base_path
-  && Curator.For_testing.is_idle ~base_path && List.for_all (fun record -> is_finished record && observer_acknowledged record) (records store))
+  && Curator.For_testing.is_idle ~base_path && List.for_all (fun record ->
+    let progress=Owner.Record.progress record in is_finished progress && observer_acknowledged progress)
+    (owned (Owner.discover ~store ~scope:Capture.scope)))
 let publish_routes ?(requires_token_measurement=false) base_path urls =
   let slots=List.mapi (fun i url -> {F.id="candidate-" ^ string_of_int i;base_url=url}) urls in
   let lanes=List.map (fun output ->
@@ -226,13 +233,16 @@ let with_fixture ?(on_response_error=(fun _ _ -> ()))
       let mode=ref Answer and delivery=ref false in
       let original_for body=
         let messages=Yojson.Safe.from_string body |> member "messages" |> Yojson.Safe.Util.to_list in
-        let matches=List.filter (fun (record,capture) ->
-          (match Progress.phase record.Owner.progress with Progress.Dispatch_pending _ -> true
-           | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
-           | Rejected _ | Subdividing _ | Subdivided _ -> false)
-          && List.exists (fun msg -> member "content" msg=`String (Capture.rendered_prompt capture)) messages)
-          (captures base_path store) in
-        match matches with [(_,capture)] -> capture | [] | _::_::_ -> fail "provider has no unique original request" in
+        (* Only a dispatched original can be on the wire, so no other body is read. *)
+        let dispatched=owned (Owner.discover ~store ~scope:Capture.scope) |> List.filter (fun record ->
+          match Progress.phase (Owner.Record.progress record) with Progress.Dispatch_pending _ -> true
+          | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
+          | Rejected _ | Subdividing _ | Subdivided _ -> false) in
+        let matches=List.filter_map (fun record ->
+          let capture=capture_of base_path store (load_record store record) in
+          if List.exists (fun msg -> member "content" msg=`String (Capture.rendered_prompt capture)) messages
+          then Some capture else None) dispatched in
+        match matches with [capture] -> capture | [] | _::_::_ -> fail "provider has no unique original request" in
       let response bad _index body=
         try
         match !mode with
@@ -304,7 +314,7 @@ let test_original_waits_for_actual_route_publication ()=with_fixture ~routes:fal
   publish_routes base_path urls;
   settle_all clock base_path store 1;
   check bool "publication resumes the same retained original" true
-    (List.exists (fun record -> record.Owner.request_id=original && is_finished record) (records store)))
+    (List.exists (fun record -> record.Owner.request_id=original && is_finished record.Owner.progress) (records store)))
 let test_refused_identity_does_not_remint_on_unrelated_fact ()=
   let blocked="A permanently refused original source" in
   with_fixture ~start_owner:false ~claims:[blocked] (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode ~delivery:_ ->
@@ -328,7 +338,7 @@ let test_complete_discovery_blocks_malformed_original ()=with_fixture ~start_own
   let request_id=Capture.Request_id.fresh () |> Capture.Request_id.to_string in
   owned (Owner.retain ~store ~scope:Capture.scope ~request_id
     ~installation_id:(Owner.installation_id (Owner.Configuration "curator")) ~package_id:Capture.package_id ~tool:Capture.tool
-    ~request:(`Assoc ["malformed",`Bool true]));
+    ~summary:`Null ~request:(`Assoc ["malformed",`Bool true]));
   Curator.start ~sw ~config;await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
   check int "invalid original inventory grants no replacement root" 1 (List.length (records store));
   check int "invalid original inventory dispatches no HTTP" 0 (F.post_count server))
@@ -385,7 +395,7 @@ let test_existing_intent_recovers_locally_off_then_runs_on ()=
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
     let recovered=Consumer.discover ~config |> consumed in
     check bool "Off completes only the original already retained intention" true
-      (List.exists (fun (original:Consumer.original) -> original.record.request_id=intent.request_id) recovered);
+      (List.exists (fun (original:Consumer.original) -> Owner.Record.request_id original.record=intent.request_id) recovered);
     Curator.start ~sw ~config;
     await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
     check int "Off recovery starts no provider" 0 (F.post_count server);
@@ -394,7 +404,7 @@ let test_existing_intent_recovers_locally_off_then_runs_on ()=
     await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=2
       && ready_summary base_path && Curator.For_testing.is_idle ~base_path);
     check bool "original child ID completes after actual reattachment" true
-      (List.exists (fun record -> record.Owner.request_id=intent.request_id && is_finished record) (records store)))
+      (List.exists (fun record -> record.Owner.request_id=intent.request_id && is_finished record.Owner.progress) (records store)))
 let test_the_next_root_takes_the_size_its_last_answer_supports ()=
   let claims=List.init 5 (fun i -> "Size-evidence original source " ^ string_of_int i) in
   with_fixture ~start_owner:false ~claims
@@ -523,7 +533,7 @@ let test_accepted_host_terminal_commits_off_without_worker ()=
     save_source config source (declaration false);
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
     Curator.start ~sw ~config;
-    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path && is_finished (original_record store capture));
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path && is_finished (original_record store capture).progress);
     check int "accepted host result commits locally while Off" 1 (List.length (Ledger.dispositions (get (Ledger.load ~base_path))));
     check int "Off local commit never dispatches another provider" 1 (F.post_count server);
     delivery:=false;save_source config source (declaration true);
@@ -539,7 +549,8 @@ let test_pending_observation_recovers_on_existing_maintenance ?(unavailable_name
     let destination=Capture.destination capture in
     owned (Owner.retain ~store ~scope:Capture.scope ~request_id
       ~installation_id:destination.installation_id ~package_id:Capture.package_id
-      ~tool:Capture.tool ~request:(Capture.to_json capture));
+      ~tool:Capture.tool ~summary:(Capture.Summary.to_json (get (Capture.summary capture)))
+      ~request:(Capture.to_json capture));
     let original=original_record store capture in
     ignore (match Owner.advance ~store ~expected:original
       ~event:(Progress.Refused {stage=Progress.Before_dispatch;evidence=`Assoc ["reason",`String "original host refusal"]})
@@ -578,7 +589,7 @@ let test_pending_observation_recovers_on_existing_maintenance ?(unavailable_name
         (In_channel.with_open_bin original_path In_channel.input_all));
     Curator.retry_pending_observations ~base_path:(Filename.concat base_path ".");
     await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path
-      && observer_acknowledged (original_record store capture));
+      && observer_acknowledged (original_record store capture).progress);
     check int "Off observer recovery never asks the provider" 0 (F.post_count server);
     check int "observer retry never applies a domain judgment" 0
       (List.length (Ledger.dispositions (get (Ledger.load ~base_path)))))
@@ -606,7 +617,7 @@ let test_registry_failure_does_not_block_new_work ()=
           Some record
         | Capture.Classification _ | Capture.Briefing _ -> None) in
       check bool "fresh source reaches a confirmed classification despite registry failure" true
-        (match fresh_classification with [record] -> is_finished record | [] | _::_::_ -> false);
+        (match fresh_classification with [record] -> is_finished record.Owner.progress | [] | _::_::_ -> false);
       check int "fresh classification and Briefing each use the actual provider" 2 (F.post_count server);
       check int "the refused original and two new domain originals are retained" 3 (List.length (records store));
       check bool "unconfirmed registry delivery leaves every registration pending" true
@@ -624,7 +635,7 @@ let test_registry_failure_does_not_block_new_work ()=
       check int "failed observation retry never repeats primary work" 2 (F.post_count server));
     Curator.retry_pending_observations ~base_path;
     await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path
-      && List.for_all observer_acknowledged (records store));
+      && List.for_all (fun record -> observer_acknowledged record.Owner.progress) (records store));
     check bool "recovered registry clears maintenance retry demand" false
       (match Curator.For_testing.snapshot ~base_path with Some state -> state.observation_retry
        | None -> fail "original owner disappeared after registry recovery");
@@ -641,7 +652,7 @@ let test_finished_identity_readded_after_observed_removal ()=
     let original,selected=match classifications () with
       | [original] -> original
       | [] | _::_::_ -> fail "expected one completed original classification" in
-    check bool "original classification finished before removal" true (is_finished original);
+    check bool "original classification finished before removal" true (is_finished original.Owner.progress);
     let progress=Progress.to_json original.Owner.progress and calls=F.post_count server in
     commit_facts base_path [];
     await_owner clock base_path (fun () -> Ledger.dispositions (get (Ledger.load ~base_path))=[]
@@ -657,12 +668,33 @@ let test_finished_identity_readded_after_observed_removal ()=
     check bool "same restored fact identity reaches the actual production owner" true
       (List.map (fun (fact:Ledger.pending_fact) -> fact.fact) fresh_selected
        = List.map (fun (fact:Ledger.pending_fact) -> fact.fact) selected);
-    check bool "new original reaches a confirmed domain commit" true (is_finished fresh);
+    check bool "new original reaches a confirmed domain commit" true (is_finished fresh.Owner.progress);
     let retained=match List.find_opt (fun record -> record.Owner.request_id=original.request_id) (records store) with
       | Some retained -> retained | None -> fail "completed original was removed" in
     check json "completed original progress stays unchanged" progress (Progress.to_json retained.progress);
     check json "completed original capture stays unchanged" original.request retained.request;
     check int "only new classification and synthesis call the provider" (calls+2) (F.post_count server))
+let test_a_pass_reads_no_body_of_an_observed_finished_original ()=
+  let claim="A source finished and observed before the next pass"
+  and later="A later source the next pass classifies" in
+  with_fixture ~claims:[claim]
+    (fun ~sw:_ ~clock ~base_path ~config:_ ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode:_ ~delivery:_ ->
+    settle_all clock base_path store 1;
+    let finished=owned (Owner.discover ~store ~scope:Capture.scope) in
+    check int "one classification and one Briefing original finished" 2 (List.length finished);
+    let body record=Filename.concat (Store.root store)
+      (Store.tool_request_body_path ~scope:Capture.scope ~request_digest:(Owner.Record.request_digest record)) in
+    (* A restore of either original now fails, so the pass below can finish
+       only without reading them. *)
+    List.iter (fun record -> Sys.remove (body record)) finished;
+    let calls=F.post_count server in
+    commit_facts base_path [claim;later];
+    ignore (Curator.request ~base_path);
+    settle_all clock base_path store 2;
+    check int "the later source and the refreshed Briefing each call the provider once" (calls+2) (F.post_count server);
+    check int "the pass adds one original per domain" 4 (List.length (owned (Owner.discover ~store ~scope:Capture.scope)));
+    check bool "nothing wrote the finished originals' bodies again" true
+      (List.for_all (fun record -> not (Sys.file_exists (body record))) finished))
 type forged_original = Refused_original | Size_refused_original | Active_original
 let test_forged_observation_still_blocks_new_work initial ()=
   let refused_claim="An original with an invalid semantic receipt" in
@@ -789,7 +821,7 @@ let test_successor_frontier_ignores_an_old_semantic_destination ()=
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ -> fail "current original never acquired its unique successor" in
     check bool "the actual owner completes the current original's child" true
-      (List.exists (fun record -> record.Owner.request_id=child_id && is_finished record) (records store));
+      (List.exists (fun record -> record.Owner.request_id=child_id && is_finished record.Owner.progress) (records store));
     let old_facts=match Capture.work old_capture with
       | Capture.Classification {batch;_} -> List.map (fun (pending:Ledger.pending_fact) -> pending.fact) batch.selected
       | Capture.Briefing _ -> fail "old original is not classification" in
@@ -900,6 +932,7 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "registry delivery failure preserves new work and original ACK retries" `Quick
     test_registry_failure_does_not_block_new_work;
   test_case "finished source can return as new pending work after actual removal" `Quick test_finished_identity_readded_after_observed_removal;
+  test_case "a pass reads no body of an observed finished original" `Quick test_a_pass_reads_no_body_of_an_observed_finished_original;
   test_case "invalid original observation still refuses new primary work" `Quick
     (test_forged_observation_still_blocks_new_work Refused_original);
   test_case "invalid original observation still refuses a new size successor" `Quick

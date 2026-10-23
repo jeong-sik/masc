@@ -40,10 +40,12 @@ let classification workspace =
       ~size:R.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0))) in
   let batch = some (requested (R.narrow ~render ~ledger:L.empty full)) in
   a,b,batch,get (C.classification ~request_id:id ~workspace ~destination ~prompt:classification_prompt ~ledger:L.empty ~batch)
+let summary_of capture = C.Summary.to_json (get (C.summary capture))
 let retain ?(scope=C.scope) ?(installation_id=destination.installation_id) ?(tool=destination.tool)
-    ~request store =
+    ~summary ~request store =
   let request_id = C.Request_id.to_string id in
-  owned (Owner.retain ~store ~scope ~request_id ~installation_id ~package_id:destination.package_id ~tool ~request);
+  owned (Owner.retain ~store ~scope ~request_id ~installation_id ~package_id:destination.package_id ~tool
+    ~summary ~request);
   some (owned (Owner.load ~store:(Store.create ~root:(Store.root store)) ~scope ~request_id))
 let restore store ~workspace record = C.restore ~workspace
   ~load:(fun ~request_id -> Owner.load ~store ~scope:C.scope ~request_id
@@ -60,7 +62,7 @@ let occurrences sub text =
 let test_canonical_storage_preserves_original_prompt_and_selected_judgment () = with_workspace (fun root store ->
   let workspace = get (C.observe_workspace ~base_path:root) in
   let a,_,batch,capture = classification workspace in
-  let retained = retain ~request:(C.to_json capture) store in
+  let retained = retain ~summary:(summary_of capture) ~request:(C.to_json capture) store in
   let restored = get (restore store ~workspace:(get (C.observe_workspace ~base_path:root)) retained) in
   Alcotest.(check int) "the stored capture holds the model input once" 1
     (occurrences a.claim (Yojson.Safe.to_string retained.request));
@@ -112,18 +114,20 @@ let test_changed_capture_provenance_and_owner_are_refused () = with_workspace (f
     replace "request_id" (`String "019c0000-0000-7000-8000-000000000002") original] in
   List.iteri (fun i request ->
     let store = Store.create ~root:(Filename.concat root ("invalid-" ^ string_of_int i)) in
-    rejected (restore store ~workspace (retain ~request store))) invalid;
+    rejected (restore store ~workspace (retain ~summary:(summary_of capture) ~request store))) invalid;
   let wrong_scope = Store.create ~root:(Filename.concat root "wrong-scope") in
-  rejected (restore store ~workspace (retain ~scope:"different-consumer" ~request:original wrong_scope));
+  rejected (restore store ~workspace
+    (retain ~scope:"different-consumer" ~summary:(summary_of capture) ~request:original wrong_scope));
   let wrong_tool = Store.create ~root:(Filename.concat root "wrong-tool") in
-  rejected (restore store ~workspace (retain ~tool:"different" ~request:original wrong_tool)))
+  rejected (restore store ~workspace
+    (retain ~tool:"different" ~summary:(summary_of capture) ~request:original wrong_tool)))
 
 let test_physical_root_replacement_and_copy_are_refused () = with_workspace (fun root store ->
   let workspace = get (C.observe_workspace ~base_path:root) in
   let _,_,_,capture = classification workspace in
-  let retained = retain ~request:(C.to_json capture) store in
+  let retained = retain ~summary:(summary_of capture) ~request:(C.to_json capture) store in
   let other = Filename.concat (Filename.dirname root) "other-workspace" in Unix.mkdir other 0o700;
-  let copy = retain ~request:retained.request (Store.create ~root:(Filename.concat other "store")) in
+  let copy = retain ~summary:retained.summary ~request:retained.request (Store.create ~root:(Filename.concat other "store")) in
   rejected (restore store ~workspace:(get (C.observe_workspace ~base_path:other)) copy);
   let moved = root ^ "-original" in
   Unix.rename root moved; Unix.mkdir root 0o700;
@@ -144,7 +148,7 @@ let test_briefing_contract_and_partial_publication_are_original () = with_worksp
   rejected (make (prepared (B.contract ~template:"different-template")));
   let batch = some (get (B.narrow ~render (prepared (B.contract ~template:p.effective)))) in
   let capture = get (make batch) in
-  let restored = get (restore store ~workspace (retain ~request:(C.to_json capture) store)) in
+  let restored = get (restore store ~workspace (retain ~summary:(summary_of capture) ~request:(C.to_json capture) store)) in
   match get (C.validate_output restored (`Assoc ["briefing",`String "Partial original summary"])) with
   | C.Briefing_commit partial ->
     (match B.observe ~sources ~contract:(B.contract ~template:p.effective) partial with
@@ -153,13 +157,14 @@ let test_briefing_contract_and_partial_publication_are_original () = with_worksp
     rejected (C.validate_output restored (`Assoc ["briefing",`String " "]))
   | C.Classification_commit _ -> Alcotest.fail "briefing changed domain")
 
-(* Each change below still decodes: the rows, id map, ledger and pass agree
-   with it. Only the digest of the prompt that was sent tells it apart. *)
+(* Each change below still decodes: the rows, id map, ledger, pass and the
+   record's summary agree with it. Only the digest of the prompt that was
+   sent tells it apart. *)
 let test_a_restore_refuses_a_changed_input_that_still_decodes () = with_workspace (fun root _ ->
   let workspace = get (C.observe_workspace ~base_path:root) in
-  let restores_after name edit capture =
+  let restores_after name ?(summary=Fun.id) edit capture =
     let store = Store.create ~root:(Filename.concat root name) in
-    restore store ~workspace (retain ~request:(edit (C.to_json capture)) store) in
+    restore store ~workspace (retain ~summary:(summary (summary_of capture)) ~request:(edit (C.to_json capture)) store) in
   let in_batch f capture =
     let work = member "work" capture in
     replace "work" (replace "batch" (f (member "batch" work)) work) capture in
@@ -177,8 +182,11 @@ let test_a_restore_refuses_a_changed_input_that_still_decodes () = with_workspac
         if member "claim_sha256" fact = sha a.claim then replace "fact" (replace "claim_sha256" (sha forged) fact) row
         else row) (member "facts" batch) in
     batch |> replace "input" (replace "facts" claims input) |> replace "facts" refs in
+  let forge_selected summary = replace "selected" (rows (fun fact ->
+      if member "claim_sha256" fact = sha a.claim then replace "claim_sha256" (sha forged) fact else fact)
+      (member "selected" summary)) summary in
   ignore (get (restores_after "classification-as-sent" Fun.id classified));
-  rejected (restores_after "classification-forged-claim" (in_batch forge_claim) classified);
+  rejected (restores_after "classification-forged-claim" ~summary:forge_selected (in_batch forge_claim) classified);
   let source id : B.source = {id;kind=B.Claim;text="Uncut evidence " ^ id} in
   let sources = [source "a";source "b";source "c"] in
   let p = prompt "Original briefing: {{workspace_memory_briefing}}" in
@@ -189,16 +197,47 @@ let test_a_restore_refuses_a_changed_input_that_still_decodes () = with_workspac
   let partial = get (B.accept (some (get (B.narrow ~render (prepared B.empty)))) ~text:"Partial original summary") in
   let briefed = get (C.briefing ~request_id:id ~workspace ~destination ~prompt:p
       ~batch:(some (get (B.narrow ~render (prepared partial))))) in
-  let stored = (retain ~request:(C.to_json briefed) (Store.create ~root:(Filename.concat root "briefing-stored"))).request in
+  let stored = (retain ~summary:(summary_of briefed) ~request:(C.to_json briefed)
+      (Store.create ~root:(Filename.concat root "briefing-stored"))).request in
   Alcotest.(check int) "the stored briefing holds each unconsumed entry once" 1
     (occurrences "Uncut evidence b" (Yojson.Safe.to_string stored));
   let forge_summary batch =
     let state = member "state" batch in
     replace "state" (replace "building" (replace "text" (`String "Forged prior summary") (member "building" state)) state)
       batch in
+  let forged_state = member "state" (forge_summary (member "batch" (member "work" (C.to_json briefed)))) in
+  let forged_state_sha256 = get (C.briefing_state_sha256 (get (B.of_json forged_state))) in
   ignore (get (restores_after "briefing-as-sent" Fun.id briefed));
-  rejected (restores_after "briefing-forged-summary" (in_batch forge_summary) briefed);
-  rejected (restores_after "briefing-wider-selection" (in_batch (replace "selected_count" (`Int 2))) briefed))
+  rejected (restores_after "briefing-forged-summary"
+    ~summary:(replace "prepared_state_sha256" (`String forged_state_sha256)) (in_batch forge_summary) briefed);
+  rejected (restores_after "briefing-wider-selection" ~summary:(replace "selected_count" (`Int 2))
+    (in_batch (replace "selected_count" (`Int 2))) briefed))
+
+(* The record's summary is what a pass reads without restoring; a capture
+   whose summary says something else is refused. *)
+let test_a_restore_refuses_a_summary_other_than_its_capture () = with_workspace (fun root _ ->
+  let workspace = get (C.observe_workspace ~base_path:root) in
+  let restores_with name summary capture =
+    let store = Store.create ~root:(Filename.concat root name) in
+    restore store ~workspace (retain ~summary ~request:(C.to_json capture) store) in
+  let _,_,_,classified = classification workspace in
+  ignore (get (restores_with "classification-as-kept" (summary_of classified) classified));
+  rejected (restores_with "classification-other-size" (replace "up_to" (`Int 7) (summary_of classified)) classified);
+  rejected (restores_with "classification-no-facts" (replace "selected" (`List []) (summary_of classified)) classified);
+  rejected (restores_with "classification-root" (replace "predecessor" (`String (C.Request_id.to_string id))
+    (summary_of classified)) classified);
+  rejected (restores_with "classification-no-summary" `Null classified);
+  let source id : B.source = {id;kind=B.Claim;text="Kept evidence " ^ id} in
+  let p = prompt "Original briefing: {{workspace_memory_briefing}}" in
+  let render = render Prompt_names.workspace_memory_briefing "workspace_memory_briefing" p in
+  let briefed = match get (B.prepare ~sources:[source "a";source "b"] ~contract:(B.contract ~template:p.effective)
+      ~render B.empty) with
+    | B.Prepared batch -> get (C.briefing ~request_id:id ~workspace ~destination ~prompt:p ~batch)
+    | B.Unchanged | B.Cleanup _ -> Alcotest.fail "expected briefing work" in
+  ignore (get (restores_with "briefing-as-kept" (summary_of briefed) briefed));
+  rejected (restores_with "briefing-other-state"
+    (replace "prepared_state_sha256" (`String (String.make 64 '0')) (summary_of briefed)) briefed);
+  rejected (restores_with "briefing-other-count" (replace "selected_count" (`Int 1) (summary_of briefed)) briefed))
 
 let test_descriptor_scope_refuses_replaced_root_before_return () = with_workspace (fun root _ ->
   let before = Unix.stat root in
@@ -223,27 +262,30 @@ let test_next_classification_size_follows_the_last_answer () = with_workspace (f
            ~prompt:classification_prompt ~ledger:L.empty ~batch) in
   let commit : P.commit = {judgment=`Null;change={before=`Null;after=`Null}} in
   let refusal : P.refusal = {stage=P.Execution;evidence=`Null} in
+  (* What a pass reads: each original's ID, summary and phase. *)
+  let classification_size originals = C.classification_size
+      (List.map (fun (capture, phase) -> C.request_id capture, get (C.summary capture), phase) originals) in
   let size = Alcotest.testable (fun format -> function
       | R.Fill_frame -> Format.pp_print_string format "Fill_frame"
       | R.Up_to count -> Format.fprintf format "Up_to %d" count) ( = ) in
-  Alcotest.check size "no answered classification fills the frame" R.Fill_frame (C.classification_size []);
+  Alcotest.check size "no answered classification fills the frame" R.Fill_frame (classification_size []);
   Alcotest.check size "a root the frame bounded keeps filling the frame" R.Fill_frame
-    (C.classification_size [root_of 3,P.Finished commit]);
+    (classification_size [root_of 3,P.Finished commit]);
   let older = root_of ~size:(R.Up_to 3) 3 in
   Alcotest.check size "a root that held its size tries twice that size" (R.Up_to 6)
-    (C.classification_size [older,P.Finished commit]);
+    (classification_size [older,P.Finished commit]);
   Alcotest.check size "a root a short backlog stopped keeps its size" (R.Up_to 4)
-    (C.classification_size [root_of ~size:(R.Up_to 4) 1,P.Finished commit]);
+    (classification_size [root_of ~size:(R.Up_to 4) 1,P.Finished commit]);
   let parent = root_of ~size:(R.Up_to 4) 4 in
   let child = some (get (C.narrow ~request_id:(C.Request_id.fresh ())
       ~final:(Lane_addon_exact.Call_final (Input_refused Input_capacity)) parent)) in
   let link : P.successor = {request_id=C.Request_id.to_string (C.request_id child);
     request_digest=get (Owner.request_digest (C.to_json child))} in
   Alcotest.check size "a child answered after a size refusal keeps its count" (R.Up_to 2)
-    (C.classification_size [older,P.Finished commit;parent,P.Subdivided (refusal,link);
+    (classification_size [older,P.Finished commit;parent,P.Subdivided (refusal,link);
                             child,P.Conflicted (commit,`Null)]);
   Alcotest.check size "the latest answer decides, whatever the list order" (R.Up_to 2)
-    (C.classification_size [child,P.Finished commit;older,P.Finished commit]);
+    (classification_size [child,P.Finished commit;older,P.Finished commit]);
   (* Were it evidence, this later root would double its three facts. *)
   let refused = root_of ~size:(R.Up_to 3) 3 in
   let source id : B.source = {id;kind=B.Claim;text="Briefing evidence " ^ id} in
@@ -255,7 +297,7 @@ let test_next_classification_size_follows_the_last_answer () = with_workspace (f
                                  ~prompt:briefing_prompt ~batch)
     | B.Unchanged | B.Cleanup _ -> Alcotest.fail "expected a briefing pass" in
   Alcotest.check size "refused classifications and answered briefings are not evidence" (R.Up_to 2)
-    (C.classification_size [child,P.Finished commit;refused,P.Rejected refusal;briefing,P.Finished commit]))
+    (classification_size [child,P.Finished commit;refused,P.Rejected refusal;briefing,P.Finished commit]))
 
 let () = Alcotest.run "Curator trusted host capture" ["capture",[
   Alcotest.test_case "canonical storage preserves exact original prompt and judgment" `Quick test_canonical_storage_preserves_original_prompt_and_selected_judgment;
@@ -263,6 +305,7 @@ let () = Alcotest.run "Curator trusted host capture" ["capture",[
   Alcotest.test_case "physical root copy and replacement" `Quick test_physical_root_replacement_and_copy_are_refused;
   Alcotest.test_case "briefing original contract and partial publication" `Quick test_briefing_contract_and_partial_publication_are_original;
   Alcotest.test_case "a changed input that still decodes" `Quick test_a_restore_refuses_a_changed_input_that_still_decodes;
+  Alcotest.test_case "a summary other than its capture" `Quick test_a_restore_refuses_a_summary_other_than_its_capture;
   Alcotest.test_case "descriptor scope rejects a replaced root" `Quick test_descriptor_scope_refuses_replaced_root_before_return;
   Alcotest.test_case "next classification size follows the last answer" `Quick
     test_next_classification_size_follows_the_last_answer]]

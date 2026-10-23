@@ -453,7 +453,8 @@ let test_original_tool_destination_survives_replacement_and_reattachment () =
     await clock (fun () -> Option.is_some (current ()));
     let original = Option.get (current ()) in
     let bind export = Runtime.retain_tool_request_owner ~config ~access ~reserved:[] ~export
-      ~scope:"original-consumer" ~request_id:"original-request" ~request:(`Assoc ["input",`String "original"]) in
+      ~scope:"original-consumer" ~request_id:"original-request" ~summary:`Null
+      ~request:(`Assoc ["input",`String "original"]) in
     let accepted = function Ok () -> () | Error _ -> fail "the original installation lost its binding" in
     accepted (bind original);
     let directory = Filename.concat root ".masc/config/lane-addons" in
@@ -503,7 +504,7 @@ let test_capture_factory_uses_actual_live_declaration_before_any_rpc () =
         "package",`String destination.package_id;"tool",`String destination.tool;
         "source_revision",`String destination.source_revision;
         "configuration_revision",`String destination.configuration_revision;
-        "max_reply_bytes",`Int destination.max_reply_bytes] in Ok (json,json) in
+        "max_reply_bytes",`Int destination.max_reply_bytes] in Ok (json,json,`Assoc ["index",`String "fixture"]) in
     let captured=match Runtime.capture_tool_request_owner ~config ~access ~reserved:[] ~export
       ~scope:"trusted-capture" ~request_id:"original" ~capture with
       | Ok json -> json | Error _ -> fail "live configured capture was refused" in
@@ -516,7 +517,10 @@ let test_capture_factory_uses_actual_live_declaration_before_any_rpc () =
       (text "installation" captured);
     let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     (match Lane_addon_tool_request_owner.load ~store ~scope:"trusted-capture" ~request_id:"original" with
-     | Ok (Some record) -> check bool "factory output is durably retained before return" true (Yojson.Safe.equal record.request captured)
+     | Ok (Some record) ->
+       check bool "factory output is durably retained before return" true (Yojson.Safe.equal record.request captured);
+       check bool "with the summary the factory returned" true
+         (Yojson.Safe.equal record.summary (`Assoc ["index",`String "fixture"]))
      | Ok None | Error _ -> fail "capture returned before retaining its original request");
     (match Runtime.with_tool_request_destination ~config ~access ~reserved:[] ~export
       ~publish:(fun _ -> Error (Runtime.Outcome_unknown "controlled local publication uncertainty")) with

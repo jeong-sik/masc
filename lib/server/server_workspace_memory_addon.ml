@@ -55,7 +55,8 @@ let capture ~config ~request_id make =
       let* ()=if destination.package_id=Binding.package_id && destination.tool=Binding.tool then Ok ()
         else Error "Curator capture requires its declared package and tool" in
       let* capture=make ~workspace ~destination in
-      Ok (capture,Capture.to_json capture)) |> Result.map_error runtime_error
+      let* summary=Capture.summary capture in
+      Ok (capture,Capture.to_json capture,Capture.Summary.to_json summary)) |> Result.map_error runtime_error
 let capture_classification ~config ~request_id ~prompt ~ledger ~batch =
   capture ~config ~request_id (fun ~workspace ~destination ->
     let* capture=Capture.classification ~request_id ~workspace ~destination:(captured_destination destination)
@@ -131,6 +132,14 @@ let restore ~store ~workspace original =
   Eio_unix.run_in_systhread (fun () -> Capture.restore ~workspace
     ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id
       |> Result.map_error Owner.error_to_string) original) |> rejected
+let restore_original ~config ~request_id =
+  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let* original=Eio_unix.run_in_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
+  let* original=match original with Some original -> Ok original
+    | None -> Error (Unavailable "Original Curator capture disappeared") in
+  let* workspace=Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path:config.Workspace.base_path)
+    |> Result.map_error (fun detail -> Unavailable detail) in
+  restore ~store ~workspace original
 let resume_with ~store ~base_path ~request_id ~call =
   let* original=Eio_unix.run_in_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
   let* original=match original with Some original -> Ok original
@@ -240,7 +249,7 @@ let resume ~config ~request_id =
       ~reserved ~export ~scope:Capture.scope ~request_id
       ~capture:(fun destination ->
         if destination.installation_id=original.installation_id && destination.package_id=original.package_id
-           && destination.tool=original.tool then Ok ((),original.request)
+           && destination.tool=original.tool then Ok ((),original.request,original.summary)
         else Error "Another installation cannot resume the original Curator request")
       |> Result.map_error runtime_error in
     Runtime.call_exported_tool_with_principal ~principal:(Some Lane_addon_call_context.Operator)
@@ -445,11 +454,13 @@ let narrow_with ~admit ~store ~base_path ~request_id =
     (* The intent names the child by digest; the child retained is the one
        derived again from the parent, which [validate_intent] matched to it. *)
     let* child = validate_intent refusal intent in
+    let* summary = rejected (Capture.summary child) in
     let destination = Capture.destination child in
     let* () = Eio_unix.run_in_systhread (fun () ->
       Owner.retain ~store ~scope:Capture.scope ~request_id:intent.Progress.request_id
         ~installation_id:destination.installation_id ~package_id:destination.package_id
-        ~tool:destination.tool ~request:(Capture.to_json child)) |> owned in
+        ~tool:destination.tool ~summary:(Capture.Summary.to_json summary) ~request:(Capture.to_json child))
+      |> owned in
     (* This strict read and the equal request digest establish only that the
        intended child is durable. Ordinary restore still rejects it until ACK. *)
     let* retained = read ~request_id:intent.request_id in
@@ -483,6 +494,11 @@ let narrow_with ~admit ~store ~base_path ~request_id =
     Error (Rejected "Only an original execution size refusal can create a Curator successor")
 let local_admission _ publish = publish ()
 let narrow_local ~store ~base_path ~request_id = narrow_with ~admit:local_admission ~store ~base_path ~request_id
+(* Discovery recovery completes the intent a parent's record already holds. A
+   parent that holds none when read again must not get a new child here. *)
+let recovery_admission _ _ = Error (Rejected "Original successor intent changed during recovery")
+let recover_successor ~store ~base_path ~request_id =
+  narrow_with ~admit:recovery_admission ~store ~base_path ~request_id
 let narrow ~config ~request_id =
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   let admit original publish =
@@ -500,57 +516,45 @@ let narrow ~config ~request_id =
           | Rejected detail -> Runtime.Host_refusal (Lane_addon_call_context.Rejected detail)))
     |> Result.map_error runtime_error in
   narrow_with ~admit ~store ~base_path:config.Workspace.base_path ~request_id
-type original = {capture:Capture.t;record:Owner.retained}
+type original = {id:Capture.Request_id.t;record:Owner.Record.t;summary:Capture.Summary.t}
+(* Records and their summaries only: no request body is read and no capture
+   is restored here. The pass restores only the originals it acts on. *)
 let discover_observed_with ~store ~base_path ~after_inventory =
   let scan () = Eio_unix.run_in_systhread (fun () ->
     let inventory = Owner.discover ~store ~scope:Capture.scope in
     after_inventory ();
     let* records = inventory |> owned in
-    let* workspace = Capture.observe_workspace ~base_path
-      |> Result.map_error (fun detail -> Unavailable detail) in
-    Ok (workspace,records)) in
-  let* workspace,records = scan () in
-  let* pending = Eio_unix.run_in_systhread (fun () ->
-    Capture.recoverable_successors ~workspace records) |> rejected in
+    let rec summarize originals = function
+      | [] -> Ok (List.rev originals)
+      | record::rest ->
+        let* id = Capture.Request_id.of_string (Owner.Record.request_id record) |> rejected in
+        let* summary = Capture.Summary.of_json (Owner.Record.summary record) |> rejected in
+        summarize ({id;record;summary}::originals) rest in
+    summarize [] records) in
+  let links = List.map (fun original -> original.record,original.summary) in
+  let* originals = scan () in
+  let* pending = Capture.recoverable_successors (links originals) |> rejected in
   let rec recover = function
     | [] -> Ok ()
     | request_id::rest ->
-      let* parent = Eio_unix.run_in_systhread (fun () ->
-        Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
-      let* () = match parent with
-        | None -> Error (Unavailable "An original successor parent vanished during recovery")
-        | Some parent ->
-          match Progress.phase parent.progress with
-          | Progress.Subdividing _ | Progress.Subdivided _ ->
-            let* result = narrow_local ~store ~base_path ~request_id in
-            (match result with
-             | Successor_ready _ -> Ok ()
-             | Successor_waiting _ -> Error (Uncertain "Original successor recovery requires a fresh journal read")
-             | Indivisible _ -> Error (Rejected "An existing successor intent cannot become indivisible"))
-          | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
-          | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _
-          | Progress.Rejected _ -> Error (Rejected "Original successor intent changed during recovery") in
+      let* result = recover_successor ~store ~base_path ~request_id in
+      let* () = match result with
+        | Successor_ready _ -> Ok ()
+        | Successor_waiting _ -> Error (Uncertain "Original successor recovery requires a fresh journal read")
+        | Indivisible _ -> Error (Rejected "An existing successor intent cannot become indivisible") in
       recover rest in
-  let* workspace,records = match pending with
-    | [] ->
-      (* No recovery changed this pass's validated forest. This observation
-         cannot authorize effects: resume/settle/narrow still reload the owner. *)
-      Ok (workspace,records)
-    | _::_ ->
-      let* () = recover pending in
-      let* workspace,records = scan () in
-      let* pending = Eio_unix.run_in_systhread (fun () ->
-        Capture.recoverable_successors ~workspace records) |> rejected in
-      let* () = match pending with
-        | [] -> Ok ()
-        | _::_ -> Error (Uncertain "Original successor discovery changed during recovery") in
-      Ok (workspace,records) in
-  let rec restore_all acc = function
-    | [] -> Ok (List.rev acc)
-    | record::rest ->
-      let* capture = restore ~store ~workspace record in
-      restore_all ({capture;record}::acc) rest in
-  restore_all [] records
+  match pending with
+  | [] ->
+    (* No recovery changed this pass's validated forest. This observation
+       cannot authorize effects: resume/settle/narrow still reload the owner. *)
+    Ok originals
+  | _::_ ->
+    let* () = recover pending in
+    let* originals = scan () in
+    let* pending = Capture.recoverable_successors (links originals) |> rejected in
+    (match pending with
+     | [] -> Ok originals
+     | _::_ -> Error (Uncertain "Original successor discovery changed during recovery"))
 let discover_with ~store ~base_path =
   discover_observed_with ~store ~base_path ~after_inventory:(fun () -> ())
 let discover ~config =
@@ -655,6 +659,7 @@ let deliver_observation ~config ~request_id =
     ~registry:(Runs.global ()) ~request_id ~now:Time_compat.now
 module For_testing = struct
   let resume=resume_with let settle=settle_with let narrow=narrow_local
+  let recover_successor=recover_successor
   let deliver_observation=deliver_observation_with
   let prepare_observation=prepare_observation_with
   let discover=discover_with

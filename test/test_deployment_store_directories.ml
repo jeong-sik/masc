@@ -385,7 +385,7 @@ let owner_request_bytes = Yojson.Safe.to_string owner_request
 let tool_request_owner ~scope ~request_id ~schema ~request_digest =
   `Assoc ["schema", `String schema; "scope", `String scope; "request_id", `String request_id
          ; "installation_id", `String {|["configuration","curator"]|}; "package_id", `String "curator"
-         ; "tool", `String "read"; "request_digest", `String request_digest
+         ; "tool", `String "read"; "request_digest", `String request_digest; "summary", `Null
          ; "progress", Lane_addon_request_progress.to_json Lane_addon_request_progress.captured]
 
 let test_lane_addon_tool_request_owners () = with_lane_store (fun base root ->
@@ -394,12 +394,11 @@ let test_lane_addon_tool_request_owners () = with_lane_store (fun base root ->
   let body = Filename.concat root (Lane_addon_store.tool_request_body_path ~scope:"scope" ~request_digest) in
   Fs_compat.mkdir_p (Filename.dirname body);
   write body owner_request_bytes;
-  let owner = tool_request_owner ~scope:"scope" ~schema:"lane.addon.tool-request-owner.v3" in
+  let owner = tool_request_owner ~scope:"scope" ~schema:"lane.addon.tool-request-owner.v4" in
   put (path "current") (owner ~request_id:"current" ~request_digest);
   put (path "without-body")
     (owner ~request_id:"without-body" ~request_digest:(Lane_addon_store.digest "a body never published"));
-  (* #44911 moved the record to schema v2. v3 names the request body by
-     digest instead of carrying the request. *)
+  (* Records of an earlier schema, which carry the request, are refused. *)
   let carrying_request ~request_id ~schema =
     match tool_request_owner ~scope:"scope" ~request_id ~schema ~request_digest with
     | `Assoc fields -> `Assoc (("request", owner_request) :: fields)

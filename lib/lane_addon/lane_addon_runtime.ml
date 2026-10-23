@@ -1971,7 +1971,7 @@ let read_browser_document m ~access ~visibility ~route ~tab_id =
     | Several_browser_services ->
         Error "more than one browser Add-on is attached, so the document source cannot choose one")
 
-let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) ~scope ~request_id ~request =
+let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) ~scope ~request_id ~summary ~request =
   with_tool_call_owner (fun () ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m = match Hashtbl.find_opt managers root with
@@ -1988,7 +1988,7 @@ let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) 
       | None -> Lane_addon_tool_request_owner.Manual e.instance_id) in
     Eio.Mutex.use_rw ~protect:true m.action_mutex (fun () ->
       offload (fun () -> Lane_addon_tool_request_owner.retain ~store:m.store ~scope ~request_id
-        ~installation_id ~package_id:e.package.id ~tool:export.tool.name ~request)
+        ~installation_id ~package_id:e.package.id ~tool:export.tool.name ~summary ~request)
       |> Result.map_error (function
         | Lane_addon_tool_request_owner.Store_unavailable detail -> Unavailable detail
         | (Binding_conflict | Invalid_identity _ | Invalid_request _) as error ->
@@ -2041,12 +2041,12 @@ let with_tool_request_destination ~config ~access ~reserved ~(export : tool_expo
       publish destination))))
 let capture_tool_request_owner ~config ~access ~reserved ~export ~scope ~request_id ~capture =
   with_tool_request_destination ~config ~access ~reserved ~export ~publish:(fun destination ->
-    let* value,request = capture destination |> Result.map_error (fun detail ->
+    let* value,request,summary = capture destination |> Result.map_error (fun detail ->
       Host_refusal (Lane_addon_call_context.Rejected detail)) in
     let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     let* () = offload (fun () -> Lane_addon_tool_request_owner.retain ~store ~scope ~request_id
       ~installation_id:destination.installation_id ~package_id:destination.package_id
-      ~tool:destination.tool ~request)
+      ~tool:destination.tool ~summary ~request)
       |> Result.map_error (function
         | Lane_addon_tool_request_owner.Store_unavailable detail -> Unavailable detail
         | (Binding_conflict | Invalid_identity _ | Invalid_request _) as error ->

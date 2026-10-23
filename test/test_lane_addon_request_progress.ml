@@ -22,7 +22,7 @@ let with_store f =
   Fun.protect ~finally:(fun () -> remove parent) (fun () ->
     let root = Filename.concat parent "store" in f root (Store.create ~root))
 let retain store = Owner.retain ~store ~scope ~request_id ~installation_id:"original-installation"
-  ~package_id:"curator" ~tool:"classify" ~request
+  ~package_id:"curator" ~tool:"classify" ~summary:`Null ~request
 let load store = some (owned (Owner.load ~store ~scope ~request_id))
 let advance store expected event = Owner.advance ~store ~expected ~event
 let stored store expected event = match updated (advance store expected event) with
@@ -75,7 +75,7 @@ let test_expected_history_and_exact_uncertain_ack_are_distinct () = with_store (
    | Ok (Owner.Stored _ | Owner.Already_stored _ | Owner.Unconfirmed _) -> Alcotest.fail "stale writer erased progress");
   check_events "stale writer leaves original history intact" (events next) (load store);
   (match Owner.retain ~store ~scope ~request_id ~installation_id:"replacement"
-      ~package_id:"curator" ~tool:"classify" ~request with
+      ~package_id:"curator" ~tool:"classify" ~summary:`Null ~request with
    | Error Owner.Binding_conflict -> ()
    | Error (Owner.Store_unavailable _ | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok () ->
      Alcotest.fail "replacement acquired the advancing original request");
@@ -371,7 +371,7 @@ let test_progress_rewrites_only_the_record_and_its_size_ignores_the_request () =
       let large = `Assoc ["input",`String (String.make large_input_bytes 'x')] in
       owned (retain small_store);
       owned (Owner.retain ~store:large_store ~scope ~request_id ~installation_id:"original-installation"
-        ~package_id:"curator" ~tool:"classify" ~request:large);
+        ~package_id:"curator" ~tool:"classify" ~summary:`Null ~request:large);
       ignore (stored small_store (load small_store) Progress.Dispatch_intended);
       ignore (stored large_store (some (owned (Owner.load ~store:large_store ~scope ~request_id))) Progress.Dispatch_intended);
       Alcotest.(check int) "a record is as large for a large request as for a small one"
@@ -396,13 +396,11 @@ let test_a_record_without_its_body_is_an_error_not_absence () = with_store (fun 
     (match Owner.load ~store:(Store.create ~root) ~scope ~request_id with
      | Error (Owner.Store_unavailable _) -> ()
      | Error (Owner.Binding_conflict | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok _ ->
-       Alcotest.fail (label ^ " became valid or absent"));
-    (match Owner.discover ~store:(Store.create ~root) ~scope with
-     | Error (Owner.Store_unavailable _) -> ()
-     | Error (Owner.Binding_conflict | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok _ ->
-       Alcotest.fail (label ^ " was discovered")) in
+       Alcotest.fail (label ^ " became valid or absent")) in
   Sys.remove body;
   refused "a missing body";
+  Alcotest.(check int) "discovery reads records only, so it still lists that record" 1
+    (List.length (owned (Owner.discover ~store:(Store.create ~root) ~scope)));
   (match retain store with
    | Error (Owner.Store_unavailable _) -> ()
    | Error (Owner.Binding_conflict | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok () ->
@@ -416,11 +414,14 @@ let test_a_record_without_its_body_is_an_error_not_absence () = with_store (fun 
   named {|{"z":1,"a":2}|};
   refused "a body that is not canonical JSON";
   named (Yojson.Safe.to_string (`Assoc ["input",`String "another captured input"]));
+  let renamed = Fs_compat.load_file (record_path root) in
   (match advance store pending (Progress.Execution_observed (Progress.Waiting (evidence "late"))) with
    | Error Owner.State_conflict -> ()
    | Error (Owner.Ownership_error _ | Owner.Invalid_transition _)
    | Ok (Owner.Stored _ | Owner.Already_stored _ | Owner.Unconfirmed _) ->
-     Alcotest.fail "progress landed on a record that names another request"))
+     Alcotest.fail "progress landed on a record that names another request");
+  Alcotest.(check string) "the refused progress leaves that record as it was" renamed
+    (Fs_compat.load_file (record_path root)))
 
 let () = Alcotest.run "Original Add-on request progress" ["owner",[
   Alcotest.test_case "opaque receipt reuse and strict replay" `Quick

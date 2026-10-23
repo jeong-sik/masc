@@ -32,7 +32,8 @@ let with_workspace f =
 let runner ?(installation_id="original-installation") ~registry ~base_path ~call request =
   let store = Lane_addon_store.create ~root:(Filename.concat base_path "request-ownership") in
   let retain ~request_id ~request = Lane_addon_tool_request_owner.retain ~store
-    ~scope:"candle-appraisals" ~request_id ~installation_id ~package_id:"candle-appraiser" ~tool:"candle_appraise" ~request
+    ~scope:"candle-appraisals" ~request_id ~installation_id ~package_id:"candle-appraiser" ~tool:"candle_appraise"
+    ~summary:`Null ~request
     |> Result.map_error (function
       | Lane_addon_tool_request_owner.Store_unavailable detail -> Lane_addon_runtime.Unavailable detail
       | (Binding_conflict | Invalid_identity _ | Invalid_request _) as error -> Lane_addon_runtime.Host_refusal

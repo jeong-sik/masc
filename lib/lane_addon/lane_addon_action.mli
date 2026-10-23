@@ -28,10 +28,16 @@ val validate_value_schema : Yojson.Safe.t -> (unit, string) result
     closed ones. Declared fields remain checked; open contents must still be
     canonical JSON. Action-envelope schemas remain recursively closed. *)
 val validate_value : schema:Yojson.Safe.t -> name:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+(** Pure schema and value validation, including nested [oneOf] alternatives.
+    Candidate branches produce no tool-validation logs, counters or span events;
+    the returned error belongs to the caller's actual validation boundary. *)
 
-(** Check an input against a schema that [validate_schema] already accepted. *)
+(** Purely check and canonicalize an input against an already accepted schema.
+    Emits no tool-validation telemetry. *)
 val validate_input : schema:Yojson.Safe.t -> name:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
 val validate : schema:Yojson.Safe.t -> name:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+(** Pure action-envelope schema and input validation, with the same observation
+    boundary as {!validate_value}. *)
 val input_digest : Yojson.Safe.t -> string
 val decode_result : store:Lane_addon_store.t -> Yojson.Safe.t -> (package_result, string) result

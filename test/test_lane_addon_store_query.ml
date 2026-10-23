@@ -346,7 +346,21 @@ let sequence_graph_is_published_and_rejects_nonlocal_or_broken_links () = with_s
   check bool "missing ancestor refuses a new freeze" true
     (Result.is_error (Store.freeze store ~instance_id ~binding:(binding 4096) ~row_ids:[(row 1 "").id])))
 
+let original_evidence_addresses_cross_feed_boundaries () = with_store (fun _root store ->
+  List.iter (fun (length, expected) ->
+    let original = String.init length (fun index -> Char.chr (index mod 251)) in
+    let reference = unwrap (Store.write_blob store original) in
+    check (option string) "standard SHA-256 address is preserved" (Some expected) reference.sha256;
+    check string "complete retained bytes remain readable" original
+      (unwrap (Store.read_blob store reference)))
+    [0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+     65535, "dda402a2c028f0cbbdbc5c6ebae965eed9c75f71236e7022b0386d3455d5ae2f";
+     65536, "4b640d85ab3ba30fd02c9fc9db4a8928f416322ad27022ea58a65aaee68a4df2";
+     131089, "1ec3437cee3cccf3647e130524ade52848571960a3340ae33573beef17d330b3"])
+
 let () = run "bounded Lane history" ["queries", [
+  test_case "original evidence addresses survive internal hash feeds" `Quick
+    original_evidence_addresses_cross_feed_boundaries;
   test_case "captured histories retain only new records" `Quick retained_sequences_grow_only_with_new_records;
   test_case "typed sequence graph crosses Keeper evidence boundary intact" `Quick
     sequence_graph_is_published_and_rejects_nonlocal_or_broken_links;

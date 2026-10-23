@@ -9,7 +9,11 @@ val selection_of_json : Yojson.Safe.t -> (hook list, string) result
 type t
 val prepare : hooks:hook list -> Mcp_protocol.Mcp_types.tool -> (t, string) result
 val before_call : t -> Yojson.Safe.t -> (unit, string) result
+(** Pure validation, including a returned [Error]: no validation logs, counters
+    or span events are emitted. The caller maps input refusal to [Host_refusal]
+    and owns observations at the actual dispatch boundary. *)
 val after_call : t -> Mcp_protocol.Mcp_types.tool_result -> (unit, string) result
-(** Error replies retain their original failure/effect metadata. Only successful
+(** Uses the same pure validation boundary as [before_call], including [Error].
+    Error replies retain their original failure/effect metadata. Only successful
     replies require [structuredContent] matching the selected output contract.
     A rejected successful reply is an unknown effect, never a pre-effect refusal. *)

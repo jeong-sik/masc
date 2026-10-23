@@ -27366,7 +27366,7 @@ and is loaded on demand through keeper_skill.
                     open_detail_reading state
                       (Masc_tui_detail_reading.move ~count ~height movement reading)) movement)
        | Some "S"
-         when state.view=Board && not compact_viewport && not state.composer_focused
+         when state.view=Board && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
               && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport)
@@ -27377,7 +27377,7 @@ and is loaded on demand through keeper_skill.
                 state.followed_from <- Some (Board, Some origin);
                 open_board_post_id state ~mailbox:async_messages ~focus:Right_pane successor)
        | Some "v"
-         when not compact_viewport && not state.composer_focused
+         when not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
               && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport)
@@ -27434,7 +27434,7 @@ and is loaded on demand through keeper_skill.
            if k = "esc" then (
              state.client_detail <- None;
              state.client_detail_scroll <- 0)
-           else if not compact_viewport then (
+           else (
              let page = max 1 (surface_page_rows state - 1) in
              let delta = match k with
                | "j" | "down" -> 1 | "k" | "up" -> -1
@@ -27446,7 +27446,7 @@ and is loaded on demand through keeper_skill.
                  (if delta > 0 then scroll_down_from state.client_detail_scroll ~by:delta
                   else max 0 (state.client_detail_scroll + delta)))
        | Some ("\r" | "\n" | "enter")
-         when state.view = Clients && not compact_viewport && not (modal_owns_keys state)
+         when state.view = Clients && not (modal_owns_keys state)
               && not state.palette_open && not state.answering_open
               && not state.patch_modal_open && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport) ->
@@ -28710,21 +28710,18 @@ and is loaded on demand through keeper_skill.
                 launch_runtime_catalog_load state ~mailbox:async_messages)
         | Some ("T" | "t")
           when state.view = Keepers Keeper_detail
-               && state.detail_tab = Detail_identity
-               && not compact_viewport ->
+               && state.detail_tab = Detail_identity ->
            Masc_tui_identity_input.toggle state
              ~switch:(fun ~keeper_name ~provider_id ~enabled -> Masc_tui_identity_requests.launch_switch state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~keeper_name ~provider_id ~enabled)
              ~report:(fun level detail -> report_action state level detail)
         | Some ("A" | "a")
           when state.view = Keepers Keeper_detail
-               && state.detail_tab = Detail_identity
-               && not compact_viewport ->
+               && state.detail_tab = Detail_identity ->
            Masc_tui_identity_input.open_app_form state
         | Some ("D" | "d")
           when state.view = Keepers Keeper_detail
                && state.detail_tab = Detail_identity
-               && Option.is_none (text_input_target state ~compact_viewport)
-               && not compact_viewport ->
+               && Option.is_none (text_input_target state ~compact_viewport) ->
            Masc_tui_identity_input.disconnect state
              ~unbind:(fun ~keeper_name ~provider_id -> Masc_tui_identity_requests.launch_disconnect state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~keeper_name ~provider_id)
              ~report:(fun level detail -> report_action state level detail)
@@ -28746,8 +28743,7 @@ and is loaded on demand through keeper_skill.
            Masc_tui_github_ui.token_key state ~save:(fun keeper token -> Masc_tui_github_requests.launch_token_save state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~check:(capture_workspace_check state ~mailbox:async_messages) keeper token) k
        | Some "/"
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity
-              && not compact_viewport ->
+              && state.detail_tab = Detail_identity ->
            state.identity_filter <- Some "";
            state.identity_cursor <- 0
        | Some key

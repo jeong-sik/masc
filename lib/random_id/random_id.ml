@@ -86,6 +86,12 @@ let parse_uuid_v7 value =
     | Some uuid -> Error (Printf.sprintf "invalid UUID variant %d" (Uuidm.variant uuid))
     | None -> Error "invalid UUID syntax"
 
+let uuid_v7_time_ms value =
+  Result.bind (parse_uuid_v7 value) (fun canonical ->
+    match Option.bind (Uuidm.of_string canonical) Uuidm.time_ms with
+    | Some time_ms -> Ok time_ms
+    | None -> Error "a UUIDv7 carries a timestamp")
+
 module For_testing = struct
   let logical_ms_clock raw_now_ms =
     let clock = logical_ms_clock raw_now_ms in

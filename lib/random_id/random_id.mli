@@ -32,6 +32,10 @@ val parse_uuid_v7 : string -> (string, string) result
 (** [parse_uuid_v7 value] validates the complete canonical UUID shape,
     RFC 9562 variant, and version 7, then returns lowercase canonical text. *)
 
+val uuid_v7_time_ms : string -> (int64, string) result
+(** The millisecond POSIX timestamp a UUIDv7 carries, for a value
+    {!parse_uuid_v7} accepts. *)
+
 module For_testing : sig
   val logical_ms_clock : (unit -> int64) -> (unit -> int64) * (unit -> unit)
 end

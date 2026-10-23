@@ -111,21 +111,31 @@ let refused report refusal =
 
 let finish report = { report with refusals = List.rev report.refusals }
 
+let removed path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
+  | exception Unix.Unix_error _ -> false
+  | _ -> false
+
 (* One record file: read and parse it as the store's readers do, then hand it
-   to [decode]. A file removed between the listing and the read is absent. *)
-let read_record report ~path decode =
+   to [decode]. A file removed between the listing and the read is absent, and
+   so is one removed while it was checked: a running server settles an
+   original by moving its record and then the body the check reads next. *)
+let read_record ~after_read report ~path decode =
   match Fs_compat.load_file_opt path with
   | exception Sys_error detail ->
     refused report { path; decoder = Json; detail; aside = [ path ] }
   | None -> report
   | Some bytes ->
+    after_read path;
     (match Yojson.Safe.from_string bytes with
      | exception Yojson.Json_error detail ->
        refused report { path; decoder = Json; detail; aside = [ path ] }
      | json ->
        (match decode json with
         | Ok () -> counted report
-        | Error (decoder, detail) -> refused report { path; decoder; detail; aside = [ path ] }))
+        | Error (decoder, detail) ->
+          if removed path then report else refused report { path; decoder; detail; aside = [ path ] }))
 
 let decoded decoder result = Result.map_error (fun detail -> decoder, detail) result
 
@@ -146,29 +156,29 @@ let tool_request_owner_entry name =
   | Staged_entry -> Skipped
   | Unknown_entry -> Refused (Tool_request_inventory, "unknown entry in original request namespace")
 
-let read_entries report ~dir ~entry decode names =
+let read_entries ~after_read report ~dir ~entry decode names =
   List.fold_left
     (fun report name ->
        let path = Filename.concat dir name in
        match entry name with
        | Skipped -> report
        | Refused (decoder, detail) -> refused report { path; decoder; detail; aside = [ path ] }
-       | Record -> read_record report ~path (decode ~name ~path))
+       | Record -> read_record ~after_read report ~path (decode ~name ~path))
     report
     names
 
-let scan_bindings root =
+let scan_bindings ~after_read root =
   let dir = Filename.concat root Lane_addon_store.bindings_directory in
   let* names = entries dir in
   Ok
-    (read_entries empty ~dir ~entry:json_entry
+    (read_entries ~after_read empty ~dir ~entry:json_entry
        (fun ~name:_ ~path json ->
           let* () = decoded Retained_binding (Lane_addon_runtime.check_retained_binding json) in
           decoded Inventory_record (Lane_addon_runtime.check_inventory_record ~path json))
        names)
 
 (* Records grouped one directory deep: [<store>/<digest>/<digest>.json]. *)
-let scan_grouped root directory ~entry decode =
+let scan_grouped ~after_read root directory ~entry decode =
   let dir = Filename.concat root directory in
   let* groups = entries dir in
   List.fold_left
@@ -179,7 +189,7 @@ let scan_grouped root directory ~entry decode =
        then Ok report
        else
          let* names = entries group_dir in
-         Ok (read_entries report ~dir:group_dir ~entry (decode ~group) names))
+         Ok (read_entries ~after_read report ~dir:group_dir ~entry (decode ~group) names))
     (Ok empty)
     groups
 
@@ -251,17 +261,17 @@ let scan_native_claims root =
        empty
        names)
 
-let scan store ~base_path =
+let scan_with ~after_read store ~base_path =
   let root = store_root ~base_path in
   let report =
     match store with
-    | Store.Bindings -> scan_bindings root
+    | Store.Bindings -> scan_bindings ~after_read root
     | Native_claims -> scan_native_claims root
     | Actions ->
-      scan_grouped root Lane_addon_store.actions_directory ~entry:json_entry
+      scan_grouped ~after_read root Lane_addon_store.actions_directory ~entry:json_entry
         (fun ~group ~name ~path:_ json -> check_action ~group ~name json |> decoded Action_receipt)
     | Exact_requests ->
-      scan_grouped root Lane_addon_store.exact_requests_directory ~entry:json_entry
+      scan_grouped ~after_read root Lane_addon_store.exact_requests_directory ~entry:json_entry
         (fun ~group:_ ~name:_ ~path:_ json ->
            Lane_addon_exact.check_retained_record json |> decoded Exact_record)
     | Tool_request_owners ->
@@ -274,10 +284,16 @@ let scan store ~base_path =
         | exception Sys_error detail -> Error detail
         | body -> Ok body
       in
-      scan_grouped root Lane_addon_store.tool_request_owners_directory
+      scan_grouped ~after_read root Lane_addon_store.tool_request_owners_directory
         ~entry:tool_request_owner_entry
         (fun ~group ~name ~path:_ json ->
            Lane_addon_tool_request_owner.check_published ~read_body ~directory_name:group ~file_name:name json
            |> decoded Tool_request_owner)
   in
   Result.map finish report
+
+let scan = scan_with ~after_read:(fun _ -> ())
+
+module For_testing = struct
+  let scan = scan_with
+end

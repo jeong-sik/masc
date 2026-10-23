@@ -64,6 +64,43 @@ let records store=owned (Owner.discover ~store ~scope:Capture.scope) |> List.map
 let capture_of base_path store record=get (Capture.restore ~workspace:(get (Capture.observe_workspace ~base_path))
   ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id |> Result.map_error Owner.error_to_string) record)
 let captures base_path store=records store |> List.map (fun record -> record,capture_of base_path store record)
+(* The settled archive of the Curator scope, read as plain files, each record
+   with the date directory it is under. No pass reads this namespace. *)
+let settled_records store=
+  let scope=Filename.concat (Store.root store)
+      (Filename.concat Store.tool_request_archive_directory (Store.digest Capture.scope)) in
+  let names directory=if Sys.file_exists directory
+    then List.sort String.compare (Array.to_list (Sys.readdir directory)) else [] in
+  names scope |> List.concat_map (fun date ->
+    let directory=Filename.concat scope (Filename.concat date "records") in
+    names directory |> List.map (fun name -> date,Yojson.Safe.from_file (Filename.concat directory name)))
+let text json key=Yojson.Safe.Util.to_string (member key json)
+type stored = { stored_id : string; stored_progress : Progress.t; stored_summary : Capture.Summary.t }
+(* Every original, whether its record is in the scope a pass reads or was
+   settled. Settling moves a record unchanged. The scope is read first, so a
+   record a pass settles between the two reads shows up in both, and the
+   settled copy stands for it. *)
+let every_original store=
+  let live=owned (Owner.discover ~store ~scope:Capture.scope) |> List.map (fun record ->
+    {stored_id=Owner.Record.request_id record;stored_progress=Owner.Record.progress record;
+     stored_summary=get (Capture.Summary.of_json (Owner.Record.summary record))}) in
+  let settled=List.map (fun (_,json) -> {stored_id=text json "request_id";
+    stored_progress=get (Progress.of_json (member "progress" json));
+    stored_summary=get (Capture.Summary.of_json (member "summary" json))}) (settled_records store) in
+  settled @ List.filter (fun original ->
+    not (List.exists (fun moved -> moved.stored_id=original.stored_id) settled)) live
+let find_original store request_id=
+  match List.find_opt (fun original -> original.stored_id=request_id) (every_original store) with
+  | Some original -> original
+  | None -> fail "an original is in neither its scope nor the settled archive"
+(* The request an original names, read from its scope or from the archive. *)
+let request_of store request_id=
+  match owned (Owner.load ~store ~scope:Capture.scope ~request_id) with
+  | Some retained -> retained.Owner.request
+  | None -> match List.find_opt (fun (_,json) -> text json "request_id"=request_id) (settled_records store) with
+    | None -> fail "an original is in neither its scope nor the settled archive"
+    | Some (date,json) -> Yojson.Safe.from_file (Filename.concat (Store.root store)
+        (Store.tool_request_archive_body_path ~scope:Capture.scope ~date ~request_digest:(text json "request_digest")))
 let await clock condition=Eio.Time.with_timeout_exn clock F.fixture_wait_seconds (fun () ->
   let rec loop ()=if condition () then () else (Eio.Fiber.yield ();loop ()) in loop ())
 let await_owner clock base_path condition=
@@ -295,13 +332,15 @@ let with_fixture ?(on_response_error=(fun _ _ -> ()))
 let test_actual_production_pipeline ()=with_fixture ~invalid_first:true (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode:_ ~delivery:_ ->
   Curator.start ~sw ~config;
   settle_all clock base_path store 1;
-  check int "one classification and one Briefing original" 2 (List.length (records store));
+  check int "one classification and one Briefing original" 2 (List.length (every_original store));
   check int "each domain reaches the admitted good HTTP candidate" 2 (F.post_count server);
-  let snapshots=records store |> List.map (fun record -> record.Owner.request_id,Progress.to_json record.progress) in
+  let snapshots ()=every_original store
+    |> List.map (fun original -> original.stored_id,Progress.to_json original.stored_progress)
+    |> List.sort (fun (a,_) (b,_) -> String.compare a b) in
+  let before=snapshots () in
   ignore (Curator.request ~base_path);await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
   check int "unchanged wake does not replay HTTP" 2 (F.post_count server);
-  check (list (pair string json)) "original terminal and observer intents stay immutable" snapshots
-    (records store |> List.map (fun record -> record.Owner.request_id,Progress.to_json record.progress)))
+  check (list (pair string json)) "original terminal and observer intents stay immutable" before (snapshots ()))
 let test_off_then_actual_metadata_on ()=with_fixture ~off:true (fun ~sw:_ ~clock ~base_path ~config ~store ~source ~declaration ~server ~urls:_ ~mode:_ ~delivery:_ ->
   await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
   check int "Off creates no original request" 0 (List.length (records store));
@@ -406,7 +445,7 @@ let test_existing_intent_recovers_locally_off_then_runs_on ()=
     await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=2
       && ready_summary base_path && Curator.For_testing.is_idle ~base_path);
     check bool "original child ID completes after actual reattachment" true
-      (List.exists (fun record -> record.Owner.request_id=intent.request_id && is_finished record.Owner.progress) (records store)))
+      (is_finished (find_original store intent.request_id).stored_progress))
 let test_the_next_root_takes_the_size_its_last_answer_supports ()=
   let claims=List.init 5 (fun i -> "Size-evidence original source " ^ string_of_int i) in
   with_fixture ~start_owner:false ~claims
@@ -417,20 +456,35 @@ let test_the_next_root_takes_the_size_its_last_answer_supports ()=
     Curator.start ~sw ~config;
     await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=5
       && Curator.For_testing.is_idle ~base_path);
+    (* The workspace goes idle, and a pass settles every finished chain but
+       the last answer. A source that arrives only then still takes its size
+       from that answer. *)
+    ignore (Curator.request ~base_path);await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
+    check int "the idle pass leaves only the last answered classification in the scope" 1
+      (List.length (List.filter (fun record ->
+         match (get (Capture.Summary.of_json (Owner.Record.summary record))).Capture.Summary.batch with
+         | Capture.Summary.Classification _ -> true | Capture.Summary.Briefing _ -> false)
+         (owned (Owner.discover ~store ~scope:Capture.scope))));
+    commit_facts base_path (claims @ ["Size-evidence source after an idle pass"]);
+    await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=6
+      && Curator.For_testing.is_idle ~base_path);
     let size=testable (fun format -> function
         | Request.Fill_frame -> Format.pp_print_string format "Fill_frame"
         | Request.Up_to count -> Format.fprintf format "Up_to %d" count) ( = ) in
-    let classifications=captures base_path store |> List.filter_map (fun (_,capture) ->
-        match Capture.work capture with
-        | Capture.Classification {batch;_} -> Some (Capture.request_id capture,batch)
-        | Capture.Briefing _ -> None)
-      |> List.sort (fun (a,_) (b,_) -> Capture.Request_id.compare a b)
-      |> List.map (fun (_,(batch:Request.batch)) -> batch.size,List.length batch.selected) in
+    (* Settled chains included: the size each batch was prepared for and the
+       facts it held are in its summary. *)
+    let classifications=every_original store |> List.filter_map (fun original ->
+        match original.stored_summary.Capture.Summary.batch with
+        | Capture.Summary.Classification {up_to;selected} -> Some (original.stored_id,(up_to,List.length selected))
+        | Capture.Summary.Briefing _ -> None)
+      |> List.sort (fun (a,_) (b,_) -> String.compare a b) |> List.map snd in
     (* The child of two is answered, so the next root takes two of the three
        left, though the frame holds all three. That root held its size, so the
-       last one may take four and finds one. *)
+       next one may take four and finds one. A backlog stopped that one below
+       its size, so the source after the idle pass is prepared for four too. *)
     check (list (pair size int)) "classifications in mint order"
-      [Request.Fill_frame,5;Request.Fill_frame,2;Request.Up_to 2,2;Request.Up_to 4,1] classifications)
+      [Request.Fill_frame,5;Request.Fill_frame,2;Request.Up_to 2,2;Request.Up_to 4,1;Request.Up_to 4,1]
+      classifications)
 let test_the_owner_narrows_a_batch_its_worker_could_not_list ()=
   let claims=["Frame-refused original source a";"Frame-refused original source b"] in
   with_fixture ~start_owner:false ~claims
@@ -441,10 +495,9 @@ let test_the_owner_narrows_a_batch_its_worker_could_not_list ()=
     Curator.start ~sw ~config;
     await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=2
       && Curator.For_testing.is_idle ~base_path);
-    let current=match owned (Owner.load ~store ~scope:Capture.scope ~request_id:parent.Owner.request_id) with
-      | Some current -> current | None -> fail "the refused original disappeared" in
+    let current=find_original store parent.Owner.request_id in
     check bool "the refused root was narrowed, not left fencing its facts" true
-      (match Progress.phase current.progress with
+      (match Progress.phase current.stored_progress with
        | Progress.Subdivided _ -> true
        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
        | Finished _ | Conflicted _ | Rejected _ | Subdividing _ -> false))
@@ -671,10 +724,9 @@ let test_finished_identity_readded_after_observed_removal ()=
       (List.map (fun (fact:Ledger.pending_fact) -> fact.fact) fresh_selected
        = List.map (fun (fact:Ledger.pending_fact) -> fact.fact) selected);
     check bool "new original reaches a confirmed domain commit" true (is_finished fresh.Owner.progress);
-    let retained=match List.find_opt (fun record -> record.Owner.request_id=original.request_id) (records store) with
-      | Some retained -> retained | None -> fail "completed original was removed" in
-    check json "completed original progress stays unchanged" progress (Progress.to_json retained.progress);
-    check json "completed original capture stays unchanged" original.request retained.request;
+    let retained=find_original store original.request_id in
+    check json "completed original progress stays unchanged" progress (Progress.to_json retained.stored_progress);
+    check json "completed original capture stays unchanged" original.request (request_of store original.request_id);
     check int "only new classification and synthesis call the provider" (calls+2) (F.post_count server))
 let test_a_pass_reads_no_body_of_an_observed_finished_original ()=
   let claim="A source finished and observed before the next pass"
@@ -682,21 +734,98 @@ let test_a_pass_reads_no_body_of_an_observed_finished_original ()=
   with_fixture ~claims:[claim]
     (fun ~sw:_ ~clock ~base_path ~config:_ ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode:_ ~delivery:_ ->
     settle_all clock base_path store 1;
+    (* One more pass settles the finished Briefing. The classification stays,
+       since the next batch takes its size from it. *)
+    ignore (Curator.request ~base_path);await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
     let finished=owned (Owner.discover ~store ~scope:Capture.scope) in
-    check int "one classification and one Briefing original finished" 2 (List.length finished);
+    check (list string) "the scope keeps the finished classification only" ["classification"]
+      (List.map (fun record -> match (get (Capture.Summary.of_json (Owner.Record.summary record))).Capture.Summary.batch with
+         | Capture.Summary.Classification _ -> "classification" | Capture.Summary.Briefing _ -> "briefing") finished);
     let body record=Filename.concat (Store.root store)
       (Store.tool_request_body_path ~scope:Capture.scope ~request_digest:(Owner.Record.request_digest record)) in
-    (* A restore of either original now fails, so the pass below can finish
-       only without reading them. *)
+    (* A restore of that original now fails, so the pass below can finish only
+       without reading it. *)
     List.iter (fun record -> Sys.remove (body record)) finished;
     let calls=F.post_count server in
     commit_facts base_path [claim;later];
     ignore (Curator.request ~base_path);
     settle_all clock base_path store 2;
     check int "the later source and the refreshed Briefing each call the provider once" (calls+2) (F.post_count server);
-    check int "the pass adds one original per domain" 4 (List.length (owned (Owner.discover ~store ~scope:Capture.scope)));
-    check bool "nothing wrote the finished originals' bodies again" true
+    check int "the pass adds one original per domain" 4 (List.length (every_original store));
+    check bool "nothing wrote the finished original's body again" true
       (List.for_all (fun record -> not (Sys.file_exists (body record))) finished))
+let test_finished_chains_move_out_of_the_scope_by_their_root_date ()=
+  let claims=["A first source that settles";"A second source that settles";"A third source"] in
+  with_fixture ~claims:(List.take 1 claims)
+    (fun ~sw:_ ~clock ~base_path ~config:_ ~store ~source:_ ~declaration:_ ~server:_ ~urls:_ ~mode:_ ~delivery:_ ->
+    settle_all clock base_path store 1;
+    commit_facts base_path (List.take 2 claims);
+    settle_all clock base_path store 2;
+    commit_facts base_path claims;
+    settle_all clock base_path store 3;
+    (* One more pass settles what the last one only observed. *)
+    ignore (Curator.request ~base_path);await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
+    let classifications=every_original store |> List.filter_map (fun original ->
+        match original.stored_summary.Capture.Summary.batch with
+        | Capture.Summary.Classification _ -> Some original.stored_id
+        | Capture.Summary.Briefing _ -> None) |> List.sort String.compare in
+    check int "three classifications and three Briefings" 6 (List.length (every_original store));
+    check (list string) "the scope keeps only the latest classification" (List.drop 2 classifications)
+      (List.map Owner.Record.request_id (owned (Owner.discover ~store ~scope:Capture.scope)));
+    let path relative=Filename.concat (Store.root store) relative in
+    check int "the other five are settled" 5 (List.length (settled_records store));
+    List.iter (fun (date,json) ->
+      let request_digest=text json "request_digest" in
+      check string "a settled root is under the UTC date its ID was minted"
+        (get (Capture.Request_id.minted_on (get (Capture.Request_id.of_string (text json "request_id"))))) date;
+      check bool "its body moved with it" true
+        (Sys.file_exists (path (Store.tool_request_archive_body_path ~scope:Capture.scope ~date ~request_digest)));
+      check bool "and is no longer beside the scope" false
+        (Sys.file_exists (path (Store.tool_request_body_path ~scope:Capture.scope ~request_digest))))
+      (settled_records store))
+let test_discovery_finishes_a_chain_whose_settle_stopped_partway ()=
+  let claims=["Partly settled source a";"Partly settled source b"] in
+  with_fixture ~start_owner:false ~claims
+    (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server:_ ~urls:_ ~mode:_ ~delivery:_ ->
+    await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
+    let parent=seed_size_refusal store (capture_classification config) in
+    let settled_under request_id=List.find_map (fun (date,json) ->
+        if text json "request_id"=request_id then Some date else None) (settled_records store) in
+    Curator.start ~sw ~config;
+    (* The refused root's child answers one fact and a new root the other.
+       Once that root is the latest answer, the parent's chain settles. *)
+    await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=2
+      && Curator.For_testing.is_idle ~base_path && Option.is_some (settled_under parent.Owner.request_id));
+    Curator.For_testing.stop ~base_path;
+    await clock (fun () -> match Curator.For_testing.snapshot ~base_path with
+      | Some owner -> not owner.in_flight | None -> true);
+    let child=match Progress.phase (find_original store parent.request_id).stored_progress with
+      | Progress.Subdivided (_,intent) -> intent.request_id
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Conflicted _ | Rejected _ | Subdividing _ -> fail "the refused root was not narrowed" in
+    let date=Option.get (settled_under parent.request_id) in
+    check (option string) "the child is under its root's date" (Some date) (settled_under child);
+    let path relative=Filename.concat (Store.root store) relative in
+    let live_record=path (Filename.concat "tool-request-owners"
+        (Filename.concat (Store.digest Capture.scope) (Store.digest parent.request_id ^ ".json"))) in
+    let settled_record=path (Store.tool_request_archive_record_path ~scope:Capture.scope ~date ~request_id:parent.request_id) in
+    let live_body=path (Store.tool_request_body_path ~scope:Capture.scope ~request_digest:parent.request_digest)
+    and settled_body=path (Store.tool_request_archive_body_path ~scope:Capture.scope ~date
+        ~request_digest:parent.request_digest) in
+    (* What a settle interrupted after the child and before its parent leaves:
+       the child under the date, the parent still in the scope. *)
+    let interrupt ()=Unix.rename settled_record live_record;Unix.rename settled_body live_body in
+    interrupt ();
+    let discovered=Consumer.discover ~config |> consumed in
+    check bool "discovery does not list the parent" false
+      (List.exists (fun (original:Consumer.original) -> Owner.Record.request_id original.record=parent.request_id) discovered);
+    check bool "the parent's record is under the date again" true (Sys.file_exists settled_record);
+    check bool "and its body" true (Sys.file_exists settled_body && not (Sys.file_exists live_body));
+    (* A child in neither place is a broken link, not an interrupted settle. *)
+    interrupt ();
+    Sys.remove (path (Store.tool_request_archive_record_path ~scope:Capture.scope ~date ~request_id:child));
+    check bool "a parent whose child is gone refuses discovery" true (Result.is_error (Consumer.discover ~config));
+    check bool "and stays in the scope" true (Sys.file_exists live_record))
 type forged_original = Refused_original | Size_refused_original | Active_original
 let test_forged_observation_still_blocks_new_work initial ()=
   let refused_claim="An original with an invalid semantic receipt" in
@@ -817,13 +946,13 @@ let test_successor_frontier_ignores_an_old_semantic_destination ()=
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
      | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> fail "old configuration acquired a successor");
     check json "old immutable capture is never replaced" old.request retained_old.request;
-    let retained_current=original_record store current_capture in
-    let child_id=match Progress.phase retained_current.progress with
+    let retained_current=find_original store (Capture.Request_id.to_string (Capture.request_id current_capture)) in
+    let child_id=match Progress.phase retained_current.stored_progress with
       | Progress.Subdivided (_,intent) -> intent.request_id
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ -> fail "current original never acquired its unique successor" in
     check bool "the actual owner completes the current original's child" true
-      (List.exists (fun record -> record.Owner.request_id=child_id && is_finished record.Owner.progress) (records store));
+      (is_finished (find_original store child_id).stored_progress);
     let old_facts=match Capture.work old_capture with
       | Capture.Classification {batch;_} -> List.map (fun (pending:Ledger.pending_fact) -> pending.fact) batch.selected
       | Capture.Briefing _ -> fail "old original is not classification" in
@@ -964,6 +1093,10 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
     test_registry_failure_does_not_block_new_work;
   test_case "finished source can return as new pending work after actual removal" `Quick test_finished_identity_readded_after_observed_removal;
   test_case "a pass reads no body of an observed finished original" `Quick test_a_pass_reads_no_body_of_an_observed_finished_original;
+  test_case "finished chains move out of the scope by their root's date" `Quick
+    test_finished_chains_move_out_of_the_scope_by_their_root_date;
+  test_case "discovery finishes a chain whose settle stopped partway" `Quick
+    test_discovery_finishes_a_chain_whose_settle_stopped_partway;
   test_case "invalid original observation still refuses new primary work" `Quick
     (test_forged_observation_still_blocks_new_work Refused_original);
   test_case "invalid original observation still refuses a new size successor" `Quick

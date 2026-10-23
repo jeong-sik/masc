@@ -75,4 +75,14 @@ val fresh_state_step : refusal -> string
 val scan : Store.t -> base_path:string -> (report, string) result
 (** Read every record of the store under [base_path] with this build's
     decoders. A missing store directory is an empty store. [Error] means a
-    directory exists and cannot be listed. *)
+    directory exists and cannot be listed. The scan runs beside a live server
+    and takes none of its locks: a record removed before it is read, or while
+    it is checked, is absent, since a settle moves an original's record and
+    then the body its check reads. *)
+
+module For_testing : sig
+  val scan : after_read:(string -> unit) -> Store.t -> base_path:string -> (report, string) result
+  (** The same scan, calling [after_read] with each record's path once its
+      bytes are read and before they are decoded, so a test can move a file
+      at the point a running server could. *)
+end

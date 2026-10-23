@@ -119,7 +119,22 @@ val discover : config:Workspace.config -> (original list, error) Stdlib.result
     Works locally while Off, publishing no new ID or successor intention. It does
     not dispatch, settle domains, prepare observers or schedule new roots.
     Caller holds the workspace process lease and serializes the entire pass;
-    the result is an observation, not a grant to bypass fresh effect checks. *)
+    the result is an observation, not a grant to bypass fresh effect checks.
+    A settle interrupted inside a chain left a Subdivided parent whose child
+    is already in the settled archive; discovery settles that parent and its
+    ancestors before the link check, and a move that fails there fails the
+    discovery. *)
+val settle_chains : config:Workspace.config -> Workspace_memory_execution_capture.settling ->
+  original list -> (unit, error) Stdlib.result
+(** Move the chains of one domain that no pass needs again
+    ({!Workspace_memory_execution_capture.settled_chains}) from the scope a
+    pass reads into the settled archive, under the UTC date of each chain's
+    root: [tool-request-owners-settled/<scope digest>/<YYYY-MM-DD>/]. Each
+    chain moves leaf first and each original record first, then its body.
+    [originals] is the list the same pass discovered; a record that changed
+    since is [Uncertain] and stays. A settled request the worker still lists
+    has no original, so the host ends it as [not_allowed]. Caller holds the
+    workspace process lease and serializes the entire pass. *)
 type observation = {
   original : Lane_addon_tool_request_owner.retained;
   registration : Workspace_memory_observation_receipt.registration;
@@ -182,8 +197,9 @@ module For_testing : sig
       refused; no child is derived or published for it. *)
   val discover : store:Lane_addon_store.t -> base_path:string ->
     (original list, error) Stdlib.result
-  (** Same record and summary discovery, forest link validation and existing
-      successor recovery. Only the store root/workspace is supplied. *)
+  (** Same record and summary discovery, interrupted settle completion, forest
+      link validation and existing successor recovery. Only the store
+      root/workspace is supplied. *)
   val discover_observed : store:Lane_addon_store.t -> base_path:string ->
     after_inventory:(unit -> unit) -> (original list, error) Stdlib.result
   (** Same discovery, with a callback after each actual strict [Owner.discover]
@@ -191,6 +207,9 @@ module For_testing : sig
       runs in the inventory system thread, outside the store's inventory lock;
       it neither supplies nor replaces the read result. This fixture edge can
       observe reads and arrange a physical change before recovery/revalidation. *)
+  val settle_chains : store:Lane_addon_store.t -> Workspace_memory_execution_capture.settling ->
+    original list -> (unit, error) Stdlib.result
+  (** Same chain selection and moves; only the store root is supplied. *)
   val prepare_observation : store:Lane_addon_store.t -> base_path:string ->
     request_id:string -> now:(unit -> float) -> (observation, error) Stdlib.result
   (** Same real journal and strict restore; only the first observer clock edge

@@ -419,6 +419,34 @@ let test_lane_addon_tool_request_owners () = with_lane_store (fun base root ->
        path "v1", P.Tool_request_owner; path "v3", P.Tool_request_owner; stray, P.Tool_request_inventory])))
 
 
+(* The check runs beside a live server, which settles an original by moving
+   its record and then its body. A record read just before that move, whose
+   body the check then finds gone, is absent. A body lost under a record that
+   stays is still refused. *)
+let test_a_record_settled_while_it_is_checked_is_absent () = with_lane_store (fun base root ->
+  let path id = grouped root Lane_addon_store.tool_request_owners_directory ~group:"scope" ~id in
+  let body_of request =
+    let bytes = Yojson.Safe.to_string request in
+    let request_digest = Lane_addon_store.digest bytes in
+    let body = Filename.concat root (Lane_addon_store.tool_request_body_path ~scope:"scope" ~request_digest) in
+    Fs_compat.mkdir_p (Filename.dirname body);
+    write body bytes;
+    request_digest, body in
+  let owner = tool_request_owner ~scope:"scope" ~schema:"lane.addon.tool-request-owner.v4" in
+  let settled_digest, settled_body = body_of (`Assoc ["query", `String "settled rows"]) in
+  let kept_digest, kept_body = body_of (`Assoc ["query", `String "kept rows"]) in
+  put (path "settled") (owner ~request_id:"settled" ~request_digest:settled_digest);
+  put (path "kept") (owner ~request_id:"kept" ~request_digest:kept_digest);
+  let after_read read =
+    if String.equal read (path "settled") then (Sys.remove read; Sys.remove settled_body)
+    else if String.equal read (path "kept") then Sys.remove kept_body in
+  match P.For_testing.scan ~after_read P.Store.Tool_request_owners ~base_path:base with
+  | Error detail -> fail detail
+  | Ok report ->
+    check int "only the record that stayed is read" 1 report.P.rows;
+    check (list string) "the record whose body went under it is refused, the settled one is not"
+      [path "kept"] (List.map (fun (refusal : P.refusal) -> refusal.path) report.P.refusals))
+
 (* The deploy gate itself: a refused Lane Add-on record stops validate-stores. *)
 let test_lane_addon_record_refuses_deploy exe () = with_lane_store (fun base root ->
   let path = grouped root Lane_addon_store.actions_directory ~group:"instance" ~id:"string-executor" in
@@ -456,5 +484,7 @@ let () =
       test_case "action receipts" `Quick test_lane_addon_actions;
       test_case "exact requests" `Quick test_lane_addon_exact_requests;
       test_case "tool request owners" `Quick test_lane_addon_tool_request_owners;
+      test_case "a record settled while it is checked is absent" `Quick
+        test_a_record_settled_while_it_is_checked_is_absent;
       test_case "a refused record stops validate-stores" `Quick
         (test_lane_addon_record_refuses_deploy exe)]]

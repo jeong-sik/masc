@@ -18,7 +18,10 @@ still requires a fresh complete inventory and forest validation before
 returning originals. Nothing is cached across passes; resume, settlement and
 narrowing keep their fresh original reads and effect checks. The pass restores
 a capture only for an original it acts on; an observed finished original costs
-one record read. Classification
+one record read. After observing, each domain pass moves the finished chains
+no pass reads again into the dated settled archive, keeping the latest answered
+classification and a Briefing that prepared the current state
+([discovery and settle](workspace-curator-addon-execution.md#complete-original-discovery-before-production-cutover)). Classification
 and Briefing then independently advance their unique active original. Ambiguous
 active frontiers fail rather than picking file order. Separate passes preserve
 classification failure versus existing Briefing progress.

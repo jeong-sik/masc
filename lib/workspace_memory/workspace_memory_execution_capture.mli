@@ -9,6 +9,8 @@ module Request_id : sig
   (** Mint order. The canonical UUIDv7 text starts with its millisecond
       timestamp, and one process mints monotonically within a millisecond
       ({!Random_id.uuid_v7}). *)
+  val minted_on : t -> (string, string) result
+  (** The UTC date, [YYYY-MM-DD], of the timestamp the ID carries. *)
 end
 type workspace
 val observe_workspace : base_path:string -> (workspace, string) result
@@ -128,6 +130,21 @@ val recoverable_successors : workspace:workspace ->
     ID, intent, admission, worker call or domain effect is authorized. Caller
     must re-read each parent under the original lease/serializer and perform
     ordinary full restore after recovering its exact existing intention. *)
+type settling = Classifications | Briefings of { state : string }
+(** The domain whose chains to settle. Briefing names the SHA-256 of its
+    current state ({!briefing_state_sha256}). *)
+val settled_chains : settling ->
+  (Lane_addon_tool_request_owner.Record.t * Summary.t) list ->
+  (Request_id.t * Lane_addon_tool_request_owner.Record.t list) list
+(** The chains of the domain that no pass needs again, from the discovered
+    forest: each root's ID with the chain's records, leaf first, the order
+    they are settled in. A chain is settled when its leaf is Finished or
+    Conflicted and every original in it has both observer receipts
+    acknowledged. It stays while it holds the latest answered classification,
+    which sizes the next batch, or while its Briefing leaf prepared the
+    current state, which keeps the same pass from being prepared again. A
+    Rejected leaf keeps its chain, since it holds its facts or its pass back.
+    Records and summaries only. *)
 type expected_commit =
   | Classification_commit of Workspace_memory_ledger.t
   | Briefing_commit of Workspace_memory_briefing.t

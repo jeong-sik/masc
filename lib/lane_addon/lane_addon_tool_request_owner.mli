@@ -94,5 +94,18 @@ val advance : store:Lane_addon_store.t -> expected:retained ->
     Reload the original key; never infer absence or invent a replacement ID.
     Cancellation propagates and likewise does not prove publication absent.
     This API records trusted host facts; it performs no worker/domain effects. *)
+type settle_error = Settle_unavailable of string | Settle_changed
+val settle : store:Lane_addon_store.t -> date:string -> Record.t -> (unit, settle_error) result
+(** Move one original, its record and then its body, into the settled archive
+    under [date], if the scope still holds exactly this record; [Settle_changed]
+    otherwise, and nothing moves. A record already in the archive completes
+    the move of whatever is left. The caller settles only originals no pass
+    needs again and whose body no other record names. The check and the move
+    each take the scope serializer, so this is an expected-record check under
+    the caller's lease and serialization, like {!advance}. *)
+val settled : store:Lane_addon_store.t -> scope:string -> date:string -> request_id:string ->
+  (bool, error) result
+(** Whether the archive holds the record of [request_id] under [date]. *)
+val settle_error_to_string : settle_error -> string
 val update_error_to_string : update_error -> string
 val error_to_string : error -> string

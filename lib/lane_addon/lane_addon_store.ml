@@ -332,14 +332,16 @@ let save_exact_request t ~declaration_id ~request_id json =
   save_record_with ~sync_parent:sync_parent_directory t (exact_request_path ~declaration_id ~request_id) json
 let tool_request_owner_path ~scope ~request_id =
   Filename.concat tool_request_owners_directory (Filename.concat (digest scope) (digest request_id ^ ".json"))
-let with_tool_request_owner_serialization t ~scope work =
+let with_tool_request_owner_directory_serialization t ~directory_name work =
   (* The parent is the existing authority anchor, even before the store/scope
      exists. Resolve its aliases without creating missing authority. Store and
      descriptor checks inside [work] still reject external replacement. *)
   let parent=Unix.realpath (Filename.dirname t.root) in
   let key=Filename.concat parent (Filename.concat (Filename.basename t.root)
-    (Filename.concat tool_request_owners_directory (digest scope))) in
+    (Filename.concat tool_request_owners_directory directory_name)) in
   File_lock_eio.with_mutex key work
+let with_tool_request_owner_serialization t ~scope work =
+  with_tool_request_owner_directory_serialization t ~directory_name:(digest scope) work
 let save_tool_request_owner t ~scope ~request_id json =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     save_record_with ~sync_parent:sync_parent_directory t (tool_request_owner_path ~scope ~request_id) json))
@@ -732,6 +734,56 @@ let tool_request_owner_inventory_with ~after_listing ~sync_file ~sync_parent t ~
   Ok (match result with None -> [] | Some records -> records)
 let tool_request_owner_inventory = tool_request_owner_inventory_with
   ~after_listing:(fun _ -> ()) ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+
+let tool_request_owner_inventory_all t =
+  let blocking () = protect (fun () ->
+    let* result=Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
+      let owner_uid=Unix.geteuid () in
+      let root=Filename.concat (Fs_compat.owned_inventory_root_path anchor) (Filename.basename t.root) in
+      let directory=Filename.concat root tool_request_owners_directory in
+      let observed=Fs_compat.with_owned_directory_inventory_if_present ~owner_uid ~inventory_root:anchor
+        ~sync_directory:Unix.fsync directory (fun namespace names ->
+          let rec scopes rows = function
+            | [] ->
+              let* current=Fs_compat.read_owned_directory ~owner_uid ~inventory_root:namespace
+                ~ownership_root:directory directory |> owned_result in
+              if current=names then Ok (List.rev rows)
+              else Error "original request scope membership changed during inventory"
+            | directory_name::rest ->
+              if not (String_util.is_lowercase_sha256_hex directory_name) then
+                Error "unknown directory in original request scope namespace"
+              else
+                let* rows=with_tool_request_owner_directory_serialization t ~directory_name (fun () ->
+                let path=Filename.concat (Fs_compat.owned_inventory_root_path namespace) directory_name in
+                let* observed=Fs_compat.with_owned_directory_inventory_if_present ~owner_uid
+                  ~inventory_root:namespace ~sync_directory:Unix.fsync path (fun held files ->
+                    let rec read rows = function
+                      | [] ->
+                        let* current=Fs_compat.read_owned_directory ~owner_uid ~inventory_root:held
+                          ~ownership_root:path path |> owned_result in
+                        if current=files then Ok rows
+                        else Error "original request scope changed during inventory"
+                      | file_name::tail -> match tool_request_owner_entry file_name with
+                        | Staged_entry -> read rows tail
+                        | Unknown_entry -> Error "unknown entry in original request namespace"
+                        | Record_entry ->
+                          let* json=read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held file_name in
+                          read ((directory_name,file_name,json)::rows) tail in
+                    read rows files) |> owned_result in
+                let* rows=match observed with
+                  | None -> Error "listed original request scope disappeared during inventory"
+                  | Some result -> result in
+                Ok rows) in
+                scopes rows rest in
+          scopes [] names) |> owned_result in
+      Ok observed) |> owned_result in
+    let* result=result in
+    match result with None -> Ok [] | Some result -> result) in
+  match Fs_compat.execution_context () with
+  | Fs_compat.Non_eio -> blocking ()
+  | Fs_compat.Eio_fiber ->
+    let result=Eio_unix.run_in_systhread ~label:"addon-original-request-sweep" blocking in
+    Eio.Fiber.check ();result
 
 let host_result_path ~instance_id ~request_id =
   Filename.concat "host-results" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))

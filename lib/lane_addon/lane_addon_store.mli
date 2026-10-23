@@ -167,6 +167,14 @@ val tool_request_owner_inventory : t -> scope:string -> ((string * Yojson.Safe.t
     original-scope serializer as publication and known-ID reads. This is not an
     atomic multi-record transaction; callers retain their process lease and
     serialization and revalidate the original record before effects. *)
+val tool_request_owner_inventory_all : t -> ((string * string * Yojson.Safe.t) list, string) result
+(** Read-only observational sweep of all published scopes. Each row retains its
+    actual scope-directory name and filename for the Owner's strict key check.
+    The same descriptor/no-follow/durability checks and per-scope publication
+    serializer apply. Malformed names, vanished listed entries or any unreadable
+    scope fail the whole sweep. Scope membership is checked again before return;
+    individual scope reads are serialized, not one cross-scope atomic snapshot.
+    No Keeper metadata/profile list is needed and no state is created. *)
 val save_sampling_request : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 val save_sampling_outcome : t -> instance_id:string -> request_id:string ->

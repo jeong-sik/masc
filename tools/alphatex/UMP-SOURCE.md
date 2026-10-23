@@ -274,3 +274,47 @@ Optional `expressions` edits use the same original identity with one unsigned
 Optional `timing` edits have original `packet`/`word` and exact decimal
 `hostTime`. An event may have both a time edit and a note/value edit; duplicate
 time identities are refused separately.
+
+
+### Move a native phrase with its selected expression
+
+The editor can group explicit original message identities without guessing
+NoteOn/NoteOff pairing or which attack owns a per-note controller. For example:
+
+```
+select-events 0:0 0:2 2:0 3:0
+shift-events-beats 1/3
+stretch-events 3/2
+undo
+redo
+reset-event-times
+deselect-events
+```
+
+`:select-events ID...` replaces the group with distinct original packet:word
+identities. Every original UMP message is eligible, including releases, MIDI1,
+expression and opaque messages; choose the exact messages to move together.
+The focused event and the explicit group are separate. Navigation, view changes,
+value edits and Undo/Redo retain the group; it is session state, not saved music.
+The header gives its size and `+` marks members. Empty or unknown selections
+refuse without changing the document. `:deselect-events` clears the group.
+
+`:shift-events-ticks INTEGER`, `:shift-events-seconds DECIMAL` and
+`:shift-events-beats DECIMAL_OR_FRACTION` apply one common offset to every member.
+Seconds and beats use the existing source-clock conversion and its nearest-tick
+rounding; beats use the opening arrangement tempo. `:stretch-events RATIO
+[ANCHOR_BEATS]` scales each member's current distance from the earliest selected
+event, or an explicit source-zero project-beat anchor. Ratios accept exact
+positive decimals or integer fractions. Every scaled distance must resolve to a
+whole native tick; a nonintegral result is refused rather than rounded. Timestamp
+math stays in BigInt, including above binary64's exact integer range.
+
+Each group edit validates the complete overlay and makes one Undo revision.
+A bad member, timestamp outside UInt64 or unsupported embedded JR/delta clock
+refuses the entire decision. `:reset-event-times` restores only the selected
+members' original timestamps in one revision, retaining other timing, pitch,
+velocity and expression edits. Original words, source routes, equal-time order,
+WAV and recorded provenance remain unchanged. Audition, returned arrangement
+variants, portable save/reopen and native export use the existing timing overlay.
+This is event-group retiming, not automatic musical ownership, live clock sync,
+audio time stretching, native event insertion/deletion or MIDI2 Clip import.

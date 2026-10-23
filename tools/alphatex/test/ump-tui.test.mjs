@@ -121,3 +121,19 @@ test('owned controller uses the supplied project tempo for fractional beats and 
     { packet: 1, word: 0, hostTime: '10000000000008000000' }])
   assert.equal(view.process.stdin.isRaw, false); assert.equal(view.process.stdin.listenerCount('keypress'), 0)
 })
+
+
+test('owned controller drains explicit grouped rhythm edits, history and the matching export before return', async () => {
+  let finishExport
+  const exported = new Promise(resolve => { finishExport = resolve }), exports = []
+  const view = await controller({ tempo: 120, exported: async asset => { exports.push(asset); finishExport() } })
+  view.command('select-events 0:0 1:0'); view.command('shift-events-beats 1/3')
+  view.command('stretch-events 2'); view.command('undo'); view.command('redo')
+  view.command('export /unused/group-output'); await exported; view.key('q')
+  const result = await view.done
+  assert.equal(result.changed, true); assert.deepEqual(result.asset.ump, exports[0].ump)
+  assert.deepEqual(result.asset.ump.timing, [{ packet: 0, word: 0, hostTime: '10000000000004000000' },
+    { packet: 1, word: 0, hostTime: '10000000000004000200' }])
+  assert.deepEqual(view.packets.map(row => row.hostTime), ['10000000000000000000', '10000000000000000100'])
+  assert.equal(view.process.stdin.listenerCount('keypress'), 0); assert.equal(view.process.stdin.isRaw, false)
+})

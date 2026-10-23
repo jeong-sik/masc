@@ -41,7 +41,7 @@ the authenticated Lane inventory. `provider_execution` always says
 to establish completed work. Full health aggregates actionable missing
 dependencies as degraded while intentional Off remains explicit in each row.
 
-## Prepare package version 0.2.2
+## Prepare package version 0.2.3
 
 Use the repository version containing
 [`addons/keeper-librarian/lane.toml`](../../addons/keeper-librarian/lane.toml),
@@ -49,16 +49,19 @@ its `server.py` and both bundled schemas. Prepare this image through the package
 image workflow, then load it into the container engine used by MASC:
 
 ```sh
-docker build -f addons/keeper-librarian/Dockerfile -t masc-lane-keeper-librarian:0.2.2 addons
+docker build -f addons/keeper-librarian/Dockerfile -t masc-lane-keeper-librarian:0.2.3 addons
 ```
 
 The build context is `addons`, because the image contains the shared
 `protocol.py` and `exact_worker.py`. The runtime mounts the package directory.
-Saving a declaration does not build or download an image. For an alternate
+Saving a declaration does not build or download an image. Existing installations with worker record v1 require the
+[Exact worker state hard cut](EXACT-WORKER-STATE-HARD-CUT.md) before this version;
+do not erase unresolved originals or reuse old worker state. A first installation
+uses the host-created empty state under its declared owner identity. For an alternate
 configured engine, import that same image into that engine before attaching.
 
 Place the complete package in an operator-managed, versioned location readable
-by MASC. For example, `<base-path>/.masc/packages/keeper-librarian-0.2.2/` works
+by MASC. For example, `<base-path>/.masc/packages/keeper-librarian-0.2.3/` works
 with this declaration when the resolved config root is
 `<base-path>/.masc/config`:
 
@@ -66,7 +69,7 @@ with this declaration when the resolved config root is
 id = "keeper-librarian"
 run_id = "keeper-librarian"
 enabled = true
-manifest_path = "../../packages/keeper-librarian-0.2.2/lane.toml"
+manifest_path = "../../packages/keeper-librarian-0.2.3/lane.toml"
 
 [binding]
 sources = []

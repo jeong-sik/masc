@@ -6458,6 +6458,7 @@
 (include stanzas/test_tui_ask_followup_result.inc)
 (include stanzas/test_browser_addon_worker.inc)
 (include stanzas/test_repo_skills_readable.inc)
+(include stanzas/test_keeper_volume_filesystem.inc)
 
 (test
  (name test_run_tool_workflow)

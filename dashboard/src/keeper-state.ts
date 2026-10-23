@@ -1843,6 +1843,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     || (slot?.kind === 'tool_delivery' && executionId !== null)
     || slot?.kind === 'accepted_user'
     || slot?.kind === 'terminal_result'
+    || slot?.kind === 'settled_failure'
   ) return null
   return {
     id: message.id,

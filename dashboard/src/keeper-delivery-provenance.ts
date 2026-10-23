@@ -54,7 +54,7 @@ export type KeeperChatDeliveryProvenanceDecode =
 
 export function operationDeliveryProvenance(
   operationId: string,
-  slot: 'accepted_user' | 'terminal_result',
+  slot: 'accepted_user' | 'terminal_result' | 'settled_failure',
 ): KeeperChatDeliveryProvenance {
   return {
     delivery_key: { kind: 'operation', operation_id: operationId },

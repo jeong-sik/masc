@@ -29,7 +29,12 @@ let system_prompt ~lookup_schemas ~question ~lookup_root req =
           (fun name -> Types_core.{ name; description = ""; input_schema = `Assoc [] })
           lookup_schemas
     ; dispatch =
-        (fun ~name:_ ~args:_ -> Tool_result.refused "lookup is not available in original preparation")
+        (fun ~name:_ ~args:_ ->
+          Tool_result.error
+            ~failure_class:Tool_result.Policy_rejection
+            ~tool_name:"verifier_review_original.lookup"
+            ~start_time:(Tool_timing.start ())
+            "lookup is not available in original preparation")
     }
   in
   AR.build_prompt ~question ~lookup ~lookup_root req

@@ -12,13 +12,13 @@ let digest = function Ledger digest | Briefing digest -> digest
 let kind = function Ledger _ -> "ledger" | Briefing _ -> "briefing"
 
 (* The bytes each revision names: the ledger as [Ledger_state.save] writes it,
-   the Briefing state with its keys sorted. *)
+   the Briefing state with its keys sorted. Briefing JSON holds only strings,
+   null, lists and objects, so sorting is all its canonical form needs. *)
 let ledger_bytes state = Yojson.Safe.to_string (Ledger_state.to_json state)
-let briefing_bytes state =
-  Result.map Yojson.Safe.to_string (Lane_addon_action.canonical (Briefing_state.to_json state))
+let briefing_bytes state = Yojson.Safe.to_string (Yojson.Safe.sort (Briefing_state.to_json state))
 
 let of_ledger = Ledger_state.sha256
-let of_briefing state = Result.map sha256 (briefing_bytes state)
+let of_briefing state = sha256 (briefing_bytes state)
 let ledger_sha256 revision = revision
 let briefing_sha256 revision = revision
 
@@ -39,36 +39,29 @@ let path ~base_path revision =
   List.fold_left Filename.concat (Ledger_state.directory ~base_path)
     ["revisions"; kind revision; digest revision ^ ".json"]
 
-type error =
+let name revision = kind revision ^ " revision " ^ digest revision
+
+type write_error = { revision : t; detail : string }
+
+let write_error_to_string {revision; detail} = name revision ^ " could not be written: " ^ detail
+
+type read_error =
   | Missing of t
   | Damaged of { revision : t; detail : string }
-  | Unavailable of { revision : t; detail : string }
-  | Unencodable of string
+  | Unreadable of { revision : t; detail : string }
 
-let error_to_string error =
-  let name revision = kind revision ^ " revision " ^ digest revision in
-  match error with
+let read_error_to_string = function
   | Missing revision -> name revision ^ " has no file"
   | Damaged {revision; detail} -> name revision ^ " is damaged: " ^ detail
-  | Unavailable {revision; detail} -> name revision ^ " is unavailable: " ^ detail
-  | Unencodable detail -> "Briefing state has no key-sorted JSON: " ^ detail
+  | Unreadable {revision; detail} -> name revision ^ " could not be read: " ^ detail
 
-let io revision f =
-  try f () with
-  | Unix.Unix_error (error, fn, arg) ->
-    Error (Unavailable {revision; detail = Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error)})
-  | Sys_error detail -> Error (Unavailable {revision; detail})
-  | Eio.Io _ as exn -> Error (Unavailable {revision; detail = Printexc.to_string exn})
-
-(* A base path that does not exist is a wrong path; writing would create it. *)
+(* The base is the ownership root: the write refuses a base that is missing or
+   not a directory and a symbolic link below it, and checks the directory
+   chain again on every call. The writer returns every failure but
+   cancellation as an error. *)
 let write ~base_path revision bytes =
-  io revision (fun () ->
-    if not (Sys.is_directory base_path) then
-      Error (Unavailable {revision; detail = base_path ^ ": workspace base is not a directory"})
-    else
-      Keeper_fs.save_bytes_durable_atomic (path ~base_path revision) bytes
-      |> Result.map_error (fun error ->
-        Unavailable {revision; detail = Keeper_fs.durable_write_error_to_string error}))
+  Keeper_fs.save_bytes_durable_atomic ~ownership_root:base_path (path ~base_path revision) bytes
+  |> Result.map_error (fun error -> {revision; detail = Keeper_fs.durable_write_error_to_string error})
 
 let write_ledger ~base_path state =
   let bytes = ledger_bytes state in
@@ -76,29 +69,30 @@ let write_ledger ~base_path state =
   write ~base_path (Ledger revision) bytes |> Result.map (fun () -> revision)
 
 let write_briefing ~base_path state =
-  let* bytes = briefing_bytes state |> Result.map_error (fun detail -> Unencodable detail) in
+  let bytes = briefing_bytes state in
   let revision = sha256 bytes in
   write ~base_path (Briefing revision) bytes |> Result.map (fun () -> revision)
 
+(* Read under the same ownership root as the write, so a symbolic link or a
+   directory where the file belongs is refused rather than followed. *)
 let read ~base_path revision ~decode ~revision_of =
-  io revision (fun () ->
-    match Fs_compat.load_file_opt (path ~base_path revision) with
-    | None -> Error (Missing revision)
-    | Some bytes ->
-      let damaged detail = Damaged {revision; detail} in
-      let actual = sha256 bytes in
-      if not (String.equal actual (digest revision)) then Error (damaged ("its bytes hash to " ^ actual))
-      else
-        let* json = try Ok (Yojson.Safe.from_string bytes) with
-          | Yojson.Json_error detail -> Error (damaged detail) in
-        let* state = decode json |> Result.map_error damaged in
-        let* again = revision_of state |> Result.map_error damaged in
-        if String.equal again (digest revision) then Ok state
-        else Error (damaged ("it decodes to a state whose revision is " ^ again)))
+  let damaged detail = Damaged {revision; detail} in
+  match Fs_compat.load_owned_regular_file ~ownership_root:base_path (path ~base_path revision) with
+  | Error error -> Error (Unreadable {revision; detail = Fs_compat.owned_regular_file_read_error_to_string error})
+  | Ok None -> Error (Missing revision)
+  | Ok (Some bytes) ->
+    let actual = sha256 bytes in
+    if not (String.equal actual (digest revision)) then Error (damaged ("its bytes hash to " ^ actual))
+    else
+      let* json = try Ok (Yojson.Safe.from_string bytes) with
+        | Yojson.Json_error detail -> Error (damaged detail) in
+      let* state = decode json |> Result.map_error damaged in
+      let again = revision_of state in
+      if String.equal again (digest revision) then Ok state
+      else Error (damaged ("it decodes to a state whose revision is " ^ again))
 
 let read_ledger ~base_path revision =
-  read ~base_path (Ledger revision) ~decode:Ledger_state.of_json
-    ~revision_of:(fun state -> Ok (of_ledger state))
+  read ~base_path (Ledger revision) ~decode:Ledger_state.of_json ~revision_of:of_ledger
 
 let read_briefing ~base_path revision =
   read ~base_path (Briefing revision) ~decode:Briefing_state.of_json ~revision_of:of_briefing

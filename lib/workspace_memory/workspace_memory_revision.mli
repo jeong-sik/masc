@@ -4,7 +4,8 @@
     A revision is computed from a typed state, never by hashing a published
     file. [ledger.json] holds the same bytes as the ledger's revision file;
     [briefing.json] is written with unsorted keys, so its file hash is not the
-    Briefing revision. *)
+    Briefing revision. A file lives at
+    [<base>/.masc/workspace-memory/revisions/<kind>/<sha256>.json]. *)
 
 type ledger
 (** The revision of a ledger state. *)
@@ -17,8 +18,8 @@ type t = Ledger of ledger | Briefing of briefing
 val of_ledger : Workspace_memory_ledger.t -> ledger
 (** {!Workspace_memory_ledger.sha256}. *)
 
-val of_briefing : Workspace_memory_briefing.t -> (briefing, string) result
-(** The SHA-256 of the state's key-sorted JSON. *)
+val of_briefing : Workspace_memory_briefing.t -> briefing
+(** The SHA-256 of the state's compact JSON with every object's keys sorted. *)
 
 val ledger_sha256 : ledger -> string
 val briefing_sha256 : briefing -> string
@@ -30,39 +31,40 @@ val of_json : Yojson.Safe.t -> (t, string) result
 (** Refuses another kind, a digest that is not 64 lowercase hex digits, and a
     missing, repeated or other field. *)
 
-val path : base_path:string -> t -> string
-(** [revisions/<kind>/<sha256>.json] in the workspace memory directory. *)
+type write_error = { revision : t; detail : string }
+(** The workspace, a directory or the file could not be written. *)
 
-type error =
+val write_error_to_string : write_error -> string
+
+type read_error =
   | Missing of t
   | Damaged of { revision : t; detail : string }
       (** The file's bytes do not hash to the revision, or they do not decode
-          as that kind of state. *)
-  | Unavailable of { revision : t; detail : string }
-      (** The workspace, a directory or the file could not be read or
-          written. *)
-  | Unencodable of string
-      (** The Briefing state has no key-sorted JSON (a repeated key or a
-          non-finite number), so it has no revision. *)
+          as that kind of state, or the decoded state has another revision. *)
+  | Unreadable of { revision : t; detail : string }
+      (** The file could not be read, or a symbolic link or something other
+          than a regular file sits at its place or below the base. *)
 
-val error_to_string : error -> string
+val read_error_to_string : read_error -> string
 
-val write_ledger : base_path:string -> Workspace_memory_ledger.t -> (ledger, error) result
+val write_ledger : base_path:string -> Workspace_memory_ledger.t -> (ledger, write_error) result
 
-val write_briefing : base_path:string -> Workspace_memory_briefing.t -> (briefing, error) result
+val write_briefing : base_path:string -> Workspace_memory_briefing.t -> (briefing, write_error) result
 (** Writes the state's revision bytes with
     {!Keeper_fs.save_bytes_durable_atomic}, as the run registry writes its
     payloads: a temporary file, fsync, rename, and the directory fsyncs that
-    make the file and any directory created for it durable. It writes every
-    time. The name is the digest of the bytes, so writing
-    again publishes the same file and replaces one damaged from outside. A
-    write stopped midway leaves no file under the revision's name. The
-    workspace base must already be a directory. *)
+    make the file and any directory created for it durable. [base_path] is
+    the ownership root: it must already be a directory and not a symbolic
+    link, no symbolic link may sit below it, and a revision directory removed
+    since an earlier write is created again. It writes every time. The name is the digest of the bytes,
+    so writing again publishes the same file and replaces one damaged from
+    outside. A write stopped midway leaves no file under the revision's
+    name. *)
 
-val read_ledger : base_path:string -> ledger -> (Workspace_memory_ledger.t, error) result
+val read_ledger : base_path:string -> ledger -> (Workspace_memory_ledger.t, read_error) result
 
-val read_briefing : base_path:string -> briefing -> (Workspace_memory_briefing.t, error) result
-(** Accepts the file only when its SHA-256 is the revision, it decodes as that
-    kind of state (each state decoder refuses another [schema]) and the decoded
-    state has this revision again. A missing file is [Missing], never an empty
-    state. *)
+val read_briefing : base_path:string -> briefing -> (Workspace_memory_briefing.t, read_error) result
+(** Reads the file under the same ownership root as the write. Accepts it only
+    when its SHA-256 is the revision, it decodes as that kind of state (each
+    state decoder refuses another [schema]) and the decoded state has this
+    revision again. A missing file is [Missing], never an empty state. *)

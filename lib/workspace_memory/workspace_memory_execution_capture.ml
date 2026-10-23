@@ -225,8 +225,7 @@ let summary t =
       Ok (Summary.Classification {up_to=batch.size;
         selected=List.map (fun (fact : Ledger.pending_fact) -> fact.fact) batch.selected})
     | Briefing batch ->
-      let* prepared_state = Workspace_memory_revision.of_briefing (Brief.prepared_state batch)
-        |> Result.map Workspace_memory_revision.briefing_sha256 in
+      let prepared_state = Workspace_memory_revision.(briefing_sha256 (of_briefing (Brief.prepared_state batch))) in
       Ok (Summary.Briefing {selected_count=Brief.selected_count batch; prepared_state}) in
   Ok {Summary.predecessor=t.predecessor; workspace=t.workspace; batch}
 let restore_record ~workspace (retained : Owner.retained) =

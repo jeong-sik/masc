@@ -92,7 +92,7 @@ let settle ~config domain originals =
       | Classification -> Ok Capture.Classifications
       | Synthesis ->
         let* state=io (fun () -> Briefing.load ~directory:(Ledger.directory ~base_path:config.Workspace.base_path)) in
-        let* state=Revision.of_briefing state |> Result.map Revision.briefing_sha256 in
+        let state=Revision.briefing_sha256 (Revision.of_briefing state) in
         Ok (Capture.Briefings {state}) in
     Consumer.settle_chains ~config settling originals |> consumer in
   match settled with
@@ -158,7 +158,7 @@ let classify_new ~config ~originals ~new_work =
 (* A refused or finished Briefing that prepared exactly this state, for a pass
    still current, blocks preparing the same batch again. *)
 let briefing_blocked ~sources ~contract ~state originals =
-  let* state_sha256=Revision.of_briefing state |> Result.map Revision.briefing_sha256 in
+  let state_sha256=Revision.briefing_sha256 (Revision.of_briefing state) in
   let prepared_this_state=List.exists (fun (original : Consumer.original) ->
       match original.summary.Capture.Summary.batch, phase original with
       | Capture.Summary.Briefing {prepared_state;_}, (Progress.Rejected _ | Finished _) ->

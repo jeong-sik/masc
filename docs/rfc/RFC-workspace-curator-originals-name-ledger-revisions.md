@@ -72,13 +72,13 @@ Briefing 원본도 모양이 같다. 원장 대신 Briefing 상태가 들어간�
 - `lib/workspace_memory/workspace_memory_log.ml(.mli)` 는 그 RFC 의 1단계로 2026-10-14 에 들어왔다(`1b6a8f4fee3`).
   - 묶음 머리(`batch_header = { batch_id; author; started_at; expected_changes }`)에도, `Committed` 기록(`workspace_memory_log.mli:27`)에도 판본이 없다.
   - 이 log 를 읽는 것은 `Workspace_memory_reader` 뿐이다. 둘 다 운영 코드에서 부르는 곳이 없고 테스트만 부른다.
-- 원장 digest 는 이미 있다. `ledger_sha256` 은 `Yojson.Safe.to_string (Ledger.to_json ledger)` 의 SHA-256 이다(`workspace_memory_ledger.ml:362-363`).
-  - 쓰는 곳은 원장 파일을 파싱한 뒤 다시 직렬화해서 이 값을 구한다(`workspace_memory_ledger_view.ml:9-15`). 파일을 해시하지 않는다.
-  - `Ledger.save` 가 같은 바이트를 쓰기 때문에(`:318-323`) 지금은 `ledger.json` 파일의 SHA-256 과도 같다. 05:11Z 값은 `62d16978…`(1,220,177 바이트)였다.
+- 원장 digest 는 이미 있다. `ledger_sha256` 은 `Yojson.Safe.to_string (Ledger.to_json ledger)` 의 SHA-256 이다(`Workspace_memory_ledger.sha256`, `workspace_memory_ledger.ml:126`, `:364`).
+  - 쓰는 곳은 원장 파일을 파싱한 뒤 다시 직렬화해서 이 값을 구한다(`workspace_memory_ledger_view.ml:9-13`). 파일을 해시하지 않는다.
+  - `Ledger.save` 가 같은 바이트를 쓰기 때문에(`:320-325`) 지금은 `ledger.json` 파일의 SHA-256 과도 같다. 05:11Z 값은 `62d16978…`(1,220,177 바이트)였다.
   - ledger view, Keeper recall, Keeper 프롬프트, 대시보드가 이 값을 쓴다. Curator 실행 경로는 이 값을 계산하지도 저장하지도 않는다.
 - 원본에 들어간 사본은 키를 정렬한 형태다(`lane_addon_action.ml:32-35`). 그래서 사본의 SHA-256 은 `ledger_sha256` 과 다르다.
-- Briefing 에는 앞선 예가 있다. `briefing_state_sha256` 은 키를 정렬한 `Brief.to_json` 의 SHA-256 이다(`workspace_memory_execution_capture.ml:222-223`).
-  - 요약에 `prepared_state_sha256` 으로 저장하고(`:186`, `:229-231`) 여러 곳에서 비교한다(`:261-263`, `:449`, `server_workspace_memory_curator.ml:93-95`, `:160-164`).
+- Briefing 요약도 상태 digest 를 이미 갖는다. `prepared_state_sha256` 은 키를 정렬한 `Brief.to_json` 바이트의 SHA-256 이다(`Workspace_memory_revision.of_briefing`, `workspace_memory_execution_capture.ml:228`).
+  - 요약에 저장하고(`:185-186`) 여러 곳에서 비교한다(`:259-260`, `:447`, `server_workspace_memory_curator.ml:94-96`, `:161-165`).
   - `Briefing.save` 는 키를 정렬하지 않고 쓴다(`workspace_memory_briefing.ml:282-284`). 그래서 `briefing.json` 파일의 SHA-256 은 이 값과 다르다.
 - 원장과 Briefing 상태는 둘 다 자기 종류를 `schema` 필드에 적는다(`workspace_memory_ledger.ml:23`, `workspace_memory_briefing.ml:184`). 진행 기록은 상태를 `{kind, state}` 로 싸서 넣는다(`server_workspace_memory_addon.ml:263`).
 
@@ -90,7 +90,7 @@ Briefing 원본도 모양이 같다. 원장 대신 Briefing 상태가 들어간�
 - Briefing 상태 판본은 키를 정렬한 `Brief.to_json` 바이트의 SHA-256 이다(`Workspace_memory_revision.of_briefing`). Briefing 요약의 `prepared_state_sha256` 이 이미 쓰는 값이다.
 - 판본은 늘 타입 있는 값에서 구한다. 게시된 파일(`ledger.json`, `briefing.json`)을 해시하지 않는다.
   - 같은 원장을 들여쓰기만 다르게 쓴 파일도 판본이 같다.
-  - `briefing.json` 은 키 순서가 달라서 파일 해시가 판본과 다르다. commit 관찰은 파일을 파싱한 뒤 판본을 구한다. 지금 `server_workspace_memory_curator.ml:93-94` 가 하는 방식이다.
+  - `briefing.json` 은 키 순서가 달라서 파일 해시가 판본과 다르다. commit 관찰은 파일을 파싱한 뒤 판본을 구한다. 지금 `server_workspace_memory_curator.ml:94-95` 가 하는 방식이다.
 - 판본 파일의 바이트는 그 digest 가 해시하는 바이트 그대로다. 그래서 파일의 SHA-256 이 파일 이름과 같다.
 - 기록에는 판본을 종류와 함께 `{"kind": "ledger" | "briefing", "sha256": "<64자>"}` 로 적는다. 지금 `{kind, state}` 를 쓰는 자리다.
   - 코드에서는 종류마다 다른 생성자를 가진 닫힌 variant 로 읽는다.
@@ -107,7 +107,9 @@ Briefing 원본도 모양이 같다. 원장 대신 Briefing 상태가 들어간�
 
 쓰는 규칙은 다음과 같다.
 
-- 요청 본문과 같은 방식으로 쓴다(`lane_addon_store.ml:652-658`). 임시 파일에 쓰고 fsync 한 뒤 이름을 바꾸고, 디렉터리를 fsync 한다.
+- 실행 기록(run registry)이 payload 를 쓰는 함수로 쓴다(`Keeper_fs.save_bytes_durable_atomic`). 임시 파일에 쓰고 fsync 한 뒤 이름을 바꾸고, 새로 만든 디렉터리까지 fsync 한다.
+  - `<base>` 를 소유 루트로 넘긴다. `<base>` 는 이미 있는 디렉터리여야 하고, 그 아래에 symlink 가 있으면 쓰지 않는다.
+  - 읽을 때도 같은 루트로 읽는다(`Fs_compat.load_owned_regular_file`). 파일 자리에 symlink 나 디렉터리가 있으면 따라가지 않고 거절한다.
 - 이름이 바이트의 digest 라 다시 써도 같은 파일이 된다. 그래서 파일이 있는지 먼저 보지 않고 늘 쓴다.
 - 쓰다가 멈추면 임시 파일만 남는다. `<sha256>.json` 이 반쯤 쓰인 채로 남지 않는다.
 - 판본을 기록에 처음 적는 쓰기가, 기록을 쓰기 전에 그 판본 파일을 쓴다. 판본의 상태를 메모리에 가진 곳이 셋이다.

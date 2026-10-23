@@ -19,21 +19,35 @@ type context = {
 let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 
-(* RFC-0393: an agent is looked up under exactly the name the caller
-   supplied. The wrapped [keeper-<name>-agent] spellings and the
-   candidate fan-out that accepted them are gone — the relationship
-   between a keeper and its agent-plane row is data, not an encoding
-   recoverable from the string. *)
-let resolve_metrics_for_agent ctx ~requested ~days =
-  let agent_id = String.trim requested in
-  match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id ~days with
-  | Some metrics -> Some (agent_id, metrics)
-  | None -> None
+let ( let* ) = Result.bind
 
-let resolve_existing_metric_agent_id ctx ~requested ~days =
-  match resolve_metrics_for_agent ctx ~requested ~days with
-  | Some (resolved, _) -> resolved
-  | None -> String.trim requested
+let metric_read_failure ~tool_name ~start_time error =
+  let code, message =
+    match error with
+    | Metrics_store_eio.Invalid_agent_id _ | Invalid_window _ ->
+        Validation_error, "Metric agent_name must be an exact path component and days must be positive."
+    | Source_unavailable _ | Invalid_record _ ->
+        Log.Metrics.error "%s" (Metrics_store_eio.read_error_to_string error);
+        Internal_error, "Metric source could not be read completely."
+  in
+  error_result_typed ~tool_name ~start_time ~code message
+
+(** Defaults apply to omitted query fields only, never malformed values. *)
+let metric_query args =
+  match args with
+  | `Assoc fields ->
+      let* agent = match List.assoc_opt "agent_name" fields with
+        | None -> Ok None
+        | Some (`String name) when not (String.equal name "") -> Ok (Some name)
+        | Some _ -> Error "agent_name must be a nonempty exact name"
+      in
+      let* days = match List.assoc_opt "days" fields with
+        | None -> Ok 7
+        | Some (`Int days) when days > 0 -> Ok days
+        | Some _ -> Error "days must be a positive integer"
+      in
+      Ok (agent, days)
+  | _ -> Error "metric arguments must be an object"
 
 let find_agent_by_identity agents raw =
   let name = String.trim raw in
@@ -64,55 +78,27 @@ let agent_card_action_of_string raw =
   | "refresh" -> Some Agent_card_refresh
   | _ -> None
 
-(** Handle masc_get_metrics *)
+(** Handle masc_get_metrics. No-data and failed source reads remain distinct. *)
 let handle_get_metrics ?(tool_name = Tool_schemas_agent.tool_name Get_metrics) ~start_time ctx args
-
-  : Tool_result.result
-  =
-  let target = get_string args "agent_name" "" in
-  if String.equal target "" then
-    error_result_typed ~tool_name ~start_time ~code:Validation_error
-      "agent_name is required"
-  else
-    let days = get_int args "days" 7 in
-    match resolve_metrics_for_agent ctx ~requested:target ~days with
-    | Some (_resolved, metrics) ->
-        json_ok ~tool_name ~start_time
-          (Metrics_store_eio.agent_metrics_to_yojson metrics)
-    | None ->
-        error_result_typed
-          ~tool_name
-          ~start_time
-          ~code:Not_found
-          (Tool_guidance.to_string
-             (Tool_guidance.No_metrics_found_for_agent { agent = target }))
-
-(** Create default metrics for agent *)
-let create_default_metrics ~agent_id ~days =
-  let now = Time_compat.now () in
-  { Metrics_store_eio.agent_id = agent_id;
-    period_start = now -. Masc_time_constants.days_to_seconds days;
-    period_end = now;
-    total_tasks = 0;
-    completed_tasks = 0;
-    failed_tasks = 0;
-    avg_completion_time_s = 0.0;
-    task_completion_rate = 0.0;
-    error_rate = 0.0;
-    handoff_success_rate = 0.0;
-    unique_collaborators = [];
-  }
-
-(** Get metrics for agent, with default fallback *)
-let metrics_for ctx ~days agent_id =
-  match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id ~days with
-  | Some m -> m
-  | None -> create_default_metrics ~agent_id ~days
+  : Tool_result.result =
+  match metric_query args with
+  | Error message -> error_result_typed ~tool_name ~start_time ~code:Validation_error message
+  | Ok (None, _) ->
+      error_result_typed ~tool_name ~start_time ~code:Validation_error "agent_name is required"
+  | Ok (Some target, days) ->
+      (match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:target ~days with
+       | Error error -> metric_read_failure ~tool_name ~start_time error
+       | Ok (Some metrics) ->
+           json_ok ~tool_name ~start_time (Metrics_store_eio.agent_metrics_to_yojson metrics)
+       | Ok None ->
+           error_result_typed ~tool_name ~start_time ~code:Not_found
+             (Tool_guidance.to_string (Tool_guidance.No_metrics_found_for_agent { agent = target })))
 
 (** Calculate min avg time from metrics list *)
 let min_avg_time metrics_list =
   metrics_list
-  |> List.map (fun (_, m) -> m.Metrics_store_eio.avg_completion_time_s)
+  |> List.filter_map (fun (_, metrics) ->
+      Option.map (fun m -> m.Metrics_store_eio.avg_completion_time_s) metrics)
   |> List.filter (fun t -> Stdlib.Float.compare t 0.0 > 0)
   |> List.fold_left (fun acc t -> if Stdlib.Float.compare acc 0.0 = 0 || Stdlib.Float.compare t acc < 0 then t else acc) 0.0
 
@@ -139,61 +125,64 @@ let components_for ~min_avg metrics =
   in
   (completion, reliability, speed, handoff)
 
-(** Handle masc_agent_fitness *)
+(** Handle masc_agent_fitness. Missing observations remain in the named pool
+    with null metrics/components; they never contribute fabricated zero scores. *)
 let handle_agent_fitness ?(tool_name = Tool_schemas_agent.tool_name Agent_fitness) ~start_time ctx args
-
-  : Tool_result.result
-  =
-  let agent_opt = get_string_opt args "agent_name" in
-  let days = get_int args "days" 7 in
-  let agents =
-    match agent_opt with
-    | Some a -> [ resolve_existing_metric_agent_id ctx ~requested:a ~days ]
-    | None ->
-      (* Merge agents from metrics store AND workspace state.
-         Without this, agents active on the board but without task metrics
-         are invisible to fitness queries (Issue #1861). *)
-      let metrics_agents = Metrics_store_eio.get_all_agents ctx.config in
-      let workspace_agents =
-        try
-          Workspace.get_agents_raw ctx.config
-          |> List.map (fun (a : Masc_domain.agent) -> a.name)
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Misc.warn "workspace agents fallback (metrics_store still used): %s"
-            (Stdlib.Printexc.to_string exn);
-          []
-      in
-      List.sort_uniq String.compare (metrics_agents @ workspace_agents)
-  in
-  if Stdlib.List.length agents = 0 then
-    json_ok ~tool_name ~start_time
-      (`Assoc [("count", `Int 0); ("agents", `List [])])
-  else
-    let metrics_list = List.map (fun a -> (a, metrics_for ctx ~days a)) agents in
-    let min_avg = min_avg_time metrics_list in
-
-    let agents_json =
-      List.map (fun (agent_id, metrics) ->
-        let (completion, reliability, speed, handoff) = components_for ~min_avg metrics in
-        `Assoc [
-          ("agent_id", `String agent_id);
-          ("components", `Assoc [
-            ("completion", `Float completion);
-            ("reliability", `Float reliability);
-            ("speed", `Float speed);
-            ("handoff", `Float handoff);
-          ]);
-          ("metrics", Metrics_store_eio.agent_metrics_to_yojson metrics);
-        ]
-      ) metrics_list
+  : Tool_result.result =
+  let read () =
+    let* agent_opt, days =
+      metric_query args
+      |> Result.map_error (fun message ->
+          error_result_typed ~tool_name ~start_time ~code:Validation_error message)
     in
-    let json = `Assoc [
-      ("count", `Int (List.length agents_json));
-      ("agents", `List agents_json);
-    ] in
-    json_ok ~tool_name ~start_time json
+    let* agents =
+      match agent_opt with
+      | Some name -> Ok [name]
+      | None ->
+          let* metric_agents =
+            Metrics_store_eio.get_all_agents ctx.config
+            |> Result.map_error (metric_read_failure ~tool_name ~start_time)
+          in
+          let* workspace_agents =
+            try Ok (Workspace.get_agents_raw ctx.config) with
+            | (Unix.Unix_error _ | Sys_error _ | Eio.Io _) as error ->
+                Log.Metrics.error "workspace agent listing failed: %s" (Printexc.to_string error);
+                Error (error_result_typed ~tool_name ~start_time ~code:Internal_error
+                  "Workspace agent listing could not be read.")
+          in
+          let names = List.map (fun (agent : Masc_domain.agent) -> agent.name) workspace_agents in
+          Ok (List.sort_uniq String.compare (metric_agents @ names))
+    in
+    let rec read_metrics acc = function
+      | [] -> Ok (List.rev acc)
+      | agent_id :: rest ->
+          let* metrics =
+            Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id ~days
+            |> Result.map_error (metric_read_failure ~tool_name ~start_time)
+          in
+          read_metrics ((agent_id, metrics) :: acc) rest
+    in
+    let* metrics_list = read_metrics [] agents in
+    let min_avg = min_avg_time metrics_list in
+    let agents_json = List.map (fun (agent_id, observation) ->
+      let components, metrics = match observation with
+        | None -> `Null, `Null
+        | Some metrics ->
+            let completion, reliability, speed, handoff = components_for ~min_avg metrics in
+            `Assoc [ "completion", `Float completion; "reliability", `Float reliability;
+                     "speed", `Float speed; "handoff", `Float handoff ],
+            Metrics_store_eio.agent_metrics_to_yojson metrics
+      in
+      `Assoc [ "agent_id", `String agent_id; "components", components; "metrics", metrics ]
+    ) metrics_list in
+    Ok (`Assoc [
+      "count", `Int (List.length agents_json);
+      "agents", `List agents_json;
+    ])
+  in
+  match read () with
+  | Error result -> result
+  | Ok json -> json_ok ~tool_name ~start_time json
 
 (** Handle masc_agent_card *)
 let handle_agent_card ?(tool_name = Tool_schemas_agent.tool_name Agent_card) ~start_time ctx args

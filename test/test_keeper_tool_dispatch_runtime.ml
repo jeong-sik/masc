@@ -9458,8 +9458,8 @@ let test_composable_outputs_satisfy_declared_schema () =
             ~agent_name:meta.Masc.Keeper_meta_contract.name
             ~capabilities:[]
             ());
-       (* masc_get_metrics and masc_agent_fitness both read this store and
-          reject with not_found when it is empty, before emitting any shape. *)
+       (* Exercise the recorded branch in both tools. An empty source is
+          not_found for get_metrics and a named null observation for fitness. *)
        let now = Unix.gettimeofday () in
        Masc.Metrics_store_eio.record
          config

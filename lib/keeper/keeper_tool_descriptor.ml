@@ -1868,57 +1868,44 @@ let agent_metrics_output_required =
   ]
 ;;
 
-(* Producer: Tool_agent.handle_get_metrics, which serializes the metrics
-   record and nothing else.
-
-   This declared two more properties, [requested_agent_name] and
-   [resolved_agent_name], and the comment credited them to
-   [metrics_json_with_resolution]. That function does not exist, no code
-   emits either field, and nothing in docs, the dashboard or an RFC reads
-   them. [resolve_metrics_for_agent] trims the requested name and returns it
-   unchanged, so a "resolved differs from requested" case cannot arise
-   either. Declared and never produced is quiet under a strict schema --
-   optional properties pass validation by being absent -- which is how it
-   outlived the producer (masc #33007). *)
+(* Producer: Tool_agent.handle_get_metrics serializes the observed aggregate. *)
 let get_metrics_output_schema =
   object_output_schema
     ~properties:agent_metrics_output_properties
     ~required:agent_metrics_output_required
 ;;
 
-(* Producer: Tool_agent.handle_agent_fitness — both the empty-pool and the
-   populated envelope. *)
+(* Producer: Tool_agent.handle_agent_fitness. A named missing observation has
+   null metrics and components. Metric source failures are tool errors. *)
 let agent_fitness_output_schema =
+  let nullable_object ~properties ~required =
+    `Assoc [
+      "type", `List [ `String "object"; `String "null" ];
+      "properties", `Assoc properties;
+      "required", `List (List.map (fun name -> `String name) required);
+      "additionalProperties", `Bool false;
+    ]
+  in
   object_output_schema
-    ~properties:
-      [ "count", `Assoc [ "type", `String "integer" ]
-      ; ( "agents"
-        , `Assoc
-            [ "type", `String "array"
-            ; ( "items"
-              , object_output_schema
-                  ~properties:
-                    [ "agent_id", `Assoc [ "type", `String "string" ]
-                    ; ( "components"
-                      , object_output_schema
-                          ~properties:
-                            [ "completion", `Assoc [ "type", `String "number" ]
-                            ; "reliability", `Assoc [ "type", `String "number" ]
-                            ; "speed", `Assoc [ "type", `String "number" ]
-                            ; "handoff", `Assoc [ "type", `String "number" ]
-                            ]
-                          ~required:
-                            [ "completion"; "reliability"; "speed"; "handoff" ]
-                      )
-                    ; ( "metrics"
-                      , object_output_schema
-                          ~properties:agent_metrics_output_properties
-                          ~required:agent_metrics_output_required )
-                    ]
-                  ~required:[ "agent_id"; "components"; "metrics" ] )
-            ] )
-      ]
-    ~required:[ "count"; "agents" ]
+    ~properties:[
+      "count", `Assoc [ "type", `String "integer" ];
+      "agents", `Assoc [ "type", `String "array";
+        "items", object_output_schema
+          ~properties:[
+            "agent_id", `Assoc [ "type", `String "string" ];
+            "components", nullable_object
+              ~properties:[
+                "completion", `Assoc [ "type", `String "number" ];
+                "reliability", `Assoc [ "type", `String "number" ];
+                "speed", `Assoc [ "type", `String "number" ];
+                "handoff", `Assoc [ "type", `String "number" ];
+              ]
+              ~required:[ "completion"; "reliability"; "speed"; "handoff" ];
+            "metrics", nullable_object ~properties:agent_metrics_output_properties
+              ~required:agent_metrics_output_required;
+          ] ~required:[ "agent_id"; "components"; "metrics" ];
+      ];
+    ] ~required:[ "count"; "agents" ]
 ;;
 
 let masc_board_descriptor board_name =

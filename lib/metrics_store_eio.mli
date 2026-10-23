@@ -147,24 +147,39 @@ val filter_recent_month_filenames :
 
 (** {1 Reads / aggregates} *)
 
+type read_error =
+  | Invalid_agent_id of string
+  | Invalid_window of int
+  | Source_unavailable of { path : string; message : string }
+  | Invalid_record of { path : string; line : int; message : string }
+
+val read_error_to_string : read_error -> string
+(** Diagnostics retain the source path and physical line, never record bodies. *)
+
 val get_recent :
-  config -> agent_id:string -> days:int -> task_metric list
+  config -> agent_id:string -> days:int -> (task_metric list, read_error) result
 (** [get_recent config ~agent_id ~days] returns metrics with
-    [started_at >= now -. days * 86400] from
+    [now -. days * 86400 <= started_at <= now] from
     \[<agent_metrics_dir>/*.jsonl\].
 
     Two-stage filter: month-level (file selection) +
     metric-level ([started_at] cutoff).  Yields between files via
     {!Eio.Fiber.yield} so concurrent fibers are not starved on
-    large month files.  Returns [\[\]] when the agent dir does not
-    exist. *)
+    large month files. [Ok []] means an absent or empty agent directory, or
+    no records in the requested window. Malformed records, another agent's
+    records and unreadable/disappearing captured files are errors, never an
+    empty or partial successful reading. Names are nonblank exact single path components;
+    [days] must be positive. Cancellation and unexpected exceptions propagate.
+    This is a per-query reading, not an atomic snapshot of concurrent writers. *)
 
 val calculate_agent_metrics :
-  config -> agent_id:string -> days:int -> agent_metrics option
+  config -> agent_id:string -> days:int -> (agent_metrics option, read_error) result
 (** [calculate_agent_metrics config ~agent_id ~days] aggregates
     {!get_recent} into an {!agent_metrics} summary.  Contracts:
 
-    - Returns [None] iff {!get_recent} returns [\[\]].
+    - Returns [Ok None] iff the successful reading contains no recent records.
+      Source failures propagate as [Error]. The period is the requested query
+      window, captured once for both filtering and aggregation.
     - [period_start = now -. days * 86400], [period_end = now].
     - [completed_tasks] counts only [success = true] (note: not all
       [completed_at = Some _]).
@@ -177,8 +192,8 @@ val calculate_agent_metrics :
       [handoff_from] or [handoff_to] set, the success ratio.
       Returns [1.0] when there are no handoffs ("perfect rate"). *)
 
-val get_all_agents : config -> string list
+val get_all_agents : config -> (string list, read_error) result
 (** [get_all_agents config] lists each subdirectory of
-    \[<masc_dir>/metrics/\].  Returns [\[\]] when the metrics
-    directory does not exist.  Order: filesystem readdir order
-    (not sorted). *)
+    \[<masc_dir>/metrics/\]. Returns [Ok []] when the metrics
+    directory does not exist. Source/identity failures are errors.
+    Inventory is sorted; it does not prove a metric exists for each name. *)

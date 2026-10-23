@@ -1088,6 +1088,10 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
                  ]
              ] )
        ]);
+  accepts "masc_agent_fitness"
+    (`Assoc [ "count", `Int 1;
+      "agents", `List [ `Assoc [ "agent_id", `String "unobserved";
+        "components", `Null; "metrics", `Null ] ] ]);
   (* Host lane: [file_bytes] present, [via] absent; [next_offset] and
      [last_line_partial] co-occur on a window cut mid-line. *)
   accepts

@@ -1,6 +1,6 @@
 name = "masc_agent_fitness"
 description = """
-Fitness scores for agents: completion rate, reliability, speed."""
+Observed fitness components for exact agent identities. Named agents without recent records have null metrics and components. Inventory queries combine recorded metric identities and the existing workspace agent listing, not a complete membership census."""
 additional_properties = false
 
 
@@ -14,7 +14,7 @@ defer_loading = true
 name = "agent_name"
 type = "string"
 description = """
-Optional: Get fitness for specific agent. If omitted, returns all agents."""
+Optional exact agent identity. If omitted, returns metric-directory identities and the existing workspace agent listing."""
 
 [[params]]
 name = "days"

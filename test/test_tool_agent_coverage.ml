@@ -136,8 +136,43 @@ let test_agent_fitness_specific () =
   let args = `Assoc [("agent_name", `String "test-agent"); ("days", `Int 7)] in
   let result = Tool_agent.handle_agent_fitness ~start_time:(Tool_timing.start ()) ctx args in
   Alcotest.(check bool) "fitness with agent" true (Tool_result.is_success result);
-  Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string (Tool_result.message result) in
+  Alcotest.(check int) "named observation retained" 1 (json |> member "count" |> to_int);
+  let row = json |> member "agents" |> to_list |> List.hd in
+  Alcotest.(check string) "exact identity" "test-agent" (row |> member "agent_id" |> to_string);
+  Alcotest.(check bool) "no synthetic metrics or scores" true
+    (member "metrics" row = `Null && member "components" row = `Null);
   )
+
+let test_metric_source_failure () =
+  with_ctx (fun ctx ->
+    let metric = Metrics_store_eio.create_metric ~agent_id:"Exact" ~task_id:"task" () in
+    Metrics_store_eio.record ctx.config metric;
+    let file = Filename.concat (Metrics_store_eio.agent_metrics_dir ctx.config "Exact") "bad.jsonl" in
+    Fs_compat.save_file file "not-json\n";
+    List.iter (fun name ->
+      let result = dispatch_exn ctx ~name ~args:(`Assoc ["agent_name", `String "Exact"]) in
+      Alcotest.(check bool) "source failure is not success" false (Tool_result.is_success result);
+      let open Yojson.Safe.Util in
+      let json = Yojson.Safe.from_string (Tool_result.message result) in
+      Alcotest.(check string) "not misreported as absence" "internal_error"
+        (json |> member "error_code" |> to_string)
+    ) ["masc_get_metrics"; "masc_agent_fitness"])
+
+let test_metric_exact_identity_and_query () =
+  with_ctx (fun ctx ->
+    let metric = Metrics_store_eio.create_metric ~agent_id:"Exact" ~task_id:"task" () in
+    Metrics_store_eio.record ctx.config metric;
+    let result = dispatch_exn ctx ~name:"masc_agent_fitness"
+      ~args:(`Assoc ["agent_name", `String " Exact "]) in
+    let open Yojson.Safe.Util in
+    let row = Yojson.Safe.from_string (Tool_result.message result) |> member "agents" |> to_list |> List.hd in
+    Alcotest.(check string) "no trim alias" " Exact " (row |> member "agent_id" |> to_string);
+    Alcotest.(check bool) "other exact identity has no record" true (member "metrics" row = `Null);
+    let invalid = dispatch_exn ctx ~name:"masc_agent_fitness"
+      ~args:(`Assoc ["agent_name", `String "Exact"; "days", `String "7"]) in
+    Alcotest.(check bool) "malformed query has no silent default" false (Tool_result.is_success invalid))
 
 (* ============================================================
    Helper function tests
@@ -201,6 +236,8 @@ let () =
     ("agent_update", [
       Alcotest.test_case "no agents" `Quick test_agent_fitness_no_agents;
       Alcotest.test_case "specific agent" `Quick test_agent_fitness_specific;
+      Alcotest.test_case "failed source is not absence" `Quick test_metric_source_failure;
+      Alcotest.test_case "exact identity and query" `Quick test_metric_exact_identity_and_query;
     ]);
     ("get_metrics", [
       Alcotest.test_case "no data returns not_found" `Quick test_get_metrics_no_data;

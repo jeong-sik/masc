@@ -128,7 +128,7 @@ let test_an_entry_reads_back_as_written () =
 
 let all_verbs =
   Peer.[ Browser_info; Tabs_list; Page_read; Page_elements; Page_capture; Page_scene; Page_interact; Page_act;
-         Page_goto ]
+         Page_goto; Page_context ]
 
 let test_a_verb_is_read_by_the_name_it_was_written_under () =
   List.iter

@@ -8,7 +8,8 @@ type failure = Browser_live_peer.failure =
   | Outcome_unknown of string
 type verb = Browser_live_peer.verb =
   | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
-  | Page_goto
+  | Page_goto | Page_context
+
 val verb_to_wire : verb -> string
 val verb_of_wire : string -> verb option
 (** The browser's error codes this host acts on, and any other one as the

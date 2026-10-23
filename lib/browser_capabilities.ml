@@ -226,8 +226,11 @@ let support backend operation = match backend with
             [observed;"Pass the selector of one single-choice select and the exact value of one enabled option; a multiple select, a missing, repeated or disabled option is refused before any effect.";
              "Sets the option and emits input and change; this is not a trusted click on the list."])
       | Safari_unavailable -> missing)
-    | Read_frames -> gecko_only backend (invoke ~mode:"frames" Read)
-        [observed;"Explicit tabId; framePath consists of observed outer-to-inner frame selectors."]
+    | Read_frames -> (match backend with
+      | Connected Browser_lane.Webdriver_bidi | Owned_gecko ->
+          conditional ~mode:"frames" Read
+            [observed;"Explicit tabId; framePath consists of observed outer-to-inner frame selectors. Text and elements reads accept the same framePath."]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Owned_chromium | Safari_unavailable -> missing)
     | Frame_interaction -> (match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko ->
           conditional ~action:"click" Interact

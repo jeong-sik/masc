@@ -323,6 +323,7 @@ type live_capability =
   | Tab_closing
   | Tab_creation
   | Dialog_answer
+  | Frame_read
 [@@deriving enumerate]
 
 let live_capability_to_wire = function
@@ -349,6 +350,7 @@ let live_capability_to_wire = function
   | Tab_closing -> "tab_closing"
   | Tab_creation -> "tab_creation"
   | Dialog_answer -> "dialog_answer"
+  | Frame_read -> "frame_read"
 ;;
 
 let live_capability_of_wire raw =
@@ -385,7 +387,8 @@ let live_capability = function
   | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Some Tab_closing
   | Page_goto _ -> Some Tab_navigation
   | Page_act (Action.On_tab {interaction = (Action.Accept_dialog _ | Action.Dismiss_dialog); _}) -> Some Dialog_answer
-  | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ -> None
+  | Page_context { mode = (`Text _ | `Elements _ | `Frames); _ } -> Some Frame_read
+  | Page_context { mode = `Dialog; _ } | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ -> None
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
   | Session_open _ | Session_close | Session_status
@@ -515,17 +518,17 @@ let live_transport_serves transport capability =
   | Web_extension, Browser_zoom -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing | Dialog_answer) -> false
+                    | Tab_closing | Dialog_answer | Frame_read) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing | Dialog_answer) -> true
+                    | Tab_closing | Dialog_answer | Frame_read) -> true
   | Webdriver_bidi, Browser_zoom -> false
   | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_keyboard) -> true
   | Ego_task_space, (Document_source | Trusted_drag | Touch_input | Browser_zoom | Viewport_resize
-                    | Tab_activation | Tab_history | Dialog_answer) -> false
+                    | Tab_activation | Tab_history | Dialog_answer | Frame_read) -> false
 ;;
 
 let live_transports_serving capability =

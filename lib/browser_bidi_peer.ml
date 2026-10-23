@@ -37,7 +37,7 @@ let refusal_message = function
   | Unanswered why | Unsent why -> why
 type verb = Browser_live_peer.verb =
   | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
-  | Page_goto
+  | Page_goto | Page_context
 let verb_to_wire = Browser_live_peer.verb_to_wire
 let verb_of_wire = Browser_live_peer.verb_of_wire
 type session_end_failure = Connection_gone of string | Not_confirmed of string
@@ -539,10 +539,27 @@ let dispatch ?actor ?request_id t ~verb args =
         let result = use context id in
         phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _) -> Browser_pointer_feedback.Refused | Error (Partial_failure _ | Outcome_unknown _) -> Browser_pointer_feedback.Unknown);
         result)
-    | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene|Page_act|Page_goto), (None|Some _)
+    | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene|Page_act|Page_goto|Page_context), (None|Some _)
     | Page_interact,None -> use context id in
   match verb with
   | Page_goto -> goto t args
+  | Page_context -> on_tab (fun context id -> pre (
+      (* The automation lane's contextual reads (text, elements, frames) inside
+         the frame chain named by framePath, resolved to a child browsing context. *)
+      let* frame_path = Browser_lane.Action.parse_frame_path args in
+      let* context = frame_context t context frame_path in
+      let* data = match field "mode" args with
+        | Some (`String "text") ->
+          let* cap = Browser_page_script.text_cap (match field "maxChars" args with Some (`Int n) -> Some n | _ -> None) in
+          script t context Browser_page_script.text (`Int cap)
+        | Some (`String "elements") ->
+          let* within = Browser_page_script.within_of_json (field "within" args) in
+          parsed_document t context Browser_page_script.elements (Browser_page_script.elements_args within)
+        | Some (`String "frames") -> script t context Browser_page_script.frames (obj [])
+        | Some _ | None -> Error "a live connection reads text, elements and frames in a frame" in
+      match data with
+      | `Assoc fields -> Ok (obj (("tabId",`Int id)::("framePath",`List (List.map str frame_path))::fields))
+      | _ -> Error "invalid contextual observation"))
   | Page_act ->
     let* action = pre (Browser_lane.Action.parse args) in
     (match action with

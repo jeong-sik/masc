@@ -55,8 +55,12 @@ let prepare_read ~keeper_name json =
   let contextual=frame_path<>[] || (match mode with `Frames|`Dialog -> true
     | `Text|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies -> false) in
   if contextual then
-    let* ()=match request.route with Browser_selection.Exact B.Automation_route -> Ok ()
-      | Automatic|Exact (Live_route _|Stagehand_route) -> Error "frame and dialog reads require automation" in
+    let* ()=match request.route,mode with
+      | Browser_selection.Exact B.Automation_route,_ -> Ok ()
+      | Exact (Live_route _),(`Text|`Elements|`Frames) -> Ok ()
+      | Exact (Live_route _),(`Dialog|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies) ->
+          Error "a live browser reads text, elements and frames in a frame; a dialog shows on its BrowserTabs row"
+      | Automatic,_|Exact Stagehand_route,_ -> Error "frame and dialog reads require an explicit automation or live browser" in
     let* tab_id=tab request in
     let* mode=match mode with
       | `Text -> Ok (`Text max_chars) | `Elements -> Ok (`Elements within) | `Frames -> Ok `Frames

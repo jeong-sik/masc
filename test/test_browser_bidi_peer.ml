@@ -801,6 +801,42 @@ let test_framed_interaction_runs_in_the_child_context () =
      | Ok _ | Error _ -> fail "an unknown inner frame must be refused before any effect");
     check (list string) "no page script runs after a missing frame" [] !targets)
 
+let test_context_reads_run_in_the_frame () =
+  Eio_main.run (fun _ ->
+    let targets = ref [] in
+    let command method_ args = match method_ with
+      | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+      | "script.callFunction" ->
+        let open Yojson.Safe.Util in
+        let context = args |> member "target" |> member "context" |> to_string in
+        let declaration = args |> member "functionDeclaration" |> to_string in
+        if String.length declaration > 20 && String.sub declaration 0 20 = "function(selector) {" then
+          Ok (obj ["type",`String "success";"result",obj ["type",`String "window";
+                 "value",obj ["context",`String "child"]]])
+        else begin
+          targets := context :: !targets;
+          Ok (script_value (obj ["url",`String "https://example.test/frame";"frames",`List []]))
+        end
+      | _ -> fail ("unexpected command: " ^ method_) in
+    let peer = peer_of command in
+    let read mode extra = Peer.dispatch peer ~verb:Peer.Page_context
+      (obj (["tabId",`Int 1;"framePath",`List [`String "iframe"];"mode",`String mode] @ extra)) in
+    List.iter (fun (mode, extra) ->
+      targets := [];
+      (match read mode extra with
+       | Ok receipt ->
+         check bool (mode ^ " names its frame chain") true
+           (Yojson.Safe.Util.member "framePath" receipt = `List [`String "iframe"]
+            && Yojson.Safe.Util.member "tabId" receipt = `Int 1)
+       | Error _ -> fail (mode ^ " must be read in the frame"));
+      check (list string) (mode ^ " runs only in the child context") ["child"] !targets)
+      ["text",["maxChars",`Int 100]; "elements",[]; "frames",[]];
+    targets := [];
+    (match read "dialog" [] with
+     | Error (Peer.Before_effect _) -> ()
+     | Ok _ | Error _ -> fail "a dialog is not read through a frame");
+    check (list string) "a refused mode runs no page script" [] !targets)
+
 let test_hover_without_click () =
   Eio_main.run (fun _ ->
     let hovered = ref false in
@@ -905,12 +941,14 @@ let test_peer_serves_what_the_lane_table_says () =
       | Tab_navigation -> Page_goto {url="https://example.test/next";tab_id=Some 2}
       | Tab_activation -> interact Activate_tab
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
-      | Dialog_answer -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Dismiss_dialog})) in
+      | Dialog_answer -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Dismiss_dialog})
+      | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}) in
     (* The names the native host forwards (Browser_host.decode_poll). *)
     let peer_verb = function
       | "tabs.list" -> Peer.Tabs_list | "page.read" -> Peer.Page_read | "page.scene" -> Peer.Page_scene
       | "page.elements" -> Peer.Page_elements | "page.capture" -> Peer.Page_capture
       | "page.interact" -> Peer.Page_interact | "page.act" -> Peer.Page_act | "page.goto" -> Peer.Page_goto
+      | "page.context" -> Peer.Page_context
       | other -> failf "the lane put a verb on the wire that the host does not forward: %s" other in
     let calls = ref [] in
     let created = ref false in
@@ -1511,7 +1549,7 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
     test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;
     test_case "semantic clicks use trusted native input" `Quick test_semantic_click_uses_native_input;
-    test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "a framed request runs in the child context" `Quick test_framed_interaction_runs_in_the_child_context; test_case "element inventory is the shared page script" `Quick test_element_inventory;
+    test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "context reads run in the frame" `Quick test_context_reads_run_in_the_frame; test_case "a framed request runs in the child context" `Quick test_framed_interaction_runs_in_the_child_context; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "capture retains URL and document/viewport guards" `Quick test_capture_guards;
     test_case "document source is the shared document helper" `Quick test_document_source;
     test_case "a document still loading is not answered for" `Quick test_document_still_loading;

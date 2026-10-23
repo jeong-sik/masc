@@ -59,6 +59,19 @@ export function laneTargetFor(row: LaneInventoryRow, workspace: string): LaneNav
       installation: row.state.kind === 'package' && row.state.declaration?.kind === 'valid' ? row.state.declaration.installation_id : null }
   }
 }
+/** Selection survives a display/category edit, never a replacement owner. */
+export function sameLaneTarget(left: LaneNavigationTarget, right: LaneNavigationTarget): boolean {
+  if (left.workspace !== right.workspace) return false
+  switch (left.kind) {
+    case 'exact': case 'run_history': case 'browser':
+      return right.kind === left.kind && right.lane === left.lane
+    case 'machine': return right.kind === 'machine' && right.machine === left.machine
+    case 'declaration': return right.kind === 'declaration'
+      && right.path === left.path && right.installation === left.installation
+    case 'instance': return right.kind === 'instance'
+      && right.instance === left.instance && right.incarnation === left.incarnation
+  }
+}
 export function laneTargetParams(target: LaneNavigationTarget, diagnostics = false): Record<string, string> {
   const destination: LaneNavigationTarget = diagnostics && target.kind === 'exact'
     ? { kind: 'run_history', workspace: target.workspace, lane: target.lane } : target

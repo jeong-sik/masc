@@ -11,21 +11,18 @@
     "dashboard/src/components/lane-addons-panel.ts": "73fee80805c3a5a1ac4f962c02317516f0873524ee3c6e47af5a7bbe13bc8979",
     "dashboard/src/components/lane-installation-manager.test.ts": "70149b7ddf7db553ce3de358e14292d255c28425c81222a175158556faa7179c",
     "dashboard/src/components/lane-installation-manager.ts": "088c98c51b2ca0e51ad6895ad110a1a7507519b6937983bbcce1e6f0ab9f0db6",
-    "dashboard/src/components/lane-inventory-panel.test.ts": "97740c3376317379a155359a4d43572a9bd8d10e21c5a0e89a5ed434589b8152",
-    "dashboard/src/components/lane-inventory-panel.ts": "e6ce495b4c0ab5ecd477e17259f79e393bc240b157c351889731a9927899db19",
+    "dashboard/src/components/lane-inventory-panel.test.ts": "62be75d254675f8a26fc84b226fe91eb2afe973df3ca4fc45503341e18c442dc",
+    "dashboard/src/components/lane-inventory-panel.ts": "af44402d8d2a7170bfcee2cd2a104eba6b5ce28515ce5b556b2a1590214ef364",
     "dashboard/src/components/lane-package-installer.test.ts": "ee2dc952535f6c3fafc44e286e2caa5cd8b1c2726116c4faa28c883be6fd730d",
     "dashboard/src/components/lane-package-installer.ts": "aefc81ac7f0ef92d092cb629cc24c4b0b1d4e6db38eb8c846aea86a7d9498164",
     "dashboard/src/lib/lane-addon-category.test.ts": "309cc00f10dbab92d7c249a1082402b378ff3bd1719b80801d48b5d28d661ad3",
-    "dashboard/src/lib/lane-addon-category.ts": "6d4f0dc7a634bed58f78e45da7952eec1c513f07522f16d01f485857e48ab997"
+    "dashboard/src/lib/lane-addon-category.ts": "6d4f0dc7a634bed58f78e45da7952eec1c513f07522f16d01f485857e48ab997",
+    "dashboard/src/lib/lane-navigation.ts": "e55ad39d54f6f737e1a576511ce3d8731e2cfc8eb08e3f736152f4a16e910027"
   },
   "changes_after_frozen_author": [
     "explicit typed builtin role grouping; removed builtin technical group",
     "one role/navigation preservation case"
   ],
-  "validation": {
-    "tsc": "exit0; tool chunk44ac59",
-    "selected": "9 suites / 82 tests PASS; tool chunk a3028c; 2026-10-23 14:35:13 KST; 10.50 seconds"
-  },
   "limits": [
     "no rendered UI proof yet",
     "no OCaml compilation or runtime installation"
@@ -39,5 +36,24 @@
     "selected_id": "declaration//fixture/browser.toml",
     "screenshot_sha256": "7d37d16c3f7203dfb84f4ba14ef6a14845e120374eb1b7108046305fb3d6052b",
     "screenshot": "dashboard-all-groups.png"
+  },
+  "original_grouping_checks": {
+    "tsc": "exit0; tool chunk44ac59",
+    "selected": "9 suites / 82 tests PASS; tool chunk a3028c; 2026-10-23 14:35:13 KST; 10.50 seconds"
+  },
+  "base": "dd72436925365a0028981c8bbb5b9a1e52ef1877",
+  "selection_followup": {
+    "reason": "same declaration path may be replaced by a different installation; retain complete typed management target",
+    "typecheck": "exit0, chunk4b8a99",
+    "suites": [
+      "lane-inventory-panel",
+      "lane-navigation",
+      "lane-navigation-flow",
+      "lane-addon-category"
+    ],
+    "result": "4 suites / 54 tests passed, chunk4252e2",
+    "elapsed_seconds": 6.53,
+    "started_at": "2026-10-23 14:46:04 KST",
+    "browser_limit": "Earlier browser screenshot and before/after receipt precede this stricter replacement-target check; no replacement behavior in browser claimed."
   }
 }

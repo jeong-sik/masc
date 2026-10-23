@@ -10,7 +10,7 @@ import { BrowserLaneActivityPanel } from './browser-lane-activity-panel'
 import { browserLaneObservationRevision } from '../lib/browser-lane-observation'
 import { MachineLaneActivityPanel } from './machine-lane-activity-panel'
 import { machineLaneObservationRevision } from '../lib/machine-lane-observation'
-import { laneTargetFor, laneTargetParams } from '../lib/lane-navigation'
+import { laneTargetFor, laneTargetParams, sameLaneTarget, type LaneNavigationTarget } from '../lib/lane-navigation'
 import { categoryGroup, categoryLabel, groupAddonCategories, inventoryCategory, type AddonCategoryFilter } from '../lib/lane-addon-category'
 import { LaneAddonCategoryFilter } from './lane-addon-category-filter'
 
@@ -142,7 +142,7 @@ export function LaneInventoryPanel() {
   const [verifying, setVerifying] = useState(false)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<AddonCategoryFilter>('all')
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<{ id: string; target: LaneNavigationTarget } | null>(null)
   const request = useRef<AbortController | null>(null)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -187,7 +187,9 @@ export function LaneInventoryPanel() {
   const search = query.trim().toLocaleLowerCase()
   const rows = snapshot?.rows.filter(row => [row.id, row.label, row.purpose].some(value => value.toLocaleLowerCase().includes(search))) ?? []
   const groups = groupAddonCategories(rows, inventoryCategory, category)
-  const detail = snapshot?.rows.find(row => row.id === selected)
+  const candidate = snapshot?.rows.find(row => row.id === selected?.id)
+  const detail = candidate && selected && authority
+    && sameLaneTarget(selected.target, laneTargetFor(candidate, authority.workspaceRoot)) ? candidate : undefined
   useEffect(() => { if (selected !== null) details.current?.focus() }, [selected])
   return html`<section aria-label="All Lanes" class="space-y-4">
     <header class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="text-xl font-semibold">All Lanes</h2>
@@ -215,7 +217,8 @@ export function LaneInventoryPanel() {
       ${group.items.map(row => html`<article key=${row.id} class="min-w-0 rounded border border-[var(--color-border-default)] p-4 space-y-2">
         <h3 class="font-semibold">${row.label}</h3><p class="break-all">${row.id}</p><p>${row.purpose}</p>
         ${stateLines(row, snapshot).map(line => html`<p class="break-all">${line}</p>`)}
-        <button class=${button} aria-pressed=${selected === row.id} onClick=${() => setSelected(row.id)}>Inspect ${row.label}</button>
+        <button class=${button} aria-pressed=${detail?.id === row.id}
+          onClick=${() => { if (authority !== null) setSelected({ id: row.id, target: laneTargetFor(row, authority.workspaceRoot) }) }}>Inspect ${row.label}</button>
       </article>`)}
       </div>
     </section>`)}

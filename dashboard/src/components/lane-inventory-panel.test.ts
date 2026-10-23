@@ -17,6 +17,32 @@ function workspace(root: string) {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 beforeEach(() => { invalidateExecutionSnapshotGeneration(epoch, 0); generation = 0; workspace('/fixture/default') })
 describe('operator Lane inventory', () => {
+  it('requires an explicit new selection when another installation replaces the same declaration path', async () => {
+    const row = { id: 'declaration//fixture/shared.toml', label: 'Shared path', purpose: 'fixture',
+      selection: { kind: 'declaration', source_path: '/fixture/shared.toml' },
+      state: { kind: 'package', instances: [], declaration: { kind: 'valid', enabled: false,
+        installation_id: 'original', run_id: 'run', package_id: 'fixture', title: 'Shared path',
+        source_revision: 'file', desired_revision: 'inputs', exact_outputs: [], ui_category: 'browser',
+        application: { kind: 'inactive' } } } }
+    api.fetchLaneInventory.mockResolvedValueOnce(parseLaneInventory({ ...fixture, rows: [...fixture.rows, row] }))
+      .mockResolvedValue(parseLaneInventory({ ...fixture, rows: [...fixture.rows,
+        { ...row, state: { ...row.state, declaration: { ...row.state.declaration, installation_id: 'replacement' } } }] }))
+    const screen = render(html`<${LaneInventoryPanel} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect Shared path' }))
+    const original = within(screen.getByRole('region', { name: 'Details for Shared path' }))
+      .getByRole('link', { name: 'Manage package declarations and retained observations' }).getAttribute('href')
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Lanes' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Details for Shared path' })).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Shared path' }))
+    const replacement = within(screen.getByRole('region', { name: 'Details for Shared path' }))
+      .getByRole('link', { name: 'Manage package declarations and retained observations' }).getAttribute('href')
+    expect(replacement).not.toBe(original)
+    fireEvent.click(within(screen.getByRole('region', { name: 'Details for Shared path' }))
+      .getByRole('link', { name: 'Manage package declarations and retained observations' }))
+    expect(JSON.parse(route.value.params.lane_target!)).toMatchObject({ kind: 'declaration',
+      workspace: '/fixture/default', path: '/fixture/shared.toml', installation: 'replacement' })
+    replaceRoute('overview', {})
+  })
   it('preserves the selected declaration target while its category changes or is filtered out', async () => {
     const row = { id: 'declaration//fixture/neutral.toml', label: 'Neutral', purpose: 'fixture',
       selection: { kind: 'declaration', source_path: '/fixture/neutral.toml' },

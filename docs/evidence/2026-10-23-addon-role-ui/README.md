@@ -9,3 +9,5 @@ The screenshot is from the actual LaneInventoryPanel rendered through Vite with 
 ![Actual Dashboard component with fixture data](dashboard-all-groups.png)
 
 No server was replaced, no runtime configuration was applied, and no real worker/provider/device was launched. TUI compilation/visible terminal evidence and full Addon conversion remain separate work.
+
+A later source review also identified same-path installation replacement as a selection boundary. The Dashboard now retains the complete typed original management target; a replacement requires explicit reselection. Four targeted suites passed all 54 tests and TypeScript checking passed after that change on the current source hashes. The earlier 82-case and browser results remain bound to their earlier sources. No later visible-browser replacement check is claimed.

@@ -188,10 +188,10 @@ function isModelInputDestination(destination: PromptDestination): boolean {
 }
 
 // The count on the attention tab and the rows behind it are the same set, so
-// they ask one question. A prompt wants attention when it is not simply the
-// file's words: an override is in force, or there is no file to fall back to.
+// they ask one question. A prompt wants attention when an override is in force,
+// its file is missing, or its file reports an authoring error.
 function wantsAttention(prompt: DashboardPromptItem): boolean {
-  return prompt.source !== 'file' || (prompt.authoring_issues?.length ?? 0) > 0
+  return prompt.source !== 'file' || prompt.authoring_issues.length > 0
 }
 
 function presetPromptCount(

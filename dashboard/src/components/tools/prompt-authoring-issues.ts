@@ -3,10 +3,10 @@ import type { PromptAuthoringIssue } from '../../api/schemas/prompt-authoring'
 import { StatusChip } from '../common/status-chip'
 
 export function PromptAuthoringIssues({ issues, compact = false }: {
-  issues: readonly PromptAuthoringIssue[] | undefined
+  issues: readonly PromptAuthoringIssue[]
   compact?: boolean
 }) {
-  if (!issues || issues.length === 0) return null
+  if (issues.length === 0) return null
   return html`
     <div class="my-2 rounded-[var(--r-1)] border border-[var(--warn-border)] bg-[var(--warn-soft)] p-3 text-xs" role="note" aria-label="프롬프트 작성 오류">
       <${StatusChip} tone="warn">작성 오류 ${issues.length}<//>

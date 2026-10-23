@@ -64,9 +64,14 @@ let with_fixture f =
           ~base_path
           ~sandbox_profile:(Some Keeper_types_profile.Docker) keeper_name;
         Keeper_types_profile.invalidate_keeper_profile_snapshots ();
+        let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+        let () =
+          match Memory.ensure_epoch ~keepers_dir ~keeper_id with
+          | Ok () -> ()
+          | Error () -> fail "the Memory epoch could not be created" in
         let owner =
           M.observe_owner ~base_path
-            ~keepers_dir:(Common.keepers_runtime_dir_of_base ~base_path)
+            ~keepers_dir
             ~keeper_id:keeper_name
           |> get in
         let destination : M.destination =

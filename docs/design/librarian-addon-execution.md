@@ -1,13 +1,16 @@
 # Librarian execution as an Addon
 
 This records the original E03 extraction contract and its current implementation.
-The explicit-candidate production caller now uses the configured Librarian Addon
-for the raw proposal and the original host for absorption, Memory and ACK. This
-candidate has source/parser evidence; selected checks on earlier heads failed
-and their failure logs and repairs are recorded in the worklist. The restored,
-corrected combination has no successful execution receipt yet. Checkpoint, official-client, continuity and history purposes
-remain on their original host path. E03 is incomplete until its original memory
-lineage, pending-work and actual Keeper-continuity criteria are verified.
+The explicit-candidate caller uses its configured Addon for proposals and the
+host for absorption, Memory and ACK. The completed-history production queue now
+also uses an immutable Addon owner for checkpoint, official-client and mixed
+input. Continuity and other purposes remain on their existing host paths.
+
+[Current execution evidence](../evidence/2026-10-23-librarian-history-owner/README.md)
+separates successful Pending-foundation and Python-worker checks from the new
+host integration selection. Earlier failures and their repairs remain in the
+worklist. E03 stays incomplete until its original memory lineage, failure
+semantics, pending-work and actual Keeper-continuity criteria are verified.
 
 ## Execution must leave authority on the host
 
@@ -162,10 +165,10 @@ outcome and an opaque `Keeper_exact_walk_receipt.t`. The worker's request,
 outcome, schema permission and digest format do not gain an evidence or priority
 field. The real server captures the original ordered HTTP declaration, catalog
 and target fingerprints, visits, generation and measurement evidence, advances,
-semantic rejections and complete official-client tail. The current builtin
-Librarian also consumes the shared classifier/receipt instead of maintaining a
-private exhaustion predicate. This is a production execution boundary; it does
-not yet dispatch a Librarian worker or give one commit authority.
+semantic rejections and complete official-client tail. The remaining host Librarian paths also consume the shared classifier/receipt
+instead of maintaining a private exhaustion predicate. The explicit-candidate
+and completed-history owners now use this same proof through their configured
+worker. The host alone retains commit authority.
 
 A receipt retains typed source observations and rederives policy after strict
 restore. Input-only recursive admission partitioning and exhausted API-only
@@ -348,18 +351,19 @@ Exact/ask/delivery errors remain diagnostic and are attempted only once per
 cycle, while other requests can continue. Listing/protocol/global-runner failures
 still stop the cycle. Purged originals are not rewritten as successful results.
 
-The focused production fixture uses actual Runtime, persistent Python worker,
+The explicit-candidate production fixture uses actual Runtime, persistent Python worker,
 loopback HTTP/common Exact, serialized Memory lane, original journals, Current
 receipts and queue ACK. Its resource-launch edge is substituted; it does not
 prove Docker, paid-provider execution, installed native binaries, either visible
 UI, other Librarian purposes or the original E03 continuity requirement. The
 server wake case substitutes only the final queue-refresh scheduling callback
 with the same Memory-lane/public-worker consumer. Earlier selected runs failed
-on declaration, lifecycle or typing defects; their corrections have not yet
-established successful execution of this combination. Earlier parent execution
-receipts are not evidence for this candidate.
+on declaration, lifecycle or typing defects. After those repairs, the explicit
+owner suite passed 22 cases on exact `3fdc42ef7e33e70f555ac10e40112875a45fff34`
+in [run39886511979](https://github.com/jeong-sik/masc/actions/runs/39886511979).
+That result does not certify the later completed-history owner.
 
-## Complete original input data before durable-source extraction
+## Complete original input data
 
 `Keeper_librarian_input_capture` is the common pure data codec used by the
 explicit-candidate capture. It retains all ten `Keeper_librarian.input` fields,
@@ -384,23 +388,21 @@ working-context input. A shared data representation does not permit relabeling a
 durable-history pass as an admission pass, and it does not give the worker any
 Memory, source, cursor or host gate authority.
 
-This is preparatory for a separate durable-source owner. Before that route can
-be enabled, retain and restore its actual checkpoint prefix and selected official
-fragments, both progress positions, source generation, counterpart/external
-cursor witnesses, immutable prompt and exact request. Pending must remain a
-typed suspension through the real durable consumer and queue refresh; it cannot
-be a failed range that narrows the next selection or a second builtin continuity
-judgment over the same outstanding source. Publication still requires fresh
-physical/source authority under the actual source-before-Memory locks and a
-matching original disposition receipt before cursor/ACK settlement. The data
-codec alone implements none of those effects or the remaining Librarian purposes.
+The completed-history owner below retains the actual checkpoint prefix and
+selected official fragments, both progress positions, source generation,
+counterpart/external cursor witnesses, immutable prompt and exact request. The
+codec remains a data port: source freshness, execution and publication authority
+come from the host owner and its locks rather than from restored input alone.
 
 
-## Typed suspension before the durable owner connects
+## Typed suspension and completed-history owner
 
 The durable commit port now distinguishes `Memory_pending` from a committed
 snapshot and a refused pass. It returns `Pending` without message-floor inference,
-Memory mutation, external acknowledgement or atom/official cursor advancement.
+a new Memory mutation, external acknowledgement or atom/official cursor advance
+by the consumer. The original owner may already have a real Memory receipt while
+its external ACK or position settlement remains unfinished. That state stays
+Pending until the original owner completes settlement.
 A successful receipt recovery still runs before a new commit callback. Suspension
 preserves the failed-range marker that existed before the pass: it neither turns
 a previously wide selection into a narrow retry nor clears an earlier failure.
@@ -417,12 +419,57 @@ The server, strict Dashboard decoder and typed TUI decoder preserve it without
 adding a stopped alert or changing the unread count. This is observation of the
 real drain result, not permission to dispatch, consume input or commit Memory.
 
-This unit prepares the existing durable consumer for an asynchronous owner.
-The current synchronous `run_best_effort` adapter does not produce Pending;
-there is no new empty owner, runtime selector or production history cutover.
-Tests exercise the actual public commit port and production phase dispatcher.
-Before the Addon route is enabled, its immutable original selection, checkpoint
-and official witnesses, source lock, execution proof and Memory/cursor receipt
-recovery must still be connected. Typed suspension alone cannot freeze a later
-source tail or establish source freshness. E03 and the original54 criteria remain
-incomplete until those connections and Keeper continuity are verified.
+The production `run_durable` queue calls
+[`Keeper_librarian_durable_execution`](../../lib/keeper/keeper_librarian_durable_execution.mli).
+It strictly inventories retained originals before fresh selection, resolves the
+configured `keeper-librarian` / `derive_memory` export, and retains the original
+under the Runtime destination serializer before submitting it once. The worker
+shares the existing Exact runner; credentials and background admission remain
+on the host. An original host proof must confirm the worker answer before raw
+proposal decoding or publication.
+
+[`Keeper_librarian_durable_commit`](../../lib/keeper/keeper_librarian_durable_commit.mli)
+uses the original captured gate journal, holds actual source locks, and passes
+the original revision and full current facts to `Current.apply_disposition_guarded`.
+The latter compares both inside its actual Memory write locks. Only matching
+atom/official range receipts permit external ACK and original position
+settlement, followed by Finished. A post-Memory ACK failure recovers locally
+without a second inference or disposition. Changed checkpoint prefixes,
+same-trace restarts, physical owners and Memory epochs refuse old authority.
+
+A concurrent explicit Memory write can make a completed model answer stale.
+Only a typed basis mismatch observed inside the actual Current write locks,
+followed by absence of the original range receipts, closes that original as
+`Conflicted`. Storage failures and unknown effects retain their original
+uncertainty. An already proved Memory receipt takes precedence over the typed
+mismatch; earlier journal recovery may already have published that effect.
+
+For a known basis conflict, a successor preserves the complete original source,
+external frontier and captured positions and changes only its current Memory
+input/preparation. The parent durably records the full immutable successor
+before child retention, then acknowledges that exact retained child before any
+RPC. Both links and full payloads are authenticated before resume. An unfinished
+intent recovers that same child locally; a confirmed child that disappears
+refuses rather than minting another request. The old conflict history remains
+available after its successful successor uses the same source range receipts.
+Fresh successor capture/inference requires current configured Addon authority.
+
+Addon Off prevents a new original, new gate intent and new gate evaluation.
+An existing gate intent/transcript and receipt-backed settlement may recover
+locally; an old original cannot
+become a new request merely because the package is replaced. This differs from
+the existing global Librarian disabled policy, which skips the entire durable
+queue. With no configured history export, source input stays unread. A blocked
+original retains its journal/error evidence. An unfinished-publication error
+suspends the same wake's following Memory phases; ordinary Pending does not
+carry a separate live detail string. Neither unknown work nor a malformed
+inventory is absence.
+
+The [execution receipt](../evidence/2026-10-23-librarian-history-owner/README.md)
+separates passing foundation/worker checks, the actual first host integration
+failures and later repairs. The integration fixture uses real Runtime, Python
+worker, host Exact HTTP/server authorization, Memory lane and files; resource
+launch/cleanup and provider HTTP are substituted. Absorption-model policy is
+disabled in that fixture. History capacity/failure descent, remaining Librarian
+purposes and actual Keeper continuity still require implementation/verification.
+E03 and the original54 acceptance criteria remain incomplete.

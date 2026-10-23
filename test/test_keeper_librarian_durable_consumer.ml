@@ -1206,6 +1206,21 @@ let test_pending_preserves_selection_and_memory ~after_failure () =
     | _ -> fail "the next oldest cut did not commit")
 ;;
 
+let test_blocked_original_suspends_following_phases () =
+  with_workspace @@ fun config ->
+  let events = ref [] in
+  let run error = Queue_refresh.For_testing.run_with_readers
+    ~durable:(fun () -> Queue_refresh.Stopped error)
+    ~continuity:(fun () -> events := !events @ ["continuity"])
+    ~cleanup:(fun () -> events := !events @ ["cleanup"])
+    ~base_path:config.Workspace.base_path ~keeper_name in
+  run (Consumer.Original_publication_blocked "original journal could not be restored");
+  check (list string) "an unrestorable original suspends following effects" [] !events;
+  run (Consumer.Memory_snapshot_unreadable "ordinary reader failure");
+  check (list string) "ordinary reader errors retain the existing following-phase policy"
+    ["continuity";"cleanup"] !events
+;;
+
 let test_pending_wake_suspends_following_phases () =
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
     (Some "true") @@ fun () ->
@@ -4846,6 +4861,8 @@ let () =
             (test_pending_preserves_selection_and_memory ~after_failure:false)
         ; test_case "Pending preserves the earlier narrow retry marker" `Quick
             (test_pending_preserves_selection_and_memory ~after_failure:true)
+        ; test_case "blocked originals suspend following effects while ordinary failures keep their policy" `Quick
+            test_blocked_original_suspends_following_phases
         ; test_case "Pending suspends the same wake and normal commit reopens phases" `Quick
             test_pending_wake_suspends_following_phases
         ; test_case "failure stops and a later wake drains successful cuts" `Quick

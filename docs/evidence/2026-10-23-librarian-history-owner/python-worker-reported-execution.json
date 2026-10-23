@@ -1,0 +1,34 @@
+{
+  "kind": "reported_agent_tool_execution",
+  "command": "env PYTHONPATH=addons/tests python3 -m unittest test_keeper_librarian test_workspace_curator test_candle_appraiser -v",
+  "executed_in": "/tmp/masc-librarian-durable-source-capture-20261023",
+  "agent": "/root/durable_pending_core",
+  "tool_result_chunk": "273e69",
+  "raw_stdout_artifact_saved": false,
+  "tests": {
+    "librarian": 6,
+    "curator": 7,
+    "candle": 14,
+    "total": 27,
+    "passed": 27
+  },
+  "elapsed_seconds": 2.507,
+  "librarian_subprocesses": {
+    "count": 17,
+    "total_seconds": 0.86,
+    "min_seconds": 0.048,
+    "max_seconds": 0.065
+  },
+  "source_sha256": {
+    "addons/exact_worker.py": "b6171b7c04a6030cd04992a7de1ee7359f6fb2255aca67cc7bfb1d6428ef9aa7",
+    "addons/keeper-librarian/server.py": "28266e6716e72179ce156c426711221f7f61a2dcdef85941a3e90bac95ee5269",
+    "addons/keeper-librarian/lane.toml": "f862f7786e665ba313b5224002f1382701fcf573a0536214cf36b9cf18d01af9",
+    "addons/keeper-librarian/schemas/durable.json": "085cfc22622a2c31dee2c93e1e8c6930058887279fa3e5721310d8917c9e7eff",
+    "addons/tests/test_keeper_librarian.py": "9f343f005c402f716511ac6383dabfde6db60d9cfde68cac045f018b6b5b11a4"
+  },
+  "limits": [
+    "Only Python worker and protocol execution",
+    "No host Memory/provider/Docker/native UI proof",
+    "Prior raw stdout exists only in the agent tool result; this JSON is a reported receipt, not a fabricated original log"
+  ]
+}

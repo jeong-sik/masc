@@ -19,9 +19,13 @@
 type commit_result =
   | Memory_committed
   | Memory_pending
-      (** The selected input remains owned by an unfinished commit. This is
-          neither refusal evidence nor permission to advance or try a smaller
-          input. The callback must not report it after a Memory commit. *)
+      (** The selected input remains owned by an unfinished original publication.
+          Memory may already have its matching durable receipt while external
+          acknowledgement, source positions or Finished settlement is pending.
+          The consumer does not advance on this result; only the original owner
+          may reconcile its actual receipts and complete local settlement.
+          This grants neither refusal evidence nor permission to redispatch,
+          advance, or select a smaller replacement input. *)
   | Memory_refused of Keeper_librarian_runtime.not_committed list
       (** All failure reports in callback order. An empty list means the pass
           returned without committing or supplying classified evidence. Neither
@@ -30,8 +34,10 @@ type commit_result =
 type outcome =
   | Nothing_to_read
   | Pending
-      (** No Memory commit, external acknowledgement, or progress advance.
-          Preserves the retry selection mode present when this pass started. *)
+      (** Original publication is unfinished. This consumer performs no external
+          acknowledgement or progress advance on this result. The original
+          owner may have durable partial settlement; it must recover its exact
+          receipts before Finished. Preserves the existing retry selection mode. *)
   | Baseline_advanced of Keeper_librarian_progress.t
   | Memory_not_committed of Keeper_librarian_runtime.not_committed list
   | Progress_advanced of Keeper_librarian_progress.t
@@ -46,6 +52,7 @@ type outcome =
 
 type error =
   | Keeper_meta_absent
+  | Original_publication_blocked of string
   | Source_capture_failed of Keeper_librarian_durable_capture.error
   | Keeper_meta_unreadable of string
   | Boundary_log_unreadable of string
@@ -100,6 +107,9 @@ type error =
       (** A refused history line after the first that names a turn. *)
 
 val error_to_string : error -> string
+val publication_unfinished : error -> bool
+(** A blocked original publication retains uncertain work. Queue consumers
+    report the actual error and suspend later Memory phases of this wake. *)
 
 (** How far behind the keeper's Librarian is standing (RFC §4.9, invariant
     I4): finished turns beyond each read position, counted over the boundary

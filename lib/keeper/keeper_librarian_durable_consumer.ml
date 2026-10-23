@@ -26,6 +26,7 @@ type outcome =
 
 type error =
   | Keeper_meta_absent
+  | Original_publication_blocked of string
   | Source_capture_failed of Capture.error
   | Keeper_meta_unreadable of string
   | Boundary_log_unreadable of string
@@ -66,6 +67,18 @@ type error =
       ; error : Keeper_turn_fragments.read_error
       }
 
+let publication_unfinished = function
+  | Original_publication_blocked _ -> true
+  | Keeper_meta_absent | Source_capture_failed _ | Keeper_meta_unreadable _
+  | Boundary_log_unreadable _ | Progress_unreadable _ | Checkpoint_unreadable _
+  | Position_in_other_trace _ | Position_not_in_history _ | Range_stopped _
+  | Range_end_boundary_missing _ | Progress_boundary_missing _ | Memory_snapshot_unreadable _
+  | Counterpart_interval_non_monotone _ | Counterpart_observations_unreadable _
+  | Progress_write_failed _ | Official_progress_unreadable _ | Official_progress_write_failed _
+  | Official_progress_boundary_missing _ | Committed_official_range_mismatch
+  | Official_range_stopped _ | Fragment_store_unreadable _ | Fragment_line_unreadable _ -> false
+;;
+
 let fragment_file_to_string = function
   | Keeper_turn_fragments.Main -> Keeper_types_support.history_file_name
   | Keeper_turn_fragments.Internal -> Keeper_types_support.internal_history_file_name
@@ -87,6 +100,7 @@ let range_stop_to_string = function
 
 let error_to_string = function
   | Keeper_meta_absent -> "keeper metadata is absent"
+  | Original_publication_blocked detail -> "Original history publication is blocked: " ^ detail
   | Source_capture_failed error -> Capture.error_to_string error
   | Keeper_meta_unreadable detail -> "keeper metadata is unreadable: " ^ detail
   | Boundary_log_unreadable detail -> "turn-boundary log is unreadable: " ^ detail
@@ -1089,7 +1103,7 @@ let consume_one_with_extent
       | trace_id :: later ->
         (match trace_selection trace_id with
          | Error
-             (( Keeper_meta_absent | Source_capture_failed _ | Keeper_meta_unreadable _
+             (( Keeper_meta_absent | Original_publication_blocked _ | Source_capture_failed _ | Keeper_meta_unreadable _
               | Boundary_log_unreadable _ | Progress_unreadable _
               | Checkpoint_unreadable _ | Position_in_other_trace _
               | Position_not_in_history _ | Range_stopped _
@@ -1603,6 +1617,7 @@ let consume_one_with_progress_writer_and_floor
    | Error (Official_range_stopped _), _ -> clear_failed key
    | (Ok (Progress_advanced _ | Official_advanced _), R.To_first_cut_point)
    | (Ok (Memory_not_committed _), _) | (Error (Keeper_meta_absent), _)
+   | (Error (Original_publication_blocked _), _)
    | (Error (Source_capture_failed _), _)
    | (Error (Keeper_meta_unreadable _), _) | (Error (Boundary_log_unreadable _), _)
    | (Error (Progress_unreadable _), _) | (Error (Checkpoint_unreadable _), _)

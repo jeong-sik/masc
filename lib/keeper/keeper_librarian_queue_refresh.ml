@@ -253,6 +253,7 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
              | Boundary_log_unreadable _
              | Progress_unreadable _
              | Checkpoint_unreadable _
+             | Original_publication_blocked _
              | Source_capture_failed _
              | Position_in_other_trace _
              | Position_not_in_history _
@@ -294,7 +295,8 @@ let run_durable_with_commit ~config ~keeper_name ~commit =
 let run_durable ~base_path ~keeper_name =
   let config = Workspace.default_config base_path in
   run_durable_with_consumer ~config ~keeper_name ~consume:(fun () ->
-    Keeper_librarian_durable_consumer.consume_one_with_runtime ~config ~keeper_name ())
+    Keeper_librarian_durable_execution.consume_one ~config ~keeper_name
+      ~wake:(fun () -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name))
 ;;
 
 (* Continuity has its own exact source position. A Memory baseline does not
@@ -853,8 +855,10 @@ exception Blank_keeper_name
 let after_durable ~durable ~following =
   match durable () with
   | Pending -> ()
+  | Stopped error ->
+    if not (Keeper_librarian_durable_consumer.publication_unfinished error) then following ()
   | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
-  | Not_committed | Stopped _ | Raised _ -> following ()
+  | Not_committed | Raised _ -> following ()
 ;;
 
 let run_with_readers ~durable ~continuity ~cleanup ~base_path ~keeper_name =

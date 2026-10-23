@@ -34,7 +34,9 @@ function stateFor(k: Keeper) {
 }
 
 async function flush() {
-  await new Promise(resolve => setTimeout(resolve, 0))
+  for (let turn = 0; turn < 3; turn += 1) {
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
 }
 
 describe('deregisterStopsRunningKeeper', () => {
@@ -108,6 +110,20 @@ describe('RegistryDeregister', () => {
     expect(mocks.purgeKeeper).toHaveBeenCalledWith('alpha')
     expect(mocks.showToast).toHaveBeenCalledWith('busy lane', 'error')
     expect(onCloseCalls).toBe(0)
+  })
+
+  it.each([{ isComposing: true }, { keyCode: 229 }, { consumed: true }])('does not dismiss on an owned Escape (%o)', async (flags) => {
+    const k = keeper({ phase: 'Offline' })
+    render(h(RegistryDeregister, { keeper: k, state: stateFor(k), onClose }), container)
+    await flush()
+    const button = container.querySelector<HTMLButtonElement>('.reg-dlg-x')!
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...flags })
+    if ('consumed' in flags) event.preventDefault()
+    button.dispatchEvent(event)
+    expect(onCloseCalls).toBe(0)
+    expect(mocks.purgeKeeper).not.toHaveBeenCalled()
+    button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(onCloseCalls).toBe(1)
   })
 
   it('closes on Escape and on the dismiss button', async () => {

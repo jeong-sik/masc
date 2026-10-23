@@ -62,6 +62,21 @@ describe('GoalCreateForm side panel', () => {
     expect(screen.queryByText('가드 통과 · 자율 실행')).toBeNull()
   })
 
+  it.each([{ isComposing: true }, { keyCode: 229 }, { consumed: true }])('keeps the goal draft when Escape is owned (%o)', async (flags) => {
+    render(h(GoalCreateForm, {}))
+    fillField('goal-create-title-input', 'Draft goal')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const input = screen.getByTestId('goal-create-title-input') as HTMLInputElement
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...flags })
+    if ('consumed' in flags) event.preventDefault()
+    fireEvent(input, event)
+    expect(showGoalCreate.value).toBe(true)
+    expect(input.value).toBe('Draft goal')
+    expect(api.callMcpTool).not.toHaveBeenCalled()
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(showGoalCreate.value).toBe(false)
+  })
+
   it('closes the panel when the close button is clicked', () => {
     render(h(GoalCreateForm, {}))
     fireEvent.click(screen.getByTestId('goal-create-close'))

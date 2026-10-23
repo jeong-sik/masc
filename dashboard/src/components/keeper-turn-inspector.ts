@@ -1,3 +1,4 @@
+import { isImeComposing } from '../lib/keyboard'
 // Keeper Turn Inspector (RFC-0233 PR-4) — one row per keeper turn from
 // GET /api/v1/keepers/:name/turn-records, with the server-computed
 // block diff between consecutive turns of the same trace. Answers the
@@ -958,7 +959,7 @@ function TurnDetailDrawer({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (!e.defaultPrevented && !isImeComposing(e) && e.key === 'Escape') {
         e.stopPropagation()
         onClose()
       }

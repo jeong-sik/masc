@@ -1,0 +1,84 @@
+{
+  "frozen_at": "2026-10-23T07:12:11.552176+00:00",
+  "base": "f985fde683092953b33cfcab0884ef9f27d17ad9",
+  "state": "frozen source assembly with independent seven-file source review; execution unverified",
+  "scope": "E03 actual terminal Outcome_unknown retains original source frontier and returns Pending",
+  "files": [
+    {
+      "path": "lib/keeper/keeper_librarian_durable_commit.ml",
+      "base_git_blob": "cae62f7eaf6f76c4c9143aa6237c06b6ec2a6f9f",
+      "base_sha256": "5d2f869fa907dcf5e81d9ab420bd4bd708ca540a36d7c68d5882c17d5dbb2fef",
+      "sha256": "e62f2329c9635ac439fbe6624e43258145a9dc50397fb0e5261f16d6f4ab387c",
+      "git_blob": "68094d4bf61acb93fc33a1910ae4c85c9238e627",
+      "bytes": 27704
+    },
+    {
+      "path": "lib/keeper/keeper_librarian_durable_commit.mli",
+      "base_git_blob": "c46569b69b85afe7d7bcf14f2ffc1757465826f3",
+      "base_sha256": "638c4688f68383a9ee541c3ffd92047a6d49a4183b8acde59d936cb413bcc371",
+      "sha256": "378920000b0e1b0619038359e53b38041d50af1c4b6f1215eb736cb6f2640f8f",
+      "git_blob": "19ee52dc3c8aa473f909fba65093ca7c935198b3",
+      "bytes": 3555
+    },
+    {
+      "path": "lib/keeper/keeper_librarian_durable_execution.ml",
+      "base_git_blob": "5b11768886e7361dc114c660ba3a350d69847318",
+      "base_sha256": "d4d9ad6e94fddb016bd5e233e27b938dc3c295e81598677f808559ad7f985e08",
+      "sha256": "75c1482123f7398dd441f40f2604e19f37df94e3f0f54da1224fa0541a82233e",
+      "git_blob": "07d75736ae2c52c8d7491df38ed2d1b1d688616a",
+      "bytes": 20705
+    },
+    {
+      "path": "lib/keeper/keeper_librarian_durable_execution.mli",
+      "base_git_blob": "76954299b8228c850a41f56df38e560ba5497e0c",
+      "base_sha256": "e5d36dd0bc8055895183cb4f968d3fa977de45c4276a9ebbcab20e389e33436c",
+      "sha256": "de86ab4c8dbd281706b43f94a2019b552fff7bfeb109bc78cb8251f485082437",
+      "git_blob": "dae92cba1add08cedfdf661fc9dac0bc80593996",
+      "bytes": 1969
+    },
+    {
+      "path": "lib/keeper/keeper_librarian_durable_owner.ml",
+      "base_git_blob": "71058d05a9c81ca9d1a609b855de6a7301379a40",
+      "base_sha256": "2ee7e625df00b22cd14030a5d21cdb31155b7fad3d04147c3df5757dabfb01b3",
+      "sha256": "1d3893b6846dc92cfcc161d9cbe87a3dd3dc3010a1469e52c75b77dff35c08d3",
+      "git_blob": "8b4d5b3270c1f1e72e5f48542b4e5418b84d76d8",
+      "bytes": 11873
+    },
+    {
+      "path": "lib/keeper/keeper_librarian_durable_owner.mli",
+      "base_git_blob": "63d4022f5ff387eabd9968a50bd61c0319fbcaaa",
+      "base_sha256": "f8ff3938bef269dba9ba5c0974d8173c802bc5e0f6e4cfd7e6ad3a1f0d80c709",
+      "sha256": "6f534e21e3d686d295571d7314dc669593841d19ddc4d0d190ed335122206248",
+      "git_blob": "32d8eeb9cba65a91db36e9df2233f7585f7beb7a",
+      "bytes": 4366
+    },
+    {
+      "path": "test/test_keeper_librarian_durable_execution.ml",
+      "base_git_blob": "0f9dc12ddc5e95e48d41cdedc50e293d3a0060de",
+      "base_sha256": "7f83144eed9b18265c238066c65b9daa982fa66c868dd3378f97e1ebd8c48c93",
+      "sha256": "67ce60b73323f525cec8c18638e8a5e901cb5d0dc2fd04d1bad225ec7726b94d",
+      "git_blob": "5ffe626f3af09a3fcf3b2b7fbdf2b3cd4f2c54f4",
+      "bytes": 72835
+    }
+  ],
+  "patch": {
+    "path": "librarian-terminal-unknown-repair-20261023.patch",
+    "sha256": "c77acbc2f30141b2518f3a495f15c2c2ba06b8f50f83968ebd1da7dc416e3cc8",
+    "bytes": 22366
+  },
+  "checks": {
+    "parser_files": 7,
+    "parser_pass": true,
+    "diff_check_pass": true,
+    "raw": "validation-raw.json",
+    "ocaml_typecheck": false,
+    "ocaml_build": false,
+    "ocaml_tests": false,
+    "ci": false,
+    "runtime": false
+  },
+  "source_approval": false,
+  "committed": false,
+  "pushed": false,
+  "source_head": "6a0d3c3f942a8708a426efede9e272b7b7a19b3b"
+}

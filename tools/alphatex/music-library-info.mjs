@@ -4,6 +4,7 @@ import { loadProject } from './sequencer-files.mjs'
 import { midiSourceInfo, midiSourcePattern } from './midi-source.mjs'
 import { arrangementClipTime } from './arrangement.mjs'
 import { readCapture } from './session-data.mjs'
+import { midiClipPerformance, midiClipNotes } from './midi-clip-source.mjs'
 
 // Read only the selected item. Project values describe the validated document,
 // not an assertion that every external asset or output device can play it.
@@ -19,6 +20,12 @@ export async function readMusicInfo(entry, { signal } = {}) {
   if (entry.kind !== 'project') throw new Error('Select a saved project or recorded take')
   const { project, revision } = await loadProject(entry.path, { signal })
   signal?.throwIfAborted()
+  if (project.kind === 'midi-clip') {
+    const performance = midiClipPerformance(project)
+    return { kind: 'midi-clip', title: project.name, revision, ppq: performance.ppq, ticks: performance.ticks,
+      notes: midiClipNotes(project).length, messages: performance.events.length + performance.prefix.length,
+      edits: project.changes.length, originalSha256: project.original.sha256 }
+  }
   if (project.kind === 'midi-source') {
     const info = midiSourceInfo(project)
     const patterns = Array.from({ length: info.patterns }, (_, pattern) => {

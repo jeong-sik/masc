@@ -51,7 +51,8 @@ if (values.help) {
     + '  --sequence opens a new phrase editor; --project song.json reopens one; --project-root sets its folder.\n'
     + '  --music opens the terminal music library: phrases, arrangements and recorded takes.\n'
     + '  --arrange opens MIDI/WAV region editing; --project also reopens saved arrangements.\n'
-    + '  --midi-file song.mid imports a source for editing/export/MIDI audition; --midi-pattern N selects an SMF2 pattern.\n'
+    + '  --midi-file song.mid imports SMF for editing/export/MIDI audition; --midi-pattern N selects an SMF2 pattern.\n'
+    + '  --midi-file song.midi2 opens native MIDI2 Clip editing and export, preserving its original clock and UMP.\n'
     + '  --output UID selects sequencer audio output; :output UID changes it in the editor.\n'
     + '  --midi-output=ID selects MIDI output; Space pauses/resumes; :seek moves within a playing source; :stop ends it.\n'
     + '  Arrangement: combine --output and --midi-output, or use :mixed-output AUDIO_UID with per-source MIDI ports.\n'
@@ -78,7 +79,7 @@ try {
     await viewArrangement({ root: values['project-root'], output: values.output, midiOutput: values['midi-output'], stateDirectory: values['state-dir'] })
   } else if (values.sequence || values.project || values['midi-file']) {
     const { viewSequencer } = await import('./sequencer-tui.mjs')
-    const initialDocument = values['midi-file'] ? (await import('./midi-source.mjs')).importMidiSource(readFileSync(values['midi-file']), { name: basename(values['midi-file']) }) : undefined
+    const initialDocument = values['midi-file'] ? (await import('./midi-import.mjs')).importMidiDocument(readFileSync(values['midi-file']), { name: basename(values['midi-file']) }) : undefined
     await viewSequencer({ path: values.project, root: values['project-root'], soundfontPath: values.soundfont, stateDirectory: values['state-dir'],
       sessionRoot: values['session-root'], input: values.input, midi: values.midi, output: values.output, midiOutput: values['midi-output'], initialDocument, pattern: values['midi-pattern'] === undefined ? undefined : Number(values['midi-pattern']) - 1 })
   } else if (values.devices) {

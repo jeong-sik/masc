@@ -7,11 +7,13 @@ import { validateProject, sequenceEvents, PPQ } from './sequencer-project.mjs'
 import { validateArrangement } from './arrangement.mjs'
 import { validateMidiSource, exportMidiSource } from './midi-source.mjs'
 import { restoreArrangementCaptureTimes } from './captured-source-files.mjs'
+import { validateMidiClip } from './midi-clip-source.mjs'
 midiFiles(JZZ)
 const hash = data => createHash('sha256').update(data).digest('hex')
 const validateDocument = document => {
   if (document?.kind === 'arrangement') return validateArrangement(document)
   if (document?.kind === 'midi-source') return validateMidiSource(document)
+  if (document?.kind === 'midi-clip') return validateMidiClip(document)
   if (document?.kind !== undefined) throw new Error('Unsupported musical document')
   return validateProject(document)
 }
@@ -77,6 +79,7 @@ export async function saveProject(path, project, revision = null) {
   return hash(data)
 }
 export function projectMidi(project, options) {
+  if (project?.kind === 'midi-clip') throw new Error('Use native MIDI2 Clip export for this document')
   if (project?.kind === 'arrangement') throw new Error('Arrangement MIDI export requires explicit clip-state reconstruction')
   if (project?.kind === 'midi-source') {
     if (options?.loop) throw new Error('MIDI source clip export requires explicit arrangement boundaries')

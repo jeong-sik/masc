@@ -39,7 +39,7 @@ export async function openMusicEntry(entry, options) {
     case 'phrase': case 'project': case 'midi': {
       const { viewSequencer } = await import('./sequencer-tui.mjs')
       const initialDocument = entry.kind === 'midi'
-        ? (await import('./midi-source.mjs')).importMidiSource(await readFile(entry.path, { signal: options.signal }), { name: basename(entry.path) })
+        ? (await import('./midi-import.mjs')).importMidiDocument(await readFile(entry.path, { signal: options.signal }), { name: basename(entry.path) })
         : undefined
       options.signal.throwIfAborted()
       return viewSequencer({ ...options, root: options.projectRoot,
@@ -208,6 +208,9 @@ export async function viewMusic(options = {}) {
           case 'midi-source': return [info.title, `Imported MIDI · format ${info.format} · ${info.tracks} tracks`,
             `${info.patterns.length} independent pattern(s)`,
             info.patterns.map(pattern => `${pattern.index + 1}: ${seconds(pattern.durationSeconds)}, ${pattern.notes} notes`).join(' · ')]
+          case 'midi-clip': return [info.title, `Native MIDI2 Clip · ${info.ppq} ticks per quarter · ${info.ticks} ticks`,
+            `${info.notes} native NoteOn events · ${info.messages} source messages`,
+            `${info.edits} authored message edits · original SHA256 ${info.originalSha256}`]
           case 'session': return [info.title, `Recorded take · ${info.state} · ${seconds(info.durationSeconds)}`,
             `${info.channels} audio channels · ${info.sampleRate} Hz · ${info.frames} frames`,
             `${info.midiTracks} MIDI tracks · ${info.midiPackets} packets`, info.failure ?? '']

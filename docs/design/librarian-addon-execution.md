@@ -355,3 +355,39 @@ UI, other Librarian purposes or the original E03 continuity requirement. The
 server wake case substitutes only the final queue-refresh scheduling callback
 with the same Memory-lane/public-worker consumer. Tests are authored, not yet
 executed; earlier parent execution receipts are not evidence for this candidate.
+
+## Complete original input data before durable-source extraction
+
+`Keeper_librarian_input_capture` is the common pure data codec used by the
+explicit-candidate capture. It retains all ten `Keeper_librarian.input` fields,
+including ordered current facts, original Goal read failures, historical source
+spans, counterpart provenance and the complete working-context input. Previous
+pocket identity, merge references, completeness and execution basis remain data;
+they do not become current execution authority merely by being restored.
+
+A provider/checkpoint message projection is insufficient here. The current
+Agent Core checkpoint codec omits `ToolResult.json`, and its provider content
+encoder sanitizes some text and projects reasoning details through their raw
+provider value. This capture instead retains every typed message/content field,
+recursive tool-result blocks, parsed JSON presence separately from a JSON null,
+and both raw and typed reasoning detail text. Metadata is an ordered entry list,
+so repeated speaker entries remain repeated and retain their original position.
+Restoration does not reinterpret malformed/duplicate attribution as a single
+trusted speaker. Embedded JSON and speaker content remain untrusted data.
+
+The actual explicit-candidate capture uses this codec but continues to refuse
+nonempty conversation, historical spans, tool/counterpart observations and
+working-context input. A shared data representation does not permit relabeling a
+durable-history pass as an admission pass, and it does not give the worker any
+Memory, source, cursor or host gate authority.
+
+This is preparatory for a separate durable-source owner. Before that route can
+be enabled, retain and restore its actual checkpoint prefix and selected official
+fragments, both progress positions, source generation, counterpart/external
+cursor witnesses, immutable prompt and exact request. Pending must remain a
+typed suspension through the real durable consumer and queue refresh; it cannot
+be a failed range that narrows the next selection or a second builtin continuity
+judgment over the same outstanding source. Publication still requires fresh
+physical/source authority under the actual source-before-Memory locks and a
+matching original disposition receipt before cursor/ACK settlement. The data
+codec alone implements none of those effects or the remaining Librarian purposes.

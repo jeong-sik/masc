@@ -11,9 +11,7 @@ let get = function Ok value -> value | Error detail -> fail detail
 
 let proposal = function
   | Ok value -> value
-  | Error (M.Proposal_invalid error) -> fail (L.parse_error_to_string error)
-  | Error (M.Preparation_invalid detail) -> fail detail
-  | Error (M.Request_invalid detail) -> fail detail
+  | Error e -> fail (M.error_to_string e)
 
 let fact claim =
   Keeper_memory_os_types.observed ~claim ~category:Keeper_memory_os_types.Fact
@@ -88,7 +86,7 @@ let test_create_and_roundtrip ~owner ~destination ~prepared =
     M.create ~request_id:"req-1" ~owner ~destination ~preparation:prepared
       ~answer_text:"{not json}" ~captured_at:123.
     |> get in
-  let restored = captured |> M.to_json |> M.of_json |> get in
+  let restored = captured |> M.to_json |> M.of_json |> Result.map_error M.error_to_string |> get in
   check string "request id survives" "req-1" (M.request_id restored);
   check string "answer bytes survive verbatim" "{not json}"
     (M.answer_text restored);

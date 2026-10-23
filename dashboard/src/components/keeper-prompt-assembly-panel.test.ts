@@ -22,6 +22,7 @@ function prompt(overrides: Partial<DashboardPromptItem>): DashboardPromptItem {
     char_count: 0,
     required_file: true,
     template_variables: [],
+    authoring_issues: [],
     ...overrides,
   }
 }

@@ -138,29 +138,6 @@ let test_a_start_past_the_librarian_point_decodes () =
        (decode
           {|{"kind":"past_librarian_point","librarian_end_atom":2,"front":{"kind":"librarian_progress","end_atom":2}}|}))
 
-let test_an_evicted_refusal_origin_decodes () =
-  let json =
-    Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v5","checkpoint_messages":1,"wake_line_bytes":1,
-         "walk":{"lane_id":"r","declared":["r"]},
-         "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
-           "parts":{"error":"not measured"},"history_atoms":4,
-           "carried":{"first_atom":2,"kept_atoms":2,"transmitted_bytes":300,"preamble_bytes":null,
-                      "origin":{"kind":"evicted_after_refusal","retry":3},"counted_tokens":null},
-           "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
-  in
-  match Inspector.decode_forecast json with
-  | Ok
-      { candidates =
-          [ { carried = Some { origin = Inspector.Carried_evicted_after_refusal { retry = 3 }; _ }
-            ; _
-            }
-          ]
-      ; _
-      } -> ()
-  | Ok _ -> Alcotest.fail "the eviction origin lost its retry"
-  | Error detail -> Alcotest.fail ("the eviction origin decodes: " ^ detail)
-
 let test_a_turn_start_origin_decodes () =
   let json =
     Yojson.Safe.from_string
@@ -572,8 +549,6 @@ let () =
             test_the_forecast_decodes_the_servers_shape
         ; Alcotest.test_case "null marks, count, a record origin and a layout decode" `Quick
             test_null_marks_count_a_record_origin_and_a_layout_decode
-        ; Alcotest.test_case "an evicted refusal origin decodes" `Quick
-            test_an_evicted_refusal_origin_decodes
         ; Alcotest.test_case "a refused seed origin decodes" `Quick
             test_a_refused_seed_origin_decodes
         ; Alcotest.test_case "a start past the Librarian point decodes" `Quick

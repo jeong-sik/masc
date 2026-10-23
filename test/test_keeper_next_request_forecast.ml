@@ -1200,12 +1200,11 @@ let test_the_json_carries_the_walk_and_each_place () =
     "the assignment names no configured lane or runtime"
     (refused |> member "walk" |> member "refusal" |> to_string)
 
-let test_observed_boundary_forecast ~marks ~samples ~expected_step ~expected_front () =
+let test_observed_boundary_forecast ~marks ~samples ~expected_front () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   let module Ledger = Keeper_model_input_ledger in
-  let module Range = Keeper_carried_range in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Model_catalog.global () in
   let base_path = Filename.temp_file "forecast-boundary-" "" in
@@ -1286,17 +1285,12 @@ let test_observed_boundary_forecast ~marks ~samples ~expected_step ~expected_fro
     | None -> Alcotest.fail "observed ledger missing"
   in
   let observed = lookup () in
-  let step = Option.map (fun marks -> Range.at_turn_boundary ~marks observed) marks in
-  Alcotest.(check bool) "fixture reaches the intended marks branch" true
-    (match expected_step, step with
-     | `No_marks, None -> true
-     | `Evicted_to expected, Some (Range.Evicted { first_atom; _ }) -> first_atom = expected
-     | (`No_marks | `Evicted_to _), (None | Some (Range.Evicted _ | Range.Unchanged _)) -> false);
   let forecast = Keeper_next_request_forecast.forecast ~config ~keeper_name |> unwrap in
   Alcotest.(check bool) "forecast preserves the complete observed Table value" true
     (lookup () = observed);
   match forecast.candidates with
-  | [ { carried = Some carried; _ } ] ->
+  | [ { carried = Some carried; marks = declared_marks; _ } ] ->
+    Alcotest.(check bool) "the actual candidate retains its declared marks" true (declared_marks = marks);
     Alcotest.(check (option int)) "last counted stays the actual observation"
       observed.total_tokens carried.counted_tokens;
     Alcotest.(check int) "forecast opens on the ledger's front, as the driver does" expected_front
@@ -1312,17 +1306,15 @@ let () =
     [ ( "boundary"
       , let marks high = Some { Runtime_schema.high_water_tokens = high; low_water_tokens = 600 } in
         (* An initial prefix-only observation then three four-atom blocks,
-           each counted at 400 tokens, gives total 1300. Marks at 1200 would
-           remove two blocks, but a Keeper turn on a trace always has a
-           continuity choice and the driver judges marks only without one,
-           so the ledger's front stays at atom 0. *)
+           each counted at 400 tokens, gives total 1300. Forecasting reports
+           the actual candidate's declared marks while preserving the complete
+           observed ledger and its front at atom 0. *)
         let samples = [ 0, Some 100; 4, Some 500; 8, Some 900; 12, Some 1300 ] in
-        [ Alcotest.test_case "marks that would evict do not move the forecast's front" `Quick
+        [ Alcotest.test_case "declared marks preserve the observed front" `Quick
             (test_observed_boundary_forecast ~marks:(marks 1200) ~samples
-               ~expected_step:(`Evicted_to 8)
                ~expected_front:0)
         ; Alcotest.test_case "no marks preserve the observed front" `Quick
-            (test_observed_boundary_forecast ~marks:None ~samples ~expected_step:`No_marks ~expected_front:0)
+            (test_observed_boundary_forecast ~marks:None ~samples ~expected_front:0)
         ] )
     ; ( "parts"
       , [ Alcotest.test_case "a first-round composition yields the fixed and pinned parts"

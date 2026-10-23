@@ -10,9 +10,10 @@
     [Keeper_claude_code_runtime] and [Keeper_codex_runtime] wire it to their
     real provider call, which has no unit-level fixture
     in this suite — see [test_keeper_turn_driver_failover.ml] for the
-    candidate-rotation layer's equivalent boundary. The Agent Core lane's
-    retry is [carried_range_eviction_sequence], covered in
-    [test_keeper_carried_range_eviction.ml]. *)
+    candidate-rotation layer's equivalent boundary. Agent Core Keeper-history
+    recovery uses [turn_boundary_resend_sequence] and memory receipt fences,
+    covered in [test_keeper_carried_range_eviction.ml]. Current-turn tool-result
+    demotion is covered in [test_keeper_model_input_demotion.ml]. *)
 
 module Try_provider = Masc.Keeper_turn_driver_try_provider
 

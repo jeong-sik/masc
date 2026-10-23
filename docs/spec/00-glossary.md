@@ -4026,20 +4026,20 @@ status: reference
 
 **Seed (시작 위치 근거)**
 : 요청에 실리는 범위가 어디서 시작하는지를 그 근거와 함께 적은 값
-  (`Keeper_carried_front.seed`). 시작 Atom의 번호(`first_atom`)와 그 Atom을 여는
-  Message의 digest(`front_digest`), 그리고 그 위치가 어디서 왔는지(`source`)로
-  이뤄진다. `Carried Front`가 흡수 지점(가장 오래된 Atom)이라면 시작 위치 근거는 그 범위의
-  시작을 정하는 값이다. 프로세스가 (Keeper, runtime) 쌍의 원장을 쥐고 있으면
-  위치는 원장의 것이고(`Ledger`), 없으면 — 부팅 뒤 첫 turn이거나 이 runtime의
-  첫 turn이면 — 가장 새 turn 기록이 실제 provider 응답과 이어진 범위가 위치가
-  된다(`Turn_record`). 거절이 앞을 옮긴 뒤에는 그 이동을 이름으로 남긴다
-  (`Halved_after_refusal`·`Evicted_after_refusal`). 시작 위치 근거로 보낸 범위가 거절돼 이번
-  턴의 시작부터 다시 보낼 때도 이름을 남긴다(`Turn_start_after_seed_refusal`).
-  Seed와 이월된 앞머리를 포함한 범위 구성에서 거절이 앞을 옮기는 것은 크기 때문인 typed 거절
-  (`ContextOverflow`·`Request_body_refused_by_provider`)뿐이다. 모델링되지 않은 400/422
-  (`Unknown_invalid_request`, 도구 스키마 오류나 지원하지 않는 인자 등)는 오래된
-  맥락을 자르거나(evict/halve) 강등하지 않고 받은 그대로 반환하여, 다음 턴이 좁혀진
-  앞머리가 아니라 정상 수용된 전체 범위를 구성하게 한다(#38286).
+  (`Keeper_carried_front.seed`). 시작 Atom 번호(`first_atom`), 그 위치의 증거
+  (`Model_input_front.t`), 위치의 출처(`source`)를 함께 가진다. 전송 Atom을 여는
+  Message의 digest 또는 History 끝을 증명하는 digest로 그 위치를 확인한다.
+  프로세스가 (Keeper, runtime) 쌍의 유효한 관측 원장을 쥐고 있으면 그 원장의
+  위치를 쓰고(`Ledger`), 없으면 가장 새 turn 기록이 실제 provider 응답과 이어진
+  범위에서 위치를 읽는다(`Turn_record`). 지속 Keeper의 요청 범위가 거절돼 마지막
+  완료 turn 경계부터 다시 보낼 때는 시작한 곳에 따라
+  `Turn_start_after_seed_refusal` 또는 `Turn_start_after_librarian_refusal`로 남긴다.
+  경계 재전송은 typed 크기 거절과 `Unknown_invalid_request`에 답한다
+  (`boundary_resend_on`). 재전송도 typed 크기 외의 오류로 거절되면 이전 앞머리를
+  복원한다. Memory 재투영과 이번 turn의 도구 결과 강등은 typed 크기 거절
+  (`ContextOverflow`·`Request_body_refused_by_provider`)에만 답한다
+  (`is_size_refusal`). 효과·checkpoint 재시도 권한은 각 경로에서 따로 확인한다.
+  프로그램 소유 완료 검토는 `Completion_review`로 구분하고 원래 증거를 유지한다.
   위치는 번호와 digest의 쌍이라, 손에 든 History가 같은 번호를 같은 Message로
   열 때만 쓴다(`for_history`). History의 Atom 개수는 비교하지 않는다.
   RFC 코퍼스는 이 자리를 **씨앗**이라 부른다. 이 사전은 뜻이 드러나게 시작 위치 근거라고 풀어 쓴다.
@@ -4055,11 +4055,11 @@ status: reference
   요청을 기록한다. 후자의 경우에는 끝 digest가 없어 비어 있지 않은 History에서 위치의 증거로
   재사용할 수 없다. 입력 관측 자체가 없다는 뜻은 model-input window 기록의 부재로 남는다.
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
-  그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
+  그 위치를 쓴다. 완료 turn 경계로 옮긴 위치는 같은 turn의 다음 후보에도 전달한다.
   다른 History의 위치는 witness digest가 맞지 않으면 쓰지 않는다.
   → [Model_input_front.t](../../lib/types/model_input_front.mli)
   이 위치의 출처(`Keeper_carried_front.origin`)는 여섯이다 — `Carried`(seed에서 온
-  위치: 원장, turn 기록, 거절 뒤 반 자르기·묶음 비우기, 시작 위치 근거 범위 거절 뒤 turn 경계),
+  위치: 원장, turn 기록, 시작 위치 근거나 Librarian 범위 거절 뒤 turn 경계),
   `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),
   `Librarian_progress`(저장본이 이 History에 맞지 않을 때 Librarian의 durable Read
   Position), `Past_librarian_point`(Librarian 지점이 뒤처져 있고 provider가 수용한

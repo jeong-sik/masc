@@ -3,8 +3,6 @@
 type source =
   | Ledger
   | Turn_record of { turn : int }
-  | Halved_after_refusal of { retry : int }
-  | Evicted_after_refusal of { retry : int }
   | Turn_start_after_seed_refusal
   | Turn_start_after_librarian_refusal
 
@@ -314,17 +312,9 @@ let warn_if_origin_is_unknown_start ~keeper_name = function
   | Carried _ | Librarian_snapshot _ | Librarian_progress _ | Past_librarian_point _ | Turn_start _ -> ()
 ;;
 
-let halve ~first_atom ~atom_count =
-  let first_atom = clamp ~atom_count first_atom in
-  let carried = atom_count - first_atom in
-  if carried <= 1 then None else Some (first_atom + (carried / 2))
-;;
-
 let source_to_string = function
   | Ledger -> "ledger"
   | Turn_record { turn } -> Printf.sprintf "turn_record#%d" turn
-  | Halved_after_refusal { retry } -> Printf.sprintf "halved_after_refusal#%d" retry
-  | Evicted_after_refusal { retry } -> Printf.sprintf "evicted_after_refusal#%d" retry
   | Turn_start_after_seed_refusal -> "turn_start_after_seed_refusal"
   | Turn_start_after_librarian_refusal -> "turn_start_after_librarian_refusal"
 ;;
@@ -353,10 +343,6 @@ let rec origin_to_json = function
   | Carried Ledger -> `Assoc [ "kind", `String "ledger" ]
   | Carried (Turn_record { turn }) ->
     `Assoc [ "kind", `String "turn_record"; "turn", `Int turn ]
-  | Carried (Halved_after_refusal { retry }) ->
-    `Assoc [ "kind", `String "halved_after_refusal"; "retry", `Int retry ]
-  | Carried (Evicted_after_refusal { retry }) ->
-    `Assoc [ "kind", `String "evicted_after_refusal"; "retry", `Int retry ]
   | Carried Turn_start_after_seed_refusal ->
     `Assoc [ "kind", `String "turn_start_after_seed_refusal" ]
   | Carried Turn_start_after_librarian_refusal ->

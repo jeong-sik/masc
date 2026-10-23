@@ -1062,17 +1062,6 @@ let new_attempt_state (ctx : try_provider_ctx) =
   }
 ;;
 
-let move_ledger_front ledger ~first_atom ~front_digest =
-  match !ledger with
-  | None -> false
-  | Some current ->
-    (match Keeper_model_input_ledger.move_front current ~first_atom ~front_digest with
-     | None -> false
-     | Some moved ->
-       ledger := Some moved;
-       true)
-;;
-
 (* An empty base path turns demotion off, so no atom is below the boundary. *)
 let applied_demote_before ~base_path ~demote_before =
   if String.equal base_path "" then 0 else demote_before
@@ -2149,11 +2138,9 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     (* Usage observation (RFC keeper-context-window-in-tokens): the
        provider's inclusive prompt total for the request the composition just
        built. The ledger records the request's carried range against the
-       count, one line per provider call, so block sizes, front moves and
-       tail changes are read from the provider's numbers. The marks are not
-       judged here: a front moved after a response would change the prefix of
-       the turn's next request ([evict_at_turn_boundary]). Composed outermost
-       and always [Continue], so it neither delays nor decides anything the
+       count, one line per provider call, so the accepted range and tail
+       changes remain observations of the provider's actual input. Composed
+       outermost and always [Continue], so it neither delays nor decides anything the
        turn's own hooks do. *)
     let ledger_hooks =
       { Agent_core.Hooks.empty with
@@ -2660,7 +2647,7 @@ let default_context_overflow_shrink_capacity ~capacity =
    shorter range of the SAME conversation can still answer the same turn.
    Enumerated so a new variant forces a decision here instead of a silent
    [false]. *)
-let refusal_evicts = function
+let is_size_refusal = function
   | Agent_core.Error.Api (ContextOverflow _)
   | Agent_core.Error.Api
       (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) -> true
@@ -2711,7 +2698,7 @@ let refusal_evicts = function
    Ok/Error sequence to verify the halving sequence, the walk to the floor,
    and the same-run-retry-authority gate on their own.
 
-   Classifies with [refusal_evicts] above -- the context overflow and the
+   Classifies with [is_size_refusal] above -- the context overflow and the
    provider's refusal of the request body, enumerated exhaustively -- rather
    than [Keeper_error_classify.is_context_overflow]: the latter depends on
    [Keeper_turn_driver], which depends on this module (it calls
@@ -2740,7 +2727,7 @@ let context_overflow_shrink_sequence
     match attempt ~capacity with
     | Ok _ as ok -> ok
     | Error error as failed ->
-      if refusal_evicts error && same_run_retry_authorized ()
+      if is_size_refusal error && same_run_retry_authorized ()
       then (
         match on_memory_capacity_refusal ~refusal:error with
         | Error _ -> failed
@@ -2796,38 +2783,13 @@ let context_overflow_shrink_sequence
   go ~capacity:starting_capacity ~shrink_attempt:0
 ;;
 
-type eviction_retry =
-  | Evicted_blocks of Keeper_carried_range.step
-  | Halved_range of
-      { first_atom : int
-      ; atom_count : int
-      }
-
-(* The eviction-retry policy over an injected [attempt], testable without a
-   provider (RFC keeper-context-window-in-tokens §10.5). A refusal that
-   [refusal_evicts] is answered from the pair's ledger with
-   [Keeper_carried_range.after_overflow]: the oldest blocks leave and the
-   same candidate is asked again. When the ledger has no block structure to
-   walk — no usage counted yet on this pair, or a single block — the range
-   halves toward the newest atom instead, and stops at a single atom, where
-   the refusal stands and [current_turn_demotion_sequence] answers it. Every
-   step is a position on the atom axis chosen against the
-   provider's verdict; nothing measures the request against a limit of its
-   own. Every retry follows a move: [evict] and [halve] answer whether the
-   next composition carries a strictly later front, and [false] ends the
-   sequence with the refusal in hand, so no retry resends the range that was
-   refused. [same_run_retry_authorized]
-   is the same gate [Keeper_turn_driver]'s declared-lane walk applies before
-   rotating candidates: a retry here is a same-run retry too, so it must not
-   fire once AGENT_CORE has mutated agent state at a durable checkpoint
-   stage. *)
 (* The refusals the turn boundary resend answers (RFC librarian-lifecycle
    §4.10, rule 1). A typed size refusal, and also a refusal whose reason
    agent core does not model: every live size refusal measured so far
    arrives that way -- a 400 whose only size signal is its sentence, with
    no typed code (RFC librarian-lifecycle §4.10 lists the measured wires) --
    and reading the sentence
-   would be a string classifier. [refusal_evicts] names only the two typed
+   would be a string classifier. [is_size_refusal] names only the two typed
    size refusals (#38286); this check keeps the third.
    - A refusal that was not about size draws the same refusal from the
      boundary. The held front is then given back ([turn_boundary_resend_sequence]),
@@ -2885,7 +2847,7 @@ let boundary_resend_on = function
    never halved on this path.
 
    The front stays held only when the boundary request is accepted or is
-   refused for a typed size ([refusal_evicts]). A boundary request refused
+   refused for a typed size ([is_size_refusal]). A boundary request refused
    for any other reason says the boundary did not answer the refusal, so
    the front held before it comes back: without that, the later candidate
    the walk asks opens at the boundary, its success records that boundary as
@@ -2923,7 +2885,7 @@ let turn_boundary_resend_sequence
           (match attempt () with
            | Ok _ as ok -> ok
            | Error resent as refused ->
-             if not (refusal_evicts resent) then restore_front before;
+             if not (is_size_refusal resent) then restore_front before;
              refused)
         | Some (_ : Keeper_carried_front.seed) | None -> failed)
      | Some
@@ -2937,102 +2899,10 @@ let turn_boundary_resend_sequence
      | None -> failed)
 ;;
 
-let carried_range_eviction_sequence
-      ~same_run_retry_authorized
-      ~(ledger : unit -> Keeper_model_input_ledger.t option)
-      ~(last_request : unit -> Keeper_model_input_ledger.request option)
-      ~marks
-      ~(evict : Keeper_carried_range.step -> bool)
-      ~hold_front
-      ~(halve : first_atom:int -> atom_count:int -> retry:int -> bool)
-      ~(on_retry : retry:int -> eviction_retry -> unit)
-      ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
-      ()
-  : ('ok, Agent_core.Error.t) result
-  =
-  let halve_last_request ~retry ~failed ~continue_ =
-    match last_request () with
-    | None -> failed
-    | Some (request : Keeper_model_input_ledger.request) ->
-      (match
-         Keeper_carried_front.halve
-           ~first_atom:request.first_atom
-           ~atom_count:request.atom_count
-       with
-       | None -> failed
-       | Some first_atom ->
-         if halve ~first_atom ~atom_count:request.atom_count ~retry
-         then (
-           on_retry ~retry (Halved_range { first_atom; atom_count = request.atom_count });
-           continue_ ())
-         else failed)
-  in
-  let rec go ~retry =
-    match attempt () with
-    | Ok _ as ok -> ok
-    | Error error as failed ->
-      if not (refusal_evicts error && same_run_retry_authorized ())
-      then failed
-      else (
-        let retry = retry + 1 in
-        let continue_ () = go ~retry in
-        match ledger () with
-        | Some ledger ->
-          (match Keeper_carried_range.after_overflow ~marks ledger with
-           | Keeper_carried_range.Evicted { first_atom; front_digest; _ } as step ->
-             (* Another candidate may have moved this turn's front beyond
-                this ledger's blocks. Evicting one of those blocks would
-                resend the same carried range. Halve the actual request. *)
-             let advances_request =
-               match last_request () with
-               | Some request -> first_atom > request.Keeper_model_input_ledger.first_atom
-               | None -> true
-             in
-             if not advances_request
-             then halve_last_request ~retry ~failed ~continue_
-             else if evict step
-             then (
-               hold_front
-                 { Keeper_carried_front.first_atom
-                 ; front = Model_input_front.At_atom front_digest
-                 ; source = Keeper_carried_front.Evicted_after_refusal { retry }
-                 };
-               on_retry ~retry (Evicted_blocks step);
-               continue_ ())
-             else failed
-           | Keeper_carried_range.Unchanged _ -> halve_last_request ~retry ~failed ~continue_)
-        | None -> halve_last_request ~retry ~failed ~continue_)
-  in
-  go ~retry:0
-;;
-
-(* One halving after a refusal, answering whether the retry carries a
-   strictly later front. [first_atom] is the halved position, after the front
-   the refused request carried; [digest_at] is the lookup over the history
-   that request was composed from, which the retry composes from again.
-   - No digest at [first_atom]: nothing names the new front. [false].
-   The seed is held whether the pair's ledger moves or not: it may predate
-   this position, or be absent. The composition reads the held position on
-   every candidate, so the next request advances in all three cases. *)
-let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
-  match Option.bind digest_at (fun digest_at -> digest_at first_atom) with
-  | None -> false
-  | Some front_digest ->
-    (* The ledger may have nothing to move, while halving still succeeds by
-       holding this front for the next attempt (RFC section 10.3). *)
-    let (_ : bool) = move_ledger ~first_atom ~front_digest in
-    hold
-      { Keeper_carried_front.first_atom
-      ; front = Model_input_front.At_atom front_digest
-      ; source = Keeper_carried_front.Halved_after_refusal { retry }
-      };
-    true
-;;
-
 (* #28845's step, the last answer to a size refusal on every continuity
    (RFC keeper-context-window-in-tokens §10.4, §13.9). When [first] -- the
    lane's own answer, which on a turn with an absorbed point is one attempt --
-   ends with a refusal [refusal_evicts] names, [same_run_retry_authorized]
+   ends with a refusal [is_size_refusal] names, [same_run_retry_authorized]
    holds, and [demotable] names the refused request's atom count because
    demoting this turn's tool results in those atoms would carry fewer bytes,
    [demote] makes the compositions demote them and [resend] runs once on the
@@ -3052,7 +2922,7 @@ let current_turn_demotion_sequence
   match first () with
   | Ok _ as ok -> ok
   | Error error as failed ->
-    if refusal_evicts error && same_run_retry_authorized ()
+    if is_size_refusal error && same_run_retry_authorized ()
     then (
       match demotable () with
       | Some refused_atom_count ->
@@ -3060,38 +2930,6 @@ let current_turn_demotion_sequence
         resend ()
       | None -> failed)
     else failed
-;;
-
-(** Same as [run_try_provider], except a refusal that says the request
-    outgrew its carrier moves the carried front and retries the SAME
-    candidate, before returning to the caller, which still owns
-    declared-lane candidate rotation and cascade fallback for every other
-    error and for a refusal that survives every move. The front the retry
-    composes from is the ledger's after the eviction, or, before any usage
-    on this pair, the halved range, which the turn holds for every
-    candidate the lane walks to. *)
-(* The marks, judged once per candidate turn before its first composition
-   (RFC keeper-context-window-in-tokens §10.5): above the high-water mark the
-   oldest blocks leave until the projected total is under the low-water mark,
-   and every request of the turn composes from that one front. Without marks,
-   only a refusal moves the front. *)
-let evict_at_turn_boundary ~keeper_name ~runtime_id ~context_marks ledger =
-  match context_marks with
-  | None -> ()
-  | Some marks ->
-    (match !ledger with
-     | None -> ()
-     | Some current ->
-       let projected, step = Keeper_carried_range.apply_turn_boundary ~marks current in
-       ledger := Some projected;
-       (match step with
-        | Keeper_carried_range.Unchanged _ -> ()
-        | Keeper_carried_range.Evicted _ ->
-          Log.Keeper.info
-            ~keeper_name
-            "model input carried range evicted runtime=%s %s"
-            runtime_id
-            (Yojson.Safe.to_string (Keeper_carried_range.step_to_json step))))
 ;;
 
 let native_retry_allowed (ctx : try_provider_ctx) =
@@ -3107,7 +2945,7 @@ let memory_capacity_retry_sequence ~same_run_retry_authorized
   let rec go () = match attempt () with
     | Ok _ as result -> result
     | Error error as failed ->
-      if not (refusal_evicts error && same_run_retry_authorized ()) then failed
+      if not (is_size_refusal error && same_run_retry_authorized ()) then failed
       else match on_memory_capacity_refusal ~refusal:error with
         | Error _ -> on_projection_failure (); failed
         | Ok Keeper_memory_delivery_reprojection.Unchanged -> failed
@@ -3484,9 +3322,6 @@ module For_testing = struct
   let retry_without_thinking_admitted = retry_without_thinking_admitted
   let memoize_message_measurement = memoize_message_measurement
   let carried_front = carried_front
-  let move_ledger_front = move_ledger_front
-  let evict_at_turn_boundary = evict_at_turn_boundary
-  let halve_front = halve_front
   let message_measurement_hash = Agent_core.Types.Message_value.hash
   let compose_carried_model_input = compose_carried_model_input
   let request_view = request_view

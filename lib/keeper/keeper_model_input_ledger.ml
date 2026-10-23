@@ -323,49 +323,6 @@ let observe ~digest_at (previous : t option) (request : request) (usage : usage 
 
 let holds ~digest_at (t : t) = history_holds ~digest_at t.last
 
-(* Apply an eviction the carried range decided: the same trimming a request
-   would report as [Front_moved], applied now so the next composition (the
-   turn's first, or a refusal retry) sees the moved front. A front inside a
-   block restarts the blocks from the new front with the total unknown, as
-   [observe] would. The moved front is recorded with the message that opens
-   it, so the next composition and the next [observe] check the position
-   they compose from; the last atom's digest stays the last request's.
-
-   [None] when nothing moves, so a caller that retries on a move never asks
-   again with the front it already had: a front at or behind the current one,
-   a front at or past the last request's atom count (there is no atom there to
-   carry from), or a ledger whose last request carried no atom and so has no
-   front. *)
-let move_front (t : t) ~first_atom ~front_digest =
-  match t.last.ends with
-  | No_atom_carried -> None
-  | Carried_atoms { front_digest = _; end_digest }
-    when first_atom > t.last.first_atom && first_atom < t.last.atom_count ->
-    let last =
-      { t.last with first_atom; ends = Carried_atoms { front_digest; end_digest } }
-    in
-    (match trim_front t.blocks ~first_atom with
-     | `Cut ->
-       Some
-         { t with
-           total_tokens = None
-         ; measured_end_atom = None
-         ; measured_demote_before = None
-         ; blocks = base_blocks last
-         ; last
-         }
-     | `Trimmed (kept, evicted_tokens) ->
-       let total_tokens, measured_end_atom, measured_demote_before =
-         match t.total_tokens, evicted_tokens with
-         | Some total, Some evicted ->
-           Some (total - evicted), t.measured_end_atom, t.measured_demote_before
-         | Some _, None | None, (Some _ | None) -> None, None, None
-       in
-       Some
-         { t with total_tokens; measured_end_atom; measured_demote_before; blocks = kept; last })
-  | Carried_atoms _ -> None
-;;
-
 let known_tokens t =
   List.fold_left
     (fun sum b -> match b.tokens with Some n -> sum + n | None -> sum)

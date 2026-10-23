@@ -69,14 +69,6 @@ let block_digests (t : Ledger.t) =
   List.map (fun (b : Ledger.block) -> b.block_first_digest) t.blocks
 ;;
 
-(* The ledger a move produced; a test that expects no move says so with
-   [Option.is_none] instead. *)
-let moved_to t ~first_atom =
-  match Ledger.move_front t ~first_atom ~front_digest:(opener first_atom) with
-  | Some moved -> moved
-  | None -> failf "expected the front to move to %d" first_atom
-;;
-
 let test_first_request_starts_with_one_unmeasured_block () =
   let o = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
   check string "event" "started" (Ledger.event_to_string o.event);
@@ -353,9 +345,8 @@ let test_json_reports_counts_not_the_block_list () =
   check int "known tokens" 300 (ledger |> member "known_tokens" |> to_int)
 ;;
 
-(* Four measured blocks on a known total, as the measured-eviction test
-   builds them: [10,12) 300, [12,14) 200, [14,16) 200, [16,18) 250, total
-   1150 measured up to 18. *)
+(* Four blocks measured by actual request observations: [10,12) 300,
+   [12,14) 200, [14,16) 200, [16,18) 250, total 1150 measured up to 18. *)
 let four_measured_blocks () =
   let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
   let o2 =
@@ -472,55 +463,6 @@ let test_prefix_digest_is_stable_and_separates_prompts () =
   check int "sha256 hex" 64 (String.length a)
 ;;
 
-let test_move_front_over_measured_blocks_adjusts_the_total () =
-  let t = four_measured_blocks () in
-  let moved = moved_to t ~first_atom:14 in
-  check blocks_testable "two blocks left"
-    [ 14, 16, Some 200; 16, 18, Some 250 ]
-    (block_tokens moved);
-  check (option int) "total less the evicted 500" (Some 650) moved.total_tokens;
-  check (option int) "measured end kept" (Some 18) moved.measured_end_atom;
-  check int "front recorded" 14 moved.last.first_atom;
-  let o = step (Some moved) (request ~first_atom:14 ~atom_count:20 ()) (Some (usage 800)) in
-  check string "the next request reads an unchanged front" "appended_measured"
-    (Ledger.event_to_string o.event);
-  check (option int) "delta against the adjusted total" (Some 150) o.delta_tokens
-;;
-
-let test_move_front_over_the_cold_block_blanks_the_total () =
-  let o1 = step None (request ~first_atom:0 ~atom_count:10 ()) (Some (usage 1_000)) in
-  let o2 =
-    step (Some o1.ledger) (request ~first_atom:0 ~atom_count:12 ()) (Some (usage 1_300))
-  in
-  let moved = moved_to o2.ledger ~first_atom:10 in
-  check blocks_testable "the measured block stays" [ 10, 12, Some 300 ] (block_tokens moved);
-  check (option int) "total unknown" None moved.total_tokens;
-  check (option int) "measured end unknown" None moved.measured_end_atom
-;;
-
-let test_move_front_that_does_not_advance_changes_nothing () =
-  let t = four_measured_blocks () in
-  let stays first_atom =
-    Option.is_none (Ledger.move_front t ~first_atom ~front_digest:(opener first_atom))
-  in
-  check bool "the same front is no move" true (stays 10);
-  check bool "a front behind the current one is no move" true (stays 3);
-  (* The last request carried atoms 10 to 17: there is no atom at 18 or past
-     it to carry from, and a retry from there would carry the same newest atom
-     it was refused with. *)
-  check bool "a front at the last request's atom count is no move" true (stays 18);
-  check bool "a front past it is no move" true (stays 25)
-;;
-
-let test_move_front_inside_a_block_restarts_the_blocks () =
-  let t = four_measured_blocks () in
-  let moved = moved_to t ~first_atom:13 in
-  check blocks_testable "one unknown block from the new front" [ 13, 18, None ] (block_tokens moved);
-  check (option int) "total unknown" None moved.total_tokens;
-  check (list string) "the restarted block is named by the moved front" [ opener 13 ]
-    (block_digests moved)
-;;
-
 let test_table_observations_are_session_scoped () =
   Ledger.Table.For_testing.reset ();
   let keeper_name = "alpha" and runtime_id = "r" and session_id = "trace-1" in
@@ -579,8 +521,6 @@ let test_a_request_without_an_atom_names_no_position () =
   check bool "no position" true (empty.ends = Ledger.No_atom_carried);
   let o1 = step None empty (Some (usage 500)) in
   check blocks_testable "no block" [] (block_tokens o1.ledger);
-  check bool "no front to move" true
-    (Option.is_none (Ledger.move_front o1.ledger ~first_atom:0 ~front_digest:(opener 0)));
   let o2 =
     step (Some o1.ledger) (request ~first_atom:0 ~atom_count:3 ()) (Some (usage 800))
   in
@@ -625,26 +565,26 @@ let test_both_positions_holding_keeps_appending () =
     (block_digests o3.ledger)
 ;;
 
-(* An eviction moves the front to a block boundary and records the digest the
-   block carries, so the next request's check reads the moved front against
-   the message that opens it, not the old front's. *)
-let test_a_moved_front_is_checked_at_its_own_position () =
+(* A provider-observed request records its own nonzero front and opener
+   digest. The next observation checks that position against its current
+   message rather than reusing the previous request's older front. *)
+let test_a_provider_observed_front_is_checked_at_its_own_position () =
   let t = four_measured_blocks () in
-  let moved = moved_to t ~first_atom:14 in
-  (match moved.last.ends with
+  let observed = step (Some t) (request ~first_atom:14 ~atom_count:18 ()) None in
+  (match observed.ledger.last.ends with
    | Ledger.Carried_atoms { front_digest; end_digest } ->
-     check string "the moved front's digest" (opener 14) front_digest;
+     check string "the observed front's digest" (opener 14) front_digest;
      check string "the last atom's digest is the last request's" (opener 17) end_digest
    | Ledger.No_atom_carried -> fail "the ledger carried atoms");
   let replaced i = if i = 14 then Some "another message" else history ~atom_count:20 i in
   let o =
     step
       ~digest_at:replaced
-      (Some moved)
+      (Some observed.ledger)
       (request ~digest_at:replaced ~first_atom:14 ~atom_count:20 ())
       (Some (usage 800))
   in
-  check string "another message at the moved front restarts" "history_reset"
+  check string "another message at the observed front restarts" "history_reset"
     (Ledger.event_to_string o.event)
 ;;
 
@@ -695,20 +635,15 @@ let () =
         ; test_case "lookup without the appended atom" `Quick
             test_a_lookup_without_the_appended_atom_restarts
         ; test_case "both positions hold" `Quick test_both_positions_holding_keeps_appending
-        ; test_case "moved front checked at its position" `Quick
-            test_a_moved_front_is_checked_at_its_own_position
+        ; test_case "provider-observed front checked at its position" `Quick
+            test_a_provider_observed_front_is_checked_at_its_own_position
         ] )
     ; "json", [ test_case "counts only" `Quick test_json_reports_counts_not_the_block_list ]
     ; ( "inputs"
       , [ test_case "zero usage" `Quick test_zero_input_tokens_is_not_a_usage
         ; test_case "prefix digest" `Quick test_prefix_digest_is_stable_and_separates_prompts
         ] )
-    ; ( "move_front"
-      , [ test_case "over measured blocks" `Quick test_move_front_over_measured_blocks_adjusts_the_total
-        ; test_case "over the cold block" `Quick test_move_front_over_the_cold_block_blanks_the_total
-        ; test_case "not advancing" `Quick test_move_front_that_does_not_advance_changes_nothing
-        ; test_case "inside a block" `Quick test_move_front_inside_a_block_restarts_the_blocks
-        ; test_case "session-scoped observation" `Quick test_table_observations_are_session_scoped
-        ] )
+    ; ( "table"
+      , [ test_case "session-scoped observation" `Quick test_table_observations_are_session_scoped ] )
     ]
 ;;

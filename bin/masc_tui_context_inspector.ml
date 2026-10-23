@@ -81,8 +81,6 @@ type forecast_parts =
 type forecast_carried_origin =
   | Carried_from_ledger
   | Carried_from_turn_record of { turn : int }
-  | Carried_halved_after_refusal of { retry : int }
-  | Carried_evicted_after_refusal of { retry : int }
   | Carried_turn_start_after_seed_refusal
   | Carried_turn_start_after_librarian_refusal
   | Carried_turn_start of { end_atom : int }
@@ -969,14 +967,6 @@ let rec decode_forecast_origin = function
       let* turn_json = field "turn" fields in
       let* turn = nonnegative_int "origin.turn" turn_json in
       Ok (Carried_from_turn_record { turn })
-    else if String.equal kind "halved_after_refusal" then
-      let* retry_json = field "retry" fields in
-      let* retry = nonnegative_int "origin.retry" retry_json in
-      Ok (Carried_halved_after_refusal { retry })
-    else if String.equal kind "evicted_after_refusal" then
-      let* retry_json = field "retry" fields in
-      let* retry = nonnegative_int "origin.retry" retry_json in
-      Ok (Carried_evicted_after_refusal { retry })
     else if String.equal kind "turn_start_after_seed_refusal" then
       Ok Carried_turn_start_after_seed_refusal
     else if String.equal kind "turn_start_after_librarian_refusal" then
@@ -987,8 +977,7 @@ let rec decode_forecast_origin = function
       let* front_json = field "front" fields in
       let* front = decode_forecast_origin front_json in
       (match front with
-       | Carried_from_ledger | Carried_from_turn_record _ | Carried_halved_after_refusal _
-       | Carried_evicted_after_refusal _ | Carried_turn_start_after_seed_refusal
+       | Carried_from_ledger | Carried_from_turn_record _ | Carried_turn_start_after_seed_refusal
        | Carried_turn_start_after_librarian_refusal ->
          Ok (Carried_past_librarian_point { librarian_end_atom; front })
        | Carried_turn_start _ | Carried_turn_start_unknown _ | Carried_librarian_snapshot _

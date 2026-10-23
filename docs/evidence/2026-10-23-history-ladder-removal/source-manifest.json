@@ -1,0 +1,10 @@
+[
+  {
+    "path": "lib/keeper/keeper_carried_front.ml",
+    "sha256": "28581f0a7d247069bfc7c2ed30494edb67b31ccb2b02bf1080ddf6147c80b521"
+  },
+  {
+    "path": "bin/masc_tui_context_inspector.ml",
+    "sha256": "0f8daf883ef3da31d10b7e9d070d9c5e8905d8a327908ca9823caaac9f0b1316"
+  }
+]

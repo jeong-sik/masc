@@ -86,8 +86,7 @@ type request =
   ; first_atom : int  (** Index of the oldest carried atom in the durable history. *)
   ; atom_count : int  (** Atoms the durable history held when this request was built. *)
   ; ends : carried_ends
-        (** Both carried positions as that history opened them. After
-            {!move_front}, [front_digest] is the moved front's. *)
+        (** Both carried positions as that request's history opened them. *)
   ; tail_bytes : int
         (** Bytes of the per-request tail (extra system context and other
             pinned messages), measured with the request encoder. *)
@@ -191,20 +190,6 @@ val holds : digest_at:(int -> string option) -> t -> bool
     caller that has to decide before it composes whether the ledger's front
     names an atom of this history (RFC keeper-context-window-in-tokens
     §10.3). *)
-
-val move_front : t -> first_atom:int -> front_digest:string -> t option
-(** Apply an eviction decided outside a request: blocks below [first_atom]
-    leave, their tokens come off the total when they were all measured, and
-    otherwise the total is unknown until the next sample. [front_digest] is
-    the opening-message digest of [first_atom]: the [block_first_digest] of
-    the block an eviction stopped at, or the history's own for a halved
-    front. A front inside a block restarts the blocks from it. The next
-    request's [observe] then sees an unchanged front.
-
-    [None] when the front does not move: [first_atom] at or behind the
-    current front, at or past the last request's atom count, or a ledger whose
-    last request carried no atom. A caller that retries on a move can then
-    tell a retry that would send the same range from one that would not. *)
 
 val known_tokens : t -> int
 (** Sum of the measured blocks' tokens. *)

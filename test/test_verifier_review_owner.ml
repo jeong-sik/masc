@@ -65,7 +65,7 @@ let with_workspace f =
     (fun () -> f base_path)
 
 let tmp_store base_path =
-  Lane_addon_store.create ~root:(Filename.concat base_path "request-ownership")
+  Masc.Lane_addon_store.create ~root:(Filename.concat base_path "request-ownership")
 
 let test_round_trip () =
   with_workspace @@ fun base_path ->
@@ -163,7 +163,7 @@ let test_different_destination_rejected () =
   (match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"masc.verifier" ~package_id:"masc.verifier.review" original with
    | Ok () -> ()
    | Error err -> failwith ("first retain failed: " ^ string_of_retain_error err));
-  match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"other.install" ~package_id:"masc.verifier.review" original with
+  (match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"other.install" ~package_id:"masc.verifier.review" original with
   | Ok () -> failwith "same original under a different installation must not pass"
   | Error (O.Already_retained _) -> ()
   | Error err -> failwith ("wrong rejection: " ^ string_of_retain_error err));

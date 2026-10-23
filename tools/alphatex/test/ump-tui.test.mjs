@@ -10,7 +10,7 @@ import { packet } from './helpers/captured-midi-fixture.mjs'
 import { loadSubstituted } from './helpers/substituted-module.mjs'
 
 const flush = () => new Promise(resolve => setImmediate(resolve))
-async function controller({ preview = async () => {}, exported = async () => {}, captured } = {}) {
+async function controller({ preview = async () => {}, exported = async () => {}, captured, tempo } = {}) {
   const process = { stdin: Object.assign(new EventEmitter(), { isTTY: true, isRaw: false, setRawMode(value) { this.isRaw = value }, resume() {} }),
     stdout: Object.assign(new EventEmitter(), { isTTY: true, columns: 100, rows: 24, write() {} }) }
   const asset = { name: 'Keys', parts: { midi: { sha256: 'a'.repeat(64) } }, midiTime: { first: '10000000000000000000', last: '10000000000000000100' },
@@ -20,7 +20,7 @@ async function controller({ preview = async () => {}, exported = async () => {},
   const substitutes = { isDeepStrictEqual, newUmpEditor, umpEditorRows, umpEditorAction, umpEditorCommand, captureSecondsAtHost, safeText: String, emitKeypressEvents() {} }
   const { viewUmpEditor } = await loadSubstituted(new URL('../ump-tui.mjs', import.meta.url), substitutes, { globals: { process } })
   const abort = new AbortController()
-  const done = viewUmpEditor({ asset, packets, signal: abort.signal, onPreview: preview, onExport: exported })
+  const done = viewUmpEditor({ asset, packets, tempo, signal: abort.signal, onPreview: preview, onExport: exported })
   const key = (name, text = '', extra = {}) => process.stdin.emit('keypress', text, { name, ...extra })
   return { asset, packets, done, abort, process, key, command(line) { key(undefined, ':'); key(undefined, line); key('return') } }
 }
@@ -107,4 +107,17 @@ test('owned controller exports decimal seconds as exact native ticks and drains 
   assert.deepEqual(result.asset.ump.timing, [{ packet: 0, word: 0, hostTime: '10000000000002400000' },
     { packet: 1, word: 0, hostTime: '10000000000006000000' }])
   assert.equal(view.process.stdin.listenerCount('keypress'), 0); assert.equal(view.process.stdin.isRaw, false)
+})
+
+test('owned controller uses the supplied project tempo for fractional beats and exports exact native times', async () => {
+  let finishExport
+  const exported = new Promise(resolve => { finishExport = resolve }), exports = []
+  const view = await controller({ tempo: 120, exported: async asset => { exports.push(asset); finishExport() } })
+  view.command('note-beats 1:0 1/3 2/3'); view.command('select-event 1:0'); view.command('shift-beats -1/6')
+  view.command('undo'); view.command('export /unused/beat-output'); await exported; view.key('q')
+  const result = await view.done
+  assert.equal(result.changed, true); assert.deepEqual(exports[0].ump, result.asset.ump)
+  assert.deepEqual(result.asset.ump.timing, [{ packet: 0, word: 0, hostTime: '10000000000004000000' },
+    { packet: 1, word: 0, hostTime: '10000000000008000000' }])
+  assert.equal(view.process.stdin.isRaw, false); assert.equal(view.process.stdin.listenerCount('keypress'), 0)
 })

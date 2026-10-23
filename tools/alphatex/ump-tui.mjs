@@ -6,10 +6,10 @@ import { safeText } from './terminal.mjs'
 
 // The arrangement lends its terminal. All file/device effects remain owned by
 // callbacks which settle before this child returns or the parent adopts edits.
-export async function viewUmpEditor({ asset, packets, signal, onPreview, onExport }) {
+export async function viewUmpEditor({ asset, packets, tempo, signal, onPreview, onExport }) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('UMP editor requires a terminal')
   if (signal?.aborted) return { changed: false, asset }
-  let editor = newUmpEditor(asset, packets), prompt = null, status = 'Select a MIDI2 event; :help lists commands'
+  let editor = newUmpEditor(asset, packets, { tempo }), prompt = null, status = 'Select a MIDI2 event; :help lists commands'
   let accepting = true, suspended = false, showHelp = false, tail = Promise.resolve(), commit = true
   const close = new AbortController(), operationSignal = signal ? AbortSignal.any([signal, close.signal]) : close.signal
   let finish
@@ -19,7 +19,7 @@ export async function viewUmpEditor({ asset, packets, signal, onPreview, onExpor
     const noteView = editor.selection.kind === 'note', eventView = editor.selection.kind === 'event', rows = umpEditorRows(editor)
     const selected = rows.findIndex(row => row.id === editor.selection.id), height = Math.max(1, (process.stdout.rows || 24) - 6)
     const first = Math.max(0, selected - Math.floor(height / 2))
-    const lines = [`Native UMP · ${asset.name} · ${status}`,
+    const lines = [`Native UMP · ${asset.name}${tempo === undefined ? '' : ` · ${tempo} BPM`} · ${status}`,
       noteView ? 'Pitch edits explicitly override this attack with Pitch7.9; note indices and per-note addresses stay fixed.'
         : eventView ? 'Original packet:word IDs survive authored time/order changes; raw words stay native UMP.'
           : 'Expression values retain note addresses; authored time edits are stored separately from recorded timestamps.',
@@ -35,6 +35,9 @@ export async function viewUmpEditor({ asset, packets, signal, onPreview, onExpor
       ':at-seconds S / :shift-seconds S edit decimal seconds; :note-seconds OFF_ID START_S END_S edits a pair',
       ':duration-seconds OFF_ID S sets length; seconds round to nearest native tick, half ties away from zero',
       'Seconds use this asset’s fixed original source zero; * marks authored time; :clock shows exact ticks',
+      ':at-beats B / :shift-beats B / :note-beats OFF_ID START END / :duration-beats OFF_ID B',
+      'Beat inputs accept decimals or fractions (1/3); quarter notes at the opening arrangement tempo, same source zero.',
+      'Beat edits round once to native ticks; later project tempo changes do not retime this captured variant or WAV.',
       ':reset-time restores selected original time; ticks are exact UInt64; controls and WAV do not follow notes',
       'Sources containing JR/delta-clock utility messages need an embedded-clock editor before time changes.',
       'Per-note registered/assignable controllers, pitch bend and poly pressure keep their original note addresses.',

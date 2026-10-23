@@ -1,11 +1,13 @@
 import { isDeepStrictEqual } from 'node:util'
-import { captureRange, captureHostAtSeconds, captureSecondsAtHost, captureSecondsToTicks } from './capture-time.mjs'
+import { captureRange, captureHostAtSeconds, captureSecondsAtHost, captureSecondsToTicks, captureBeatsToTicks, captureHostAtBeats } from './capture-time.mjs'
+import { binary } from './exact-time.mjs'
 import { absoluteUmpPitch, umpSourceView, editUmpNotes, editUmpExpressions, editUmpTimes, editUmpNoteTime, revoiceUmpNotes, umpOnsetHarmony } from './ump-source.mjs'
 
-export function newUmpEditor(asset, packets) {
+export function newUmpEditor(asset, packets, { tempo } = {}) {
+  if (tempo !== undefined) binary(tempo)
   const { notes, expressions, events } = umpSourceView(packets, asset.ump, asset.parts.midi.sha256)
   if (!events.length) throw new Error('Captured source has no UMP events to edit')
-  return { asset, packets, notes, expressions, events, selection: notes.length ? { kind: 'note', id: notes[0].id }
+  return { asset, packets, tempo, notes, expressions, events, selection: notes.length ? { kind: 'note', id: notes[0].id }
     : expressions.length ? { kind: 'expression', id: expressions[0].id } : { kind: 'event', id: events[0].id }, undo: [], redo: [] }
 }
 export const umpEditorRows = editor => editor.selection.kind === 'note' ? editor.notes : editor.selection.kind === 'expression' ? editor.expressions : editor.events
@@ -78,6 +80,13 @@ export function umpEditorCommand(editor, line) {
     case 'reset-note': count(0); return { editor: change(editor, editUmpNotes(editor.packets, current, hash, [{ kind: 'reset', id: selected('note') }])) }
     case 'time': count(1); return { editor: change(editor, editUmpTimes(editor.packets, current, hash, [{ kind: 'time', id: editor.selection.id, hostTime: args[0] }])) }
     case 'at-seconds': count(1); return { editor: change(editor, editUmpTimes(editor.packets, current, hash, [{ kind: 'time', id: editor.selection.id, hostTime: captureHostAtSeconds(editor.asset, args[0]) }])) }
+    case 'at-beats': count(1); return { editor: change(editor, editUmpTimes(editor.packets, current, hash, [{ kind: 'time', id: editor.selection.id, hostTime: captureHostAtBeats(editor.asset, args[0], editor.tempo) }])) }
+    case 'shift-beats': {
+      count(1)
+      const event = editor.events.find(event => event.id === editor.selection.id)
+      return { editor: change(editor, editUmpTimes(editor.packets, current, hash, [{ kind: 'time', id: event.id,
+        hostTime: String(BigInt(event.hostTime) + captureBeatsToTicks(editor.asset, args[0], editor.tempo)) }])) }
+    }
     case 'shift-seconds': {
       count(1)
       const event = editor.events.find(event => event.id === editor.selection.id)
@@ -94,6 +103,14 @@ export function umpEditorCommand(editor, line) {
     case 'note-time': count(3); return { editor: change(editor, editUmpNoteTime(editor.packets, current, hash, selected('note'), args[0], args[1], args[2])) }
     case 'note-seconds': count(3); return { editor: change(editor, editUmpNoteTime(editor.packets, current, hash, selected('note'), args[0],
       captureHostAtSeconds(editor.asset, args[1]), captureHostAtSeconds(editor.asset, args[2]))) }
+    case 'note-beats': count(3); return { editor: change(editor, editUmpNoteTime(editor.packets, current, hash, selected('note'), args[0],
+      captureHostAtBeats(editor.asset, args[1], editor.tempo), captureHostAtBeats(editor.asset, args[2], editor.tempo))) }
+    case 'duration-beats': {
+      count(2)
+      const ticks = captureBeatsToTicks(editor.asset, args[1], editor.tempo), on = editor.notes.find(note => note.id === selected('note'))
+      if (ticks <= 0n) throw new Error('Duration must round to at least one positive host tick')
+      return { editor: change(editor, editUmpNoteTime(editor.packets, current, hash, on.id, args[0], on.hostTime, String(BigInt(on.hostTime) + ticks))) }
+    }
     case 'duration-seconds': {
       count(2)
       const ticks = captureSecondsToTicks(editor.asset, args[1]), on = editor.notes.find(note => note.id === selected('note'))

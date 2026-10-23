@@ -1,6 +1,8 @@
 // Captured regions use the original host-clock tick domain. Absolute UInt64
 // origins and source frame counts never pass through Number. Only derived
 // display/scheduling seconds cross that boundary.
+import { binary } from './exact-time.mjs'
+
 const uint64Max = 0xffffffffffffffffn
 function unsigned(value, name, maximum) {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) throw new Error(`Invalid captured ${name}`)
@@ -28,20 +30,43 @@ function clockOf(manifest) {
 }
 // Terminal seconds enter as decimal rationals. Quantize once at the native
 // host-clock boundary: nearest whole tick, exact half ties away from zero.
-export function captureSecondsToTicks(asset, text) {
+function decimalInput(text, unit) {
   const match = typeof text === 'string' && /^([+-]?)(?:(\d+)(?:\.(\d+))?|\.(\d+))$/.exec(text)
-  if (!match) throw new Error('Use decimal seconds without exponents')
+  if (!match) throw new Error(`Use decimal ${unit} without exponents`)
   const digits = match[3] ?? match[4] ?? '', divisor = 10n ** BigInt(digits.length)
-  const value = BigInt(match[2] ?? '0') * divisor + BigInt(digits || '0'), clock = clockOf(asset.manifest)
-  const numerator = value * 1_000_000_000n * clock.denom, denominator = divisor * clock.numer
+  const value = BigInt(match[2] ?? '0') * divisor + BigInt(digits || '0')
+  return [match[1] === '-' ? -value : value, divisor]
+}
+function sourceTicks(asset, value, divisor) {
+  const clock = clockOf(asset.manifest), negative = value < 0n
+  const numerator = (negative ? -value : value) * 1_000_000_000n * clock.denom, denominator = divisor * clock.numer
   const ticks = numerator / denominator + (2n * (numerator % denominator) >= denominator ? 1n : 0n)
-  return match[1] === '-' ? -ticks : ticks
+  return negative ? -ticks : ticks
+}
+export function captureSecondsToTicks(asset, text) {
+  return sourceTicks(asset, ...decimalInput(text, 'seconds'))
+}
+// Beats are project quarter notes, not captured Flex Data tempo or clip-local
+// timing. Match the exact binary64 project tempo used by native scheduling.
+export function captureBeatsToTicks(asset, text, tempo) {
+  if (tempo === undefined) throw new Error('Beat editing requires the arrangement tempo')
+  const ratio = typeof text === 'string' && /^([+-]?\d+)\/(\d+)$/.exec(text)
+  const [value, divisor] = ratio ? [BigInt(ratio[1]), BigInt(ratio[2])] : decimalInput(text, 'beats')
+  if (divisor === 0n) throw new Error('Beat fractions need a positive denominator')
+  const [tempoN, tempoD] = binary(tempo)
+  return sourceTicks(asset, value * 60n * tempoD, divisor * tempoN)
 }
 // The editor's zero belongs to the recorded source, not the moving edge of an
 // authored overlay. Derived imports keep their declared original source span.
 export function captureHostAtSeconds(asset, text) {
+  return hostAtTicks(asset, captureSecondsToTicks(asset, text))
+}
+export function captureHostAtBeats(asset, text, tempo) {
+  return hostAtTicks(asset, captureBeatsToTicks(asset, text, tempo))
+}
+function hostAtTicks(asset, ticks) {
   const origin = BigInt(captureRange({ ...asset, ump: undefined }).origin)
-  return String(unsigned(String(origin + captureSecondsToTicks(asset, text)), 'authored MIDI time', uint64Max))
+  return String(unsigned(String(origin + ticks), 'authored MIDI time', uint64Max))
 }
 export function captureSecondsAtHost(asset, hostTime) {
   const origin = BigInt(captureRange({ ...asset, ump: undefined }).origin), clock = clockOf(asset.manifest)

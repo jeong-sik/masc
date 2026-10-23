@@ -646,10 +646,12 @@ test('native UMP child returns only its overlay and creates an independently sel
   const view = await controller()
   try {
     const asset = await primeCapture(view)
+    view.command('tempo 137.1'); await flush()
     view.command('edit-ump'); await flush()
     const job = view.observed.requests.find(job => job.kind === 'prepare-ump')
     view.worker.emit('message', { id: job.id, ok: true, result: { asset, packets: nativeUmpPackets() } }); await flush()
     const child = view.observed.umpEditors[0]
+    assert.equal(child.options.tempo, 137.1)
     const ump = { schemaVersion: 1, midiSha256: asset.parts.midi.sha256, notes: [{ packet: 0, word: 0, pitch: 30976, velocity: 0 }] }
     child.finish({ changed: true, asset: { ...asset, ump } }); await flush()
     const imported = view.observed.requests.find(job => job.kind === 'import-ump')

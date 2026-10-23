@@ -618,7 +618,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
             })
           } finally { signal.removeEventListener('abort', cancel) }
         }
-        const edited = await viewUmpEditor({ ...source, signal: controller.signal,
+        const edited = await viewUmpEditor({ ...source, tempo: project.tempo, signal: controller.signal,
           onPreview: async (candidate, signal, borrowTerminal) => {
             let snapshot
             try {

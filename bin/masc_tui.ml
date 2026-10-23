@@ -25946,12 +25946,19 @@ and is loaded on demand through keeper_skill.
       let composer_claimed =
         Option.is_none state.account_login && Option.is_none state.lane_addons &&
         (not compact_viewport)
-        (* The inventory owns inspection while the composer is unfocused.
-           A focused composer still owns every typed character. *)
+        (* Surface inspection and Dashboard Keeper selection precede an
+           unfocused composer's entry key. A focused composer still owns
+           every typed character, including i. *)
         && not ((not state.composer_focused)
-          && state.view = Lanes && state.lanes_mode = Lanes_overview
-          && Option.is_none state.slot_editor && Option.is_none state.runtime_lane_pick
-          && (match key with Some ("d" | "i") -> true | Some _ | None -> false))
+          && (match state.view, key with
+              | Overview, Some "i" -> true
+              | Resources, Some "i" -> state.resource_focus = Right_pane
+              | Config, Some "i" -> state.config_pane = Config_prompts
+              | Lanes, Some ("d" | "i") ->
+                  state.lanes_mode = Lanes_overview
+                  && Option.is_none state.slot_editor
+                  && Option.is_none state.runtime_lane_pick
+              | _ -> false))
         && (not (modal_owns_keys state))
         (* Any open field takes the key before the composer does. This was six
            conditions naming six fields, and the ones added later were not in

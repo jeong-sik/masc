@@ -1,4 +1,5 @@
 import type { RouteState } from './types'
+import { routeRequiresExecutionAuthority } from './execution-authority-routes'
 import { refreshExecution, refreshBoard, refreshFusionBoard, refreshFusionRuns, refreshGoals, refreshShell } from './store'
 import { requestNamespaceTruth } from './namespace-truth-store'
 import { refreshMissionSnapshot } from './mission-store'
@@ -60,6 +61,11 @@ type RefreshTask =
 const HIDDEN_DIAGNOSTIC_FALLBACK_PLAN: readonly RefreshTask[] = ['namespaceTruth', 'missionSnapshot']
 
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
+  const plan = surfaceRefreshPlanForRoute(routeState)
+  return routeRequiresExecutionAuthority(routeState) ? [...new Set<RefreshTask>([...plan, 'execution'])] : plan
+}
+
+function surfaceRefreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
   switch (routeState.tab) {
     case 'overview':
       // The overview 작업·목표 card renders the flat `goals` signal, which only

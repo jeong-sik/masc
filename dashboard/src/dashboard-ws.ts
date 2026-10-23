@@ -1,4 +1,5 @@
 import type { RouteState, SSEEvent } from './types'
+import { routeRequiresExecutionAuthority } from './execution-authority-routes'
 import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import { recordServerPushEvent } from './sse'
@@ -424,6 +425,7 @@ function routeKey(routeState: DashboardRouteState): string {
 
 export function dashboardSlicesForRoute(routeState: DashboardRouteState): string[] {
   const slices = new Set<DashboardPushSlice>(GLOBAL_DASHBOARD_PUSH_SLICES)
+  if (routeRequiresExecutionAuthority(routeState)) slices.add('execution')
 
   // Overview fleet statistics consume keeper data from the execution slice.
   if (routeState.tab === 'overview') {

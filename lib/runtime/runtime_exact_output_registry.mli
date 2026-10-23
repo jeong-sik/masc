@@ -133,6 +133,7 @@ val subscribe_lane_changes : lane_id:string -> (unit -> unit) -> (unit -> unit)
 val publish
   :  ?runtime_observations:(string * runtime_observation) list
   -> ?required_lane_ids:string list
+  -> ?addon_served_lane_ids:string list
   -> ?excused_lane_ids:string list
   -> lanes:Runtime_schema.exact_output_lane_decl list
   -> Agent_core.Exact_output.resolver_snapshot
@@ -149,11 +150,16 @@ val publish
     refs remain fatal. A required lane must retain at least one admitted slot,
     or be served by an Addon lane that holds one: an Addon lane whose exact
     output is named by the required lane's id (for example
-    [hitl_auto_judge_exact]) counts as availability only. Which of the two
-    runs a request is decided where the request is dispatched, never by
-    publication. A required lane is excused only by [excused_lane_ids] (a lane rule 3 emptied): that lane is
-    unavailable alone. The registry keeps [required_lane_ids] whole, so a
-    replacement requires an excused lane again unless it excuses it too.
+    [hitl_auto_judge_exact]) counts only when that id is also in
+    [addon_served_lane_ids], the caller's attestation that dispatch routes the
+    service to that Addon. A [runtime.toml] table with the right name is never
+    enough, since it loads without any installation behind it. The default
+    [[]] keeps every required lane on its builtin slots. The registry keeps
+    [addon_served_lane_ids] whole like [required_lane_ids], and a replacement
+    inherits it. A required lane is excused only by [excused_lane_ids] (a lane
+    rule 3 emptied): that lane is unavailable alone. The registry keeps
+    [required_lane_ids] whole, so a replacement requires an excused lane again
+    unless it excuses it too.
     Disabled declarations retain their candidates and may be empty. Blank
     and duplicate candidates are still rejected; live target and thinking
     capability admission apply only when enabled. A required lane cannot be disabled,
@@ -162,6 +168,7 @@ val publish
 
 val check_publication
   :  ?required_lane_ids:string list
+  -> ?addon_served_lane_ids:string list
   -> ?excused_lane_ids:string list
   -> lanes:Runtime_schema.exact_output_lane_decl list
   -> Agent_core.Exact_output.resolver_snapshot

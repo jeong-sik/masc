@@ -703,8 +703,9 @@ let test_addon_lanes_publish_beside_builtin_lanes () =
     | Ok _ | Error _ -> Alcotest.fail "an output with no table must resolve to Exact_lane_unconfigured"
 ;;
 
-(* A required service is met by an Addon lane whose exact output carries the
-   service's id, only while that lane holds an admitted slot. *)
+(* An Addon lane named like a required service serves it only when the caller
+   attests that id, and only while the lane holds an admitted slot. A table
+   with the right name alone never does. *)
 let test_addon_lane_serves_required_service () =
   let snapshot =
     load_control_snapshot
@@ -720,7 +721,9 @@ let test_addon_lane_serves_required_service () =
   let lane owner slot_ids : Runtime_schema.exact_output_lane_decl =
     { owner; enabled = true; slot_ids; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None }
   in
-  let admission lanes = Registry.check_publication ~required_lane_ids:[ required ] ~lanes snapshot in
+  let admission ?(served = [ required ]) lanes =
+    Registry.check_publication ~required_lane_ids:[ required ] ~addon_served_lane_ids:served ~lanes snapshot
+  in
   let refused label = function
     | Error (Registry.Required_lane_unavailable { lane_id }) ->
       Alcotest.(check string) label required lane_id
@@ -730,8 +733,12 @@ let test_addon_lane_serves_required_service () =
   (match admission [ lane (addon required) [ replacement_target ] ] with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Registry.publication_error_to_string error));
-  refused "an Addon lane with no admitted slot" (admission [ lane (addon required) [ "not-in-frozen-catalog" ] ]);
-  refused "an Addon lane of another output" (admission [ lane (addon "unrelated_exact") [ replacement_target ] ]);
+  refused "a correctly named Addon table nobody attested"
+    (admission ~served:[] [ lane (addon required) [ replacement_target ] ]);
+  refused "an attested Addon lane with no admitted slot"
+    (admission [ lane (addon required) [ "not-in-frozen-catalog" ] ]);
+  refused "an attested id served by an Addon lane of another output"
+    (admission [ lane (addon "unrelated_exact") [ replacement_target ] ]);
   refused "no lane at all" (admission [])
 ;;
 
@@ -1356,7 +1363,7 @@ let () =
             `Quick
             test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity
         ; Alcotest.test_case
-            "an Addon lane serves a required service only with an admitted slot"
+            "an Addon lane serves a required service only when attested and holding a slot"
             `Quick
             test_addon_lane_serves_required_service
         ; Alcotest.test_case

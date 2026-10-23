@@ -121,8 +121,7 @@ module Category = Masc.Lane_addon_category
    are rejected by the shared parser rather than defaulted. *)
 let ui_category_of fields = match List.assoc_opt "ui_category" fields with
   | None -> Ok None
-  | Some (`String wire) -> Result.map Option.some (Category.of_wire wire)
-  | Some _ -> Error "ui_category must be a string"
+  | Some value -> Result.map Option.some (Category.of_json value)
 let output_ports = function
   | `Assoc fields ->
       List.fold_right (fun (id, value) acc ->

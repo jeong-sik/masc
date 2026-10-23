@@ -44,13 +44,21 @@ type agent_metrics = {
   agent_id : string;
   period_start : float;
   period_end : float;
+  record_count : int; (** Raw observations before grouping by exact Task ID. *)
   total_tasks : int;
   completed_tasks : int;
+  successful_tasks : int;
   failed_tasks : int;
-  avg_completion_time_s : float;
+  avg_completion_time_s : float option; (** [None] when no Task completed. *)
   task_completion_rate : float;  (** Range [\[0.0, 1.0\]]. *)
-  error_rate : float;  (** Range [\[0.0, 1.0\]]. *)
-  handoff_success_rate : float;  (** Range [\[0.0, 1.0\]]. *)
+  task_success_rate : float option; (** Successful / completed; [None] if none completed. *)
+  error_rate : float option; (** Failed / completed; [None] if none completed. *)
+  handoff_tasks : int;
+  completed_handoff_tasks : int;
+  successful_handoff_tasks : int;
+  handoff_task_success_rate : float option;
+      (** Success among completed Tasks with an observed handoff reference.
+          [None] if none completed. This does not measure handoff delivery. *)
   unique_collaborators : string list;
 }
 [@@deriving yojson, show]
@@ -88,6 +96,7 @@ type record_receipt = Enqueued | Written
 
 type record_error =
   | Invalid_metric_identity of string
+  | Invalid_metric_record of { task_id : string; message : string }
   | Metric_store_failure of { path : string; message : string }
 
 val record_error_to_string : record_error -> string
@@ -108,6 +117,8 @@ val record : config -> task_metric -> (record_receipt, record_error) result
     Publication failure can leave a complete binding in place. It is not rolled
     back or a receipt for the metric body.
     The bounded stream applies backpressure, it does not silently drop overflow.
+    Invalid Task identities, inconsistent pending outcomes and nonfinite or negative
+    durations are rejected before storage preparation.
     Expected filesystem and identity failures return [Error]; cancellation and
     unexpected exceptions propagate. Metadata and append are not one transaction.
     Flush append failure is still logged separately after [Enqueued]. *)
@@ -171,9 +182,11 @@ type read_error =
   | Invalid_window of int
   | Source_unavailable of { path : string; message : string }
   | Invalid_record of { path : string; line : int; message : string }
+  | Conflicting_task_evidence of { task_id : string; message : string }
 
 val read_error_to_string : read_error -> string
-(** Diagnostics retain the source path and physical line, never record bodies. *)
+(** File diagnostics retain the source path and physical line. Conflicts identify
+    the exact Task; messages never include record bodies. *)
 
 val get_recent :
   config -> agent_id:string -> days:int -> (task_metric list, read_error) result
@@ -200,16 +213,18 @@ val calculate_agent_metrics :
       Source failures propagate as [Error]. The period is the requested query
       window, captured once for both filtering and aggregation.
     - [period_start = now -. days * 86400], [period_end = now].
-    - [completed_tasks] counts only [success = true] (note: not all
-      [completed_at = Some _]).
-    - [failed_tasks] counts [completed_at = Some _ && success = false].
-    - [avg_completion_time_s] averages over metrics with
-      [completed_at = Some _]; returns [0.0] when no completions.
-    - [task_completion_rate = successful / total] when [total > 0],
-      else [0.0].
-    - [handoff_success_rate]: among metrics with
-      [handoff_from] or [handoff_to] set, the success ratio.
-      Returns [1.0] when there are no handoffs ("perfect rate"). *)
+    - [total_tasks] counts distinct exact Task IDs in the observed start window,
+      not the workspace backlog. [record_count] retains the raw row count.
+    - Repeated observations must agree on start time and, when present, terminal
+      time/outcome. Conflicts return [Conflicting_task_evidence]. A pending and
+      agreeing terminal observation combine into one completed Task.
+    - [completed_tasks = successful_tasks + failed_tasks]. Completion rate is
+      completed / total; success and error rates use completed as denominator.
+    - Average duration uses completed Tasks, including genuine zero durations.
+      Missing denominators produce [None], never synthetic zero or perfect rates.
+    - Collaborators and the presence of handoff references are observed unions
+      per Task. Handoff counts/rates describe Task outcomes, not transfer receipts.
+      Grouping is read-time only; {!get_recent} retains every raw observation. *)
 
 val get_all_agents : config -> (string list, read_error) result
 (** [get_all_agents config] lists each subdirectory of

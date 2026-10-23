@@ -110,10 +110,13 @@ let test_calculate_agent_metrics () =
     match read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1) with
     | Some metrics ->
       assert (metrics.total_tasks = 5);
-      (* completed_tasks counts successful tasks: i=2 and i=4 (even numbers) *)
-      assert (metrics.completed_tasks = 2);
-      (* task_completion_rate = successful / total = 2/5 = 0.4 *)
-      assert (metrics.task_completion_rate >= 0.3 && metrics.task_completion_rate <= 0.5);
+      assert (metrics.record_count = 5);
+      assert (metrics.completed_tasks = 5);
+      assert (metrics.successful_tasks = 2 && metrics.failed_tasks = 3);
+      assert (metrics.task_completion_rate = 1.0);
+      assert (metrics.task_success_rate = Some 0.4);
+      assert (metrics.error_rate = Some 0.6);
+      assert (metrics.handoff_task_success_rate = None);
       print_endline (Printf.sprintf "  Completion rate: %.1f%%" (metrics.task_completion_rate *. 100.0))
     | None -> failwith "Expected to get agent metrics"
   );
@@ -181,8 +184,9 @@ let test_handoff_tracking () =
 
     match read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1) with
     | Some metrics ->
-      assert (metrics.handoff_success_rate = 1.0);  (* Both handoffs successful *)
-      print_endline (Printf.sprintf "  Handoff success rate: %.0f%%" (metrics.handoff_success_rate *. 100.0))
+      assert (metrics.handoff_tasks = 2 && metrics.completed_handoff_tasks = 2);
+      assert (metrics.successful_handoff_tasks = 2);
+      assert (metrics.handoff_task_success_rate = Some 1.0)
     | None -> failwith "Expected metrics"
   );
   print_endline "✓ test_handoff_tracking passed"
@@ -266,6 +270,78 @@ let test_concurrent_first_records () =
      | Error _ | Ok _ -> failwith "an empty existing binding was adopted");
     assert (Fs_compat.load_file path = ""))
 
+let aggregate config agent_id =
+  match read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id ~days:1) with
+  | Some metrics -> metrics
+  | None -> failwith "expected observed metrics"
+
+let test_task_denominators_and_replays () =
+  with_temp_masc_dir (fun config ->
+    let agent_id = "denominators" in
+    let now = Time_compat.now () in
+    let pending task_id =
+      { (Metrics_store_eio.create_metric ~agent_id ~task_id ()) with started_at = now -. 60.0 } in
+    let success = { (pending "success") with completed_at = Some (now -. 50.0); success = true } in
+    let failure = { (pending "failure") with completed_at = Some (now -. 30.0); handoff_to = Some "next" } in
+    let waiting = { (pending "waiting") with handoff_from = Some "previous" } in
+    record_ok config waiting;
+    let uncompleted = aggregate config agent_id in
+    assert (uncompleted.task_completion_rate = 0.0);
+    assert (uncompleted.avg_completion_time_s = None && uncompleted.task_success_rate = None);
+    assert (uncompleted.error_rate = None && uncompleted.handoff_task_success_rate = None);
+    (* Replays, including a pending observation after completion, are one Task. *)
+    List.iter (record_ok config)
+      [success; { success with id = "replay" }; pending "success"; failure];
+    let metrics = aggregate config agent_id in
+    assert (metrics.record_count = 5 && metrics.total_tasks = 3);
+    assert (metrics.completed_tasks = 2 && metrics.successful_tasks = 1 && metrics.failed_tasks = 1);
+    assert (metrics.task_completion_rate = 2.0 /. 3.0);
+    assert (metrics.task_success_rate = Some 0.5 && metrics.error_rate = Some 0.5);
+    assert (metrics.avg_completion_time_s = Some 20.0);
+    assert (metrics.handoff_tasks = 2 && metrics.completed_handoff_tasks = 1);
+    assert (metrics.successful_handoff_tasks = 0 && metrics.handoff_task_success_rate = Some 0.0);
+    assert (List.length (read_ok (Metrics_store_eio.get_recent config ~agent_id ~days:1)) = 5))
+
+let test_conflicting_task_evidence () =
+  let check order = with_temp_masc_dir (fun config ->
+    let metric = Metrics_store_eio.create_metric ~agent_id:"conflict" ~task_id:"same" () in
+    let completed = { metric with completed_at = Some metric.started_at; success = true } in
+    let conflicts = [
+      { completed with started_at = completed.started_at -. 1.0 };
+      { completed with success = false };
+      { completed with completed_at = Some (completed.started_at +. 1.0) } ] in
+    List.iteri (fun i conflict ->
+      let agent_id = Printf.sprintf "conflict-%d" i in
+      let rows = List.map (fun (row : Metrics_store_eio.task_metric) -> { row with agent_id })
+        (order [completed; conflict]) in
+      List.iter (record_ok config) rows;
+      match Metrics_store_eio.calculate_agent_metrics config ~agent_id ~days:1 with
+      | Error (Metrics_store_eio.Conflicting_task_evidence { task_id; _ }) -> assert (task_id = "same")
+      | Error _ | Ok _ -> failwith "conflicting Task evidence became successful statistics") conflicts) in
+  check Fun.id;
+  check List.rev
+
+let test_invalid_observations_and_real_zero () =
+  with_temp_masc_dir (fun config ->
+    let metric = Metrics_store_eio.create_metric ~agent_id:"validated" ~task_id:"zero" () in
+    let zero = { metric with completed_at = Some metric.started_at; success = true } in
+    record_ok config zero;
+    assert ((aggregate config "validated").avg_completion_time_s = Some 0.0);
+    let invalid = [ { metric with task_id = " " }; { metric with started_at = Float.nan };
+      { metric with success = true };
+      { metric with completed_at = Some (metric.started_at -. 1.0) };
+      { metric with started_at = -. Float.max_float; completed_at = Some Float.max_float } ] in
+    List.iter (fun row ->
+      match Metrics_store_eio.record config row with
+      | Error (Metrics_store_eio.Invalid_metric_record _) -> ()
+      | Error _ | Ok _ -> failwith "invalid observation was recorded") invalid;
+    let file = Filename.concat (Metrics_store_eio.agent_metrics_dir config "validated") "invalid.jsonl" in
+    List.iter (fun row ->
+      Fs_compat.save_file file (Yojson.Safe.to_string (Metrics_store_eio.task_metric_to_yojson row));
+      match Metrics_store_eio.get_recent config ~agent_id:"validated" ~days:1 with
+      | Error (Metrics_store_eio.Invalid_record _) -> ()
+      | Error _ | Ok _ -> failwith "invalid stored observation was accepted") invalid)
+
 let test_generate_id () =
   let ids = List.init 128 (fun _ -> Metrics_store_eio.generate_id ()) in
   let unique_ids = List.sort_uniq String.compare ids in
@@ -309,6 +385,9 @@ let () =
   test_exact_storage_identity ();
   test_unbound_store_is_not_adopted ();
   test_concurrent_first_records ();
+  test_task_denominators_and_replays ();
+  test_conflicting_task_evidence ();
+  test_invalid_observations_and_real_zero ();
   test_generate_id ();
   test_filter_recent_month_filenames ();
   print_endline "\n✅ All Metrics_store_eio tests passed!\n"

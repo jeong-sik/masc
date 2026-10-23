@@ -1552,6 +1552,9 @@ type prompt_source =
   | Prompt_file
   | Prompt_missing
 
+type prompt_authoring_issue = Prompt_registry_types.authoring_issue =
+  | Invalid_operator_surface of { value : string; source_file : string }
+
 type prompt_row = {
   pr_key : string;
   pr_category : string;
@@ -1562,6 +1565,11 @@ type prompt_row = {
           otherwise. This is the text an editor should open. *)
   pr_file_path : string;
   pr_source : prompt_source;
+  pr_authoring_issues : prompt_authoring_issue list option;
+      (** [None] means the server did not report diagnostics; [Some []] is a
+          reported clean result. Known issues retain their authored value and
+          file provenance without changing the effective body or source.
+          A malformed or unknown report fails [decode_prompts]. *)
   pr_template_variables : string list;
   pr_override_default_moved : bool;
       (** The override in force was written against a default that has since

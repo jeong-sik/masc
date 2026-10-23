@@ -9921,6 +9921,81 @@ let test_decode_prompts_rejects_unknown_operator_surface () =
   | Ok _ -> Alcotest.fail "an unknown operator surface must not be guessed"
   | Error _ -> ()
 
+let prompt_authoring_issue_fields =
+  [ "code", `String "invalid_operator_surface"
+  ; "field", `String "operator_surface"
+  ; "value", `String "primray\nraw"
+  ; "source_file", `String "/fixture/prompts/authored.md"
+  ]
+
+let prompt_with_authoring_report ~source report =
+  `Assoc
+    [ "prompts", `List
+        [ `Assoc
+            ([ "key", `String "authored"
+             ; "source", `String source
+             ; "operator_surface", `String "primary"
+             ; "effective", `String "Effective body remains editable."
+             ; "file_path", `String "/fixture/catalog-path.md"
+             ] @ report)
+        ]
+    ]
+
+let test_decode_prompt_authoring_report_preserves_body_and_source () =
+  List.iter (fun (source, expected_source) ->
+    match Tui_decode.decode_prompts
+      (prompt_with_authoring_report ~source
+        ["authoring_issues", `List [`Assoc prompt_authoring_issue_fields]]) with
+    | Error detail -> Alcotest.fail detail
+    | Ok snapshot ->
+      let row = List.hd snapshot.Tui_decode.ps_rows in
+      Alcotest.(check string) "metadata does not replace the effective body"
+        "Effective body remains editable." row.pr_effective;
+      Alcotest.(check bool) "metadata does not change override authority"
+        true (row.pr_source = expected_source);
+      Alcotest.(check bool) "reported effective placement is preserved"
+        true (row.pr_operator_surface = Tui_decode.Prompt_primary);
+      let issues = match row.pr_authoring_issues with
+        | Some issues -> issues
+        | None -> Alcotest.fail "authoring diagnostic was lost" in
+      let observed = List.map
+          (function Tui_decode.Invalid_operator_surface {value; source_file} ->
+             value, source_file)
+          issues in
+      Alcotest.(check (list (pair string string)))
+        "authored value and diagnostic file are not replaced or normalized"
+        ["primray\nraw", "/fixture/prompts/authored.md"] observed)
+    ["file", Tui_decode.Prompt_file; "override", Tui_decode.Prompt_override]
+
+let test_decode_prompt_authoring_report_distinguishes_unreported_and_clean () =
+  List.iter (fun (report, expected) ->
+    match Tui_decode.decode_prompts (prompt_with_authoring_report ~source:"file" report) with
+    | Error detail -> Alcotest.fail detail
+    | Ok snapshot ->
+      let row = List.hd snapshot.Tui_decode.ps_rows in
+      Alcotest.(check bool) "absence and reported clean have distinct states"
+        true (row.pr_authoring_issues = expected))
+    [[], None; ["authoring_issues", `List []], Some []]
+
+let test_decode_prompt_authoring_report_refuses_protocol_drift () =
+  let changed name value =
+    `Assoc ((name, value) :: List.remove_assoc name prompt_authoring_issue_fields) in
+  let malformed =
+    [`Null; `Assoc []; `String "clean"; `List [`Null];
+     `List [changed "code" (`String "unknown")];
+     `List [changed "field" (`String "description")];
+     `List [changed "value" (`Int 3)];
+     `List [changed "source_file" `Null];
+     `List [`Assoc (List.remove_assoc "source_file" prompt_authoring_issue_fields)];
+     `List [`Assoc (("extra", `Bool true) :: prompt_authoring_issue_fields)];
+     `List [`Assoc (("value", `String "duplicate") :: prompt_authoring_issue_fields)];
+     `List [`Assoc prompt_authoring_issue_fields; changed "code" (`String "unknown")]] in
+  List.iter (fun report ->
+    match Tui_decode.decode_prompts
+      (prompt_with_authoring_report ~source:"override" ["authoring_issues", report]) with
+    | Ok _ -> Alcotest.fail "a malformed report became an ordinary prompt row"
+    | Error _ -> ()) malformed
+
 (* [source] is the one field of a prompt row that decides what the operator is
    looking at, and every one of the three readers -- the list mark, the detail
    line, the clear guard -- now asks it. A word this build does not know is a
@@ -14016,6 +14091,12 @@ let () =
           test_prompt_rows_hide_fragments_by_default;
         Alcotest.test_case "rejects an unknown operator surface" `Quick
           test_decode_prompts_rejects_unknown_operator_surface;
+        Alcotest.test_case "authoring metadata preserves body and source" `Quick
+          test_decode_prompt_authoring_report_preserves_body_and_source;
+        Alcotest.test_case "authoring report distinguishes absent and clean" `Quick
+          test_decode_prompt_authoring_report_distinguishes_unreported_and_clean;
+        Alcotest.test_case "authoring report refuses protocol drift" `Quick
+          test_decode_prompt_authoring_report_refuses_protocol_drift;
         Alcotest.test_case "rejects an unknown source" `Quick
           test_decode_prompts_rejects_an_unknown_source;
         Alcotest.test_case "rejects a row with no source" `Quick

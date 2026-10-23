@@ -562,6 +562,8 @@ let test_capability_table_sharing_is_listed () =
     ; [ "key_chord"; "press_key" ] (* press_key with modifiers *)
     ; [ "html5_drop"; "pointer_drag" ] (* drag_to on Stagehand *)
     ; [ "click"; "frame_interaction" ] (* click with framePath *)
+    ; [ "click"; "click_snapshot_target" ] (* click with target on an ego connection *)
+    ; [ "fill"; "fill_snapshot_target" ] (* fill with target on an ego connection *)
     ]
   in
   let invocation = function

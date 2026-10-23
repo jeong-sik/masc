@@ -4,6 +4,7 @@ type operation =
   | List_tabs | Open_tab | Close_tab | Activate_tab | List_windows | Create_window | Close_window
   | Navigate | Follow_link | Back | Forward | Reload | Session_lifecycle
   | Read_text | Read_html | Read_elements | Read_scene | Read_regions | Read_snapshot | Screenshot
+  | Click_snapshot_target | Fill_snapshot_target
   | Click | Double_click | Right_click | Middle_click | Pointer_down | Pointer_up | Hover | Pointer_drag | Html5_drop
   | Scroll_page | Scroll_at | Fill | Type_text | Press_key | Key_chord | Select_option
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
@@ -24,6 +25,7 @@ let backend_of_target = function
 let operations = [List_tabs;Open_tab;Close_tab;Activate_tab;List_windows;Create_window;Close_window;
   Navigate;Follow_link;Back;Forward;Reload;Session_lifecycle;
   Read_text;Read_html;Read_elements;Read_scene;Read_regions;Read_snapshot;Screenshot;
+  Click_snapshot_target;Fill_snapshot_target;
   Click;Double_click;Right_click;Middle_click;Pointer_down;Pointer_up;Hover;Pointer_drag;Html5_drop;Scroll_page;Scroll_at;
   Fill;Type_text;Press_key;Key_chord;Select_option;Read_frames;Frame_interaction;
   Read_dialog;Accept_dialog;Dismiss_dialog;Upload_file;List_downloads;Page_zoom;
@@ -63,6 +65,15 @@ let gecko_only backend invocation constraints = match backend with
   | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_chromium ->
     Unsupported "This public operation is implemented only by the owned Gecko adapter."
   | Safari_unavailable -> Unsupported "No Safari adapter is installed in MASC."
+(* A click or fill on a target the ego connection's own snapshot named. *)
+let snapshot_target backend ~action = match backend with
+  | Connected Browser_lane.Ego_task_space -> conditional ~action Interact
+      [observed;"target is {ref} from the latest snapshot of the same page, {role, name, exact} or {text, exact}, given alone with expectedUrl.";
+       "Refused before any effect when the tab is not at expectedUrl or the target names no element or several (ego lists the candidates); ego brings the target into view and acts.";
+       "The receipt lists the pages the action opened as popups (tabIds) and a JavaScript dialog it raised; the dialog stays open.";ego_agent_pages]
+  | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium ->
+    Unsupported "Only an ego connection acts on its own snapshot targets; use selector or documentId/nodeId instead."
+  | Safari_unavailable -> missing
 let support backend operation = match backend with
   | Safari_unavailable -> Unsupported "No Safari adapter is installed in MASC; installed Safari alone is not a connection."
   | (Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Owned_chromium) ->
@@ -209,6 +220,8 @@ let support backend operation = match backend with
       | Safari_unavailable -> missing)
     | Scroll_page -> dom_input backend (conditional ~action:"scroll" Interact [observed;"Scrolls the page; use scroll_at for a nested pane."])
     | Scroll_at -> dom_input backend (conditional ~action:"scroll_at" Interact [observed;geometry;"Scrolls the pane at the observed viewport point."])
+    | Click_snapshot_target -> snapshot_target backend ~action:"click"
+    | Fill_snapshot_target -> snapshot_target backend ~action:"fill"
     | Fill -> dom_input backend (conditional ~action:"fill" Interact
         [observed;target;"Replaces the value of a text input or textarea and emits input/change, or replaces the content of a contenteditable editor with insertText (the editor gets input events); this is not trusted keyboard typing or submission."])
     | Double_click -> (match backend with
@@ -340,7 +353,8 @@ let operation_name = function
   | Navigate -> "navigate" | Follow_link -> "follow_link" | Back -> "back" | Forward -> "forward"
   | Reload -> "reload" | Session_lifecycle -> "session_lifecycle" | Read_text -> "read_text"
   | Read_html -> "read_html" | Read_elements -> "read_elements" | Read_scene -> "read_scene"
-  | Read_regions -> "read_regions" | Read_snapshot -> "read_snapshot" | Screenshot -> "screenshot" | Click -> "click"
+  | Read_regions -> "read_regions" | Read_snapshot -> "read_snapshot" | Screenshot -> "screenshot"
+  | Click_snapshot_target -> "click_snapshot_target" | Fill_snapshot_target -> "fill_snapshot_target" | Click -> "click"
   | Double_click -> "double_click" | Right_click -> "right_click" | Middle_click -> "middle_click"
   | Pointer_down -> "pointer_down" | Pointer_up -> "pointer_up" | Hover -> "hover"
   | Pointer_drag -> "pointer_drag" | Html5_drop -> "html5_drop" | Scroll_page -> "scroll_page"

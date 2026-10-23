@@ -275,6 +275,52 @@ let test_select_option () =
      "value on fill",fields "fill" @ ["selector",`String "#country";"text",`String "kr";"value",`String "kr"];
      "value on click",fields "click" @ ["selector",`String "#country";"value",`String "kr"]]
 
+(* An ego snapshot target: one of three shapes, given alone, on a page the
+   caller observed; it is what only an ego connection serves. *)
+let test_snapshot_targets () =
+  let url = ["expectedUrl",`String "https://example.org/"] in
+  let target action json = fields action @ url @ ["target",json] in
+  let expect label expected input = match Interaction.parse (`Assoc input) with
+    | Ok request ->
+      check bool label true (request.action = expected);
+      let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path
+          ~expected_url:request.expected_url request.action in
+      check bool (label ^ " survives the wire round trip") true
+        ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
+      check bool (label ^ " asks for the snapshot target capability") true
+        (Browser_lane.live_capability (Browser_lane.Page_interact {frame_path=[];tab_id=request.tab_id;
+          expected_url=request.expected_url;action=request.action}) = Some Browser_lane.Snapshot_target_input)
+    | Error error -> failf "%s: %s" label error in
+  expect "a ref" (Browser_lane.Click_target (Browser_lane.Target_ref 12)) (target "click" (`Assoc ["ref",`Int 12]));
+  expect "a role is exact by default"
+    (Browser_lane.Click_target (Browser_lane.Target_role {role="button";name="Send";exact=true}))
+    (target "click" (`Assoc ["role",`String "button";"name",`String "Send"]));
+  expect "a part of a text"
+    (Browser_lane.Click_target (Browser_lane.Target_text {text="send";exact=false}))
+    (target "click" (`Assoc ["text",`String "send";"exact",`Bool false]));
+  expect "a fill"
+    (Browser_lane.Fill_target {target=Browser_lane.Target_ref 5;text=""})
+    (target "fill" (`Assoc ["ref",`Int 5]) @ ["text",`String ""]);
+  List.iter (fun (label,input) ->
+    check bool label true (Result.is_error (Interaction.parse (`Assoc input))))
+    ["no expectedUrl",fields "click" @ ["target",`Assoc ["ref",`Int 1]];
+     "with a selector",target "click" (`Assoc ["ref",`Int 1]) @ ["selector",`String "#send"];
+     "with a scene node",target "click" (`Assoc ["ref",`Int 1]) @ ["documentId",`String "d";"nodeId",`String "n"];
+     "in a frame",target "click" (`Assoc ["ref",`Int 1]) @ ["framePath",`List [`String "#frame"]];
+     "on hover",target "hover" (`Assoc ["ref",`Int 1]);
+     "a negative ref",target "click" (`Assoc ["ref",`Int (-1)]);
+     "a ref as text",target "click" (`Assoc ["ref",`String "@1"]);
+     "two shapes at once",target "click" (`Assoc ["ref",`Int 1;"text",`String "Send"]);
+     "a role without a name",target "click" (`Assoc ["role",`String "button"]);
+     "a role that is not one lowercase word",target "click" (`Assoc ["role",`String "Button";"name",`String "Send"]);
+     "a blank text",target "click" (`Assoc ["text",`String " "]);
+     "a part of a text starting with a quote",target "click" (`Assoc ["text",`String "\"Send";"exact",`Bool false]);
+     "a part of a text with a chain",target "click" (`Assoc ["text",`String "a >> nth=1";"exact",`Bool false]);
+     "exact that is not a boolean",target "click" (`Assoc ["text",`String "Send";"exact",`String "yes"]);
+     "a fill without text",target "fill" (`Assoc ["ref",`Int 5])];
+  check bool "an exact text may start with a quote" true
+    (Result.is_ok (Interaction.parse (`Assoc (target "click" (`Assoc ["text",`String "\"Send\""])))))
+
 let test_touch_actions () =
   let viewport = `Assoc ["documentId",`String "fixture";"width",`Int 800;
     "height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0] in
@@ -360,6 +406,7 @@ let () = run "browser interaction" ["typed boundary", [
   test_case "set_viewport takes both sides in bounds or neither" `Quick test_set_viewport;
   test_case "click button parses and round trips" `Quick test_click_button;
   test_case "select_option parses, round trips and refuses mixed fields" `Quick test_select_option;
+  test_case "an ego snapshot target parses alone and round trips" `Quick test_snapshot_targets;
   test_case "tap_at and swipe parse as touch" `Quick test_touch_actions;
   test_case "touch sources use a touch pointer" `Quick test_touch_sources_use_a_touch_pointer;
   test_case "click button picks the live capability" `Quick test_click_button_capability;

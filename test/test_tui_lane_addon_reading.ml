@@ -10,6 +10,7 @@ let configuration : UI.configuration =
 let declaration : UI.declaration =
   { source_path = "/addons/one.toml"
   ; installation_id = None
+  ; ui_category = None
   ; desired = Some "r1"
   ; applied = None
   ; instance_id = None

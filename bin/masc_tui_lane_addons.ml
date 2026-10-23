@@ -34,12 +34,12 @@ type instance = {
   revision : string; phase : Row.phase; runtime_presence : runtime_presence;
   observation_seq : int; rows_count : int;
   installation_id : string option; source_path : string option; configuration_revision : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
-  skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
+  skills_directory : string option; ui_category : Masc.Lane_addon_category.t option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
   host_requests : (host_requests, string) result option;
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
-  source_path : string; installation_id : string option; enabled : bool option; desired : string option;
+  source_path : string; installation_id : string option; ui_category : Masc.Lane_addon_category.t option; enabled : bool option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
   origin : declaration_origin;
   application : Application.observation option;
@@ -65,7 +65,7 @@ type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type screen = Overview | Detail of string * string
 type overview_mode = Current_installations | Retained_runs
-type overview_anchor = Worker_anchor of string * string | Declaration_anchor of string
+type overview_anchor = Worker_anchor of string * string | Declaration_anchor of string * string option
 type overview_selection = Unvisited | No_selection | Selection of overview_anchor
 type diagnostic =
   | Detail_read_failure of string
@@ -116,6 +116,14 @@ let rec array parse = function
 let nullable parse = function `Null -> Ok None | value -> Result.map Option.some (parse value)
 let boolean = function `Bool value -> Ok value | _ -> Error "expected boolean"
 let optional name parse json = get (nullable parse) name json
+module Category = Masc.Lane_addon_category
+(* Only an omitted key is unclassified. Explicit null, blank or unknown values
+   are rejected by the shared parser rather than defaulted. *)
+let ui_category_of fields =
+  match List.filter (fun (name, _) -> String.equal name "ui_category") fields with
+  | [] -> Ok None
+  | [(_, value)] -> Result.map Option.some (Category.of_json value)
+  | _ :: _ :: _ -> Error "duplicate ui_category"
 let output_ports = function
   | `Assoc fields ->
       List.fold_right (fun (id, value) acc ->
@@ -137,7 +145,8 @@ let configuration = function
         let {Application.source_path;installation_id;enabled;desired_revision=desired;_} = application.target in
         let* applied = optional "applied_revision" text json in
         let* instance_id = optional "instance_id" text json in
-        Ok {source_path;installation_id=Some installation_id;enabled=Some enabled;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration;application=Some application})) "declarations" json in
+        let* ui_category = match json with `Assoc fields -> ui_category_of fields | _ -> Error "expected declaration object" in
+        Ok {source_path;installation_id=Some installation_id;ui_category;enabled=Some enabled;desired=Some desired;applied;instance_id;issues=[];origin=Parsed_declaration;application=Some application})) "declarations" json in
       let* issues = get (array (fun json ->
         let* source_path = get text "source_path" json in
         let* installation_id = optional "id" text json in
@@ -145,7 +154,7 @@ let configuration = function
       let declarations = List.fold_left (fun declarations (path, id, message) ->
         if List.exists (fun (d : declaration) -> d.source_path = path) declarations
         then List.map (fun (d : declaration) -> if d.source_path = path then {d with issues=d.issues @ [message]} else d) declarations
-        else declarations @ [{source_path=path;installation_id=id;enabled=None;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only;application=None}]) declarations issues in
+        else declarations @ [{source_path=path;installation_id=id;ui_category=None;enabled=None;desired=None;applied=None;instance_id=None;issues=[message];origin=Issue_only;application=None}]) declarations issues in
       Ok (Some {directory;complete;declarations})
 let decode_configuration json =
   let* configuration = get configuration "configuration" json in
@@ -237,6 +246,7 @@ let instance json =
   let* package = field "package" json in
   let* outputs = get output_ports "outputs" package in
   let* skills_directory = optional "skills_directory" text package in
+  let* ui_category = match package with `Assoc fields -> ui_category_of fields | _ -> Error "expected package object" in
   let* incarnation = get text "incarnation" json in
   let* action_schema = optional "action_schema" (function `Assoc _ as schema -> Ok schema | _ -> Error "expected action schema") json in
   let* package_fields = match package with `Assoc fields -> Ok fields | _ -> Error "expected package object" in
@@ -251,7 +261,7 @@ let instance json =
     | `Assoc fields -> Option.map host_requests (List.assoc_opt "host_requests" fields)
     | _ -> None in
   Ok { id; run_id; addon_id; title; revision; phase; runtime_presence; observation_seq; rows_count;
-    installation_id;source_path;configuration_revision;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display;
+    installation_id;source_path;configuration_revision;binding;outputs;skills_directory;ui_category;incarnation;action_schema;binding_schema;display;
     host_requests }
 let output json =
   let* rows = field "rows" json in
@@ -356,7 +366,7 @@ let retained (instance : instance) = match instance.phase with
   | Row.Detached -> true
   | Row.Attached | Row.Observing | Row.Failed _ | Row.Detaching -> false
 let history_group (instance : instance) = instance.source_path, instance.run_id, instance.addon_id
-let overview_entries ?(mode=Current_installations) snapshot =
+let overview_entries_raw ?(mode=Current_installations) snapshot =
   let instances = match mode with
     | Current_installations -> List.filter (fun item -> not (retained item)) snapshot.instances
     | Retained_runs -> List.filter retained snapshot.instances
@@ -375,6 +385,65 @@ let overview_entries ?(mode=Current_installations) snapshot =
                     instance.id=id && instance.source_path=Some declaration.source_path) instances)
                   declaration.instance_id in
                 if has_worker then None else Some (`Declaration (index, declaration))))
+let category_label = function
+  | Category.Memory_and_judgment -> "Memory & judgment"
+  | Category.Browser -> "Browser"
+  | Category.External_communications -> "External communications"
+  | Category.Voice_and_media -> "Voice & media"
+  | Category.Execution_environment -> "Execution environment"
+  | Category.Analysis -> "Analysis"
+type current_category = Classified of Category.t | Unclassified | Unverified
+let declared_category = function
+  | Some category -> Classified category
+  | None -> Unclassified
+(* The current declaration speaks only for an exact installation and path in a
+   complete, unique, issue-free reading. A worker keeps its original metadata;
+   it never supplies a missing or replacement declaration's current category. *)
+let current_category snapshot entry =
+  let trusted_declaration ~id ~path =
+    match snapshot.configuration with
+    | Some {complete=true; declarations; _} ->
+        let claims (d : declaration) =
+          String.equal d.source_path path
+          || Option.fold ~none:false ~some:(fun id -> d.installation_id=Some id) id in
+        (match List.filter claims declarations with
+         | [d] when d.installation_id=id && String.equal d.source_path path ->
+             (match d.origin, d.issues with
+              | Parsed_declaration, [] -> declared_category d.ui_category
+              | Parsed_declaration, _ :: _ | Issue_only, ([] | _ :: _) -> Unverified)
+         | [] | [_] | _ :: _ :: _ -> Unverified)
+    | Some {complete=false; _} | None -> Unverified in
+  match entry with
+  | `Declaration (_, (d : declaration)) ->
+      trusted_declaration ~id:d.installation_id ~path:d.source_path
+  | `Instance (i : instance) ->
+      match i.installation_id, i.source_path with
+      | Some id, Some path -> trusted_declaration ~id:(Some id) ~path
+      | None, None -> declared_category i.ui_category
+      | Some _, None | None, Some _ -> Unverified
+let category_rank = function
+  | Classified Category.Memory_and_judgment -> 0
+  | Classified Category.Browser -> 1
+  | Classified Category.External_communications -> 2
+  | Classified Category.Voice_and_media -> 3
+  | Classified Category.Execution_environment -> 4
+  | Classified Category.Analysis -> 5
+  | Unclassified -> 6
+  | Unverified -> 7
+let category_heading = function
+  | Classified c -> category_label c
+  | Unclassified -> "Unclassified"
+  | Unverified -> "Category unverified"
+(* Current installations are grouped by role; within a group the order is the
+   raw order, so identity-based cursor anchors stay stable. Retained runs keep
+   their run grouping. *)
+let overview_entries ?(mode=Current_installations) snapshot =
+  let entries = overview_entries_raw ~mode snapshot in
+  match mode with
+  | Retained_runs -> entries
+  | Current_installations ->
+      List.stable_sort (fun a b ->
+        Int.compare (category_rank (current_category snapshot a)) (category_rank (current_category snapshot b))) entries
 let overview_count ?(mode=Current_installations) snapshot = List.length (overview_entries ~mode snapshot)
 let selectable_overview_entries view snapshot =
   let entries = overview_entries ~mode:view.overview_mode snapshot in
@@ -391,10 +460,26 @@ let move_instance view delta =
       {view with instance_cursor; scroll=0}
 let overview_anchor = function
   | `Instance (instance : instance) -> Worker_anchor (instance.id, instance.incarnation)
-  | `Declaration (_, declaration) -> Declaration_anchor declaration.source_path
+  | `Declaration (_, declaration) -> Declaration_anchor (declaration.source_path, declaration.installation_id)
+let select_overview_anchor view selected =
+  let instance_cursor = Option.bind selected (fun anchor ->
+    Option.bind view.snapshot (fun snapshot ->
+      List.find_index (fun entry -> overview_anchor entry=anchor)
+        (selectable_overview_entries view snapshot)))
+    |> Option.value ~default:(-1) in
+  {view with instance_cursor}
+let set_presentation view presentation =
+  if view.presentation=presentation then view else
+  (* Detail keeps its pinned screen identity, but also retains the original
+     hidden list target when the operator returns from it to Overview. *)
+  let selected = Option.bind view.snapshot (fun snapshot ->
+    Option.map overview_anchor
+      (at_cursor (selectable_overview_entries view snapshot) view.instance_cursor)) in
+  select_overview_anchor {view with presentation} selected
 let toggle_history view = match view.screen with
   | Detail _ -> view
   | Overview ->
+      let view = set_presentation view Summary in
       let entries mode = Option.fold ~none:[] ~some:(overview_entries ~mode) view.snapshot in
       let saved = match at_cursor (entries view.overview_mode) view.instance_cursor with
         | None -> No_selection | Some entry -> Selection (overview_anchor entry) in
@@ -408,7 +493,7 @@ let toggle_history view = match view.screen with
             List.find_index (fun entry -> overview_anchor entry=anchor) (entries overview_mode)
             |> Option.value ~default:(-1) in
       {view with overview_mode;current_selection;history_selection;instance_cursor;scroll=0;selected=[];
-        focus=Instances;presentation=Summary;document_key=None}
+        focus=Instances;document_key=None}
 let selected_document view = Option.bind view.document_key (fun key ->
   List.find_opt (fun (s : Document.session) -> s.file_name = key) view.documents)
 let put_document view (document : Document.session) =
@@ -466,10 +551,7 @@ let reconcile_snapshot view snapshot =
       let entries = selectable_overview_entries view snapshot in
       let instance_cursor =
         if previous_entries=[] && entries<>[] then 0
-        else anchor (function
-          | `Instance (instance : instance) -> `Instance (instance.id, instance.incarnation)
-          | `Declaration (_, declaration) -> `Declaration declaration.source_path)
-          previous_entries entries view.instance_cursor in
+        else anchor overview_anchor previous_entries entries view.instance_cursor in
       {view with snapshot=Some snapshot; row_cursor; instance_cursor;
         configuration_cursor}
 let selected_instance view = Option.bind view.snapshot (fun snapshot ->
@@ -495,10 +577,9 @@ let ordered_rows view snapshot =
     if time=0 then String.compare a.id b.id else time)
 let toggle_flow view =
   let presentation = if view.presentation=Flow then Summary else Flow in
-  let view = {view with presentation;
+  { (set_presentation view presentation) with
     focus=(if view.screen=Overview then Instances else view.focus);
-    document_key=None; scroll=0} in
-  if view.screen=Overview && presentation=Flow then move_instance view 0 else view
+    document_key=None; scroll=0}
 (* Presentation readings identify user-facing results. Supporting context
    records stay available in Records and raw details without becoming result
    navigation targets. Packages without readings retain their generic view. *)
@@ -527,8 +608,8 @@ let open_selected_instance view =
   | Some snapshot ->
       match at_cursor (selectable_overview_entries view snapshot) view.instance_cursor with
       | Some (`Declaration (index, _)) ->
-          {view with focus=Configurations; configuration_cursor=index;
-            presentation=Technical; scroll=0; selected=[]; document_key=None}
+          { (set_presentation view Technical) with focus=Configurations; configuration_cursor=index;
+            scroll=0; selected=[]; document_key=None}
       | Some (`Instance item) ->
           select_initial_result {view with screen=Detail (item.id,item.incarnation); focus=Timeline;
             scroll=0; selected=[]; document_key=None}
@@ -547,9 +628,16 @@ let open_declaration view path =
           configuration.declarations))
     |> Option.value ~default:(-1)
   in
-  {view with screen=Overview; focus=Configurations; configuration_cursor;
-    current_selection=Selection (Declaration_anchor path);
-    scroll=0; error=None; editor_ready=false; presentation=Technical}
+  let current_selection =
+    Option.bind view.snapshot (fun snapshot ->
+      Option.bind snapshot.configuration (fun config ->
+        Option.map (fun (declaration : declaration) ->
+          Selection (Declaration_anchor (declaration.source_path, declaration.installation_id)))
+          (at_cursor config.declarations configuration_cursor)))
+    |> Option.value ~default:No_selection in
+  { (set_presentation view Technical) with screen=Overview; focus=Configurations; configuration_cursor;
+    current_selection;
+    scroll=0; error=None; editor_ready=false}
 let evidence_target view =
   let* snapshot = Option.to_result ~none:"Observation snapshot unavailable" view.snapshot in
   let* () = if view.selected=[] then Error "Select evidence rows first" else Ok () in
@@ -868,7 +956,7 @@ let detail_read_note view =
 let previous_read_note (view : t) =
   match view.snapshot_read_error, view.error with
   | Some detail, Some (Detail_read_failure _ | Request_failure _ | Input_failure _) ->
-      Some ("Previous Add-ons read: " ^ detail)
+      Some ("Previous Plugins read: " ^ detail)
   | (Some _ | None), None | None, Some _ -> None
 
 let diagnostic_lines view =
@@ -1007,7 +1095,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
         @ ("Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json)) in
   let draft = match view.draft with
     | None -> []
-    | Some text -> [(if view.naming then "New TOML filename: " else "Add-on command: ") ^ text] in
+    | Some text -> [(if view.naming then "New TOML filename: " else "Plugin command: ") ^ text] in
   let document = match selected_document view with
     | None -> [] | Some session -> document_application_lines view session @ Document.summary session in
   List.concat_map wrap
@@ -1117,7 +1205,7 @@ let open_actions ~request_id view =
   let* () = if can_observe instance then Ok () else Error "This instance is unavailable for actions; D shows its state and retained evidence." in
   let* schema = match instance.action_schema with
     | Some schema -> Ok schema
-    | None -> Error "This Add-on provides observations only. Press o to observe." in
+    | None -> Error "This Plugin provides observations only. Press o to observe." in
   let* () = Action.validate_schema schema in
   let* action_schema =
     let* properties = field "properties" schema in
@@ -1131,9 +1219,14 @@ let open_actions ~request_id view =
     Result.is_ok (Action.validate ~schema ~name:"lane_act"
       (Action.arguments ~instance_id:instance.id ~request_id ~action))) choices in
   if choices=[] && Option.is_none form then Error "The advertised schema has no valid preset action. D shows details."
-  else Ok {view with action_menu=Some {
-    target_id=instance.id;target_incarnation=instance.incarnation;target_title=instance.title;request_id;
-    schema;choices;form;cursor=0}; presentation=Summary;scroll=0;error=None}
+  else
+    (* Installation details can own a worker independently of the overview
+       cursor. The menu and the list it returns to keep that exact worker. *)
+    let view = select_overview_anchor (set_presentation view Summary)
+        (Some (Worker_anchor (instance.id, instance.incarnation))) in
+    Ok {view with action_menu=Some {
+      target_id=instance.id;target_incarnation=instance.incarnation;target_title=instance.title;request_id;
+      schema;choices;form;cursor=0};scroll=0;error=None}
 
 let move_action view delta =
   {view with scroll=0;action_menu=Option.map (fun menu ->
@@ -1147,7 +1240,7 @@ let submit_action view =
       && String.equal instance.incarnation menu.target_incarnation
       && instance.action_schema=Some menu.schema) snapshot.instances) with
     | Some instance -> Ok instance
-    | None -> Error "The selected Add-on changed. Refresh and choose its action again." in
+    | None -> Error "The selected Plugin changed. Refresh and choose its action again." in
   let* () = if can_observe instance then Ok ()
     else Error "The selected worker is no longer available for actions." in
   let* action = match menu.form with
@@ -1370,7 +1463,7 @@ let instance_heading _snapshot (item : instance) =
 
 let empty_result_lines view (item : instance) =
   match item.phase with
-  | Row.Failed detail -> ["Add-on failed: " ^ detail; instance_controls view item]
+  | Row.Failed detail -> ["Plugin failed: " ^ detail; instance_controls view item]
   | Row.Attached | Row.Observing | Row.Detaching | Row.Detached ->
       if item.observation_seq=0 then ["No completed observation received yet."]
       else if item.rows_count=0 then
@@ -1380,7 +1473,7 @@ let empty_result_lines view (item : instance) =
 
 let snapshot_coverage_lines coverage =
   if coverage=[] then [] else
-    [""; "Received snapshot coverage · all Add-ons"]
+    [""; "Received snapshot coverage · all Plugins"]
     @ List.map (fun (source : Row.coverage) ->
         source.source_id ^ " · " ^ (if source.complete then "complete" else "PARTIAL")
         ^ " · cursor " ^ Option.value ~default:"unknown" source.cursor
@@ -1411,7 +1504,7 @@ let overview_lines ~width view =
               Printf.sprintf "%d declared%s%s" declared
                 (if issues=0 then "" else Printf.sprintf " · %d config issues" issues)
                 (if config.complete then "" else " · inventory partial") in
-        let heading = Printf.sprintf "Lane Add-ons · %s · %d active · %d failed workers%s"
+        let heading = Printf.sprintf "Plugins · %s · %d active · %d failed workers%s"
           configuration_summary active failed
           (if Option.is_some view.snapshot_read_error then " · STALE" else "") in
         let entries = selectable_overview_entries view snapshot in
@@ -1424,7 +1517,7 @@ let overview_lines ~width view =
           | Retained_runs, _ when entries=[] -> ["No retained runs in this snapshot. h:current installations"]
           | Retained_runs, _ -> []
           | Current_installations, Some {complete=true;declarations=[];_} when count=0 ->
-              ["No Add-ons installed. i:install a package  n:new TOML"]
+              ["No Plugins installed. i:install a package  n:new TOML"]
           | Current_installations, Some {complete=false;_} when entries=[] -> ["Installation inventory incomplete · r:refresh"]
           | Current_installations, None when entries=[] -> ["TOML installation status unknown · r:refresh"]
           | Current_installations, (Some _ | None) -> [] in
@@ -1435,6 +1528,14 @@ let overview_lines ~width view =
          ""] @ empty)
         @ List.concat_map (fun (index,item) ->
             let marker = if index=view.instance_cursor then "> " else "  " in
+            let role_header = match view.overview_mode with
+              | Retained_runs -> []
+              | Current_installations ->
+                  let here = current_category snapshot item in
+                  let previous = if index=0 then None else List.nth_opt entries (index-1) in
+                  if index<>window && Option.fold ~none:false ~some:(fun p -> current_category snapshot p=here) previous
+                  then [] else texts ["── " ^ category_heading here ^ " ──"] in
+            role_header @
             match item with
             | `Declaration (_, declaration) ->
                 let name = Option.value ~default:"unresolved installation" declaration.installation_id in
@@ -1485,6 +1586,14 @@ let overview_lines ~width view =
                    | Current_installations, None | Retained_runs, _ -> [])
                 @ (match view.overview_mode with Current_installations -> []
                    | Retained_runs -> ["    Instance " ^ item.id])
+                @ (match view.overview_mode, current_category snapshot (`Instance item), item.ui_category with
+                   | Retained_runs, _, _ | _, Unverified, _ -> []
+                   | Current_installations, Classified now, Some started when now=started -> []
+                   | Current_installations, Unclassified, None -> []
+                   | Current_installations, now, started ->
+                       let word = function Some c -> category_label c | None -> "unclassified" in
+                       [Printf.sprintf "    role: worker started as %s · declaration now %s" (word started)
+                          (match now with Classified c -> category_label c | Unclassified | Unverified -> "unclassified")])
                 @ (if index=view.instance_cursor then
                      Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
                    else [])
@@ -1495,7 +1604,8 @@ let overview_lines ~width view =
      @ texts ([""; overview_hints view] @ action_lines view))
 
 let help_lines = [
-  "Lane Add-ons keys · Esc:close";
+  "Plugins keys · Esc:close";
+  "Install Plugins and switch them on/off. Lanes are their work and observation paths.";
   "List: j/k select · Enter open · h history/current · i install · n new TOML";
   "Detail: 1 Results · 2 Links · 3 Installation · 4 Records · Tab next";
   "Both: ?:help · Esc back · q back · r refresh · J/K scroll";
@@ -1508,8 +1618,8 @@ let help_lines = [
   "Saving off keeps the TOML and evidence; r reads the actual worker cleanup state.";
   "Links: S subscriptions · Left/Right lane";
   "Records: Space mark row · e export marked rows";
-  "Navigation: : command palette · Esc returns to Lane Add-ons";
-  "Advanced: A opens Add-on commands · Enter submits (including act or detach ID)";
+  "Navigation: : command palette · Esc returns to Plugins";
+  "Advanced: A opens Plugin commands · Enter submits (including act or detach ID)";
 ]
 
 type read_target =
@@ -1631,8 +1741,8 @@ let installation_results view ~installation_id =
       snapshot.instances) in
   match live with
   | Some item ->
-      select_initial_result {view with screen=Detail (item.id, item.incarnation); focus=Timeline;
-        row_cursor = -1; scroll=0; selected=[]; document_key=None; presentation=Summary; error=None}
+      select_initial_result { (set_presentation view Summary) with screen=Detail (item.id, item.incarnation); focus=Timeline;
+        row_cursor = -1; scroll=0; selected=[]; document_key=None; error=None}
   | None ->
       {view with error=Some (Input_failure (installation_id
         ^ " has no running worker; its Results appear while it runs"))}
@@ -1819,7 +1929,7 @@ let tab_strip ~width view =
 let detail_lines ~height ~width view =
   let wrap = document_rows ~width in
   match selected_instance view, view.snapshot with
-  | None, _ -> ["The selected Add-on changed. Esc returns to the list."]
+  | None, _ -> ["The selected Plugin changed. Esc returns to the list."]
   | Some item, Some snapshot ->
       let header = instance_heading snapshot item ^ " · " ^ phase_label item.phase in
       let head = List.concat_map wrap ["?:help  Esc:back  Tab:section  j/k:move  D:raw"; header]
@@ -1892,7 +2002,7 @@ let detail_lines ~height ~width view =
               "Evidence " ^ e.uri ^ " · sha256 " ^
               Option.value ~default:"unknown" e.sha256) row.evidence) record_rows) in
       head @ body
-  | Some _, None -> ["Reading Add-ons…"]
+  | Some _, None -> ["Reading Plugins…"]
 
 let rec action_fields prefix = function
   | `Assoc fields -> List.concat_map (fun (key,value) ->
@@ -1979,7 +2089,7 @@ let declared_layers ~identity workers =
 
 let flow_lines ?(embedded=false) view =
   (match selected_instance view with
-   | None -> ["No selected Add-on action target"]
+   | None -> ["No selected Plugin action target"]
    | Some instance -> ["Action target: " ^ instance.title ^ " · " ^ instance.id])
   @ ["Declared Add-on layers · last received snapshot";
      "Same layer: independent dependencies. Downward: declared upstream -> consumer.";
@@ -2033,7 +2143,7 @@ let flow_lines ?(embedded=false) view =
                     | [] -> ["  Cyclic or unresolved upstream dependency"]
                     | problems -> List.map (fun detail -> "  " ^ detail) problems)) unresolved in
          notices @ source_lines @ layer_lines
-         @ (if workers=[] then ["No current workers to place. Review installation issues or install an Add-on."] else [])
+         @ (if workers=[] then ["No current workers to place. Review installation issues or install a Plugin."] else [])
          @ [""; "Declared inputs and outputs"]
          @ List.concat_map (fun instance ->
            let target = name instance in

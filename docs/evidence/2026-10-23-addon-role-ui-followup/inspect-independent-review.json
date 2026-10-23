@@ -1,0 +1,75 @@
+{
+  "verdict": "PASS",
+  "kind": "independent_source_review",
+  "reviewer": "inventory_category_authority",
+  "reviewed_at": "2026-10-23T06:20:59.692349+00:00",
+  "base": "70f438d054df3c0fe4eaf51853d4775cc42bab81",
+  "files": [
+    {
+      "path": "bin/masc_tui_lane_addons.ml",
+      "bytes": 130813,
+      "sha256": "2ebe77ddcd69dc0df51fa88428c10617eed5b50c3976981e051a8e50b18497f0"
+    },
+    {
+      "path": "bin/masc_tui_lane_addons.mli",
+      "bytes": 15575,
+      "sha256": "14beb1dc1c990e33f0f33524a3abd32f780acb6e85b6cb512f1bb8755afc1f73"
+    },
+    {
+      "path": "bin/masc_tui.ml",
+      "bytes": 1826565,
+      "sha256": "3dde5e309f49adc01a8507c6cfe6398c372841543ef9112b481b58a5a9f5f63f"
+    },
+    {
+      "path": "test/test_tui_lane_addons.ml",
+      "bytes": 144222,
+      "sha256": "e943047f6d8dbc4a9b2f7542d96b19584e139f79b6365619cc1e905b0b4efaf2"
+    },
+    {
+      "path": "test/test_tui_lane_addon_reading.ml",
+      "bytes": 4773,
+      "sha256": "bc37bf1e8079c7205deeeb14fdb6c9c78d7db7eed608c10423bfb100a411c863"
+    }
+  ],
+  "patch": {
+    "path": "/tmp/masc-addon-goal-resume-20261021/tui-inspect-role-v2-20261023.patch",
+    "bytes": 59598,
+    "sha256": "eed11403081a98b88cb7ea694cc9763bad7143b7774876a06de9432e6127c3cb"
+  },
+  "independent": true,
+  "independence_scope": "Reviewer authored a separate 14-file server category authority followup, not any file or change in this five-file Inspect candidate. No source edits, commits, push or GitHub approval performed in this review.",
+  "findings": [],
+  "previous_verdict": {
+    "verdict": "FAIL",
+    "record": "tui-inspect-role-independent-review-original-20261023.json",
+    "patch_sha256": "53a9b8747740ae6e853be958916c21265e610b3f372cd9368d5d697fb76a953f",
+    "resolved": [
+      "P2-1 projection changes f/D/h may retarget worker by old numeric cursor"
+    ]
+  },
+  "reviewed_source_boundaries": [
+    "Complete final five-file diff against base, including all four bin/masc_tui.ml direct-consumer hunks",
+    "Current-category exact installation/path uniqueness, completeness, parsed origin and issue-free declaration",
+    "Strict optional package/declaration ui_category decoding and duplicate category refusal",
+    "select_overview_anchor and public set_presentation MLI/ML agreement",
+    "f/D/Escape/history, Subscriptions pending view, explicit Results/manual detail, and action menu projection transitions",
+    "Pinned Detail identity and its hidden original overview anchor",
+    "Original worker incarnation/action schema validation in submit_action and declaration replacement selection invalidation",
+    "Actual action-payload and selected_instance regression fixtures including unresolved declaration before workers",
+    "All direct new instance/declaration field constructors found by source search; retained run grouping unchanged"
+  ],
+  "source_conclusions": [
+    "set_presentation captures the exact original anchor from the old selectable projection and remaps to the new one; absent/filtered originals leave -1, never a substitute worker",
+    "toggle_history first remaps to Summary before saving/restoring anchors, preventing filtered/unfiltered index confusion",
+    "All production presentation mutations found in the Inspect module and main direct consumers route through set_presentation except initial fixed state",
+    "open_actions additionally pins the actual action_target worker, including a Technical installation-owned worker distinct from the old overview cursor",
+    "Selection remains worker id+incarnation or declaration exact path+installation, independent of display category",
+    "Regression fixtures exercise real selected_instance and submit_action targets, rather than rendered wording or row ordering"
+  ],
+  "limitations": [
+    "Source PASS only; no OCaml typing, Dune build, OCaml test execution, CI, installed binary or visible-terminal result observed by this reviewer",
+    "Narrow terminal visibility remains unmeasured: the selected item begins its logical list window, but wrapped diagnostics/headings may consume viewport rows; this was not promoted to a new P0-P2 source regression",
+    "No formal GitHub approval is conferred by this record"
+  ],
+  "mutations": "Only independent review MD/JSON records written; reviewed source and remote refs untouched"
+}

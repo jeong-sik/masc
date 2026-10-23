@@ -13,128 +13,158 @@ let read_error_to_string = function
     ^ Keeper_external_attention.read_error_to_string error
 ;;
 
-let counterpart_observations_read ?external_after ~base_dir ~keeper_name ~after ~before () =
-  let ( let* ) = Result.bind in
-  let in_range ts =
-    ts <= before
-    &&
-    match after with
-    | None -> true
-    | Some lower -> ts > lower
-  in
-  let* user_rows =
-    match after with
-    | Some lower when Float.compare lower before >= 0 ->
-      (* An empty chat interval admits no chat row, so the strict store read
-         is skipped: a broken row outside the interval must not fail it. *)
-      Ok []
-    | Some _ | None ->
-      Keeper_chat_store.load_all_result ~base_dir ~keeper_name
-      |> Result.map_error (fun error -> Chat_store_unreadable error)
-  in
-  let user_rows =
-    user_rows
-    |> List.filter (fun (message : Keeper_chat_store.chat_message) ->
-      in_range message.ts
-      &&
-      match message.role, message.speaker with
-      | Keeper_chat_store.Role.User, Some _ -> true
-      | Keeper_chat_store.Role.User, None
-      | Keeper_chat_store.Role.Assistant, _
-      | Keeper_chat_store.Role.Request_failure, _
-      | Keeper_chat_store.Role.System, _
-      | Keeper_chat_store.Role.Tool, _ -> false)
-  in
-  let* all_external_items =
-    Keeper_external_attention.load_events_result ~base_path:base_dir ~keeper_name
-    |> Result.map_error (fun error -> External_attention_unreadable error)
-    |> Result.map (List.filter_map (function
-      | Keeper_external_attention.Recorded item -> Some item))
-  in
-  let received_at (item : Keeper_external_attention.item) = item.received_at in
-  let* external_items, external_through = match external_after with
-    | None ->
-      let items =
-        all_external_items
-        |> List.filter (fun item -> in_range (received_at item))
-        |> List.stable_sort (fun left right ->
-          Float.compare (received_at left) (received_at right))
-      in
-      Ok (items, List.length all_external_items)
-    | Some cursor when cursor < 0 || cursor > List.length all_external_items ->
-      Error (External_cursor_failed "external log shrank behind its admission cursor")
-    | Some cursor ->
-      (* Rows stay in durable admission order. The snapshot ends at the first
-         row admitted after this range, so a later turn's evidence is not
-         committed with this one. A row stamped before a clock rollback holds
-         the rows behind it until a range ends after its stamp. *)
-      let items =
-        List.drop cursor all_external_items
-        |> List.take_while (fun item -> received_at item <= before)
-      in
-      Ok (items, cursor + List.length items)
-  in
-  (* This key answers whether a chat row came from an external delivery, not
-     whether that delivery happened inside this Memory range. The external
-     event and its chat projection can straddle a turn boundary. Restricting
-     keys to [external_items] would emit the same counterpart once on each
-     side of that boundary. *)
-  let external_delivery_keys =
-    all_external_items
-    |> List.filter_map (fun (item : Keeper_external_attention.item) ->
-      match item.external_message with
-      | None -> None
-      | Some message -> Some (item.conversation.conversation_id, message.message_id))
-  in
-  let is_external_duplicate (message : Keeper_chat_store.chat_message) =
+let ( let* ) = Result.bind
+module Chat = Keeper_chat_store
+module Attention = Keeper_external_attention
+
+type counterpart_snapshot =
+  { keeper_name : string
+  ; after : float option
+  ; before : float
+  ; external_after : int option
+  ; chat_rows : Chat.captured_row list
+  ; external_log : Attention.item list
+  }
+
+let in_interval ~after ~before ts =
+  ts <= before && match after with None -> true | Some lower -> ts > lower
+
+let selected_chat ~after ~before (message : Chat.chat_message) =
+  in_interval ~after ~before message.Chat.ts &&
+  match message.Chat.role, message.Chat.speaker with
+  | Chat.Role.User, Some _ -> true
+  | Chat.Role.User, None
+  | Chat.Role.Assistant, _ | Chat.Role.Request_failure, _
+  | Chat.Role.System, _ | Chat.Role.Tool, _ -> false
+
+let selected_external (snapshot : counterpart_snapshot) =
+  match snapshot.external_after with
+  | None ->
+    List.filter (fun (item : Attention.item) ->
+      in_interval ~after:snapshot.after ~before:snapshot.before item.received_at) snapshot.external_log
+    |> List.stable_sort (fun (left : Attention.item) (right : Attention.item) ->
+      Float.compare left.received_at right.received_at)
+  | Some cursor ->
+    List.drop cursor snapshot.external_log
+    |> List.take_while (fun (item : Attention.item) -> item.received_at <= snapshot.before)
+
+let external_through (snapshot : counterpart_snapshot) =
+  match snapshot.external_after with
+  | None -> List.length snapshot.external_log
+  | Some cursor -> cursor + List.length (selected_external snapshot)
+
+let counterpart_snapshot_matches_selection (snapshot : counterpart_snapshot) ~external_after ~after ~before =
+  snapshot.external_after = Some external_after && snapshot.after = after && snapshot.before = before
+
+let counterpart_observations (snapshot : counterpart_snapshot) =
+  (* The complete original log supplies dedup identities, even outside this
+     interval/frontier: a delivery and its chat projection can straddle it. *)
+  let delivery_keys = List.filter_map (fun (item : Attention.item) ->
+    Option.map (fun (message : Attention.external_message_ref) ->
+      item.conversation.conversation_id, message.message_id) item.external_message) snapshot.external_log in
+  let is_duplicate (message : Chat.chat_message) =
     match message.conversation_id, message.external_message_id with
     | Some conversation_id, Some message_id ->
-      List.exists
-        (fun (external_conversation_id, external_message_id) ->
-           String.equal conversation_id external_conversation_id
-           && String.equal message_id external_message_id)
-        external_delivery_keys
-    | None, _ | _, None -> false
-  in
-  let external_observations =
-    List.map
-      (fun (item : Keeper_external_attention.item) ->
-         item.received_at, Keeper_counterpart_observation.of_external_attention item)
-      external_items
-  in
-  let chat_observations =
-    user_rows
-    |> List.filter (fun message -> not (is_external_duplicate message))
-    |> List.filter_map (fun (message : Keeper_chat_store.chat_message) ->
-      Keeper_counterpart_observation.of_chat_message message
-      |> Option.map (fun observation -> message.ts, observation))
-  in
-  let chat_observations =
-    List.stable_sort
-      (fun (left_ts, _) (right_ts, _) -> Float.compare left_ts right_ts)
-      chat_observations
-  in
-  (* Interleave by time without reordering either side: external rows keep the
-     order chosen above, and an external row goes first on a tie. *)
-  let rec interleave acc externals chats =
-    match externals, chats with
+      List.exists (fun (conversation, id) ->
+        String.equal conversation_id conversation && String.equal message_id id) delivery_keys
+    | None, _ | _, None -> false in
+  let externals = selected_external snapshot |> List.map (fun (item : Attention.item) ->
+    item.received_at, Keeper_counterpart_observation.of_external_attention item) in
+  let chats = snapshot.chat_rows |> List.map Chat.captured_row_message
+    |> List.filter (fun message -> not (is_duplicate message))
+    |> List.filter_map (fun (message : Chat.chat_message) ->
+      Option.map (fun observation -> message.ts, observation)
+        (Keeper_counterpart_observation.of_chat_message message))
+    |> List.stable_sort (fun (left, _) (right, _) -> Float.compare left right) in
+  let rec interleave acc externals chats = match externals, chats with
     | [], rest | rest, [] -> List.rev_append acc rest
-    | ((admitted_ts, _) as admitted) :: admitted_rest, ((chat_ts, _) as chat) :: chat_rest ->
-      if Float.compare chat_ts admitted_ts < 0
+    | ((external_ts, _) as external_row) :: external_rest,
+      ((chat_ts, _) as chat) :: chat_rest ->
+      if Float.compare chat_ts external_ts < 0
       then interleave (chat :: acc) externals chat_rest
-      else interleave (admitted :: acc) admitted_rest chats
-  in
-  interleave [] external_observations chat_observations
-  |> List.map snd
-  |> fun observations -> Ok (observations, external_through)
-;;
+      else interleave (external_row :: acc) external_rest chats in
+  interleave [] externals chats |> List.map snd
+
+let capture_counterparts_read ?external_after ~base_dir ~keeper_name ~after ~before () =
+  let* () = if Float.is_finite before && Option.fold ~none:true ~some:Float.is_finite after
+    then Ok () else Error (External_cursor_failed "counterpart interval must be finite") in
+  let* chat_rows = match after with
+    | Some lower when Float.compare lower before >= 0 -> Ok []
+    | Some _ | None -> Chat.load_captured_result ~select:(selected_chat ~after ~before) ~base_dir ~keeper_name
+      |> Result.map_error (fun error -> Chat_store_unreadable error) in
+  let* external_log = Attention.load_events_result ~base_path:base_dir ~keeper_name
+    |> Result.map_error (fun error -> External_attention_unreadable error)
+    |> Result.map (List.map (function Attention.Recorded item -> item)) in
+  let* () = if List.for_all (fun (item : Attention.item) ->
+      Float.is_finite item.received_at && String.equal keeper_name item.keeper_name) external_log
+    then Ok () else Error (External_cursor_failed "external counterpart rows do not match their original scope or time") in
+  match external_after with
+  | Some cursor when cursor < 0 || cursor > List.length external_log ->
+    Error (External_cursor_failed "external log shrank behind its admission cursor")
+  | Some _ | None -> Ok {keeper_name;after;before;external_after;chat_rows;external_log}
+
+let counterpart_snapshot_to_json (snapshot : counterpart_snapshot) =
+  `Assoc ["keeper_name", `String snapshot.keeper_name;
+    "after", (match snapshot.after with None -> `Null | Some ts -> `Float ts);
+    "before", `Float snapshot.before;
+    "external_after", (match snapshot.external_after with None -> `Null | Some value -> `Int value);
+    "external_through", `Int (external_through snapshot);
+    "chat_rows", `List (List.map Chat.captured_row_to_json snapshot.chat_rows);
+    "external_log", `List (List.map Attention.item_to_json snapshot.external_log)]
+
+let counterpart_snapshot_of_json value =
+  let fields names = function
+    | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields
+    | _ -> Error "unexpected counterpart snapshot fields" in
+  let finite = function
+    | `Float value when Float.is_finite value -> Ok value
+    | _ -> Error "counterpart time must be finite float" in
+  let list decode = function
+    | `List values -> List.fold_left (fun result value ->
+      let* acc = result in let* value = decode value in Ok (value :: acc)) (Ok []) values
+      |> Result.map List.rev
+    | _ -> Error "counterpart rows must be a list" in
+  (* Existing domain codecs own external shapes. Exact roundtrip additionally
+     refuses optional defaults/unknown or duplicate typed fields. Domain string
+     association payloads (metadata/address) retain their original entry order. *)
+  let item value =
+    let* item = Attention.item_of_json value in
+    if Float.is_finite item.received_at
+       && Yojson.Safe.equal value (Attention.item_to_json item)
+    then Ok item else Error "incomplete or unknown external counterpart fields" in
+  let* fields = fields ["keeper_name";"after";"before";"external_after";"external_through";"chat_rows";"external_log"] value in
+  let get key = List.assoc key fields in
+  let* keeper_name = match get "keeper_name" with `String name -> Ok name | _ -> Error "invalid counterpart Keeper" in
+  let* after = match get "after" with `Null -> Ok None | value -> Result.map Option.some (finite value) in
+  let* before = finite (get "before") in
+  let* external_after = match get "external_after" with
+    | `Null -> Ok None | `Int value when value >= 0 -> Ok (Some value)
+    | _ -> Error "invalid counterpart external offset" in
+  let* through = match get "external_through" with `Int value when value >= 0 -> Ok value
+    | _ -> Error "invalid counterpart external frontier" in
+  let* chat_rows = list Chat.captured_row_of_json (get "chat_rows") in
+  let* external_log = list item (get "external_log") in
+  let snapshot = {keeper_name;after;before;external_after;chat_rows;external_log} in
+  if Option.exists (fun cursor -> cursor > List.length external_log) external_after
+     || not (List.for_all (fun row -> selected_chat ~after ~before (Chat.captured_row_message row)) chat_rows)
+     || not (List.for_all (fun (item : Attention.item) -> String.equal keeper_name item.keeper_name) external_log)
+     || external_through snapshot <> through
+  then Error "counterpart snapshot selection or original frontier is inconsistent"
+  else Ok snapshot
+
+let capture_counterparts ~external_after ~base_dir ~keeper_name ~after ~before =
+  let* snapshot = capture_counterparts_read ~external_after ~base_dir ~keeper_name ~after ~before () in
+  let* _ = counterpart_snapshot_of_json (counterpart_snapshot_to_json snapshot)
+    |> Result.map_error (fun detail -> External_cursor_failed detail) in
+  Ok snapshot
 
 let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
-  counterpart_observations_read ~base_dir ~keeper_name ~after ~before () |> Result.map fst
-;;
+  capture_counterparts_read ~base_dir ~keeper_name ~after ~before ()
+  |> Result.map counterpart_observations
 
 let counterpart_observations_from ~external_after ~base_dir ~keeper_name ~after ~before =
-  counterpart_observations_read ~external_after ~base_dir ~keeper_name ~after ~before ()
+  capture_counterparts ~external_after ~base_dir ~keeper_name ~after ~before
+  |> Result.map (fun snapshot -> counterpart_observations snapshot, external_through snapshot)
 ;;
 
 let counterpart_observations_between_offloaded ~base_dir ~keeper_name ~after ~before =

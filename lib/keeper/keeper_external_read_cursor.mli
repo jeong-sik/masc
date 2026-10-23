@@ -6,6 +6,20 @@
     existing Memory WAL receipts repair interruption before acknowledgement.
     Receipt comparison includes exact unread coverage, whose verified records
     are durably archived before acknowledgement can discard the pending ID. *)
+(** Read-only snapshot of the original cursor, including after, pending through
+    and complete atom/official receipt identities. Missing state is the original
+    zero cursor. This is data, not a token or a recovery/ACK capability. *)
+type observation
+val observe : runtime_keepers_dir:string -> keeper_name:string -> (observation, string) result
+val observation_to_json : observation -> Yojson.Safe.t
+val observation_of_json : Yojson.Safe.t -> (observation, string) result
+val observation_offset : observation -> int
+val observation_matches_preparation : observation -> after:int -> through:int ->
+  atom:Keeper_memory_os_current.durable_range_id option ->
+  official:Keeper_memory_os_current.official_range_id option -> bool
+(** Exact stored preparation comparison only. Does not construct a token or
+    inspect/repair current Memory receipts. Equal through/after expects no pending. *)
+
 type token
 val read : memory_keepers_dir:string -> runtime_keepers_dir:string -> keeper_name:string ->
   (token, string) result

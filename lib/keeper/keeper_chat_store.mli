@@ -574,6 +574,18 @@ type strict_decode_error =
     e.g. ["<path>:2 unreadable chat row"]. *)
 val strict_decode_error_to_string : strict_decode_error -> string
 
+(** Original complete row bytes and the typed projection from that same strict
+    read, including its then-current redaction. No current secret lookup occurs
+    on codec restoration. Raw bytes may contain private source data; this is an
+    internal capture, not a Dashboard projection or an effect capability. Every
+    source row is strictly read; only [select]ed rows are captured. *)
+type captured_row
+val load_captured_result : select:(chat_message -> bool) -> base_dir:string -> keeper_name:string ->
+  (captured_row list, strict_decode_error) result
+val captured_row_message : captured_row -> chat_message
+val captured_row_to_json : captured_row -> Yojson.Safe.t
+val captured_row_of_json : Yojson.Safe.t -> (captured_row, string) result
+
 val load_all_result :
   base_dir:string -> keeper_name:string ->
   (chat_message list, strict_decode_error) result

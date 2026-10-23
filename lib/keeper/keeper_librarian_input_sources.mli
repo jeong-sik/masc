@@ -8,6 +8,21 @@ type read_error =
 
 val read_error_to_string : read_error -> string
 
+(** Immutable data from the same strict chat/external reads. Captures the raw
+    selected chat rows before delivery deduplication and the complete original
+    external log, including out-of-range identities used to deduplicate chat.
+    This observation grants no acknowledgement or dispatch authority. *)
+type counterpart_snapshot
+val capture_counterparts : external_after:int -> base_dir:string -> keeper_name:string ->
+  after:float option -> before:float -> (counterpart_snapshot, read_error) result
+val counterpart_observations : counterpart_snapshot -> Keeper_counterpart_observation.t list
+val external_through : counterpart_snapshot -> int
+val counterpart_snapshot_matches_selection : counterpart_snapshot -> external_after:int ->
+  after:float option -> before:float -> bool
+val counterpart_snapshot_to_json : counterpart_snapshot -> Yojson.Safe.t
+val counterpart_snapshot_of_json : Yojson.Safe.t -> (counterpart_snapshot, string) result
+(** Strict, complete data codec. Does not reread current stores. *)
+
 (** Complete counterpart evidence after [after] through [before], inclusive of
     [before]. [after = None] means
     that the selected range starts with this trace's current atom history.

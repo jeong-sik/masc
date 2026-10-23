@@ -477,6 +477,13 @@ let test_external_cursor_recovers_memory_receipt ~with_unread () =
     ~source:{kind=Current.Librarian;trace_id="cursor-trace"} ~new_claims:[] () |> get);
   (* No acknowledge call: simulate interruption after the real Memory WAL
      committed but before the external cursor and ordinary progress wrote. *)
+  let pending_path = Cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
+  let pending_bytes = Fs_compat.load_file pending_path in
+  let observed = Cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
+  Alcotest.(check int) "observation does not recover a committed Memory receipt" 0
+    (Cursor.observation_offset observed);
+  Alcotest.(check string) "committed receipt observation leaves pending bytes intact" pending_bytes
+    (Fs_compat.load_file pending_path);
   let ledger_path = Current.unread_ledger_path ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name in
   if with_unread then (
     let cursor_path = Cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
@@ -520,6 +527,119 @@ let test_external_cursor_recovers_memory_receipt ~with_unread () =
    | Error _ -> () | Ok _ -> Alcotest.fail "malformed cursor passed deployment preflight")
 ;;
 
+let test_counterpart_capture_retains_original_rows_and_dedup_frontier () =
+  with_temp_base "keeper-counterpart-capture" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let module Chat = Masc.Keeper_chat_store in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let keeper_name = "captured-counterparts" in
+  let first = item ~keeper_name ~dedupe_key:"capture-first" ~preview:"first"
+      ~received_at:5. () in
+  let future = item ~keeper_name ~dedupe_key:"capture-future" ~preview:"future"
+      ~external_message:(external_message "capture-future-message") ~received_at:30. () in
+  let behind_future = item ~keeper_name ~dedupe_key:"capture-held" ~preview:"held"
+      ~received_at:10. () in
+  List.iter (fun incoming -> match record ~base_path incoming with
+    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected capture duplicate"
+    | `Error detail -> Alcotest.fail detail) [first;future;behind_future];
+  let row ~id ~content ~ts extra =
+    `Assoc (["id",`String id;"role",`String "user";"content",`String content;
+      "ts",`Float ts;"speaker_id",`String "speaker";"speaker_name",`String "Original speaker";
+      "speaker_authority",`String "external"] @ extra) |> Yojson.Safe.to_string in
+  let duplicate = row ~id:"chat-duplicate" ~content:"duplicate future delivery" ~ts:12.
+      ["conversation_id",`String future.conversation.conversation_id;
+       "external_message_id",`String "capture-future-message"] in
+  let direct = row ~id:"chat-original" ~content:"direct original" ~ts:13. [] in
+  let chat_path = Chat.chat_path ~base_dir:base_path ~keeper_name in
+  write_file chat_path (duplicate ^ "\n" ^ direct ^ "\n");
+  let snapshot = Sources.capture_counterparts ~external_after:0 ~base_dir:base_path
+      ~keeper_name ~after:None ~before:20.
+    |> Result.map_error Sources.read_error_to_string |> get in
+  let snapshot_json = Sources.counterpart_snapshot_to_json snapshot in
+  let snapshot_bytes = Yojson.Safe.to_string snapshot_json in
+  let content snapshot = Sources.counterpart_observations snapshot |> external_previews in
+  Alcotest.(check (list string)) "out-of-range delivery still suppresses its selected chat duplicate"
+    ["first";"direct original"] (content snapshot);
+  Alcotest.(check int) "original frontier stops at the first future admission" 1
+    (Sources.external_through snapshot);
+  let captured_rows = match snapshot_json with
+    | `Assoc fields -> (match List.assoc "chat_rows" fields with
+      | `List rows -> rows | _ -> Alcotest.fail "capture rows missing")
+    | _ -> Alcotest.fail "capture envelope missing" in
+  let raw row = match row with
+    | `Assoc fields -> (match List.assoc "raw_line" fields with
+      | `String raw -> raw | _ -> Alcotest.fail "original raw row missing")
+    | _ -> Alcotest.fail "invalid raw capture" in
+  Alcotest.(check (list string)) "raw selected rows include the deduplicated row in source order"
+    [duplicate;direct] (List.map raw captured_rows);
+  (match record ~base_path (item ~keeper_name ~dedupe_key:"capture-append" ~preview:"new tail" ~received_at:40. ()) with
+   | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected appended duplicate"
+   | `Error detail -> Alcotest.fail detail);
+  write_file chat_path (row ~id:"replacement" ~content:"changed source" ~ts:13. [] ^ "\n");
+  let restored = Sources.counterpart_snapshot_of_json (Yojson.Safe.from_string snapshot_bytes) |> get in
+  Alcotest.(check (list string)) "restoration never rereads rewritten or appended sources"
+    ["first";"direct original"] (content restored);
+  Alcotest.(check string) "complete original capture is immutable" snapshot_bytes
+    (Sources.counterpart_snapshot_to_json restored |> Yojson.Safe.to_string);
+  let refused value = match Sources.counterpart_snapshot_of_json value with
+    | Error _ -> () | Ok _ -> Alcotest.fail "malformed complete counterpart snapshot accepted" in
+  (match snapshot_json with
+   | `Assoc fields ->
+     refused (`Assoc (("extra",`Null)::fields));
+     refused (`Assoc (("before",`Float 20.)::fields));
+     refused (`Assoc (List.map (fun (key,value) -> key, if key="external_through" then `Int 2 else value) fields));
+     refused (`Assoc (List.map (fun (key,value) -> key, if key="chat_rows" then
+       `List [`Assoc ["raw_line",`String duplicate;"projected_line",`String direct]] else value) fields))
+   | _ -> Alcotest.fail "capture envelope missing")
+;;
+
+let test_cursor_observation_preserves_complete_preparation () =
+  with_temp_base "keeper-cursor-observation" @@ fun base_path ->
+  let module Cursor = Masc.Keeper_external_read_cursor in
+  let module Current = Masc.Keeper_memory_os_current in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let runtime_keepers_dir = Filename.concat base_path "runtime" in
+  let memory_keepers_dir = Filename.concat base_path "memory" in
+  let keeper_name = "observation-owner" in
+  let cursor_path = Cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
+  let missing = Cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
+  Alcotest.(check int) "missing observation starts at zero" 0 (Cursor.observation_offset missing);
+  Alcotest.(check bool) "observation creates no cursor" false (Sys.file_exists cursor_path);
+  let atom : Current.durable_range_id =
+    {receipt_scope=runtime_keepers_dir;trace_id="observation-trace";history_start_boundary_line=1;
+     start_atom=0;end_atom=1;last_atom_digest=String.make 64 'a';end_boundary_line=2;
+     boundary_lines_seen=2;unread_messages=[]} in
+  let official : Current.official_range_id =
+    {receipt_scope=runtime_keepers_dir;after_boundary_line=0;
+     turns=[1,Ids.Turn_ref.make ~trace_id:"official-observation" ~absolute_turn:1];unread_messages=[]} in
+  let token = Cursor.read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name |> get in
+  Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name token
+    ~through:2 ~atom:(Some atom) ~official:(Some official) |> get;
+  let original = Fs_compat.load_file cursor_path in
+  let observation = Cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
+  let json = Cursor.observation_to_json observation in
+  let restored = Cursor.observation_of_json json |> get in
+  Alcotest.(check bool) "both original receipt identities survive the strict codec" true
+    (Cursor.observation_matches_preparation restored ~after:0 ~through:2 ~atom:(Some atom) ~official:(Some official));
+  Alcotest.(check bool) "different original receipt is not the same preparation" false
+    (Cursor.observation_matches_preparation restored ~after:0 ~through:2 ~atom:(Some {atom with end_atom=2}) ~official:(Some official));
+  Alcotest.(check string) "observation neither acknowledges nor rewrites" original (Fs_compat.load_file cursor_path);
+  Cursor.acknowledge ~runtime_keepers_dir ~keeper_name |> get;
+  Alcotest.(check int) "stored observation remains at the original offset after later ACK" 0
+    (Cursor.observation_offset restored);
+  Alcotest.(check bool) "original complete pending state is stable after later ACK" true
+    (Yojson.Safe.equal json (Cursor.observation_to_json restored));
+  let refused value = match Cursor.observation_of_json value with
+    | Error _ -> () | Ok _ -> Alcotest.fail "malformed cursor observation accepted" in
+  (match json with
+   | `Assoc fields ->
+     refused (`Assoc (("after",`Int 0)::fields));
+     refused (`Assoc (("unknown",`Null)::fields));
+     refused (`Assoc (List.map (fun (key,value) -> key, if key="pending" then
+       `Assoc ["through",`Int 2;"atom",`Null;"official",`Null] else value) fields))
+   | _ -> Alcotest.fail "cursor observation envelope missing")
+;;
+
 let () =
   Alcotest.run "keeper_external_attention"
     [
@@ -528,6 +648,10 @@ let () =
       );
       ( "store",
         [
+          Alcotest.test_case "counterpart capture preserves original rows and out-of-range dedup identities" `Quick
+            test_counterpart_capture_retains_original_rows_and_dedup_frontier;
+          Alcotest.test_case "read-only cursor capture preserves complete original preparation" `Quick
+            test_cursor_observation_preserves_complete_preparation;
           Alcotest.test_case "external cursor recovers only its committed Memory receipt" `Quick
             (test_external_cursor_recovers_memory_receipt ~with_unread:false);
           Alcotest.test_case "external cursor archives unread evidence before receipt acknowledgement" `Quick

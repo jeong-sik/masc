@@ -23,37 +23,64 @@ export function openVstSession({ command = vstHostPath, args = [], spawnProcess 
   const pending = new Map(), hosts = new Set()
   function start() {
     const child = spawnProcess(command, [...args, '--serve'], { stdio: ['pipe', 'pipe', 'pipe'] })
-    let text = '', stderr = Buffer.alloc(0), failure = null, ended
+    let parts = [], bufferedBytes = 0, stderr = Buffer.alloc(0), failure = null, ended
     // Sent jobs without a reply yet, cancelled ones included: the host is busy.
     const owned = { child, outstanding: new Set(), ended: new Promise(resolve => { ended = resolve }) }
     hosts.add(owned)
     // A failed host takes no new job; the next run starts another.
-    const fail = error => { failure ??= error; if (host === owned) host = null; child.kill('SIGKILL') }
-    child.stdout.setEncoding('utf8')
+    const fail = error => {
+      if (failure) return
+      failure = error
+      parts = []; bufferedBytes = 0
+      if (host === owned) host = null
+      child.kill('SIGKILL')
+    }
+    function complete(line) {
+      let reply
+      const invalid = () => fail(new Error(`${label} host sent an invalid reply`))
+      try { reply = JSON.parse(line) } catch { invalid(); return }
+      if (!reply || typeof reply !== 'object' || Array.isArray(reply)
+        || !Number.isSafeInteger(reply.id) || !owned.outstanding.has(reply.id)) { invalid(); return }
+      const fields = Object.keys(reply)
+      const exactly = (...names) => fields.length === names.length && names.every(name => Object.hasOwn(reply, name))
+      const success = reply.ok === true && exactly('id', 'ok', 'result')
+        && reply.result !== null && typeof reply.result === 'object' && !Array.isArray(reply.result)
+      const cancelled = reply.ok === false && exactly('id', 'ok', 'cancelled') && reply.cancelled === true
+      const rejected = reply.ok === false && exactly('id', 'ok', 'error') && typeof reply.error === 'string'
+      if (!success && !cancelled && !rejected) { invalid(); return }
+      owned.outstanding.delete(reply.id)
+      const job = pending.get(reply.id)
+      // Only a known cancelled job's single valid reply may be dropped.
+      if (!job) return
+      pending.delete(reply.id)
+      if (success) job.resolve(reply.result)
+      else if (cancelled) job.reject(cancelledError(label))
+      else job.reject(new Error(reply.error))
+    }
     child.stdout.on('data', chunk => {
-      text += chunk
-      let end
-      while ((end = text.indexOf('\n')) >= 0) {
-        const line = text.slice(0, end)
-        text = text.slice(end + 1)
-        let reply
-        try { reply = JSON.parse(line) } catch { fail(new Error(`${label} host sent an invalid reply`)); return }
-        owned.outstanding.delete(reply?.id)
-        const job = pending.get(reply?.id)
-        // A cancelled job was already rejected; its late reply is dropped.
-        if (!job || job.owner !== owned) continue
-        pending.delete(reply.id)
-        if (reply.ok === true && reply.result && typeof reply.result === 'object') job.resolve(reply.result)
-        else if (reply.ok === false && reply.cancelled === true) job.reject(cancelledError(label))
-        else if (reply.ok === false && typeof reply.error === 'string') job.reject(new Error(reply.error))
-        else job.reject(new Error(`Invalid ${label} host completion`))
+      if (failure) return
+      // Keep the pipe's bytes until a complete line arrives, including when a
+      // UTF-8 character crosses chunks. The bound includes its newline.
+      let offset = 0
+      while (offset < chunk.length) {
+        const end = chunk.indexOf(10, offset)
+        const part = chunk.subarray(offset, end < 0 ? chunk.length : end + 1)
+        if (bufferedBytes + part.length > replyBytes) {
+          fail(new Error(`${label} reply exceeds its protocol memory bound`)); return
+        }
+        parts.push(part); bufferedBytes += part.length
+        if (end < 0) return
+        const line = Buffer.concat(parts, bufferedBytes).toString('utf8')
+        parts = []; bufferedBytes = 0
+        complete(line)
+        if (failure) return
+        offset = end + 1
       }
-      if (text.length > replyBytes) fail(new Error(`${label} reply exceeds its protocol memory bound`))
     })
     child.stderr.on('data', bytes => { stderr = Buffer.concat([stderr, bytes]).subarray(-diagnosticBytes) })
     // EPIPE is settled by the process's error/close receipt below.
     child.stdin.on('error', () => {})
-    child.once('error', error => { failure ??= error })
+    child.once('error', fail)
     child.once('close', (code, signal) => {
       if (host === owned) host = null
       hosts.delete(owned)

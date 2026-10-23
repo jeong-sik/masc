@@ -14,6 +14,11 @@ monitoring feature. See [stream protocol](STREAM.md).
 The phrase editor keeps one `host.py --serve` process while it is open. Each
 NDJSON line is `{"id", "job"}` with an ordinary job, or `{"cancel": id}`; each
 reply is `{"id", "ok", "result"|"error"|"cancelled"}`. Jobs run one at a time.
+The viewer accepts one valid completion per job from the host that owns it,
+including a cancelled job's late reply. A malformed, unknown or duplicate
+completion retires that host; later replies cannot turn its failure into success.
+Each reply line, including its newline, is limited to 16 MiB of UTF-8 bytes.
+The viewer waits for the failed process to close before settling its jobs.
 The process keeps the instrument its latest `snapshot` or `render` left loaded,
 keyed by plug-in path, plug-in name and the sha256 of that state's preset bytes;
 a job for a different sound loads a fresh instance and replaces it. Playing the

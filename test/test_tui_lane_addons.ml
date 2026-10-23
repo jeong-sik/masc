@@ -242,14 +242,14 @@ let configuration_and_ports () =
     (Option.is_some (removal [owned;{owned with source_path="/config/lane-addons/duplicate.toml";instance_id=None}] true));
   check bool "same ID issue elsewhere blocks removal" true
     (Option.is_some (removal [owned;{owned with source_path="/config/lane-addons/duplicate.toml";
-      desired=None;applied=None;instance_id=None;issues=["duplicate"];origin=UI.Issue_only;application=None}] true));
+      desired=None;applied=None;instance_id=None;issues=["duplicate"];ui_category=None;origin=UI.Issue_only;application=None}] true));
   check bool "invalid owned file with no recoverable ID blocks removal" true
     (Option.is_some (removal [{owned with installation_id=None;desired=None;applied=None;
-      instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only;application=None}] true));
+      instance_id=None;issues=["invalid TOML"];enabled=None;ui_category=None;origin=UI.Issue_only;application=None}] true));
   check (option string) "missing owned file permits retained worker cleanup" None (removal [] true);
   check (option string) "unrelated invalid declaration does not block cleanup" None
     (removal [{UI.installation_id=None;source_path="/config/lane-addons/unrelated.toml";
-      desired=None;applied=None;instance_id=None;issues=["invalid TOML"];enabled=None;origin=UI.Issue_only;application=None}] true);
+      desired=None;applied=None;instance_id=None;issues=["invalid TOML"];enabled=None;ui_category=None;origin=UI.Issue_only;application=None}] true);
   check (option string) "manual cleanup remains available" None
     (UI.removal_block_reason overview {worker with installation_id=None;source_path=None});
 
@@ -266,7 +266,7 @@ let configuration_and_ports () =
   check int "overview offers the worker and four configuration issues" 5
     (UI.overview_count snapshot);
   check bool "issue-only rows do not become declared installations" true
-    (List.mem "Lane Add-ons · 1 declared · 4 config issues · inventory partial · 1 active · 0 failed workers" overview_lines);
+    (List.mem "Plugins · 1 declared · 4 config issues · inventory partial · 1 active · 0 failed workers" overview_lines);
   let issue = UI.open_selected_instance {overview with instance_cursor=1} in
   check bool "Enter opens the exact broken installation" true
     (issue.focus=UI.Configurations && issue.presentation=UI.Technical
@@ -422,7 +422,7 @@ let guided_actions () =
   let instance : UI.instance = {id="worker";incarnation="worker";run_id="run";
     addon_id="arbitrary-package";title="Useful observer";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc [];outputs=[];
-    skills_directory=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
+    skills_directory=None;ui_category=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
     host_requests=None} in
   let snapshot : UI.snapshot = {instances=[instance];configuration=None;
     output={rows=[];coverage=[]};complete=Some true} in
@@ -509,7 +509,7 @@ let guided_actions () =
        {instance with phase=UI.Row.Attached;runtime_presence=UI.Retained_binding});
   let declaration = {UI.source_path="/config/lane-addons/custom.toml";installation_id=Some "custom";
     enabled=Some true;desired=Some "1";applied=None;instance_id=None;issues=[];
-    origin=UI.Parsed_declaration;application=None} in
+    ui_category=None;origin=UI.Parsed_declaration;application=None} in
   (* The mark follows the application line drawn under the entry. *)
   let observed ~enabled state =
     let target = {UI.Application.source_path=declaration.source_path;installation_id="custom";
@@ -605,7 +605,7 @@ let context_flow_uses_declared_connections () =
   let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
     addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=Some "1";installation_id=Some "project-observer";source_path=Some "/config/project-observer.toml";binding=`Assoc ["sources",`List []];
-    outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
+    outputs=["events",UI.Row.All_lanes];skills_directory=None;ui_category=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
     host_requests=None} in
   let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
     installation_id=Some "project-metric";source_path=Some "/config/project-metric.toml";
@@ -615,7 +615,7 @@ let context_flow_uses_declared_connections () =
   let declaration installation_id instance_id : UI.declaration =
     {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
       instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[];
-      enabled=Some true;origin=UI.Parsed_declaration;application=None} in
+      enabled=Some true;ui_category=None;origin=UI.Parsed_declaration;application=None} in
   let configuration : UI.configuration = {directory="/config";complete=true;
     declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
@@ -683,8 +683,10 @@ let context_flow_uses_declared_connections () =
     (UI.move_instance history_flow 1).instance_cursor;
   let pending_flow = UI.toggle_flow {mixed_flow with presentation=UI.Summary;
     instance_cursor=UI.overview_count mixed - 1} in
-  check int "entering Flow from an unresolved declaration selects a visible worker" 1
+  check int "an unresolved declaration has no substitute Flow worker" (-1)
     pending_flow.instance_cursor;
+  check (option string) "a filtered-out declaration grants no worker action target" None
+    (Option.map (fun (instance : UI.instance) -> instance.id) (UI.selected_instance pending_flow));
   let empty_flow = UI.toggle_flow {mixed_flow with presentation=UI.Summary;
     snapshot=Some {mixed with instances=[]}} in
   check int "Flow with no workers has no selection" (-1) empty_flow.instance_cursor;
@@ -904,7 +906,7 @@ let evidence_export_chooses_a_keeper_by_name () =
   let worker id : UI.instance = {id;incarnation=id;run_id="project";
     addon_id="fixture";title="Observed value changes";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
-    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
+    outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;
     display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row ~owner:"worker" "chosen";row ~owner:"worker" "second";row ~owner:"other" "foreign"];coverage=[]};
@@ -1019,11 +1021,11 @@ let refresh_preserves_operator_target () =
   let worker id : UI.instance = {id;incarnation=id;run_id="project";
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
-    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
+    outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;
     display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
+    instance_id=Some id;issues=[];enabled=Some true;ui_category=None;origin=UI.Parsed_declaration;application=None} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row "chosen";row "other"];coverage=[]};complete=Some true;
     configuration=Some {directory="/config";complete=true;
@@ -1085,11 +1087,11 @@ let detail_keeps_installation_ownership () =
   let worker id : UI.instance = {id;incarnation=id ^ "-run";run_id="project";
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=2;configuration_revision=Some "1";installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
-    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
+    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;ui_category=None;
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
-    instance_id=Some id;issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
+    instance_id=Some id;issues=[];enabled=Some true;ui_category=None;origin=UI.Parsed_declaration;application=None} in
   let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
     lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
     observed_at;subject_id=(if owner="b" && lane="last" then "guest" else "project");
@@ -1167,7 +1169,7 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
   let worker : UI.instance = {id="report-worker";incarnation="incarnation";run_id="project";
     addon_id="custom";title="Project report";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
-    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;display;host_requests=None} in
+    outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;display;host_requests=None} in
   let row : UI.Row.row = {id="report-row";lane_id="report-worker/report";kind=UI.Row.Value;
     title="Useful analysis";observed_at=1.;subject_id="project";clock=None;actor=None;
     fields=["body",`String "First finding\nSecond finding";"complete",`Bool false;
@@ -1381,7 +1383,7 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   let worker id run addon phase source_path : UI.instance = {
     id;incarnation=id;run_id=run;addon_id=addon;title="Repeated title";
     revision="1";phase;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=Some "1";installation_id=Option.map (fun _ -> addon) source_path;source_path;
-    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;
+    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;ui_category=None;
     action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None} in
   let old = worker "old-a" "project" "analysis" UI.Row.Detached (Some "/config/a.toml") in
   let current = worker "live-a" "project" "analysis" UI.Row.Attached (Some "/config/a.toml") in
@@ -1389,7 +1391,7 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   let other = worker "old-b" "project" "analysis" UI.Row.Detached (Some "/elsewhere/a.toml") in
   let declaration : UI.declaration = {source_path="/config/b.toml";installation_id=Some "b";
     desired=Some "1";applied=Some "1";instance_id=Some "old-b-config";
-    issues=["missing image"];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
+    issues=["missing image"];enabled=Some true;ui_category=None;origin=UI.Parsed_declaration;application=None} in
   let retired_declaration = worker "old-b-config" "project" "b" UI.Row.Detached (Some declaration.source_path) in
   let historical_row : UI.Row.row = {id="old-a/1/result";lane_id="old-a/result";
     kind=UI.Row.Value;title="Old result";observed_at=1.;subject_id="project";
@@ -1760,7 +1762,169 @@ let detail_slice_scope_precedes_successful_result_admission () =
        && (Option.get after.snapshot).complete=Some complete
        && after.receipt=before.receipt && after.draft=before.draft)) [true;false]
 
+let inspect_category_decode_is_strict () =
+  let module Category = Masc.Lane_addon_category in
+  let edit_field name update = function
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        key, if String.equal key name then update value else value) fields)
+    | _ -> fail "fixture expected an object" in
+  let package_fields extra =
+    edit_field "instances" (function
+      | `List [instance] -> `List [edit_field "package" (function
+          | `Assoc fields -> `Assoc (fields @ extra)
+          | _ -> fail "fixture expected a package object") instance]
+      | _ -> fail "fixture expected exactly one worker")
+      (installation_inspect ~runtime:"live" ()) in
+  let declaration_fields extra =
+    let declaration = `Assoc (["id",`String "operator-quiz";
+      "source_path",`String "/c/operator-quiz.toml"; "enabled",`Bool true;
+      "source_revision",`String "source-1"; "desired_revision",`String "r1";
+      "applied_revision",`Null; "instance_id",`Null;
+      "application",`Assoc ["kind",`String "starting"]] @ extra) in
+    edit_field "configuration" (edit_field "declarations" (fun _ -> `List [declaration]))
+      (installation_inspect ~runtime:"live" ()) in
+  let categories = ["memory_judgment",Category.Memory_and_judgment;
+    "browser",Category.Browser; "external_communications",Category.External_communications;
+    "voice_media",Category.Voice_and_media; "execution_environment",Category.Execution_environment;
+    "analysis",Category.Analysis] in
+  List.iter (fun (name,category) ->
+    let worker = UI.decode (package_fields ["ui_category",`String name]) |> ok in
+    check bool "worker retains the exact declared package category" true
+      ((List.hd worker.instances).ui_category=Some category);
+    let declared = UI.decode (declaration_fields ["ui_category",`String name]) |> ok in
+    check bool "configuration retains its current declared category" true
+      ((List.hd (Option.get declared.configuration).declarations).ui_category=Some category)) categories;
+  check bool "an omitted package category is unclassified" true
+    (((UI.decode (package_fields []) |> ok).instances |> List.hd).ui_category=None);
+  check bool "an omitted current category is unclassified" true
+    ((UI.decode (declaration_fields []) |> ok).configuration |> Option.get
+      |> fun config -> (List.hd config.declarations).ui_category=None);
+  List.iter (fun fields ->
+    check bool "malformed package role is refused" true
+      (Result.is_error (UI.decode (package_fields fields)));
+    check bool "malformed declaration role is refused" true
+      (Result.is_error (UI.decode (declaration_fields fields))))
+    (List.map (fun value -> ["ui_category",value])
+      [`Null;`String "";`String "browser ";`String "unknown";`Int 1;`Bool true;`List [];`Assoc []]
+     @ [["ui_category",`String "browser";"ui_category",`String "analysis"];
+        ["ui_category",`String "browser";"ui_category",`String "browser"]])
+
+let role_refresh_keeps_original_action_and_installation () =
+  let module Category = Masc.Lane_addon_category in
+  let schema = Yojson.Safe.from_string
+    {|{"type":"object","required":["instance_id","request_id","action"],"additionalProperties":false,
+       "properties":{"instance_id":{"type":"string"},"request_id":{"type":"string"},
+       "action":{"type":"object","required":["operation"],"additionalProperties":false,
+       "properties":{"operation":{"type":"string","enum":["inspect"]}}}}}|} in
+  let worker id category : UI.instance = {
+    id;incarnation=id ^ "-original";run_id="world";addon_id="fixture";title=id;revision="1";
+    phase=UI.Row.Attached;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;
+    installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
+    configuration_revision=Some "r1";binding=`Assoc [];outputs=[];skills_directory=None;
+    ui_category=Some category;action_schema=Some schema;binding_schema=None;
+    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+  let declaration id category : UI.declaration = {
+    source_path="/config/" ^ id ^ ".toml";installation_id=Some id;
+    desired=Some "r1";applied=Some "r1";instance_id=Some id;issues=[];enabled=Some true;
+    ui_category=Some category;origin=UI.Parsed_declaration;application=None} in
+  let original = worker "original" Category.Browser in
+  let other = worker "other" Category.Analysis in
+  let config : UI.configuration = {directory="/config";complete=true;
+    declarations=[declaration "original" Category.Browser;declaration "other" Category.Analysis]} in
+  let snapshot : UI.snapshot = {instances=[original;other];configuration=Some config;
+    output={rows=[];coverage=[]};complete=Some true} in
+  let before = {UI.initial with snapshot=Some snapshot;focus=UI.Instances} in
+  let request_id = "01901234-1234-7000-8000-000000000001" in
+  let menu = UI.open_actions ~request_id before |> ok in
+  let first = UI.submit_action menu |> ok in
+  let refreshed = {snapshot with instances=[other;original];
+    configuration=Some {config with declarations=[declaration "other" Category.Browser;
+      declaration "original" Category.Analysis]}} in
+  let after = UI.reconcile_snapshot before refreshed in
+  check bool "regrouping keeps the exact selected worker and its original package" true
+    (UI.selected_instance after=Some original);
+  let next = UI.open_actions ~request_id after |> ok |> UI.submit_action |> ok in
+  check bool "a fresh action after regrouping retains its original request target" true (next=first);
+  check bool "a previously chosen action retains its exact worker target" true
+    (UI.submit_action (UI.reconcile_snapshot menu refreshed)=Ok first);
+  let replaced = {refreshed with instances=[other;{original with incarnation="replacement"}]} in
+  check bool "a replacement incarnation cannot reuse the original action" true
+    (Result.is_error (UI.submit_action (UI.reconcile_snapshot menu replaced)));
+  (* A saved declaration before the workers makes Summary and Flow use
+     different numeric cursors. Every transition must retain the same target. *)
+  let unresolved = {(declaration "unresolved" Category.Memory_and_judgment) with
+    instance_id=None;applied=None} in
+  let grouped_snapshot = {snapshot with configuration=Some {config with
+    declarations=unresolved :: config.declarations}} in
+  let grouped = {before with snapshot=Some grouped_snapshot;instance_cursor=1} in
+  let assert_original label view =
+    check bool (label ^ " keeps the original selected worker") true
+      (UI.selected_instance view=Some original);
+    let actual = UI.open_actions ~request_id view |> ok |> UI.submit_action |> ok in
+    check bool (label ^ " sends the original exact action request") true (actual=first) in
+  assert_original "grouped source" grouped;
+  let flow = UI.toggle_flow grouped in
+  assert_original "f into Flow" flow;
+  assert_original "f back into Summary" (UI.toggle_flow flow);
+  let technical = UI.set_presentation flow UI.Technical in
+  assert_original "D into technical" technical;
+  assert_original "D or Escape back into Summary" (UI.set_presentation technical UI.Summary);
+  let detail = UI.open_selected_instance flow in
+  let detail_technical = UI.set_presentation detail UI.Technical in
+  check bool "technical detail keeps its original pinned action owner" true
+    (UI.selected_instance detail_technical=Some original);
+  let returned = UI.set_presentation detail_technical UI.Summary in
+  assert_original "returning from a Flow-opened detail after D and Escape"
+    {returned with screen=UI.Overview;focus=UI.Instances};
+  let history_return = UI.toggle_history flow |> UI.toggle_history in
+  assert_original "h into history and back from Flow" history_return;
+  let opened_menu = UI.open_actions ~request_id flow |> ok in
+  check bool "opening actions in Flow keeps the menu's original payload" true
+    (UI.submit_action opened_menu=Ok first);
+  assert_original "closing the Flow action menu" {opened_menu with action_menu=None};
+  let installation = {grouped with presentation=UI.Technical;focus=UI.Configurations;
+    instance_cursor=2;configuration_cursor=1} in
+  let installation_menu = UI.open_actions ~request_id installation |> ok in
+  check bool "an installation-owned action keeps its original exact payload" true
+    (UI.submit_action installation_menu=Ok first);
+  assert_original "closing an installation action menu" {installation_menu with action_menu=None};
+  let filtered_out = UI.toggle_flow {grouped with instance_cursor=0} in
+  List.iter (fun view ->
+    check bool "a declaration filtered out of Flow cannot choose another worker" true
+      (UI.selected_instance view=None);
+    check bool "a filtered-out original cannot open actions on another worker" true
+      (Result.is_error (UI.open_actions ~request_id view)))
+    [filtered_out; UI.toggle_flow filtered_out;
+     UI.set_presentation filtered_out UI.Technical;
+     UI.toggle_history filtered_out |> UI.toggle_history];
+  assert_original "explicit navigation after a filtered-out selection" (UI.move_instance filtered_out 1);
+  let saved = {(declaration "original" Category.Browser) with instance_id=None;applied=None} in
+  let no_worker = {snapshot with instances=[];
+    configuration=Some {config with declarations=[saved]}} in
+  let list_view = {UI.initial with snapshot=Some no_worker;focus=UI.Instances} in
+  let newer_category = {no_worker with configuration=Some {config with
+    declarations=[{saved with ui_category=Some Category.Analysis}]}} in
+  let regrouped = UI.reconcile_snapshot list_view newer_category |> UI.open_selected_instance in
+  check (option string) "opening a reclassified entry targets the same installation" (Some "original")
+    (Option.bind (UI.selected_declaration regrouped) (fun declaration -> declaration.installation_id));
+  let replacement = {no_worker with configuration=Some {config with
+    declarations=[{saved with installation_id=Some "replacement"}]}} in
+  let invalidated = UI.reconcile_snapshot list_view replacement |> UI.open_selected_instance in
+  check bool "same-path replacement needs an explicit selection" true
+    (UI.selected_declaration invalidated=None && UI.selected_instance invalidated=None);
+  let from_history = UI.toggle_history list_view
+    |> fun view -> UI.reconcile_snapshot view replacement |> UI.toggle_history
+    |> UI.open_selected_instance in
+  check bool "a saved list selection cannot inherit another installation through history" true
+    (UI.selected_declaration from_history=None && UI.selected_instance from_history=None);
+  let selected = UI.move_instance invalidated 1 |> UI.open_selected_instance in
+  check (option string) "explicit navigation may select the replacement installation" (Some "replacement")
+    (Option.bind (UI.selected_declaration selected) (fun declaration -> declaration.installation_id))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "Inspect categories use strict shared decoding" `Quick inspect_category_decode_is_strict;
+  test_case "role refresh preserves original action and installation targets" `Quick
+    role_refresh_keeps_original_action_and_installation;
   test_case "detail Slice scope precedes successful result admission" `Quick
     detail_slice_scope_precedes_successful_result_admission;
   test_case "partial detail read keeps original results and fresh authority" `Quick

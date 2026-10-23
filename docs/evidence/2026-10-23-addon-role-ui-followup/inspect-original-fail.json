@@ -1,0 +1,71 @@
+{
+  "verdict": "FAIL",
+  "kind": "independent_source_review",
+  "reviewer": "inventory_category_authority",
+  "reviewed_at": "2026-10-23T06:13:35.192621+00:00",
+  "base": "70f438d054df3c0fe4eaf51853d4775cc42bab81",
+  "files": [
+    {
+      "path": "bin/masc_tui_lane_addons.ml",
+      "bytes": 129749,
+      "sha256": "f903dc64f08b132c05fe500c53f588134bf144628d18cf3afb7af707dbd0faa4"
+    },
+    {
+      "path": "bin/masc_tui_lane_addons.mli",
+      "bytes": 15294,
+      "sha256": "0dfc53f82c5f5a84a958cf0df852e25e48b5619cb4e393d2958241bb0544565a"
+    },
+    {
+      "path": "test/test_tui_lane_addons.ml",
+      "bytes": 140910,
+      "sha256": "76472cd2ae2af07d980ca83edbff1d1c10511da8c3a0c96654babf00da3727dd"
+    },
+    {
+      "path": "test/test_tui_lane_addon_reading.ml",
+      "bytes": 4773,
+      "sha256": "bc37bf1e8079c7205deeeb14fdb6c9c78d7db7eed608c10423bfb100a411c863"
+    }
+  ],
+  "patch": {
+    "path": "/tmp/masc-addon-goal-resume-20261021/tui-inspect-role-20261023.patch",
+    "bytes": 45761,
+    "sha256": "53a9b8747740ae6e853be958916c21265e610b3f372cd9368d5d697fb76a953f"
+  },
+  "independent": true,
+  "findings": [
+    {
+      "id": "P2-1",
+      "priority": "P2",
+      "title": "Presentation switches reuse a cursor in a differently filtered role list and retarget actions",
+      "locations": [
+        "bin/masc_tui_lane_addons.ml:448",
+        "bin/masc_tui_lane_addons.ml:467",
+        "bin/masc_tui_lane_addons.ml:562",
+        "bin/masc_tui.ml:26377"
+      ],
+      "scenario": "Current Summary entries [unstarted declaration D(memory), live worker B(browser), live worker A(analysis)]. Select worker B at index 1. toggle_flow removes declaration D but preserves/clamps index 1, selecting worker A. open_actions/observe/detach consume that changed selected_instance. Flow-to-Technical via D and toggle_history saving the filtered cursor against unfiltered entries have the same identity mismatch.",
+      "recommendation": "Capture exact original overview_anchor from the currently selectable projection before every f/D/h presentation or mode switch, remap against the new selectable projection, and leave selection absent if the original is not present. Keep Flow movement and displayed worker list on the same projection. Verify actual selected_instance and submit_action target across mixed declaration/worker role groups, without wording/order/snapshot tests."
+    }
+  ],
+  "read_scope": [
+    "Complete four-file diff",
+    "current_category and strict ui_category parser",
+    "overview entry generation, selection reconciliation, flow/history toggles and action submission",
+    "Direct bin/masc_tui.ml key handling for f,D,h,j/k,a,o,d",
+    "Flow renderer, overlay row budget, direct instance/declaration constructors and both test suites"
+  ],
+  "confirmed_from_source": [
+    "Current managed category requires complete configuration, unique id-or-path claim, exact id-and-path match, parsed issue-free declaration",
+    "Manual both-None ownership keeps original package category; partial ownership remains unverified",
+    "Omitted ui_category is None; explicit null, unknown values and duplicate ui_category keys are refused via the shared parser",
+    "MLI and ML record/constructor changes agree, direct record constructors found by rg were adapted",
+    "Retained mode keeps original run grouping and does not regroup by current declaration category",
+    "New meaningful tests reach strict decode and actual action request targets on refresh and replacement"
+  ],
+  "limitations": [
+    "No OCaml typing, Dune, test execution, CI or visible terminal run performed by this reviewer",
+    "The added target tests do not cover projection-changing f/D/h transitions with unresolved declarations interleaved before workers",
+    "Selected entry is first in its logical overview window, but arbitrary narrow viewport visibility is not established by source because wrapped diagnostics and headings precede it; no layout/snapshot test requested"
+  ],
+  "mutations": "Only independent review records written; source, commits, stack and remote refs untouched"
+}

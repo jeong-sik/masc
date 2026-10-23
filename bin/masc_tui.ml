@@ -5438,8 +5438,8 @@ let launch_lane_addons ?target state ~mailbox request =
   let initial_detail = match target with
     | Addons.Read_detail (id, incarnation) -> Some (id, incarnation)
     | Addons.Read_screen | Addons.Read_installation_results _ -> None in
-  let pending_view = { view with generation; loading = true; error = None;
-    application_reading; draft = None;action_menu=None;last_action;action_receipt;presentation } in
+  let pending_view = { (Addons.set_presentation view presentation) with generation; loading = true; error = None;
+    application_reading; draft = None;action_menu=None;last_action;action_receipt } in
   state.lane_addons <- Some pending_view;
   let host = server_peer_host and port = state.port in
   let broadcast_path=Filename.concat
@@ -14833,9 +14833,9 @@ let open_lane_inventory_selection state ~mailbox =
           | Error detail -> state.lane_addons <- Some {view with document_key=None;
               error=lane_addons_input_failure detail})
       | Manual_instance {instance_id;incarnation} -> open_addon (fun view ->
-          state.lane_addons <- Some {view with screen=Addons.Detail (instance_id,incarnation);
+          state.lane_addons <- Some { (Addons.set_presentation view Addons.Summary) with screen=Addons.Detail (instance_id,incarnation);
             focus=Addons.Timeline; row_cursor = -1; scroll=0; selected=[];
-            document_key=None; presentation=Addons.Summary; error=None};
+            document_key=None; error=None};
           (* Inspect first even for a retained worker: its identity must exist
              in the fresh snapshot before a history slice can join it. *)
           launch_lane_addons ~target:(Addons.Read_detail (instance_id,incarnation))
@@ -26293,7 +26293,7 @@ and is loaded on demand through keeper_skill.
                      | "r" when Option.is_some view.document_key ->
                          launch_lane_application state ~mailbox:async_messages
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
-                     | "esc" when view.presentation<>Addons.Summary -> update {view with presentation=Addons.Summary;
+                     | "esc" when view.presentation<>Addons.Summary -> update { (Addons.set_presentation view Addons.Summary) with
                          focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
                      | "esc" | "q" when view.screen<>Addons.Overview -> update {view with screen=Addons.Overview;focus=Addons.Instances;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
@@ -26374,8 +26374,8 @@ and is loaded on demand through keeper_skill.
                              ~targets:(Addons.subscription_targets view) in
                            update {view with subscription_panel=Some panel;document_key=None;scroll=0};
                            launch_lane_subscriptions state ~mailbox:async_messages Masc_tui_lane_subscriptions.Inspect)
-                     | "D" -> update {view with
-                         presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);
+                     | "D" -> update { (Addons.set_presentation view
+                         (if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical)) with
                          focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
                      | "f" -> update (Addons.toggle_flow view)
                      | "a" ->

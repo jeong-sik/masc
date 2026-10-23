@@ -28,14 +28,20 @@ type instance = {
   revision : string; phase : Row.phase; runtime_presence : runtime_presence;
   observation_seq : int; rows_count : int;
   installation_id : string option; source_path : string option; configuration_revision : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
-  skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
+  skills_directory : string option;
+  ui_category : Masc.Lane_addon_category.t option;
+      (** The worker package's category as of its start; never rewritten. *)
+  incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
   host_requests : (host_requests, string) result option;
       (** [None]: the Inspect row carries none (a retained run). An unreadable
           value is [Error] for this field alone, so the rest still shows. *)
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
-  source_path : string; installation_id : string option; enabled : bool option; desired : string option;
+  source_path : string; installation_id : string option;
+  ui_category : Masc.Lane_addon_category.t option;
+      (** The current declaration's category from Inspect; [None] is unclassified. *)
+  enabled : bool option; desired : string option;
   applied : string option; instance_id : string option; issues : string list;
   origin : declaration_origin;
   application : Application.observation option;
@@ -66,7 +72,9 @@ type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type screen = Overview | Detail of string * string
 type overview_mode = Current_installations | Retained_runs
-type overview_anchor = Worker_anchor of string * string | Declaration_anchor of string
+type overview_anchor = Worker_anchor of string * string | Declaration_anchor of string * string option
+(** Declaration anchors keep the exact source path and installation ID, so
+    replacement at the same path requires explicit reselection. *)
 type overview_selection = Unvisited | No_selection | Selection of overview_anchor
 type diagnostic =
   | Detail_read_failure of string
@@ -172,6 +180,10 @@ val selected_declaration : t -> declaration option
 val selected_document : t -> Document.session option
 val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
+val set_presentation : t -> presentation -> t
+(** Switch the overview projection by its exact selected worker/declaration
+    identity. A filtered-out or absent original leaves no selection; a numeric
+    cursor never transfers selection to another worker. Detail stays pinned. *)
 val toggle_flow : t -> t
 (** Toggle Flow and Summary, keeping overview navigation on visible instances. *)
 val select_initial_result : t -> t

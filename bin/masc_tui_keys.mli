@@ -49,6 +49,11 @@ val voice_listen_key : string
     beside a draft or a capture. *)
 
 
+val mouse_toggle_key : string
+val mouse_toggle_label : string
+(** F2: give mouse selection to the terminal or reclaim it for MASC. Kept
+    separate from chat's Ctrl-T queue action. *)
+
 val roster_toggle_key : string
 (** Ctrl-B, as the roster pane's title names it. *)
 

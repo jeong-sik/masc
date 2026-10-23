@@ -22380,11 +22380,11 @@ let mouse_tracking_disable = "\x1b[?1006;1002;1000l"
 (* Tracking is what the wheel costs the terminal: with reports on, a drag is a
    report and the terminal never highlights anything. A drag is read here
    instead: it selects inside the pane it started in and is copied on release
-   ([Masc_tui_pane_selection]). Ctrl-T hands the mouse back, for a selection
+   ([Masc_tui_pane_selection]). F2 hands the mouse back, for a selection
    the terminal draws itself, and takes it again. A letter would not do -- in
    the composer every letter is text. *)
 let mouse_tracking_on = Atomic.make true
-let toggle_mouse_tracking_key = "\020"
+let toggle_mouse_tracking_key = Masc_tui_keys.mouse_toggle_key
 
 (* Ctrl-B, as an editor toggles its side bar. The roster beside a keeper chat
    costs 30 of the terminal's columns, and a reader who knows which keeper
@@ -25946,12 +25946,27 @@ and is loaded on demand through keeper_skill.
       let composer_claimed =
         Option.is_none state.account_login && Option.is_none state.lane_addons &&
         (not compact_viewport)
-        (* The inventory owns inspection while the composer is unfocused.
-           A focused composer still owns every typed character. *)
+        (* Surface inspection and Dashboard Keeper selection precede an
+           unfocused composer's entry key. A focused composer still owns
+           every typed character, including i. *)
         && not ((not state.composer_focused)
-          && state.view = Lanes && state.lanes_mode = Lanes_overview
-          && Option.is_none state.slot_editor && Option.is_none state.runtime_lane_pick
-          && (match key with Some ("d" | "i") -> true | Some _ | None -> false))
+          && (match state.view with
+              | Overview -> key = Some "i"
+              | Resources ->
+                  key = Some "i" && state.resource_focus = Right_pane
+              | Config ->
+                  key = Some "i" && state.config_pane = Config_prompts
+              | Lanes ->
+                  (key = Some "d" || key = Some "i")
+                  && state.lanes_mode = Lanes_overview
+                  && Option.is_none state.slot_editor
+                  && Option.is_none state.runtime_lane_pick
+              | Keepers (Keeper_list | Keeper_detail | Keeper_logs
+                        | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+              | Acting | Metrics | Memory | Clients | Board | Approvals
+              | Planning | Schedules | Verification | Harness | Fusion
+              | Repositories | Code | Changes | Connectors | Runtime
+              | Tools | System_logs -> false))
         && (not (modal_owns_keys state))
         (* Any open field takes the key before the composer does. This was six
            conditions naming six fields, and the ones added later were not in
@@ -26003,12 +26018,20 @@ and is loaded on demand through keeper_skill.
            state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
        | None, _ | Some _, None -> ());
       (match key with
+       (* Above the modals on purpose: the reason to reach for this is to copy
+          something already on the screen, and the help overlay is one of the
+          screens worth copying from. *)
+       | Some k when String.equal k toggle_mouse_tracking_key ->
+           toggle_mouse_tracking ();
+           (* Handed to the terminal, the button's release never comes here. *)
+           pointer_gesture := Masc_tui_pane_selection.Idle;
+           Render_schedule.request render_schedule Render_schedule.Force
        (* The invite card holds the only copy of a link, so it takes every key and
           closes on the operator's own: Esc or q, after which /play link brings
           it back. Enter does not close it, so a second Enter, pressed while
           the answer was on its way, cannot close the card it opens. [y] copies
           the link to the terminal clipboard and says so without naming it.
-          Ctrl-T is left to its arm below: a terminal that ignores OSC 52 has
+          F2 is handled by the earlier global arm: a terminal that ignores OSC 52 has
           only the mouse to copy the link with, and this is a screen worth
           copying from. *)
        | Some k
@@ -26145,7 +26168,18 @@ and is loaded on demand through keeper_skill.
                 | "\r" | "\n" | "enter" ->
                     launch_voice_agent_voice_save state ~mailbox:async_messages session
                 | _ -> ()))
-       | Some key when Option.is_some state.lane_addons && not state.palette_open ->
+       (* Hidden Add-ons actions keep their draft and receipts, but cannot
+          dispatch while the resize fallback is the only painted frame. *)
+       | Some "esc" when compact_viewport && Option.is_some state.lane_addons ->
+           (match state.lane_addons with
+            | None -> ()
+            | Some view ->
+                state.lane_addons_cached <- view;
+                state.lane_addons <- None)
+       | Some _ when compact_viewport && Option.is_some state.lane_addons
+                     && not quit_key -> ()
+       | Some key when Option.is_some state.lane_addons && not state.palette_open
+                       && not (compact_viewport && quit_key) ->
            let module Addons = Masc_tui_lane_addons in
            (match state.lane_addons with
             | None -> ()
@@ -26415,11 +26449,16 @@ and is loaded on demand through keeper_skill.
                           | Ok next -> update next
                           | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | _ -> ()))
+       (* A retained form owns its paste target, but a frame showing only the
+          resize prompt cannot accept hidden edits or submit writes. Keep
+          these key guards separate from text_input_target so a paste never
+          falls through into a different draft. *)
        (* Inline Runtime_params editing is modal: printable keys, including q,
           belong to the value.  Friendly mode turns the registry's declared
           type into a bool/number/string control; capital E is the explicit
           raw-JSON escape hatch.  The server remains the final authority. *)
-       | Some k when text_input_target state ~compact_viewport = Some Text_resource_save ->
+       | Some k when not compact_viewport
+           && text_input_target state ~compact_viewport = Some Text_resource_save ->
            (match state.resource_save_prompt with
             | None -> ()
             | Some prompt ->
@@ -26438,8 +26477,9 @@ and is loaded on demand through keeper_skill.
           draft is open, so a name with an s or an r in it does not fire the
           save and restore keys under it. *)
        | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_preset_name ->
+         when not compact_viewport
+              && text_input_target state ~compact_viewport
+                 = Some Text_preset_name ->
            (match state.preset_save_draft with
             | None -> ()
             | Some draft ->
@@ -26503,8 +26543,9 @@ and is loaded on demand through keeper_skill.
           Every printable key is the field's while it is open, so a name with
           an x or a D in it does not fire the lane keys under it. *)
        | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_runtime_lane_name ->
+         when not compact_viewport
+              && text_input_target state ~compact_viewport
+                 = Some Text_runtime_lane_name ->
            (match state.runtime_lane_name_draft with
             | None -> ()
             | Some entry ->
@@ -26595,8 +26636,9 @@ and is loaded on demand through keeper_skill.
                    | Error detail -> state.runtime_account_form <- Some
                        (Masc_tui_runtime_account_form.refused form detail)))
        | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_runtime_param ->
+         when not compact_viewport
+              && text_input_target state ~compact_viewport
+                 = Some Text_runtime_param ->
            (match state.runtime_param_edit with
             | None -> ()
             | Some edit ->
@@ -26787,14 +26829,6 @@ and is loaded on demand through keeper_skill.
              report_action state "system"
                (session_quit_notice state ~key:"q")
            end
-       (* Above the modals on purpose: the reason to reach for this is to copy
-          something already on the screen, and the help overlay is one of the
-          screens worth copying from. *)
-       | Some k when String.equal k toggle_mouse_tracking_key ->
-           toggle_mouse_tracking ();
-           (* Handed to the terminal, the button's release never comes here. *)
-           pointer_gesture := Masc_tui_pane_selection.Idle;
-           Render_schedule.request render_schedule Render_schedule.Force
        (* Also above the modals: the roster is chrome around whatever is
           showing, and reclaiming its columns should not depend on which
           surface is up. *)
@@ -30617,19 +30651,7 @@ and is loaded on demand through keeper_skill.
        | Some k when Masc_tui_keys.opens_keepers ~message_mode k ->
            state.detail_focus_recovery <- None;
            state.view <- Keepers Keeper_list
-       (* Ctrl-] follows the reference under the cursor, and Esc on the surface
-          it lands on comes back. vim's tag key for the going; for the coming
-          back it was Ctrl-T, which never ran: the mouse-tracking toggle
-          claims the same byte 1200 lines above this in the same ordered
-          match, and its [when] guard stops the compiler from calling the
-          later arm unreachable. So following worked and returning did not.
-
-          Esc rather than another chord. It is what a reader presses to leave
-          a screen anyway, and where they were is a better answer than
-          Overview -- which is where Esc used to drop them, having thrown away
-          the fact that they had come from somewhere. [Y] already copies the
-          same reference; following it is what an operator did with the copy
-          by hand. *)
+       (* Following preserves the source surface; Esc returns to it. *)
        | Some "\x1d" ->
            (match
               Option.bind (presented_surface_reference ()) (fun reference ->

@@ -279,6 +279,9 @@ let keepers_jump =
   b Meta "3" "keepers"
     ~help:"jump to Keepers when the active field or panel does not use 3"
 
+let mouse_toggle_key = "f2"
+let mouse_toggle_label = "F2"
+
 let global =
   [ b Meta "Tab / Shift-Tab" "next / previous surface"
   ; keepers_jump
@@ -306,12 +309,12 @@ let global =
              Esc or Ctrl-W gives the keys back; the chat keeps Ctrl-W for its draft until \
              the draft is empty"
   ; b Meta "Ctrl-^" "show or hide Browser Lane; retain tab and scroll"
-  ; b Meta "Ctrl-T" "mouse to the terminal and back; with masc, a drag copies one pane"
+  ; b Meta mouse_toggle_label "mouse to the terminal and back; with masc, a drag copies one pane"
       ~help:"the mouse starts with masc: a drag selects inside the pane it began in \
              (Keeper roster, surface or Activity pane) and copies it on release via OSC 52, \
              a press that does not move clicks, and Esc drops a selection still held; \
-             Ctrl-T hands the mouse to the terminal for its own selection across the \
-             whole window, and Ctrl-T again takes it back"
+             F2 hands the mouse to the terminal for its own selection across the \
+             whole window, and F2 again takes it back"
   ; b Navigate "Ctrl-]" "follow the reference under the cursor"
       ~help:"follow the reference under the cursor; Esc on the surface it opens comes back here"
   ; b Meta "q" "quit"

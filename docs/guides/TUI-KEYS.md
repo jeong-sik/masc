@@ -27,7 +27,7 @@ The command palette is `:`.
 | `Ctrl-L` | cycle the Activity pane narrow, wide or hidden; the wheel over the pane scrolls the full list; a press picks a keeper, a second press opens its chat; /activity order turns the order of its calls, /activity scroll moves the pane |
 | `Ctrl-W` | focus the Activity pane: a cursor lands on its first row, j/k walk the rows a press acts on and scroll past the last, Enter opens or closes the call under it, Esc or Ctrl-W gives the keys back; the chat keeps Ctrl-W for its draft until the draft is empty |
 | `Ctrl-^` | show or hide Browser Lane; retain tab and scroll |
-| `Ctrl-T` | the mouse starts with masc: a drag selects inside the pane it began in (Keeper roster, surface or Activity pane) and copies it on release via OSC 52, a press that does not move clicks, and Esc drops a selection still held; Ctrl-T hands the mouse to the terminal for its own selection across the whole window, and Ctrl-T again takes it back |
+| `F2` | the mouse starts with masc: a drag selects inside the pane it began in (Keeper roster, surface or Activity pane) and copies it on release via OSC 52, a press that does not move clicks, and Esc drops a selection still held; F2 hands the mouse to the terminal for its own selection across the whole window, and F2 again takes it back |
 | `Ctrl-]` | follow the reference under the cursor; Esc on the surface it opens comes back here |
 | `q` | quit |
 

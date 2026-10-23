@@ -19,6 +19,8 @@ type event =
   | Judgment_retained of Yojson.Safe.t
   | Preparation_intended of preparation_intent
   | Preparation_observed of string
+  | Replacement_intended of preparation_intent
+  | Replacement_observed of string
   | Commit_intended of change
   | Commit_uncertain of Yojson.Safe.t
   | Commit_retry_observed of Yojson.Safe.t
@@ -43,6 +45,12 @@ val preparation : t -> preparation option
     execution and grant no domain effect. The host separately authenticates
     the complete original child, parent and physical owner. Pending preparation
     prevents Commit_intended; consumers without one keep their original policy. *)
+val replacement : t -> preparation option
+(** Orthogonal immutable replacement-publication fact, allowed only while the
+    original remains Conflicted. One complete successor intent and its exact ID
+    acknowledgement survive restart without altering the original phase, Gate
+    preparation or observer. The host must authenticate the full derivation and
+    confirm the retained child before ACK; neither event grants RPC permission. *)
 val observer : t -> Lane_addon_request_receipt.t
 (** Orthogonal immutable observer intents/acknowledgements. Execution and commit
     transitions preserve them. Completion intent requires an original Finished,

@@ -460,7 +460,112 @@ let test_original_preparation_survives_partial_publication () = with_store (fun 
   Alcotest.(check bool) "duplicate prerequisite identity never parses as an acknowledgement" true
     (Result.is_error (Progress.of_json history)))
 
+let test_conflicted_replacement_survives_partial_child_publication () = with_store (fun root store ->
+  let judged=judge store in
+  let prerequisite:Progress.successor={request_id="original-gate";request=`Assoc ["gate",request]} in
+  let prepared=stored store judged (Progress.Preparation_intended prerequisite) in
+  let prepared=stored store prepared (Progress.Preparation_observed prerequisite.request_id) in
+  let registration=receipt 1. (`Assoc ["original",request]) in
+  let registered=observe store prepared (Receipt.Intended (Receipt.Registration,registration)) in
+  let registered=observe store registered (Receipt.Recorded (Receipt.Registration,registration.digest)) in
+  let committing=stored store registered (Progress.Commit_intended {before;after}) in
+  let conflict=stored store committing (Progress.Commit_conflicted (evidence "known original basis superseded")) in
+  let terminal=receipt 2. (`Assoc ["original_conflict",events conflict]) in
+  let conflict=observe store conflict (Receipt.Intended (Receipt.Completion,terminal)) in
+  let intended:Progress.successor={request_id="one-original-replacement";
+    request=get (Lane_addon_action.canonical
+      (`Assoc ["original_source",request;"current_basis",`List [`String "later Memory"]]))} in
+  let pending=stored store conflict (Progress.Replacement_intended intended) in
+  let reopened=load (Store.create ~root) in
+  Alcotest.(check bool) "restart retains full replacement intent without changing the original conflict" true
+    (Progress.replacement reopened.progress=Some (Progress.Preparation_pending intended)
+     && Progress.phase reopened.progress=Progress.phase conflict.progress);
+  Alcotest.(check bool) "replacement is orthogonal to prerequisite and observer evidence" true
+    (Progress.preparation reopened.progress=Progress.preparation conflict.progress
+     && Progress.observer reopened.progress=Progress.observer conflict.progress);
+  invalid store reopened (Progress.Replacement_observed "different-child");
+  invalid store reopened (Progress.Replacement_intended intended);
+  invalid store reopened (Progress.Replacement_intended {intended with request=`Assoc ["changed",`Bool true]});
+  invalid store reopened Progress.Dispatch_intended;
+  invalid store reopened (Progress.Commit_retry_observed before);
+  let child_scope="original-replacement" in
+  owned (Owner.retain ~store ~scope:child_scope ~request_id:intended.request_id
+    ~installation_id:pending.installation_id ~package_id:pending.package_id ~tool:pending.tool
+    ~request:intended.request);
+  let child=some (owned (Owner.load ~store:(Store.create ~root) ~scope:child_scope ~request_id:intended.request_id)) in
+  Alcotest.check json "actual retained child matches the whole immutable intent" intended.request child.request;
+  let acknowledged=stored store reopened (Progress.Replacement_observed child.request_id) in
+  let path=Filename.concat (Filename.concat (Filename.concat root "tool-request-owners") (Store.digest scope))
+    (Store.digest request_id ^ ".json") in
+  let bytes=Fs_compat.load_file path and identity=Unix.stat path in
+  (match updated (advance store reopened (Progress.Replacement_observed child.request_id)) with
+   | Owner.Already_stored record -> check_events "lost child publication ACK is idempotent" (events acknowledged) record
+   | Owner.Stored _ | Owner.Unconfirmed _ -> Alcotest.fail "lost replacement ACK rewrote its original journal");
+  let current=Unix.stat path in
+  Alcotest.(check bool) "lost ACK keeps original parent bytes and inode" true
+    (bytes=Fs_compat.load_file path && identity.st_ino=current.st_ino && identity.st_dev=current.st_dev);
+  let completed=observe store acknowledged (Receipt.Recorded (Receipt.Completion,terminal.digest)) in
+  let child_path=Filename.concat (Filename.concat (Filename.concat root "tool-request-owners") (Store.digest child_scope))
+    (Store.digest intended.request_id ^ ".json") in
+  Sys.remove child_path;
+  let restored=load (Store.create ~root) in
+  Alcotest.(check bool) "missing once-published child does not erase the parent's exact confirmed identity" true
+    (Progress.replacement restored.progress=Some (Progress.Preparation_confirmed intended)
+     && Progress.preparation restored.progress=Progress.preparation conflict.progress
+     && Progress.phase restored.progress=Progress.phase conflict.progress
+     && Progress.observer restored.progress=Progress.observer completed.progress);
+  invalid store restored (Progress.Replacement_intended {intended with request_id="replacement-after-missing-child"});
+  invalid store restored (Progress.Replacement_observed intended.request_id);
+  invalid store restored Progress.Dispatch_intended)
+
+let test_replacement_cannot_infer_away_unknown_or_other_phases () =
+  let fold events=get (List.fold_left (fun state event ->
+    Result.bind state (fun state -> Progress.append state event)) (Ok Progress.captured) events) in
+  let dispatch=[Progress.Dispatch_intended] in
+  let judged=dispatch@[Progress.Judgment_retained judgment] in
+  let committing=judged@[Progress.Commit_intended {before;after}] in
+  let refused=dispatch@[Progress.Refused {stage=Progress.Execution;evidence=evidence "not a basis conflict"}] in
+  let child:Progress.successor={request_id="must-not-dispatch";request} in
+  let invalid_histories=[[];dispatch;
+    dispatch@[Progress.Execution_observed (Progress.Outcome_unknown (evidence "accepted but reply lost"))];
+    judged;committing;committing@[Progress.Commit_uncertain (evidence "Memory effect unknown")];
+    committing@[Progress.Commit_observed after];refused;
+    refused@[Progress.Successor_intended child];
+    refused@[Progress.Successor_intended child;Progress.Successor_observed child.request_id]] in
+  List.iter (fun history ->
+    let state=fold history in
+    List.iter (fun event -> match Progress.append state event with
+      | Error _ -> () | Ok _ -> Alcotest.fail "a non-conflicted original acquired replacement authority")
+      [Progress.Replacement_intended child;Progress.Replacement_observed child.request_id]) invalid_histories
+
+let test_replacement_strict_codec_rejects_malformed_and_changed_intents () =
+  let state=get (Progress.append Progress.captured Progress.Dispatch_intended) in
+  let state=get (Progress.append state (Progress.Judgment_retained judgment)) in
+  let state=get (Progress.append state (Progress.Commit_intended {before;after})) in
+  let state=get (Progress.append state (Progress.Commit_conflicted (evidence "known conflict"))) in
+  let history=match Progress.to_json state with `List events -> events
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> Alcotest.fail "expected event list" in
+  let intent=`Assoc ["event",`String "replacement_intended";"request_id",`String "one-child";"request",request] in
+  let ack=`Assoc ["event",`String "replacement_observed";"request_id",`String "one-child"] in
+  let malformed=[
+    [ack];[intent;intent];[intent;replace "request_id" (`String "changed-child") ack];[intent;ack;ack];
+    [replace "request_id" (`String " ") intent];
+    [`Assoc ["event",`String "replacement_intended";"request_id",`String "one-child"]];
+    [`Assoc ["event",`String "replacement_intended";"request_id",`String "one-child";
+      "request_id",`String "changed";"request",request]];
+    [replace "request" (`Assoc ["duplicate",`Int 1;"duplicate",`Int 2]) intent];
+    [`Assoc ["event",`String "replacement_observed";"request_id",`String "one-child";"extra",`Null]];
+    [replace "event" (`String "unknown_replacement") intent]] in
+  List.iter (fun tail -> match Progress.of_json (`List (history@tail)) with
+    | Error _ -> () | Ok _ -> Alcotest.fail "malformed replacement history became valid") malformed
+
 let () = Alcotest.run "Original Add-on request progress" ["owner",[
+  Alcotest.test_case "conflicted replacement survives actual partial child publication and lost ACK" `Quick
+    test_conflicted_replacement_survives_partial_child_publication;
+  Alcotest.test_case "replacement cannot infer away unknown or non-conflicted work" `Quick
+    test_replacement_cannot_infer_away_unknown_or_other_phases;
+  Alcotest.test_case "replacement strict codec refuses malformed changed or duplicate intents" `Quick
+    test_replacement_strict_codec_rejects_malformed_and_changed_intents;
   Alcotest.test_case "opaque receipt reuse and strict replay" `Quick
     test_typed_receipt_sharing_and_strict_replay;
   Alcotest.test_case "original prerequisite publication survives restart without attempting Memory" `Quick

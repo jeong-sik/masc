@@ -46,6 +46,7 @@ type outcome =
 
 type error =
   | Keeper_meta_absent
+  | Source_capture_failed of Keeper_librarian_durable_capture.error
   | Keeper_meta_unreadable of string
   | Boundary_log_unreadable of string
   | Progress_unreadable of Keeper_librarian_progress.read_error
@@ -122,11 +123,7 @@ val consume_one
   :  config:Workspace.config
   -> keeper_name:string
   -> commit:
-       (expected_revision:int option
-        -> range_id:Keeper_memory_os_current.durable_range_id option
-          -> official_range_id:Keeper_memory_os_current.official_range_id option
-        -> Keeper_librarian.input
-        -> commit_result)
+       (Keeper_librarian_durable_capture.t -> commit_result)
   -> (outcome, error) result
 (** The first attempt reads all unread cut points and official lines. A
     failed commit, typed error, or cancellation keeps a process-local marker;
@@ -138,6 +135,11 @@ val consume_one
     without invoking message-floor inference or changing the pre-existing
     failure marker. A later read still selects from current sources; this
     foundation alone does not retain an immutable original across wakes.
+
+    The commit receives the complete immutable original source/input capture.
+    The capture records both cursors, selection mode, exact checkpoint bytes
+    and messages, separate official files, counterparts and external frontier.
+    Its restored data is not source freshness or Memory commit authority.
 
     [range_id] is the receipt identity of the atoms in the pass, [None] when
     the pass read official lines only: the receipt recovers a Memory commit
@@ -226,10 +228,7 @@ val commit_with_runtime
   :  base_path:string
   -> keepers_dir:string
   -> keeper_id:string
-  -> expected_revision:int option
-  -> range_id:Keeper_memory_os_current.durable_range_id option
-          -> official_range_id:Keeper_memory_os_current.official_range_id option
-  -> Keeper_librarian.input
+  -> Keeper_librarian_durable_capture.t
   -> commit_result
 
 module For_testing : sig
@@ -260,11 +259,7 @@ module For_testing : sig
     -> config:Workspace.config
     -> keeper_name:string
     -> commit:
-         (expected_revision:int option
-          -> range_id:Keeper_memory_os_current.durable_range_id option
-          -> official_range_id:Keeper_memory_os_current.official_range_id option
-          -> Keeper_librarian.input
-          -> commit_result)
+         (Keeper_librarian_durable_capture.t -> commit_result)
     -> (outcome, error) result
 
   val reset_process_state : unit -> unit

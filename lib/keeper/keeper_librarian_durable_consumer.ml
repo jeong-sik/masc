@@ -1,11 +1,9 @@
+module Capture = Keeper_librarian_durable_capture
 module B = Keeper_turn_boundaries
 module P = Keeper_librarian_progress
 module R = Keeper_librarian_range
 module Window = Runtime_model_input_tail_window
-module Canonical_tool = Agent_core.Canonical_tool
 module String_map = Map.Make (String)
-module Line_map = Map.Make (Int)
-module Historical = Keeper_librarian_task_context
 
 module O = Keeper_librarian_official_progress
 module History = Keeper_checkpoint_store.Saved_history
@@ -28,6 +26,7 @@ type outcome =
 
 type error =
   | Keeper_meta_absent
+  | Source_capture_failed of Capture.error
   | Keeper_meta_unreadable of string
   | Boundary_log_unreadable of string
   | Progress_unreadable of P.read_error
@@ -88,6 +87,7 @@ let range_stop_to_string = function
 
 let error_to_string = function
   | Keeper_meta_absent -> "keeper metadata is absent"
+  | Source_capture_failed error -> Capture.error_to_string error
   | Keeper_meta_unreadable detail -> "keeper metadata is unreadable: " ^ detail
   | Boundary_log_unreadable detail -> "turn-boundary log is unreadable: " ^ detail
   | Progress_unreadable error -> P.read_error_to_string error
@@ -491,40 +491,7 @@ let continuity_saved_position
     })
 ;;
 
-let tool_observations messages =
-  let calls_rev, results =
-    List.fold_left
-      (fun (calls_rev, results) (message : Agent_core.Types.message) ->
-         List.fold_left
-           (fun (calls_rev, results) block ->
-              match Canonical_tool.tool_call_of_block block with
-              | Some call -> (call :: calls_rev), results
-              | None ->
-                (match Canonical_tool.tool_result_of_block block with
-                 | None -> calls_rev, results
-                 | Some result ->
-                   calls_rev, String_map.add result.call_id result.outcome results))
-           (calls_rev, results)
-           message.content)
-      ([], String_map.empty)
-      messages
-  in
-  List.rev_map
-    (fun (call : Canonical_tool.provider_tool_call) ->
-       let outcome =
-         match String_map.find_opt call.call_id results with
-         | None -> Keeper_librarian.Unknown
-         | Some result ->
-           if Agent_core.Types.tool_result_outcome_is_error result
-           then Keeper_librarian.Failed
-           else Keeper_librarian.Succeeded
-       in
-       ({ tool_name =
-            Keeper_tool_descriptor_resolution.canonical_tool_name call.name
-        ; outcome
-        }
-         : Keeper_librarian.tool_observation))
-    calls_rev
+let tool_observations = Capture.tool_observations
 ;;
 
 let current_memory ~keepers_dir ~keeper_name =
@@ -626,7 +593,7 @@ let read_fragments ~config (official : R.official_line list) =
        else
          let* main = read_file ~trace_id Keeper_turn_fragments.Main in
          let* internal = read_file ~trace_id Keeper_turn_fragments.Internal in
-         Ok (String_map.add trace_id (main @ internal) by_trace))
+         Ok (String_map.add trace_id {Capture.trace_id;main;internal} by_trace))
     (Ok String_map.empty)
     official
 ;;
@@ -784,8 +751,8 @@ let official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~of
           let* () = match String_map.find_opt trace_id fragments,
               String_map.find_opt trace_id current_fragments with
             | Some original, Some current ->
-              if Keeper_turn_fragments.of_turn selected.turn_ref current
-                 = Keeper_turn_fragments.of_turn selected.turn_ref original then Ok ()
+              if Keeper_turn_fragments.of_turn selected.turn_ref (current.Capture.main @ current.internal)
+                 = Keeper_turn_fragments.of_turn selected.turn_ref (original.Capture.main @ original.internal) then Ok ()
               else Error "official messages or host observations changed during message inference"
             | None, (None | Some _) | Some _, None -> Error "official source capture is unavailable" in
           let* () = Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir
@@ -887,7 +854,7 @@ let recover_official_progress
                | Atom _ -> false
                | Official_turn {turn_ref;boundary_line;message_in_turn;_} ->
                  let lines = match String_map.find_opt (Ids.Turn_ref.trace_id turn_ref) fragments with
-                   | Some lines -> lines | None -> [] in
+                   | Some lines -> lines.Capture.main @ lines.internal | None -> [] in
                  let messages = Keeper_turn_fragments.of_turn turn_ref lines
                    |> List.filter_map (function
                      | Keeper_turn_fragments.Message {message;_} -> Some message
@@ -972,6 +939,24 @@ let load_current_checkpoint ~config ~trace_id =
   Domain_pool_ref.submit_io_or_inline (fun () ->
     Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id
     |> Keeper_checkpoint_store.saved_history)
+;;
+
+type captured_checkpoint =
+  | Captured_checkpoint of Keeper_checkpoint_store.exact_checkpoint_snapshot
+  | Absent_checkpoint
+  | Superseded_checkpoint
+
+let load_captured_checkpoint ~config ~trace_id =
+  let module C = Keeper_checkpoint_store in
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+  match Domain_pool_ref.submit_io_or_inline (fun () ->
+    C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> C.saved_history_of_ref) with
+  | Ok (History.Read snapshot) -> Ok (Captured_checkpoint snapshot)
+  | Ok (History.Superseded _) -> Ok Superseded_checkpoint
+  | Error History.Ref_not_found -> Ok Absent_checkpoint
+  | Error (History.Ref_read_failed error) -> Error (Checkpoint_unreadable {trace_id;error})
+  | Error ((History.Ref_identity_invalid _ | History.Ref_session_mismatch _ | History.Ref_lock_failed _) as error) ->
+    Error (Source_capture_failed (Capture.Checkpoint_source error))
 ;;
 
 type unread =
@@ -1076,27 +1061,22 @@ let consume_one_with_extent
     && not (R.may_have_unread_official ~lines ~cursor:official_cursor)
   then Ok Nothing_to_read
   else
-  let load_checkpoint trace_id = load_current_checkpoint ~config ~trace_id in
+  let load_checkpoint trace_id = load_captured_checkpoint ~config ~trace_id in
   (* A keeper that has only ever run on official-client runtimes has no
      checkpoint and no atom position: its atoms are nothing to read, and its
      official lines are read below. A missing checkpoint with a position is
      still an error when unread atom work requires that checkpoint. *)
   let trace_selection ?progress trace_id =
     if not (R.may_have_unread ~trace_id ~lines ~progress)
-    then Ok (trace_id, progress, [], R.Nothing_to_read)
+    then Ok (trace_id, progress, None, [], R.Nothing_to_read)
     else match load_checkpoint trace_id, progress with
-    | Error History.Not_found, None ->
-      Ok (trace_id, None, [], R.Nothing_to_read)
-    | Ok (History.Superseded _), progress ->
-      Ok (trace_id, progress, [], R.Nothing_to_read)
-    | Error
-        (( History.Not_found | History.Store_error _ | History.Parse_error _
-          | History.Newer_version _ | History.Io_error _
-          | History.Read_failed _ | History.Agent_core_error _ ) as error), _ ->
-      Error (Checkpoint_unreadable { trace_id; error })
-    | Ok (History.Read checkpoint), progress ->
-      let messages = checkpoint.Agent_core.Checkpoint.messages in
-      Ok (trace_id, progress, messages, R.select ~trace_id ~lines ~progress ~messages extent)
+    | Ok Absent_checkpoint, None -> Ok (trace_id, None, None, [], R.Nothing_to_read)
+    | Ok Superseded_checkpoint, progress -> Ok (trace_id, progress, None, [], R.Nothing_to_read)
+    | Ok Absent_checkpoint, Some _ -> Error (Checkpoint_unreadable {trace_id;error=History.Not_found})
+    | Error error, _ -> Error error
+    | Ok (Captured_checkpoint snapshot), progress ->
+      let messages = Keeper_checkpoint_store.exact_snapshot_messages snapshot in
+      Ok (trace_id, progress, Some snapshot, messages, R.select ~trace_id ~lines ~progress ~messages extent)
   in
   (* [previous]'s trace has nothing left, or its checkpoint is gone. Each trace
      that started after it is read from its own start, in the order the log
@@ -1109,7 +1089,7 @@ let consume_one_with_extent
       | trace_id :: later ->
         (match trace_selection trace_id with
          | Error
-             (( Keeper_meta_absent | Keeper_meta_unreadable _
+             (( Keeper_meta_absent | Source_capture_failed _ | Keeper_meta_unreadable _
               | Boundary_log_unreadable _ | Progress_unreadable _
               | Checkpoint_unreadable _ | Position_in_other_trace _
               | Position_not_in_history _ | Range_stopped _
@@ -1121,7 +1101,7 @@ let consume_one_with_extent
               | Committed_official_range_mismatch | Official_range_stopped _
               | Fragment_store_unreadable _ | Fragment_line_unreadable _ ) as error) ->
            Error error
-         | Ok ((_, _, _, selection) as chosen) ->
+         | Ok ((_, _, _, _, selection) as chosen) ->
            (match selection with
             | R.Nothing_to_read when not (String.equal trace_id current_trace_id) ->
               walk later
@@ -1141,16 +1121,16 @@ let consume_one_with_extent
      the atom position at zero, but the counterpart evidence up to
      [previous]'s boundary was read with the old trace, so that boundary stays
      the lower bound instead of the start of both stores. *)
-  let with_counterpart counterpart_progress (trace_id, selection_progress, messages, selection) =
-    trace_id, selection_progress, counterpart_progress, messages, selection
+  let with_counterpart counterpart_progress (trace_id, selection_progress, snapshot, messages, selection) =
+    trace_id, selection_progress, counterpart_progress, snapshot, messages, selection
   in
-  let* trace_id, selection_progress, counterpart_progress, messages, selection =
+  let* trace_id, selection_progress, counterpart_progress, selected_checkpoint, messages, selection =
     match progress with
     | Some ({ P.position; _ } as previous)
       when not (String.equal position.trace_id current_trace_id) ->
       (match load_checkpoint position.trace_id with
-       | Ok (History.Read checkpoint) ->
-         let messages = checkpoint.Agent_core.Checkpoint.messages in
+       | Ok (Captured_checkpoint snapshot) ->
+         let messages = Keeper_checkpoint_store.exact_snapshot_messages snapshot in
          let selection =
            R.select
              ~trace_id:position.trace_id
@@ -1166,17 +1146,12 @@ let consume_one_with_extent
           | R.Baseline _
           | R.Position_in_other_trace _
           | R.Stop _ ->
-            Ok (position.trace_id, Some previous, Some previous, messages, selection))
-       | Error History.Not_found
-       | Ok (History.Superseded _) ->
+            Ok (position.trace_id, Some previous, Some previous, Some snapshot, messages, selection))
+       | Ok Absent_checkpoint | Ok Superseded_checkpoint ->
          (* A removed owner/session cannot finish its old trace, and nothing
             of a superseded one is read. *)
          Result.map (with_counterpart (Some previous)) (after_prior previous)
-       | Error
-           (( History.Store_error _ | History.Parse_error _
-             | History.Newer_version _ | History.Io_error _
-             | History.Read_failed _ | History.Agent_core_error _ ) as error) ->
-         Error (Checkpoint_unreadable { trace_id = position.trace_id; error }))
+       | Error error -> Error error)
     | None -> Result.map (with_counterpart None) (trace_selection current_trace_id)
     | Some current ->
       Result.map
@@ -1361,73 +1336,25 @@ let consume_one_with_extent
         (fun a b -> Int.compare (step_line a) (step_line b))
         (atom_steps @ List.map (fun official_line -> Official official_line) official_lines)
     in
-    let start_atom =
-      match atom with
-      | Some (range, _, _, _, _) -> range.R.start_atom
-      | None -> 0
-    in
-    (* Join selected line identities against the same frozen boundary read.
-       Earlier text covered by an end line is not automatically that turn's. *)
-    let boundaries = List.fold_left (fun acc (line, decoded) ->
-      match decoded with Ok record -> Line_map.add line record acc | Error _ -> acc)
-      Line_map.empty lines in
-    let digest_at = Window.atom_opening_digest messages in
-    let _, _, _, selected_messages_rev, observations_rev, historical_rev =
-      List.fold_left
-        (fun (prev_end, message_count, tool_count, messages_rev, observations_rev, historical_rev) step ->
-           match step with
-           | Atoms { line; end_atom; _ } ->
-             (match atom with
-              | None -> prev_end, message_count, tool_count, messages_rev, observations_rev, historical_rev
-              | Some (range, _, _, _, _) ->
-                let scopes = Historical.atom_spans ~trace_id ~digest_at
-                    ~start_atom:prev_end ~end_atom ~boundary:(Line_map.find_opt line boundaries) in
-                let message_count, tool_count, messages_rev, observations_rev, historical_rev =
-                  List.fold_left (fun (count, tool_count, messages_rev, observations_rev, contexts) scope ->
-                    let slice = match scope.Historical.source with
-                      | Historical.Atom_span {start_atom;end_atom;_} ->
-                        R.slice messages {range with R.start_atom;end_atom}
-                      | Historical.Boundary_only | Historical.Official_turn -> [] in
-                    let after_message = count + List.length slice in
-                    let observations = tool_observations slice in
-                    let after_tool_observation = tool_count + List.length observations in
-                    let context : Historical.t = {scope;first_message=count;after_message;
-                      first_tool_observation=tool_count;after_tool_observation} in
-                    after_message, after_tool_observation, List.rev_append slice messages_rev,
-                    List.rev_append observations observations_rev, context :: contexts)
-                    (message_count, tool_count, messages_rev, observations_rev, historical_rev) scopes in
-                end_atom, message_count, tool_count, messages_rev, observations_rev, historical_rev)
-           | Official { R.line; turn_ref; _ } ->
-             let official_trace = Ids.Turn_ref.trace_id turn_ref in
-             let of_trace =
-               match String_map.find_opt official_trace fragments with
-               | Some lines -> lines
-               | None -> [] in
-             let count, after_tools, messages_rev, observations_rev =
-               List.fold_left
-                 (fun (count, tools, messages_rev, observations_rev) fragment ->
-                    match fragment with
-                    | Keeper_turn_fragments.Message { message; _ } ->
-                      count + 1, tools, message :: messages_rev, observations_rev
-                    | Keeper_turn_fragments.Tool_observation { observation; _ } ->
-                      count, tools + 1, messages_rev, observation :: observations_rev)
-                 (message_count, tool_count, messages_rev, observations_rev)
-                 (Keeper_turn_fragments.of_turn turn_ref of_trace) in
-             let attribution = match Line_map.find_opt line boundaries with
-               | Some {B.event=B.Turn_ended {turn_ref;task_context;_};_} ->
-                 Historical.Observed {turn_ref;task_context}
-               | Some { B.event = B.History_restarted _; _ } | None ->
-                 Historical.Unattributed in
-             let context : Historical.t =
-               {scope={source=Historical.Official_turn;attribution};
-                first_message=message_count;after_message=count;
-                first_tool_observation=tool_count;after_tool_observation=after_tools} in
-             prev_end, count, after_tools, messages_rev, observations_rev, context :: historical_rev)
-        (start_atom, 0, 0, [], [], []) steps
-    in
-    let historical_task_contexts = List.rev historical_rev in
-    let selected_messages = List.rev selected_messages_rev in
-    let observations = List.rev observations_rev in
+    let* checkpoint_source = match atom, selected_checkpoint with
+      | None, (None | Some _) -> Ok None
+      | Some (range,boundary_lines_seen,end_boundary_line,_,_), Some snapshot ->
+        Ok (Some (Capture.checkpoint ~snapshot ~range ~boundary_lines_seen ~end_boundary_line))
+      | Some _, None -> Error (Source_capture_failed (Capture.Inconsistent_source
+          "Selected atom source has no original exact checkpoint")) in
+    let official_source = match official_lines with
+      | [] -> None
+      | _::_ -> Some {Capture.selected=official_lines;traces=List.map snd (String_map.bindings fragments)} in
+    let* source = match checkpoint_source, official_source with
+      | Some checkpoint,None -> Ok (Capture.Checkpoint_only checkpoint)
+      | None,Some official -> Ok (Capture.Official_only official)
+      | Some checkpoint,Some official -> Ok (Capture.Mixed (checkpoint,official))
+      | None,None -> Error (Source_capture_failed (Capture.Inconsistent_source "Selected durable input has no source")) in
+    let* projected = Capture.project_source ~boundaries:lines source
+      |> Result.map_error (fun error -> Source_capture_failed error) in
+    let historical_task_contexts = projected.Capture.historical_task_contexts in
+    let selected_messages = projected.messages in
+    let observations = projected.tool_observations in
     let first_step, last_step =
       match steps, List.rev steps with
       | first :: _, last :: _ -> first, last
@@ -1558,12 +1485,17 @@ let consume_one_with_extent
             | None -> true
             | Some official_bound -> official_bound <= ended_at)
       in
-      let* counterpart_observations, external_through =
+      let* counterparts =
         Domain_pool_ref.submit_io_or_inline (fun () ->
-          Keeper_librarian_input_sources.counterpart_observations_from
+          Keeper_librarian_input_sources.capture_counterparts
             ~external_after:(Keeper_external_read_cursor.offset external_cursor)
             ~base_dir:config.Workspace.base_path ~keeper_name ~after ~before:ended_at)
         |> Result.map_error (fun error -> Counterpart_observations_unreadable error) in
+      let counterpart_observations = Keeper_librarian_input_sources.counterpart_observations counterparts in
+      let external_through = Keeper_librarian_input_sources.external_through counterparts in
+      let* external_before = Domain_pool_ref.submit_io_or_inline (fun () ->
+        Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name)
+        |> Result.map_error cursor_error in
       let* () =
         match after with
         | Some after when after > ended_at && not inverted_by_the_carried_bound_alone
@@ -1574,6 +1506,9 @@ let consume_one_with_extent
       let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
         Keeper_external_read_cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name external_cursor
           ~through:external_through ~atom:atom_next ~official:official_range_id)
+        |> Result.map_error cursor_error in
+      let* external_prepared = Domain_pool_ref.submit_io_or_inline (fun () ->
+        Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name)
         |> Result.map_error cursor_error in
       let input : Keeper_librarian.input =
         { turn_ref
@@ -1595,7 +1530,12 @@ let consume_one_with_extent
         ; counterpart_observations
         }
       in
-      let result = commit ~expected_revision ~range_id:atom_next ~official_range_id input in
+      let* original = Capture.create ~runtime_keepers_dir ~extent ~boundaries:lines
+        ~positions:{Capture.current=progress;selection=selection_progress;counterpart=counterpart_progress;official=official_cursor}
+        ~source ~counterparts ~external_before ~external_prepared ~expected_revision
+        ~range_id:atom_next ~official_range_id input
+        |> Result.map_error (fun error -> Source_capture_failed error) in
+      let result = commit original in
       let result = match result, message_floor with
         | Memory_refused reports, Runtime_message_floor cli_runner
             when input.messages <> [] && Keeper_librarian_runtime.may_descend_messages reports ->
@@ -1663,6 +1603,7 @@ let consume_one_with_progress_writer_and_floor
    | Error (Official_range_stopped _), _ -> clear_failed key
    | (Ok (Progress_advanced _ | Official_advanced _), R.To_first_cut_point)
    | (Ok (Memory_not_committed _), _) | (Error (Keeper_meta_absent), _)
+   | (Error (Source_capture_failed _), _)
    | (Error (Keeper_meta_unreadable _), _) | (Error (Boundary_log_unreadable _), _)
    | (Error (Progress_unreadable _), _) | (Error (Checkpoint_unreadable _), _)
    | (Error (Position_in_other_trace _), _) | (Error (Position_not_in_history _), _)
@@ -1698,11 +1639,12 @@ let commit_with_runtime_runner
       ~base_path
       ~keepers_dir
       ~keeper_id
-      ~expected_revision
-      ~range_id
-      ~official_range_id
-      input
+      original
   =
+  let input = Capture.input original in
+  let expected_revision = Capture.expected_revision original in
+  let range_id = Capture.range_id original in
+  let official_range_id = Capture.official_range_id original in
   let committed = ref false and reports = ref [] in
   Keeper_librarian_runtime.run_best_effort
     ?cli_runner
@@ -1718,19 +1660,16 @@ let commit_with_runtime_runner
   if !committed then Memory_committed else Memory_refused (List.rev !reports)
 ;;
 
-let commit_with_runtime ~base_path ~keepers_dir ~keeper_id ~expected_revision ~range_id
-    ~official_range_id input =
-  commit_with_runtime_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision ~range_id
-    ~official_range_id input
+let commit_with_runtime ~base_path ~keepers_dir ~keeper_id original =
+  commit_with_runtime_runner ~base_path ~keepers_dir ~keeper_id original
 ;;
 
 let consume_one_with_runtime_and_progress_writers ?cli_runner ~write_progress_store
     ~write_official_progress_store ~config ~keeper_name () =
   let base_path = config.Workspace.base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let commit ~expected_revision ~range_id ~official_range_id input =
-    commit_with_runtime_runner ?cli_runner ~base_path ~keepers_dir ~keeper_id:keeper_name
-      ~expected_revision ~range_id ~official_range_id input in
+  let commit original =
+    commit_with_runtime_runner ?cli_runner ~base_path ~keepers_dir ~keeper_id:keeper_name original in
   consume_one_with_progress_writer_and_floor ~write_progress_store ~write_official_progress_store
     ~config ~keeper_name ~commit ~message_floor:(Runtime_message_floor cli_runner)
 ;;

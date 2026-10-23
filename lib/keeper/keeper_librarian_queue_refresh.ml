@@ -253,6 +253,7 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
              | Boundary_log_unreadable _
              | Progress_unreadable _
              | Checkpoint_unreadable _
+             | Source_capture_failed _
              | Position_in_other_trace _
              | Position_not_in_history _
              | Range_stopped _

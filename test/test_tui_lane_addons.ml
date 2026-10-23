@@ -780,6 +780,35 @@ let guided_installation () =
     (Result.is_error (Install.accept_preview (preview (`Assoc ["kind",`String "unknown"]))));
   check bool "container preview requires its image receipt" true
     (Result.is_error (Install.accept_preview (preview (`Assoc ["kind",`String "container"]))));
+  let with_package extra = match preview (container unverified) with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "package", `Assoc package -> "package", `Assoc (package @ extra) | field -> field) fields)
+    | json -> json in
+  check bool "declared browser service and role are accepted as declared" true
+    (Result.is_ok (Install.accept_preview (with_package ["service",`String "browser";"ui_category",`String "browser"])));
+  check bool "unknown service is refused, not guessed from the role" true
+    (Result.is_error (Install.accept_preview (with_package ["service",`String "engine";"ui_category",`String "browser"])));
+  check bool "unknown role is refused, not replaced by the service" true
+    (Result.is_error (Install.accept_preview (with_package ["service",`String "browser";"ui_category",`String "nonsense"])));
+  let host = `Assoc ["kind",`String "host_process"] in
+  let with_runtime execution runtime = match preview execution with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "package", `Assoc package -> "package", `Assoc (package @ runtime) | field -> field) fields)
+    | json -> json in
+  check bool "Docker is the omitted runtime of a container" true
+    (Result.is_ok (Install.accept_preview (with_runtime (container unverified) [])));
+  check bool "an explicit Apple container runtime matches a container" true
+    (Result.is_ok (Install.accept_preview (with_runtime (container unverified) ["runtime",`String "apple_container"])));
+  check bool "an explicit docker value is not the wire form and is refused" true
+    (Result.is_error (Install.accept_preview (with_runtime (container unverified) ["runtime",`String "docker"])));
+  check bool "host_process execution needs the explicit host_process runtime" true
+    (Result.is_ok (Install.accept_preview (with_runtime host ["runtime",`String "host_process"])));
+  check bool "host_process execution without its runtime is refused" true
+    (Result.is_error (Install.accept_preview (with_runtime host [])));
+  check bool "a container cannot carry the host_process runtime" true
+    (Result.is_error (Install.accept_preview (with_runtime (container unverified) ["runtime",`String "host_process"])));
+  check bool "a host process cannot carry a container runtime" true
+    (Result.is_error (Install.accept_preview (with_runtime host ["runtime",`String "apple_container"])));
   let module Catalog = Masc.Lane_addon_catalog in
   let catalog=Catalog.{directory="/packages";parent=None;
     entries=[Package {manifest_path="/packages/arbitrary/lane.toml";
@@ -831,7 +860,11 @@ let guided_installation () =
     (Otoml.find_opt document Otoml.get_string ["binding";"topic"] |> Option.get);
   let pending_native = Install.begin_preview ~request_id:30 ~path:"/packages/arbitrary/lane.toml" path |> ok in
   let native,error = Install.receive_preview ~request_id:30 ~path:"/packages/arbitrary/lane.toml"
-    (Ok (preview (`Assoc ["kind",`String "host_process"]))) pending_native |> Option.get in
+    (Ok (match preview (`Assoc ["kind",`String "host_process"]) with
+      | `Assoc fields -> `Assoc (List.map (function
+          | "package", `Assoc package -> "package", `Assoc (package @ ["runtime",`String "host_process"])
+          | field -> field) fields)
+      | json -> json)) pending_native |> Option.get in
   check (option string) "native preview needs no container image" None error;
   let reviewed_native = native |> Install.paste ~text:"native-browser" |> edit "tab"
     |> Install.paste ~text:"browser-run" |> edit "tab"

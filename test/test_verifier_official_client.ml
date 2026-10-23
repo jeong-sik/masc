@@ -158,7 +158,7 @@ candidates = ["forbidden.verifier", "official.verifier"]
   Eio.Switch.on_release sw (fun () ->
     Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn previous_slots);
   let calls = ref [] in
-  let review () = AR.run ~sw:(Some sw)
+  let review () = AR.run ~project_lookup:Masc.Verification_authority_tools.project_lookup_result ~sw:(Some sw)
     ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
     ~render_prompt:(fun () -> Ok "Verify the supplied image and read proof.txt before reporting.")
     ~goal_blocks:[Agent_core.Types.Image
@@ -296,7 +296,7 @@ let test_unsafe_slots_refused_before_spawn () =
     (match Runtime.init_default ~config_path with Ok () -> () | Error e -> fail e);
     check bool (label ^ " CLI admission") (label <> "unsupported media")
       (Result.is_error (Runtime.verifier_cli_slot_admission ~runtime_id:slot));
-    let result = AR.run ~evaluator_runtime:slot ~sw:(Some sw)
+    let result = AR.run ~project_lookup:Masc.Verification_authority_tools.project_lookup_result ~evaluator_runtime:slot ~sw:(Some sw)
       ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
       ~render_prompt:(fun () -> Ok "A prose approval must never authorize this review.")
       ~goal_blocks:[Agent_core.Types.Image
@@ -331,7 +331,7 @@ let test_failed_review_leaves_no_failed_attempt_mark () =
   let config_path = Filename.concat root "runtime.toml" in
   write config_path (runtime_config command);
   (match Runtime.init_default ~config_path with Ok () -> () | Error e -> fail e);
-  let result = AR.run ~evaluator_runtime:slot ~sw:(Some sw)
+  let result = AR.run ~project_lookup:Masc.Verification_authority_tools.project_lookup_result ~evaluator_runtime:slot ~sw:(Some sw)
     ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
     ~render_prompt:(fun () -> Ok "Report a verdict.")
     ~lookup ~provider_rest:Verification_retry.provider_rest ~base_path:root () in

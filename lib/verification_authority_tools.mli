@@ -70,3 +70,8 @@ val dispatch : t -> name:string -> args:Yojson.Safe.t -> Tool_result.result
     with every slide rendered from the captured presentation. Animations and
     embedded audio/video playback remain explicitly uninspected.
     Other binary output is a stated lookup failure, never text or visual proof. *)
+
+val project_lookup_result : Task.Anti_rationalization.project_lookup
+(** Use the full Tool_bridge projection at lookup return, preserving typed
+    inline/storage refusals, failure envelopes and admitted media. The caller
+    owns the workspace and projection policy; no string fallback is used. *)

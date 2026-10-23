@@ -37,6 +37,14 @@ type review_request =
   ; evidence_images : evidence_image list
   }
 
+type lookup_projection =
+  | Projected of Agent_core.Types.tool_result
+  | Inline_budget_exceeded of string
+  | Artifact_storage_failure of string
+type project_lookup =
+  base_path:string -> model_projection:Tool_output.model_projection ->
+  Tool_result.result -> lookup_projection
+
 type lookup_surface =
   { schemas : Types_core.tool_schema list
   ; dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result
@@ -597,6 +605,7 @@ let run
          the whole goal, as before. *)
       ?goal_blocks
       ~(lookup : lookup_surface)
+      ~(project_lookup : project_lookup)
       ~(provider_rest : string -> provider_rest)
       ~base_path
       ()
@@ -696,23 +705,21 @@ let run
           under a possibly changed prompt policy or expose host-only metadata. *)
        let lookup_observations = ref [] in
        let capture_lookup evaluator_slot name arguments result =
-         let refusal = ref None in
-         let projected = Tool_bridge.to_agent_core_typed_result
+         let projected = project_lookup
            ~base_path
            ~model_projection:(Tool_output.Inline_up_to
              { maximum_bytes = Tool_shard_limits.verification_evidence_max_bytes })
-           ~on_externalization_error:(fun error -> refusal := Some error)
            result in
-         let fields, media = match !refusal with
-           | Some { Tool_bridge.kind = Inline_budget_exceeded; message } ->
+         let fields, media = match projected with
+           | Inline_budget_exceeded message ->
              [ "projection_refusal", `Assoc
                  [ "kind", `String "inline_budget_exceeded"
                  ; "message", `String message ] ], []
-           | Some { Tool_bridge.kind = Artifact_storage_failure; message } ->
+           | Artifact_storage_failure message ->
              [ "projection_refusal", `Assoc
                  [ "kind", `String "artifact_storage_failure"
                  ; "message", `String message ] ], []
-           | None ->
+           | Projected projected ->
              (match projected with
               | Ok output ->
                 [ "result", `Assoc
@@ -910,6 +917,7 @@ let review
       ~(question : verdict_question)
       ~(lookup : lookup_surface)
       ~(lookup_root : lookup_root)
+      ~(project_lookup : project_lookup)
       ~provider_rest
       ~base_path
       (req : review_request)
@@ -941,6 +949,7 @@ let review
       Log.Task.warn "task_id=%s [task-completion-review] %s" req.task_id message)
     ~render_prompt:(fun () -> build_prompt ~question ~lookup ~lookup_root req)
     ~lookup:lookup_for_judge
+    ~project_lookup
     ~provider_rest
     ~base_path
     ()

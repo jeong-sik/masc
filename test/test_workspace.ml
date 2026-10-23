@@ -1108,6 +1108,7 @@ let test_read_backlog_r_rejects_recovery_after_invalid_primary_revision () =
       (Workspace.backlog_path config)
       (`Assoc
         [ "tasks", `List []
+        ; "delivered_completion_rejections", `List []
         ; "last_updated", `String (Masc_domain.now_iso ())
         ; "version", `Int 0
         ]);

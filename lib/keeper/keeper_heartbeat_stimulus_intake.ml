@@ -82,7 +82,7 @@ let classify_pending_board_event_result = function
     Stimulus_consumed []
 ;;
 
-let completion_rejection_intake ~config ~meta_after_triage stim
+let completion_rejection_intake ~config ~(meta_after_triage : keeper_meta) stim
       (rejection : Keeper_event_queue.completion_authority_rejection) =
   match Workspace_task_rejection_outbox.standing config
     ~task_id:rejection.car_task_id ~verification_id:rejection.car_verification_id

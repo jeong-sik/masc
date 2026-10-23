@@ -1,5 +1,6 @@
 import { Chord, Note, Interval, Voicing, VoicingDictionary, VoiceLeading } from 'tonal'
 import { validateSound } from './project-sound.mjs'
+import { tickUnits } from './tick-units.mjs'
 
 // Quarter-note ticks are the document authority. Wall time belongs to transport.
 export const PPQ = 960 // alphaSynth's native quarter-note resolution
@@ -20,8 +21,7 @@ export function pitch(value) {
   return int(midi, 'pitch (use C4 or MIDI 0–127)', 0, 127)
 }
 export function beats(value) {
-  const ticks = Number(value) * PPQ
-  return int(ticks, 'beat position (must resolve to whole ticks)')
+  return tickUnits(value, PPQ, { label: 'Invalid beat position' })
 }
 export function validateProject(project) {
   if (project?.sound !== undefined) validateSound(project.sound)

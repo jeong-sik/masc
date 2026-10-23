@@ -1,6 +1,7 @@
 import { Chord, Note } from 'tonal'
 import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions, orderMidiSourceExpression, tempoEvent, editMidiSourceTempos, meterEvent, editMidiSourceMeters } from './midi-source.mjs'
 import { expressionEvent } from './midi-expression.mjs'
+import { tickUnits } from './tick-units.mjs'
 import { pitch, chordVoicing, revoiceNotes, revoiceProgressionNotes, GM_DRUM_CHANNEL } from './sequencer-project.mjs'
 
 export function sourceEditor(project, previous = {}, pattern = previous.pattern) {
@@ -197,7 +198,7 @@ export function sourceAction(editor, action) {
 export function sourceCommand(editor,line) {
   const [command,...args]=line.trim().split(/\s+/)
   const count=(low,high=low)=>{if(args.length<low||args.length>high)throw new Error(`Wrong arguments for ${command}`)}
-  const units=value=>{const n=Number(value)*editor.axis.per;if(!Number.isSafeInteger(n)||n<0)throw new Error(`Position must resolve to source ticks (${editor.axis.label})`);return n}
+  const units = value => tickUnits(value, editor.axis.per, { label: `Position (${editor.axis.label})` })
   const notes=editor.view.tracks[editor.track].notes
   const message = (kind, values, channel) => {
     const expected = ['cc','poly-pressure'].includes(kind) ? 2 : 1

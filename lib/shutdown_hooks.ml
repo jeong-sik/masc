@@ -6,14 +6,14 @@
     @since 0.5.0
 *)
 
-(** Registered cancel function for orchestrator — WORM Atomic. *)
-let cancel_orchestrator_ref : (unit -> unit) option Atomic.t = Atomic.make None
+(** Registered Keeper-owner and workspace-observation shutdown — WORM Atomic. *)
+let keeper_shutdown_ref : (unit -> unit) option Atomic.t = Atomic.make None
 let sse_cleanup_ref : (unit -> int * int) option Atomic.t = Atomic.make None
 let ws_cleanup_ref : (unit -> int * int) option Atomic.t = Atomic.make None
 
-(** Register the orchestrator cancel function *)
-let register_cancel_orchestrator (f : unit -> unit) =
-  Atomic.set cancel_orchestrator_ref (Some f)
+(** Register Keeper-owner and workspace-observation shutdown. *)
+let register_keeper_shutdown (f : unit -> unit) =
+  Atomic.set keeper_shutdown_ref (Some f)
 ;;
 
 let register_sse_cleanup (f : unit -> int * int) =
@@ -27,16 +27,16 @@ let register_ws_cleanup (f : unit -> int * int) =
 (** Call all registered shutdown hooks with per-hook timing. *)
 let run_all () =
   let t0 = Unix.gettimeofday () in
-  (* Cancel orchestrator first *)
-  (match Atomic.get cancel_orchestrator_ref with
+  (* Stop Keeper owners and workspace observation first. *)
+  (match Atomic.get keeper_shutdown_ref with
    | Some cancel ->
      let t_start = Unix.gettimeofday () in
-     Log.Server.info "Cancelling orchestrator...";
+     Log.Server.info "Stopping Keeper owners and workspace observation...";
      cancel ();
      Log.Server.info
-       "[Shutdown] orchestrator cancelled (%.2fs)"
+       "[Shutdown] Keeper owners and workspace observation stopped (%.2fs)"
        (Unix.gettimeofday () -. t_start)
-   | None -> Log.Server.info "[Shutdown] no orchestrator registered, skipping");
+   | None -> Log.Server.info "[Shutdown] no Keeper shutdown registered, skipping");
   (* Close all SSE clients *)
   let t_sse = Unix.gettimeofday () in
   let sse_count, remaining_sse =

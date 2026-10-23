@@ -98,24 +98,6 @@ module Executor = struct
   ;;
 end
 
-(** {1 Orchestrator Configuration} *)
-
-module Orchestrator = struct
-  (** Orchestrator check interval (seconds) *)
-  let check_interval_seconds =
-    get_float ~default:300.0 "MASC_ORCHESTRATOR_INTERVAL"
-
-  (** Orchestrator agent name *)
-  let agent_name =
-    get_string ~default:"orchestrator" "MASC_ORCHESTRATOR_AGENT"
-
-  let min_priority =
-    max 0 (min 10 (get_int ~default:2 "MASC_ORCHESTRATOR_MIN_PRIORITY"))
-
-  let enabled =
-    get_bool ~default:false Env_config_core.orchestrator_enabled_env_key
-end
-
 (** {1 Local MODEL Server Configuration} *)
 
 (** Local MODEL runtime config (llama-server / any OpenAI-compatible backend).

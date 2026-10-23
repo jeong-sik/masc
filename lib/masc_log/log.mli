@@ -235,7 +235,6 @@ module Backend : LOGGER
 module Session : LOGGER
 module Sub : LOGGER
 module Pulse : LOGGER
-module Orchestrator : LOGGER
 module BoardLog : LOGGER
 module MsxLog : LOGGER
 module DosLog : LOGGER

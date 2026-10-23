@@ -315,18 +315,6 @@ let operator_entries =
       "Operator snapshot cache TTL (seconds)";
   ]
 
-let orchestrator_entries =
-  [
-    entry ~default:"orchestrator" "MASC_ORCHESTRATOR_AGENT"
-      "Orchestrator agent name";
-    entry ~default:"false" Env_config_core.orchestrator_enabled_env_key
-      "Orchestrator background loop enabled (feature flag)";
-    entry ~default:"300.0" "MASC_ORCHESTRATOR_INTERVAL"
-      "Orchestrator check interval (seconds)";
-    entry ~default:"2" "MASC_ORCHESTRATOR_MIN_PRIORITY"
-      "Orchestrator minimum priority (clamped 0-10)";
-  ]
-
 let path_entries =
   [
     entry ~default:"(none)" "MASC_ASSETS_DIR"
@@ -424,7 +412,7 @@ let category_specs () =
     , keeper_execution_entries @ decision_entries );
     "autonomy", autonomy_entries;
     "dashboard", dashboard_entries;
-    "operations", operator_entries @ orchestrator_entries;
+    "operations", operator_entries;
     "channel", channel_gate_entries;
     "process", shutdown_entries;
     "worker", worker_entries;

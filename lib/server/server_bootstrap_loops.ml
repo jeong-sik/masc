@@ -1532,7 +1532,6 @@ let start_keeper_loops_owned
       ~sw
       ~clock
       ~net
-      ~domain_mgr
       ~proc_mgr
       (state : Mcp_server.server_state)
   =
@@ -2009,12 +2008,12 @@ let start_keeper_loops_owned
              report.deferred
              report.rejected
              report.corrupt_rows);
-  (* Orchestrator needs synchronous registration for shutdown hook *)
+  (* Register observation cancellation together with Keeper-owner stopping. *)
   (try
-     let cancel_orchestrator =
-       Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr (Mcp_server.workspace_config state)
+     let cancel_orphan_observation =
+       Workspace_orphan_observation.start ~sw ~clock (Mcp_server.workspace_config state)
      in
-     Shutdown_hooks.register_cancel_orchestrator (fun () ->
+     Shutdown_hooks.register_keeper_shutdown (fun () ->
        let base_path = (Mcp_server.workspace_config state).base_path in
        (match Keeper_owner_registry.begin_stopping_all ~base_path with
         | Error Keeper_owner_registry.Inventory_stopping -> ()
@@ -2035,12 +2034,12 @@ let start_keeper_loops_owned
                   "keeper_owner: shutdown child settlement failed error=%s"
                   (Keeper_owner.error_to_string error))
             results);
-       cancel_orchestrator ())
+       cancel_orphan_observation ())
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
      Log.Server.error
-       "subsystem orchestrator failed to start: %s"
+       "subsystem orphan observation failed to start: %s"
        (Printexc.to_string exn));
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
@@ -2321,7 +2320,6 @@ let start_keeper_loops
       ~sw
       ~clock
       ~net
-      ~domain_mgr
       ~proc_mgr
       (state : Mcp_server.server_state)
   =
@@ -2346,7 +2344,6 @@ let start_keeper_loops
           ~sw
           ~clock
           ~net
-          ~domain_mgr
           ~proc_mgr
           state
       with

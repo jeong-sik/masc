@@ -8,7 +8,18 @@ basis comparison. Actual range receipts precede external ACK, both source
 positions, and durable Finished. Uncertain original work never authorizes a
 replacement request or another inference.
 
-Latest completed selection: [run39897358407](https://github.com/jeong-sik/masc/actions/runs/39897358407),
+Latest completed selection: [run39899986422](https://github.com/jeong-sik/masc/actions/runs/39899986422),
+exact `8bd78aa75f764fcf7c204a3d6512053f00586fb5`, **184 passed, 1 failed**.
+Compilation succeeded. Atomic Current **155/155 in 7.953 s** and request progress
+**16/16 in 0.142 s** passed; history **13/14 in 8.880 s** failed at the original
+replacement's pre-admission read while the Addon was Off. The shared submit
+state machine returned an unavailable export as an error instead of preserving
+the unchanged original as waiting. The common repair and its actual-store
+regressions require a fresh execution; this run is an overall failure.
+[Exact-head receipt](history-basis-first-execution.json) and
+[raw-log excerpt](history-basis-first-excerpt.txt) retain the failure.
+
+The preceding completed selection: [run39897358407](https://github.com/jeong-sik/masc/actions/runs/39897358407),
 exact `57b06a6ee933c7571caa509a4e57876e8b15fc98`, **34 passed**:
 configured Addon owner **23/23 in 10.680 s** and completed-history integration
 **11/11 in 3.826 s**. This verifies the review repair that isolates malformed

@@ -1,0 +1,44 @@
+{
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/39899986422",
+  "exact_head": "8bd78aa75f764fcf7c204a3d6512053f00586fb5",
+  "conclusion": "failure",
+  "compilation": "passed for all three selected executables",
+  "suites": [
+    {
+      "suite": "test_keeper_memory_os_current",
+      "tests": 155,
+      "passed": 155,
+      "suite_seconds": 7.953
+    },
+    {
+      "suite": "test_lane_addon_request_progress",
+      "tests": 16,
+      "passed": 16,
+      "suite_seconds": 0.142
+    },
+    {
+      "suite": "test_keeper_librarian_durable_execution",
+      "tests": 14,
+      "passed": 13,
+      "failed": 1,
+      "suite_seconds": 8.88
+    }
+  ],
+  "total": 185,
+  "passed": 184,
+  "failed": 1,
+  "failure": {
+    "case_index": 13,
+    "case": "unacknowledged replacement is denied by host and locally recovered while Off",
+    "source": "test/test_keeper_librarian_durable_execution.ml:765",
+    "detail": "Original history publication is blocked: Original history Add-on export is unavailable",
+    "cause": "Shared Submit pre-admission read returns unavailable as Error instead of unchanged Awaiting Worker_unreachable.",
+    "repair_execution": "pending; this failed run does not certify the later shared repair"
+  },
+  "raw_workflow_log_sha256": "ecba91fa64209a50b1cc88e43679349cba09d9e18dd25bfe7a80605be82ccd47",
+  "excerpt_file": "history-basis-first-excerpt.txt",
+  "limits": [
+    "Actual Runtime/Python/HTTP authorization/Memory lane/filesystem; resource launch/cleanup and provider HTTP are fixtures.",
+    "No real Docker, paid provider, enabled absorption model, installed binary, visible UI or live Keeper continuity."
+  ]
+}

@@ -2,7 +2,8 @@
 
 ## Identity and scope
 
-- Issue: #45521. Source PR: #45534.
+- Issue: #45521. Source PR: #45534. Evidence PR: #45546.
+- Native Stack: #45547, source then evidence, targeting main through the top PR.
 - Source: `9d72bccfac14725d2a1ef2a918b4e0db99f702d1`.
 - Reviewed base: `9bf443caaeaf8c54db442c64cfb90d87d6b7cf26`.
 - Remove MemoryLens and its exclusive memory primitives, AgentCapability,

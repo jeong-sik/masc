@@ -3,7 +3,7 @@ import { Chord, Note } from 'tonal'
 import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions, orderMidiSourceExpression, tempoEvent, editMidiSourceTempos, meterEvent, editMidiSourceMeters } from './midi-source.mjs'
 import { expressionEvent } from './midi-expression.mjs'
 import { tickUnits } from './tick-units.mjs'
-import { pitch, chordVoicing, revoiceNotes, revoiceProgressionNotes, GM_DRUM_CHANNEL } from './sequencer-project.mjs'
+import { pitch, chordVoicing, voiceLedProgression, revoiceNotes, revoiceProgressionNotes, GM_DRUM_CHANNEL } from './sequencer-project.mjs'
 
 export function sourceEditor(project, previous = {}, pattern = previous.pattern) {
   const info = midiSourceInfo(project)
@@ -373,6 +373,33 @@ export function sourceCommand(editor,line) {
       const selected = sourceSelected(editor), next = apply(editor, changes)
       const voice = changes.find(note => note.id === selected?.id)
       return { editor: voice ? { ...next, pitch: voice.pitch } : next }
+    }
+    case 'progression-led': {
+      count(6, Number.MAX_SAFE_INTEGER)
+      if (!editor.performance) throw new Error('Choose a MIDI pattern before composing a progression')
+      const start = units(args[0]), duration = units(args[1]), target = insertion(editor, {})
+      if (!duration) throw new Error('Progression duration must be positive')
+      if (target.channel === GM_DRUM_CHANNEL) throw new Error('Chord voicings need a melodic MIDI channel')
+      const voicings = voiceLedProgression(args.slice(5), { mode: args[2], low: pitch(args[3]), high: pitch(args[4]) })
+      if (!Number.isSafeInteger(start + duration * voicings.length)) throw new Error('Progression exceeds MIDI tick precision')
+      const edits = voicings.flatMap((keys, index) => keys.map(pitch => ({ ...target, pitch,
+        start: start + index * duration, duration, velocity: editor.velocity })))
+      const next = apply(editor, edits), existing = new Set(editor.performance.notes.map(note => note.id))
+      // Read the actual inserted port at each onset from the validated source
+      // projection. Tracks may share keys; a point at an onset is also a clash.
+      const added = next.performance.notes.filter(note => !existing.has(note.id))
+      // An original unclosed attack has no paired note interval. Preserve
+      // existing diagnostics, but refuse any overlap newly reported by the
+      // actual event sweep, including attacks occurring inside a new voice.
+      const overlaps = new Set(editor.performance.diagnostics.filter(value => value.kind === 'overlapping-key').map(value => value.event))
+      if (next.performance.diagnostics.some(value => value.kind === 'overlapping-key' && !overlaps.has(value.event))
+        || added.some(note => editor.performance.notes.some(before => before.port === note.port
+        && before.channel === note.channel && before.pitch === note.pitch
+        && (before.duration === 0 ? note.start <= before.start && before.start < note.start + note.duration
+          : before.start < note.start + note.duration && note.start < before.start + before.duration)))) {
+        throw new Error('Progression creates overlapping notes of the same pitch, channel and port')
+      }
+      return { editor: next }
     }
     case 'progression':{
       count(4,Number.MAX_SAFE_INTEGER)

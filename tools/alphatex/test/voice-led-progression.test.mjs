@@ -148,7 +148,7 @@ test('undo, save/reopen, actual SMF, harmony worker and editable arrangement ret
     verifyPhraseSnapshot(asset)
     assert.deepEqual(phraseDocument(arranged.project, asset.id), reopened)
     assert.deepEqual(Buffer.from(asset.source.original, 'base64'), Buffer.from(projectMidi(reopened)))
-    // Source editing keeps its existing explicit contract.
-    assert.throws(() => command(newEditor(asset.source), 'progression-led 0 1 close C3 C5 Dm7 G7 Cmaj7'))
+    // Composing into a source cannot replace its existing sounding keys.
+    assert.throws(() => command(newEditor(asset.source), 'progression-led 0 1 close C3 C5 Dm7 G7 Cmaj7'), /overlapping|pairing/)
   } finally { await worker.terminate(); await rm(root, { recursive: true, force: true }) }
 })

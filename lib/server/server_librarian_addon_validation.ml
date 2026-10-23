@@ -28,6 +28,7 @@ let authorize_history ~base_path ~store ~declaration_id ~(package:Lane_addon_typ
     let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let* owner=History.observe_record_owner ~base_path ~keepers_dir record in
     let* capture=History.restore ~owner record in
+    let* ()=History.confirm_predecessor ~store ~require_confirmed:true capture in
     let destination=History.destination capture in
     let* ()=if destination.installation_id=Owner.installation_id (Owner.Configuration declaration_id)
         && destination.package_id=History.package_id && package.id=History.package_id
@@ -49,7 +50,8 @@ let authorize_history ~base_path ~store ~declaration_id ~(package:Lane_addon_typ
             else Error "Original history immutable host binding changed before provider dispatch" in
           let* actual=History.observe_record_owner ~base_path ~keepers_dir fresh in
           let* ()=History.owner_matches_json actual (History.owner_to_json owner) in
-          History.restore ~owner:actual fresh |> Result.map (fun _ -> ())) in
+          let* capture=History.restore ~owner:actual fresh in
+          History.confirm_predecessor ~store ~require_confirmed:true capture) in
         Lane_addon_runtime.authorize_captured_exact_dispatch ~store ~declaration_id
           ~package_id:destination.package_id ~configuration_revision:destination.configuration_revision);
       with_execution=(fun run ->

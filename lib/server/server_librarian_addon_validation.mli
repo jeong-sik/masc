@@ -14,6 +14,8 @@ val authorize : base_path:string -> store:Lane_addon_store.t -> declaration_id:s
     separate typed namespaces. Restore the physical Keeper/Memory epoch and
     either the complete candidate forest/acknowledged ancestry or complete
     history source and immutable Memory preparation, then the original request/schema
+    and any replacement parent's complete acknowledged child intent, rechecked
+    at actual dispatch,
     before returning a pure complete-domain validator and an execution-only
     fresh physical original/semantic Runtime guard and the original Keeper
     external-effect purge scope. The latter is called at each actual dispatch,

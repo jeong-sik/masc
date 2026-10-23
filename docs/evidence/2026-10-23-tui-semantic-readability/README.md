@@ -73,3 +73,23 @@ bounded contrast/presentation change.
 Dashboard artifact remains disabled. No installed binary/assets were replaced;
 no live server restart was performed. Source, CI, artifact, visible UI and
 installed-runtime claims must remain separate.
+
+## Native build follow-up
+
+[Run 39900708827](https://github.com/jeong-sik/masc/actions/runs/39900708827)
+at source `365b78c22cea4141ae3413c88d21bdfee0bd2da8` completed source/configuration
+checks, then failed to compile the TUI: removing the old summary parser also
+removed `is_tool`, while one ambient-background condition still referred to it.
+`native-build-failure.txt` retains the diagnostic. The behavior suites and
+candidate packaging were skipped; no usable native TUI was established.
+
+Repair `bf1f7c48d2fcbfee151abe1cbd949d43ad32102f` removes the redundant
+`not is_tool` condition. `Chat_theme.body_context` enables ambient background
+only for User rows with a known background; every Tool row already has it
+disabled. The remaining condition preserves that typed decision. Syntax and
+whitespace checks passed; independent source review checked that exact repair
+against `73028e4450921a3f130b7297d013c907df2e7f49`. Earlier source review missed
+the undefined reference and must not be treated as compile evidence.
+
+The colour-module observations above remain separate. A new native candidate
+build and manual screen observations are still required after this repair.

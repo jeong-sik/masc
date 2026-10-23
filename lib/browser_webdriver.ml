@@ -191,7 +191,10 @@ let execute_action t action =
     phase := Started;
     call t session method_ path body in
   let result = match action with
-  | Browser_lane.Action.Open_tab url ->
+  | (Browser_lane.Action.Open_tab url | Browser_lane.Action.Open_window url) as opening ->
+    let kind = match opening with
+      | Browser_lane.Action.Open_window _ -> "window"
+      | Browser_lane.Action.Open_tab _ | Browser_lane.Action.On_tab _ -> "tab" in
     let* () = absolute_http_url url in
     let* session = session t in
     let* _ = match call t session `GET "/window" None with
@@ -201,7 +204,7 @@ let execute_action t action =
          | `List (`String handle :: _) -> select t session handle
          | _ -> Error (Protocol "no surviving browser window; reopen the session"))
       | (Error (Remote { code = (Invalid_session_id | (No_such_alert | (Unexpected_alert_open | Other _)));_}) | Error (Transport _ | Protocol _) | Ok _) as result -> result in
-    let* created = perform_effect session `POST "/window/new" (Some (`Assoc ["type",`String "tab"])) in
+    let* created = perform_effect session `POST "/window/new" (Some (`Assoc ["type",`String kind])) in
     let* handle = string_field "handle" created in
     let id = tab_id t session handle in
     let navigate () =

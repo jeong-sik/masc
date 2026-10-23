@@ -1,6 +1,6 @@
 name = "masc_browser_act"
 description = """
-Run one action in an explicitly selected browser. Automation serves the listed actions; Stagehand serves only open_tab and top-level back/forward/reload/close_tab through native browser methods. Live BiDi serves open_tab, and top-level back/forward/reload/close_tab only for a tab this connection opened with open_tab. Omit identity only for initial open_tab discovery; otherwise retain the exact browserSelection lane/clientId and returned tabId. A failed navigation after creation retains a partial-effect receipt: inspect that created tab on the same browser before deciding what to do next; never open another automatically.
+Run one action in an explicitly selected browser. Automation serves the listed actions; Stagehand serves only open_tab and top-level back/forward/reload/close_tab through native browser methods. open_window opens a new browser window holding one tab (automation Firefox and live BiDi only; it returns that tab's tabId). Live BiDi serves open_tab, open_window, and top-level back/forward/reload/close_tab only for a tab this connection opened with open_tab. Omit identity only for initial open_tab discovery; otherwise retain the exact browserSelection lane/clientId and returned tabId. A failed navigation after creation retains a partial-effect receipt: inspect that created tab on the same browser before deciding what to do next; never open another automatically.
 Read elements in the same tab/frame for selectors; preserve decoded CSS escapes exactly. After no match, re-read. Actions can change external state: observe again after success or failure before retrying."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
@@ -13,7 +13,7 @@ defer_loading = true
 [[params]]
 name = "action"
 type = "string"
-enum = ["open_tab", "close_tab", "back", "forward", "reload", "upload", "accept_dialog", "dismiss_dialog"]
+enum = ["open_tab", "open_window", "close_tab", "back", "forward", "reload", "upload", "accept_dialog", "dismiss_dialog"]
 required = true
 description = "Browser-level actions: tabs, history, JavaScript dialogs and file upload. Page input (click, fill, select, scroll, keys) is masc_browser_interact."
 
@@ -27,7 +27,7 @@ description = "Optional advanced browser override. Omit only for initial discove
 name = "tabId"
 type = "integer"
 minimum = 0
-description = "Required except open_tab."
+description = "Required except open_tab and open_window."
 
 [[params]]
 name = "selector"
@@ -42,7 +42,7 @@ description = "accept_dialog prompt text."
 [[params]]
 name = "url"
 type = "string"
-description = "open_tab HTTP(S) URL."
+description = "open_tab and open_window HTTP(S) URL."
 
 [[params]]
 name = "framePath"
@@ -59,4 +59,4 @@ description = "Keeper-readable playground-relative or visible absolute files, pr
 [[params]]
 name = "clientId"
 type = "string"
-description = "Required with lane=live for open_tab: exact observed BiDi connection ID. Not valid on automation or stagehand."
+description = "Required with lane=live for open_tab and open_window: exact observed BiDi connection ID. Not valid on automation or stagehand."

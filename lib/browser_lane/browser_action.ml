@@ -3,9 +3,9 @@ type interaction =
   | Upload of { selector : string; paths : string list }
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
-type t = Open_tab of string | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
+type t = Open_tab of string | Open_window of string | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
 let reply_timeout_sec = function
-  | Open_tab _ | On_tab _ -> 60.
+  | Open_tab _ | Open_window _ | On_tab _ -> 60.
 let ( let* ) = Result.bind
 let key_name = function
   | Enter -> "Enter" | Tab -> "Tab" | Escape -> "Escape" | Backspace -> "Backspace"
@@ -55,6 +55,7 @@ let parse = function
     let* action = string "action" in
     (match action with
      | "open_tab" -> let* () = exact ["url"] in let* url = string "url" in Ok (Open_tab url)
+     | "open_window" -> let* () = exact ["url"] in let* url = string "url" in Ok (Open_window url)
      | "upload" ->
        let* selector = selector () in
        let* paths = match List.assoc_opt "paths" fields with
@@ -74,6 +75,7 @@ let parse = function
   | _ -> Error "browser action must be an object"
 let to_json = function
   | Open_tab url -> `Assoc ["action",`String "open_tab";"url",`String url]
+  | Open_window url -> `Assoc ["action",`String "open_window";"url",`String url]
   | On_tab {tab_id;frame_path;interaction} ->
     let action, args = match interaction with
       | Upload {selector;paths} -> "upload", ["selector",`String selector;"paths",`List (List.map (fun p -> `String p) paths)]

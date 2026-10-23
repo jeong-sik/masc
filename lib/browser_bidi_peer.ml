@@ -238,8 +238,8 @@ let remember_window t window =
   | Some id -> id
   | None -> let id = List.length t.windows in t.windows <- t.windows @ [window, id]; id
 
-let open_tab t url =
-  let invalid () = Error (Before_effect "open_tab requires an absolute HTTP(S) URL") in
+let open_tab ?(kind="tab") t url =
+  let invalid () = Error (Before_effect ("open_" ^ kind ^ " requires an absolute HTTP(S) URL")) in
   let* () = match Uri.of_string url with
     | uri -> (match Uri.scheme uri,Uri.host uri with
         | Some ("http"|"https"),Some host when host <> "" -> Ok ()
@@ -247,7 +247,7 @@ let open_tab t url =
     | exception Failure _ -> invalid () in
   (* Only a fresh context is navigated. A protected existing start page does
      not need a script realm and is never replaced to make this work. *)
-  let* created = match t.ask "browsingContext.create" (obj ["type",str "tab";"background",`Bool true]) with
+  let* created = match t.ask "browsingContext.create" (obj ["type",str kind;"background",`Bool true]) with
     | Ok created -> Ok created
     | Error (Rejected _ | Unsent _ as refusal) ->
       Error (Before_effect ("browsingContext.create: " ^ refusal_message refusal))
@@ -258,10 +258,10 @@ let open_tab t url =
   let id = remember_context t context in
   t.opened <- id :: t.opened;
   let message reason =
-    Printf.sprintf "New tab was created as tabId %d on this connection. %s. Do not open another tab to retry." id reason in
+    Printf.sprintf "New %s was created as tabId %d on this connection. %s. Do not open another %s to retry." kind id reason kind in
   let partial reason = Partial_failure {tab_id=id;message=message reason ^
     " Inspect it using this same clientId and tabId.";
-    receipt=obj ["action",str "open_tab";"created",`Bool true;"tabId",`Int id]} in
+    receipt=obj ["action",str ("open_" ^ kind);"created",`Bool true;"tabId",`Int id]} in
   let rpc_failure = function
     | Rejected (Other_error _ | No_such_alert | Unexpected_alert_open) as refusal -> partial (refusal_message refusal)
     | Rejected (Session_not_created | Invalid_session_id) | Unanswered _ | Unsent _ as refusal ->
@@ -275,7 +275,7 @@ let open_tab t url =
     (evaluate_typed t context
       "arguments[0]=JSON.parse(arguments[0]);\nreturn {url:location.href,title:document.title,active:document.visibilityState==='visible'};" (obj [])) in
   match summary with
-  | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str "open_tab")::("created",`Bool true)::fields))
+  | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str ("open_" ^ kind))::("created",`Bool true)::fields))
   | _ -> Error (partial "invalid new-tab summary")
 
 type tab_context = { context : string; id : int; url : string option; window : int option }
@@ -564,6 +564,7 @@ let dispatch ?actor ?request_id t ~verb args =
     let* action = pre (Browser_lane.Action.parse args) in
     (match action with
      | Browser_lane.Action.Open_tab url -> open_tab t url
+     | Browser_lane.Action.Open_window url -> open_tab ~kind:"window" t url
      | Browser_lane.Action.On_tab {tab_id; interaction; _} -> tab_action t ~tab_id interaction)
   | Browser_info ->
     (match t.version with Some version->Ok (obj ["name",str "Firefox";"version",str version])

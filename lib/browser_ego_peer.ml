@@ -573,6 +573,8 @@ let act t args =
   match Browser_lane.Action.parse args with
   | Error detail -> Error (Live.Before_effect detail)
   | Ok (Browser_lane.Action.Open_tab url) -> open_tab t url
+  | Ok (Browser_lane.Action.Open_window _) ->
+    Error (Live.Before_effect "an ego connection does not open windows")
   | Ok (Browser_lane.Action.On_tab {frame_path = _ :: _; _}) ->
     Error (Live.Before_effect "an ego connection does not act inside frames")
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Close_tab}) -> close_tab t tab_id

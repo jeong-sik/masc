@@ -4,7 +4,7 @@ type interaction =
   | Upload of { selector : string; paths : string list }
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
-type t = Open_tab of string | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
+type t = Open_tab of string | Open_window of string | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
 (** Reply observation window shared by built-in and Add-on action callers.
     Expiry does not prove that a dispatched browser effect did not happen. *)
 val reply_timeout_sec : t -> float

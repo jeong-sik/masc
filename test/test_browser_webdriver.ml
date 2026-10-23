@@ -396,6 +396,38 @@ let test_semantic_click_uses_native_pointer_input () =
      | Lane.Answered _ | Lane.Refused _ | Lane.Lane_absent | Lane.Timed_out -> fail "stale native guard must reject before input");
     check int "failed guard sends no input or fallback" 2 !inputs)
 
+let test_open_window_asks_for_a_window () =
+  Eio_main.run (fun _ ->
+    let kinds = ref [] and navigations = ref [] in
+    let request ~method_ ~path ~body = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET, "/session/owned/window" -> Ok (`String "tab")
+      | `POST, "/session/owned/window" -> Ok `Null
+      | `POST, "/session/owned/window/new" ->
+        (match Option.bind body (fun json -> Yojson.Safe.Util.(member "type" json |> to_option Fun.id)) with
+         | Some (`String kind) -> kinds := kind :: !kinds
+         | _ -> fail "window/new needs a type");
+        Ok (`Assoc ["handle",`String "fresh"])
+      | `POST, "/session/owned/url" -> navigations := path :: !navigations; Ok `Null
+      | `POST, "/session/owned/execute/sync" -> Ok (`Assoc ["url",`String "https://example.org/new";"title",`String "New"])
+      | _ -> fail ("unexpected request " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    List.iter (fun action ->
+      match Driver.execute driver (Lane.Page_act action) with
+      | Lane.Answered _ -> ()
+      | Lane.Refused _ | Lane.Rejected_before_effect _ | Lane.Lane_absent | Lane.Timed_out -> fail "opening failed")
+      [Lane.Action.Open_tab "https://example.org/a"; Lane.Action.Open_window "https://example.org/b"];
+    check (list string) "a tab, then a window, is requested from the driver" ["tab";"window"] (List.rev !kinds);
+    check int "each opening navigates once" 2 (List.length !navigations);
+    let window = Lane.Action.Open_window "https://example.org/b" in
+    check bool "open_window survives the wire" true (Lane.Action.parse (Lane.Action.to_json window) = Ok window);
+    check bool "open_window takes only a url" true
+      (Result.is_error (Lane.Action.parse (`Assoc ["action",`String "open_window";"url",`String "https://example.org";"tabId",`Int 1]))))
+
 let test_interact_enters_frames () =
   Eio_main.run (fun _ ->
     let order = ref [] and missing = ref false in
@@ -823,6 +855,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "optional document never selects or blocks owner" `Quick test_optional_document_never_selects_or_blocks_owner;
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
   test_case "semantic clicks use native input" `Quick test_semantic_click_uses_native_pointer_input;
+  test_case "open_window asks the driver for a window" `Quick test_open_window_asks_for_a_window;
   test_case "framed interaction enters the frame first" `Quick test_interact_enters_frames;
   test_case "pointer release failure recovery" `Quick test_pointer_release_recovery;
   test_case "a dialog opened by a click can be answered" `Quick test_dialog_opened_by_a_click_can_be_answered;

@@ -390,7 +390,7 @@ let live_capability = function
   | Page_capture _ -> Some Viewport_capture
   | Page_scene _ -> Some Scene_read
   | Page_interact { action; _ } -> Some (live_capability_of_interaction action)
-  | Page_act (Action.Open_tab _) -> Some Tab_creation
+  | Page_act (Action.Open_tab _ | Action.Open_window _) -> Some Tab_creation
   | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Some Tab_history
   | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Some Tab_closing
   | Page_goto _ -> Some Tab_navigation
@@ -425,6 +425,7 @@ let verb_allowed_on_stagehand = function
   | Page_read _ | Page_elements _ | Page_scene _ | Page_interact _ | Page_instruct _ | Page_locate _
   | Page_extract _ -> true
   | Page_act (Action.Open_tab _) -> true
+  | Page_act (Action.Open_window _) -> false
   | Page_act (Action.On_tab {frame_path;interaction;_}) ->
     (match interaction with
      | Action.Back | Forward | Reload | Close_tab -> frame_path = []

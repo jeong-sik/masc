@@ -514,7 +514,7 @@ supported; different ports/channels and independent SMF2 patterns stay separate.
 Lengths, attack/release dynamics, other tracks and expression events are retained.
 
 For a whole-progression voice-leading comparison, use
-`:progression-led 0 4 drop2 C3 C5 Dm7 G7 Cmaj7` on a melodic phrase track.
+`:progression-led 0 4 drop2 C3 C5 Dm7 G7 Cmaj7` on a melodic phrase or imported MIDI track.
 After start, duration and mode, give the inclusive lowest/highest MIDI keys
 (note names or numbers), then the chord symbols. Close candidates contain one
 instance of each chord pitch class within an octave; drop2 lowers the
@@ -532,8 +532,19 @@ counts, drum tracks and overlapping same-key notes fail without editing the
 draft. The generated notes retain the requested timing and current velocity;
 one undo removes the progression, and redo restores it. Save, MIDI/WAV export,
 the harmony timeline and editable arrangement handoff use those ordinary notes.
-This command composes authored phrases; imported original MIDI keeps its
-existing source-editing commands.
+For imported MIDI, choose a pattern when needed and `:channel N` if the current
+track contains multiple channels. The start and duration use native quarter-note
+beats (PPQ) or frames (SMPTE), including exact fractions such as `1/7` in PPQ1001.
+Each generated note uses the source track's existing port at its own onset;
+an insertion crossing a port change or changing note-off pairing is refused.
+New notes cannot overlap an existing same-port/channel/key in any source track,
+including original point notes. Original event order remains authoritative, so
+a same-tick release/point ordering that changes pairing is also refused.
+Drum channels, zero durations and unrepresentable timing fail transactionally.
+One undo removes the entire inserted progression, retaining the existing source
+notes, expression, tempo map, SysEx, opaque chunks and immutable original bytes.
+Save/reopen, MIDI export, harmony analysis and arrangement handoff consume the
+same edited source; the command does not replace or revoice existing notes.
 
 Musical command positions and lengths accept decimals or integer fractions:
 `:note C4 8.3 1/3 91` starts at tick 7968 and lasts 320 ticks in a phrase.

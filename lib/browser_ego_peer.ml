@@ -230,9 +230,9 @@ let read t args =
   with_tab id page
 
 let elements t args =
-  let* within = Browser_page_script.within_of_json (field "within" args) in
+  let* filter = Browser_page_script.elements_filter_of_json (fun key -> field key args) in
   let* id,page = evaluate t args ~step:"page.elements"
-      (Browser_page_script.parsed Browser_page_script.elements) (Browser_page_script.elements_args within) in
+      (Browser_page_script.parsed Browser_page_script.elements) (Browser_page_script.elements_args filter) in
   if Option.is_some (field "documentLoading" page) then Error Browser_page_script.document_loading_refused
   else with_tab id page
 

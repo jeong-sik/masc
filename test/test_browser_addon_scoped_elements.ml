@@ -35,8 +35,8 @@ let scoped_answers_need_their_match_count () =
         "elements", `List [`Assoc ["selector", `String "#outside"]]] in
       let scoped = `Assoc ["tabId", `Int 7; "within", `String "nav"; "withinMatches", `Int 1;
         "total", `Int 1; "truncated", `Bool false; "elements", `List []] in
-      let top = B.Page_elements {tab_id = Some 7; within = Some "nav"} in
-      let framed = B.Page_context {tab_id = 7; frame_path = ["#frame"]; mode = `Elements (Some "nav")} in
+      let top = B.Page_elements {tab_id = Some 7;filter={within=Some "nav";selector=None}} in
+      let framed = B.Page_context {tab_id = 7; frame_path = ["#frame"]; mode = `Elements {within=Some "nav";selector=None}} in
       List.iter (fun (label, verb) ->
         answer := every_control;
         let refused = invoke verb in
@@ -47,9 +47,28 @@ let scoped_answers_need_their_match_count () =
         answer := scoped;
         check (option bool) (label ^ ": a scoped answer succeeds") (Some false) (invoke verb).is_error)
         ["top document", top; "frame", framed];
+      List.iter (fun (within, selector) ->
+        let filter = B.{within; selector = Some selector} in
+        let verbs = [B.Page_elements {tab_id=Some 7;filter};
+          B.Page_context {tab_id=7;frame_path=["#frame"];mode=`Elements filter}] in
+        List.iter (fun verb ->
+          List.iter (fun reply ->
+            answer := reply;
+            check (option bool) "missing, mismatched or negative selector receipt fails"
+              (Some true) (invoke verb).is_error)
+            [scoped;
+             `Assoc ["selector",`String "#wrong";"selectorMatches",`Int 1];
+             `Assoc ["selector",`String selector;"selectorMatches",`Int (-1)]];
+          answer := `Assoc (["selector",`String selector;"selectorMatches",`Int 0;
+            "elements",`List [];"total",`Int 0] @
+            (match within with None -> [] | Some scope ->
+              ["within",`String scope;"withinMatches",`Int 1]));
+          check (option bool) "a confirmed zero-match selector answer succeeds"
+            (Some false) (invoke verb).is_error) verbs)
+        [None,"[role=row]";Some "nav","[role=row]"];
       answer := every_control;
       check (option bool) "an unscoped read is unchanged" (Some false)
-        (invoke (B.Page_elements {tab_id = Some 7; within = None})).is_error))
+        (invoke (B.Page_elements {tab_id = Some 7;filter={within=None;selector=None}})).is_error))
 
 let () = run "Browser add-on scoped elements" ["tool", [
   test_case "scoped answers need their match count" `Quick scoped_answers_need_their_match_count]]

@@ -386,7 +386,7 @@ let test_public_scoped_elements () = with_upload_context (fun config _meta ->
         && (String.sub carried index 8="#outside" || mentions (index+1)) in
       check bool "the refusal does not pass on the unscoped controls" false (mentions 0);
       check bool "the scope reaches the browser" true
-        (List.hd !sent=(Lane.Automation_route,Lane.Page_elements {tab_id=Some 3;within=Some "nav"}));
+        (List.hd !sent=(Lane.Automation_route,Lane.Page_elements {tab_id=Some 3;filter={within=Some "nav";selector=None}}));
       answer:=`Assoc ["tabId",`Int 3;"within",`String "nav";"withinMatches",`Int 1;
         "total",`Int 2;"truncated",`Bool false;"elements",`List []];
       check bool "a scoped answer is returned" true (Tool_result.is_success (invoke read));
@@ -396,7 +396,22 @@ let test_public_scoped_elements () = with_upload_context (fun config _meta ->
       check bool "an empty within is refused" true
         (Tool_result.is_failed (invoke ["lane",`String "automation";"tabId",`Int 3;
           "mode",`String "elements";"within",`String ""]));
-      check int "refused arguments send no browser command" 2 (List.length !sent))))
+      let selected = ["lane",`String "automation";"tabId",`Int 3;
+        "mode",`String "elements";"within",`String "nav";"selector",`String "[role=row]"] in
+      check bool "an old extension cannot silently ignore selector" true
+        (Tool_result.is_failed (invoke selected));
+      check bool "both CSS filters reach the browser" true
+        (List.hd !sent=(Lane.Automation_route,Lane.Page_elements {tab_id=Some 3;
+          filter={within=Some "nav";selector=Some "[role=row]"}}));
+      answer:=`Assoc ["within",`String "nav";"withinMatches",`Int 1;
+        "selector",`String "[role=row]";"selectorMatches",`Int 0;"elements",`List []];
+      check bool "both confirmed filters return" true (Tool_result.is_success (invoke selected));
+      List.iter (fun (mode, selector) ->
+        check bool "selector is validated before a browser command" true
+          (Tool_result.is_failed (invoke ["lane",`String "automation";"tabId",`Int 3;
+            "mode",`String mode;"selector",selector])))
+        ["text",`String "nav";"elements",`String "";"elements",`Int 3];
+      check int "refused arguments send no browser command" 4 (List.length !sent))))
 
 let () = run "Firefox controls" ["behavior",[
   test_case "public locate keeps its owned browser through native routing" `Quick test_public_locate_retains_browser;

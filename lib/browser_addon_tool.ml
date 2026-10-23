@@ -134,7 +134,7 @@ let invoke ~owner ~principal arguments =
     let unscoped=match reply with
       | W.Issue_result (Ok (B.Answered (`Assoc fields))) when List.assoc_opt "ok" fields=Some (`Bool true) ->
           Result.fold ~ok:(fun _ -> None) ~error:Option.some
-            (Browser_page_script.check_scoped_elements ~within:(B.elements_within verb)
+            (Browser_page_script.check_scoped_elements ~filter:(B.elements_filter verb)
                (Option.value (List.assoc_opt "data" fields) ~default:`Null))
       | Issue_result (Ok (B.Answered _|Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
       | Issue_result (Error _)|Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _

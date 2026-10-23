@@ -306,10 +306,10 @@ let read_text ~tabs ~call ~tab_id ~max_chars =
   with_tab_id tab_id "a text observation" text
 ;;
 
-let read_elements ~tabs ~call ~tab_id ~within =
+let read_elements ~tabs ~call ~tab_id ~filter =
   let* tab_id, page_id = page_or_active ~tabs ~call tab_id in
   let* elements =
-    evaluate ~runtime:No_runtime ~send:(send call) ~args:(Browser_page_script.elements_args within)
+    evaluate ~runtime:No_runtime ~send:(send call) ~args:(Browser_page_script.elements_args filter)
       page_id Browser_page_script.elements
   in
   with_tab_id tab_id "an elements observation" elements
@@ -550,7 +550,7 @@ let execute ~tabs ~call ?actor verb =
     | Browser_lane.Page_act action -> tab_action ~tabs ~call action
     | Browser_lane.Page_capture { tab_id } -> capture ~tabs ~call ~tab_id
     | Browser_lane.Page_read { tab_id; max_chars } -> read_text ~tabs ~call ~tab_id ~max_chars
-    | Browser_lane.Page_elements { tab_id; within } -> read_elements ~tabs ~call ~tab_id ~within
+    | Browser_lane.Page_elements { tab_id; filter } -> read_elements ~tabs ~call ~tab_id ~filter
     | Browser_lane.Page_scene { tab_id; max_chars; view; scope } -> read_scene ~tabs ~call ~tab_id ~max_chars ~view ~scope
     | Browser_lane.Page_interact { frame_path = _ :: _; _ } ->
       Error (Browser_lane.Rejected_before_effect "framePath is not supported on a Stagehand browser yet; the page input runs in the top document only")

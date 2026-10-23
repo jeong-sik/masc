@@ -267,3 +267,38 @@ test('a selector starts at the nearest id no other element carries', async () =>
   assert.equal(native.elements[2].selector, '#form > input:nth-of-type(3)');
   assert.equal(new Set(native.elements.map(item => item.selector)).size, 8);
 });
+
+
+test('explicit selectors observe custom rows inside within without exposing hidden nodes or values', async () => {
+  const {context, text} = fixture();
+  const body = text.parentElement;
+  const row = (label, parent = body) => ({
+    localName:'div', nodeType:1, parentElement:parent, children:[], innerText:label,
+    getAttribute(key) { return key === 'role' ? 'row' : null; },
+    getClientRects() { return [{}]; }, matches() { return false; },
+  });
+  const inside = row('Inside'), outside = row('Outside');
+  const hidden = row('Hidden'); hidden.getClientRects = () => [];
+  const nav = row('Rows'); nav.children = [inside, hidden];
+  inside.parentElement = hidden.parentElement = nav;
+  body.children.push(nav, outside);
+  scope(context, {nav:[nav], '[role=row]':[inside,outside,hidden],
+    'input[type=password]':[body.children[4]]});
+  for (const args of [{selector:'[role=row]'}, {within:'nav',selector:'[role=row]'},
+      {within:'#missing',selector:'[role=row]'}, {selector:'#missing'},
+      {selector:'input[type=password]'}]) {
+    const native = runNative(context,args);
+    const {tabId,...extension} = await runExtension(context,args);
+    assert.deepEqual(extension,native);
+    if (args.selector === '[role=row]') {
+      assert.equal(native.selectorMatches,3);
+      assert.deepEqual(native.elements.map(e=>e.text),
+        args.within === '#missing' ? [] : args.within ? ['Inside'] : ['Inside','Outside']);
+    } else if (args.selector === '#missing') assert.equal(native.total,0);
+    else assert.equal(Object.hasOwn(native.elements[0],'value'),false);
+  }
+  assert.throws(()=>runNative(context,{selector:'nav(('}),/invalid_css_selector/);
+  await assert.rejects(runExtension(context,{selector:'nav(('}),/invalid_css_selector/);
+  for (const selector of ['',null,7,{}])
+    await assert.rejects(runExtension(context,{selector}),/invalid_selector/);
+});

@@ -636,6 +636,9 @@ async function pageElements(args) {
   const within = args?.within;
   if (within !== undefined && (typeof within !== "string" || within === ""))
     throw new Error("invalid_within");
+  const selector = args?.selector;
+  if (selector !== undefined && (typeof selector !== "string" || selector === ""))
+    throw new Error("invalid_selector");
   const [page] = await browser.tabs.executeScript(tabId, {
     runAt: "document_end",
     code: '(' + (function () {
@@ -648,7 +651,7 @@ const actionRoles = new Set('button link checkbox radio switch menuitem menuitem
 // [within] is a CSS selector read by the page's own engine: only controls that
 // match it, or sit inside an element that matches it, are observed. An invalid
 // selector is refused rather than read as the whole page.
-const within = (arguments[0] || {}).within;
+const {within, selector: requestedSelector} = arguments[0] || {};
 let scope = null;
 if (within !== undefined) {
   try { scope = new Set(document.querySelectorAll(within)); }
@@ -660,8 +663,15 @@ const inScope = el => {
   for (let node = el; node; node = node.parentElement) if (scope.has(node)) return true;
   return false;
 };
-const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'))
-  .filter(el => scope === null || inScope(el));
+// Explicit CSS reads may observe custom rows and other non-control nodes.
+// Observation does not claim that a matched node supports an interaction.
+let matches;
+try {
+  matches = Array.from(document.querySelectorAll(requestedSelector === undefined
+    ? 'a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'
+    : requestedSelector));
+} catch { throw new Error('invalid_css_selector'); }
+const nodes = matches.filter(el => scope === null || inScope(el));
 // A selector path stops at the nearest element, the control itself included,
 // whose id no other element in the document carries. Without one it runs from
 // the root element. Either way it names exactly one element.
@@ -710,10 +720,10 @@ const observable = el => (el.getClientRects().length || labelTextRects(el).lengt
     if (style.display === 'none' || Number(style.opacity) === 0) return false;
   } return true; })();
 const visible = nodes.filter(el=>observable(el)
-  && (!el.getAttribute('role') || actionRoles.has(effectiveRole(el))
+  && (requestedSelector !== undefined || !el.getAttribute('role') || actionRoles.has(effectiveRole(el))
     || ['a','button','input','textarea','select','summary','label'].includes(el.localName)
     || el.getAttribute('onclick') !== null || el.getAttribute('contenteditable') === 'true')
-  && (el.localName!=='label' || el.hasAttribute('onclick') || actionRoles.has(effectiveRole(el))
+  && (requestedSelector !== undefined || el.localName!=='label' || el.hasAttribute('onclick') || actionRoles.has(effectiveRole(el))
     || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type) && !observable(el.control))));
 function disabled(el) {
   const target=(el.localName==='label' && el.control) || el;
@@ -770,9 +780,10 @@ function observe(el) {
 }
 return {url:location.href,title:document.title,
   ...(scope === null ? {} : {within,withinMatches:scope.size}),
+  ...(requestedSelector === undefined ? {} : {selector:requestedSelector,selectorMatches:matches.length}),
   total:visible.length,truncated:visible.length>200,
   elements:visible.slice(0,200).map(observe)};
-}).toString() + ')(' + JSON.stringify(within === undefined ? {} : {within}) + ')'
+}).toString() + ')(' + JSON.stringify({within,selector}) + ')'
   });
   if (!page) throw new Error("page_unavailable");
   return {tabId,...page};

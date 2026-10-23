@@ -56,6 +56,14 @@ type interaction = Activate_tab | Click of string | Fill of { selector : string;
   | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport; via : Pointer.point list; duration_ms : int }
   | Follow_link of node_ref | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
 
+type elements_filter = { within : string option; selector : string option }
+
+let unfiltered_elements = { within = None; selector = None }
+
+let elements_filter_fields {within; selector} =
+  List.filter_map (fun (key, value) -> Option.map (fun value -> key, `String value) value)
+    ["within", within; "selector", selector]
+
 type verb =
   | Tabs_list
   | Page_read of { tab_id : int option; max_chars : int option }
@@ -74,9 +82,9 @@ type verb =
      question a keeper has before deciding to open one. *)
   | Session_status
   | Page_goto of { url : string; tab_id : int option }
-  | Page_elements of { tab_id : int option; within : string option }
+  | Page_elements of { tab_id : int option; filter : elements_filter }
   | Page_act of Browser_action.t
-  | Page_context of { tab_id : int; frame_path : string list; mode : [ `Text of int | `Elements of string option | `Frames | `Dialog ] }
+  | Page_context of { tab_id : int; frame_path : string list; mode : [ `Text of int | `Elements of elements_filter | `Frames | `Dialog ] }
   (* Sentences for the Stagehand runtime (RFC-browser-lane-stagehand §3.2):
      act on, locate, or extract from the page, with element choice left to
      the model the runtime asks. *)
@@ -98,13 +106,13 @@ let reply_timeout_sec = function
 
 (* The CSS scope an elements read carries, top-level or in a frame. Every
    caller that relays such a read checks the answer against it. *)
-let elements_within = function
-  | Page_elements { within; _ } -> within
-  | Page_context { mode = `Elements within; _ } -> within
+let elements_filter = function
+  | Page_elements { filter; _ } -> filter
+  | Page_context { mode = `Elements filter; _ } -> filter
   | Page_context { mode = (`Text _ | `Frames | `Dialog); _ }
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _
   | Page_cookies _ | Page_capture _ | Page_scene _ | Page_interact _ | Session_open _ | Session_close
-  | Session_status | Page_goto _ | Page_act _ | Page_instruct _ | Page_locate _ | Page_extract _ -> None
+  | Session_status | Page_goto _ | Page_act _ | Page_instruct _ | Page_locate _ | Page_extract _ -> unfiltered_elements
 ;;
 
 let verb_to_string = function
@@ -252,14 +260,14 @@ let verb_json = function
   | Page_goto { url; tab_id } ->
     `Assoc ["verb", `String "page.goto"; "args", `Assoc
       (["url", `String url] @ Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
-  | Page_elements { tab_id; within } ->
+  | Page_elements { tab_id; filter } ->
     `Assoc ["verb", `String "page.elements"; "args", `Assoc
       (Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id)
-       @ Option.to_list (Option.map (fun selector -> "within", `String selector) within))]
+       @ elements_filter_fields filter)]
   | Page_context {tab_id;frame_path;mode} ->
     let name, extra = match mode with
       | `Text cap -> "text", ["maxChars",`Int cap]
-      | `Elements within -> "elements", Option.to_list (Option.map (fun selector -> "within", `String selector) within)
+      | `Elements filter -> "elements", elements_filter_fields filter
       | `Frames -> "frames", [] | `Dialog -> "dialog", [] in
     `Assoc ["verb",`String "page.context";"args",`Assoc
       (["tabId",`Int tab_id;"framePath",`List (List.map (fun s -> `String s) frame_path);"mode",`String name] @ extra)]

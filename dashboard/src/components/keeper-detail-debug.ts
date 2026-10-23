@@ -26,7 +26,7 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   if (keeper.context_source) extras.push({ title: '컨텍스트 소스', value: keeper.context_source })
   if (keeper.context_tokens != null) extras.push({ title: '컨텍스트 토큰', value: formatTokens(keeper.context_tokens) })
   if (keeper.context_max != null) extras.push({ title: '컨텍스트 최대', value: formatTokens(keeper.context_max) })
-  if (keeper.k2k_count != null) extras.push({ title: 'K2K 카운트', value: String(keeper.k2k_count) })
+  if (keeper.addressed_message_count != null) extras.push({ title: '멘션 메시지', value: String(keeper.addressed_message_count) })
   if (keeper.conversation_tail_count != null) extras.push({ title: '대화 tail', value: String(keeper.conversation_tail_count) })
   if (keeper.context?.message_count != null) extras.push({ title: '메시지 수', value: String(keeper.context.message_count) })
   if (keeper.context?.has_checkpoint != null) extras.push({ title: '체크포인트 보유', value: keeper.context.has_checkpoint ? '예' : '아니오' })

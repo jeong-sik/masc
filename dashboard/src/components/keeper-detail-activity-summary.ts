@@ -15,7 +15,7 @@ export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
   const hasActivity =
     hasActivitySignal ||
     workPreview ||
-    (keeper.k2k_count ?? 0) > 0
+    (keeper.addressed_message_count ?? 0) > 0
 
   if (!hasActivity) return null
 
@@ -31,9 +31,9 @@ export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
                 : null}
           </span>`
         : null}
-      ${(keeper.k2k_count ?? 0) > 0
+      ${(keeper.addressed_message_count ?? 0) > 0
         ? html`<span class="inline-flex items-center gap-1 text-2xs px-2.5 py-1 rounded-[var(--r-1)] bg-[var(--info-soft)] border border-[var(--info-border)] text-[var(--color-fg-muted)]">
-            K2K <span class="font-mono font-medium text-[var(--info-fg)]">${keeper.k2k_count}</span>
+            멘션 <span class="font-mono font-medium text-[var(--info-fg)]">${keeper.addressed_message_count}</span>
           </span>`
         : null}
     </div>

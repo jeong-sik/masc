@@ -103,16 +103,6 @@ let retired_pr_work_summary_fields =
     "observed_pr_" ^ "work";
   ]
 
-let test_contains_ci_preserves_literal_ascii_semantics () =
-  check bool "ascii case-insensitive hit" true
-    (Metrics.contains_ci "keeper Tool Surface" "tool");
-  check bool "literal metachar needle" true
-    (Metrics.contains_ci "keeper.a+b" ".a+");
-  check bool "empty needle stays false" false
-    (Metrics.contains_ci "keeper" "");
-  check bool "longer needle false" false
-    (Metrics.contains_ci "keeper" "keeper-agent")
-
 let test_metrics_window_does_not_classify_execute_as_pr_work () =
   let _, summary =
     Detail.compute_metrics_window
@@ -213,7 +203,7 @@ let with_temp_history content f =
 (* Regression: keeper history rows persist message text as typed
    [content_blocks], not a flat [content] string. Reading flat [content]
    decoded "" for every row, so the dashboard keeper conversation feed and the
-   k2k mention graph were entirely empty. *)
+   mention summary were entirely empty. *)
 let test_history_summary_decodes_content_blocks () =
   let rows =
     String.concat
@@ -227,7 +217,7 @@ let test_history_summary_decodes_content_blocks () =
     ^ "\n"
   in
   with_temp_history rows (fun path ->
-      let conversation, _k2k_recent, _k2k_mentions, raw_count =
+      let conversation, _recent_addressed_messages, _keeper_mention_counts, raw_count =
         Metrics.keeper_history_summary_json
           ~all_keeper_names:[ "albini"; "fixture-keeper" ]
           ~keeper_name:"albini"
@@ -283,7 +273,7 @@ let test_history_summary_routes_by_source_not_content () =
     ^ "\n"
   in
   with_temp_history rows (fun path ->
-      let conversation, _k2k_recent, _k2k_mentions, raw_count =
+      let conversation, _recent_addressed_messages, _keeper_mention_counts, raw_count =
         Metrics.keeper_history_summary_json
           ~all_keeper_names:[ "albini" ]
           ~keeper_name:"albini"
@@ -297,6 +287,35 @@ let test_history_summary_routes_by_source_not_content () =
       | other ->
           failf "expected one user-authored history item, got %s"
             (Yojson.Safe.to_string other))
+
+let test_history_mentions_follow_keeper_addressing () =
+  let texts =
+    [ "partial artwork report"
+    ; "email@alice.com"
+    ; "@alicex"
+    ; "the code is `@alice`"
+    ; "Thanks (@ALICE), @alice and @art."
+    ; "@@unknown @alice"
+    ] in
+  let rows = texts |> List.map (fun text -> Yojson.Safe.to_string (`Assoc
+      [ "role", `String "user"; "source", `String "direct_user"
+      ; "content_blocks", `List [ `Assoc [ "type", `String "text"; "text", `String text ] ] ]))
+    |> String.concat "\n" in
+  with_temp_history (rows ^ "\n") (fun path ->
+    let conversation, recent, counts, raw_count =
+      Metrics.keeper_history_summary_json ~all_keeper_names:[ "self"; "alice"; "art" ]
+        ~keeper_name:"self" ~history_path:path in
+    check int "all messages remain in history" 6 raw_count;
+    let mentions = Yojson.Safe.Util.(conversation |> to_list
+        |> List.map (fun item -> item |> member "mentions" |> to_list |> List.map to_string)) in
+    check (list (list string)) "only declared addresses count as mentions"
+      [ []; []; []; []; [ "alice"; "art" ]; [] ] mentions;
+    check int "one addressed user message, not six substring matches" 1
+      Yojson.Safe.Util.(recent |> to_list |> List.length);
+    let counts = Yojson.Safe.Util.(counts |> to_list |> List.map (fun item ->
+        item |> member "keeper" |> to_string, item |> member "count" |> to_int)) in
+    check (list (pair string int)) "duplicate spelling contributes once per message"
+      [ "alice", 1; "art", 1 ] counts)
 
 (* #32971 Root B: the Turn row the producer writes today carries neither
    [generation] (removed by #29590) nor [handoff_performed] (removed by
@@ -319,11 +338,6 @@ let test_producer_shaped_turn_rows_enter_the_window () =
 let () =
   run "dashboard_keeper_metrics_10286"
     [
-      ( "contains_ci",
-        [
-          test_case "preserves literal ascii semantics" `Quick
-            test_contains_ci_preserves_literal_ascii_semantics;
-        ] );
       ( "metrics_window",
         [
           test_case "does not classify Execute as PR work" `Quick
@@ -341,5 +355,7 @@ let () =
             test_history_summary_decodes_content_blocks;
           test_case "routes by source, not content" `Quick
             test_history_summary_routes_by_source_not_content;
+          test_case "mentions follow Keeper addressing" `Quick
+            test_history_mentions_follow_keeper_addressing;
         ] );
     ]

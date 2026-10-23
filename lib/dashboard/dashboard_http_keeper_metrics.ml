@@ -16,7 +16,7 @@ let truncate_text ~(max_len : int) (s : string) : string =
   | String_util.Untouched _ -> s
   | String_util.Truncated { prefix; suffix; _ } -> prefix ^ suffix
 
-let contains_ci = String_util.contains_substring_ci
+module Mention_counts = Map.Make (String)
 
 let keeper_history_summary_json
     ~(all_keeper_names : string list)
@@ -27,16 +27,22 @@ let keeper_history_summary_json
     Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_history_summary"
       history_path ~max_bytes:120000 ~max_lines:80
   in
-  let mention_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let (conversation_rev, k2k_rev, raw_count) =
-    List.fold_left (fun (conv_acc, k2k_acc, raw_count) line ->
+  let keeper_targets =
+    all_keeper_names
+    |> List.filter (fun name -> name <> keeper_name)
+    |> List.filter_map (fun name ->
+         Keeper_identity.Keeper_id.of_string name
+         |> Option.map (fun id -> name, id))
+  in
+  let (conversation_rev, addressed_rev, mention_counts, raw_count) =
+    List.fold_left (fun (conv_acc, addressed_acc, mention_counts, raw_count) line ->
       try
         let j = Yojson.Safe.from_string line in
         let role = Safe_ops.json_string ~default:"" "role" j |> String.trim in
         let role_lc = String.lowercase_ascii role in
         (* Message text lives in typed [content_blocks], not a flat [content]
            string. Reading flat [content] decoded "" for every row, so the
-           keeper conversation / k2k summary was empty. Same SSOT extractor as
+           keeper conversation / mention summary was empty. Same SSOT extractor as
            the trace view. *)
         let content =
           Keeper_context_core.text_of_history_jsonl_json j |> String.trim
@@ -46,17 +52,24 @@ let keeper_history_summary_json
         if role = "" || content = ""
            || Keeper_types_support.is_internal_history_source source
         then
-          (conv_acc, k2k_acc, raw_count)
+          (conv_acc, addressed_acc, mention_counts, raw_count)
         else
+          let mentioned_ids = Keeper_lane_mentions.mention_ids_of_content content in
           let mentions =
-            all_keeper_names
-            |> List.filter (fun candidate ->
-                 candidate <> keeper_name && contains_ci content candidate)
+            keeper_targets
+            |> List.filter_map (fun (name, id) ->
+                 if List.exists (Keeper_identity.Keeper_id.equal id) mentioned_ids
+                 then Some name else None)
           in
-          let (conv_acc, k2k_acc) =
-            let () = List.iter (count_table_incr mention_counts) mentions in
+          let mention_counts =
+            List.fold_left (fun counts name ->
+              Mention_counts.update name
+                (fun previous -> Some (1 + Option.value ~default:0 previous)) counts)
+              mention_counts mentions
+          in
+          let (conv_acc, addressed_acc) =
             let preview = truncate_text ~max_len:280 content in
-            let is_k2k = role_lc = "user" && mentions <> [] in
+            let addressed_user_message = role_lc = "user" && mentions <> [] in
             let conversation_item =
               `Assoc [
                 ("role", `String role);
@@ -64,35 +77,34 @@ let keeper_history_summary_json
                 ("content", `String content);
                 ("preview", `String preview);
                 ("mentions", `List (List.map (fun s -> `String s) mentions));
-                ("k2k", `Bool is_k2k);
+                ("addressed_user_message", `Bool addressed_user_message);
               ]
             in
-            let k2k_acc =
+            let addressed_acc =
               match mentions with
-              | mentioned_keeper :: _ when is_k2k ->
+              | mentioned_keeper :: _ when addressed_user_message ->
                   (`Assoc [
                      ("keeper", `String keeper_name);
                      ("mentioned", `String mentioned_keeper);
                      ("role", `String role);
                      ("ts_unix", `Float ts_unix);
                      ("preview", `String preview);
-                   ]) :: k2k_acc
-              | _ -> k2k_acc
+                   ]) :: addressed_acc
+              | _ -> addressed_acc
             in
-            (conversation_item :: conv_acc, k2k_acc)
+            (conversation_item :: conv_acc, addressed_acc)
           in
-          (conv_acc, k2k_acc, raw_count + 1)
+          (conv_acc, addressed_acc, mention_counts, raw_count + 1)
       with
       | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Not_found ->
-        (conv_acc, k2k_acc, raw_count)
-    ) ([], [], 0) history_lines
+        (conv_acc, addressed_acc, mention_counts, raw_count)
+    ) ([], [], Mention_counts.empty, 0) history_lines
   in
   let conversation = `List (List.rev conversation_rev) in
-  let k2k_recent = `List (List.rev k2k_rev) in
-  let k2k_mentions =
+  let recent_addressed_messages = `List (List.rev addressed_rev) in
+  let keeper_mention_counts =
     mention_counts
-    |> Hashtbl.to_seq
-    |> List.of_seq
+    |> Mention_counts.bindings
     |> List.sort (fun (ka, va) (kb, vb) ->
          let c = compare vb va in
          if c <> 0 then c else String.compare ka kb)
@@ -101,7 +113,7 @@ let keeper_history_summary_json
          `Assoc [("keeper", `String k); ("count", `Int v)])
     |> fun xs -> `List xs
   in
-  (conversation, k2k_recent, k2k_mentions, raw_count)
+  (conversation, recent_addressed_messages, keeper_mention_counts, raw_count)
 
 let top_counts_json
     ?(limit = 5)

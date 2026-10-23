@@ -481,6 +481,8 @@ let test_a_snapshot_target_is_checked_before_any_browser () =
   List.iter (fun (name, result) -> check bool name true (refused_as_input result))
     [ "a target on the automation browser", interact "automation" (click @ url)
     ; "a target on the Stagehand browser", interact "stagehand" (click @ url)
+    ; "a fill target on the automation browser",
+      interact "automation" (["action",`String "fill";"target",`Assoc ["ref",`Int 5];"text",`String "Ada"] @ url)
     ; "a target without expectedUrl", live click ];
   check bool "a target click on a live connection goes on to find the browser Add-on" true
     (reaches_the_addon_lookup (live (click @ url)))

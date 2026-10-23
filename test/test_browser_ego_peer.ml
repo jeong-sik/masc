@@ -857,6 +857,8 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   check bool "a part of a name is name*=" true (contains (seen ()) {|loc=role:link[name*=\"Docs\"]|});
   ignore (answer "text" (click (Lane.Target_text {text="Send";exact=false})));
   check bool "part of a text is unquoted" true (contains (seen ()) "click text=Send");
+  ignore (answer "exact text" (click (Lane.Target_text {text="Send now";exact=true})));
+  check bool "an exact text is ego's quoted text" true (contains (seen ()) {|click text=\"Send now\"|});
   ignore (answer "fill" (on (Lane.Fill_target {target=Lane.Target_ref 5;text="Ada"})));
   check string "a fill gives ego its text" {|["info","url","wait @5 attached","fill @5 Ada"]|} (seen ());
   act := {|return {popups: [{label: "p7", targetId: "T7"}]};|};

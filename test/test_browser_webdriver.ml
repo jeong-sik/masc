@@ -1170,9 +1170,11 @@ let profile_argument = function
     after args
 
 (* Each session runs on a fresh profile, and its profile is let go exactly
-   once however the session ends. *)
+   once however the session ends. A session the driver may still hold without
+   this client being able to address it is reported lost; a creation the driver
+   refused is not. *)
 let test_each_session_lets_its_profile_go_once () = Eio_main.run (fun _ ->
-  let made = ref 0 and ended = ref [] in
+  let made = ref 0 and ended = ref [] and losses = ref 0 in
   let profiles = {Driver.fresh=(fun () -> incr made; Ok (Printf.sprintf "/fixture/profile-%d" !made));
     ended=(fun path -> ended := path :: !ended)} in
   let creation = ref `Open and input_lost = ref false in
@@ -1195,7 +1197,7 @@ let test_each_session_lets_its_profile_go_once () = Eio_main.run (fun _ ->
     | (`POST | `DELETE),"/session/owned/actions" ->
       if !input_lost then Error (Driver.Remote {code=Driver.Invalid_session_id;message="Firefox exited"}) else Ok `Null
     | _ -> fail ("unexpected request: " ^ path) in
-  let driver = Driver.create ~profiles ~start_downloads ~request () in
+  let driver = Driver.create ~profiles ~lost:(fun () -> incr losses) ~start_downloads ~request () in
   let open_session () = ignore (Driver.execute driver (Lane.Session_open {headless=Some true})) in
   let let_go_once name =
     let profile = Printf.sprintf "/fixture/profile-%d" !made in
@@ -1205,11 +1207,15 @@ let test_each_session_lets_its_profile_go_once () = Eio_main.run (fun _ ->
   check int "an open session keeps its profile" 0 (List.length !ended);
   ignore (Driver.execute driver Lane.Session_close);
   let_go_once "a closed session lets its profile go";
-  List.iter (fun (mode, name) -> creation := mode; open_session (); let_go_once name)
-    [ `Other_profile, "a session on another profile is closed and lets its own profile go";
-      `No_session_id, "a creation answer without a session id lets the profile go";
-      `Refused, "a refused creation lets the profile go";
-      `Lost, "a lost creation answer lets the profile go" ];
+  check int "a closed session is not lost" 0 !losses;
+  List.iter (fun (mode, name, lost) ->
+      let before = !losses in
+      creation := mode; open_session (); let_go_once name;
+      check int (name ^ ": losses reported") lost (!losses - before))
+    [ `Other_profile, "a session on another profile is closed and lets its own profile go", 0;
+      `No_session_id, "a creation answer without a session id lets the profile go", 1;
+      `Refused, "a refused creation lets the profile go", 0;
+      `Lost, "a lost creation answer lets the profile go", 1 ];
   creation := `Open; open_session ();
   ignore (Driver.execute driver Lane.Tabs_list);
   input_lost := true;
@@ -1218,6 +1224,7 @@ let test_each_session_lets_its_profile_go_once () = Eio_main.run (fun _ ->
   ignore (Driver.execute driver (Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
     action=Lane.Type_text {document_id="d1";text="a"}}));
   let_go_once "a session the driver forgot lets its profile go once";
+  check int "a session the driver forgot is lost once" 3 !losses;
   check bool "the forgotten session is closed" true (Driver.session_observation driver=Lane.Browser_closed))
 
 let () = run "native Firefox lane" ["behavior", [

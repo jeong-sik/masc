@@ -9,7 +9,7 @@ let lease result=ok (Result.map_error Native_addon_lease.error_to_string result)
 (* An actual external HTTP driver process, with no personal browser/profile.
    This proves backend lifecycle wiring, not Firefox behavior. *)
 let driver = {|#!/usr/bin/env python3
-import argparse,base64,fcntl,hashlib,http.server,json,os,pathlib,struct,time
+import argparse,base64,fcntl,hashlib,http.server,json,os,pathlib,struct,threading,time
 p=argparse.ArgumentParser()
 p.add_argument("--host");p.add_argument("--port",type=int)
 p.add_argument("--websocket-port")
@@ -55,6 +55,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=="/session/owned":return self.bidi()
         assert self.path=="/status",self.path
+        # A driver that exits on its own soon after it became ready.
+        if (root/"exit-after-ready").exists() and not held.get("exiting"):
+            held["exiting"]=True;threading.Timer(0.5,lambda:os._exit(0)).start()
         self.send_json({"ready":True})
     def do_POST(self):
         assert self.path=="/session",self.path
@@ -175,40 +178,71 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false)
    session id. A worker that still serves returns from [work] after this many
    seconds, which fails the case instead of hanging it. *)
 let still_serving_seconds = 10.
-(* The command deadline a slow creation answer misses. *)
-let creation_deadline_seconds = 1.
-let lost_authority ~marker () = Eio_main.run (fun env ->
+(* The command deadline a slow creation answer misses; the fake driver takes
+   the profile lock at once and answers 30 s later. *)
+let creation_deadline_seconds = 3.
+let open_session ~instance_id ~timeout_sec = {W.incarnation=instance_id;command=W.Issue {route=B.Automation_route;
+  verb=B.Session_open {headless=Some true};actor=Some "fixture";timeout_sec;only_if_idle=false}}
+let with_instance ~marker body = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let {slot;driver_root;profile_root;profiles=_;instance_id;admission;directory}=instance ~markers:[marker] in
   let owner=ok (Owner.create ~incarnation:instance_id) in
-  let work () =
-    ignore (Owner.dispatch owner {W.incarnation=instance_id;command=W.Issue {route=B.Automation_route;
-      verb=B.Session_open {headless=Some true};actor=Some "fixture";timeout_sec=creation_deadline_seconds;
-      only_if_idle=false}});
-    Eio.Time.sleep (Eio.Stdenv.clock env) still_serving_seconds in
-  (match Masc.Browser_addon_automation.run ~env ~owner ~directory work with
-   | () -> fail "the worker kept serving after it lost its session authority"
-   | exception Sys_error _ -> ());
-  check bool "the worker retired admission before it ended" true (Owner.is_retired owner);
-  let profile=match seen_profiles driver_root with
-    | [profile] -> profile
-    | [] | _ :: _ :: _ -> fail "the driver did not receive exactly one session profile" in
-  check bool "the browser still held the profile, so the worker left it" true (Sys.file_exists profile);
-  lease (Native_addon_lease.retire admission);
-  (match ok (Socket.cleanup ~admission ~directory:slot) with
-   | Socket.Allocation_released -> ()
-   | Allocation_retained -> fail "the allocation was retained, not released");
-  let outcomes=Masc.Browser_gecko_sweep.(pass (create ~termination_grace_seconds)
-    (plan ~root:profile_root ~sweepable:(fun _ -> true))) in
-  check bool "the host pass removes the profile the ended worker left" true
-    (List.exists (function Masc.Browser_gecko_sweep.Removed path -> String.equal path profile
-       | Terminated _ | Killed _ | Kept _ -> false) outcomes && not (Sys.file_exists profile));
-  List.iter Fs_compat.remove_tree [slot;driver_root;profile_root])
+  Fun.protect ~finally:(fun () -> List.iter Fs_compat.remove_tree [slot;driver_root;profile_root]) (fun () ->
+    body ~env ~owner ~instance_id ~directory ~driver_root;
+    check bool "the worker retired admission" true (Owner.is_retired owner);
+    lease (Native_addon_lease.retire admission);
+    (match ok (Socket.cleanup ~admission ~directory:slot) with
+     | Socket.Allocation_released -> ()
+     | Allocation_retained -> fail "the allocation was retained, not released");
+    (* The host pass removes a profile the ended worker left. *)
+    let left=seen_profiles driver_root in
+    let outcomes=Masc.Browser_gecko_sweep.(pass (create ~termination_grace_seconds)
+      (plan ~root:profile_root ~sweepable:(fun _ -> true))) in
+    List.iter (fun profile ->
+      check bool "the host pass removes the profile the ended worker left" true
+        (List.exists (function Masc.Browser_gecko_sweep.Removed path -> String.equal path profile
+           | Terminated _ | Killed _ | Kept _ -> false) outcomes && not (Sys.file_exists profile))) left))
+let ends_on_its_own ~env ~owner ~directory work =
+  match Masc.Browser_addon_automation.run ~env ~owner ~directory work with
+  | () -> fail "the worker kept serving after it lost its session authority"
+  | exception Sys_error _ -> ()
+let left_by_the_browser driver_root = match seen_profiles driver_root with
+  | [profile] -> check bool "the browser still held the profile, so the worker left it" true (Sys.file_exists profile)
+  | [] | _ :: _ :: _ -> fail "the driver did not receive exactly one session profile"
+let lost_authority ~marker () = with_instance ~marker (fun ~env ~owner ~instance_id ~directory ~driver_root ->
+  ends_on_its_own ~env ~owner ~directory (fun () ->
+    ignore (Owner.dispatch owner (open_session ~instance_id ~timeout_sec:creation_deadline_seconds));
+    Eio.Time.sleep (Eio.Stdenv.clock env) still_serving_seconds);
+  left_by_the_browser driver_root)
+(* Retirement cancels a creation in flight. That loss belongs to the worker's
+   own stop: [run] returns, and Retire reports the cleanup as unconfirmed. *)
+let retire_during_creation () = with_instance ~marker:"slow-session"
+  (fun ~env ~owner ~instance_id ~directory ~driver_root ->
+    let retired=ref None in
+    let clock=Eio.Stdenv.clock env in
+    let work () = Eio.Fiber.both
+      (fun () -> ignore (Owner.dispatch owner (open_session ~instance_id ~timeout_sec:still_serving_seconds)))
+      (fun () ->
+        Eio.Time.with_timeout_exn clock still_serving_seconds (fun () ->
+          while seen_profiles driver_root = [] do Eio.Time.sleep clock 0.01 done);
+        retired:=Some (Owner.dispatch owner {W.incarnation=instance_id;command=W.Retire})) in
+    (match Masc.Browser_addon_automation.run ~env ~owner ~directory work with
+     | () -> ()
+     | exception Sys_error detail -> fail ("the worker raised during its own stop: " ^ detail));
+    check bool "Retire reports the interrupted creation as unconfirmed cleanup" true
+      (match !retired with
+       | Some (W.Service_refusal {disposition=W.Outcome_unknown;_}) -> true
+       | Some (W.Service_refusal {disposition=W.Not_started;_}|W.Issue_result _|W.Snapshot_result _
+              |W.Model_reply _|W.Download_reply _|W.Poll_result _|W.Receipt) | None -> false);
+    left_by_the_browser driver_root)
+(* A driver that exits while the worker serves leaves no session it can address. *)
+let driver_exit () = with_instance ~marker:"exit-after-ready"
+  (fun ~env ~owner ~instance_id:_ ~directory ~driver_root:_ ->
+    ends_on_its_own ~env ~owner ~directory (fun () -> Eio.Time.sleep (Eio.Stdenv.clock env) still_serving_seconds))
 let lost_authority_child flag () =
   let pid=Unix.create_process Sys.executable_name [|Sys.executable_name;flag|] Unix.stdin Unix.stdout Unix.stderr in
-  check bool "a worker that lost its session authority ends and leaves its profile to the host" true
-    (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
+  check bool "the case passes in its own process" true (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
 let open_bidi_child () =
   let pid=Unix.create_process Sys.executable_name [|Sys.executable_name;"--open-bidi"|] Unix.stdin Unix.stdout Unix.stderr in
   check bool "open BiDi reader settles before original switch join" true (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
@@ -236,6 +270,12 @@ let () =
     run ~argv:[|Sys.executable_name|] "browser interrupted session creation" ["backend",[
       test_case "a creation the command deadline interrupts ends the worker" `Quick
         (lost_authority ~marker:"slow-session")]]
+  else if Array.to_list Sys.argv=[Sys.executable_name;"--retire-during-creation"] then
+    run ~argv:[|Sys.executable_name|] "browser retirement during session creation" ["backend",[
+      test_case "retirement during a creation stops the worker without raising" `Quick retire_during_creation]]
+  else if Array.to_list Sys.argv=[Sys.executable_name;"--driver-exit"] then
+    run ~argv:[|Sys.executable_name|] "browser driver exit while serving" ["backend",[
+      test_case "a driver that exits while serving ends the worker" `Quick driver_exit]]
   else if Array.to_list Sys.argv=[Sys.executable_name;"--refused-close"] then
     run ~argv:[|Sys.executable_name|] "browser refused DELETE retirement" ["backend",[
       test_case "rejected DELETE leaves cleanup unconfirmed after reader cancellation" `Quick
@@ -247,4 +287,7 @@ let () =
     test_case "rejected DELETE still joins the original BiDi reader" `Quick refused_close_child;
     test_case "a creation answer without a session id ends the worker" `Quick
       (lost_authority_child "--no-session-id");
-    test_case "an interrupted creation ends the worker" `Quick (lost_authority_child "--slow-session")]]
+    test_case "an interrupted creation ends the worker" `Quick (lost_authority_child "--slow-session");
+    test_case "retirement during a creation stops the worker without raising" `Quick
+      (lost_authority_child "--retire-during-creation");
+    test_case "a driver that exits while serving ends the worker" `Quick (lost_authority_child "--driver-exit")]]

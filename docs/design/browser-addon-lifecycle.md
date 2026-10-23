@@ -197,11 +197,15 @@ receipts remain distinct from successful contract validation.
    revoked, the session is closed through an independent HTTP pool, and the
    exact driver child is reaped. Retirement waits for this completion rather than the quick
    control timeout or the native worker's short abort grace. Stdin EOF and
-   termination signals also join backend cleanup. A session creation that ends
-   without a session id, including one a command timeout interrupted, and a
-   driver that no longer knows the session end the worker: it retires
-   admission and raises, so the runtime replaces it and the host's Gecko
-   profile pass reaches any browser it left.
+   termination signals also join backend cleanup. The WebDriver client reports
+   a session it can no longer address: a creation that raised (a command
+   timeout included), failed in transport, or answered without a session id,
+   and an `invalid session id` reply. A creation the driver refused with a
+   WebDriver error started no browser and is not a loss. A loss, or a driver
+   that exits while the worker serves, ends the worker: it retires admission
+   and raises, so the runtime replaces it and the host's Gecko profile pass
+   reaches any browser it left. A loss during the worker's own stop only
+   leaves its cleanup unconfirmed.
    The host additionally requires native group settlement, the original
    allocation inode, its unchanged spec and empty download directory trees. It
    removes only known regular files, the socket and empty directories. Changed

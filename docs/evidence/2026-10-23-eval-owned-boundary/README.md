@@ -72,6 +72,8 @@ before fixture preparation, covering setup failures too. Baseline and final
 HTTP test hashes therefore differ. The exact two-location change is retained
 in `baseline-to-candidate-runner.patch`; scenario bodies and snapshot fixtures
 are unchanged. Final candidate compilation and all 38 checks ran after this move.
+The verbatim unified patch contains its required blank context line (` `), which
+`git diff --check` flags as trailing whitespace in this evidence artifact.
 
 Full regression, CI, deployment, browser/UI readiness and latency measurements
 were not performed. Coordinated concurrent replacement stress was not run; this

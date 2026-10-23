@@ -90,5 +90,6 @@
   "ci": "not run",
   "installed_runtime": "unchanged by this repair",
   "ui_and_latency": "not measured",
-  "race_stress": "coordinated concurrent replacement stress not run; shared owned-reader validation reused"
+  "race_stress": "coordinated concurrent replacement stress not run; shared owned-reader validation reused",
+  "raw_patch_whitespace": "Verbatim unified patch blank context line is intentionally preserved; diff --check flags that evidence line."
 }

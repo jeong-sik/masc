@@ -1,0 +1,49 @@
+{
+  "head": "2c9ce3323a0eed8457fd3b4ed0ace93f786fda6e",
+  "run": 39879335145,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39879335145",
+  "conclusion": "failure",
+  "compiled_selected_executables": 7,
+  "target_suites": [
+    {
+      "name": "test_keeper_librarian_input_capture",
+      "cases": 3,
+      "failures": 0
+    },
+    {
+      "name": "test_keeper_librarian_addon_owner",
+      "cases": 22,
+      "failures": 1
+    },
+    {
+      "name": "test_lane_addon_host_cycle",
+      "cases": 53,
+      "failures": 0
+    },
+    {
+      "name": "test_lane_addon_submit_once",
+      "cases": 4,
+      "failures": 0
+    },
+    {
+      "name": "test_lane_addon_request_progress",
+      "cases": 13,
+      "failures": 0
+    },
+    {
+      "name": "test_workspace_curator_addon_contract",
+      "cases": 7,
+      "failures": 0
+    },
+    {
+      "name": "test_workspace_curator_addon_commit",
+      "cases": 64,
+      "failures": 0
+    }
+  ],
+  "cases": 166,
+  "passed": 165,
+  "failed": 1,
+  "failed_log_sha256": "d8537ec0e6b210e94ea9a64442a184c3a414d4eef6cc695126d399824bc49856",
+  "scope": "selected development checks, not full regression, provider/Docker/UI/install or original54 completion"
+}

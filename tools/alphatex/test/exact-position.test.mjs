@@ -14,6 +14,8 @@ const command = (editor, text) => editorCommand(editor, text).editor
 test('decimal onsets and triplet lengths survive phrase editing and real MIDI export', () => {
   let editor = command(newEditor(), 'note C4 8.3 1/3 91')
   assert.deepEqual(editor.project.tracks[0].notes.map(n => [n.start,n.duration,n.velocity]), [[7968,320,91]])
+  const quantized = command(command(editor, 'select-all'), 'quantize-notes 1/3')
+  assert.deepEqual(quantized.project.tracks[0].notes.map(n => [n.start,n.duration,n.velocity]), [[8000,320,91]])
   const before = editor.project
   editor = command(editor, 'select-notes 8.3 9')
   editor = command(editor, 'move-notes -1/3 0')
@@ -45,7 +47,7 @@ test('imported PPQ and SMPTE use their own exact units and retain controller/rel
   }
 })
 
-test('arrangement cursor, grid and loop share exact phrase beats without changing source data', () => {
+test('arrangement cursor and grid share exact phrase beats without changing source data', () => {
   let editor = arrangementEditor()
   editor = arrangementCommand(editor, 'cursor 8.3').editor
   assert.equal(editor.tick, 7968)

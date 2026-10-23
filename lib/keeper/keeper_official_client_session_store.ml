@@ -1412,13 +1412,18 @@ let validate_completed_continuation
 
 let validate_unchanged_context ~expected ~snapshot_sha256 =
   match expected with
-  | Some {phase=Settled settled; context_frontier=Some {
-      delivery=Canonical_source_guard {snapshot_sha256=acknowledged_sha256};
-      acknowledged_turn=Some receipt; _}; _}
-      when settled = receipt ->
-    if String.equal acknowledged_sha256 snapshot_sha256 then Ok ()
-    else Error Canonical_context_changed
-  | Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ } | None -> Error Context_frontier_missing
+  | Some {phase=Settled settled; context_frontier=Some frontier; _} ->
+    (match frontier.delivery, frontier.acknowledged_turn with
+     | Canonical_source_guard {snapshot_sha256=acknowledged_sha256}, Some receipt
+         when settled = receipt ->
+       if String.equal acknowledged_sha256 snapshot_sha256 then Ok ()
+       else Error Canonical_context_changed
+     | Canonical_source_guard _, (Some _ | None)
+     | (Prepared_start_context | Held_by_vendor_session), (Some _ | None) ->
+       Error Context_frontier_missing)
+  | Some {phase=Settled _; context_frontier=None; _}
+  | Some {phase=Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _; _}
+  | None -> Error Context_frontier_missing
 
 let held_context_for_resume plan ~expected =
   match plan.previous_settlement, expected with

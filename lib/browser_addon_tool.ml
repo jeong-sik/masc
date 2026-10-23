@@ -62,11 +62,15 @@ let parse json =
       |Page_instruct _|Page_locate _|Page_extract _),_::_ ->
         Error "requiredActions applies only to initial tab discovery or session open" in
   let* ()=match preference,verb with
-    | Browser_selection.Exact (B.Live_route None),B.Page_act (B.Action.Open_tab _|Open_window _|Control _) ->
+    | Browser_selection.Exact (B.Live_route None),B.Page_act (B.Action.Open_tab _|Open_window _|Control _)
+    | Automatic,B.Page_act (B.Action.Control _) ->
         Error "live open_tab, open_window, hand_off and take_over require an explicit observed clientId"
+    | Exact (B.Automation_route|Stagehand_route),B.Page_act (B.Action.Control _) ->
+        Error B.handoff_refused
+    | Exact (B.Live_route (Some _)),B.Page_act (B.Action.Control _) -> Ok ()
     | (Automatic|Exact (Live_route _|Automation_route|Stagehand_route)),
       (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
-      |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (B.Action.Open_tab _|Open_window _|Control _|On_tab _)|Page_context _
+      |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (B.Action.Open_tab _|Open_window _|On_tab _)|Page_context _
       |Page_instruct _|Page_locate _|Page_extract _) -> Ok () in
   let* upload_id=match List.assoc_opt "uploadId" fields with
     | None -> Ok None

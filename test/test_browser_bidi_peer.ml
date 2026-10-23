@@ -979,7 +979,8 @@ let test_peer_serves_what_the_lane_table_says () =
       | Tab_activation -> interact Activate_tab
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
       | Dialog_answer -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Dismiss_dialog})
-      | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}) in
+      | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}
+      | Operator_handoff -> Page_act (Action.Control Action.Hand_off)) in
     (* The names the native host forwards (Browser_host.decode_poll). *)
     let peer_verb = function
       | "tabs.list" -> Peer.Tabs_list | "page.read" -> Peer.Page_read | "page.scene" -> Peer.Page_scene

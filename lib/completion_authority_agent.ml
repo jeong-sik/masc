@@ -780,24 +780,28 @@ let announce_stall ~notify ~task_id ~verification_id ~cause ~disposition =
    semantic verdict produced by the evaluator. Infrastructure failures never
    call this function. A failed commit is its own outcome because the verdict
    was decided but never reached the Task. *)
+let find_task (runtime : runtime) task_id =
+  List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+    (Workspace.get_tasks_raw runtime.config)
+
 let task_already_terminal (runtime : runtime) task_id =
-  match Workspace.read_task_r runtime.config ~task_id with
-  | Ok task ->
-    (match task.status with
-     | Types_core.Done _ | Types_core.Cancelled _ -> true
+  match find_task runtime task_id with
+  | Some task ->
+    (match task.task_status with
+     | Masc_domain.Done _ | Masc_domain.Cancelled _ -> true
      | _ -> false)
-  | Error _ -> false
+  | None -> false
 
 let task_terminal_detail (runtime : runtime) task_id =
-  match Workspace.read_task_r runtime.config ~task_id with
-  | Ok task ->
-    (match task.status with
-     | Types_core.Done { assignee; _ } ->
+  match find_task runtime task_id with
+  | Some task ->
+    (match task.task_status with
+     | Masc_domain.Done { assignee; _ } ->
        Some (Printf.sprintf "Done by %s" assignee)
-     | Types_core.Cancelled { cancelled_by; _ } ->
+     | Masc_domain.Cancelled { cancelled_by; _ } ->
        Some (Printf.sprintf "Cancelled by %s" cancelled_by)
      | _ -> None)
-  | Error _ -> None
+  | None -> None
 
 let commit_verdict
       (runtime : runtime)

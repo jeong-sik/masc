@@ -410,6 +410,9 @@ module For_testing : sig
     action_schema : unit -> Yojson.Safe.t option;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (Lane_addon_lifecycle.release, Lane_addon_lifecycle.failure) result;
+    await_exit : unit -> string;
+    (** Waits until the worker process has ended, through [stop] or on its
+        own, and says how it ended. It stops and confirms nothing. *)
     resource : Lane_addon_lifecycle.resource;
     resolved_image : Lane_addon_engine.image_identity option;
     (** [Some] is the pre-create container image resolution, retained separately

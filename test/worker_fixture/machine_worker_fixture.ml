@@ -46,6 +46,7 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
             ~root:(Filename.concat (Masc.Workspace.masc_dir config) "lane-addons") in
           let history = Masc.Lane_addon_machine_history.create () in
           let connection : R.For_testing.connection = {browser=None;
+            await_exit = (fun () -> Eio.Fiber.await_cancel ());
             resolved_image = (match Masc.Lane_addon_engine.image_of_inspect Masc.Lane_addon_types.Docker
               ("sha256:" ^ String.make 64 'a') with
               | Ok image -> Some image | Error message -> fail message);

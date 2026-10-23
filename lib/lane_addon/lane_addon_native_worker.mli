@@ -49,6 +49,9 @@ val release : t -> (release, error) result option
     replacement. An exited child with unconfirmed retirement remains retryable
     through this same handle. Pending checks may yield for kernel/file writes
     and observations; they never admit a new execution. *)
+val await_completion : t -> (release, error) result
+(** Waits until the owned child has ended, through [stop] or on its own. It
+    neither requests stop nor confirms retirement; [stop] still does both. *)
 val exported_tools : t -> Mcp_protocol.Mcp_types.tool list
 val action_schema : t -> Yojson.Safe.t option
 val host_requests : t -> (Yojson.Safe.t, error) result

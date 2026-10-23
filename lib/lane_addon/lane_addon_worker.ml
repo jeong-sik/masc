@@ -22,6 +22,7 @@ type t = {
   protocol : Lane_addon_worker_protocol.t;
   cleanup : unit -> (unit, error) result;
   mutable removed : bool;
+  connected : Agent_core.Mcp.t Eio.Promise.t;
 }
 
 let error_to_string = function
@@ -258,6 +259,8 @@ let holder_changed ~clock ~control_timeout_sec ~mgr ~runtime
       let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
       Lane_addon_slot.holder_changed (slot_port ~run runtime) holder)
 
+let await_exit t = Agent_core.Mcp.await_exit (Eio.Promise.await t.connected)
+
 let stop t =
   (* Never take the observation mutex: an unresponsive observation is a
      reason to stop, not a prerequisite for stopping. *)
@@ -406,7 +409,8 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
       Ok () in
     let protocol = Protocol.create ~instance_id ~contract
       ?artifact_store ?sampling_broker () in
-    let worker = {id;name;image;protocol;cleanup=worker_cleanup;removed=false} in
+    let connected, set_connected = Eio.Promise.create () in
+    let worker = {id;name;image;protocol;cleanup=worker_cleanup;removed=false;connected} in
     let result = try
       on_created worker;
       let* () = if Protocol.revoked protocol then Error Stopped else Ok () in
@@ -427,6 +431,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
             ~stderr:(stderr_w :> Eio.Flow.sink_ty Eio.Resource.t)
             ~max_response_bytes:(Lane_addon_types.max_reply_bytes package) ?sampling_handler ()
           |> Result.map_error protocol_error in
+        Eio.Promise.resolve set_connected client;
         Eio.Flow.close stderr_w;
         let* () = Protocol.initialize protocol client |> protocol_result in
         Ok worker

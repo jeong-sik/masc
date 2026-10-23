@@ -4971,6 +4971,9 @@ type prompt_source =
   | Prompt_file
   | Prompt_missing
 
+type prompt_authoring_issue = Prompt_registry_types.authoring_issue =
+  | Invalid_operator_surface of { value : string; source_file : string }
+
 type prompt_row = {
   pr_key : string;
   pr_category : string;
@@ -4979,6 +4982,7 @@ type prompt_row = {
   pr_effective : string;
   pr_file_path : string;
   pr_source : prompt_source;
+  pr_authoring_issues : prompt_authoring_issue list option;
   pr_template_variables : string list;
   pr_override_default_moved : bool;
 }
@@ -5010,6 +5014,27 @@ let prompt_rows_for_operator ~show_fragments snapshot =
       (fun row -> row.pr_operator_surface = Prompt_primary)
       snapshot.ps_rows
 ;;
+
+let decode_prompt_authoring_issue json =
+  let* () = require_exact_object_fields "prompt authoring issue"
+      ["code"; "field"; "value"; "source_file"] json in
+  let* code = required_string_field json "code" in
+  let* field = required_string_field json "field" in
+  match code, field with
+  | "invalid_operator_surface", "operator_surface" ->
+    let* value = required_string_field json "value" in
+    let* source_file = required_string_field json "source_file" in
+    Ok (Invalid_operator_surface {value; source_file})
+  | code, field ->
+    Error (Printf.sprintf "unknown prompt authoring issue code=%S field=%S" code field)
+
+let decode_prompt_authoring_issues json =
+  match Json_util.assoc_member_opt "authoring_issues" json with
+  | None -> Ok None
+  | Some (`List issues) ->
+    let* issues = decode_list "authoring_issues" decode_prompt_authoring_issue issues in
+    Ok (Some issues)
+  | Some value -> field_type_error "authoring_issues" "a list" value
 
 (* A prompt with no description, or none on disk, is still a prompt the
    registry serves; only the key has to be there for a row to name itself. *)
@@ -5050,6 +5075,7 @@ let decode_prompt_row json =
     | `Null -> Error (Printf.sprintf "missing required field '%s'" "source")
     | value -> field_type_error "source" "a string" value
   in
+  let* pr_authoring_issues = decode_prompt_authoring_issues json in
   (* Absent reads as false: a row with no override has nothing to have
      moved, and the server sends the field for every row. *)
   let* pr_override_default_moved =
@@ -5066,6 +5092,7 @@ let decode_prompt_row json =
     ; pr_effective = string_or "effective"
     ; pr_file_path = string_or "file_path"
     ; pr_source
+    ; pr_authoring_issues
     ; pr_template_variables
     ; pr_override_default_moved
     }

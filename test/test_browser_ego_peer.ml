@@ -726,6 +726,7 @@ const page = {
   snapshot: async options => { seen.push(options === undefined ? "no options" : options); return %s; },
   url: async () => "https://app.slack.com/",
   title: async () => "Slack",
+  info: async () => ({url: "https://app.slack.com/", title: "Slack", w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600}),
 };
 const taskSpace = async () => ({
   tabs: async () => [{label: "p1", url: "https://app.slack.com/", title: "Slack", active: true}],

@@ -74,16 +74,16 @@ import CoreMIDI
   try require(full.output.held.isEmpty && full.output.pedals.isEmpty,"original release messages did not settle owned state")
   full.finish(reason:"completed",error:nil,publish:false)
   try require(full.timer == nil && full.output.closed && full.output.port == 0 && full.output.client == 0,"native resources did not retire")
-  print("EDITED_UMP_NATIVE_WIRE_PASS: exact Attribute3 fractional pitch, velocity0/full16, Note Index, PN32 and original releases on two actual private native2 destinations")
+  print("EDITED_UMP_NATIVE_WIRE_PASS: exact Attribute3 pitch, velocity0/full16, edited per-note32 values, Note Index and original releases on two private native2 destinations")
 
   let cancelled=try transport("cancel/")
   defer {cancelled.finish(reason:"probe-cleanup",error:nil,publish:false)}
   try cancelled.prepare();try cancelled.stageCoordinated(at:0)
   try cancelled.runCoordinated(anchorNanoseconds:DispatchTime.now().uptimeNanoseconds+100_000_000)
   // The first source packet contains PN state, pedal-down and four attacks
-  // (12 words). Wait for B's attack too, so cancellation proves cleanup of
+  // (14 words). Wait for B's attack too, so cancellation proves cleanup of
   // both source owners after receive acknowledgement, not a fixed sleep.
-  try spin("admitted edited attacks on both sources") {(observed("cancel/A").count >= 12 && observed("cancel/B").count >= 2) || cancelled.state == .stopped}
+  try spin("admitted edited attacks on both sources") {(observed("cancel/A").count >= 14 && observed("cancel/B").count >= 2) || cancelled.state == .stopped}
   try require(cancelled.state == .playing && cancelled.terminalFailure == nil,"cancel owner did not acquire edited attacks")
   let sent=Array(cancelled.events.prefix(cancelled.index))
   var held:[UmpOutput.Key:Int]=[:]
@@ -131,7 +131,7 @@ import CoreMIDI
     join(directory, 'Probe.swift'), '-o', join(directory, 'probe'), '-framework', 'CoreMIDI'], { encoding: 'utf8' })
   assert.equal(built.status, 0, built.stderr)
   const rows = [
-    packet(0n, 'A', [JZZ.UMP.umpPnRPN(3, 5, 60, 3, 0x7b123456), JZZ.UMP.umpControl(3, 5, 64, 0xffffffff),
+    packet(0n, 'A', [JZZ.UMP.umpPnRPN(3, 5, 60, 3, 0x7b123456), JZZ.UMP.umpPnNRPN(3, 5, 60, 255, 0x12345678), JZZ.UMP.umpControl(3, 5, 64, 0xffffffff),
       ...[60, 64, 67, 71].map(key => JZZ.UMP.umpNoteOn(3, 5, key, 0x9001))]),
     packet(2400000n, 'B', [JZZ.UMP.umpNoteOn(9, 2, 17, 0x1234)]),
     packet(4800000n, 'A', [JZZ.UMP.umpPnPitchBend(3, 5, 60, 0x87654321), JZZ.UMP.umpAftertouch(3, 5, 60, 0xabcdef01)]),
@@ -149,15 +149,17 @@ import CoreMIDI
       const options = { sourceRoot: dirname(path), directory: scratch }
       const source = await request({ kind: 'prepare-ump', project: imported.project, asset: imported.asset, ...options })
       let editor = newUmpEditor(source.asset, source.packets)
-      for (const line of ['revoice Cmaj7 drop2', 'velocity 0', 'scope B 10 3', 'pitch-absolute 64.25', 'velocity 65535']) editor = umpEditorCommand(editor, line).editor
+      for (const line of ['revoice Cmaj7 drop2', 'velocity 0', 'scope B 10 3', 'pitch-absolute 64.25', 'velocity 65535',
+        'select-expression 0:0', 'value32 2046820353', 'select-expression 0:2', 'value32 0',
+        'select-expression 2:0', 'value32 2147483648', 'select-expression 2:2', 'value32 4294967295']) editor = umpEditorCommand(editor, line).editor
       const variant = await request({ kind: 'import-ump', project: imported.project, asset: imported.asset, ump: editor.asset.ump, ...options })
       const snapshot = await request({ kind: 'prepare-take', project: variant.project, asset: variant.asset, ...options })
       const playback = await prepareCapturedPlayback(snapshot.directory, { directory: scratch, sourceBindings: [{ source: 'A', destination: '1' }, { source: 'B', destination: '2' }] })
       const timeline = JSON.parse(await readFile(playback.path)).ump
       const expected = {
-        A: [0x43053c03, 0x7b123456, 0x43b54000, 0xffffffff,
+        A: [0x43053c03, 0x7a000001, 0x43153cff, 0, 0x43b54000, 0xffffffff,
           0x43953c03, 55 * 512, 0x43954003, 0x90010000 + 60 * 512, 0x43954303, 0x90010000 + 64 * 512, 0x43954703, 0x90010000 + 71 * 512,
-          0x43653c00, 0x87654321, 0x43a53c00, 0xabcdef01,
+          0x43653c00, 0x80000000, 0x43a53c00, 0xffffffff,
           0x43853c00, 0x12340000, 0x43854000, 0x12340000, 0x43854300, 0x12340000, 0x43854700, 0x12340000, 0x43b54000, 0],
         B: [0x49921103, 0xffff8080, 0x49821100, 0xfedc0000],
       }

@@ -9,11 +9,11 @@ import { packet } from './helpers/captured-midi-fixture.mjs'
 import { loadSubstituted } from './helpers/substituted-module.mjs'
 
 const flush = () => new Promise(resolve => setImmediate(resolve))
-async function controller({ preview = async () => {}, exported = async () => {} } = {}) {
+async function controller({ preview = async () => {}, exported = async () => {}, captured } = {}) {
   const process = { stdin: Object.assign(new EventEmitter(), { isTTY: true, isRaw: false, setRawMode(value) { this.isRaw = value }, resume() {} }),
     stdout: Object.assign(new EventEmitter(), { isTTY: true, columns: 100, rows: 24, write() {} }) }
   const asset = { name: 'Keys', parts: { midi: { sha256: 'a'.repeat(64) } } }
-  const packets = [packet(0n, 'A', [JZZ.UMP.umpNoteOn(0, 0, 60, 0x9001)]), packet(100n, 'A', [JZZ.UMP.umpNoteOff(0, 0, 60, 0x1234)])]
+  const packets = captured ?? [packet(0n, 'A', [JZZ.UMP.umpNoteOn(0, 0, 60, 0x9001)]), packet(100n, 'A', [JZZ.UMP.umpNoteOff(0, 0, 60, 0x1234)])]
   const substitutes = { isDeepStrictEqual, newUmpEditor, umpEditorAction, umpEditorCommand, safeText: String, emitKeypressEvents() {} }
   const { viewUmpEditor } = await loadSubstituted(new URL('../ump-tui.mjs', import.meta.url), substitutes, { globals: { process } })
   const abort = new AbortController()
@@ -62,4 +62,19 @@ test('external abort cancels a borrowed native session and never returns an adop
   const result = await view.done
   assert.equal(retired, true); assert.equal(result.changed, false)
   assert.equal(view.process.stdin.listenerCount('keypress'), 0)
+})
+
+test('owned controller exports mixed expression/note edits and returns the same variant after Tab navigation', async () => {
+  let finishExport
+  const exported = new Promise(resolve => { finishExport = resolve }), exports = []
+  const view = await controller({ captured: [packet(0n, 'A', [JZZ.UMP.umpNoteOn(0, 0, 60, 0x9001),
+    JZZ.UMP.umpPnPitchBend(0, 0, 60, 0x87654321), JZZ.UMP.umpAftertouch(0, 0, 60, 0x12345678)])],
+  exported: async asset => { exports.push(asset); finishExport() } })
+  view.key('tab'); view.command('value32 2147483648'); view.key('down'); view.command('value32 4294967295')
+  view.key('tab'); view.command('pitch-absolute 60.5'); view.command('export /unused/output')
+  await exported; view.key('q'); const result = await view.done
+  assert.equal(result.changed, true); assert.deepEqual(exports[0].ump, result.asset.ump)
+  assert.deepEqual(result.asset.ump.notes, [{ packet: 0, word: 0, pitch: 30976 }])
+  assert.deepEqual(result.asset.ump.expressions, [{ packet: 0, word: 2, value: 2147483648 }, { packet: 0, word: 4, value: 4294967295 }])
+  assert.equal(view.process.stdin.isRaw, false); assert.equal(view.process.stdin.listenerCount('keypress'), 0)
 })

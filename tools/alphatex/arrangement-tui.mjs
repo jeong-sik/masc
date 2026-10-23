@@ -27,7 +27,7 @@ import { defaultStateDirectory } from './vst.mjs'
 import { captureVstSound } from './project-sound-files.mjs'
 
 const help = [
-  ':edit-ump [ASSET] edits native MIDI2 absolute pitch/velocity and onset voicings; raw capture stays unchanged',
+  ':edit-ump [ASSET] edits native MIDI2 pitch/velocity, per-note expression and onset voicings; raw capture stays unchanged',
   'i chooses a VST/preset for the selected MIDI region or asset; Space plays it with WAV backing through the audio output',
   ':phrase opens a new phrase; :edit-midi [ASSET] [PATTERN] makes an editable variant; Enter places its new asset',
   ':practice BARS on|off   count-in bars and metronome; :record also starts stopped backing',

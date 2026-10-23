@@ -36,34 +36,29 @@
 ; (Unix.error) is listed once, in System_error_class.errno_of_unix_error, and
 ; call sites match on the errno variant that function returns. Test
 ; directories switch it off in their own env stanza.
+;
+; task-2499: The full @runtest regression on a GitHub ubuntu-24.04 runner
+; exhausts the free disk space with test executables. The CI lane selects
+; this profile via DUNE_PROFILE=ci in scripts/ci-run-test-suite.sh so only
+; the CI build strips debug symbols; local dev and release builds keep them
+; for backtraces.
 (env
  (dev
   (flags
    (:standard -w +4+32+69 -warn-error +a)))
  (release
   (flags
-   (:standard -w +4+32+69 -warn-error +a))))
+   (:standard -w +4+32+69 -warn-error +a)))
+ (ci
+  (flags
+   (:standard -w +4+32+69 -warn-error +a))
+  (ocamlopt_flags
+   (:standard -no-g))))
 
 ; Vendored packages are local copies of external sources. Keep the repository's
 ; strict warning policy for MASC code, but do not turn vendor warnings 4 and 69 into a
 ; project build error. The subdir stanza applies this override without editing
 ; the vendored dune files or weakening warning 32 in the rest of the tree.
-(env
- (dev
-  (flags
-   (:standard -w +4+32+69 -warn-error +a)))
- (release
-  (flags
-   (:standard -w +4+32+69 -warn-error +a)))
- ; task-2499: The full @runtest regression on a GitHub ubuntu-24.04 runner
- ; exhausts the free disk space with test executables. The CI lane selects
- ; this profile in .github/workflows/test.yml so only the CI build strips
- ; debug symbols; local builds keep them for backtraces.
- (ci
-  (flags
-   (:standard -w +4+32+69 -warn-error +a))
-  (ocamlopt_flags
-   (:standard -g0))))
 (subdir vendor
  (env
   (dev (flags (:standard -w -4-69)))

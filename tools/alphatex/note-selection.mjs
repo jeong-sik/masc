@@ -1,6 +1,7 @@
 import { pitch, editProject } from './sequencer-project.mjs'
 import { editMidiSourceNotes } from './midi-source.mjs'
 import { sourceEditor } from './midi-source-editor.mjs'
+import { tickUnits } from './tick-units.mjs'
 
 const source = editor => editor.project.kind === 'midi-source'
 const view = editor => editor.view ?? editor.project
@@ -12,10 +13,8 @@ const integer = (value, label) => {
   return value
 }
 function units(editor, value, signed = false) {
-  const ticks = Number(value) * (source(editor) ? editor.axis.per : editor.project.ppq)
-  integer(ticks, 'selection position (must resolve to original ticks)')
-  if (!signed && ticks < 0) throw new Error('Selection position must be nonnegative')
-  return ticks
+  return tickUnits(value, source(editor) ? editor.axis.per : editor.project.ppq,
+    { signed, label: 'Selection position' })
 }
 export function selectedNotes(editor) {
   const selection = editor.noteSelection

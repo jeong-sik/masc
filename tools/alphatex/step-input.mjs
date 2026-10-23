@@ -5,6 +5,7 @@ import { sourceEditor } from './midi-source-editor.mjs'
 import { openMidiInput } from './midi-input.mjs'
 import { openStepMonitor } from './step-monitor.mjs'
 import { openPracticeTake } from './practice-take.mjs'
+import { tickUnits } from './tick-units.mjs'
 
 const inputFailure = reason => reason instanceof Error ? reason : new Error('Step input failed', { cause: reason })
 const sourceDocument = editor => editor.project.kind === 'midi-source'
@@ -25,19 +26,7 @@ function target(editor) {
 }
 export function stepControl(editor, action) {
   const per = sourceDocument(editor) ? editor.axis.per : editor.project.ppq
-  const units = value => {
-    const parts = value.split('/')
-    let numerator, denominator
-    if (parts.length === 2 && parts.every(part => /^[0-9]+$/.test(part))) {
-      numerator = BigInt(parts[0]); denominator = BigInt(parts[1])
-    } else if (parts.length === 1 && /^[0-9]+(?:\.[0-9]+)?$/.test(value)) {
-      const [whole, decimal = ''] = value.split('.')
-      numerator = BigInt(whole + decimal); denominator = 10n ** BigInt(decimal.length)
-    } else throw new Error('Use a nonnegative decimal or integer fraction for step length/rest')
-    const ticks = numerator * BigInt(per)
-    if (denominator === 0n || ticks % denominator !== 0n || ticks / denominator > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Step value must resolve to exact whole source ticks')
-    return Number(ticks / denominator)
-  }
+  const units = value => tickUnits(value, per, { label: 'Step value' })
   switch (action.kind) {
     case 'step-length': {
       const duration = units(action.value)

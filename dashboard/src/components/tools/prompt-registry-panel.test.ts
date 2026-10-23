@@ -141,6 +141,14 @@ describe('promptSourceCounts', () => {
 })
 
 describe('the 수정/누락 tab', () => {
+  it('includes a file-backed prompt whose authored metadata needs correction', () => {
+    const invalid = makePrompt({ key: 'invalid', source: 'file', authoring_issues: [{
+      code: 'invalid_operator_surface', field: 'operator_surface', value: 'primray',
+      source_file: '/workspace/prompts/invalid.md',
+    }] })
+    expect(filterPrompts([invalid], 'all', '', EMPTY_REPORT, 'attention')).toEqual([invalid])
+    expect(promptPresetOptions([invalid], EMPTY_REPORT).find(p => p.id === 'attention')?.count).toBe(1)
+  })
   // The tab prints a count and then a list of rows. Those were two spellings
   // of one predicate -- one over has_override, one over source -- eighty lines
   // apart in the same file, and no test compared them. A prompt whose override
@@ -179,6 +187,38 @@ describe('PromptRegistryPanel', () => {
   afterEach(() => {
     render(null, container)
     container.remove()
+  })
+
+  it('shows authored value and source while preserving body override operations', async () => {
+    const invalid = makePrompt({ key: 'invalid.surface', source: 'file',
+      effective: 'File body', file_value: 'File body', authoring_issues: [{
+        code: 'invalid_operator_surface', field: 'operator_surface', value: '<primray>',
+        source_file: '/workspace/prompts/invalid.md',
+      }] })
+    mocks.fetchDashboardPrompts.mockResolvedValue({ prompts: [invalid] })
+    render(html`<${PromptRegistryPanel} />`, container)
+    await waitFor(() => expect(container.querySelectorAll('[aria-label="프롬프트 작성 오류"]')).toHaveLength(2))
+    const editor = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(editor.value).toBe('File body')
+    const diagnostics = container.querySelectorAll('[aria-label="프롬프트 작성 오류"]')
+    for (const node of diagnostics) {
+      expect(node.textContent).toContain('invalid_operator_surface')
+      expect(node.textContent).toContain('"<primray>"')
+      expect(node.textContent).toContain('/workspace/prompts/invalid.md')
+      expect(node.querySelector('primray')).toBeNull()
+    }
+    await fireEvent.input(editor, { target: { value: 'Operator body' } })
+    const apply = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.trim() === '오버라이드 적용')!
+    mocks.fetchDashboardPrompts.mockResolvedValue({ prompts: [{ ...invalid, source: 'override', effective: 'Operator body', override_value: 'Operator body' }] })
+    await fireEvent.click(apply)
+    await waitFor(() => expect(mocks.savePromptOverride).toHaveBeenCalledWith('invalid.surface', 'Operator body'))
+    await waitFor(() => expect(editor.value).toBe('Operator body'))
+    expect(container.querySelectorAll('[aria-label="프롬프트 작성 오류"]')).toHaveLength(2)
+    const clear = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.trim() === '오버라이드 제거')!
+    mocks.fetchDashboardPrompts.mockResolvedValue({ prompts: [invalid] })
+    await fireEvent.click(clear)
+    await waitFor(() => expect(mocks.clearPromptOverride).toHaveBeenCalledWith('invalid.surface'))
+    await waitFor(() => expect(editor.value).toBe('File body'))
   })
 
   it('opens all preset source text without changing drafts or saving', async () => {

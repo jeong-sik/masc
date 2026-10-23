@@ -11,15 +11,11 @@ val run : env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t ->
   directory:string -> (unit -> unit) -> unit
 (** Read the host-written automation.json, start the owned driver and publish it
     only after readiness. Each session runs on a fresh profile in [profiles],
-    which is removed when the session ends and its browser has let it go. On exit retire admission, close the session and reap
-    the driver. Write automation-closed.json only after confirmed cleanup. Any
-    uncertain session creation or lost session authority permanently prevents
-    that receipt. Download bytes stay in this allocation until a host broker
-    handles them; this backend never publishes ambient workspace artifacts. *)
-module For_testing : sig
-  val run : commit_receipt:(path:string -> contents:string -> (unit, string) result) ->
-    env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t -> directory:string ->
-    (unit -> unit) -> unit
-  (** Interpose on the actual final receipt commit to exercise cancellation at
-      this I/O boundary. All startup, driver and cleanup code stays unchanged. *)
-end
+    which is removed when the session ends and its browser has let it go.
+    On exit retire admission, close the session and reap the driver. The
+    settled result tells the owner whether the session closed cleanly. The
+    host releases the allocation once the worker's process group has ended,
+    never on a file this backend writes, and its pass over Gecko profiles ends
+    a browser left behind. Download bytes stay in this
+    allocation until a host broker handles them; this backend never publishes
+    ambient workspace artifacts. *)

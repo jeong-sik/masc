@@ -192,15 +192,12 @@ let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi 
   let* ()=match automation with
     | None -> if List.for_all ((=) "s") names then Ok () else Error "browser socket directory contains unknown resources"
     | Some configuration ->
-      let* ()=if List.for_all (fun name -> List.mem name ["s";"automation.json";"automation-closed.json";"webdriver.log";"downloads"]) names
+      let* ()=if List.for_all (fun name -> List.mem name ["s";"automation.json";"webdriver.log";"downloads"]) names
         then Ok () else Error "owned browser directory contains unknown resources" in
       let* ()=if confirmed then Ok () else (
       let* spec=read "automation.json" in
       let* actual=Browser_addon_automation.configuration_of_json spec in
-      let* ()=if actual=configuration then Ok () else Error "owned browser configuration changed" in
-      let* receipt=read "automation-closed.json" in
-      if receipt=`Assoc ["incarnation",`String (Native_addon_lease.instance_id admission)] then Ok ()
-        else Error "owned browser cleanup is unconfirmed") in
+      if actual=configuration then Ok () else Error "owned browser configuration changed") in
       empty_tree (Filename.concat root "downloads") in
   let* ()=confirm () in
   List.fold_left (fun acc name -> let* ()=acc in
@@ -208,7 +205,7 @@ let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi 
     let info=Unix.lstat path in
     match info.Unix.st_kind with
     | Unix.S_SOCK when name="s" -> Unix.unlink path;Ok ()
-    | Unix.S_REG when List.mem name ["automation.json";"automation-closed.json";"webdriver.log";"models.json";"stagehand.json";"chromium.log";"live-bidi.json";"live-firefox.log"] ->
+    | Unix.S_REG when List.mem name ["automation.json";"webdriver.log";"models.json";"stagehand.json";"chromium.log";"live-bidi.json";"live-firefox.log"] ->
         let* ()=Requirement.check ~label:"owned browser file" socket_record ~path info in
         Unix.unlink path;Ok ()
     | Unix.S_DIR|Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK as kind ->

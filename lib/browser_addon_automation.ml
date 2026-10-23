@@ -59,7 +59,7 @@ let ready ~clock ~pool ~endpoint ~process =
   Eio.Fiber.first poll (fun () ->
     let status=Eio.Process.await process in
     invalid_arg (Format.asprintf "owned geckodriver exited before readiness: %a" Eio.Process.pp_status status))
-let run_with_commit ~commit_receipt ~env ~owner ~directory work =
+let run ~env ~owner ~directory work =
   let configuration = Eio_unix.run_in_systhread (fun () ->
     let text=Fs_compat.load_owned_regular_file ~ownership_root:directory (Filename.concat directory "automation.json")
       |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
@@ -166,20 +166,7 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
       | Error _ -> outcome
       | Ok () -> if !clean && not !uncertain then Ok ()
         else Error "owned browser cleanup is unconfirmed" in
-    (* Once driver teardown finishes, cancellation must not strand the foreground
-       cleanup join. Commit its receipt and publish terminal completion together. *)
-    Eio.Cancel.protect (fun () ->
-      let finish () =
-        let result=match outcome with
-          | Error _ -> outcome
-          | Ok () -> commit_receipt ~path:(Filename.concat directory "automation-closed.json")
-              ~contents:(Yojson.Safe.to_string (`Assoc ["incarnation",`String (Browser_addon_owner.incarnation owner)])) in
-        ignore (Eio.Promise.try_resolve settle result) in
-      match finish () with
-      | () -> ()
-      | exception exn ->
-          ignore (Eio.Promise.try_resolve settle (Error "browser cleanup receipt is unconfirmed"));
-          raise exn));
+    ignore (Eio.Promise.try_resolve settle outcome));
     (match Eio.Promise.await ready_p with
      | Error detail -> invalid_arg detail
      | Ok () -> Eio.Switch.run (fun scope ->
@@ -189,9 +176,3 @@ let run_with_commit ~commit_receipt ~env ~owner ~directory work =
            ignore (Eio.Promise.await stopped));
          work ())))
 
-let run ~env ~owner ~directory work = run_with_commit ~env ~owner ~directory work
-  ~commit_receipt:(fun ~path ~contents -> Eio_unix.run_in_systhread (fun () ->
-    Fs_compat.save_file_atomic_strict path contents))
-module For_testing = struct
-  let run = run_with_commit
-end

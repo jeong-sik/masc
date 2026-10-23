@@ -233,7 +233,10 @@ type manager = { store : Lane_addon_store.t; base_path : string; artifact_store 
   mutable configuration_visibility : (string * visibility) list;
   mutable swept : runtime list;
   sweep_retries : (runtime, sweep_retry list) Hashtbl.t;
-  sweep_warned : (runtime, (string * string option * Lifecycle.failure) list) Hashtbl.t }
+  sweep_warned : (runtime, (string * string option * Lifecycle.failure) list) Hashtbl.t;
+  gecko_sweep : Browser_gecko_sweep.t;
+  (* What the latest Gecko profile pass kept, as the next reading's issues. *)
+  mutable gecko_kept : string list }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let installation_id (e : entry) = Lane_addon_tool_request_owner.installation_id (match e.configuration with
   | Some owner -> Lane_addon_tool_request_owner.Configuration owner.id
@@ -1789,7 +1792,10 @@ let manager config =
                      fleet_journals=Hashtbl.create 8;
                      fleet_operations=Hashtbl.create 8; fleet_recipients=Hashtbl.create 16; fleet_nudge=(fun () -> ());
                      configuration_status = None; configuration_nudge = (fun () -> ()); configuration_visibility=[];
-                     swept = []; sweep_retries = Hashtbl.create 2; sweep_warned = Hashtbl.create 2 } in
+                     swept = []; sweep_retries = Hashtbl.create 2; sweep_warned = Hashtbl.create 2;
+                     gecko_sweep = Browser_gecko_sweep.create
+                       ~termination_grace_seconds:Browser_gecko_sweep.termination_grace_seconds;
+                     gecko_kept = [] } in
       Hashtbl.add managers root m; m
 let reading_exports (reading : live_reading) =
   reading.ready |> List.concat_map (fun ((e : entry), connection) ->
@@ -2286,6 +2292,30 @@ let is_live m (binding : retained_binding) =
 let historical m =
   let* reading = read_retained_bindings m in
   Ok { reading with readable = List.filter (fun binding -> not (is_live m binding)) reading.readable }
+(* G5 of RFC #45368: the host sweeps an instance's Gecko profiles once its
+   record says its allocation was released, or when no record names it, and
+   never while this process runs or recovers it. A record that cannot be read
+   holds back the instance it names, or every instance when it names none.
+   [reading] is every retained binding, live ones included, read with the
+   liveness it is checked against. [None] means no instance may be swept on
+   this pass. *)
+let gecko_sweepable m (reading : (retained_reading, string) result) =
+  match reading with
+  | Error _ -> None
+  | Ok reading ->
+    let held = Hashtbl.create 16 and unattributed = ref false in
+    List.iter (fun (fault : retained_fault) -> match fault.fault_instance with
+        | Some id -> Hashtbl.replace held id ()
+        | None -> unattributed := true) reading.faults;
+    List.iter (fun (binding : retained_binding) ->
+        match text binding.binding_fields "instance_id", lifecycle_of_fields binding.binding_fields with
+        | Ok _, Ok (Lifecycle.Detached (Lifecycle.Never_created | Lifecycle.Released _ | Lifecycle.Native_released _)) -> ()
+        | Ok id, Ok (Lifecycle.Detached (Lifecycle.Native_retained _)
+                     | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Failed _ | Lifecycle.Detaching _)
+        | Ok id, Error _ -> Hashtbl.replace held id ()
+        | Error _, (Ok _ | Error _) -> unattributed := true) reading.readable;
+    if !unattributed then None
+    else Some (fun id -> not (is_live_instance m id || Hashtbl.mem held id))
 (* The record decoder the inventory applies to one retained binding file.
    [recovering] names the instances this process is still cleaning up; it only
    changes the projected phase, never whether a record is read. *)
@@ -2583,7 +2613,7 @@ let historical_detach ~sw ?(wait = false) m fields =
 (* The operator takes over the resources of a native instance whose cleanup
    could not be confirmed (docs/design/browser-addon-lifecycle.md). The host
    still confirms what it can observe, in [native_retain]. What it cannot
-   observe, a missing receipt or an allocation's contents, is not inferred: the
+   observe, an allocation's contents, is not inferred: the
    record says the operator took it over, and the declaration may start a new
    instance. A refusal changes nothing. *)
 let retain_unconfirmed m args =
@@ -3756,7 +3786,7 @@ let configuration_event_packages m previous (current : configuration_reading) =
     | None -> true | Some before -> identity package_id before <> identity package_id current) candidates
 let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain (fun () ->
   let m = manager config in
-  let* result,changed=Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+  let* (result,changed),gecko_plan=Eio.Mutex.use_ro m.configuration_mutex (fun () ->
     let snapshot = offload (fun () -> Lane_addon_config.load ~directory) in
     let rec desired_visibility visiting (d : Lane_addon_config.declaration) =
       if List.mem d.id visiting then Error "Lane output connection cycle"
@@ -4103,11 +4133,30 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Some publish ->
          (match publish ~config exports with
           | Ok () -> () | Error message -> add_issue directory message));
+    (* Gecko browsers that outlived their automation instance. Which
+       instances the pass takes is decided here, under the configuration lock,
+       from the bindings and liveness read now. The file and signal work runs
+       after the lock is released, off the owner domain. Ids are never reused,
+       so the plan stays true meanwhile. *)
+    let gecko_root = Browser_gecko_profile.root ~lane_addon_root:(Lane_addon_store.root m.store) in
+    List.iter (add_issue gecko_root) m.gecko_kept;
+    let gecko_plan = Option.map (fun sweepable -> Browser_gecko_sweep.plan ~root:gecko_root ~sweepable)
+      (gecko_sweepable m (read_retained_bindings m)) in
     let reading={directory;snapshot;issues=List.rev !issues} in
     let changed=configuration_event_packages m m.configuration_status reading in
     m.configuration_status <- Some reading;
-    Ok (configuration_json m ~access:Lane_addon_sources.Operator_configuration,changed)) in
+    Ok ((configuration_json m ~access:Lane_addon_sources.Operator_configuration,changed),gecko_plan)) in
   List.iter (fun package_id -> publish_owner_event ~root:(Lane_addon_store.root m.store) ~package_id Configuration_observed) changed;
+  Option.iter (fun plan ->
+      let outcomes = offload (fun () -> Browser_gecko_sweep.pass m.gecko_sweep plan) in
+      m.gecko_kept <- List.filter_map (fun (outcome : Browser_gecko_sweep.outcome) ->
+          let text = Browser_gecko_sweep.outcome_to_string outcome in
+          match outcome with
+          | Removed _ -> Log.Misc.info "Lane Add-on %s" text; None
+          | Terminated _ | Killed _ -> Log.Misc.warn "Lane Add-on %s" text; None
+          | Kept _ -> Some text)
+        outcomes)
+    gecko_plan;
   Ok result)
 
 let fleet_services : (string,unit -> unit) Hashtbl.t = Hashtbl.create 4

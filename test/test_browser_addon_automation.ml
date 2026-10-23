@@ -83,7 +83,7 @@ let seen_profiles driver_root =
   match In_channel.with_open_bin (Filename.concat driver_root "profiles-seen") In_channel.input_all with
   | text -> String.split_on_char '\n' text |> List.filter (fun line -> line<>"")
   | exception Sys_error _ -> []
-let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false) ~cancel_receipt () = Eio_main.run (fun env ->
+let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false) () = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let slot=Filename.temp_dir "browser-owned-slot-" "" in
@@ -140,26 +140,7 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false)
            | Service_refusal {disposition=Not_started;_}|Issue_result _|Snapshot_result _
            |Model_reply _|Download_reply _|Poll_result _|Receipt -> false)
       else check bool "private retirement joins backend cleanup" true (retired=W.Receipt) in
-    if not cancel_receipt then Masc.Browser_addon_automation.run ~env ~owner ~directory work
-    else (
-      let committing,begin_commit=Eio.Promise.create () and proceed,finish_commit=Eio.Promise.create () in
-      let context,publish_context=Eio.Promise.create () in
-      let worker=Eio.Fiber.fork_promise ~sw (fun () ->
-        try Eio.Cancel.sub (fun cancellation ->
-          Eio.Promise.resolve publish_context cancellation;
-          Masc.Browser_addon_automation.For_testing.run ~env ~owner ~directory work
-            ~commit_receipt:(fun ~path ~contents ->
-              Eio.Promise.resolve begin_commit ();
-              Eio.Promise.await proceed;
-              Eio_unix.run_in_systhread (fun () -> Fs_compat.save_file_atomic_strict path contents))) with
-        | Eio.Cancel.Cancelled _ -> ()) in
-      let cancellation=Eio.Promise.await context in
-      Eio.Promise.await committing;
-      Eio.Cancel.cancel cancellation Exit;
-      Eio.Promise.resolve finish_commit ();
-      Eio.Promise.await_exn worker));
-  check bool "only confirmed cleanup writes a receipt" (not refuse_delete)
-    (Sys.file_exists (Filename.concat directory "automation-closed.json"));
+    Masc.Browser_addon_automation.run ~env ~owner ~directory work);
   if not refuse_delete then
     check bool "an ended session's profile is removed once its browser lets it go" true
       (List.for_all (fun profile -> not (Sys.file_exists profile)) (seen_profiles driver_root));
@@ -167,20 +148,19 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false)
   if refuse_delete then (
     check string "release hook never retries the original failed close" "DELETE\n"
       (In_channel.with_open_bin (Filename.concat driver_root "delete-calls") In_channel.input_all);
-    check bool "unconfirmed cleanup cannot release the original allocation" true
-      (Result.is_error (Socket.cleanup ~admission ~directory:slot));
-    (* The actual backend scope has joined its original driver here. Remove
-       this isolated fixture allocation without certifying product cleanup. *)
-    Fs_compat.remove_tree directory)
+    (* The backend scope has joined its driver, so nothing it started holds
+       the allocation. The session's profile is left for the host's pass. *)
+    (match ok (Socket.cleanup ~admission ~directory:slot) with
+     | Socket.Allocation_released -> ()
+     | Allocation_retained -> Alcotest.fail "the allocation was retained, not released");
+    check bool "a session whose DELETE was refused keeps its profile for the host" true
+      (List.for_all Sys.file_exists (seen_profiles driver_root) && seen_profiles driver_root <> []))
   else (
     (match ok (Socket.cleanup ~admission ~directory:slot) with
      | Socket.Allocation_released -> ()
      | Allocation_retained -> Alcotest.fail "the allocation was retained, not released");
     check bool "original allocation released" false (Sys.file_exists directory));
   List.iter Fs_compat.remove_tree [slot;driver_root;profile_root])
-let cancellation_child () =
-  let pid=Unix.create_process Sys.executable_name [|Sys.executable_name;"--cancel-receipt"|] Unix.stdin Unix.stdout Unix.stderr in
-  check bool "receipt cancellation joins cleanup" true (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
 let open_bidi_child () =
   let pid=Unix.create_process Sys.executable_name [|Sys.executable_name;"--open-bidi"|] Unix.stdin Unix.stdout Unix.stderr in
   check bool "open BiDi reader settles before original switch join" true (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
@@ -190,26 +170,22 @@ let wrong_profile_child () =
     (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
 let refused_close_child () =
   let pid=Unix.create_process Sys.executable_name [|Sys.executable_name;"--refused-close"|] Unix.stdin Unix.stdout Unix.stderr in
-  check bool "rejected DELETE settles the original reader without a clean receipt" true
+  check bool "rejected DELETE settles the original reader" true
     (snd (Unix.waitpid [] pid)=Unix.WEXITED 0)
 let () =
-  if Array.to_list Sys.argv=[Sys.executable_name;"--cancel-receipt"] then
-    run ~argv:[|Sys.executable_name|] "browser receipt cancellation" ["backend",[
-      test_case "cancellation during receipt commit" `Quick (fun () -> scenario ~cancel_receipt:true ())]]
-  else if Array.to_list Sys.argv=[Sys.executable_name;"--open-bidi"] then
+  if Array.to_list Sys.argv=[Sys.executable_name;"--open-bidi"] then
     run ~argv:[|Sys.executable_name|] "browser open BiDi retirement" ["backend",[
-      test_case "retire closes a real scripted BiDi reader" `Quick (scenario ~open_session:true ~cancel_receipt:false)]]
+      test_case "retire closes a real scripted BiDi reader" `Quick (scenario ~open_session:true)]]
   else if Array.to_list Sys.argv=[Sys.executable_name;"--wrong-profile"] then
     run ~argv:[|Sys.executable_name|] "browser session on another profile" ["backend",[
       test_case "a session reporting another moz:profile is refused" `Quick
-        (scenario ~open_session:true ~wrong_profile:true ~cancel_receipt:false)]]
+        (scenario ~open_session:true ~wrong_profile:true)]]
   else if Array.to_list Sys.argv=[Sys.executable_name;"--refused-close"] then
     run ~argv:[|Sys.executable_name|] "browser refused DELETE retirement" ["backend",[
       test_case "rejected DELETE leaves cleanup unconfirmed after reader cancellation" `Quick
-        (scenario ~open_session:true ~refuse_delete:true ~cancel_receipt:false)]]
+        (scenario ~open_session:true ~refuse_delete:true)]]
   else run "browser owned driver lifecycle" ["backend",[
-    test_case "owned driver readiness, command and retirement" `Quick (fun () -> scenario ~cancel_receipt:false ());
-    test_case "receipt cancellation joins cleanup" `Quick cancellation_child;
+    test_case "owned driver readiness, command and retirement" `Quick (fun () -> scenario ());
     test_case "open BiDi reader joins retirement" `Quick open_bidi_child;
     test_case "a session on another profile is refused" `Quick wrong_profile_child;
     test_case "rejected DELETE still joins the original BiDi reader" `Quick refused_close_child]]

@@ -23,6 +23,10 @@ val is_masc_name : string -> bool
 (** Whether an instance or profile directory name is a canonical UUID, the only
     names masc gives them. *)
 
+val existing_root : string -> (string option, string) result
+(** The canonical [root], or [None] when it does not exist. A root that is a
+    symbolic link or not a private directory is refused. *)
+
 val check_instance : string -> (unit, string) result
 (** Refuses a directory that is not a private directory with a canonical path. *)
 
@@ -32,6 +36,10 @@ val create : instance:string -> (string, string) result
 type removal =
   | Removed
   | In_use  (** A process holds the profile's lock; the profile is kept. *)
+
+val remove_locked : string -> (unit, string) result
+(** Removes a profile whose lock this process holds through an open
+    [Private_browser_profile.lock_file], keeping the lock file until last. *)
 
 val remove_if_free : string -> (removal, string) result
 (** Takes the profile's lock and removes the profile under it. A profile

@@ -140,3 +140,22 @@ test('actual harmony and arrangement workers consume edited source release times
     assert.deepEqual(exported.notes.filter(n=>n.track===0&&n.channel===0).map(n=>n.duration),[143,143])
   }finally{await worker.terminate();await rm(directory,{recursive:true,force:true})}
 })
+
+
+test('paired endpoint attacks masked by an existing overlap refuse absolute and relative selected lengths',()=>{
+  for(const attackFirst of [false,true])for(const line of ['duration-notes 0.41','duration-add-notes 0.11']) {
+    const file=new JZZ.MIDI.SMF(1,1000)
+    const attack=new JZZ.MIDI.SMF.MTrk().add(550,JZZ.MIDI.noteOn(0,60,90)).add(800,JZZ.MIDI.noteOff(0,60,20)).add(2000,JZZ.MIDI.smfEndOfTrack())
+    const moved=new JZZ.MIDI.SMF.MTrk().add(140,JZZ.MIDI.noteOn(0,60,80)).add(440,JZZ.MIDI.noteOff(0,60,45)).add(2000,JZZ.MIDI.smfEndOfTrack())
+    const masking=new JZZ.MIDI.SMF.MTrk().add(300,JZZ.MIDI.noteOn(0,60,70)).add(700,JZZ.MIDI.noteOff(0,60,12)).add(2000,JZZ.MIDI.smfEndOfTrack())
+    file.push(attackFirst?attack:moved);file.push(attackFirst?moved:attack);file.push(masking)
+    const editor=commands(newEditor(importMidiSource(file.toUint8Array())),[`track ${attackFirst?2:1}`,'select-all']),before=structuredClone(editor)
+    if(attackFirst){assert.throws(()=>command(editor,line),/overlapping/);assert.deepEqual(editor,before)}
+    else {
+      const next=command(editor,line),exported=midiSourcePattern(importMidiSource(projectMidi(next.project)))
+      assert.deepEqual(exported.notes.filter(n=>n.track===0).map(n=>n.duration),[410])
+      assert.deepEqual(command(next,'undo').project,editor.project)
+      assert.deepEqual(next.performance.diagnostics,editor.performance.diagnostics)
+    }
+  }
+})

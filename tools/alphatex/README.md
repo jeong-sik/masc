@@ -390,7 +390,8 @@ Native release velocity/form and on/off IDs stay intact. Negative or fractional
 ticks, unsafe end positions, source-port changes and newly overlapping keys
 refuse the entire edit. Original overlaps remain supported. Unclosed raw attacks
 also participate in conflict checks without an inferred end; at a shared tick,
-actual source event order decides whether an attack precedes a moved release.
+actual source event order compares every attack against moved releases, including
+paired attacks whose existing diagnostics mask a new collision.
 Both source quantizers use the same raw-attack checks. Pedal-derived sounding
 durations are not inferred by these key-length commands.
 

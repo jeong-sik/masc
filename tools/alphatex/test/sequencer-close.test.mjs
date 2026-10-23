@@ -838,6 +838,72 @@ test('stop queued directly after FluidSynth selection fences delayed capture and
 })
 
 
+for (const repeat of [false, true]) test(`cursor audition owns its prepared origin, repeat=${repeat}, and preserves the saved loop`, async () => {
+  const calls = [], requests = [], closers = []
+  let initial = editor.newEditor()
+  for (const line of ['note C4 0 4', 'loop 1 4']) initial = editor.editorCommand(initial, line).editor
+  const project = { ...initial.project, sound: { kind: 'soundfont' } }
+  const view = await controller({ initialDocument: project, playback(request) {
+    requests.push(request)
+    let end; const completion = new Promise(resolve => { end = resolve }); closers.push(end)
+    return { ready: Promise.resolve(), completion, seek(value) { calls.push(value) },
+      pause() { calls.push('pause') }, resume() { calls.push('resume') }, stop() { calls.push('stop'); end() } }
+  } })
+  try {
+    if (repeat) { view.key('l'); await flush() }
+    view.command('cursor 2 C4'); view.key('p'); await flush()
+    const worker = view.observed.workers[0], first = worker.requests.at(-1)
+    assert.deepEqual(first.project.loop, { start: 1920, end: (repeat ? 4 : 16) * PPQ })
+    assert.equal(first.options.loop, true); assert.equal(first.options.format, 'wav')
+    // A second audition cancels an unfinished one; late preparation is inert.
+    view.command('cursor 3 C4'); view.command('play-cursor'); await flush()
+    assert.equal(Atomics.load(new Int32Array(first.cancel), 0), 1)
+    worker.emit('message', { id: first.id, ok: true, result: { path: '/obsolete.wav' } }); await flush()
+    assert.equal(requests.length, 0)
+    const next = worker.requests.at(-1)
+    assert.equal(next.project.loop.start, 2880)
+    worker.emit('message', { id: next.id, ok: true, result: { path: '/cursor.wav', format: 'wav', clippedSamples: 0 } }); await flush()
+    assert.equal(requests[0].loop, repeat)
+    requests[0].onEvent({ kind: 'playing', currentTime: .1, duration: repeat ? .6 : 7.8 })
+    view.command('seek 3.5'); view.command('seek 2'); await flush()
+    assert.deepEqual(calls, [.3])
+    view.key('space'); await flush(); assert.equal(calls.at(-1), 'pause')
+    requests[0].onEvent({ kind: 'paused', currentTime: .1, duration: repeat ? .6 : 7.8 })
+    view.key('0'); await flush(); assert.deepEqual(calls.slice(-2), [0, 'resume'])
+    // An invalid cursor must leave the admitted player alive.
+    view.command('cursor 8 C4'); if (repeat) { view.key('p'); await flush(); assert.ok(!calls.includes('stop')) }
+    view.key(undefined, '.'); await flush(); assert.equal(calls.at(-1), 'stop')
+    view.key('q'); await view.done
+    assert.deepEqual(view.observed.saved.at(-1), project)
+  } finally { for (const end of closers) end(); view.signal.abort(); await view.done }
+})
+
+test('source cursor audition sends a temporary MIDI region without enabling native repetition or changing the source', async () => {
+  const { midiSourceFromEvents } = await import('../midi-source.mjs')
+  const project = midiSourceFromEvents([{ tick: 0, kind: 'channel', bytes: [0xb0, 64, 127] },
+    { tick: 0, kind: 'channel', bytes: [0x90, 60, 96] }, { tick: 1920, kind: 'channel', bytes: [0x80, 60, 47] },
+    { tick: 3840, kind: 'meta', type: 0x2f, data: [] }], { ppq: 960 })
+  const calls = []; let request, end
+  const view = await controller({ initialDocument: project, midiOutput: '42', playback(value) {
+    request = value
+    return { ready: Promise.resolve(), completion: new Promise(resolve => { end = resolve }),
+      stop() { end() }, terminate() { end() }, seek(seconds) { calls.push(seconds) } }
+  } })
+  try {
+    view.command('cursor 1 C4'); view.key('p'); await flush()
+    const worker = view.observed.workers[0], job = worker.requests.at(-1)
+    assert.deepEqual(job.project, project); assert.deepEqual(job.options.sourceLoop, { start: 960, end: 3840 })
+    assert.equal(job.options.loop, true)
+    worker.emit('message', { id: job.id, ok: true, result: { path: '/source-region.json', format: 'midi-arrangement', midiOutput: '42',
+      sourceWindow: { start: 960, end: 3840, startSeconds: .5, endSeconds: 2 } } }); await flush()
+    assert.equal(request.loop, false); assert.equal(request.format, 'midi-arrangement')
+    request.onEvent({ kind: 'playing', currentTime: 0, duration: 1.5 })
+    view.command('seek 2'); view.command('seek .5'); view.command('seek 4'); await flush()
+    assert.deepEqual(calls, [.5, 1.5])
+    view.key('q'); await view.done; assert.deepEqual(view.observed.saved.at(-1), project)
+  } finally { end?.(); view.signal.abort(); await view.done }
+})
+
 test('direct stop remains actionable while harmony analysis is visible', async () => {
   const requests = [], calls = []
   const initial = { ...editor.editorCommand(editor.newEditor(), 'note C4 0 1').editor.project, sound: { kind: 'soundfont' } }

@@ -9,7 +9,7 @@ import { Worker } from 'node:worker_threads'
 import { isDeepStrictEqual } from 'node:util'
 import { Note } from 'tonal'
 import { GM_DRUM_CHANNEL } from './sequencer-project.mjs'
-import { newEditor, editorCommand, editorAction, selectedNote, selectedNotes, editorView, editorAxis, editorHarmony, editorMeters, editorSound, editorEffect, stepInputEffect } from './sequencer-editor.mjs'
+import { newEditor, editorCommand, editorAction, selectedNote, selectedNotes, editorView, editorAxis, editorHarmony, editorMeters, editorSound, editorEffect, stepInputEffect, editorPlayback } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceMeters, selectedMeter } from './midi-source-editor.mjs'
@@ -49,7 +49,9 @@ const help = [
   'Source :meters lists time signatures; :meter NUM DEN [AT [CLOCKS NOTATED32NDS]]; :meter-event ID; :meter-value NUM DEN [CLOCKS NOTATED32NDS]; :meter-move AT; :meter-remove',
   ':arrange snapshots this phrase into backing; q returns to this draft',
   'Source seek/resume restores channel state; unknown initial or opaque device state is an error.',
-  'Space: play/pause; 0: restart the playback range; .: stop; f: explicitly select FluidSynth and preview',
+  'Space: play/pause; p: play from cursor; 0: restart the playback range; .: stop',
+  'p / :play-cursor auditions to the range end; loop repeats that temporary window; saved locators stay unchanged.',
+  'f: explicitly select FluidSynth and preview',
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',
   ':select-notes START END [LOW HIGH] selects onsets; :select-all; Esc clears selection',
   ':duration-notes LENGTH sets selected gates; :duration-add-notes OFFSET changes their lengths together',
@@ -260,12 +262,12 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function playTick() {
     if (!['playing', 'paused'].includes(transport.kind)) return editor.tick
     const view = editorView(editor), per = editorAxis(editor).per
-    const start = loop ? view.loop.start : 0
+    const { start, repeat } = transport.range
     const elapsed = transport.position + (transport.kind === 'playing' ? (performance.now() - transport.since) / 1000 : 0)
-    const seconds = Math.min(loop ? elapsed % transport.duration : elapsed, transport.phraseDuration ?? transport.duration)
+    const seconds = Math.min(repeat ? elapsed % transport.duration : elapsed, transport.phraseDuration ?? transport.duration)
     if (editor.project.kind === 'midi-source') return sourceTickAtSeconds(editor.performance,
       Math.min(transport.sourceWindow?.endSeconds ?? Infinity, seconds + (transport.sourceWindow?.startSeconds ?? 0)))
-    return start + (loop ? seconds % transport.duration : seconds) / 60 * view.tempo * per
+    return start + seconds / 60 * view.tempo * per
   }
   function draw() {
     if (closed || suspended || pendingDraw) return
@@ -313,7 +315,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       `Cursor ${position(editor.tick)} · ${noteName(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · input length ${editor.duration / per} · velocity ${current?.velocity ?? editor.velocity}${selection.size ? ` · ${selection.size} selected` : ''}${editor.noteClipboard ? ` · ${editor.noteClipboard.notes.length} copied` : ''}`,
       [['Chord candidates: ', []], [at.candidates.join(' / ') || '—', at.candidates.length ? [bold, cyan] : [dim]], [` · ${at.notes.join(' ')}`, []]],
       statusLine,
-      [['Space', [bold, green]], [' play/pause  ', []], ['0', [bold, cyan]], [' restart  ', []],
+      [['Space', [bold, green]], [' play/pause  ', []], ['p', [bold, cyan]], [' from cursor  ', []], ['0', [bold, cyan]], [' restart  ', []],
         ['.', [bold, red]], [' stop  ', []], ['i', [bold, cyan]], [' instrument  ', []],
         ['f', [bold, cyan]], [' FluidSynth  ·  ', []], ['selected', [bold, yellow]], ['  ', []],
         ['playing', [bold, green]], ['  ', []], ['cursor', [bold, magenta]]],
@@ -445,7 +447,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, rows - 2).forEach((line, row) => { output += `\x1b[${row + 1};1H${fit(line)}` })
-    output += `\x1b[${rows - 1};1H${fit(sourcePicker.view ? '↑/↓:choose  Enter:arm keyboard  r:refresh  Esc/q:cancel' : picker.view ? pickerFooter(picker.view) : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play/pause  0:restart  .:stop  i:instrument  Enter:note  arrows:cursor  Tab:track  ?:help')}`
+    output += `\x1b[${rows - 1};1H${fit(sourcePicker.view ? '↑/↓:choose  Enter:arm keyboard  r:refresh  Esc/q:cancel' : picker.view ? pickerFooter(picker.view) : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  p:play cursor  :commands  Esc/q:return' : 'Space:play/pause  p:play cursor  0:restart  .:stop  i:instrument  Enter:note  arrows:cursor  Tab:track  ?:help')}`
     if (!picker.view) output += `\x1b[${rows};1H${fit(sourcePicker.view ? openedSourceMenuOwner?.monitor ? 'Selection arms step input with the chosen instrument and audio output.' : 'Selection opens MIDI input only; no audio or output route.' : harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 'Ctrl-L:status  s:save  l:loop  { }:loop bars  < >:bars  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
     process.stdout.write(output)
   }
@@ -552,7 +554,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     native.promise.finally(() => nativeRenders.delete(native)).catch(() => {})
     return { promise: native.promise, cancel: preparation.cancel, native }
   }
-  async function startPlayer(wave, id) {
+  async function startPlayer(wave, id, range) {
     // Finish the previous owner before a new one can reuse its MIDI keys. Its
     // final note-offs must never cut off the replacement transport's notes.
     await Promise.allSettled([...players.values()])
@@ -562,18 +564,18 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     const midiDestination = wave.midiOutput ?? selectedMidiOutput
     const handle = openPlayback({ path: wave.path, output: midiDestination === undefined ? selectedOutput : undefined,
       midiOutput: midiDestination, midiBindings: wave.midiBindings, frameRange: wave.frameRange,
-      format: wave.format === 'midi-arrangement' ? 'midi-arrangement' : 'wave', loop, onEvent: event => {
+      format: wave.format === 'midi-arrangement' ? 'midi-arrangement' : 'wave', loop: range.repeat, onEvent: event => {
       if (!accepting || closed || id !== generation) return
       if (['playing', 'paused'].includes(event.kind)) {
         const changed = transport.kind !== event.kind
         transport = { kind: event.kind, handle, position: event.currentTime, duration: event.duration,
-          phraseDuration: wave.phraseDuration, sourceWindow: wave.sourceWindow, since: performance.now() }
+          phraseDuration: wave.phraseDuration, sourceWindow: wave.sourceWindow, range, since: performance.now() }
         if (wave.vst && changed) observe({ state: `player_${event.kind}`, selection: wave.selection, render: wave.vst,
           position_seconds: event.currentTime, duration_seconds: event.duration })
       }
       draw()
     } })
-    transport = { kind: 'starting', handle }
+    transport = { kind: 'starting', handle, range }
     handle.ready.catch(error => {
       if (!closed && id === generation) { status = failure(error.message); draw() }
     })
@@ -588,9 +590,12 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     const preview = wave.vst ? `VST: ${wave.selection.name}` : midiDestination !== undefined ? 'MIDI output' : wave.soundfont ? `FluidSynth ${wave.soundfont.engine.version}` : 'SoundFont preview'
     status = notice(`${preview}${wave.clippedSamples > 0 ? ` · ${wave.clippedSamples} samples exceed full scale` : ''}`); draw()
   }
-  function play() {
+  function play({ fromCursor = false } = {}) {
     if (!accepting || suspended || childTask) return
     if (stepInput) throw new Error('Use :step-stop before playback')
+    // Validate the requested window before retiring an existing transport.
+    const admitted = fromCursor ? editorPlayback(editor, { loop, fromCursor }) : null
+    if (fromCursor) stopPlayback()
     if (transport.kind === 'playing') {
       transport.handle.pause()
       return
@@ -599,12 +604,12 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (transport.kind !== 'stopped') { stopPlayback(); draw(); return }
     const midiRoute = selectedMidiOutput !== undefined || portBindings.length > 0
     if (!midiRoute && audioInstrument().kind === 'unselected') { picker.open(); return }
-    const id = ++generation, options = { loop, pattern: editor.pattern, midiOutput: selectedMidiOutput, portBindings,
-      ...(editor.project.kind === 'midi-source' ? { sourceLoop: editor.sourceLoop } : {}) }
-    const result = midiRoute ? render(editor.project, { ...options, format: 'midi' }) : renderAudio(editor.project, options)
+    const playback = admitted ?? editorPlayback(editor, { loop })
+    const id = ++generation, options = { ...playback.options, midiOutput: selectedMidiOutput, portBindings }
+    const result = midiRoute ? render(playback.project, { ...options, format: 'midi' }) : renderAudio(playback.project, options)
     transport = { kind: 'rendering', cancel: result.cancel, native: result.native }
     if (result.native && audioInstrument().kind === 'vst') observe({ state: 'rendering', selection: audioInstrument().selection, render: null })
-    result.promise.then(wave => startPlayer(wave, id)).catch(error => {
+    result.promise.then(wave => startPlayer(wave, id, playback.range)).catch(error => {
       if (!closed && id === generation) { transport = { kind: 'stopped' }; status = failure(error.message +
           (audioInstrument().kind === 'soundfont' && !isFluidSound(audioInstrument()) ? ' · i: select SoundFont · FluidSynth, or another instrument' : ''));
         if (result.native && audioInstrument().kind === 'vst') observe({ state: 'failed', selection: audioInstrument().selection, render: null, error: error.message }); draw() }
@@ -740,6 +745,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         break
       }
       case 'play': play(); break
+      case 'play-cursor': play({ fromCursor: true }); break
       case 'loop': stepInput?.stop(); stopPlayback(); loop = true; status = notice('Loop selected'); break
       case 'stop': stop(); break
       case 'output': stop(); portBindings = []; selectedOutput = value.path; selectedMidiOutput = undefined; status = notice(`Audio output: ${selectedOutput}`); break
@@ -749,6 +755,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       case 'seek': {
         if (!accepting) return
         if (!transport.handle) throw new Error('Start playback before seeking')
+        const range = transport.range
+        if (value.tick < range.start || value.tick > range.end) throw new Error('Seek must be within the playback range')
         if (editor.project.kind === 'midi-source') {
           const window = transport.sourceWindow
           if (window && (value.tick < window.start || value.tick > window.end)) throw new Error('Seek must be within the source loop range')
@@ -757,8 +765,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           transport.handle.seek(window ? Math.min(transport.duration, seconds) : seconds); break
         }
         const view = editorView(editor), per = editorAxis(editor).per
-        const start = loop ? view.loop.start : 0
-        const end = loop ? view.loop.end : view.length
+        const { start, end } = range
         // The WAV endpoint is the player's sample-quantized duration. Preserve
         // the musical endpoint instead of rounding it beyond the last sample.
         const seconds = value.tick === end ? transport.duration : (value.tick - start) / per * 60 / view.tempo
@@ -845,6 +852,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       // Transport keys retain their meaning while inspecting harmony.
       if (!key.ctrl && !key.meta) {
         if (key.name === 'space') { play(); return }
+        if (key.name === 'p') { play({ fromCursor: true }); return }
         if (key.name === '0') { restart(); return }
         if (text === '.') { stop(); status = notice('Stopped'); return }
         if (key.name === 'f' || key.name === 'i') {

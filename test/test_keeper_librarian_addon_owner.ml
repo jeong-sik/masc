@@ -354,8 +354,14 @@ let test_actual_happy_path ()=with_fixture (fun ~sw:_ fixture ->
         ::List.remove_assoc "input_text" fields)
     | _ -> fail "the actual retained capture must be an object" in
   let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
-  let restored=io (fun () -> Capture.restore ~owner
-    ~load_parent:(fun ~request_id:_ -> Ok (Capture.batch capture)) {record with request}) in
+  let restored=io (fun () ->
+    let store=Store.create ~root:(Filename.concat fixture.base_path "history-purpose-check") in
+    Owner.retain ~store ~scope:record.scope ~request_id:record.request_id
+      ~installation_id:record.installation_id ~package_id:record.package_id
+      ~tool:record.tool ~request |> owned;
+    let retained=match Owner.load ~store ~scope:record.scope ~request_id:record.request_id |> owned with
+      | Some retained -> retained | None -> fail "the altered history capture was not retained" in
+    Capture.restore ~owner ~load_parent:(fun ~request_id:_ -> Ok (Capture.batch capture)) retained) in
   check bool "complete data restoration grants no admission authority over history" true
     (match restored with Error detail ->
        detail="Explicit-candidate execution cannot replace another Librarian pass's original input"

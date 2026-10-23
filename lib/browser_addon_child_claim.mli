@@ -9,9 +9,10 @@ val settled : name:string -> Native_addon_lease.t -> (unit, string) result
 (** The claim is Settled. *)
 
 val original : t -> (Native_addon_lease.t option, string) result
-(** Reopen the slot under its gate. A reservation that was never published is
-    fenced as retired and is [None], as is a missing slot. A claim whose
-    descriptor differs belongs to another allocation and is refused. *)
+(** Reopen the slot under its gate. A missing slot, or one with no
+    reservation, is [None]. A lone reservation that was never published is
+    fenced as retired and returned. A claim whose descriptor differs belongs to
+    another allocation and is refused. *)
 
 val check_retained : t -> (unit, string) result
 (** Read what {!original} reads, without its gate lock, fence or any write:
@@ -24,7 +25,7 @@ val settle : t -> (unit, string) result
     not establish cleanup. Never removes claims. *)
 
 val check_settled : t -> (unit, string) result
-(** Require what {!settle} requires, without retiring or signalling anything:
-    the original claim is already Settled. A missing slot is [Ok]. A
-    reservation that was never published is refused and the refusal says the
-    next cleanup pass fences it. *)
+(** Require that the original claim is already Settled, without retiring,
+    fencing or signalling anything. A missing slot is [Ok]. A slot that is not
+    one published claim is refused; the refusal says that a reservation that
+    was never published is fenced by the next cleanup pass. *)

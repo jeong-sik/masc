@@ -189,18 +189,48 @@ let retain_requires_a_settled_child_without_signalling () =
     check "the refused retain kept the acquisition" true (acquisition_state directory = "acquired");
     lease (Lease.retire child);
     check "the operator retains the allocation" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained))
-(* An atomic replace can fail after its rename, so a failed record write is
-   never reported as a refusal that changed nothing. *)
-let retain_reports_an_unconfirmed_record_write () =
-  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+(* Only a failure before the rename says the record did not change. *)
+let retain_reports_where_a_record_write_failed () =
+  let failing stage _path _contents = Error {Fs_compat.path="record";stage;
+    exception_=Failure "disk full";backtrace=Printexc.get_callstack 0} in
+  let attempt save = with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
     (fun admission directory _root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       lease (Lease.retire admission);
-      let unconfirmed = match Socket.For_testing.retain ~save:(fun _ _ -> Error "disk full")
-          ~admission ~directory with
-        | Error (Socket.Retained_record_unconfirmed _) -> true
-        | Ok _ | Error (Socket.Retain_refused _) -> false in
-      check "a failed record write is reported unconfirmed, not refused" true unconfirmed)
+      let outcome = Socket.For_testing.retain ~save ~admission ~directory in
+      (outcome, acquisition_state directory)) in
+  let unconfirmed = function
+    | Error (Socket.Retained_record_unconfirmed _) -> true
+    | Ok _ | Error (Socket.Retain_refused _) -> false in
+  let outcome, _ = attempt (failing Fs_compat.After_rename) in
+  check "a write that failed after its rename is unconfirmed, not refused" true (unconfirmed outcome);
+  let outcome, _ = attempt (fun _ _ -> raise (Unix.Unix_error (Unix.EIO, "fsync", "record"))) in
+  check "a write that raised is unconfirmed, not refused" true (unconfirmed outcome);
+  let outcome, state = attempt (failing Fs_compat.Before_rename) in
+  refused "a write that failed before its rename is refused" outcome;
+  check "the record is unchanged after a write that failed before its rename" true (state = "acquired")
+(* A Chrome child claim recorded for another allocation is never read as this
+   allocation's settlement. *)
+let retain_refuses_a_foreign_child () =
+  let stagehand directory = Some (ok (Masc.Browser_addon_stagehand.configuration
+    ~browser:{Browser_configuration.chrome="/fixture/chrome";extension="/fixture/extension";profile=None}
+    ~launcher:"/fixture/launcher" ~guardian:"/fixture/guardian"
+    ~claim_directory:(Filename.concat directory "chrome-slot"))) in
+  with_claim ~stagehand (fun admission directory root ->
+    ignore (ok (Socket.acquire ~admission ~directory));
+    let c = Option.get (stagehand directory) in
+    let profile = match Masc.Browser_addon_stagehand.configuration_to_json c with
+      | `Assoc fields -> List.assoc "profile" fields | _ -> Alcotest.fail "expected a Chrome configuration object" in
+    let slot = Filename.concat directory "chrome-slot" in
+    Unix.mkdir slot 0o700;
+    let child = lease (Lease.prepare ~directories:[slot]
+      ~instance_id:(Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())))
+      ~cleanup_context:(Some (`Assoc ["kind",`String "browser_addon_chrome";
+        "incarnation",`String "another-allocation";"directory",`String root;"profile",profile]))) in
+    lease (Lease.retire child);
+    lease (Lease.retire admission);
+    refused "a child claim of another allocation refuses the retain" (Socket.retain ~admission ~directory);
+    check "the refused retain kept the acquisition" true (acquisition_state directory = "acquired"))
 (* A child reservation that was never published is fenced only by the cleanup
    pass. Retain refuses it without fencing; once a cleanup pass settled the
    child, the retain succeeds. *)
@@ -240,5 +270,6 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "retain refuses a replaced allocation directory" `Quick retain_refuses_replaced_directory;
   Alcotest.test_case "retain reports an allocation already released" `Quick retain_reports_a_released_allocation;
   Alcotest.test_case "retain requires a settled Chrome child and signals nothing" `Quick retain_requires_a_settled_child_without_signalling;
-  Alcotest.test_case "retain reports an unconfirmed record write" `Quick retain_reports_an_unconfirmed_record_write;
+  Alcotest.test_case "retain reports where a record write failed" `Quick retain_reports_where_a_record_write_failed;
+  Alcotest.test_case "retain refuses a child claim of another allocation" `Quick retain_refuses_a_foreign_child;
   Alcotest.test_case "retain waits until an unpublished child is fenced" `Quick retain_waits_for_an_unpublished_child_to_be_fenced]]

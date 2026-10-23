@@ -259,7 +259,21 @@ let operator_retain () = with_fixture (fun clock root config ->
        | Error (Browser_addon_socket.Retain_refused detail | Retained_record_unconfirmed detail) -> fail detail);
     ignore (dispatch config R.Detach ["instance_id",`String second]);
     check string "recovery of a retained allocation is not a release" "native_retained" (release_kind second);
-    check bool "the left profile stays in place" true (Sys.file_exists left)))
+    check bool "the left profile stays in place" true (Sys.file_exists left));
+  (* A retain refused after the host began its checks leaves no cleanup marked
+     in progress: a later Detach runs the cleanup and reports its failure. *)
+  let third, _, _, left = browser_instance () in
+  let allocation = Filename.dirname (Filename.dirname left) in
+  let moved = allocation ^ ".original" in
+  Unix.rename allocation moved; Unix.mkdir allocation 0o700;
+  Fun.protect ~finally:(fun () -> remove allocation; remove moved) (fun () ->
+    check bool "a replaced allocation directory refuses the retain" true
+      (match retain third with Error (R.Request_rejected _) -> true | Ok _ | Error (R.Runtime_failed _) -> false);
+    check bool "the refused retain kept the failed record" true (still_failed third);
+    check bool "the refused retain left no cleanup in progress" true
+      (match R.dispatch ~caller:"retain-tester" ~access:Lane_addon_sources.Operator_configuration ~config
+          ~operation:R.Detach (`Assoc ["instance_id",`String third]) with
+       | Error (R.Runtime_failed _) -> true | Ok _ | Error (R.Request_rejected _) -> false)))
 let browser_server = {|import argparse,hashlib,json,os,socket,subprocess,sys,threading,time
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("mode")

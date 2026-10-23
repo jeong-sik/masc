@@ -51,7 +51,7 @@
 (test
  (name test_browser_addon_socket)
  (modules test_browser_addon_socket)
- (libraries masc masc.native_addon_lease masc.browser_configuration alcotest yojson uuidm unix))
+ (libraries masc masc.native_addon_lease masc.browser_configuration masc.fs_compat alcotest yojson uuidm unix))
 
 (test
  (name test_browser_addon_client)

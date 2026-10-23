@@ -2512,6 +2512,14 @@ let retain_unconfirmed m args =
         restore ();
         Error (Runtime_failed ("the retained record was not confirmed written; the allocation may already be retained, and the next cleanup pass records this instance from what it finds: " ^ detail))
     | Ok release ->
+    (* [native_release] names the installation and incarnation checked above;
+       a mismatch here would follow a write, so it is never a refusal. *)
+    match check_release ~instance_id:id ~authority ~resource release with
+    | Error failure ->
+        restore ();
+        Error (Runtime_failed ("the allocation was answered for, but its release does not match the retained authority: "
+          ^ Lifecycle.failure_detail failure))
+    | Ok release ->
         let state = Lifecycle.Detached release in
         let terminal = replace_state fields state in
         let publication = {fields; terminal = Some terminal; terminal_state = state} in

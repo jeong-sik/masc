@@ -37,10 +37,11 @@ val cleanup : admission:Native_addon_lease.t -> directory:string -> (settlement,
     retained allocation is reported as [Allocation_retained] and not touched. *)
 type retain_error =
   | Retain_refused of string
-      (** Nothing was written. *)
+      (** The acquisition record was not changed. *)
   | Retained_record_unconfirmed of string
-      (** The [retained] record write did not confirm. The record may already
-          be replaced, and a later {!cleanup} reports what it finds. *)
+      (** The [retained] record write failed after its rename, or raised. The
+          record may already be replaced, and a later {!cleanup} reports what
+          it finds. *)
 val retain : admission:Native_addon_lease.t -> directory:string -> (settlement, retain_error) result
 (** The operator takes over an allocation whose release could not be confirmed.
     The claim must be Settled and each Chrome and live BiDi child claim must
@@ -51,7 +52,7 @@ val retain : admission:Native_addon_lease.t -> directory:string -> (settlement, 
     path. An allocation already released is reported as [Allocation_released]
     and left as it is. *)
 module For_testing : sig
-  val retain : save:(string -> string -> (unit, string) result) ->
+  val retain : save:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
     admission:Native_addon_lease.t -> directory:string -> (settlement, retain_error) result
   (** {!retain} with the record write supplied by the test. *)
 end

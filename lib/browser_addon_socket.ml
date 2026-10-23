@@ -321,7 +321,7 @@ type retain_error = Retain_refused of string | Retained_record_unconfirmed of st
 type retain_plan =
   | Already of settlement
   | Write_retained of { file : string; root : string; device : int; inode : int }
-let retain_with ~save ~admission ~directory =
+let retain_with ~(save:string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ~admission ~directory =
   let plan = protect (fun () ->
     let* directory=slot admission directory in
     let* status=Native_addon_lease.status admission |> Result.map_error Native_addon_lease.error_to_string in
@@ -360,13 +360,16 @@ let retain_with ~save ~admission ~directory =
   | Error detail -> Error (Retain_refused detail)
   | Ok (Already settlement) -> Ok settlement
   | Ok (Write_retained {file;root;device;inode}) ->
-    (* From here a failure cannot say nothing changed: an atomic replace can
-       fail after its rename. *)
+    (* A failure after the rename leaves the record replaced; only a failure
+       before it says nothing changed. *)
     match save file (Yojson.Safe.to_string (allocation_json admission root ~device ~inode ~state:"retained")) with
     | Ok () -> Ok Allocation_retained
-    | Error detail -> Error (Retained_record_unconfirmed detail)
+    | Error ({stage=Fs_compat.Before_rename;_} as failure) ->
+        Error (Retain_refused ("the retained record was not written: " ^ Fs_compat.atomic_replace_failure_to_string failure))
+    | Error ({stage=Fs_compat.After_rename;_} as failure) ->
+        Error (Retained_record_unconfirmed (Fs_compat.atomic_replace_failure_to_string failure))
     | exception ((Unix.Unix_error _|Sys_error _) as exn) -> Error (Retained_record_unconfirmed (Printexc.to_string exn))
-let retain ~admission ~directory = retain_with ~save:Fs_compat.save_file_atomic_strict ~admission ~directory
+let retain ~admission ~directory = retain_with ~save:Fs_compat.save_file_atomic_strict_staged ~admission ~directory
 module For_testing = struct
   let retain = retain_with
 end

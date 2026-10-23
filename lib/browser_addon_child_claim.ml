@@ -36,17 +36,16 @@ let settle t =
   | Some claim -> let* ()=lease (Lease.request_termination claim) in settled ~name:t.name claim
 let check_settled t = protect (fun () ->
   match Unix.lstat t.claim_directory with
-  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
   | _ ->
-    (match Lease.inspect ~directory:t.claim_directory with
-     | Error (refused : Lease.inspection_error) -> Error refused.refusal
-     | Ok None -> Ok ()
-     | Ok (Some recorded) when recorded.context <> Some t.context -> Error (foreign t)
-     | Ok (Some _) ->
-       (* A reservation that was never published is fenced only by [settle]'s
-          gate, which this read does not take. *)
-       (match Lease.current ~directories:[t.claim_directory] with
-        | Ok claim -> settled ~name:t.name claim
-        | Error error -> Error (Printf.sprintf
-            "%s %s is not one published claim (%s); the next cleanup pass fences a reservation that was never published, and the retain can then be repeated"
-            t.name t.claim_directory (Lease.error_to_string error)))))
+    (match Lease.current ~directories:[t.claim_directory] with
+     | Ok claim ->
+       let* known=lease (Lease.cleanup_context claim) in
+       if known=Some t.context then settled ~name:t.name claim else Error (foreign t)
+     | Error error ->
+       (* Only [settle]'s gate fences a reservation that was never published.
+          The lease error does not say whether that is the cause, so the
+          refusal names it as one possibility. *)
+       Error (Printf.sprintf
+         "%s %s is not one published claim (%s); if it is a reservation that was never published, the next cleanup pass fences it and the retain can then be repeated"
+         t.name t.claim_directory (Lease.error_to_string error)))
+  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ())

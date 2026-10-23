@@ -122,7 +122,9 @@ export function noteSelectionCommand(editor, command, args) {
         return {kind:source(editor)?'change':'change-note',id:note.id,duration}
       })
       if (!source(editor)) assertNoNewNoteOverlaps(track(editor).notes, changes)
-      return apply(editor, changes)
+      const next = apply(editor, changes)
+      if (source(editor)) assertMidiTimingOrder(editor.performance,next.performance)
+      return next
     }
     case 'velocity-notes': case 'velocity-add-notes': {
       count(1)

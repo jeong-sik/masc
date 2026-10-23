@@ -24,11 +24,11 @@ let question : AR.verdict_question =
 let with_workspace f =
   let base_path = Filename.temp_dir "verifier-worker-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.clear_fs ();Fs_compat.remove_tree base_path;
-    Masc.Config_dir_resolver.reset ()) (fun () ->
+    Config_dir_resolver.reset ()) (fun () ->
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path) (fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key
     (Some (Filename.concat base_path ".masc/config")) (fun () ->
-    Masc.Config_dir_resolver.reset ();
+    Config_dir_resolver.reset ();
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Workspace_core.default_config base_path in
@@ -71,7 +71,7 @@ let test_frozen_prompt_media_and_lookup () = with_workspace (fun config store ->
     | None -> Prompt_registry.clear_prompt_override Prompt_names.verification
     | Some text -> ignore (get (Prompt_registry.set_override Prompt_names.verification text))) (fun () ->
     get (Prompt_registry.set_override Prompt_names.verification (before.effective ^ "\nChanged after retention."));
-    let root = Masc.Keeper_sandbox_config.host_root_abs_of_producer
+    let root = Keeper_sandbox_config.host_root_abs_of_producer
       ~base_path:(Store.project_root_of_base_path config.Workspace.base_path) ~agent_name:producer in
     Fs_compat.mkdir_p root;
     Out_channel.with_open_bin (Filename.concat root "receipt.txt") (fun out -> output_string out "retained evidence");

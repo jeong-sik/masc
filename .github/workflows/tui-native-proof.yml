@@ -80,7 +80,7 @@ jobs:
               targets+=(bin/main_eio.exe test/test_tui_published_reports.exe test/test_tui_resource_document_search.exe test/test_tui_resource_image_admission.exe test/test_tui_resource_images.exe)
               ;;
             addon-lifecycle)
-              targets+=(bin/main_eio.exe test/test_tui_lane_addons.exe test/test_lane_addon_application.exe)
+              targets+=(bin/main_eio.exe bin/masc_native_addon_launcher.exe test/test_tui_lane_addons.exe test/test_lane_addon_application.exe)
               ;;
             original-tool-result|source-readers)
               targets+=(bin/main_eio.exe test/test_keeper_tool_result_source.exe test/test_tool_output_washing_e2e.exe test/test_server_dashboard_http_keeper_tool_lookup.exe test/test_tui_chat_call_reader.exe)
@@ -148,6 +148,11 @@ jobs:
             chmod +x proof/masc
             otool -L proof/masc > proof/server-native-dependencies.txt
           fi
+          if [ "$PROOF_SCENARIO" = addon-lifecycle ]; then
+            cp _build/default/bin/masc_native_addon_launcher.exe proof/masc-native-addon-launcher
+            chmod +x proof/masc-native-addon-launcher
+            otool -L proof/masc-native-addon-launcher > proof/launcher-native-dependencies.txt
+          fi
           python3 - <<'PYCODE'
           import hashlib, json, os
           from pathlib import Path
@@ -173,6 +178,11 @@ jobs:
                   'producer': 'bin/masc_tui_keys_doc_cli.exe',
               },
               'server_sha256': hashlib.sha256(Path('proof/masc').read_bytes()).hexdigest() if os.environ['PROOF_SCENARIO'] in ('workspace-files', 'rich-workspace', 'rich-chat-workspace', 'original-tool-result', 'code-references', 'resource-reading', 'addon-lifecycle', 'source-readers', 'code-drafts') else None,
+              'native_addon_launcher': {
+                  'path': 'masc-native-addon-launcher',
+                  'sha256': hashlib.sha256(Path('proof/masc-native-addon-launcher').read_bytes()).hexdigest(),
+                  'producer': 'bin/masc_native_addon_launcher.exe',
+              } if os.environ['PROOF_SCENARIO'] == 'addon-lifecycle' else None,
               'build_targets': targets,
               'expected_tests': expected_tests,
               'executed_tests': executed_tests,

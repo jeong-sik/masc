@@ -39,6 +39,14 @@ registration/terminal intents and exact acknowledgements alongside execution.
 It preserves the original primary phase and never authorizes an effect. Actual
 domain receipt validation and registry reconcile/delivery remain separate work.
 
+Receipt construction is opaque: `make` and `of_json` bind the entire canonical
+payload and its time to a digest. Appending that immutable typed receipt reuses
+it; it does not encode, decode or hash it again. Acknowledgement text and order
+are still checked. Wire history replay decodes each event once and folds that
+validated value through the same transition rules. Public events with open JSON
+payloads still pass the full canonical codec before the fold. This changes no
+wire format, domain authority, durable read or receipt integrity requirement.
+
 Retain compares only immutable scope/request/destination/canonical input and
 digest, preserving any existing history. Advance rereads and compares the entire
 expected record. A different tail conflicts; an exact already-stored next

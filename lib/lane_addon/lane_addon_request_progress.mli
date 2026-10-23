@@ -54,4 +54,6 @@ val append : t -> event -> (t, string) result
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 (** Strictly decode and fold the complete ordered history from Captured.
-    Unknown fields/events, invalid JSON and invalid transitions are errors. *)
+    Decode each event once, then fold its validated value without encoding and
+    decoding it again. Unknown fields/events, invalid JSON, receipt digest
+    mismatches and invalid transitions are errors. *)

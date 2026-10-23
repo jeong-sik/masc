@@ -193,7 +193,7 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
           | other -> Ok other in
         let read_console ~context = with_observation (Browser_console.to_json console ~context) in
         let read_network ~context = with_observation (Browser_network.to_json network ~context) in
-        Ok Browser_downloads.{read;console=read_console;network=read_network;check;close=(fun () -> disconnect "Firefox session closed")} in
+        Ok Browser_downloads.{read;console=read_console;network=read_network;check;command;close=(fun () -> disconnect "Firefox session closed")} in
       let result =
         try setup () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn

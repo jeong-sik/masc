@@ -10,10 +10,18 @@ val max_cookie_age_sec : int
 
 val max_cookie_value_bytes : int
 val same_site_wire : same_site -> string
+type geolocation = { latitude : float; longitude : float; accuracy_m : float }
+(** A tab's reported environment. Each part is optional, at least one is set;
+    [Clear_emulation] gives the tab its own location, language and time zone back. *)
+type emulation = { geolocation : geolocation option; locale : string option; timezone : string option }
+val default_accuracy_m : float
+val max_accuracy_m : float
 type interaction =
   | Upload of { selector : string; paths : string list }
   | Set_cookie of cookie
   | Delete_cookie of string
+  | Set_emulation of emulation
+  | Clear_emulation
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
 type t = Open_tab of string | Open_window of string | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }

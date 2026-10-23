@@ -13,7 +13,7 @@ type operation =
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
   | Read_clipboard | Write_clipboard | Read_network | Intercept_network
-  | Read_console | Read_storage | Write_storage | Sentence_action
+  | Read_console | Read_storage | Write_storage | Emulate_environment | Sentence_action
 type tool = Tabs | Read | Interact | Act | Session | Goto | Instruct
 type invocation = { tool : tool; action : string option; mode : string option }
 type support = Available of invocation

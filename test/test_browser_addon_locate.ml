@@ -53,7 +53,7 @@ let scenario manifest =
       let start_downloads ~session_id:_ ~websocket_url:_=Ok Browser_downloads.{
         read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
         console=(fun ~context:_ -> Ok (`Assoc ["entries",`List [];"dropped",`Int 0]));
-        network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));check=(fun () -> Ok ());close=(fun () -> ())} in
+        network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture");close=(fun () -> ())} in
       let driver=Driver.create ?locate ~start_downloads ~request () in
       ignore (Driver.execute driver (B.Session_open {headless=Some true}));
       ignore (Driver.execute driver B.Tabs_list);

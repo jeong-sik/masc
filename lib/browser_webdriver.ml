@@ -7,7 +7,7 @@ type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:
 type pointer_state = Released | Release_required
 type located_node = { node_id : string; description : string }
 type locate = scene:Browser_scene.t -> instruction:string option -> (located_node list, string) result
-type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable window_sizes : (string * (int * int)) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
+type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable window_sizes : (string * (int * int)) list; mutable emulated : (string * (string * string)) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
 type t = { start_downloads : Browser_downloads.start; binary : string option; locate : locate option; request : request; mutex : Eio.Mutex.t; active : int Atomic.t; mutable session : session option; mutable next_tab : int; observed_session : Browser_lane.session_observation Atomic.t }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -226,7 +226,73 @@ let dialog_text t session =
            | Remote { code = Invalid_session_id | No_such_window | Unexpected_alert_open | Other _; _ }) as error) -> Error error
 let element_call perform_effect id suffix body =
   perform_effect `POST ("/element/" ^ Uri.pct_encode id ^ suffix) (Some body)
-let interact t session ~perform_effect = function
+(* Environment emulation goes over the session's own BiDi connection: WebDriver
+   classic has no call for it. Firefox 158 accepts a location, a locale and a
+   time zone per browsing context (the classic window handle is that context's
+   id), but resetting a locale or time zone with null leaves the override in
+   place (probed). Clearing therefore sets the values the tab had before its
+   first override, which the page cannot tell from no override. *)
+let emulate t session ~started emulation =
+  let* connection = Result.map_error (fun detail -> Protocol detail) session.downloads in
+  let send method_ params =
+    started ();
+    Result.map_error (fun detail -> Protocol (method_ ^ ": " ^ detail)) (connection.Browser_downloads.command method_ params) in
+  let* handle = match call t session `GET "/window" None with
+    | Ok (`String handle) -> Ok handle
+    | Ok _ -> Error (Protocol "invalid current browser window")
+    | Error error -> Error error in
+  let contexts = ["contexts", `List [`String handle]] in
+  let* origin = script t session "return location.origin;" [] in
+  let origin = match origin with `String origin when origin <> "null" -> Some origin | _ -> None in
+  let permission state = match origin with
+    | None -> Ok ()
+    | Some origin ->
+      let* _ = send "permissions.setPermission" (`Assoc ["descriptor",`Assoc ["name",`String "geolocation"];
+        "state",`String state;"origin",`String origin]) in Ok () in
+  let remember_originals () =
+    if List.mem_assoc handle session.emulated then Ok ()
+    else
+      let* seen = script t session "return {locale: navigator.language, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone};" [] in
+      let* locale = string_field "locale" seen in
+      let* timezone = string_field "timezone" seen in
+      session.emulated <- (handle,(locale,timezone)) :: session.emulated; Ok () in
+  match emulation with
+  | Some {Browser_lane.Action.geolocation; locale; timezone} ->
+    let* () = if locale <> None || timezone <> None then remember_originals () else Ok () in
+    let* () = match geolocation with
+      | None -> Ok ()
+      | Some {Browser_lane.Action.latitude; longitude; accuracy_m} ->
+        let* () = permission "granted" in
+        let* _ = send "emulation.setGeolocationOverride" (`Assoc (("coordinates",`Assoc
+          ["latitude",`Float latitude;"longitude",`Float longitude;"accuracy",`Float accuracy_m]) :: contexts)) in
+        Ok () in
+    let* () = match locale with
+      | None -> Ok ()
+      | Some locale -> let* _ = send "emulation.setLocaleOverride" (`Assoc (("locale",`String locale) :: contexts)) in Ok () in
+    let* () = match timezone with
+      | None -> Ok ()
+      | Some timezone -> let* _ = send "emulation.setTimezoneOverride" (`Assoc (("timezone",`String timezone) :: contexts)) in Ok () in
+    Ok (`Assoc ["emulated",`Assoc
+      ((match geolocation with
+        | Some {Browser_lane.Action.latitude; longitude; accuracy_m} ->
+          ["geolocation",`Assoc ["latitude",`Float latitude;"longitude",`Float longitude;"accuracyMeters",`Float accuracy_m]]
+        | None -> [])
+       @ Option.to_list (Option.map (fun l -> "locale",`String l) locale)
+       @ Option.to_list (Option.map (fun z -> "timezone",`String z) timezone));
+      "note",`String "a page that already read its location, language or time zone keeps what it read; reload to see the new ones"])
+  | None ->
+    let* _ = send "emulation.setGeolocationOverride" (`Assoc (("coordinates",`Null) :: contexts)) in
+    let* () = permission "prompt" in
+    let* () = match List.assoc_opt handle session.emulated with
+      | None -> Ok ()
+      | Some (locale,timezone) ->
+        let* _ = send "emulation.setLocaleOverride" (`Assoc (("locale",`String locale) :: contexts)) in
+        let* _ = send "emulation.setTimezoneOverride" (`Assoc (("timezone",`String timezone) :: contexts)) in
+        session.emulated <- List.remove_assoc handle session.emulated; Ok () in
+    Ok (`Assoc ["cleared",`Bool true])
+let interact t session ~perform_effect ~started = function
+  | Browser_lane.Action.Set_emulation emulation -> emulate t session ~started (Some emulation)
+  | Browser_lane.Action.Clear_emulation -> emulate t session ~started None
   | Browser_lane.Action.Upload {selector;paths} ->
     let* id = element_id t session selector in
     let element = `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id] in
@@ -302,7 +368,7 @@ let execute_action t action =
     let* session = session t in
     with_tab t session (Some id) (fun () ->
       let* () = enter_frames t session frame_path in
-      let* result = interact t session ~perform_effect:(perform_effect session) interaction in
+      let* result = interact t session ~perform_effect:(perform_effect session) ~started:(fun () -> phase := Started) interaction in
       match interaction with
       | Browser_lane.Action.Close_tab ->
         session.handles <- List.filter (fun (_,known) -> known <> id) session.handles;
@@ -310,7 +376,8 @@ let execute_action t action =
         Ok (`Assoc ["tabId",`Int id;"closed",`Bool true])
       | Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back | Browser_lane.Action.Forward
       | Browser_lane.Action.Reload | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _
-      | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _ ->
+      | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
+      | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation ->
         (* Do not issue another fallible browser request after an effect.
            The caller observes the resulting page with a separate read. *)
         Ok (`Assoc ["tabId",`Int id;"performed",`Bool true;"result",result]))
@@ -374,7 +441,7 @@ let rec execute_unlocked t = function
              | Transport _ | Protocol _ -> Browser_lane.Browser_unknown);Error error
          | exception exn -> Atomic.set t.observed_session Browser_lane.Browser_unknown;raise exn in
        let* id = string_field "sessionId" result in
-       let owned = { pointer_state = Released; id; handles = []; window_sizes = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
+       let owned = { pointer_state = Released; id; handles = []; window_sizes = []; emulated = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
        t.session <- Some owned;
        Eio.Switch.run (fun setup_sw ->
          let committed = ref false in

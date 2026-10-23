@@ -121,6 +121,21 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
      | Error error -> failwith (Driver.error_message error));
     act first (Browser_action.Delete_cookie "probe-cookie");
     check "the deleted cookie is gone" (not (List.mem "probe-cookie" (cookie_names ())));
+    (* Location, language and time zone are emulated over the session's BiDi connection and cleared to the tab's own. *)
+    let page_value path script =
+      match request ~method_:`POST ~path:("/session/" ^ remote ^ path)
+          ~body:(Some (`Assoc ["script",`String script;"args",`List []])) with
+      | Ok value -> value | Error error -> failwith (Driver.error_message error) in
+    let identity () = page_value "/execute/sync" "return [navigator.language, Intl.DateTimeFormat().resolvedOptions().timeZone];" in
+    let original = identity () in
+    act first (Browser_action.Set_emulation {geolocation=Some {latitude=37.5;longitude=127.;accuracy_m=25.};
+      locale=Some "ko-KR";timezone=Some "Asia/Seoul"});
+    check "the page reports the emulated language and time zone" (identity () = `List [`String "ko-KR";`String "Asia/Seoul"]);
+    check "the page reports the emulated location, with its permission granted"
+      (page_value "/execute/async" "const done = arguments[arguments.length - 1]; navigator.geolocation.getCurrentPosition(function(p){ done([p.coords.latitude, p.coords.longitude]); }, function(e){ done('error ' + e.code); }, {timeout: 5000});"
+       = `List [`Float 37.5;`Int 127]);
+    act first Browser_action.Clear_emulation;
+    check "clearing gives the tab its own language and time zone back" (identity () = original);
     let window_tab = success (run (Browser_lane.Page_act (Browser_action.Open_window (fixture_url ^ "/second")))) |> member "tabId" |> integer in
     check "open_window returns a tab that reads as its own page" (member "url" (read window_tab) = `String (fixture_url ^ "/second"));
     check "the window's tab id is new" (window_tab <> first && window_tab <> second);

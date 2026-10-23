@@ -275,7 +275,9 @@ let support backend operation = match backend with
       | Owned_chromium -> conditional ~action:"set_viewport" Interact
           [observed;"Requires expectedUrl; " ^ viewport_bounds ^ ". Stagehand has no call that restores the browser's own size, so this session keeps the override until it closes.";
            "Read the screenshot or scene again afterward. This is the page viewport, not the browser window."]
-      | Owned_gecko -> Unsupported "The owned Firefox driver sets no viewport; use a live BiDi connection or Stagehand."
+      | Owned_gecko -> conditional ~action:"set_viewport" Interact
+          [observed;"Requires expectedUrl; " ^ viewport_bounds ^ ". With neither, the window's first size returns.";
+           "This resizes the browser window to the viewport plus its chrome. Headless Firefox keeps a window at least about 500 x 120 outer pixels, so a smaller request is refused with the size the page kept; read the screenshot or scene again afterward."]
       | Connected Browser_lane.Web_extension -> Unsupported "WebExtension cannot set the page viewport; the selected tab must not be silently moved to another browser."
       | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
     | Touch -> (match backend with

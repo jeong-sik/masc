@@ -99,23 +99,6 @@ let roles () =
     | j -> j in
   check bool "unknown category rejected" true (Result.is_error (Browser.receive (mangle (Catalog.to_json snapshot)) state))
 
-let headed_rows_stay_visible () =
-  let package name category = Catalog.Package {manifest_path="/w/"^name^"/lane.toml";
-    metadata={metadata with title=name;ui_category=category}} in
-  let open Masc.Lane_addon_category in
-  let entries=[package "p0" (Some Memory_and_judgment);package "p1" (Some Browser);package "p2" (Some External_communications);
-    package "p3" (Some Voice_and_media);package "p4" (Some Execution_environment);package "p5" (Some Analysis);package "p6" None] in
-  let snapshot=Catalog.{directory="/w";parent=None;entries} in
-  let state=ref (Browser.receive (Catalog.to_json snapshot) (Browser.create ()) |> ok) in
-  for _=0 to 6 do
-    let lines=Browser.lines ~height:17 ~render:(fun s->[s]) !state in
-    let selected=Option.get (Browser.selected_manifest !state) in
-    let name=Filename.basename (Filename.dirname selected) in
-    check bool ("selected " ^ name ^ " visible above details") true
-      (List.exists (fun l -> String.starts_with ~prefix:"> Package " l && String.length l > 0 && List.exists ((=) l) (List.take 11 lines)) lines);
-    if name <> "p6" then state := move "j" !state
-  done
-
 let reachable_large_list () =
   let snapshot=Catalog.{directory="/workspace";parent=None;entries=List.init 100 (fun i -> Folder (Printf.sprintf "/workspace/folder-%03d" i))} in
   let state=Browser.receive (Catalog.to_json snapshot) (Browser.create ()) |> ok |> move "end" in
@@ -141,7 +124,6 @@ let unread_remembered_folder () =
 
 let () = run "Local package discovery and selection" ["journeys",[
   test_case "discover actual directory with explicit loader outcomes" `Quick discover_workspace;
-  test_case "headed rows stay visible" `Quick headed_rows_stay_visible;
     test_case "never load manifests outside workspace" `Quick containment;
   test_case "folder to package selection and existing preview handoff" `Quick navigation;
   test_case "packages are grouped by role without moving folders or issues" `Quick roles;

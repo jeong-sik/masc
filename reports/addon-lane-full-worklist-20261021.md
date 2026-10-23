@@ -16,7 +16,7 @@
 | E04–E05 | task-2523 | Required Judge/Board 서비스 의무·승계, 원래 per-attempt callback과 durable 후보를 유지하는 worker 실행 |
 | E06 | task-2524 | Task/Goal의 도구·이미지·lookup·원본 증거와 report-verdict 프로토콜을 유지하는 Verifier; 최종 전이·확인은 host 소유 |
 | E03 후속 | task-2525 | history 용량·실패 descent, continuity/working-context/maintenance 목적과 실제 Keeper 기억 연속성 |
-| E09 | task-2526 | Voice/VST 실제 I/O·session/player/device 수명·Off·재연결·정리 |
+| E09 | task-2526 | Realtime 세션 보존·실제 Keeper 활동 응답5파일 수리 #45448 main 병합. 최초 P2 FAIL·수리 뒤 독립 SOURCE PASS·parser5 보존. 선택 실행은 compile 실패로 미실행. TTS/STT/player/device의 Addon 추출·실제 입출력/해제 기준은 그대로 남음 |
 | E10–E11 | task-2527 | Connector polling/socket/cursor와 Search fallback/cache/cancel의 실제 실행; host credential·송신 권한 보존 |
 | E07–E08·E12 | task-2528 | 기존 Fusion/MSX/DOS 및7개 패키지의 실제 사용·원래 결과·명시적 복원; observation-only와 callable 구분 |
 | G·H 및 A | task-2529 | Dashboard/TUI 실제 조작·관측·원래 이력·부분 실패·설정 반영 및 동일 candidate의 조합 검증 |
@@ -84,12 +84,12 @@ A의 이번 Addon 변경 닫기는 대상 범위가 다르며, 같은 수정이�
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 고정6f68 및 수리d06fc922 native 각 TUI24+application5 PASS. matching 두 실행 파일 내장 SHA·해시·key reference와 clean 같은소스 Dashboard build 확인. 운영 설치와 구분 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
-| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 6f68 실제 두 UI On→Off→On 및 Remove TOML+worker→재설치·세 incarnation/정리 확인. Evidence 직후 row 소실 #44895 수리 뒤 exactd06 실제 TUI에서 row/선택/원래 receipt/읽기실패 공존 및 정상 보존 확인. 새 후보 전체 lifecycle·운영 설치 별도 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
+| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 후속 UI source 29개 중 28개가 pinned main과 동일(test/dune 제외). 기존 source PASS는 type/build PASS 아님. 기존 범위의 근거와 원래 완료 기준은 유지. | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
+| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 새 Features/Plugins·분류·원본 선택 보존 소스는 main. 새 후속 TUI 실제 화면은 미관측. 기존 범위의 근거와 원래 완료 기준은 유지. | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
 | A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 main 병합. 고정 `7b16a917` 실제 TUI에서 retained 실행 키 미노출·수동 Observe 거절·이력 진입 확인; 전체 상세 새로고침 결함은 A02/G06에서 별도 추적 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
-| A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | 공통 #44710·G01 #44803 및 G06 #44840의 6개 층 main 병합 확인. G06 병합 head와 이후 fragment-only branch head를 구분. Browser #44168 전체 현재 판정·남은 맥락 리뷰와 새 follow-up head의 재승인은 별도 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
-| A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | 세 층의 전체 delta 직독; exact `76b741f` run `39555413943` 두 suite 14건 PASS, 독립 source delta 검토 PASS; 실제 앱·전체 스택 검증 별도 | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
-| A06 | 두 스택의 전체 통합 준비 | 공통·G01·G06 및 Browser #44702 main 병합 확인(merge bba6fd6e, 현재 main73028의 조상). 이전67층의 승인·충돌 수치는 과거 기록. 현재 Browser #45277의5층/top#45283·#45263·#45222와 Curator #45201의7층/top#45300은 별도 열린 후속이며 현재 head 판정 필요. Librarian #45095의15층 전체 push·재리뷰와 실행 실패 수리를 진행 | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
+| A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | Core/UI/Connector 및 HITL/Verifier 원본 owner 병합 확인. Browser와 Librarian #45095도 병합됨. 이후 후속 head의 독립 리뷰와 남은 P0–P2 대응은 계속하며 병합을 실행 성공으로 바꾸어 세지 않음 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
+| A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | #44702 REST merged와 pinned main 조상 관계 확인. 원래 Browser 후속3 전체 재리뷰는 아님. 기존 범위의 근거와 원래 완료 기준은 유지. | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
+| A06 | 두 스택의 전체 통합 준비 | 원래 공통·Browser 스택은 main 병합 확인. Librarian #45095도 top #45357 exact444ce2d5에서 07:00:59Z 병합(3931736b). 과거 0/67 승인·dirty 상태는 아래 역사 기록에 보존하며 현재 대기 상태로 세지 않음 | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
 
 빌더 요청: `kmsg-2ada1cdc54884c58aa6736a80b598868`는 기존 `566b98b` 대상이다. 후속 exact 후보 `7f9e34b`는 native run `39555509454`로 요청했다. 중복 시작을 피하도록 빌더에게 대체 안내 `kmsg-1974c332ed1abfed8b4bde992b686e8f`를 보냈으며 안내 접수는 원래 작업 취소·실행 여부의 증거가 아니다.
 코드 리뷰: `kmsg-f7fecd527b3870306df62a4079c30ad8` 완료 및 #44707 review `5595612747` APPROVED 직독. head `566b98b5d1645d6312d518bf2810f3e5e0626586`, reviewed base `b95d927e30c6718e0fe656d3019c6cf39766c02c`, diff `ff95fe2ecb2658cee6da5b251d2b119c825270116c978246de762b5374e336c2`. 한 층의 소스 승인이다. #44721 후속 요청 `kmsg-dc966b86727baccd78eaa31700ef384e`는 queued 접수다.
@@ -114,9 +114,9 @@ A의 이번 Addon 변경 닫기는 대상 범위가 다르며, 같은 수정이�
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| C01 | 패키지 발견·설치·활성화·비활성화·제거 흐름 통일 | 공통 경로 있음 | 같은 manifest/declaration을 API·Dashboard·TUI가 사용하고 저장/적용/관측 결과를 구분 |
-| C02 | Deferred Tools를 다른 Addon에도 실제 적용 검증 | Browser 범위 구현·검증. 실제 Candle Python worker→Runtime→ToolSearch→동일 Agent read·Off 거절·새 incarnation 재로딩 fixture 추가 및 독립 source PASS; compiled 실행은 별도. Keeper의 host 전용 submit 권한을 늘리지 않음 | 검색→원래 schema 로드→같은 Agent에서 호출, 설치 없을 때 미노출 |
-| C03 | 끄기·교체 뒤 tool inventory 갱신과 기존 호출 처리 | 기반 있음 | 신규 발견은 갱신되고 이미 시작된 호출은 원래 소유자/receipt로 종료; 오래된 export로 새 실행 불가 |
+| C01 | 패키지 발견·설치·활성화·비활성화·제거 흐름 통일 | 서버 builtin ui_category 정본과 두 UI consumer·package metadata가 main. API action identity 유지. 기존 범위의 근거와 원래 완료 기준은 유지. | 같은 manifest/declaration을 API·Dashboard·TUI가 사용하고 저장/적용/관측 결과를 구분 |
+| C02 | Deferred Tools를 다른 Addon에도 실제 적용 검증 | main Keeper snapshot/call·export 재검증 확인. real same-Agent deferred lifecycle 회귀는 병합된 #45357의 범위. 기존 범위의 근거와 원래 완료 기준은 유지. | 검색→원래 schema 로드→같은 Agent에서 호출, 설치 없을 때 미노출 |
+| C03 | 끄기·교체 뒤 tool inventory 갱신과 기존 호출 처리 | frozen export generation과 live schema/caller 재검증은 main 인터페이스에 존재. 기존 범위의 근거와 원래 완료 기준은 유지. | 신규 발견은 갱신되고 이미 시작된 호출은 원래 소유자/receipt로 종료; 오래된 export로 새 실행 불가 |
 | C04 | 번들 Skill·본문·참조·스크립트의 발견과 해제 검증 | 기반 있음 | 설치별 정확한 Skill reference·revision으로 읽고 해제 뒤 새 discovery에서 제외 |
 | C05 | 입력 Hook과 출력 Hook의 독립 선택·적용 검증 확장 | Browser 범위 구현·검증 | 선언·override·off 조합이 실제 호출에 반영되고 원래 효과/실패 정보 보존 |
 | C06 | 필수 authority 검사와 선택 Hook을 분리 | Browser 경계 있음 | Hook을 꺼도 caller·workspace·incarnation·권한·결과 기록 검사가 유지됨 |
@@ -127,10 +127,10 @@ A의 이번 Addon 변경 닫기는 대상 범위가 다르며, 같은 수정이�
 | --- | --- | --- | --- |
 | D01 | Addon별 모델 route와 기능 활성화의 독립 선택 검증 확장 | Browser broker 있음 | LLM 없는 동작은 독립 실행되고, 설치/출력별 선택 모델이 실제 호출에 반영 |
 | D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | [#44768](https://github.com/jeong-sik/masc/pull/44768)·[#44769](https://github.com/jeong-sik/masc/pull/44769)에 원래 요청 identity·grant·완전 domain decode·terminal unknown 처리 source 구현. 독립 source/response 검토 PASS; OCaml 실행 검사는 아직 미완료 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
-| D03 | 모델 호출 전 요청 보존 및 원래 identity 결속 | 기반 있음 | request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch |
-| D04 | 오류·거절·불확실 결과의 typed 처리 일관화 | 도메인별 차이 있음 | transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지 |
+| D03 | 모델 호출 전 요청 보존 및 원래 identity 결속 | 공유 원본 owner와 HITL/Verifier attempt 원본은 main. Librarian actual terminal Outcome_unknown을 원래 source frontier에 유지하는 #45451도 main 병합 확인. 원래 입력·prepared proof·provider 중복 방지의 source 수리와 미실행 회귀를 구분; 나머지 producer 연결은 남음 | request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch |
+| D04 | 오류·거절·불확실 결과의 typed 처리 일관화 | RPC Sent_unknown의 dispatch-pending과 host terminal Outcome_unknown을 구분. 후자가 source frontier에서 빠지던 P2는 #45451 main 병합으로 source 수리. 실제 worker 회귀는 aggregate compile에서 막혀 미실행; 운영자에게 unknown 원인·해결 경로를 보이는 후속은 남음 | transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지 |
 | D05 | credential·provider admission·동시 실행 권한을 host에 유지 | Browser 검증 있음 | worker/child에 비밀 유출 없음; 실제 provider별 queue·취소·동시성 동작 확인 |
-| D06 | 설정 교체·detach 중 늦은 모델 응답 처리 | Browser 범위 검증 있음 | 원래 요청의 terminal 증거를 보존하고 새 worker에 오적용하거나 같은 효과를 재생하지 않음 |
+| D06 | 설정 교체·detach 중 늦은 모델 응답 처리 | Browser 범위 기존 검증 보존. Librarian의 actual unknown 원본을 현재 route 교체 뒤에도 source frontier에 유지하는 #45451 main 병합 확인. late response·재실행 방지의 authored 회귀와 실제 실행·설치 증거는 구분 | 원래 요청의 terminal 증거를 보존하고 새 worker에 오적용하거나 같은 효과를 재생하지 않음 |
 
 Fusion 패널 답변은 기존 free text 계약을 유지한다. 모든 Lane의 결과를 임의로 Exact JSON으로 통일하지 않는다.
 Browser 최신 스택에는 요청별 schema와 부분 shape 검사가 이미 있다. 이 기반이 main에 통합됐다고
@@ -142,18 +142,18 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
-| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | db31 선택79·native29 PASS. 같은 실제 workspace에서 Off 원래 Briefing 복구→On 새 입력→final Off0·6요청 ACK·두 UI [실측](../docs/evidence/2026-10-22-curator-Off-recovery/README.md). 전체 실패 경계·통합·운영 설치 별도 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
-| E03 | Librarian 실행의 Addon 경계 검토·추출 | 이전 exact owner23/history11 및 Pending 기반631 선택 PASS. 최신8bd 실행은 Current155·progress16·history13/14로 전체 FAIL; Off의 원본 pre-admission read를 대기로 보존하는 공통 수리 진행. 전체 목적·history descent·실제 Keeper 연속성·통합/설치는 미완료 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
-| E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
-| E05 | Board Attention 실행의 Addon 경계 검토·추출 | 조사·설계, Required | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
-| E06 | Verifier 실행의 Addon 경계 검토·추출 | 조사·설계 | 증거 검증과 Goal/Task 최종 전이를 분리하고 위조·이전 실행 증거 오적용 없이 재개 |
+| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 / 10/23: Candle Off owed→On3stage→Paid1회→재연결 불변3결과 public 영수증 직접 읽음. host eb484/worker b427 혼합. | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
+| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | db31 선택79·native29 PASS. 같은 실제 workspace에서 Off 원래 Briefing 복구→On 새 입력→final Off0·6요청 ACK·두 UI [실측](../docs/evidence/2026-10-22-curator-Off-recovery/README.md). 전체 실패 경계·통합·운영 설치 별도 / 10/23: db31 Off 원래 Briefing 복구→새 incarnation·새 input→6ACK·최종 Off 실제 영수증 직접 읽음. | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
+| E03 | Librarian 실행의 Addon 경계 검토·추출 | #45095 원래16층과 terminal-unknown source 수리 #45451이 main 병합됨. checkpoint·absorption·Memory lineage·pending 전체 기준 유지. actual unknown 뒤 새 UUID/provider를 만들지 않는 독립 SOURCE PASS; 후속 selected 회귀는 compile 실패로 미실행이며 Keeper 실제 기억 연속성·운영 설치는 남음 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
+| E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | Required attestation+#45365 original+#45369 durable owner는 main. production prepare/retain caller 검색상 없음. 기존 범위의 근거와 원래 완료 기준은 유지. | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
+| E05 | Board Attention 실행의 Addon 경계 검토·추출 | Required registry는 Board에도 기반. Board-specific original/worker bridge는 직접 확인 안 함. 기존 범위의 근거와 원래 완료 기준은 유지. | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
+| E06 | Verifier 실행의 Addon 경계 검토·추출 | #45390 original+owner ML/MLI는 main. subject/question/lookup/evidence·attempt 저장 존재, production caller 미연결. 기존 범위의 근거와 원래 완료 기준은 유지. | 증거 검증과 Goal/Task 최종 전이를 분리하고 위조·이전 실행 증거 오적용 없이 재개 |
 | E07 | Fusion compute/results/report의 실제 조합 사용 검증 | 패키지 존재 | native/container/provider 계산·원래 run·immutable 결과 연결·명시적 전달·실제 Agent 읽기 확인 |
 | E08 | MSX/DOS의 설치·상태 복원·실제 게임 사용 검증 | 별도 worker·image 검증 있음 | `msx-machine`·`dos-machine`·`dos-world`의 설치 On/Off/교체·명시적 checkpoint 복원·기존 media/save 보존과 실제 화면/입력 확인 |
-| E09 | Voice·VST 실행 소유 경계 분리 | VST는 관측만, Voice는 설계 필요 | TTS/STT/realtime/session/player/device 수명과 결과·오류를 분리; 실제 입출력과 해제 정리 확인 |
-| E10 | Slack/Discord Connector의 선택적 Addon 경계 정리 | 조사·설계 | polling/cursor/subscription/인증/재접속·중복 전달 방지·host 메시지 권한 유지 |
+| E09 | Voice·VST 실행 소유 경계 분리 | Realtime bridge 설정 소실 시 원래 모드·ID·voice·턴 이력을 Suspended로 보존하고 Keeper 응답을 typed Active로 계산하는5파일 수리 #45448 main 병합 확인. 최초 P2 FAIL·수리 뒤 독립 SOURCE PASS·parser5 보존. 선택 실행은 공유 Runtime compile 오류로 미실행. TTS/STT/player/device Addon 추출·실제 입출력/해제는 남음 | TTS/STT/realtime/session/player/device 수명과 결과·오류를 분리; 실제 입출력과 해제 정리 확인 |
+| E10 | Slack/Discord Connector의 선택적 Addon 경계 정리 | 원래 Connector event·durable acceptance 전 ACK 금지·원래 route/full-history/workspace 소비자 확인. 기존 범위의 근거와 원래 완료 기준은 유지. | polling/cursor/subscription/인증/재접속·중복 전달 방지·host 메시지 권한 유지 |
 | E11 | Web Search의 provider·cache·credential 경계 추출 | 조사·설계 | 실제 검색/fallback/취소/출처 보존; provider credential을 host에 유지 |
-| E12 | 나머지 패키지의 공통 계약 적합성·실사용 점검 | 패키지 존재 | output-statistics, value-difference, frame-progress, web-project, wkbl-score-runs, operator-quiz, msx-observer의 설치/도구/Skill/출력 연결을 실제 검증 |
+| E12 | 나머지 패키지의 공통 계약 적합성·실사용 점검 | #45357 Candle 기반 deferred fixture는 원래 나열7패키지 실사용 검증을 대신하지 않음. 기존 범위의 근거와 원래 완료 기준은 유지. | output-statistics, value-difference, frame-progress, web-project, wkbl-score-runs, operator-quiz, msx-observer의 설치/도구/Skill/출력 연결을 실제 검증 |
 
 E03–E06은 무조건 모두 외부 프로세스로 옮긴다는 확정안이 아니다. B01 조사 후
 모델 실행과 host authority를 분리할 실익·수명 계약을 확인하고 각 추출 범위를 확정한다.
@@ -163,12 +163,12 @@ E03–E06은 무조건 모두 외부 프로세스로 옮긴다는 확정안이 �
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| F01 | Firefox/Chrome/Safari와 연결 방식의 능력 표 및 자동 선택 | 부분 구현, 후속 필요 | 필요한 동작·실제 연결·profile/세션 권한으로 선택; 미지원은 명확히 표시하고 임의 중복 세션을 만들지 않음 |
-| F02 | 탭·창·context·이동·frame/shadow DOM 경계 검증 | 기존 구현 있음 | 새 탭/전환/닫기·navigation·frame 전환에서 원래 target identity와 문서 상태 보존 |
-| F03 | 포인터 행동의 완성도와 좌표·대상 정확성 검증 | 기존 hover/drag 경로 있음 | hover, click, double/right click, down/up, drag/drop을 실제 UI 변화로 확인; stale 좌표 거절 |
-| F04 | 키보드·텍스트·스크롤·확대축소의 일관된 지원 | 전수 확인 필요 | focus, 입력/선택/편집, 조합키/IME, 영역 스크롤, zoom 및 화면 좌표 변환 확인 |
-| F05 | 파일·클립보드·dialog·popup·권한 상호작용 범위 점검 | 파일 일부 실측 있음 | upload/download와 artifact 보존, clipboard, dialog, popup, browser 권한 화면의 지원/운영자 개입 경계 명시 |
-| F06 | Browser 읽기·진단·출력 기능의 능력별 점검 | 일부 구현 | screenshot/PDF, console/network, cookie/storage, history·성능 관측 등을 engine별로 검증; 미지원 기능은 성공으로 응답하지 않음 |
+| F01 | Firefox/Chrome/Safari와 연결 방식의 능력 표 및 자동 선택 | 능력표/자동선택 ML·MLI: requiredActions·실제 연결/session/model 가능성·exact bound identity. Safari adapter 없음. 기존 범위의 근거와 원래 완료 기준은 유지. | 필요한 동작·실제 연결·profile/세션 권한으로 선택; 미지원은 명확히 표시하고 임의 중복 세션을 만들지 않음 |
+| F02 | 탭·창·context·이동·frame/shadow DOM 경계 검증 | 탭/context/frame별 제약은 능력표에 존재. close_window는 public 미지원. 기존 범위의 근거와 원래 완료 기준은 유지. | 새 탭/전환/닫기·navigation·frame 전환에서 원래 target identity와 문서 상태 보존 |
+| F03 | 포인터 행동의 완성도와 좌표·대상 정확성 검증 | Native click/hover/double/right/drag와 stale geometry 제약. pointer_down/up public 미지원. ego drag는 #45399 후속 확장. 기존 범위의 근거와 원래 완료 기준은 유지. | hover, click, double/right click, down/up, drag/drop을 실제 UI 변화로 확인; stale 좌표 거절 |
+| F04 | 키보드·텍스트·스크롤·확대축소의 일관된 지원 | type/fill/select/key/scroll/viewport 조건부 구현. backend별 zoom/touch 차이, 전체 IME 보장 없음. 기존 범위의 근거와 원래 완료 기준은 유지. | focus, 입력/선택/편집, 조합키/IME, 영역 스크롤, zoom 및 화면 좌표 변환 확인 |
+| F05 | 파일·클립보드·dialog·popup·권한 상호작용 범위 점검 | Owned Gecko upload/download/dialog, BiDi operator-owned dialog 거절. clipboard public 미지원. 기존 범위의 근거와 원래 완료 기준은 유지. | upload/download와 artifact 보존, clipboard, dialog, popup, browser 권한 화면의 지원/운영자 개입 경계 명시 |
+| F06 | Browser 읽기·진단·출력 기능의 능력별 점검 | Screenshot/console/network/cookie/storage/emulation/block 요청은 엔진별 조건. PDF/performance는 public catalog에 없음. 기존 범위의 근거와 원래 완료 기준은 유지. | screenshot/PDF, console/network, cookie/storage, history·성능 관측 등을 engine별로 검증; 미지원 기능은 성공으로 응답하지 않음 |
 
 Browser의 기존 완료 범위는 [기존 범위의 공개 증거 영수증](https://github.com/jeong-sik/masc/pull/44653#issuecomment-6308198140)에 있다.
 Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현을 피한다.
@@ -178,12 +178,12 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | Stack #44803의 #44801·#44802·#44830 main 병합 확인(770ca204·912f1108·1a8c3744). host application 연결과 historical62/후속92건 증거 구분 보존. 새 main 조합의 native/UI·설치 증거는 별도 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
-| G02 | 입력→Hook→worker→모델→출력/소비자의 연결 관계 표시 | 일부 Flow 있음 | 실제 연결 reference에 근거해 표시; 관측 그래프를 실행 허가로 사용하지 않음 |
+| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | Features=내장+Plugin, Plugins=설치 관리. 서버 정본 role·두 UI·exact 원래 action target 소스 main. 기존 범위의 근거와 원래 완료 기준은 유지. | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
+| G02 | 입력→Hook→worker→모델→출력/소비자의 연결 관계 표시 | Flow/Technical 원래 target remap은 main. 전체 input→Hook→model→consumer graph 감사 아님. 기존 범위의 근거와 원래 완료 기준은 유지. | 실제 연결 reference에 근거해 표시; 관측 그래프를 실행 허가로 사용하지 않음 |
 | G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | Candle 동일 종단 재조회가 elapsed를 덮는 실제 결함을 #44920에서 수리: 첫 receipt 보존·실패 append 재시도·읽기 불가 payload 보존. source 독립 PASS, exact b8a160 선택 검사 transport10+contract2+flow24 합36건 PASS. 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
-| G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
-| G05 | 에이전트 작업 중 표시와 현재 포인터/입력 활동 표시 | 범위별 재확인 필요 | 실제 동작 이벤트 기반으로 작업자·활동·포인터 위치 표시; 완료·중단·해제 때 표시 정리 |
-| G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 6f68 bare global Slice HTTP200·retained refresh·cross-run 거절·복구 관측. #44895 exactd06에서 Evidence 보존 뒤 원래 row/selection/receipt와 Slice EOF 유지·장애 해제 후 정상 보존 실측. application 관측 보존 독립 SOURCE PASS; 모든 workspace/revision 경계 미완료 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
+| G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 같은 경로 다른 ID 역사와 role sorting·Inspect exact anchor 보존. 원래 numeric retarget FAIL 기록 보존. 기존 범위의 근거와 원래 완료 기준은 유지. | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
+| G05 | 에이전트 작업 중 표시와 현재 포인터/입력 활동 표시 | Pointer feedback MLI는 trusted event의 실제 좌표만 관측하고 intended target과 구분. 전체 consumer 미감사. 기존 범위의 근거와 원래 완료 기준은 유지. | 실제 동작 이벤트 기반으로 작업자·활동·포인터 위치 표시; 완료·중단·해제 때 표시 정리 |
+| G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 원래 선택 상실 notice·같은 경로 교체 거절·실제 query→typed 관리 action 소스 main. 기존 범위의 근거와 원래 완료 기준은 유지. | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
 
 
 G04 후속 [#44807](https://github.com/jeong-sik/masc/pull/44807) · 다른 설치 ID의 같은 TOML 경로
@@ -199,12 +199,12 @@ G04 후속 [#44807](https://github.com/jeong-sik/masc/pull/44807) · 다른 설�
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| H01 | 같은 후보의 API·worker·Dashboard·TUI 조합 검증 | 같은6f68의 API·실제 worker·Dashboard·TUI 조합으로 Off와 Remove TOML+worker를 구분하고 재설치/세 incarnation/원래 이력/정리를 관측. Evidence 후 row 소실 발견으로 전체 성공 판정은 보류; 수정 후보 실행과 다른 패키지/운영 설치 별도 | On/Off와 Remove TOML+worker→재설치를 구분해 실행; 정확한 source/build 조합을 기록하고 서로 다른 증거 층을 합쳐 완료로 세지 않음 |
-| H02 | 실제 LLM·실제 앱에서 작업 완주 | Browser 모델 일부는 scripted | fixture 검증과 구분해 실제 Agent의 discovery→Skill→선택→실행→결과 확인을 수행; hover toolbar/drag 등 원래 증상 해결 확인 |
-| H03 | 실패·중단·재시작·설정 교체 복구 검증 | 부분 시나리오 있음 | 실행 중 Off, 지연/유실 응답, 부분 생성, 죽은 worker, 정리 실패·engine 변경·lease 거절에서 중복 효과/잘못된 삭제 없이 복구 |
+| H01 | 같은 후보의 API·worker·Dashboard·TUI 조합 검증 | 후속 UI hash 범위만 current main 결속. 원래6f68/d06/db31·Candle 혼합 qualification은 각 identity 보존. 기존 범위의 근거와 원래 완료 기준은 유지. | On/Off와 Remove TOML+worker→재설치를 구분해 실행; 정확한 source/build 조합을 기록하고 서로 다른 증거 층을 합쳐 완료로 세지 않음 |
+| H02 | 실제 LLM·실제 앱에서 작업 완주 | 병합된 #45357는 real configured Runtime/Agent Tool_set fixture. actual LLM+real app 완주 아님. 기존 범위의 근거와 원래 완료 기준은 유지. | fixture 검증과 구분해 실제 Agent의 discovery→Skill→선택→실행→결과 확인을 수행; hover toolbar/drag 등 원래 증상 해결 확인 |
+| H03 | 실패·중단·재시작·설정 교체 복구 검증 | Curator Off 복구/Candle bounded reconnect/ego cleanup 각각의 범위만 보존. 모든 실패군 검증 아님. 기존 범위의 근거와 원래 완료 기준은 유지. | 실행 중 Off, 지연/유실 응답, 부분 생성, 죽은 worker, 정리 실패·engine 변경·lease 거절에서 중복 효과/잘못된 삭제 없이 복구 |
 | H04 | 반복 연결과 장시간 연속 사용 검증 계획·실측 | 후속 실측 계획 | 제품의 10턴 이상·1/2/4/24h+ 목표에 연결한 시나리오·실측 범위를 정하고 연속성·누수·복구 근거 수집; 매 작은 PR에 전체 장기 검증을 반복하는 gate로 삼지 않음 |
-| H05 | 반응 속도·자원·동시 작업 영향 측정 | 후속 실측 | 동일 작업 조건의 전후 latency·queue·CPU·memory 및 TUI/Dashboard 반응을 측정; 다른 Keeper 영향 확인 |
-| H06 | 사용 안내·최종 통합·설치 후 확인 | PR 단계 | manifest/예제/운영·개발 가이드 갱신, 승인된 스택 통합, 선택된 실제 설치본의 identity 및 UI 재확인; Release/Tag라면 해당 전체 검증 별도 수행 |
+| H05 | 반응 속도·자원·동시 작업 영향 측정 | Curator CPU synthetic8MiB observer gap31.416–32.966ms→1.183–2.099ms. 실제 timeout 해결의 인과 증거 아님. 기존 범위의 근거와 원래 완료 기준은 유지. | 동일 작업 조건의 전후 latency·queue·CPU·memory 및 TUI/Dashboard 반응을 측정; 다른 Keeper 영향 확인 |
+| H06 | 사용 안내·최종 통합·설치 후 확인 | Category/Features/Plugins guide·public evidence 추가됨. 감사 입력인14a4026c 당시의 canonical54 표는10/22 checkpoint에서 멈춰 있었음. 기존 범위의 근거와 원래 완료 기준은 유지. | manifest/예제/운영·개발 가이드 갱신, 승인된 스택 통합, 선택된 실제 설치본의 identity 및 UI 재확인; Release/Tag라면 해당 전체 검증 별도 수행 |
 
 ## X. 이전 대화의 공통 후속 — 6개
 
@@ -849,3 +849,25 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - completed-history 후속 실측: exactd22196의39894327289는438건 중421PASS/17FAIL이었다. 실제 checkpoint fixture와 baseline 수리 뒤 exact0bf669d의39895924935에서 source capture7·capacity callback25는 PASS했다. 새 nonempty external admission의 Eio 문맥 실수로 통합11건은 여전히 setup FAIL이며 호출 문맥을 수리한다. 별도 worker6사례·17실제프로세스 재실행은0.861초이며 원문/개별시간을 공개 evidence에 보존했다. 부모 성공·소스 판정을 통합 성공으로 올리지 않는다.
 
 - completed-history 통합은 exact8fcdbca8의 [39896648638](https://github.com/jeong-sik/masc/actions/runs/39896648638)에서11/11 PASS(4.606초)했다. 원래 외부 항목1개 ACK·Off 로컬 복구·실제 Memory 영수증·worker 교체 및 재추론 금지 사례를 포함한다. resource launch/cleanup과 provider HTTP는 fixture이고 absorption-model policy는 disabled다. 운영 실측·유료 provider·실제 UI·전체54완료로 확대하지 않는다. MASC 리뷰의 전역 inventory 손상으로 정상 queued Keeper wake가 빠지는 P2는 실제 Runtime 설정 이벤트 회귀를 추가해 수리하며 별도 실행한다.
+
+## 2026-10-23 재개 · 원래54개 기준 보존과 현재 병합·실패 경계
+
+[54행의 범위별 감사와 원래 기준 동결](../docs/evidence/2026-10-23-addon-goal54-checkpoint/README.md)을 기록한다.
+원래 A01–H06의 이름·완료 기준은 모두 유지하며, X01–X06은 별도 확장 범위다.
+이번 상태 갱신은 완료율 재산정이나 전체54개 완료 선언이 아니다. 기존 bounded 실측은 그 identity와
+범위에서 보존하며, 모든 행에 새 후보 전체 재실행이나 운영 설치를 새로운 완료 조건으로 추가하지 않는다.
+
+- 기본 소스 감사는 main `14a4026c26d0e4dcbca3c50a515f123c950d439f`에서 읽은 범위다. 이후 #45426 수리와 #45095 병합은 별도 REST·실제 source 근거로 추가했다. 이 문서의 조립 base는 `fe1e8f7292e2f1aedd12e39cc6a872679fe2a591`이며 그 전체를 새로 승인한 것은 아니다.
+- UI 후속 exact `f6f183a439f962ac723d938c11fdca6d69f2f431`의 [선택 CI39912368422](https://github.com/jeong-sik/masc/actions/runs/39912368422)는 warning4로 aggregate compile에서 실패했다. 선택6suite는 전부 미실행이다. 기존73 PASS·Dashboard64/tsc PASS와 분리한다. [#45426](https://github.com/jeong-sik/masc/pull/45426)의 명시 분기 수리는 main에 병합됐으며 이 갱신 시점에 새 실행·binary·실제 TUI 성공은 미확인이다.
+- Librarian #45095는 top [#45357](https://github.com/jeong-sik/masc/pull/45357) exact `444ce2d57c7a2a74353fb3e8189cdde04d8f94b9`에서 07:00:59Z 병합됐다. 과거 open16·옛 head 판정은 당시 기록으로만 보존한다. 실제 host terminal `Outcome_unknown`이 Rejected로 정산된 뒤 다음 ordinary wake가 같은 unread source를 새 ID로 선택할 수 있는 source P2를 확인했다. RPC pending과 구분하며, 후속에서는 actual terminal 확인 뒤 두 번째·세 번째 wake의 원본/호출/ACK/Memory 상태를 검증한다.
+- HITL/Verifier immutable original과 durable owner는 기반이다. 실제 producer·worker·host 판정/최종 전이를 연결하는 E04/E06 기준은 남는다. Connector ACK 수리도 전체 Connector Addon 추출 완료가 아니다.
+- Features는 내장 기능과 Plugin을 함께 찾는 화면이고, Plugins는 설치·활성화 관리다. Lane은 내부 작업·관측 경로다. Catalog의 폴더 탐색을 유지한 역할 분류와 기존 package preview의 execution/worker-service 상세는 후속 구현 범위다.
+- Voice는 E09의 세션 상태 수리를 별도로 진행하며 실제 음성 연결·장치 입출력·Addon 수명 완료를 주장하지 않는다. 브라우저 Safari/clipboard/독립 pointer down-up 등 아직 공개 지원되지 않은 행동군도 원래 F 기준에 남는다.
+
+## 2026-10-23 재개 · source 병합과 미실행 회귀의 분리
+
+- Voice source [#45448](https://github.com/jeong-sik/masc/pull/45448)와 Librarian source [#45451](https://github.com/jeong-sik/masc/pull/45451), Librarian evidence [#45452](https://github.com/jeong-sik/masc/pull/45452)의 실제 REST merged/merge commit을 확인했다. D03/D04/D06/E03/E09 상태만 고치고 원래 항목명·완료 기준은 그대로 유지했다. 과거 감사 JSON과 실패 영수증은 그 관측 시점의 기록으로 보존한다.
+- Voice+TUI8 선택 run [39917104360](https://github.com/jeong-sik/masc/actions/runs/39917104360)와 Librarian2 선택 run [39917292369](https://github.com/jeong-sik/masc/actions/runs/39917292369)는 완료 실패다. 공유 Runtime의 `retain ~summary` 누락 등 aggregate compile 오류로 선택 suite가 실행되지 않았다. 각 source 리뷰 PASS를 테스트 PASS로 바꾸어 쓰지 않는다.
+- `~summary` 수리 뒤 다섯 fixture 수리 Native Stack #45464의 [#45462](https://github.com/jeong-sik/masc/pull/45462)·[#45463](https://github.com/jeong-sik/masc/pull/45463)도 병합됐다. 해당 exact top의 선택5 run [39920131507](https://github.com/jeong-sik/masc/actions/runs/39920131507)은 앞선 오류를 지난 뒤 `test_keeper_addon_deferred_runtime.ml:103`의 `Skill_source_config` 직접 의존성 누락에서 compile 실패했다. 이 선택5도 미실행이다.
+- 이어지는 [#45477](https://github.com/jeong-sik/masc/pull/45477)·[#45478](https://github.com/jeong-sik/masc/pull/45478), Native Stack #45479는 해당 executable에 `masc.skill_config`만 선언하는 한 줄 수리와 원래 실패·독립 SOURCE PASS다. 소스·parser/diff·CI 요청·실제 실행·병합·설치는 각각 별도다. 새 선택 실행 접수는 성공 판정이 아니다.
+- E06의 실제 worker bridge와 G/H의 package 분류·Preview는 담당자가 이어 구현하고 있다. 원본 owner 또는 wrapper가 있다는 사실을 Verifier 전환·실제 Agent 작업 완주로 세지 않는다. Librarian terminal unknown의 source 재실행 방지는 운영자에게 원인·명시적 해결 경로를 제공하는 후속도 남긴다.

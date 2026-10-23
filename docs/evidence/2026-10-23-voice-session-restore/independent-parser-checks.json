@@ -1,0 +1,74 @@
+[
+  {
+    "command": [
+      "git",
+      "diff",
+      "--check",
+      "fe1e8f7292e2f1aedd12e39cc6a872679fe2a591",
+      "0af6299700b262529884cc34be10ea8c959270cd"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-c",
+      "lib/voice/voice_session_manager.mli"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-c",
+      "lib/voice/voice_session_manager.ml"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-c",
+      "lib/keeper/keeper_tool_voice_runtime.ml"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-c",
+      "test/test_voice_session_manager.ml"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-c",
+      "test/test_voice_runtime_overlay.ml"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]

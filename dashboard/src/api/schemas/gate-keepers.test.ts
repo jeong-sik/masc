@@ -28,6 +28,8 @@ function keeperWire(name = 'planner') {
     health: 'healthy',
     paused: false,
     next_action: null,
+    last_failure: null,
+    runtime_lane_observation: null,
     runtime_blocker_summary: null,
     runtime_blocker_signature: null,
     keepalive_running: true,
@@ -125,6 +127,64 @@ describe('decodeGateKeepers', () => {
           keepers: [{ ...row, candle_account_revision: revision }] })
       }
     }
+  })
+
+  it('decodes administrator Board observations on every directory row variant', () => {
+    const healthy = keeperWire()
+    const issue = issueWire()
+    const retained = {
+      ...issueWire('persisted'), meta: keeperWire('persisted').meta,
+      created_at: healthy.created_at, updated_at: healthy.updated_at,
+      activation_mode: 'on_demand',
+    }
+    for (const board_address of [
+      { state: 'ready', target_ids: ['planner', 'board-planner'] },
+      { state: 'unavailable', reason: 'metadata_absent' },
+      { state: 'unavailable', reason: 'effective_metadata_unread' },
+    ]) {
+      const data = Effect.runSync(decodeGateKeepers({
+        count: 3, ...listingWire(3),
+        keepers: [healthy, issue, retained].map(row => ({ ...row, board_address })),
+      }))
+      expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+      expect(data.directoryIssues.map(issue => issue.keeperName)).toEqual(['broken', 'persisted'])
+    }
+  })
+
+  it('retains usable directory entries with current failure and all lane observation states', () => {
+    const turn = { trace_id: 'trace-planner', turn_count: 1, ended_at: '2026-10-23T00:00:00Z' }
+    for (const runtime_lane_observation of [
+      null,
+      { state: 'not_observed', turn, evidence: null, error: null },
+      { state: 'observed', turn, evidence: { failures: [], terminal: { kind: 'not_observed' } }, error: null },
+      { state: 'unreadable', turn: null, evidence: null, error: 'runtime.lane_evidence' },
+    ]) {
+      const data = Effect.runSync(decodeGateKeepers({
+        count: 1, ...listingWire(1),
+        keepers: [{ ...keeperWire(), runtime_lane_observation,
+          last_failure: { cause: 'provider', at_unix: null } }],
+      }))
+      expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+      expect(data.directoryIssues).toEqual([])
+    }
+  })
+
+  it.each([
+    ['last_failure', undefined],
+    ['last_failure', { cause: 'unknown', at_unix: null }],
+    ['last_failure', { cause: 'provider', at_unix: 'now' }],
+    ['last_failure', { cause: 'provider', at_unix: Number.POSITIVE_INFINITY }],
+    ['last_failure', { cause: 'provider', at_unix: 1, extra: true }],
+    ['runtime_lane_observation', undefined],
+    ['runtime_lane_observation', { state: 'not_observed', turn: null, evidence: null, error: null }],
+    ['runtime_lane_observation', { state: 'unreadable', turn: null, evidence: null, error: 'bad', extra: true }],
+    ['board_address', null],
+    ['board_address', { state: 'ready', target_ids: ['planner', 'planner'] }],
+    ['board_address', { state: 'ready', target_ids: ['Planner'] }],
+    ['board_address', { state: 'ready', target_ids: [], extra: true }],
+    ['board_address', { state: 'unavailable', reason: 'unknown' }],
+  ])('rejects malformed %s without dropping the observation', (field, value) => {
+    expectDrift({ count: 1, ...listingWire(1), keepers: [{ ...keeperWire(), [field]: value }] })
   })
 
   it('accepts the roster current failure without changing the compact product values', () => {

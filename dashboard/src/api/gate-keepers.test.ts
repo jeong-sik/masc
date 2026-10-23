@@ -32,6 +32,8 @@ const currentWire = {
     health: 'healthy',
     paused: false,
     next_action: 'direct_message',
+    last_failure: null,
+    runtime_lane_observation: null,
     runtime_blocker_summary: null,
     runtime_blocker_signature: null,
     keepalive_running: true,

@@ -40,7 +40,7 @@ const terminalSchema = Schema.Union(
     failure: failurePayload, summary: Schema.String,
   }),
 )
-const observationSchema = Schema.Union(
+export const RuntimeLaneObservationSchema = Schema.Union(
   Schema.Struct({
     state: Schema.Literal('observed'), turn: turnSchema, error: Schema.Null,
     evidence: Schema.Struct({ failures: Schema.Array(failureSchema), terminal: terminalSchema }),
@@ -53,7 +53,7 @@ const observationSchema = Schema.Union(
   }),
 )
 
-export type RuntimeLaneObservation = typeof observationSchema.Type
+export type RuntimeLaneObservation = typeof RuntimeLaneObservationSchema.Type
 export type RuntimeCandidateFault = typeof faultSchema.Type
 
 const bindingLabels: Record<Extract<RuntimeCandidateFault, { kind: 'binding' }>['fact'], string> = {
@@ -65,7 +65,7 @@ const bindingLabels: Record<Extract<RuntimeCandidateFault, { kind: 'binding' }>[
 
 export function readRuntimeLaneObservation(raw: unknown): RuntimeLaneObservation | null {
   if (raw === null) return null // No receipt was read by the server.
-  const parsed = Schema.decodeUnknownEither(observationSchema, { onExcessProperty: 'error' })(raw)
+  const parsed = Schema.decodeUnknownEither(RuntimeLaneObservationSchema, { onExcessProperty: 'error' })(raw)
   if (Either.isRight(parsed)) return parsed.right
   const turn = Schema.decodeUnknownEither(turnSchema, { onExcessProperty: 'error' })(
     isRecord(raw) ? raw.turn : undefined,

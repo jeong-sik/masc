@@ -316,7 +316,6 @@ export interface RouteState {
 }
 
 export const VALID_TABS = [
-  'cockpit',
   'overview',
   'monitoring',
   'keepers',

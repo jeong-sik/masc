@@ -80,7 +80,6 @@ type SurfaceSectionId =
   // lab
   | 'tools'
   | 'harness'
-  | 'performance'
   | 'keeper-memory-health'
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
@@ -160,16 +159,6 @@ export function isSectionlessSurface(tabId: TabId): boolean {
 }
 
 export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
-  {
-    id: 'cockpit',
-    label: 'MASC Cockpit',
-    icon: 'workspace',
-    description: 'MASC Cockpit',
-    defaultTab: 'cockpit',
-    tabs: ['cockpit'],
-    hidden: true,
-  },
-
   {
     id: 'overview',
     label: 'Overview',
@@ -323,7 +312,6 @@ export const PRIMARY_DASHBOARD_NAV_ITEMS: DashboardNavItem[] =
   })
 
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
-  cockpit: [],
   // Sectionless surface (single tab, no sub-sections) but still a NonHomeTabId
   // key — the Record is exhaustive over the union, so the empty entry is required.
   approvals: [],
@@ -476,12 +464,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Safety Harness',
       description: 'Evaluation model, pre-handoff state, and generation handoff monitoring.',
       params: { section: 'harness' },
-    },
-    {
-      id: 'performance',
-      label: 'Performance',
-      description: 'FPS meter, VirtualList, content-visibility, native dialog, and observer probes.',
-      params: { section: 'performance' },
     },
     {
       id: 'keeper-memory-health',

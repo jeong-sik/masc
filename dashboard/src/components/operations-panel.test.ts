@@ -20,8 +20,8 @@ async function loadPanel() {
   vi.doMock('./approvals/approvals-surface', () => ({
     ApprovalsSurface: () => html`<div data-testid="gate-hitl">Gate / HITL</div>`,
   }))
-  vi.doMock('./lab-inspector', () => ({
-    LabInspector: () => html`<div data-testid="inspector">Inspector</div>`,
+  vi.doMock('./server-config', () => ({
+    ServerConfig: () => html`<div data-testid="server-config">ServerConfig</div>`,
   }))
   return import('./operations-panel')
 }
@@ -44,7 +44,7 @@ describe('OperationsPanel', () => {
     vi.doUnmock('../router')
     vi.doUnmock('./ops')
     vi.doUnmock('./approvals/approvals-surface')
-    vi.doUnmock('./lab-inspector')
+    vi.doUnmock('./server-config')
   })
 
   it('renders Ops and Gate/HITL when view is not set (default)', async () => {

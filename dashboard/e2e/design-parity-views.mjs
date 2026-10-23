@@ -60,12 +60,11 @@ export const VIEWS = [
   { id: 'command-gate', surface: 'command', clicks: ['.fl-sec:nth-of-type(3)'] },
   { id: 'command-inspector', surface: 'command', clicks: ['.fl-sec:nth-of-type(4)'] },
 
-  // Lab — LAB_SECS. `?surface=lab` lands on 도구; harness, performance and
-  // memory are live routes too (lab/harness, lab/performance,
-  // lab/keeper-memory-health). 감사 무결성 is gone from the prototype
+  // Lab — compare the backed tools, harness and keeper-memory-health routes.
+  // The prototype still carries a Performance demo, which is not a product route.
+  // 감사 무결성 is gone from the prototype
   // (2026-08-23): the resilience subsystem it drew was removed in #28170.
   { id: 'lab-harness', surface: 'lab', clicks: ['.fl-sec:nth-of-type(2)'] },
-  { id: 'lab-performance', surface: 'lab', clicks: ['.fl-sec:nth-of-type(3)'] },
   { id: 'lab-memory', surface: 'lab', clicks: ['.fl-sec:nth-of-type(4)'] },
 
   // The tool inventory has its own inner toggle.

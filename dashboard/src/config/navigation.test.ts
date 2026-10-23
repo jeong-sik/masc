@@ -14,13 +14,6 @@ import {
 } from './navigation'
 
 describe('dashboard surface navigation', () => {
-  it('keeps MASC Cockpit routeable but out of primary navigation', () => {
-    const cockpit = DASHBOARD_SURFACES.find(surface => surface.id === 'cockpit')
-
-    expect(cockpit?.hidden).toBe(true)
-    expect(defaultParamsForTab('cockpit')).toEqual({})
-    expect(VISIBLE_DASHBOARD_NAV_ITEMS.map(item => item.id)).not.toContain('cockpit')
-  })
 
   it('exposes Keepers as a top-level v2 workspace without nested sections', () => {
     expect(defaultParamsForTab('keepers')).toEqual({})
@@ -157,19 +150,14 @@ describe('lab navigation', () => {
     expect(labSections.map(item => item.id)).toEqual([
       'tools',
       'harness',
-      'performance',
       'keeper-memory-health',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
       'Tools',
       'Safety Harness',
-      'Performance',
       '키퍼 메모리 상태',
     ])
-    expect(labSections.find(item => item.id === 'performance')?.description).toBe(
-      'FPS meter, VirtualList, content-visibility, native dialog, and observer probes.',
-    )
   })
 
   it('collapses legacy Memory Explore links into the backed Memory OS route', () => {

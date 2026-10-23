@@ -1,5 +1,10 @@
 /** Keyboard helpers shared by text inputs that submit on Enter. */
 
+/** Safari can report composition keydowns with only the legacy code set. */
+export function isImeComposing(event: KeyboardEvent): boolean {
+  return event.isComposing || event.keyCode === 229
+}
+
 /** True when this keydown is a committed Enter that should trigger submit.
  *
  *  Returns false while an IME composition is active: Korean/Japanese/Chinese
@@ -14,6 +19,6 @@
  *  Shift+Enter as newline; single-line inputs do not care). */
 export function isSubmitEnter(event: KeyboardEvent): boolean {
   if (event.key !== 'Enter') return false
-  if (event.isComposing || event.keyCode === 229) return false
+  if (isImeComposing(event)) return false
   return true
 }

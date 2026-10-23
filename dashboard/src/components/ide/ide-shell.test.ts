@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { fireEvent, waitFor } from '@testing-library/preact'
+import { act, fireEvent, waitFor } from '@testing-library/preact'
 
 const repositoryRow = {
   id: 'masc',
@@ -52,6 +52,7 @@ import {
 } from './ide-shell'
 import { navigate, route } from '../../router'
 import { globalShortcutManager } from '../../lib/global-shortcut-manager'
+import { useKeyboardShortcutHost } from '../../../design-system/headless-preact/use-keyboard-shortcut'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import {
   activeIdeFile,
@@ -959,7 +960,11 @@ describe('IdeShell', () => {
     }
     document.body.appendChild(container)
 
-    render(h(IdeShell, {}), container)
+    function ShortcutHost() {
+      useKeyboardShortcutHost(globalShortcutManager)
+      return h(IdeShell, {})
+    }
+    await act(async () => { render(h(ShortcutHost, {}), container) })
     const outside = document.createElement('button')
     document.body.appendChild(outside)
     // Mod is Cmd on macOS and Ctrl elsewhere; press whichever this
@@ -968,24 +973,30 @@ describe('IdeShell', () => {
       ? 'metaKey'
       : 'ctrlKey'
     const press = (target: Element) => {
-      const event = { key: 'f', [modKey]: true, target, preventDefault: vi.fn(), stopPropagation: vi.fn() }
-      return { handled: globalShortcutManager.dispatch(event), event }
+      const event = new KeyboardEvent('keydown', { key: 'f', [modKey]: true, bubbles: true, cancelable: true })
+      fireEvent(target, event)
+      return event
     }
 
     await waitFor(() => expect(globalShortcutManager.getById('ide.find.open')).toBeDefined())
     const fromOutside = press(outside)
-    expect(fromOutside.event.preventDefault).not.toHaveBeenCalled()
+    expect(fromOutside.defaultPrevented).toBe(false)
     expect(route.value.params.find).toBeUndefined()
 
+    const outsideInput = document.createElement('input')
+    document.body.appendChild(outsideInput)
+    expect(press(outsideInput).defaultPrevented).toBe(false)
+    expect(route.value.params.find).toBeUndefined()
+    outsideInput.remove()
+
     const inside = press(ideCommandInput(container))
-    expect(inside.handled).toBe(true)
-    expect(inside.event.preventDefault).toHaveBeenCalled()
+    expect(inside.defaultPrevented).toBe(true)
     expect(route.value.params.find).toBe('open')
 
     // Empty IDE space leaves focus on the body; that is still the IDE.
-    navigate('code', { section: 'ide-shell', view: 'source' })
+    await act(async () => { navigate('code', { section: 'ide-shell', view: 'source' }) })
     const fromBody = press(document.body)
-    expect(fromBody.event.preventDefault).toHaveBeenCalled()
+    expect(fromBody.defaultPrevented).toBe(true)
     await waitFor(() => expect(route.value.params.find).toBe('open'))
 
     outside.remove()

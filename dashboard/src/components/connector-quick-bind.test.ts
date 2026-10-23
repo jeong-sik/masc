@@ -94,6 +94,11 @@ describe('QuickBindForm', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await flushUi()
 
+    for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, ...composition }))
+      await flushUi()
+      expect(fetchSpy.mock.calls.some(c => String(c[0]).includes('/api/v1/gate/connector/bind'))).toBe(false)
+    }
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await flushUi()
 

@@ -1,3 +1,4 @@
+import { isImeComposing } from '../../lib/keyboard'
 import { scanMascReferences, postsSharingReferences } from '../../lib/masc-reference'
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
@@ -1132,6 +1133,7 @@ function BdComposer() {
               setLocalBody((e.target as HTMLTextAreaElement).value)
             }}
             onKeyDown=${(event: KeyboardEvent) => {
+              if (isImeComposing(event)) return
               if (mode === 'mention' && mobileMention.mentionListOpen && mobileMention.mentionMatches.length > 0) {
                 if (event.key === 'ArrowDown') {
                   event.preventDefault()

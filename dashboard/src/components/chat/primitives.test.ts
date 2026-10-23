@@ -4591,6 +4591,29 @@ describe('ChatComposer v2 prototype surface', () => {
     expect(onSend).toHaveBeenCalledTimes(1)
   })
 
+  it.each([{ isComposing: true }, { keyCode: 229 }])('does not run a slash command or send on composition Enter (%o)', (composition) => {
+    const run = vi.fn()
+    const onSend = vi.fn()
+    const onDraftChange = vi.fn()
+    render(html`<${ChatComposer}
+      draft="/일시"
+      disabled=${false}
+      streaming=${false}
+      commands=${[{ id: 'pause', group: 'lifecycle', label: '일시정지', run }]}
+      onDraftChange=${onDraftChange}
+      onSend=${onSend}
+    />`, container)
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...composition })
+    fireEvent(textarea, event)
+    expect(run).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onDraftChange).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
   it('runs the active slash command from the strict-index-safe menu selection', () => {
     const run = vi.fn()
     render(

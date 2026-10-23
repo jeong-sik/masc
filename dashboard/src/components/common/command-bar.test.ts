@@ -1,9 +1,31 @@
 import { describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
+import { fireEvent } from '@testing-library/preact'
 import { CommandBar } from './command-bar'
 
 describe('CommandBar', () => {
+  it.each([{ isComposing: true }, { keyCode: 229 }])('does not dispatch a command on composition Enter (%o)', (composition) => {
+    const handler = vi.fn()
+    const onSelect = vi.fn()
+    const container = document.createElement('div')
+    try {
+      render(h(CommandBar, { actions: [{ id: 'pause', title: '일시정지', handler }], onSelect }), container)
+      const input = container.querySelector('input') as HTMLInputElement
+      input.value = '일시'
+      fireEvent.input(input)
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...composition })
+      fireEvent(input, event)
+      expect(handler).not.toHaveBeenCalled()
+      expect(onSelect).not.toHaveBeenCalled()
+      expect(event.defaultPrevented).toBe(false)
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledTimes(1)
+    } finally {
+      render(null, container)
+    }
+  })
   const actions = [
     { id: 'a', title: 'Alpha', handler: () => {} },
     { id: 'b', title: 'Beta', keywords: 'second', handler: () => {} },

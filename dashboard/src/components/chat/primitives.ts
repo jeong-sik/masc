@@ -29,7 +29,7 @@ import { useVoiceInput } from './voice-input'
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost, formatMsCompact } from '../../lib/format-number'
-import { isSubmitEnter } from '../../lib/keyboard'
+import { isImeComposing, isSubmitEnter } from '../../lib/keyboard'
 import { isFailedDelivery } from '../../lib/keeper-delivery'
 import { parseTextToChatBlocks } from '../../lib/chat-blocks'
 import { createPortal, memo } from 'preact/compat'
@@ -5156,6 +5156,7 @@ export function ChatComposer({
   }
 
   const onKeyDown = (event: KeyboardEvent) => {
+    if (isImeComposing(event)) return
     if (slashOpen) {
       if (event.key === 'ArrowDown') {
         event.preventDefault()
@@ -5236,6 +5237,7 @@ export function ChatComposer({
                   disabled=${disabled}
                   onInput=${(event: Event) => setRefDraft((event.target as HTMLInputElement).value)}
                   onKeyDown=${(event: KeyboardEvent) => {
+                    if (isImeComposing(event)) return
                     if (event.key === 'Enter') {
                       event.preventDefault()
                       const value = refDraft.trim()

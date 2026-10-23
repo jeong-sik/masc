@@ -39,6 +39,8 @@ export interface ShortcutDescriptor {
   readonly scope: ShortcutScope
   readonly preserveInInputs?: boolean
   readonly priority?: number
+  /** Live owner eligibility, checked before matching can consume the event. */
+  readonly when?: (event: ShortcutKeyEvent) => boolean
   readonly action: (e: KeyboardEvent) => void
 }
 
@@ -278,6 +280,7 @@ export function createKeyboardShortcutManager(
         if (!chordMatches(s.chord, event, platform)) continue
         if (inInput && s.preserveInInputs !== true) continue
         if (!isInScope(s.scope, event.target)) continue
+        if (s.when && !s.when(event)) continue
         candidates.push(s)
       }
       if (candidates.length === 0) return false

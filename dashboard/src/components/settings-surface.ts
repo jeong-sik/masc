@@ -1,3 +1,4 @@
+import { isImeComposing } from '../lib/keyboard'
 // MASC Dashboard — Settings surface
 // Operator-facing settings only: runtime management, resolved paths, MCP server
 // health/inventory, notification thresholds, prompt/fusion/log/display controls.
@@ -1048,6 +1049,7 @@ function RuntimeLaneEditor({
                   data-testid=${`runtime-lane-${lane.id}-rename-input`}
                   onInput=${(event: Event) => setRenameDraft((event.currentTarget as HTMLInputElement).value)}
                   onKeyDown=${(event: KeyboardEvent) => {
+                    if (isImeComposing(event)) return
                     if (event.key === 'Enter') {
                       event.preventDefault()
                       void submitRename()

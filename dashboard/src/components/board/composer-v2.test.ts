@@ -161,6 +161,20 @@ describe('ComposerV2', () => {
     vi.clearAllMocks()
   })
 
+  it.each([{ isComposing: true }, { keyCode: 229 }])('does not post while Enter commits composition (%o)', async (composition) => {
+    render(h(ComposerV2, { workspaceId: 'ops' }))
+    const textarea = screen.getByLabelText('Composer v2 message') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: '한글 작성 중' } })
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...composition })
+    fireEvent(textarea, event)
+    expect(sendBroadcastMock).not.toHaveBeenCalled()
+    expect(dispatchOperatorActionMock).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+    expect(textarea.value).toBe('한글 작성 중')
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => expect(sendBroadcastMock).toHaveBeenCalledExactlyOnceWith('dashboard-test', '한글 작성 중'))
+  })
+
   it('sends broadcast drafts through the workspace broadcast transport', async () => {
     render(h(ComposerV2, { workspaceId: 'ops' }))
 

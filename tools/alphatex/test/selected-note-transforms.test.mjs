@@ -20,7 +20,7 @@ function sourceBytes({ smpte = false, portChange = false, point = false } = {}) 
   first.add(130, JZZ.MIDI.noteOn(0, 60, 80)).add(430, JZZ.MIDI.noteOff(0, 60, 45))
     .add(760, JZZ.MIDI.noteOn(0, 64, 99)).add(1010, JZZ.MIDI.noteOn(0, 64, 0))
     .add(1250, JZZ.MIDI.noteOn(1, 48, 70)).add(1500, JZZ.MIDI.noteOff(1, 48, 12))
-    
+
   if (point) first.add(1700, JZZ.MIDI.noteOn(0, 67, 88)).add(1700, JZZ.MIDI.noteOff(0, 67, 23))
   first.add(4000, JZZ.MIDI.smfEndOfTrack())
   file.push(first)

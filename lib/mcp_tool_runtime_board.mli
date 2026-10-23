@@ -86,17 +86,8 @@ val dispatch :
   Tool_result.result option
 (** [dispatch ~config ~agent_name ~arguments ~state ~name ~start_time] handles
     MCP server-local routing for tool [name] when the main runtime router has no
-    match.  Currently routes:
-
-    - [masc_board_post] -> identity enforcement +
-      {!Board_dispatch.create_post} +
-      {!Notify.notify_mention} on [@target].
-    - everything else -> [None] (caller falls through to remaining
-      dispatchers).
-
-    This doc used to say [config] / [state] / [sw] / [clock] "are ignored at the
-    entry today … but kept in the signature for forward compat". [config],
-    [state] and [start_time] are used by the routes below; [sw] and [clock] were
-    the only unused ones and are gone. The one caller is a direct call, so a
-    later route needing a switch or a clock adds the parameter back and the
-    compiler names that caller. *)
+    match. Declared Board tools pass through identity binding and
+    {!Board_tool.handle_tool}; other names return [None]. Successful post,
+    comment, post/comment vote and delete operations also project Board
+    activity. Post and comment notify mentions. Board activity does not
+    create Task performance records. *)

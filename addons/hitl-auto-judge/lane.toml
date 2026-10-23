@@ -1,9 +1,9 @@
 id = "hitl-auto-judge"
-revision = "0.1.0"
+revision = "0.1.1"
 title = "HITL Auto Judge worker"
 ui_category = "memory_judgment"
 contributions = ["derive"]
-image = "masc-lane-hitl-auto-judge:0.1.0"
+image = "masc-lane-hitl-auto-judge:0.1.1"
 command = ["python3", "server.py", "--state", "/state"]
 
 [world.state]

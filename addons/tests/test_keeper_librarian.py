@@ -102,6 +102,11 @@ class LibrarianWorker(unittest.TestCase):
                           "usage": {"input_tokens": 30, "output_tokens": 7}}]
             settled = self.run_worker(directory, [deliver(x, y) for x, y in zip(originals, terminals)])
             self.assertEqual([self.output(x) for x in settled], [{"accepted": True}] * 2)
+            for path in (Path(directory) / "keeper-librarian").glob("*.json"):
+                retained = json.loads(path.read_text())
+                self.assertEqual(set(retained), {"version", "request_id", "digest", "result", "tool"})
+                original = next(x for x in originals if x["request_id"] == retained["request_id"])
+                self.assertEqual(retained["tool"], tool(original["output"]))
             restored = self.run_worker(directory, [*map(read, originals), *map(submit, originals), listing()])
             self.assertEqual([self.output(x)["result"] for x in restored[:4]], terminals * 2)
             self.assertEqual(self.output(restored[-1])["requests"], [])

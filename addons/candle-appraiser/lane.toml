@@ -1,9 +1,9 @@
 id = "candle-appraiser"
-revision = "0.1.4"
+revision = "0.1.5"
 title = "Candle appraisal worker"
 ui_category = "memory_judgment"
 contributions = ["derive"]
-image = "masc-lane-candle-appraiser:0.1.4"
+image = "masc-lane-candle-appraiser:0.1.5"
 command = ["python3", "server.py", "--state", "/state"]
 
 [world.state]

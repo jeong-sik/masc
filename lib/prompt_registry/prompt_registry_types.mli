@@ -7,10 +7,22 @@ type operator_surface =
 val operator_surface_to_string : operator_surface -> string
 val operator_surface_of_string : string -> operator_surface option
 
+type authoring_issue =
+  | Invalid_operator_surface of { value : string; source_file : string }
+      (** The unrecognized frontmatter value and the Markdown source path
+          captured by the reader. The prompt remains usable; this is metadata diagnosis,
+          not a refusal to render or apply an override. *)
+
 type prompt_meta = {
   description : string;
   category : string;
   operator_surface : operator_surface;
+      (** Effective placement in the operator's prompt list. Invalid authored
+          values keep the prompt visible as [Primary] and are retained below. *)
+  authoring_issues : authoring_issue list;
+      (** Issues captured from the file's metadata when it was registered,
+          including for slots registered from that file. Empty for absent
+          metadata and for recognized declarations. *)
   required_file : bool;
   template_variables : string list;
 }

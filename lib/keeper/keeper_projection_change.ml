@@ -15,7 +15,7 @@ type request_digests =
    fields again with float bits preserved: the common value-equal path still
    avoids both provider encoding and SHA-256, without calling different wire
    bytes identical. *)
-let rec json_wire_equal left right =
+let rec json_wire_equal (left : Yojson.Safe.t) (right : Yojson.Safe.t) =
   match left, right with
   | `Null, `Null -> true
   | `Bool left, `Bool right -> Bool.equal left right
@@ -30,14 +30,12 @@ let rec json_wire_equal left right =
          String.equal left_key right_key && json_wire_equal left_value right_value)
       left
       right
-  | `List left, `List right | `Tuple left, `Tuple right ->
+  | `List left, `List right ->
     List.equal json_wire_equal left right
-  | `Variant (left_tag, left_value), `Variant (right_tag, right_value) ->
-    String.equal left_tag right_tag && Option.equal json_wire_equal left_value right_value
   | ( (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _
-      | `List _ | `Tuple _ | `Variant _)
+      | `List _)
     , (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _
-      | `List _ | `Tuple _ | `Variant _) ) -> false
+      | `List _) ) -> false
 ;;
 
 let reasoning_detail_wire_equal

@@ -1512,10 +1512,9 @@ type parameter_binding_error =
   | Instantiated_plan_rejected of error
 
 let instantiate_params ~descriptors ~args plan =
-  let lookup name = match args with
+  let lookup name = match (args : Yojson.Safe.t) with
     | `Assoc fields -> List.assoc_opt name fields
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
-    | `Tuple _ | `Variant _ -> None in
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None in
   let rec rebuild rebuilt = function
     | [] -> create_compiled ~descriptors ~children:plan.children ~arguments:plan.arguments
         ~branch_failure_policy:plan.branch_failure_policy ~exports:plan.exports (List.rev rebuilt)

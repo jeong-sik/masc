@@ -268,13 +268,17 @@ let support backend operation = match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko ->
           conditional ~mode:"frames" Read
             [observed;"Explicit tabId; framePath consists of observed outer-to-inner frame selectors. Text and elements reads accept the same framePath."]
-      | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Owned_chromium | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space -> conditional ~mode:"snapshot" Read
+          [observed;"Explicit tabId and no framePath: the viewport snapshot holds each iframe's content, a cross-origin one included, with refs; snapshotScope subtree with root set to the iframe's ref reads that frame alone.";ego_pages]
+      | Connected Browser_lane.Web_extension | Owned_chromium | Safari_unavailable -> missing)
     | Frame_interaction -> (match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko ->
           conditional ~action:"click" Interact
             [observed;"framePath (observed outer-to-inner iframe selectors) applies to click, fill, select_option and scroll with a selector. Inspect the same frame first; expectedUrl is the frame document's URL.";
              "Cross-origin frames work: the frame is entered through WebDriver or its own BiDi browsing context."]
-      | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Owned_chromium | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"click" Interact
+          [observed;"click and fill with target and no framePath: a ref from the frame's snapshot acts inside that frame, and a role or text target is found inside frames, a cross-origin one included, when the top document has none. expectedUrl is the top page's URL.";ego_agent_pages]
+      | Connected Browser_lane.Web_extension | Owned_chromium | Safari_unavailable -> missing)
     | Read_dialog -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional Tabs
           ["Each list_tabs row of a tab blocked on a dialog carries dialog: type (alert, confirm, prompt or beforeunload), message and, for a prompt, defaultValue. It comes from the browser's own events since this connection began, so a dialog that was already open then is not listed.";

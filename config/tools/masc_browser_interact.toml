@@ -26,7 +26,7 @@ minimum = 0
 name = "framePath"
 type = "array"
 items = { type = "string" }
-description = "Observed outer-to-inner iframe selectors (preserve CSS escapes). Only for click, fill, select_option and scroll with a selector, on an automation Firefox or a live BiDi connection; the selector and expectedUrl then refer to the innermost frame document. Omit for the top document."
+description = "Observed outer-to-inner iframe selectors (preserve CSS escapes). Only for click, fill, select_option and scroll with a selector, on an automation Firefox or a live BiDi connection; the selector and expectedUrl then refer to the innermost frame document. Omit for the top document. An ego connection takes none: give target instead."
 
 [[params]]
 name = "expectedUrl"
@@ -85,7 +85,7 @@ description = "Retain the observed live clientId on every subsequent tab read/ac
 name = "target"
 type = "object"
 additional_properties = false
-description = "click/fill/hover/double_click on an ego connection, with the observed top-level expectedUrl and without selector or documentId/nodeId: {ref} from the latest BrowserRead snapshot of the same page (12 for ref=12), {role, name} or {text}. Read a new snapshot after page changes/input or a stale/unknown ref refusal. iframe refs use ego's native resolver; framePath is not combined with target. exact (default true) matches the whole name or text; false matches a part, any case."
+description = "click/fill/hover/double_click on an ego connection, with the observed top-level expectedUrl and without selector or documentId/nodeId: {ref} from the latest BrowserRead snapshot of the same page (12 for ref=12), {role, name} or {text}. Read a new snapshot after page changes/input or a stale/unknown ref refusal. A ref from an iframe's snapshot acts inside that frame; role and text also search frames when the top document has none; framePath is not combined with target. exact (default true) matches the whole name or text; false matches a part, any case."
 
 [[params.params]]
 name = "ref"

@@ -877,6 +877,18 @@ let choose_files ?actor t id ~opener ~paths =
    and make the DOM edits, so a selector or node means the same on both;
    ego moves the mouse and presses the keys. *)
 
+(* ego reads and acts inside frames without a frame path: its viewport
+   snapshot holds each iframe's content with refs, a subtree snapshot rooted
+   at the iframe's ref reads one frame, a ref from it acts inside that frame,
+   and a role or text target is looked for in frames when the top document
+   has none (cross-origin frames included, 0.6.0.16). A frame path is refused
+   with the way that works. *)
+let frame_read_refused =
+  "an ego connection reads frames through BrowserRead snapshot: the viewport snapshot holds each iframe's content with refs, and snapshotScope subtree with root set to the iframe's ref reads that frame"
+let frame_input_refused =
+  "an ego connection acts inside frames through target, with no framePath: a ref from the frame's snapshot, or a role or text target, which ego also finds inside frames"
+let frame_upload_refused = "an ego connection uploads only to a file input or opener of the top document"
+
 (* Finding a target and acting on it are two runs, and the command has one
    window for both: a later run gets what is left of it. *)
 let command_deadline t verb = t.now () +. window_s verb
@@ -1178,7 +1190,7 @@ let interact ?actor t args =
   let* request = before (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live)) :: fields))) in
   let* () = match request.frame_path with
     | [] -> Ok ()
-    | _ :: _ -> Error (Live.Before_effect "an ego connection does not act inside frames") in
+    | _ :: _ -> Error (Live.Before_effect frame_input_refused) in
   let id = request.tab_id in
   let verb = Browser_lane.interaction_verb request.action in
   let refused = Error (Live.Before_effect (verb ^ " is not served by an ego connection")) in
@@ -1286,7 +1298,7 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.Open_window _) ->
     Error (Live.Before_effect "an ego connection does not open windows")
   | Ok (Browser_lane.Action.On_tab {frame_path = _ :: _; _}) ->
-    Error (Live.Before_effect "an ego connection does not act inside frames")
+    Error (Live.Before_effect frame_upload_refused)
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Close_tab}) -> close_tab t tab_id
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Reload}) -> reload t tab_id
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Back as interaction}) ->
@@ -1316,7 +1328,7 @@ let dispatch ?actor t ~verb args =
   | Page_scene -> pre (scene t args)
   | Page_capture -> pre (capture t args)
   | Page_goto -> goto t args
-  | Page_context -> Error (Live.Before_effect "an ego connection does not read inside frames")
+  | Page_context -> Error (Live.Before_effect frame_read_refused)
   | Page_snapshot -> pre (snapshot t args)
   | Page_downloads -> pre (downloads t args)
   | Page_act -> act ?actor t args

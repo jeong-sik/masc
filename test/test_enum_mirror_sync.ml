@@ -563,6 +563,8 @@ let test_capability_table_sharing_is_listed () =
     ; [ "html5_drop"; "pointer_drag" ] (* drag_to on Stagehand *)
     ; [ "click"; "frame_interaction" ] (* click with framePath *)
     ; [ "click"; "click_snapshot_target" ] (* click with target on an ego connection *)
+    ; [ "click"; "click_snapshot_target"; "frame_interaction" ] (* click with target on an ego connection, inside frames too *)
+    ; [ "read_frames"; "read_snapshot" ] (* an ego connection reads frames through its snapshot *)
     ; [ "fill"; "fill_snapshot_target" ] (* fill with target on an ego connection *)
     ; [ "hover"; "hover_snapshot_target" ] (* hover with target on an ego connection *)
     ; [ "double_click"; "double_click_snapshot_target" ] (* double-click with target on an ego connection *)

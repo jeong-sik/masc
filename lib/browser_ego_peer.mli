@@ -95,7 +95,8 @@ val space_id : t -> int
     stale/unknown ref refusal. Native drags share the observed waypoint
     contract, require zero duration and release the button in the same run.
     Unconfirmed release blocks further input on this peer; read/finish remain
-    available. End this task space before opening a fresh peer. It does not
+    available. End this task space before opening a fresh peer. Frames are read
+    through the snapshot. It does not
     serve explicit framePath operations. Snapshot-target click, fill, hover and
     double-click use ego's native element resolver, including iframe refs;
     expectedUrl still identifies the top-level page. Verbs this

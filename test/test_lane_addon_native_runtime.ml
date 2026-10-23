@@ -723,6 +723,27 @@ max_reply_bytes = 65536
   Unix.unlink (Filename.concat root "hold-idle");
   ignore (dispatch config R.Detach ["instance_id",`String browser]);
   wait clock (fun () -> phase browser="detached")))
+(* A native worker process that ends without a stop from masc turns its
+   instance failed instead of leaving it attached as a serving worker. An
+   instance attached without a declaration then waits for Detach, which
+   confirms the release of that exact incarnation. *)
+let native_worker_ended_outside_masc () = with_fixture (fun clock root config ->
+  let manifest = write_native_manifest root in
+  let id = dispatch config R.Attach ["manifest_path",`String manifest;
+    "run_id",`String "native-world";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
+  let inspect () = dispatch config R.Inspect ["instance_id",`String id]
+    |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+  let phase () = text "kind" (member "phase" (inspect ())) in
+  wait clock (fun () -> (inspect () |> member "observation_seq" |> Yojson.Safe.Util.to_int)>0);
+  let pid = inspect () |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
+  Unix.kill pid Sys.sigkill;
+  wait clock (fun () -> phase ()="failed");
+  check string "the end is a worker failure" "worker_failed"
+    (inspect () |> member "lifecycle" |> member "failed" |> member "cause" |> text "kind");
+  ignore (dispatch config R.Detach ["instance_id",`String id]);
+  wait clock (fun () -> phase ()="detached" && text "runtime_presence" (inspect ())="retained");
+  check string "Detach confirms the native release" "native_released"
+    (inspect () |> member "lifecycle" |> member "release" |> text "kind"))
 let () =
   if Array.length Sys.argv<>2 then fail "expected native admission launcher path";
   launcher := Unix.realpath Sys.argv.(1);
@@ -732,5 +753,7 @@ let () =
     test_case "configuration resumes after interrupted slot metadata" `Quick interrupted_metadata;
     test_case "configuration retires unpublished reservation before fresh attach" `Quick interrupted_reservation;
     test_case "the operator retains an unconfirmed native instance" `Quick operator_retain;
+    test_case "a native worker that ends outside masc turns failed and Detach releases it" `Quick
+      native_worker_ended_outside_masc;
     test_case "browser service concurrent channels exact owner cancellation and failed readiness" `Quick browser_installation;
     test_case "a browser document source reads through the browser Add-on worker" `Quick browser_document_source]]

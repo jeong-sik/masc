@@ -49,6 +49,7 @@ const help = [
   'Source :meters lists time signatures; :meter NUM DEN [AT [CLOCKS NOTATED32NDS]]; :meter-event ID; :meter-value NUM DEN [CLOCKS NOTATED32NDS]; :meter-move AT; :meter-remove',
   ':arrange snapshots this phrase into backing; q returns to this draft',
   'Source seek/resume restores channel state; unknown initial or opaque device state is an error.',
+  'Space: play/pause; 0: restart the playback range; .: stop; f: explicitly select FluidSynth and preview',
   'Arrow keys: time/pitch; Shift+arrows: move note; Enter/x: insert/remove note',
   ':select-notes START END [LOW HIGH] selects onsets; :select-all; Esc clears selection',
   ':duration-notes LENGTH sets selected gates; :duration-add-notes OFFSET changes their lengths together',
@@ -101,6 +102,8 @@ const trackColors = [cyan, green, magenta, yellow, blue]
 const blackKeys = new Set([1, 3, 6, 8, 10])
 const transportStyles = { playing: [bold, green], paused: [cyan], rendering: [yellow], starting: [yellow], stopped: [dim], practicing: [magenta] }
 const cursorRow = selected => selected ? [bold, cyan] : []
+// Pitch classes use the terminal's palette, so notes remain distinct in its theme.
+const pitchColors = [cyan, blue, green, magenta, yellow, red, '96', '94', '92', '95', '93', '91']
 // The loop as bars when both ends sit on bar lines, else in axis units.
 function loopLabel(view, axis, meters) {
   const { start, end } = view.loop, limit = view.displayLength ?? view.length
@@ -161,27 +164,28 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       .finally(() => observations.delete(pending))
   }
   function chooseInstrument(choice) {
-    task = task.then(() => {
-      if (!accepting || closed || suspended) return
-      stop()
-      if (choice.kind === 'vst' || choice.kind === 'fluid-selection') {
-        const capture = choice.kind === 'vst' ? captureVstSound(choice.selection, { run: vstSession.run }) : captureFluidSound(choice.path ?? soundfontPath)
-        let cancelled = false
-        const owned = { cancel() { if (!cancelled) { cancelled = true; capture.cancel() } } }
-        pendingSound = owned
-        owned.promise = capture.promise.then(sound => {
-          task = task.then(() => {
-            if (cancelled || pendingSound !== owned || !accepting || closed || suspended) return
-            pendingSound = null
-            adoptSound(sound, choice.preview !== false)
-          }).catch(error => { status = failure(error.message) }).finally(draw)
-          return task
-        }).catch(error => {
-          if (!cancelled && pendingSound === owned && accepting && !closed) status = failure(error.message)
-        }).finally(() => { if (pendingSound === owned) pendingSound = null; nativeRenders.delete(owned); draw() })
-        nativeRenders.add(owned)
-      } else adoptSound(choice)
-    }).catch(error => { status = failure(error.message) }).finally(draw)
+    task = task.then(() => beginInstrumentChoice(choice)).catch(error => { status = failure(error.message) }).finally(draw)
+  }
+  function beginInstrumentChoice(choice) {
+    if (!accepting || closed || suspended) return
+    stop()
+    if (choice.kind === 'vst' || choice.kind === 'fluid-selection') {
+      const capture = choice.kind === 'vst' ? captureVstSound(choice.selection, { run: vstSession.run }) : captureFluidSound(choice.path ?? soundfontPath)
+      let cancelled = false
+      const owned = { cancel() { if (!cancelled) { cancelled = true; capture.cancel() } } }
+      pendingSound = owned
+      owned.promise = capture.promise.then(sound => {
+        task = task.then(() => {
+          if (cancelled || pendingSound !== owned || !accepting || closed || suspended) return
+          pendingSound = null
+          adoptSound(sound, choice.preview !== false)
+        }).catch(error => { status = failure(error.message) }).finally(draw)
+        return task
+      }).catch(error => {
+        if (!cancelled && pendingSound === owned && accepting && !closed) status = failure(error.message)
+      }).finally(() => { if (pendingSound === owned) pendingSound = null; nativeRenders.delete(owned); draw() })
+      nativeRenders.add(owned)
+    } else adoptSound(choice)
   }
   function chooseEffect(value) {
     if (!accepting || closed || suspended) return
@@ -309,6 +313,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       `Cursor ${position(editor.tick)} · ${noteName(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · input length ${editor.duration / per} · velocity ${current?.velocity ?? editor.velocity}${selection.size ? ` · ${selection.size} selected` : ''}${editor.noteClipboard ? ` · ${editor.noteClipboard.notes.length} copied` : ''}`,
       [['Chord candidates: ', []], [at.candidates.join(' / ') || '—', at.candidates.length ? [bold, cyan] : [dim]], [` · ${at.notes.join(' ')}`, []]],
       statusLine,
+      [['Space', [bold, green]], [' play/pause  ', []], ['0', [bold, cyan]], [' restart  ', []],
+        ['.', [bold, red]], [' stop  ', []], ['i', [bold, cyan]], [' instrument  ', []],
+        ['f', [bold, cyan]], [' FluidSynth  ·  ', []], ['selected', [bold, yellow]], ['  ', []],
+        ['playing', [bold, green]], ['  ', []], ['cursor', [bold, magenta]]],
     ]
     if (sourcePicker.view) {
       lines.length = 0
@@ -407,26 +415,26 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       }
       lines.push([['       ', []], ...cellSegments(ruler)], meters ? [['  bar  ', [dim]], [numbers.join(''), [bold]]]
         : `       ${axis.label} ${first / per} → ${Math.min(project.length, first + cols * editor.step) / per}`)
-      const height = Math.max(1, rows - 11), high = Math.min(127, Math.max(height - 1, editor.pitch + Math.floor(height / 2)))
+      const height = Math.max(1, rows - 12), high = Math.min(127, Math.max(height - 1, editor.pitch + Math.floor(height / 2)))
       for (let y = 0; y < height; y++) {
         const pitch = high - y
         if (pitch < 0) break
-        const cells = Array.from({ length: cols }, (_, x) => first + x * editor.step >= project.length ? [' ', []] : pitch % 12 === 0 ? ['─', []] : ['·', [dim]])
+        const cells = Array.from({ length: cols }, (_, x) => first + x * editor.step >= project.length ? [' ', []] : pitch % 12 === 0 ? ['─', [dim, cyan]] : ['·', [dim]])
         for (const note of track.notes) {
           if (note.pitch !== pitch) continue
           const left = Math.max(0, Math.floor((note.start - first) / editor.step))
           const right = Math.min(cols - 1, Math.ceil((note.start + note.duration - first) / editor.step) - 1)
           for (let x = left; x <= right; x++) cells[x] = selection.has(note.id) ? ['▓', [bold, yellow]]
-            : first + x * editor.step <= note.start ? ['█', [bold, trackColor]] : ['━', [trackColor]]
+            : first + x * editor.step <= note.start ? ['█', [bold, pitchColors[pitch % 12]]] : ['▬', [bold, pitchColors[pitch % 12]]]
         }
         // A note under the playhead is sounding; empty cells draw its line.
         if (playColumn !== null && playColumn >= 0 && playColumn < cols && first + playColumn * editor.step < project.length) {
           const [glyph, styles] = cells[playColumn]
-          cells[playColumn] = '█━▓'.includes(glyph) ? [glyph, [...styles, inverse]] : ['│', [green]]
+          cells[playColumn] = '█▬▓'.includes(glyph) ? [glyph, [bold, green, inverse]] : ['│', [green]]
         }
         const cursor = Math.floor((editor.tick - first) / editor.step)
-        if (pitch === editor.pitch && cursor >= 0 && cursor < cols) cells[cursor] = [current ? '◆' : '◇', [bold, inverse]]
-        const label = percussion ? [] : pitch % 12 === 0 ? [bold] : blackKeys.has(pitch % 12) ? [dim] : []
+        if (pitch === editor.pitch && cursor >= 0 && cursor < cols) cells[cursor] = [current ? '◆' : '◇', [bold, magenta, inverse]]
+        const label = percussion ? [] : [pitchColors[pitch % 12], ...(pitch % 12 === 0 || pitch === editor.pitch ? [bold] : blackKeys.has(pitch % 12) ? [dim] : [])]
         lines.push([[noteName(pitch).padStart(5), label], ['  ', []], ...cellSegments(cells)])
       }
       const instrument = projectSoundLabel(audioInstrument())
@@ -437,7 +445,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, rows - 2).forEach((line, row) => { output += `\x1b[${row + 1};1H${fit(line)}` })
-    output += `\x1b[${rows - 1};1H${fit(sourcePicker.view ? '↑/↓:choose  Enter:arm keyboard  r:refresh  Esc/q:cancel' : picker.view ? pickerFooter(picker.view) : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help')}`
+    output += `\x1b[${rows - 1};1H${fit(sourcePicker.view ? '↑/↓:choose  Enter:arm keyboard  r:refresh  Esc/q:cancel' : picker.view ? pickerFooter(picker.view) : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play/pause  0:restart  .:stop  i:instrument  Enter:note  arrows:cursor  Tab:track  ?:help')}`
     if (!picker.view) output += `\x1b[${rows};1H${fit(sourcePicker.view ? openedSourceMenuOwner?.monitor ? 'Selection arms step input with the chosen instrument and audio output.' : 'Selection opens MIDI input only; no audio or output route.' : harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 'Ctrl-L:status  s:save  l:loop  { }:loop bars  < >:bars  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
     process.stdout.write(output)
   }
@@ -603,6 +611,17 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     })
     draw()
   }
+  function restart() {
+    if (!accepting || suspended || childTask) return
+    if (stepInput) throw new Error('Use :step-stop before playback')
+    if (transport.kind === 'playing' || transport.kind === 'paused') {
+      transport.handle.seek(0)
+      if (transport.kind === 'paused') transport.handle.resume()
+      return
+    }
+    stopPlayback()
+    play()
+  }
   async function save(target = path) {
     const project = editor.project
     const nextRevision = await saveProject(target, project, target === path ? revision : null)
@@ -670,7 +689,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         stop(); clearHarmony(); editor = next
         status = notice(`Selected ${projectSoundLabel(audioInstrument())}`); break
       }
-      case 'soundfont-fluid': chooseInstrument({ kind: 'fluid-selection', path: value.path, preview: false }); break
+      case 'soundfont-fluid': beginInstrumentChoice({ kind: 'fluid-selection', path: value.path, preview: false }); break
       case 'step-input':
         if (value.source !== undefined) startStepInput(value.source, value.monitor, value.practice, value.recording)
         else {
@@ -823,6 +842,18 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     task = task.then(async () => {
       // Drain admitted editor decisions even after input admission closes.
       if (closed && analysisKey) return
+      // Transport keys retain their meaning while inspecting harmony.
+      if (!key.ctrl && !key.meta) {
+        if (key.name === 'space') { play(); return }
+        if (key.name === '0') { restart(); return }
+        if (text === '.') { stop(); status = notice('Stopped'); return }
+        if (key.name === 'f' || key.name === 'i') {
+          if (stepInput) throw new Error('Use :step-stop before choosing an instrument')
+          if (key.name === 'f') beginInstrumentChoice({ kind: 'fluid-selection' })
+          else if (accepting && !suspended && !childTask) { stop(); picker.open() }
+          return
+        }
+      }
       if (harmony) {
         if (harmony.kind === 'ready') {
           if (key.name === 'up' || key.name === 'down') harmony.cursor = Math.max(0, Math.min(harmony.result.rows.length - 1, harmony.cursor + (key.name === 'down' ? 1 : -1)))
@@ -847,10 +878,6 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       }
       const eventKind = editor.eventView === 'tempo' ? 'tempo' : editor.eventView === 'meter' ? 'meter' : 'expression'
       switch (key.name) {
-        case 'space': play(); break
-        case 'i':
-          if (stepInput) throw new Error('Use :step-stop before choosing an instrument')
-          if (accepting && !suspended && !childTask) { stop(); picker.open() }; break
         case 's': await save(); break
         case 'r': await effect({ kind: 'record' }); break
         case 'l': stepInput?.stop(); stopPlayback(); loop = !loop; break

@@ -1,0 +1,139 @@
+{
+  "scope": "Explicit compatible engine selection and phrase transport/color usability; not a repair of AlphaSynth DSP",
+  "executed_core_head": "7eba1a6b9e2426f5e8c434477dad758961817801",
+  "executed_upper_before_metadata": "e69a2fcc134a1933eb97f036c5533b9669cb6fbc",
+  "product_sha256": {
+    "instruments.mjs": "53d4c13bdcb4a35152bb1f8fd2e1b15a8f970645dcf49cddfb58964063283e7a",
+    "sequencer-tui.mjs": "4fc245160447a718de5672da7e955aa4adda34779681dcae2800ab5dfa8efdd7"
+  },
+  "reproduction": [
+    {
+      "font": "configured FluidR3_GM.sf2",
+      "engine": "AlphaSynth",
+      "ok": false,
+      "error": "synthesizer produced a non-finite sample"
+    },
+    {
+      "font": "bundled sonivox.sf2",
+      "engine": "AlphaSynth",
+      "ok": true,
+      "durationMs": 60000.36281179138,
+      "peak": 0.48811522126197815,
+      "clippedSamples": 0
+    }
+  ],
+  "compatible_offline_pcm": {
+    "frames": 2646000,
+    "sampleRate": 44100,
+    "channels": 2,
+    "peak": 0.08715939521789551,
+    "clippedSamples": 0,
+    "wavSha256": "4941a9abd3a5f5316cd1c2ab1b9bd6d7b1dda2f59234f228f405cca67502883d",
+    "fontSha256": "74594e8f4250680adf590507a306655a299935343583256f3b722c48a1bc1cb0"
+  },
+  "compatible_engine": {
+    "kind": "fluidsynth",
+    "version": "2.6.0",
+    "controlFrames": 64
+  },
+  "focused_node": {
+    "files": [
+      "instrument-engine-selection",
+      "sequencer-close",
+      "score-controller",
+      "picker-display"
+    ],
+    "tests": 51,
+    "pass": 51,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0
+  },
+  "resolved_review_findings": [
+    "f then stop must cancel a delayed selected-sound capture before adoption/preview",
+    "direct stop/restart/play controls must remain reachable while harmony analysis is visible"
+  ],
+  "actual_candidate_tui": {
+    "runtimeRevision": "0f386ed22ef185efd7e73b5b3e943e3b808c1f2d2b36d4c3c4f30374dd0ace73",
+    "exitCode": 0,
+    "commands": [
+      "f: explicitly choose configured SF2 with FluidSynth and preview",
+      "Space: pause",
+      "0: seek range start and resume",
+      ".: stop",
+      "Space: start selected engine again",
+      ".: stop",
+      "q: save private copy and return"
+    ],
+    "output": "BlackHole2ch_UID",
+    "nativeChildPids": [
+      78486,
+      79643
+    ],
+    "afterStopChildCount": 0,
+    "savedEngine": {
+      "kind": "fluidsynth",
+      "version": "2.6.0",
+      "controlFrames": 64
+    },
+    "notesUnchanged": true,
+    "originalProjectUnchanged": true,
+    "sourceHashesMatchCandidate": true
+  },
+  "limits": [
+    "Chosen existing AlphaSynth remains until an explicit instrument selection; no engine fallback",
+    "Offline PCM is finite/nonzero but acoustics and received output PCM were not measured",
+    "BlackHole native child launch/retirement and private TUI are narrower than physical hardware QA",
+    "Captured ANSI was rendered locally for the preview; it is not a Ghostty screenshot",
+    "Private user melody/SF2/WAV/project and terminal raw logs are not committed",
+    "No Dune/full build, CI or server replacement"
+  ],
+  "combined_source_head_before_receipt_update": "0bd74c64afbb0f0641606aef331965ff4468be2e",
+  "combined_main_base": "376e0f1abdd03163f7af4b4791c24ad46dd043f0",
+  "combined_node_results": {
+    "tests": 92,
+    "pass": 92,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "scope": "prior four phrase files plus eight native-event/clock/selection files after the UMP group stack reached main"
+  },
+  "combined_candidate_tui": {
+    "runtimeRevision": "c77325f955ec97625dceb7b82ee2069d564bfbb6cff8c1f23c7c2b5d860829f1",
+    "exitCode": 0,
+    "commands": [
+      "f: explicitly choose configured SF2 with FluidSynth and preview",
+      "Space: pause",
+      "0: seek range start and resume",
+      ".: stop",
+      "Space: start selected engine again",
+      ".: stop",
+      "q: save private copy and return"
+    ],
+    "output": "BlackHole2ch_UID",
+    "nativeChildPids": [
+      2661,
+      3144
+    ],
+    "afterStopChildCount": 0,
+    "notesUnchanged": true,
+    "savedEngine": {
+      "kind": "fluidsynth",
+      "version": "2.6.0",
+      "controlFrames": 64
+    },
+    "runtimeSourceHashesMatch": true
+  },
+  "default_auxiliary_install": {
+    "revision": "c77325f955ec97625dceb7b82ee2069d564bfbb6cff8c1f23c7c2b5d860829f1",
+    "copiedSourceCount": 117,
+    "nativeHelperCount": 7,
+    "nativeHelpersRebuilt": false,
+    "allCopiedSourceAndHelperHashesMatch": true,
+    "sourceMerged": false,
+    "verification": "installer import/engraver probes plus identical candidate runtime and actual candidate TUI; default user screen requires reopening",
+    "previouslyObservedMusicPid": 31678,
+    "previousMusicPidPresentAtInstallReadback": false,
+    "currentUserMusicRuntime": "not observed"
+  }
+}

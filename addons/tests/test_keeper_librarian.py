@@ -6,6 +6,7 @@ they do not execute the host Exact provider or Memory commit.
 from __future__ import annotations
 
 import json
+import runpy
 from pathlib import Path
 import sys
 import tempfile
@@ -65,8 +66,9 @@ class LibrarianWorker(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        print(f"Librarian worker subprocesses: {len(cls.timings)}, "
-              f"total={sum(cls.timings):.3f}s, min={min(cls.timings):.3f}s, max={max(cls.timings):.3f}s")
+        if cls.timings:
+            print(f"Librarian worker subprocesses: {len(cls.timings)}, "
+                  f"total={sum(cls.timings):.3f}s, min={min(cls.timings):.3f}s, max={max(cls.timings):.3f}s")
 
     def run_worker(self, state, operations):
         operations = [{"method": "initialize", "params": {}}, *operations]
@@ -119,6 +121,42 @@ class LibrarianWorker(unittest.TestCase):
             terminal = self.run_worker(directory, [*[read(x, other(x)) for x in originals], *map(read, originals)])
             self.assertTrue(all(x["isError"] for x in terminal[:2]))
             self.assertTrue(all(self.output(x)["state"] == "finished" for x in terminal[2:]))
+
+    def test_body_free_admission_refusal_keeps_its_tool_after_restart(self):
+        contract = runpy.run_path(str(SERVER))["CONTRACT"]
+        from exact_worker import InvalidInput, REQUEST_BODY_REFUSED, Worker
+        with tempfile.TemporaryDirectory() as directory:
+            for output in ("admission", "durable"):
+                original = {**request(output), "system": "x" * 8192}
+                intended = tool(output)
+                other = "derive_memory" if output == "admission" else "admit_memory"
+                worker = Worker(Path(directory), 4096, contract)
+                refused = worker.invoke({"kind": "submit", "request": original},
+                                        {"kind": "operator"}, tool_name=intended)
+                self.assertEqual(refused["result"], REQUEST_BODY_REFUSED)
+                retained = json.loads(worker.store.path(original["request_id"]).read_text())
+                self.assertNotIn("request", retained)
+                self.assertEqual(retained["tool"], intended)
+                reopened = Worker(Path(directory), 4096, contract)
+                self.assertEqual(reopened.invoke({"kind": "read", "request_id": original["request_id"]},
+                                                 {"kind": "operator"}, tool_name=intended), refused)
+                with self.assertRaises(InvalidInput):
+                    reopened.invoke({"kind": "read", "request_id": original["request_id"]},
+                                    {"kind": "operator"}, tool_name=other)
+                self.assertEqual(reopened.host_requests({}), {"requests": []})
+                for invalid_tool in ([], {}, None, "", "another-tool"):
+                    worker.store.path(original["request_id"]).write_text(
+                        json.dumps({**retained, "tool": invalid_tool}))
+                    with self.assertRaises(InvalidInput):
+                        reopened.invoke({"kind": "read", "request_id": original["request_id"]},
+                                        {"kind": "operator"}, tool_name=intended)
+                changed = json.dumps({**retained, "tool": other})
+                worker.store.path(original["request_id"]).write_text(changed)
+                with self.assertRaises(InvalidInput):
+                    reopened.invoke({"kind": "submit", "request": original},
+                                    {"kind": "operator"}, tool_name=intended)
+                self.assertEqual(worker.store.path(original["request_id"]).read_text(), changed)
+                worker.store.path(original["request_id"]).write_text(json.dumps(retained))
 
     def test_request_identity_cannot_change_purpose_or_original_input(self):
         with tempfile.TemporaryDirectory() as directory:

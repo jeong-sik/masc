@@ -210,8 +210,15 @@ class Store:
                 raise InvalidInput("Exact request record identity or input digest disagrees")
             if record["result"] is not None:
                 final_of_json(record["result"])
-        elif set(record) == {"version", "request_id", "digest", "result"}:
+        elif set(record) == ({"version", "request_id", "digest", "result", "tool"}
+                             if len(self.contract.exported_names()) > 1
+                             else {"version", "request_id", "digest", "result"}):
             # Refused at admission (Worker.invoke): the body was never kept.
+            # A multi-tool worker must retain the destination without that body.
+            if len(self.contract.exported_names()) > 1:
+                tool = text(record["tool"], "Exact admission refusal tool")
+                if tool not in self.contract.exported_names():
+                    raise InvalidInput("Exact admission refusal has no exported tool")
             if self.path(record["request_id"]).name != name or not is_digest(record["digest"]):
                 raise InvalidInput("Exact admission refusal identity or input digest disagrees")
             if record["result"] != REQUEST_BODY_REFUSED:
@@ -274,6 +281,11 @@ class Worker:
         envelope = {"jsonrpc": "2.0", "id": 2 ** 53, "result": tool_result(result)}
         return len((encode_output(envelope) + "\n").encode("utf-8")) <= self.max_reply_bytes
 
+    def retained_tool(self, record: dict) -> str:
+        if "request" in record:
+            return self.contract.request_tool(record["request"])
+        return record["tool"] if len(self.contract.exported_names()) > 1 else self.contract.tool_name
+
     def status(self, request_id: str, record: dict | None) -> dict:
         if record is None:
             return {"request_id": request_id, "state": "absent"}
@@ -311,6 +323,8 @@ class Worker:
                 if old is not None:
                     if old["digest"] != request_digest:
                         raise InvalidInput("request_id already belongs to different Exact request input")
+                    if self.retained_tool(old) != tool_name:
+                        raise InvalidInput("retained Exact request belongs to another tool")
                     return self.status(request_id, old)
                 listing = [self.host_request(request)]
                 if not self.fits({"requests": listing}):
@@ -319,6 +333,8 @@ class Worker:
                     # a read after a lost reply gives this answer, not absent.
                     refused = {"version": 1, "request_id": request_id, "digest": request_digest,
                                "result": {**REQUEST_BODY_REFUSED}}
+                    if len(self.contract.exported_names()) > 1:
+                        refused["tool"] = tool_name
                     self.store.write(refused)
                     return self.status(request_id, refused)
                 pending = [self.host_request(record["request"]) for record in self.store.records()
@@ -332,10 +348,9 @@ class Worker:
                 exact(args, {"kind", "request_id"}, "read")
                 request_id = text(args["request_id"], "request_id")
                 record = self.store.read(request_id)
-                # A bodyless admission refusal has only its ID and fixed
-                # request_body_refused result, with no purpose-bound payload.
-                if record is not None and "request" in record and self.contract.request_tool(record["request"]) != tool_name:
-                    raise InvalidInput("retained Exact request belongs to another tool")
+                if record is not None:
+                    if self.retained_tool(record) != tool_name:
+                        raise InvalidInput("retained Exact request belongs to another tool")
                 return self.status(request_id, record)
             case _:
                 raise InvalidInput("Exact request kind must be submit or read")

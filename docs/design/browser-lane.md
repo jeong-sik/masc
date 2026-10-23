@@ -92,6 +92,33 @@ checking rendered application state, and gathering evidence across tabs.
 `BrowserRead mode=scene` supplies document-scoped node references and visible
 content; `mode=regions` supplies semantic regions for a scoped scene read.
 `mode=elements` supplies a control inventory when that extra detail is needed.
+An optional `selector` reads explicit CSS matches, including non-control nodes
+such as custom conversation rows. `within` independently limits the answer to
+nodes matching a CSS scope or inside one. Both use document-level CSS semantics;
+`within` is inclusive, and `:scope` refers to the document element. For example,
+after observing a sidebar's selector and row semantics, read
+`{"mode":"elements","within":"#inbox","selector":"[role=row]"}` with the
+same lane/clientId/tabId binding. These selectors describe the fixture example,
+not a contract for any particular chat application.
+
+`selectorMatches` counts document-wide CSS matches before visibility and
+`within` filtering; `withinMatches` counts scope roots. `total` counts the visible
+intersection, and `elements` retains the existing 200-result cap. Zero matches
+are a successful empty read. Invalid CSS is refused. Unfiltered reads still
+return the control inventory. Explicit matches retain the same hidden-node,
+input-value and disabled-state handling; password and file values are withheld.
+A returned selector identifies an observed node and does not promise that the
+page accepts a click or another action on it. Inspect the resulting page after
+an interaction. Keepers must not infer selectors from names alone.
+
+The browser must echo each requested filter and its nonnegative match count.
+An older running extension that ignores a filter is refused before its controls
+reach the caller. Updating installed extension files or reconnecting a native
+host does not itself reload an already-running background script; reload the
+add-on in the connected browser after setup. Native WebDriver, live BiDi,
+Stagehand and ego use the same page observation script; their existing frame
+and interaction limits still apply.
+
 Use those observations rather than inventing selectors or node IDs. A node
 reference and a CSS selector are alternative targets and cannot be combined.
 

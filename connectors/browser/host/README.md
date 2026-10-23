@@ -19,6 +19,12 @@ masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
 Without `--mode` the command writes nothing and prints what is installed. It
 starts no browser.
 
+After updating MASC and running extension setup, reload the browser-lane add-on
+in the connected Firefox/Zen browser as well. Reconnecting the native host does
+not reload the extension's already-running background script. If a filtered
+read reports that the browser did not confirm `within` or `selector`, refresh
+the extension before retrying; the unfiltered response is deliberately withheld.
+
 `--mode bidi` is the other route. It installs the host and the launcher, with no
 extension and no native messaging manifest, and writes `[browser.live.bidi]` into
 the workspace's `runtime.toml`, so the MASC server starts a Firefox of its own

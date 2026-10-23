@@ -49,6 +49,7 @@ const help = [
   ':select-notes START END [LOW HIGH] selects onsets; :select-all; Esc clears selection',
   'Ctrl+A: select all; Alt+C/X/V: copy/cut/paste notes; Shift+arrows and x/Delete act on selected notes',
   ':copy-notes :cut-notes :paste-notes [AT [SEMITONES]] :delete-notes :move-notes OFFSET SEMITONES',
+  ':quantize-notes GRID snaps selected attacks only; lengths, dynamics and other notes remain intact.',
   'Tab: track; n: new track; m: mute; o: solo; u/y: undo/redo',
   '[/]: halve/double note length; +/-: velocity; g: grid; l: loop; Space: play/pause',
   '{/}: loop from/to the bar under the cursor; </>: one bar shorter/longer; :bars N sets the length',

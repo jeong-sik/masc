@@ -99,6 +99,19 @@ export function noteSelectionCommand(editor, command, args) {
       count(2); const offset = units(editor, args[0], true), semitones = transpose(args[1])
       return moveSelectedNotes(editor, offset, semitones)
     }
+    case 'quantize-notes': {
+      count(1)
+      const grid = units(editor, args[0])
+      if (!grid) throw new Error('Quantize grid must be positive')
+      // Exact half-up rounding on the document's native tick grid, including
+      // positions near Number.MAX_SAFE_INTEGER. Do not round through a float.
+      const snap = value => integer(Number((2n * BigInt(value) + BigInt(grid))
+        / (2n * BigInt(grid)) * BigInt(grid)), 'quantized note position')
+      const next = apply(editor, chosen(editor).map(note => ({
+        kind: source(editor) ? 'change' : 'change-note', id: note.id, start: snap(note.start),
+      })))
+      return { ...next, noteSelection: { ...next.noteSelection, origin: snap(editor.noteSelection.origin) } }
+    }
     case 'paste-notes': {
       count(0, 2)
       const copied = editor.noteClipboard

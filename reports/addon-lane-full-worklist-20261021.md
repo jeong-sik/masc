@@ -16,7 +16,7 @@
 | E04–E05 | task-2523 | Required Judge/Board 서비스 의무·승계, 원래 per-attempt callback과 durable 후보를 유지하는 worker 실행 |
 | E06 | task-2524 | Task/Goal의 도구·이미지·lookup·원본 증거와 report-verdict 프로토콜을 유지하는 Verifier; 최종 전이·확인은 host 소유 |
 | E03 후속 | task-2525 | history 용량·실패 descent, continuity/working-context/maintenance 목적과 실제 Keeper 기억 연속성 |
-| E09 | task-2526 | Realtime bridge 설정 소실 시 모드·ID·voice·턴 이력을 Suspended로 보존하고, 실제 Keeper 응답도 typed Active 상태로 계산하는5파일 수리 작성. 최초 P2 FAIL과 수리 뒤 독립 SOURCE PASS·parser5 보존. 타입·실행·음성 연결·설치 미검증. TTS/STT/player/device Addon 추출·실제 입출력/해제 기준은 그대로 남음 |
+| E09 | task-2526 | Realtime 세션 보존·실제 Keeper 활동 응답5파일 수리 #45448 main 병합. 최초 P2 FAIL·수리 뒤 독립 SOURCE PASS·parser5 보존. 선택 실행은 compile 실패로 미실행. TTS/STT/player/device의 Addon 추출·실제 입출력/해제 기준은 그대로 남음 |
 | E10–E11 | task-2527 | Connector polling/socket/cursor와 Search fallback/cache/cancel의 실제 실행; host credential·송신 권한 보존 |
 | E07–E08·E12 | task-2528 | 기존 Fusion/MSX/DOS 및7개 패키지의 실제 사용·원래 결과·명시적 복원; observation-only와 callable 구분 |
 | G·H 및 A | task-2529 | Dashboard/TUI 실제 조작·관측·원래 이력·부분 실패·설정 반영 및 동일 candidate의 조합 검증 |
@@ -127,10 +127,10 @@ A의 이번 Addon 변경 닫기는 대상 범위가 다르며, 같은 수정이�
 | --- | --- | --- | --- |
 | D01 | Addon별 모델 route와 기능 활성화의 독립 선택 검증 확장 | Browser broker 있음 | LLM 없는 동작은 독립 실행되고, 설치/출력별 선택 모델이 실제 호출에 반영 |
 | D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | [#44768](https://github.com/jeong-sik/masc/pull/44768)·[#44769](https://github.com/jeong-sik/masc/pull/44769)에 원래 요청 identity·grant·완전 domain decode·terminal unknown 처리 source 구현. 독립 source/response 검토 PASS; OCaml 실행 검사는 아직 미완료 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
-| D03 | 모델 호출 전 요청 보존 및 원래 identity 결속 | 공유 원본 owner와 HITL/Verifier attempt 원본이 main에 있음. 실제 producer 연결은 남음. Librarian actual terminal Outcome_unknown 뒤 새 UUID/provider 선택이 가능한 P2 source 경계를 exact444에서 확인; 후속 수리 중 | request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch |
-| D04 | 오류·거절·불확실 결과의 typed 처리 일관화 | RPC Sent_unknown의 dispatch-pending과 실제 host terminal Outcome_unknown을 구분. 후자는 Rejected 뒤 source frontier에서 빠져 다음 wake에 새 provider를 허용하는 P2 source 경계가 남음. 실제 재현 실행과 source finding은 구분 | transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지 |
+| D03 | 모델 호출 전 요청 보존 및 원래 identity 결속 | 공유 원본 owner와 HITL/Verifier attempt 원본은 main. Librarian actual terminal Outcome_unknown을 원래 source frontier에 유지하는 #45451도 main 병합 확인. 원래 입력·prepared proof·provider 중복 방지의 source 수리와 미실행 회귀를 구분; 나머지 producer 연결은 남음 | request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch |
+| D04 | 오류·거절·불확실 결과의 typed 처리 일관화 | RPC Sent_unknown의 dispatch-pending과 host terminal Outcome_unknown을 구분. 후자가 source frontier에서 빠지던 P2는 #45451 main 병합으로 source 수리. 실제 worker 회귀는 aggregate compile에서 막혀 미실행; 운영자에게 unknown 원인·해결 경로를 보이는 후속은 남음 | transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지 |
 | D05 | credential·provider admission·동시 실행 권한을 host에 유지 | Browser 검증 있음 | worker/child에 비밀 유출 없음; 실제 provider별 queue·취소·동시성 동작 확인 |
-| D06 | 설정 교체·detach 중 늦은 모델 응답 처리 | Browser 범위의 기존 검증 보존. Librarian exact444에서는 old unknown terminal이 보존돼도 새 현재 route 요청을 만들 수 있는 source 경계가 남아 있으며, unknown 원본을 source frontier에 유지하는 후속 수리 중 | 원래 요청의 terminal 증거를 보존하고 새 worker에 오적용하거나 같은 효과를 재생하지 않음 |
+| D06 | 설정 교체·detach 중 늦은 모델 응답 처리 | Browser 범위 기존 검증 보존. Librarian의 actual unknown 원본을 현재 route 교체 뒤에도 source frontier에 유지하는 #45451 main 병합 확인. late response·재실행 방지의 authored 회귀와 실제 실행·설치 증거는 구분 | 원래 요청의 terminal 증거를 보존하고 새 worker에 오적용하거나 같은 효과를 재생하지 않음 |
 
 Fusion 패널 답변은 기존 free text 계약을 유지한다. 모든 Lane의 결과를 임의로 Exact JSON으로 통일하지 않는다.
 Browser 최신 스택에는 요청별 schema와 부분 shape 검사가 이미 있다. 이 기반이 main에 통합됐다고
@@ -144,13 +144,13 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | --- | --- | --- | --- |
 | E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 / 10/23: Candle Off owed→On3stage→Paid1회→재연결 불변3결과 public 영수증 직접 읽음. host eb484/worker b427 혼합. | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | db31 선택79·native29 PASS. 같은 실제 workspace에서 Off 원래 Briefing 복구→On 새 입력→final Off0·6요청 ACK·두 UI [실측](../docs/evidence/2026-10-22-curator-Off-recovery/README.md). 전체 실패 경계·통합·운영 설치 별도 / 10/23: db31 Off 원래 Briefing 복구→새 incarnation·새 input→6ACK·최종 Off 실제 영수증 직접 읽음. | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
-| E03 | Librarian 실행의 Addon 경계 검토·추출 | #45095의 16층이 top #45357 exact444ce2d5에서 main 병합됨(3931736b). checkpoint·absorption·Memory lineage와 pending의 전체 기준은 유지. terminal unknown 뒤 새 root/provider 경계는 source P2로 확인해 별도 수리 중; 이전 실행 결과를 새 head에 이월하지 않음 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
+| E03 | Librarian 실행의 Addon 경계 검토·추출 | #45095 원래16층과 terminal-unknown source 수리 #45451이 main 병합됨. checkpoint·absorption·Memory lineage·pending 전체 기준 유지. actual unknown 뒤 새 UUID/provider를 만들지 않는 독립 SOURCE PASS; 후속 selected 회귀는 compile 실패로 미실행이며 Keeper 실제 기억 연속성·운영 설치는 남음 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | Required attestation+#45365 original+#45369 durable owner는 main. production prepare/retain caller 검색상 없음. 기존 범위의 근거와 원래 완료 기준은 유지. | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | Required registry는 Board에도 기반. Board-specific original/worker bridge는 직접 확인 안 함. 기존 범위의 근거와 원래 완료 기준은 유지. | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
 | E06 | Verifier 실행의 Addon 경계 검토·추출 | #45390 original+owner ML/MLI는 main. subject/question/lookup/evidence·attempt 저장 존재, production caller 미연결. 기존 범위의 근거와 원래 완료 기준은 유지. | 증거 검증과 Goal/Task 최종 전이를 분리하고 위조·이전 실행 증거 오적용 없이 재개 |
 | E07 | Fusion compute/results/report의 실제 조합 사용 검증 | 패키지 존재 | native/container/provider 계산·원래 run·immutable 결과 연결·명시적 전달·실제 Agent 읽기 확인 |
 | E08 | MSX/DOS의 설치·상태 복원·실제 게임 사용 검증 | 별도 worker·image 검증 있음 | `msx-machine`·`dos-machine`·`dos-world`의 설치 On/Off/교체·명시적 checkpoint 복원·기존 media/save 보존과 실제 화면/입력 확인 |
-| E09 | Voice·VST 실행 소유 경계 분리 | Realtime bridge 설정 소실 시 원래 세션 모드·ID·voice·턴 이력을 보존하는 최소 수리 작성 중. unavailable 생성·재개 및 실제 Keeper 응답의 활동 상태도 함께 검토. 파서만 확인됐으며 독립 리뷰 대응·실행은 별도. TTS/STT/player/device의 Addon 추출·실제 입출력/해제 기준은 그대로 남음 | TTS/STT/realtime/session/player/device 수명과 결과·오류를 분리; 실제 입출력과 해제 정리 확인 |
+| E09 | Voice·VST 실행 소유 경계 분리 | Realtime bridge 설정 소실 시 원래 모드·ID·voice·턴 이력을 Suspended로 보존하고 Keeper 응답을 typed Active로 계산하는5파일 수리 #45448 main 병합 확인. 최초 P2 FAIL·수리 뒤 독립 SOURCE PASS·parser5 보존. 선택 실행은 공유 Runtime compile 오류로 미실행. TTS/STT/player/device Addon 추출·실제 입출력/해제는 남음 | TTS/STT/realtime/session/player/device 수명과 결과·오류를 분리; 실제 입출력과 해제 정리 확인 |
 | E10 | Slack/Discord Connector의 선택적 Addon 경계 정리 | 원래 Connector event·durable acceptance 전 ACK 금지·원래 route/full-history/workspace 소비자 확인. 기존 범위의 근거와 원래 완료 기준은 유지. | polling/cursor/subscription/인증/재접속·중복 전달 방지·host 메시지 권한 유지 |
 | E11 | Web Search의 provider·cache·credential 경계 추출 | 조사·설계 | 실제 검색/fallback/취소/출처 보존; provider credential을 host에 유지 |
 | E12 | 나머지 패키지의 공통 계약 적합성·실사용 점검 | #45357 Candle 기반 deferred fixture는 원래 나열7패키지 실사용 검증을 대신하지 않음. 기존 범위의 근거와 원래 완료 기준은 유지. | output-statistics, value-difference, frame-progress, web-project, wkbl-score-runs, operator-quiz, msx-observer의 설치/도구/Skill/출력 연결을 실제 검증 |
@@ -863,3 +863,11 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - HITL/Verifier immutable original과 durable owner는 기반이다. 실제 producer·worker·host 판정/최종 전이를 연결하는 E04/E06 기준은 남는다. Connector ACK 수리도 전체 Connector Addon 추출 완료가 아니다.
 - Features는 내장 기능과 Plugin을 함께 찾는 화면이고, Plugins는 설치·활성화 관리다. Lane은 내부 작업·관측 경로다. Catalog의 폴더 탐색을 유지한 역할 분류와 기존 package preview의 execution/worker-service 상세는 후속 구현 범위다.
 - Voice는 E09의 세션 상태 수리를 별도로 진행하며 실제 음성 연결·장치 입출력·Addon 수명 완료를 주장하지 않는다. 브라우저 Safari/clipboard/독립 pointer down-up 등 아직 공개 지원되지 않은 행동군도 원래 F 기준에 남는다.
+
+## 2026-10-23 재개 · source 병합과 미실행 회귀의 분리
+
+- Voice source [#45448](https://github.com/jeong-sik/masc/pull/45448)와 Librarian source [#45451](https://github.com/jeong-sik/masc/pull/45451), Librarian evidence [#45452](https://github.com/jeong-sik/masc/pull/45452)의 실제 REST merged/merge commit을 확인했다. D03/D04/D06/E03/E09 상태만 고치고 원래 항목명·완료 기준은 그대로 유지했다. 과거 감사 JSON과 실패 영수증은 그 관측 시점의 기록으로 보존한다.
+- Voice+TUI8 선택 run [39917104360](https://github.com/jeong-sik/masc/actions/runs/39917104360)와 Librarian2 선택 run [39917292369](https://github.com/jeong-sik/masc/actions/runs/39917292369)는 완료 실패다. 공유 Runtime의 `retain ~summary` 누락 등 aggregate compile 오류로 선택 suite가 실행되지 않았다. 각 source 리뷰 PASS를 테스트 PASS로 바꾸어 쓰지 않는다.
+- `~summary` 수리 뒤 다섯 fixture 수리 Native Stack #45464의 [#45462](https://github.com/jeong-sik/masc/pull/45462)·[#45463](https://github.com/jeong-sik/masc/pull/45463)도 병합됐다. 해당 exact top의 선택5 run [39920131507](https://github.com/jeong-sik/masc/actions/runs/39920131507)은 앞선 오류를 지난 뒤 `test_keeper_addon_deferred_runtime.ml:103`의 `Skill_source_config` 직접 의존성 누락에서 compile 실패했다. 이 선택5도 미실행이다.
+- 이어지는 [#45477](https://github.com/jeong-sik/masc/pull/45477)·[#45478](https://github.com/jeong-sik/masc/pull/45478), Native Stack #45479는 해당 executable에 `masc.skill_config`만 선언하는 한 줄 수리와 원래 실패·독립 SOURCE PASS다. 소스·parser/diff·CI 요청·실제 실행·병합·설치는 각각 별도다. 새 선택 실행 접수는 성공 판정이 아니다.
+- E06의 실제 worker bridge와 G/H의 package 분류·Preview는 담당자가 이어 구현하고 있다. 원본 owner 또는 wrapper가 있다는 사실을 Verifier 전환·실제 Agent 작업 완주로 세지 않는다. Librarian terminal unknown의 source 재실행 방지는 운영자에게 원인·명시적 해결 경로를 제공하는 후속도 남긴다.

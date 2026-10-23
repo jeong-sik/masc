@@ -2677,6 +2677,12 @@ status: reference
   같은 내용으로 다시 저장하면 `content_updated_at`은 유지한다.
   `Board_post_updated`는 실제 편집 저장이 성공한 뒤 발행한다. 게시글 ID와
   `content_updated_at`이 같은 편집은 한 사건이며, 뒤의 편집은 새 사건이다.
+  MCP의 게시·댓글·글/댓글 투표·삭제가 완료된 뒤 Activity Graph 투영이 실패해도
+  Board 효과는 `Completed`로 유지한다. 원래 데이터·미디어·아티팩트와 실행 메타데이터는
+  보존하고, `metadata.activity_projection`에 실패한 operation·상태·오류를 별도로 싣는다.
+  이 관측은 MCP 응답의 `_meta`와 Agent-Core 도구 결과의 `_meta`로 전달된다.
+  투영 실패가 Board 작업의 재시도 사유를 만들지 않으며, 호출자가 자의로 다시 게시하지
+  않는다는 보장을 뜻하지는 않는다.
 
 **Report Artifact (보고서 아티팩트)**
 : Keeper가 대화와 별개로 다시 열 수 있게 게시한 독립 문서·보고서·자체 완결 HTML

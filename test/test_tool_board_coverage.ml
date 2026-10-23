@@ -1617,6 +1617,63 @@ let require_mcp_runtime_result name args =
   | Some result -> ((Tool_result.is_success result), (Tool_result.message result))
   | None -> Alcotest.failf "%s not routed by MCP runtime board dispatch" name
 
+let test_committed_board_projection_failure_reaches_callers_as_completed () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
+  let config = Mcp_server.workspace_config state in
+  (* A real storage fault, isolated from Board persistence: the activity store
+     root is a regular file, so the projection cannot acquire its stream lock. *)
+  let activity_path = Filename.concat (Workspace.masc_dir config) Activity_graph.store_dirname in
+  Out_channel.with_open_bin activity_path (fun channel -> output_string channel "blocked activity store");
+  let name = Tool_name.Board_name.to_string Tool_name.Board_name.Board_post in
+  let arguments = `Assoc ["content", `String "A committed post survives projection failure"] in
+  let request = Mcp_server_eio_call_request.decode
+      (Some (`Assoc ["name", `String name; "arguments", arguments])) |> Result.get_ok in
+  let observed = ref None and dispatches = ref 0 in
+  let response = Mcp_server_eio_call_tool.handle_call_tool_eio
+    ~execute_tool_eio:(fun ~sw:_ ~clock:_ ~workspace_scope:_ ?profile:_
+      ?mcp_session_id:_ ?invocation_ref:_ ?auth_token:_ ?internal_keeper_runtime:_
+      ?on_caller_resolved:_ state ~name ~arguments ->
+      incr dispatches;
+      let result = match Mcp_tool_runtime_board.dispatch ~config ~state ~name ~arguments
+          ~agent_name:"projection-caller" with
+        | Some result -> result | None -> Alcotest.fail "Board route missing" in
+      observed := Some result;
+      result)
+    ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+    ~broadcast_tools_list_changed:(fun () -> ())
+    ~sw ~clock:(Eio.Stdenv.clock env) state (`Int 1) request in
+  let open Yojson.Safe.Util in
+  let wire = member "result" response in
+  Alcotest.(check bool) "actual MCP response does not invite a failed-tool retry" false
+    (wire |> member "isError" |> to_bool);
+  Alcotest.(check int) "MCP executes the committed mutation once" 1 !dispatches;
+  let post_id = wire |> member "structuredContent" |> member "id" |> to_string in
+  let post = Board_dispatch.get_post ~post_id |> Result.get_ok in
+  Alcotest.(check string) "authoritative Board reread retains the committed body"
+    "A committed post survives projection failure" post.body;
+  Alcotest.(check int) "the failed projection does not duplicate the Board post" 1
+    (List.length (Board_dispatch.list_posts ~author_filter:"projection-caller" ()));
+  let metadata = wire |> member "_meta" |> member Mcp_server.tool_call_meta_key
+      |> member "metadata" in
+  let check_projection metadata =
+    let projection = metadata |> member "activity_projection" in
+    Alcotest.(check string) "caller receives the failed projection" "failed"
+      (projection |> member "status" |> to_string);
+    Alcotest.(check bool) "caller retains the actual storage error" true
+      (String.length (projection |> member "error" |> to_string) > 0) in
+  check_projection metadata;
+  let result = Option.get !observed in
+  match Tool_bridge.to_agent_core_typed_result result with
+  | Error error -> Alcotest.fail error.Agent_core.Llm_provider.Types.message
+  | Ok output ->
+    Alcotest.(check string) "Agent-Core receives the unchanged committed result"
+      (Tool_result.message result) output.Agent_core.Llm_provider.Types.content;
+    check_projection (Option.get output.Agent_core.Llm_provider.Types._meta)
+
 let test_board_activity_does_not_complete_tasks () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3575,6 +3632,8 @@ let () =
             test_post_create_data_is_structured;
           Alcotest.test_case "projection failure preserves primary effect" `Quick
             test_activity_projection_failure_preserves_primary_effect;
+          Alcotest.test_case "committed projection failure reaches actual callers" `Quick
+            test_committed_board_projection_failure_reaches_callers_as_completed;
           Alcotest.test_case "create judgment roundtrip" `Quick
             test_post_create_judgment_roundtrip;
           Alcotest.test_case "create judgment list roundtrip (#16300)" `Quick

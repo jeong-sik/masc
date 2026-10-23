@@ -29,7 +29,9 @@ let install ~sw ~config =
   let discover = function
     | Runtime.Configuration_observed | Export_inventory_changed ->
       let* queued=Keeper_memory_admission_queue.list_keeper_ids ~keepers_dir in
-      let* originals=Owner.discover_all ~store |> Result.map_error Owner.error_to_string in
+      let originals,refusals=match Owner.discover_all ~store with
+        | Ok originals -> originals,[]
+        | Error error -> [],[Owner.error_to_string error] in
       let found=List.fold_left (fun found (original:Owner.retained) ->
         let keeper=match namespace original.request_id with
           | Admission scope when scope=original.scope ->
@@ -43,7 +45,7 @@ let install ~sw ~config =
         | Ok None -> found
         | Ok (Some (keeper,_installation)) -> {found with keepers=keeper::found.keepers}
         | Error detail -> {found with refusals=detail::found.refusals})
-        {keepers=queued;refusals=[]} originals in
+        {keepers=queued;refusals} originals in
       Ok {keepers=List.sort_uniq String.compare found.keepers;refusals=List.rev found.refusals}
     | Exact_result_delivered {installation_id;instance_id=_;request_id} ->
       let* scope=match namespace request_id with

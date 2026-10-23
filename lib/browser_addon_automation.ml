@@ -187,4 +187,3 @@ let run ~env ~owner ~directory work =
            Eio.Promise.await lost;
            Browser_addon_owner.revoke owner;
            raise (Sys_error "owned Gecko session authority was lost; this worker ends so the host replaces it")))))
-

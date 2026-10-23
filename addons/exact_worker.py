@@ -172,10 +172,11 @@ class Store:
         self.failure: str | None = None
         # Every record's identity and state by file name, built by the first
         # inventory and kept current by write. The host mounts each state
-        # volume into one worker, so this worker is the only writer. A change
-        # made from outside is noticed only in a pending record that a listing
-        # or submit reads again (pending). A record added, a finished record
-        # removed, damaged or turned pending again shows at the next start.
+        # volume into one worker, so this worker is the only writer. Listings
+        # and submits recheck pending records and stop on external changes.
+        # read() checks its named record: a missing leaf is absent, a damaged
+        # record fails only that call. Added records and changes to finished
+        # records otherwise become visible at the next inventory after restart.
         self.index: dict[str, Retained] | None = None
         # A first request ACK requires both its directory entry and the new
         # store entry in the installation state root to survive a crash.
@@ -221,10 +222,14 @@ class Store:
 
     def read_path(self, name: str, directory_fd: int) -> dict:
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
-        with os.fdopen(fd, "r", encoding="utf-8") as source:
-            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise InvalidInput("Exact request record is not a regular file")
-            record = object_value(decode(source.read()), "retained record")
+            # Keep ownership of the raw fd even if constructing the stream fails.
+            with os.fdopen(fd, "r", encoding="utf-8", closefd=False) as source:
+                record = object_value(decode(source.read()), "retained record")
+        finally:
+            os.close(fd)
         if type(record.get("version")) is not int or record["version"] != 1:
             raise InvalidInput("unknown Exact request record version")
         if set(record) == {"version", "request", "digest", "result"}:
@@ -271,7 +276,8 @@ class Store:
 
         The first call after the worker starts reads and checks each record,
         one at a time, so it holds one request body instead of the whole store.
-        A record it cannot read stops the worker. Later calls answer from
+        A missing or invalid record stops the worker; transient I/O errors
+        fail only the call. Later calls answer from
         memory after checking that the store directory is the one this worker
         opened; finished bodies are not read again."""
         self.trusted()
@@ -284,7 +290,7 @@ class Store:
                     try:
                         index[name] = self.retained(name, directory_fd)
                     except (FileNotFoundError, ValueError) as error:
-                        raise self.stop(f"Exact request record {name} cannot be read: {error}") from error
+                        raise self.stop(f"Exact request record {name!r} cannot be read: {error}") from error
             self.index = index
         else:
             self.check_directory()
@@ -292,8 +298,8 @@ class Store:
 
     def pending(self) -> list[dict]:
         """The pending records in name order, read and checked again. A pending
-        record that is gone, unreadable or finished changed outside this
-        worker, which stops it."""
+        record that is gone, invalid or finished changed outside this worker,
+        which stops it. Transient I/O errors fail only the call."""
         names = [name for name, retained in self.inventory() if retained.pending]
         records = []
         with self.open_directory() as directory_fd:
@@ -301,9 +307,9 @@ class Store:
                 try:
                     record = self.read_path(name, directory_fd)
                 except (FileNotFoundError, ValueError) as error:
-                    raise self.stop(f"Exact request record {name} changed outside this worker: {error}") from error
+                    raise self.stop(f"Exact request record {name!r} changed outside this worker: {error}") from error
                 if record["result"] is not None:
-                    raise self.stop(f"Exact request record {name} was finished outside this worker")
+                    raise self.stop(f"Exact request record {name!r} was finished outside this worker")
                 records.append(record)
         return records
 

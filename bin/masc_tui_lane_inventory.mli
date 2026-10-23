@@ -1,5 +1,29 @@
 (** Plain, unwrapped display text. The renderer sanitizes terminal text and
     measures/wraps cells. These functions perform no I/O or state mutation. *)
+val row_category : Masc.Tui_decode_lane_inventory.row -> Masc.Lane_addon_category.t option
+(** Built-ins use their closed typed role. A configured package uses only its
+    current valid declaration; a manual row uses its exact original instance.
+    Invalid, absent and unobserved declarations never borrow worker metadata.
+    [None] is unclassified display metadata, not an activity permission. *)
+type overview_entry =
+  | Category_header of Masc.Lane_addon_category.t option
+  | Lane_row of Masc.Tui_decode_lane_inventory.row
+val overview_entries : Masc.Tui_decode_lane_inventory.row list -> overview_entry list
+(** Nonempty role groups, each with a nonselectable header. Original row
+    objects and their order within a group are preserved. *)
+val ordered_rows : Masc.Tui_decode_lane_inventory.row list -> Masc.Tui_decode_lane_inventory.row list
+(** The selectable rows in the same grouping as [overview_entries]. *)
+val category_label : Masc.Lane_addon_category.t option -> string
+val row_position : id:string -> overview_entry list -> int option
+(** Visual position of the exact row ID, including headers, or [None] if absent. *)
+type identity
+val identity : Masc.Tui_decode_lane_inventory.row -> identity
+val find_identity : identity -> Masc.Tui_decode_lane_inventory.row list -> Masc.Tui_decode_lane_inventory.row option
+val identity_index : identity -> Masc.Tui_decode_lane_inventory.row list -> int option
+(** Selection retains the row ID and closed target; a declaration also retains
+    its valid installation ID, and a manual target includes its incarnation.
+    A missing or replaced original has no selected target. Category and worker
+    status changes alone do not change this identity. *)
 val row_summary : Masc.Tui_decode_lane_inventory.row -> string
 (** Machine activity is displayed independently of its retained publication. *)
 val row_standing : Masc.Tui_decode_lane_inventory.row -> Masc_tui_lane_standing.t

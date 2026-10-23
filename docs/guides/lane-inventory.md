@@ -83,6 +83,27 @@ worker presence. Off with a live or unresolved retained worker is an off request
 not proof of cleanup. See [package activity](lane-package-activity.md) for the
 configuration-preserving control and incomplete-read behavior.
 
+## TUI
+
+All Lanes groups rows by product role: memory and judgment, browser, external
+communications, voice and media, execution environment, analysis, and
+unclassified. Group headings are not selectable; keyboard navigation and search
+visit the Lane rows. Exact-output and worker families remain in the detail
+reading rather than appearing as role categories.
+
+Built-ins use their typed role. A configured package uses only its current valid
+declaration's `ui_category`; a manual attachment uses its original worker's
+category. An invalid, absent or unobserved declaration cannot borrow an old
+worker's category. Categories do not change Required obligations, permissions or
+whether activity may be switched off.
+
+Refresh retains the selected row's original ID and target, including a
+declaration's installation ID or a manual worker's incarnation. Category changes
+and inserted rows do not move settings or activity actions to another target.
+If that original disappears or is replaced at the same path, no target is
+selected until explicit navigation selects a current row. A mouse press from an
+old frame cannot select a replacement installation or incarnation.
+
 ## Dashboard
 
 Monitor → All Lanes reads this same operator inventory. Lane · Queue continues

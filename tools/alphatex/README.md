@@ -1378,3 +1378,41 @@ are preserved. The same engine identity and control-quantum limits apply.
 
 Paired-capture SoundFont realization remains integration work. Click/count-in
 and existing VST practice backing retain their owners.
+
+## Saved VST effect chains
+
+In the phrase or imported MIDI editor, choose a bound VST instrument first.
+`:fx-add /Library/Audio/Plug-Ins/VST3/Soundtoys/Decapitator.vst3` captures an
+audio effect's current default preset. Paths containing spaces are accepted
+without quotes. `:fx` lists the chain in processing order, after the instrument.
+Use `:fx-edit 1` to open that effect's native editor; close its window to capture
+the edited preset. `:fx-move 2 1`, `:fx-remove 1` and `:fx-clear` reorder or remove
+effects. Effect numbers start at 1. These decisions support undo/redo and the
+ordinary project save/reopen flow. Stop or view close cancels a pending native
+capture; a late reply cannot replace the selected sound.
+
+Each effect stores its own preset bytes and SHA-256, installed identifier and
+version, plus its local plugin selection. Playback loads the owned bytes, even
+if the original preset file changed or disappeared. Plugin binaries and licenses
+remain machine-local. Missing plugins, changed identities/versions and malformed
+presets fail explicitly. Neither instrument selection nor effect failure falls
+back to another sound. Choosing a different instrument replaces the whole bound
+sound, including its effects; undo restores it.
+
+Phrase playback, `:wave`, saved phrase/MIDI backing in arrangements, and monitored
+MIDI input use the same ordered chain and verify its returned identities. The
+chain is part of recorded-practice sound identity, so removing the last effect
+cannot reuse an earlier wet realization. This is an insert chain on the bound
+VST instrument; SoundFont, ordinary audio tracks and the score-only viewer do not
+have effect inserts. Arrangement regions render independent instances, rather
+than sharing one continuous global effect bus. Effect tails use the existing
+render horizon; this change does not extend a region or synchronize a plugin's
+transport/tempo to the project.
+
+This first version supports stereo effects that return the complete PCM block
+after Pedalboard's automatic plugin-latency compensation. Before offline
+publication or live stream readiness, the native host probes the chain at the
+selected sample rate and refuses remaining buffered output, changed channel/frame
+counts or nonfinite audio. Runtime blocks are checked again. Additional buffering
+compensation and sidechain inputs are not implemented. Live hardware underrun remains a failure;
+a successful native render does not establish that a device played it.

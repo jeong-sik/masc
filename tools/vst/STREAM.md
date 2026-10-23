@@ -64,3 +64,12 @@ subsequent work. Offline WAV rendering remains a separate operation.
 
 References: [Pedalboard instrument processing](https://spotify.github.io/pedalboard/reference/pedalboard.html)
 and [Ardour monitoring signal flow](https://manual.ardour.org/recording/monitoring/monitor-signal-flow/).
+
+The optional `effects` field on `open` is the same ordered frozen VST-effect
+chain as offline rendering (see [native host](README.md)). `ready` acknowledges
+its ordered `{identifier, version, preset_sha256}` identities. The host refuses
+chains with residual buffered output before `ready`, and checks exact stereo frame
+counts and finite PCM again on every processed block. Histories are reset only
+at admission/start and close, not between blocks. No plugin transport, sidechain
+or additional buffering compensation is supplied. Pedalboard supplies its native
+compensation for reported plugin latency.

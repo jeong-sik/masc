@@ -61,7 +61,7 @@ actual names for explicit selection. A loaded audio effect is refused as a
 MIDI instrument.
 
 `edit` takes the same plug-in identity, an optional existing `preset_path`, and
-an `output_path` for a new `.vstpreset`. Only this explicit operation opens the
+an `output_path` for a new `.vstpreset`. This explicit operation opens the
 plug-in's native editor. Closing the editor captures its complete current preset
 for subsequent renders. This also supports instruments whose sample browser and
 factory sounds are available only inside their own editor. Saved presets are
@@ -75,6 +75,34 @@ file. Bound playback materializes a private preset, supplies
 `expected_instrument: {identifier, version}` to `render`, checks its returned
 input hash, and removes the private preset after the native child closes.
 An installed identity/version mismatch fails before synthesis.
+
+`effect_snapshot` takes an audio-effect plugin selection and returns
+`plugin` plus `preset: {data, sha256}`. It refuses MIDI instruments. An optional
+owned `preset` replaces the mutable `preset_path`; `expected_plugin: {identifier,
+version}` verifies an existing effect before its preset is loaded. Only an
+explicit `edit: true` opens the effect editor, and closing it captures the new
+state. The phrase controller uses a separately owned one-shot child for this
+editor, so cancellation kills and joins it without blocking the retained synth.
+
+`render` and stream `open` accept optional ordered `effects`, each
+`{kind:"vst-effect", selection, preset:{data,sha256}, plugin:{identifier,version}}`.
+The chain processes the synth's stereo PCM in order. Preset hashes and installed
+identities are verified before use; `selection.preset_path` is only a label and
+is never reopened for a bound effect. Native replies acknowledge the ordered
+chain as `effects: [{identifier,version,preset_sha256}]`; consumers reject absent,
+reordered or foreign receipts when a chain is selected. Empty chains may omit
+that receipt. FX instances are fresh for each render/stream, retain histories
+across its blocks, and reset at the start. Instrument retention is unchanged.
+
+The initial insert contract requires a full stereo output block after
+Pedalboard's automatic compensation for reported plugin latency. A silent
+one-second admission probe at the actual sample rate runs before stream `ready`
+or offline synthesis; residual buffered/short output and nonfinite PCM are
+refused explicitly. Every real block is checked too. There is no additional
+buffering compensation, sidechain, automatic tail extension or plugin
+transport/tempo synchronization. Existing render horizons remain exact.
+[Pedalboard permits buffered output](https://spotify.github.io/pedalboard/reference/pedalboard.html),
+so not every loadable audio effect meets this narrower insert contract.
 
 `render` takes `plugin_path`, optional `plugin_name`, `midi_path`, `output_path`,
 optional `preset_path` (a `.vstpreset`), `sample_rate` (default 44100) and

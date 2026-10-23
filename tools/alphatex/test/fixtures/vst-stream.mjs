@@ -8,6 +8,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (row.kind === 'open') {
     if (mode === 'wait') return
     reply({ kind: 'ready', schemaVersion: 1, sampleRate: row.sampleRate, channels: 2,
+      ...(row.effects?.length ? { effects: mode === 'effects-missing' ? [] : (mode === 'effects-reversed' ? row.effects.toReversed() : row.effects).map(effect => ({ ...effect.plugin, preset_sha256: effect.preset.sha256 })) } : {}),
       instrument: mode === 'identity' ? { identifier: 'other' } : row.instrument, preset_sha256: row.preset.sha256 })
   } else if (row.kind === 'render') {
     if (mode === 'wait-block') return

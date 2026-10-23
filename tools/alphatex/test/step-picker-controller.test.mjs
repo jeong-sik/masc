@@ -1,10 +1,11 @@
+import { isDeepStrictEqual } from 'node:util'
 import {MidiSourcePicker as ActualMidiSourcePicker}from '../midi-source-picker.mjs'
 import {phraseBacking} from '../phrase-backing.mjs'
 import {sameStepContext,stepControl}from '../step-input.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { join, resolve, dirname } from 'node:path'
+import { join, resolve, dirname, basename } from 'node:path'
 import { constants } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import * as editor from '../sequencer-editor.mjs'
@@ -35,6 +36,7 @@ async function controller(options = {}) {
     openPlayback() { throw new Error('Unexpected playback') },
     renderVstPhrase() { throw new Error('Unexpected VST render') },
     captureVstSound() { throw new Error('Unexpected VST capture') },
+    captureVstEffect() { throw new Error('Unexpected VST effect capture') },
     openVstSession: () => ({ run() { throw new Error('Unexpected VST host job') }, async close() {} }),
     loadProject: async () => { throw new Error('Unexpected load') },
     captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },
@@ -59,7 +61,7 @@ async function controller(options = {}) {
     },
     defaultStateDirectory: () => '/synthetic-vst', snapshotWriter: () => async () => {},
     mkdtemp: async () => '/synthetic-temp', rm: async () => {},
-    join, resolve, dirname, constants, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
+    join, resolve, dirname, basename, isDeepStrictEqual, constants, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
     copyFile: async () => { throw new Error('Unexpected copy') },
     Note: { fromMidi: String }, safeText: String,
     saveProject: async (_path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },

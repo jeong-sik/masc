@@ -12,6 +12,31 @@ export function editorSound(editor, sound) {
   return project.kind === 'midi-source' ? sourceEditor(project, previous) : { ...previous, project: validateProject(project) }
 }
 
+export function editorEffect(editor, action) {
+  const sound = editor.project.sound
+  if (sound?.kind !== 'vst') throw new Error('Choose a project-bound VST instrument before adding effects')
+  const effects = [...(sound.effects ?? [])]
+  const index = value => {
+    if (!Number.isSafeInteger(value) || value < 0 || value >= effects.length) throw new Error('Choose an existing VST effect number')
+    return value
+  }
+  switch (action.kind) {
+    case 'add': effects.push(action.effect); break
+    case 'replace': effects[index(action.index)] = action.effect; break
+    case 'remove': effects.splice(index(action.index), 1); break
+    case 'move': {
+      const from = index(action.from), to = index(action.to)
+      effects.splice(to, 0, effects.splice(from, 1)[0]); break
+    }
+    case 'clear': effects.length = 0; break
+    default: throw new Error('Unknown VST effect edit')
+  }
+  const next = { ...sound }
+  if (effects.length) next.effects = effects
+  else delete next.effects
+  return editorSound(editor, next)
+}
+
 export function newEditor(project = newProject(), { pattern } = {}) {
   if (project?.kind === 'midi-source') return sourceEditor(project, {}, pattern)
   if (project?.kind !== undefined) throw new Error('Unsupported sequencer editor document')
@@ -180,6 +205,18 @@ export function editorCommand(editor, line) {
   const effect = stepInputEffect(line)
   if (effect) return { editor, effect }
   const [command, ...args] = line.trim().split(/\s+/)
+  if (command === 'fx' || command === 'fx-clear') {
+    if (args.length) throw new Error('Use :fx or :fx-clear without arguments')
+    return { editor, effect: { kind: command } }
+  }
+  if (command === 'fx-add') {
+    if (!args.length) throw new Error('Use :fx-add PLUGIN_PATH')
+    return { editor, effect: { kind: command, path: args.join(' ') } }
+  }
+  if (['fx-edit', 'fx-remove', 'fx-move'].includes(command)) {
+    if (args.length !== (command === 'fx-move' ? 2 : 1) || args.some(value => !Number.isSafeInteger(Number(value)) || Number(value) < 1)) throw new Error('Use positive effect numbers, starting at 1')
+    return { editor, effect: { kind: command, index: Number(args[0]) - 1, ...(command === 'fx-move' ? { to: Number(args[1]) - 1 } : {}) } }
+  }
   if (command === 'soundfont-fluid') return { editor, effect: { kind: 'soundfont-fluid', ...(args.length ? { path: args.join(' ') } : {}) } }
   if (command === 'bars') {
     if (args.length !== 1) throw new Error('Use :bars COUNT')

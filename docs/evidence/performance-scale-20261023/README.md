@@ -278,10 +278,12 @@ packet, but they do not establish the cause of any outlier. The slow run and its
 The response-path behavior did reproduce consistently: all 30 unchanged
 candidate samples reused gzip bytes and one body hash per experiment, while all
 30 baseline samples returned identity encoding and changed body hashes. At 350
-rows, unchanged wire bodies were 62,563 bytes versus 1,391,442 bytes. All changed
+rows, unchanged wire bodies were 62,560–62,563 bytes versus
+1,391,442–1,391,443 bytes. All changed
 addresses were current; most candidate changed responses used fresh JSON. Their
-Server-Timing showed one observation lookup; one slow sample needed a full cache
-refresh and retained both stages. The baseline retained both stages throughout.
+Server-Timing showed one observation lookup; one slow sample also entered the
+fallback cache_compute stage and retained both timings. This does not prove a
+new cache snapshot was published. The baseline retained both stages throughout.
 
 `native_http_observations.json` retains source/artifact identities, input hashes,
 all 120 timing/header receipts, descriptive summaries and cleanup receipts. Raw

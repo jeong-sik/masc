@@ -135,7 +135,7 @@ The two existing suites cover TUI request/state ownership and host application
 decisions. The selected TUI suite also contains existing presentation assertions;
 this scenario adds no new screen wording, layout or row-order tests, and does not
 classify that mixed suite as request/state-only proof. The matching server and
-TUI are packaged for separate actual On/Off/reconnect observations. Passing these
+TUI and native Addon launcher are packaged for separate actual On/Off/reconnect observations. Passing these
 suites does not prove that a container, real model or visible terminal executed.
 Both selected targets must exist; a missing target fails instead of reducing scope.
 
@@ -168,6 +168,17 @@ scenarios also check the server's `build-commit` and include it as `masc`, with
 its own digest and dependency list. The receipt records source SHA, workflow
 SHA, scenario and both binary digests; the existing TUI `sha256` field remains.
 The default scenario records no server digest.
+
+The `addon-lifecycle` scenario also builds `bin/masc_native_addon_launcher.exe`
+from the selected source and packages it as `masc-native-addon-launcher` with
+`launcher-native-dependencies.txt`. The receipt's `native_addon_launcher`
+records its path, SHA-256 and producer target; it is null for other scenarios.
+This executable has no build-commit command: its source identity comes from
+the exact-source build targets and receipt, not an embedded commit check.
+Put this verified artifact directory on the isolated server's PATH so native
+worker observation uses the candidate launcher rather than copying an installed
+one of unknown build source. This does not install an operator runtime or prove
+that a worker launched; actual lifecycle observations remain separate.
 
 `key-reference.md` contains the key reference produced by that source's actual
 generator. The receipt's `key_reference` records its artifact path, SHA-256 and

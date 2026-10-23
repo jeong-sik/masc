@@ -2458,6 +2458,11 @@ let () = test "transition_submit_for_verification_todo_rejects_instead_of_alias"
           ])
     in
     assert (not (Tool_result.is_success result));
+    assert (submit_rule_id result = Some "task_submit_requires_claimed_or_started");
+    let data = Tool_result.data result in
+    assert (Json_util.get_bool data "recoverable" = Some true);
+    assert (Json_util.assoc_member_opt "valid_next_actions" data
+            = Some (`List [ `String "claim"; `String "cancel" ]));
     assert
       (str_contains
          (Tool_result.message result)

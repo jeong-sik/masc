@@ -137,13 +137,56 @@ let category_for_tool tool =
   | None -> GeneralLimit
 
 module Task_error = struct
+  type transition_rejection =
+    | Current_owner_required of { current_assignee : string }
+    | Claim_required
+
+  type transition_rejected =
+    { task_id : string
+    ; requested_agent : string
+    ; task_status : Types_core.task_status
+    ; action : Types_core.task_action
+    ; reason : transition_rejection
+    ; valid_next_actions : Types_core.task_action list
+    }
+
   type t =
     | NotFound of string
     | AlreadyClaimed of { task_id: string; by: string }
     | NotClaimed of string
     | InvalidState of string
     | InvalidId of string
+    | TransitionRejected of transition_rejected
     | VerificationSuperseded of { task_id: string; requested: string; current: string }
+
+  let transition_rejection_message
+        { task_id; requested_agent; task_status; action; reason; valid_next_actions } =
+      (match reason with
+       | Current_owner_required { current_assignee } ->
+         let verb =
+           match action with
+           | Types_core.Claim -> "claim"
+           | Types_core.Start -> "start"
+           | Types_core.Done_action -> "complete"
+           | Types_core.Cancel -> "cancel"
+           | Types_core.Release -> "release"
+           | Types_core.Submit_for_verification -> "submit"
+         in
+         Printf.sprintf
+           "Task %s is %s and owned by %s; %s cannot %s it."
+           task_id
+           (Types_core.task_status_to_string task_status)
+           current_assignee
+           requested_agent
+           verb
+       | Claim_required ->
+         Printf.sprintf
+           "Invalid task state: Invalid transition: %s -> %s (%s, agent=%s, \
+            valid_next_actions=[%s])."
+           (Types_core.task_status_to_string task_status)
+           (Types_core.task_action_to_string action)
+           task_id requested_agent
+           (String.concat ";" (List.map Types_core.task_action_to_string valid_next_actions)))
 
   let to_string = function
     | NotFound id ->
@@ -160,6 +203,8 @@ module Task_error = struct
           id
     | InvalidState msg -> Printf.sprintf "[TaskError] Invalid task state: %s" msg
     | InvalidId reason -> Printf.sprintf "[TaskError] Invalid task ID: %s" reason
+    | TransitionRejected rejection ->
+        "[TaskError] " ^ transition_rejection_message rejection
     | VerificationSuperseded { task_id; requested; current } ->
         Printf.sprintf
           "[TaskError] Task %s verification %s is no longer the one awaiting a \
@@ -253,6 +298,7 @@ let code = function
   | Task (Task_error.AlreadyClaimed _
          | Task_error.NotClaimed _
          | Task_error.InvalidState _
+         | Task_error.TransitionRejected _
          | Task_error.InvalidId _) -> 400
   | Task (Task_error.VerificationSuperseded _) -> 409
   | Agent (Agent_error.InvalidName _) -> 400

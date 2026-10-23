@@ -10,16 +10,36 @@ val category_for_tool : string -> rate_limit_category
 val category_for_tool_opt : string -> rate_limit_category option
 
 module Task_error : sig
+  type transition_rejection =
+    | Current_owner_required of { current_assignee : string }
+    | Claim_required
+
+  type transition_rejected =
+    { task_id : string
+    ; requested_agent : string
+    ; task_status : Types_core.task_status
+    ; action : Types_core.task_action
+    ; reason : transition_rejection
+    ; valid_next_actions : Types_core.task_action list
+    }
+    (** A lifecycle refusal captured under the backlog lock. The caller's
+        valid actions are computed by that same lifecycle, never inferred
+        from the error message or a second, possibly stale task read. *)
+
   type t =
     | NotFound of string
     | AlreadyClaimed of { task_id: string; by: string }
     | NotClaimed of string
     | InvalidState of string
     | InvalidId of string
+    | TransitionRejected of transition_rejected
     | VerificationSuperseded of { task_id: string; requested: string; current: string }
       (** A verdict named a submission that is no longer the one awaiting a
           verdict: the producer resubmitted, or superseded it with a
           cancellation, after the verdict's author read it. *)
+  val transition_rejection_message : transition_rejected -> string
+  (** Caller-facing denial sentence, without the diagnostic [TaskError] prefix. *)
+
   val to_string : t -> string
 end
 

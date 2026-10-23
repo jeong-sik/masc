@@ -12,6 +12,12 @@ type invalid =
       (** A cancel without a stated reason. The cancellation ends the Task at
           once, and the reason is the only thing its author is told — a
           Cancelled record with no sentence tells that author nothing. *)
+  | Current_owner_required of { current_assignee : string }
+      (** A held task cannot be changed by another actor. The assignee comes
+          from the same status snapshot as the transition decision. *)
+  | Claim_required
+      (** Completion evidence cannot be submitted from [Todo]. Claiming first
+          establishes the producer whose evidence the authority will judge. *)
   | Invalid_transition
 
 (** Why a verdict does not commit. Only the verdict path produces these, and

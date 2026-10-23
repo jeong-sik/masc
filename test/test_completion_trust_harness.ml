@@ -328,9 +328,9 @@ let test_completion_denied_for_non_owner () =
     check bool "rejection is ok=false" false Yojson.Safe.Util.(member "ok" json |> to_bool);
     check string "ownership reject is a deterministic workflow rejection" "workflow_rejection"
       Yojson.Safe.Util.(member "failure_class" json |> to_string);
-    (* keeper_task_done routes through submit_for_verification, and the tool
-       layer refuses a non-holder under its own typed rule id with the holder
-       named, ahead of the lifecycle's generic denial. *)
+    (* The lifecycle refuses a non-holder under the backlog lock. Its typed
+       reason and captured holder reach this Keeper tool without a second
+       ownership decision in the tool layer. *)
     check string "ownership reject rule_id" "task_submit_requires_current_owner"
       Yojson.Safe.Util.(member "diagnosis" json |> member "rule_id" |> to_string);
     check string "ownership reject names the holder" foreign
@@ -362,13 +362,13 @@ let test_completion_denied_when_unclaimed () =
     let json = parse_json result.KTE.raw_output in
     check string "unclaimed reject is a workflow rejection" "workflow_rejection"
       Yojson.Safe.Util.(member "failure_class" json |> to_string);
-    (* Same routing as the ownership case above: the transition layer denies
-       todo -> submit_for_verification under the generic rule id (and
-       test_tool_task_coverage pins that exact denial message). The typed
-       "task_done_requires_claimed_or_started" belongs to the legacy
-       Done_action path only. *)
-    check string "unclaimed reject rule_id" "task_transition_invalid_state"
+    check string "unclaimed reject rule_id" "task_submit_requires_claimed_or_started"
       Yojson.Safe.Util.(member "diagnosis" json |> member "rule_id" |> to_string);
+    check bool "claim can recover the unclaimed submission" true
+      Yojson.Safe.Util.(member "recoverable" json |> to_bool);
+    check (list string) "the lifecycle supplies the caller's next actions"
+      [ "claim"; "cancel" ]
+      Yojson.Safe.Util.(member "valid_next_actions" json |> to_list |> List.map to_string);
     (* anti-vacuity: task stays Todo. *)
     match
       List.find_opt

@@ -222,7 +222,8 @@ and handle_transition ~tool_name ~start_time ctx args =
       | Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _) ->
         Some "task_done_requires_current_owner", None
       | Masc_domain.Task
-          (Masc_domain.Task_error.InvalidState _
+          (Masc_domain.Task_error.TransitionRejected _
+          | Masc_domain.Task_error.InvalidState _
           | Masc_domain.Task_error.VerificationSuperseded _) ->
         Some "task_done_invalid_lifecycle_state", None
       | Masc_domain.Task (Masc_domain.Task_error.NotFound _) ->
@@ -399,6 +400,10 @@ and handle_transition ~tool_name ~start_time ctx args =
             | Masc_domain.Release), _
   | Error _, _, _ -> ());
   let transition_result_to_response = function
+    | Error (Masc_domain.Task (Masc_domain.Task_error.TransitionRejected rejection)) ->
+      let data = Tool_task_transition_rejection.payload rejection in
+      Tool_result.make_err ~tool_name ~start_time
+        ~class_:Tool_result.Workflow_rejection ~data (Yojson.Safe.to_string data)
     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState message)) ->
       workflow_rejection_result
         ~tool_name

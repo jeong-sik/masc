@@ -2,6 +2,8 @@ type invalid =
   | Verification_submission_required
   | Verification_pending_verdict
   | Cancel_reason_required
+  | Current_owner_required of { current_assignee : string }
+  | Claim_required
   | Invalid_transition
 
 type verdict_invalid =
@@ -95,7 +97,8 @@ let decide
        (match status with
         | Masc_domain.Claimed { assignee; _ }
         | Masc_domain.InProgress { assignee; _ } ->
-          if same_agent assignee then ok status else Error Invalid_transition
+          if same_agent assignee then ok status
+          else Error (Current_owner_required { current_assignee = assignee })
         | Masc_domain.Done _ -> ok status
         | Masc_domain.Cancelled _ -> Error Invalid_transition
         | Masc_domain.Todo | Masc_domain.AwaitingVerification _ ->
@@ -106,9 +109,10 @@ let decide
       ok
         ~set_current:task_id
         (Masc_domain.InProgress { assignee; started_at = now })
-    else Error Invalid_transition
+    else Error (Current_owner_required { current_assignee = assignee })
   | Masc_domain.Start, Masc_domain.InProgress { assignee; _ } ->
-    if same_agent assignee then ok task_status else Error Invalid_transition
+    if same_agent assignee then ok task_status
+    else Error (Current_owner_required { current_assignee = assignee })
   | Masc_domain.Start, Masc_domain.Done _ -> ok task_status
   | ( Masc_domain.Start
     , (Masc_domain.Todo | Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled _) ) ->
@@ -117,7 +121,7 @@ let decide
     , ( Masc_domain.Claimed { assignee; _ }
       | Masc_domain.InProgress { assignee; _ } ) ) ->
     if not (same_agent assignee)
-    then Error Invalid_transition
+    then Error (Current_owner_required { current_assignee = assignee })
     else Error Verification_submission_required
   | Masc_domain.Done_action, Masc_domain.Done _ -> ok task_status
   | ( Masc_domain.Done_action
@@ -144,7 +148,7 @@ let decide
       | Masc_domain.InProgress { assignee; _ }
       | Masc_domain.AwaitingVerification { assignee; _ } ) ) ->
     if not (same_agent assignee)
-    then Error Invalid_transition
+    then Error (Current_owner_required { current_assignee = assignee })
     else (
       match reason with
       | None -> Error Cancel_reason_required
@@ -152,10 +156,14 @@ let decide
   | Masc_domain.Cancel, Masc_domain.Done _ -> Error Invalid_transition
   | ( Masc_domain.Release
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _}) ) ->
-    if same_agent assignee then ok Masc_domain.Todo else Error Invalid_transition
+    if same_agent assignee then ok Masc_domain.Todo
+    else Error (Current_owner_required { current_assignee = assignee })
+  | Masc_domain.Release, Masc_domain.AwaitingVerification { assignee; _ } ->
+    if same_agent assignee then Error Invalid_transition
+    else Error (Current_owner_required { current_assignee = assignee })
   | Masc_domain.Release, Masc_domain.Todo -> ok task_status
   | ( Masc_domain.Release
-    , (Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled _) ) ->
+    , (Masc_domain.Done _ | Masc_domain.Cancelled _) ) ->
     Error Invalid_transition
   | ( Masc_domain.Submit_for_verification
     , Masc_domain.Claimed { assignee; claimed_at } ) ->
@@ -168,7 +176,7 @@ let decide
            ; submitted_at = now
            ; verification_id = new_verification_id ()
            })
-    else Error Invalid_transition
+    else Error (Current_owner_required { current_assignee = assignee })
   | ( Masc_domain.Submit_for_verification
     , Masc_domain.InProgress { assignee; started_at } ) ->
     if same_agent assignee
@@ -180,7 +188,7 @@ let decide
            ; submitted_at = now
            ; verification_id = new_verification_id ()
            })
-    else Error Invalid_transition
+    else Error (Current_owner_required { current_assignee = assignee })
   (* Resubmission supersedes the pending obligation instead of replacing the
      task. Refusing it left [Cancel] as the assignee's only move out of
      [AwaitingVerification], and the live backlog shows what that cost: 16
@@ -203,9 +211,10 @@ let decide
            ; submitted_at = now
            ; verification_id = new_verification_id ()
            })
-    else Error Invalid_transition
+    else Error (Current_owner_required { current_assignee = assignee })
+  | Masc_domain.Submit_for_verification, Masc_domain.Todo -> Error Claim_required
   | ( Masc_domain.Submit_for_verification
-    , (Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _) ) ->
+    , (Masc_domain.Done _ | Masc_domain.Cancelled _) ) ->
     Error Invalid_transition
 ;;
 

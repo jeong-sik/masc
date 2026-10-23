@@ -1382,7 +1382,8 @@ let test_transition_release_rejects_non_owner () =
      | Ok _ -> ()
      | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
     (match Workspace.release_task_r config ~agent_name:gemini ~task_id:"task-001" () with
-     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
+     | Error (Masc_domain.Task (Masc_domain.Task_error.TransitionRejected
+         { reason = Current_owner_required _; _ })) -> ()
      | Ok _ -> Alcotest.fail "non-owner released another agent's task"
      | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
     assert_claimed_by config "task-001" claude)
@@ -1462,7 +1463,8 @@ let test_transition_release_rejects_name_shape_aliases () =
          match
            Workspace.release_task_r config ~agent_name:alias ~task_id:"task-001" ()
          with
-         | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
+         | Error (Masc_domain.Task (Masc_domain.Task_error.TransitionRejected
+         { reason = Current_owner_required _; _ })) -> ()
          | Ok _ -> Alcotest.failf "name-shape alias %s gained owner authority" alias
          | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e))
       [ "keeper-claude-agent"; "claude-happy-shark" ];
@@ -1496,6 +1498,47 @@ let test_transition_invalid () =
     match result with
     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState")
+;;
+
+let test_transition_submit_typed_refusals () =
+  with_test_env (fun config ->
+    ignore (Workspace.add_task config ~title:"Submission ownership" ~priority:1 ~description:"");
+    let refuse agent_name =
+      Workspace.transition_task_r config ~agent_name ~task_id:"task-001"
+        ~action:Masc_domain.Submit_for_verification ~notes:"reviewable evidence" ()
+    in
+    (match refuse "claude" with
+     | Error (Masc_domain.Task (Masc_domain.Task_error.TransitionRejected
+         { task_id = "task-001"; requested_agent = "claude"; task_status = Todo
+         ; action = Submit_for_verification; reason = Claim_required
+         ; valid_next_actions })) ->
+       Alcotest.(check bool) "Todo submission offers real lifecycle actions" true
+         (valid_next_actions = [ Masc_domain.Claim; Masc_domain.Cancel ])
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err)
+     | Ok _ -> Alcotest.fail "unclaimed submission was accepted");
+    let now = Masc_domain.now_iso () in
+    List.iter
+      (fun status ->
+         update_task config "task-001" (fun task -> { task with task_status = status });
+         let before = Workspace.read_backlog config in
+         (match refuse "intruder" with
+          | Error (Masc_domain.Task (Masc_domain.Task_error.TransitionRejected
+              { task_id = "task-001"; requested_agent = "intruder"; task_status
+              ; action = Submit_for_verification
+              ; reason = Current_owner_required { current_assignee = "claude" }
+              ; valid_next_actions = [] })) ->
+            Alcotest.(check bool) "refusal describes the authoritative status" true
+              (task_status = status)
+          | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err)
+          | Ok _ -> Alcotest.fail "another actor submitted the holder's work");
+         Alcotest.(check bool) "refusal leaves the backlog unchanged" true
+           (Workspace.read_backlog config = before))
+      [ Masc_domain.Claimed { assignee = "claude"; claimed_at = now }
+      ; Masc_domain.InProgress { assignee = "claude"; started_at = now }
+      ; Masc_domain.AwaitingVerification
+          { assignee = "claude"; started_at = now; submitted_at = now
+          ; verification_id = "vrf-held" }
+      ])
 ;;
 
 let test_transition_submit_for_verification_requires_notes () =
@@ -2359,13 +2402,11 @@ let test_transition_done_r_success () =
 let test_transition_done_r_not_claimed () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let result =
-      transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:""
-    in
-    match result with
-    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)) ->
-      Alcotest.(check bool) "mentions todo state" true (str_contains msg "todo")
-    | _ -> Alcotest.fail "Expected TaskInvalidState")
+    match transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" with
+    | Error (Masc_domain.Task (Masc_domain.Task_error.TransitionRejected
+        { reason = Claim_required; task_status = Todo; _ })) -> ()
+    | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err)
+    | Ok _ -> Alcotest.fail "unclaimed completion was accepted")
 ;;
 
 let test_transition_done_r_not_found () =
@@ -3773,6 +3814,8 @@ let () =
             "submit_for_verification requires notes"
             `Quick
             test_transition_submit_for_verification_requires_notes
+        ; Alcotest.test_case "submit refusal retains typed lifecycle authority" `Quick
+            test_transition_submit_typed_refusals
         ; Alcotest.test_case "version mismatch" `Quick test_transition_version_mismatch
         ; Alcotest.test_case "done idempotent" `Quick test_transition_done_idempotent
         ; Alcotest.test_case "cancel idempotent" `Quick test_transition_cancel_idempotent

@@ -117,6 +117,32 @@ let test_symlink_hardlink_and_nonregular_records_are_refused () =
     Unix.rename (directory root) moved;Unix.symlink moved (directory root);
     fail_inventory (Owner.discover ~store ~scope);fail_load (load store "original"))
 
+let body_path root = Filename.concat root
+    (Store.tool_request_body_path ~scope ~request_digest:(get (Owner.request_digest request)))
+(* The bodies directory is read through the same owned descriptors as the
+   records, so the same file shapes are refused there. *)
+let test_symlink_hardlink_nonregular_and_writable_bodies_are_refused () =
+  let refused root store =
+    fail_inventory (Owner.discover ~store:(Store.create ~root) ~scope);fail_load (load store "original") in
+  with_store (fun root store -> retain store "original";
+    let body = body_path root and outside = Filename.concat (Filename.dirname root) "outside-body.json" in
+    Unix.rename body outside;Unix.symlink outside body;
+    refused root store);
+  with_store (fun root store -> retain store "original";
+    Unix.link (body_path root) (Filename.concat (Filename.dirname root) "outside-body-hardlink.json");
+    refused root store);
+  with_store (fun root store -> retain store "original";
+    Sys.remove (body_path root);Unix.mkfifo (body_path root) 0o600;
+    refused root store);
+  with_store (fun root store -> retain store "original";
+    let bodies = Filename.dirname (body_path root) in
+    let moved = bodies ^ "-original" in
+    Unix.rename bodies moved;Unix.symlink moved bodies;
+    refused root store);
+  with_store (fun root store -> retain store "original";
+    Unix.chmod (body_path root) 0o666;
+    refused root store)
+
 let test_sync_failure_and_actual_replacement_preserve_original_read_boundary () =
   with_store (fun _ store -> retain store "original";
     fail_inventory (inventory store ~sync_file:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync","injected"))));
@@ -227,6 +253,8 @@ let () = Alcotest.run "Original Add-on request discovery" ["inventory",[
   Alcotest.test_case "bad record and unknown entry refuse complete inventory" `Quick test_bad_record_or_unknown_name_never_returns_a_partial_inventory;
   Alcotest.test_case "listed disappearance and directory replacement" `Quick test_listed_disappearance_and_same_name_directory_replacement_are_errors;
   Alcotest.test_case "symlink hardlink and nonregular records" `Quick test_symlink_hardlink_and_nonregular_records_are_refused;
+  Alcotest.test_case "symlink hardlink nonregular and writable bodies" `Quick
+    test_symlink_hardlink_nonregular_and_writable_bodies_are_refused;
   Alcotest.test_case "sync failure and replacement through actual descriptors" `Quick test_sync_failure_and_actual_replacement_preserve_original_read_boundary;
   Alcotest.test_case "fresh ownership and permissions after I/O" `Quick test_fresh_ancestor_and_file_permissions_are_checked_after_io;
   Alcotest.test_case "actual held read serializes aliased publication without blocking other scopes" `Quick

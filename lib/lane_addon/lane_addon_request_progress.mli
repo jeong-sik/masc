@@ -7,7 +7,9 @@ type refusal_stage = Before_dispatch | Execution
 type refusal = { stage : refusal_stage; evidence : Yojson.Safe.t }
 type change = { before : Yojson.Safe.t; after : Yojson.Safe.t }
 type commit = { judgment : Yojson.Safe.t; change : change }
-type successor = { request_id : string; request : Yojson.Safe.t }
+type successor = { request_id : string; request_digest : string }
+(** The child request by its original request ID and the digest its owner
+    record names it by; the child's body is stored once, by its own record. *)
 type event =
   | Dispatch_intended
   | Admission_declined of Yojson.Safe.t

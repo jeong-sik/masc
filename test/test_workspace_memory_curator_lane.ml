@@ -379,7 +379,7 @@ let test_existing_intent_recovers_locally_off_then_runs_on ()=
     let child=match Capture.narrow ~request_id:(Capture.Request_id.fresh ()) ~final capture |> get with
       | Some child -> child | None -> fail "fixture needs a whole-prefix child" in
     let intent : Progress.successor = {request_id=Capture.Request_id.to_string (Capture.request_id child);
-      request=get (Lane_addon_action.canonical (Capture.to_json child))} in
+      request_digest=get (Owner.request_digest (Capture.to_json child))} in
     ignore (advance store parent (Progress.Successor_intended intent));
     save_source config source (declaration false);
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);

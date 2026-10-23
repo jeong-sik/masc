@@ -156,7 +156,9 @@ let test_bad_records_and_failed_publication_never_become_absence () = with_store
   owned (retain ~request_id:"original" ~request store);
   let original = some (get (Store.load_tool_request_owner store ~scope:"workspace-curator" ~request_id:"original")) in
   let malformed = [replace "request_digest" (`String "wrong") original;
-    replace "request" (`Assoc ["evidence", `String "tampered"]) original;
+    replace "request_digest" (`String (Store.digest "a body never published")) original;
+    (match original with `Assoc fields -> `Assoc (("request",request) :: fields)
+     | _ -> Alcotest.fail "stored object");
     replace "scope" (`String "other-workspace") original;
     replace "request_id" (`String "other-request") original;
     replace "schema" (`String "unknown") original;

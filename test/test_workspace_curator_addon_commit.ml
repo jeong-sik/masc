@@ -281,8 +281,8 @@ let intent store capture final =
   let parent=refuse store capture final in
   let child=match get (Capture.narrow ~request_id:(Capture.Request_id.fresh ()) ~final capture) with
     | Some child -> child | None -> fail "expected a smaller whole batch" in
-  let request=get (Lane_addon_action.canonical (Capture.to_json child)) in
-  let intent : Progress.successor = {request_id=Capture.Request_id.to_string (Capture.request_id child);request} in
+  let request_digest=get (Owner.request_digest (Capture.to_json child)) in
+  let intent : Progress.successor = {request_id=Capture.Request_id.to_string (Capture.request_id child);request_digest} in
   advance store parent (Progress.Successor_intended intent),child,intent
 let no_call ~arguments:_=fail "successor linkage cannot call a worker"
 let no_worker_resume base_path store (record : Owner.retained) =
@@ -319,9 +319,9 @@ let test_successor_keeps_whole_rows_and_one_child final ()=with_workspace (fun b
    | Ok _ | Error _ -> fail "parent terminal changed"))
 let test_successor_recovers_intent child_published ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Original fact a";"Original fact b";"Original fact c"] in
-  let parent,child,intended=intent store capture size_input in
+  let parent,derived,intended=intent store capture size_input in
   if child_published then (
-    let child_record=retain_capture store child in
+    let child_record=retain_capture store derived in
     check bool "child cannot execute before parent acknowledgement" true
       (match no_worker_resume base_path store child_record with Error (Consumer.Rejected _) -> true
        | Ok _ | Error (Consumer.Unavailable _ | Consumer.Uncertain _) -> false);
@@ -329,7 +329,9 @@ let test_successor_recovers_intent child_published ()=with_workspace (fun base_p
       (Result.is_error (restore_capture base_path store child_record)));
   let parent,child=narrow base_path store parent |> accepted |> successor in
   check string "recovery uses the durably selected ID" intended.request_id child.request_id;
-  check json "recovery keeps the complete original child bytes" intended.request child.request;
+  check string "recovery keeps the request the intent names" intended.request_digest child.request_digest;
+  check json "recovery retains the complete derived child"
+    (get (Lane_addon_action.canonical (Capture.to_json derived))) child.request;
   check bool "strict parent has acknowledged that child" true (match Progress.phase parent.progress with
     | Progress.Subdivided (_,actual) -> actual=intended
     | _ -> false);
@@ -451,10 +453,11 @@ let test_missing_or_cyclic_parent_refuses missing ()=with_workspace (fun base_pa
       | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
           if key="predecessor" then `String child.request_id else value) fields)
       | _ -> fail "original parent capture" in
-    let request=get (Lane_addon_action.canonical request) in
+    let bytes=Yojson.Safe.to_string (get (Lane_addon_action.canonical request)) in
+    get (Store.save_tool_request_body store ~scope:Capture.scope ~request_digest:(Store.digest bytes) bytes);
     let wire=match get (Store.load_tool_request_owner store ~scope:Capture.scope ~request_id:parent.request_id) with
       | Some (`Assoc fields) -> `Assoc (List.map (fun (key,value) -> key,
-          if key="request" then request else if key="request_digest" then `String (Store.digest (Yojson.Safe.to_string request)) else value) fields)
+          if key="request_digest" then `String (Store.digest bytes) else value) fields)
       | Some _ | None -> fail "original parent wire" in
     get (Store.save_tool_request_owner store ~scope:Capture.scope ~request_id:parent.request_id wire));
   check bool "child resume cannot borrow missing or cyclic ancestry" true
@@ -975,6 +978,52 @@ let test_discovery_refuses_conflicting_or_started_pending_child started ()=with_
   check bool "wrong or already started unacknowledged child is never repaired" true
     (Result.is_error (discover base_path store));
   check string "invalid child cannot ACK the parent" before (bytes (child_record_path store parent)))
+let test_an_intent_naming_another_request_is_refused ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Intent source a";"Intent source b"] in
+  let parent,_,_=intent store capture size_input in
+  let wire=match get (Store.load_tool_request_owner store ~scope:Capture.scope ~request_id:parent.request_id) with
+    | Some wire -> wire | None -> fail "missing original parent" in
+  let history=match Progress.to_json parent.progress with
+    | `List events -> `List (List.map (fun event ->
+        if Yojson.Safe.Util.member "event" event=`String "successor_intended"
+        then replace_field "request_digest" (`String (Store.digest "another child request")) event else event) events)
+    | _ -> fail "expected the ordered original history" in
+  get (Store.save_tool_request_owner store ~scope:Capture.scope ~request_id:parent.request_id
+    (replace_field "progress" history wire));
+  check bool "the parent derives a child its intent does not name" true
+    (Result.is_error (narrow base_path store (original store capture)));
+  check int "no child is written for that intent" 1 (List.length (owned (Owner.discover ~store ~scope:Capture.scope)));
+  check bool "discovery refuses that intent" true (Result.is_error (discover base_path store)))
+(* The child and the parent's intent agree with each other, but the child is
+   not what the parent derives: only the derivation check refuses it. *)
+let test_a_child_the_parent_does_not_derive_is_refused ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Derived source a";"Derived source b"] in
+  let parent,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
+  let work=Yojson.Safe.Util.member "work" child.request in
+  let batch=Yojson.Safe.Util.member "batch" work in
+  let other=replace_field "work" (replace_field "batch" (replace_field "up_to" (`Int 2) batch) work) child.request in
+  let bytes=Yojson.Safe.to_string (get (Lane_addon_action.canonical other)) in
+  let digest=Store.digest bytes in
+  get (Store.save_tool_request_body store ~scope:Capture.scope ~request_digest:digest bytes);
+  let rewrite (record : Owner.retained) edit =
+    match get (Store.load_tool_request_owner store ~scope:Capture.scope ~request_id:record.request_id) with
+    | Some wire -> get (Store.save_tool_request_owner store ~scope:Capture.scope ~request_id:record.request_id (edit wire))
+    | None -> fail "missing original record" in
+  rewrite child (replace_field "request_digest" (`String digest));
+  let history=match Progress.to_json parent.progress with
+    | `List events -> `List (List.map (fun event ->
+        if Yojson.Safe.Util.member "event" event=`String "successor_intended"
+        then replace_field "request_digest" (`String digest) event else event) events)
+    | _ -> fail "expected the ordered original history" in
+  rewrite parent (replace_field "progress" history);
+  let reloaded=match owned (Owner.load ~store ~scope:Capture.scope ~request_id:child.request_id) with
+    | Some record -> record | None -> fail "missing original child" in
+  check bool "the changed child is still a valid capture" true
+    (Yojson.Safe.equal (Yojson.Safe.Util.member "up_to" (Yojson.Safe.Util.member "batch"
+       (Yojson.Safe.Util.member "work" reloaded.request))) (`Int 2));
+  check bool "restoring a child the parent does not derive is refused" true
+    (Result.is_error (restore_capture base_path store reloaded));
+  check bool "discovery refuses it" true (Result.is_error (discover base_path store)))
 let test_discovery_nested_existing_intents ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Nested source a";"Nested source b";"Nested source c";"Nested source d"] in
   let _,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
@@ -1122,6 +1171,9 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "complete forest validation precedes every recovery write" `Quick test_discovery_validates_every_member_before_recovery;
   test_case "discovery refuses conflicting pending child" `Quick (test_discovery_refuses_conflicting_or_started_pending_child false);
   test_case "discovery refuses execution before parent ACK" `Quick (test_discovery_refuses_conflicting_or_started_pending_child true);
+  test_case "an intent naming another request is refused before any child" `Quick
+    test_an_intent_naming_another_request_is_refused;
+  test_case "a child the parent does not derive is refused" `Quick test_a_child_the_parent_does_not_derive_is_refused;
   test_case "discovery recovers nested original chain" `Quick test_discovery_nested_existing_intents;
   test_case "discovery refuses a missing original predecessor" `Quick test_discovery_rejects_dangling_parent;
   test_case "discovery refuses another physical workspace" `Quick test_discovery_rejects_foreign_workspace;

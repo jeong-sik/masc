@@ -272,7 +272,8 @@ let test_observer_completion_needs_original_terminal_and_keeps_refusal_chain () 
   invalid store pending (Progress.Observer (Receipt.Intended (Receipt.Completion,terminal)));
   let refused=stored store pending (Progress.Refused {stage=Progress.Execution;evidence=evidence "size_refused"}) in
   let prepared=observe store refused (Receipt.Intended (Receipt.Completion,terminal)) in
-  let linked=stored store prepared (Progress.Successor_intended {request_id="original-child";request=`Assoc ["child",`Bool true]}) in
+  let linked=stored store prepared (Progress.Successor_intended
+      {request_id="original-child";request_digest=Store.digest "original child request"}) in
   let linked=stored store linked (Progress.Successor_observed "original-child") in
   let registered=observe store linked (Receipt.Recorded (Receipt.Registration,start.digest)) in
   let complete=observe store registered (Receipt.Recorded (Receipt.Completion,terminal.digest)) in
@@ -348,6 +349,79 @@ let test_typed_receipt_sharing_and_strict_replay () =
   match Progress.append registered (Progress.Observer (Receipt.Recorded (Receipt.Registration," "))) with
   | Error _ -> () | Ok _ -> Alcotest.fail "blank acknowledgement bypassed validation"
 
+let record_path root = Filename.concat (Filename.concat (Filename.concat root "tool-request-owners") (Store.digest scope))
+    (Store.digest request_id ^ ".json")
+let body_path root = Filename.concat root
+    (Store.tool_request_body_path ~scope ~request_digest:(get (Owner.request_digest request)))
+let save path bytes = get (Fs_compat.save_file_atomic_strict path bytes)
+let same_file (a : Unix.stats) (b : Unix.stats) =
+  a.st_dev = b.st_dev && a.st_ino = b.st_ino && a.st_mtime = b.st_mtime
+
+let test_progress_rewrites_only_the_record_and_its_size_ignores_the_request () = with_store (fun root store ->
+  let pending = dispatch store in
+  let body = body_path root in
+  let bytes = Fs_compat.load_file body and identity = Unix.stat body in
+  let judged = stored store pending (Progress.Judgment_retained judgment) in
+  ignore (stored store (stored store judged (Progress.Commit_intended {before;after})) (Progress.Commit_observed after));
+  Alcotest.(check string) "progress keeps the body bytes" bytes (Fs_compat.load_file body);
+  Alcotest.(check bool) "progress never writes the body again" true (same_file identity (Unix.stat body));
+  let large_input_bytes = 1 lsl 20 in
+  with_store (fun small_root small_store ->
+    with_store (fun large_root large_store ->
+      let large = `Assoc ["input",`String (String.make large_input_bytes 'x')] in
+      owned (retain small_store);
+      owned (Owner.retain ~store:large_store ~scope ~request_id ~installation_id:"original-installation"
+        ~package_id:"curator" ~tool:"classify" ~request:large);
+      ignore (stored small_store (load small_store) Progress.Dispatch_intended);
+      ignore (stored large_store (some (owned (Owner.load ~store:large_store ~scope ~request_id))) Progress.Dispatch_intended);
+      Alcotest.(check int) "a record is as large for a large request as for a small one"
+        (Unix.stat (record_path small_root)).st_size (Unix.stat (record_path large_root)).st_size)))
+
+let test_an_interrupted_retain_is_completed_by_the_next_retain () = with_store (fun root store ->
+  let bytes = Yojson.Safe.to_string (get (Lane_addon_action.canonical request)) in
+  get (Store.save_tool_request_body store ~scope ~request_digest:(Store.digest bytes) bytes);
+  Alcotest.(check bool) "a body no record names is not an original request" true
+    (owned (Owner.load ~store ~scope ~request_id) = None);
+  Alcotest.(check int) "and discovery does not list it" 0 (List.length (owned (Owner.discover ~store ~scope)));
+  save (body_path root) "changed before any record named it";
+  owned (retain store);
+  Alcotest.check json "the next retain publishes the body its record names" request (load store).request)
+
+let test_a_record_without_its_body_is_an_error_not_absence () = with_store (fun root store ->
+  let pending = dispatch store in
+  let wire = some (get (Store.load_tool_request_owner store ~scope ~request_id)) in
+  let body = body_path root in
+  let original = Fs_compat.load_file body in
+  let refused label =
+    (match Owner.load ~store:(Store.create ~root) ~scope ~request_id with
+     | Error (Owner.Store_unavailable _) -> ()
+     | Error (Owner.Binding_conflict | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok _ ->
+       Alcotest.fail (label ^ " became valid or absent"));
+    (match Owner.discover ~store:(Store.create ~root) ~scope with
+     | Error (Owner.Store_unavailable _) -> ()
+     | Error (Owner.Binding_conflict | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok _ ->
+       Alcotest.fail (label ^ " was discovered")) in
+  Sys.remove body;
+  refused "a missing body";
+  (match retain store with
+   | Error (Owner.Store_unavailable _) -> ()
+   | Error (Owner.Binding_conflict | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok () ->
+     Alcotest.fail "a retain over a record without its body succeeded");
+  Alcotest.(check bool) "that retain does not write the missing body again" false (Sys.file_exists body);
+  save body (original ^ " ");
+  refused "a changed body";
+  save body original;
+  let named bytes = get (Store.save_tool_request_body store ~scope ~request_digest:(Store.digest bytes) bytes);
+    get (Store.save_tool_request_owner store ~scope ~request_id (replace "request_digest" (`String (Store.digest bytes)) wire)) in
+  named {|{"z":1,"a":2}|};
+  refused "a body that is not canonical JSON";
+  named (Yojson.Safe.to_string (`Assoc ["input",`String "another captured input"]));
+  (match advance store pending (Progress.Execution_observed (Progress.Waiting (evidence "late"))) with
+   | Error Owner.State_conflict -> ()
+   | Error (Owner.Ownership_error _ | Owner.Invalid_transition _)
+   | Ok (Owner.Stored _ | Owner.Already_stored _ | Owner.Unconfirmed _) ->
+     Alcotest.fail "progress landed on a record that names another request"))
+
 let () = Alcotest.run "Original Add-on request progress" ["owner",[
   Alcotest.test_case "opaque receipt reuse and strict replay" `Quick
     test_typed_receipt_sharing_and_strict_replay;
@@ -366,4 +440,10 @@ let () = Alcotest.run "Original Add-on request progress" ["owner",[
   Alcotest.test_case "observer terminal preserves refusal and successor history" `Quick
     test_observer_completion_needs_original_terminal_and_keeps_refusal_chain;
   Alcotest.test_case "malformed observer evidence is neither absent nor replaceable" `Quick
-    test_observer_malformed_receipts_and_order_never_become_valid_history]]
+    test_observer_malformed_receipts_and_order_never_become_valid_history;
+  Alcotest.test_case "progress rewrites only the record, whatever the request size" `Quick
+    test_progress_rewrites_only_the_record_and_its_size_ignores_the_request;
+  Alcotest.test_case "the next retain completes an interrupted one" `Quick
+    test_an_interrupted_retain_is_completed_by_the_next_retain;
+  Alcotest.test_case "a record without its body is an error, not absence" `Quick
+    test_a_record_without_its_body_is_an_error_not_absence]]

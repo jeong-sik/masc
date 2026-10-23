@@ -1,5 +1,8 @@
-(** Original host-side request and progress in one durable record. Caller holds
-    the workspace process lease and serializes retains and progress updates. *)
+(** Original host-side request and progress. The request body is stored once,
+    named by its digest; one small record holds the identity, that digest and
+    the progress, and only the record is rewritten as progress advances.
+    Caller holds the workspace process lease and serializes retains and
+    progress updates. *)
 type error = Binding_conflict | Store_unavailable of string | Invalid_identity of string
   | Invalid_request of string
 type installation = Configuration of string | Manual of string
@@ -20,12 +23,16 @@ type retained = private {
   request : Yojson.Safe.t;
   progress : Lane_addon_request_progress.t;
 }
+val request_digest : Yojson.Safe.t -> (string, string) result
+(** The digest a record names a request by: of its canonical JSON bytes. *)
 val load : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   (retained option, error) result
-(** Read the complete original canonical request through the verified durable
-    store. [None] means the key is absent; malformed, changed or unreadable
-    records are errors. This restores a known ID, not restart discovery or
-    permission to dispatch or commit. The caller owns workspace authority. *)
+(** Read the record and the complete original canonical request it names
+    through the verified durable store. [None] means the key is absent;
+    malformed, changed or unreadable records, and a missing body or one whose
+    bytes do not match the record's digest, are errors. This restores a known
+    ID, not restart discovery or permission to dispatch or commit. The caller
+    owns workspace authority. *)
 val discover : store:Lane_addon_store.t -> scope:string -> (retained list, error) result
 (** Read and strictly validate every published original request in this scope,
     including its exact hashed filename and complete input/progress history.
@@ -33,22 +40,32 @@ val discover : store:Lane_addon_store.t -> scope:string -> (retained list, error
     inventory; no partial list is returned as complete. No directories, requests
     or dispatches are created. Results are observations; load/advance and actual
     workspace authority must be revalidated by the original serialized owner. *)
-val check_published : directory_name:string -> file_name:string -> Yojson.Safe.t -> (unit, string) result
+val check_published :
+  read_body:(scope:string -> request_digest:string -> (string option, string) result) ->
+  directory_name:string -> file_name:string -> Yojson.Safe.t -> (unit, string) result
 (** Decode one published record the way {!discover} reads it, with the scope
-    and request ID the record names: the complete record, and its scope
-    directory and filename. Reads nothing else and writes nothing. *)
+    and request ID the record names: the complete record, the body
+    [read_body] returns for its digest, and its scope directory and filename.
+    Reads nothing else and writes nothing. *)
 val retain : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   installation_id:string -> package_id:string -> tool:string -> request:Yojson.Safe.t -> (unit, error) result
-(** Persist the complete canonical request before dispatch. Same input and
-    original destination is idempotent and preserves advanced progress.
-    Invalid JSON is refused before writing. Publication failure is not proof
-    of absence: a retry strictly reads the original record again. *)
+(** Persist the complete canonical request before dispatch: its body first,
+    then the record that names it. Same input and original destination is
+    idempotent and preserves advanced progress; the comparison uses the
+    request digest. Invalid JSON is refused before writing. A retain
+    interrupted between the two writes leaves a body no record names.
+    Retaining the same request again writes that body again; otherwise nothing
+    reads it or removes it. A record whose body is missing is an error.
+    Publication failure is not proof of absence: a retry strictly reads the
+    original record again. *)
 type update_error = Ownership_error of error | State_conflict | Invalid_transition of string
 type publication = Stored of retained | Already_stored of retained | Unconfirmed of string
 val advance : store:Lane_addon_store.t -> expected:retained ->
   event:Lane_addon_request_progress.event -> (publication, update_error) result
 (** Check the entire original expected record before appending a canonical
-    event. An exact already-stored next history is acknowledged without writing;
+    event. Only the record is read and rewritten; the body it names is neither
+    read nor written, and the request is compared by its digest. An exact
+    already-stored next history is acknowledged without writing;
     [Already_stored] does not permit another dispatch or effect. Any other tail
     is [State_conflict]. This is an expected-record check under the caller's
     lease and serialization, not a filesystem or cross-process CAS.

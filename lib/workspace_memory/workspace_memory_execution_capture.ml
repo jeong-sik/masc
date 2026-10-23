@@ -237,8 +237,8 @@ let expected_successor original (refusal : Progress.refusal) (successor : Progre
   let* child = narrow ~request_id:id ~final original in
   let* child = match child with Some child -> Ok child
     | None -> Error "an indivisible original batch cannot have a successor" in
-  let* expected = Lane_addon_action.canonical (to_json child) in
-  if Yojson.Safe.equal expected successor.request then Ok child
+  let* digest = Owner.request_digest (to_json child) in
+  if String.equal digest successor.request_digest then Ok child
   else Error "Curator successor is not the original whole-batch reduction"
 let restore_with ~pending ~workspace ~load retained =
   let rec walk seen (retained : Owner.retained) =
@@ -260,7 +260,7 @@ let restore_with ~pending ~workspace ~load retained =
         | Progress.Rejected _ | Progress.Subdividing _ ->
           Error "original Curator predecessor has not acknowledged this child" in
       let* () = if String.equal successor.request_id retained.request_id
-          && Yojson.Safe.equal successor.request retained.request then Ok ()
+          && String.equal successor.request_digest retained.request_digest then Ok ()
         else Error "Curator child differs from its predecessor's original intent" in
       let* _ = expected_successor original refusal successor in
       Ok capture in
@@ -285,7 +285,8 @@ let recoverable_successors ~workspace originals =
           let* () = match Originals.find_opt intent.request_id records with
             | None -> Ok ()
             | Some child ->
-              let* () = if Yojson.Safe.equal child.request intent.request && Progress.events child.progress=[] then Ok ()
+              let* () = if String.equal child.request_digest intent.request_digest
+                           && Progress.events child.progress=[] then Ok ()
                 else Error "unacknowledged Curator child differs from its original initial capture" in
               let* _ = restore_with ~pending:true ~workspace ~load child in Ok () in
           Ok (record.request_id::pending)
@@ -293,7 +294,7 @@ let recoverable_successors ~workspace originals =
           let* _ = expected_successor original refusal intent in
           let* child = match Originals.find_opt intent.request_id records with Some child -> Ok child
             | None -> Error "acknowledged original Curator child is absent" in
-          let* () = if Yojson.Safe.equal child.request intent.request then Ok ()
+          let* () = if String.equal child.request_digest intent.request_digest then Ok ()
             else Error "acknowledged Curator child differs from its original intent" in
           let* _ = restore ~workspace ~load child in Ok pending
         | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _

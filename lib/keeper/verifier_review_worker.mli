@@ -5,6 +5,8 @@ type error =
   | Original_not_found
   | Original_corrupt of string
   | Grants_mismatch of string
+  | Execution_pending of string
+  | Persistence_unavailable of string
 
 val run_attempt :
   ?on_verdict:(Task.Anti_rationalization.review_result -> unit) ->
@@ -21,3 +23,15 @@ val run_attempt :
     dispatch. Execute the stored prompt and images; callers supply neither
     another question nor a lookup dispatch closure. The structured output
     contract must still match the review protocol. *)
+
+val commit_attempt :
+  store:Verifier_review_owner.store -> verification_id:string -> attempt:int ->
+  installation_id:string -> package_id:string ->
+  change:Lane_addon_request_progress.change ->
+  observe:(Lane_addon_request_progress.change -> (Yojson.Safe.t, string) result) ->
+  apply:(Lane_addon_request_progress.change -> (unit, string) result) ->
+  (unit, error) result
+(** Host-only domain commitment of the exact retained judgment. Observe and
+    apply consume the retained intent on resume, never a newly generated one.
+    A possible prior commit is confirmed by the exact expected after-state or
+    retried only after observing its own original before-state. *)

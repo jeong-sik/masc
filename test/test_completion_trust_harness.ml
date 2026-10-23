@@ -25,7 +25,7 @@ let reviewer_response = ref (Reviewer_verdict (AR.Approve ""))
 let reviewer_calls = ref []
 let submitted_verifications = ref []
 
-let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () =
+let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () =
   reviewer_calls := !reviewer_response :: !reviewer_calls;
   match !reviewer_response with
   | Reviewer_verdict verdict -> Ok {AR.selected_runtime_id=evaluator_runtime;verdict=Some verdict}
@@ -442,7 +442,7 @@ let test_rendered_image_reaches_verifier_http_request () =
         Cohttp_eio.Server.run socket server ~on_error:raise);
       let previous = Atomic.get AR.run_llm_reviewer_fn in
       let http_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
-          ?goal_blocks ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+          ?system_prompt:_ ?goal_blocks ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
           ~on_runtime_attempt_error:_ () =
         match goal_blocks with
         | None -> Error (Agent_core.Error.Internal "rendering missing from verifier input")

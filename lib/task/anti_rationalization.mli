@@ -137,12 +137,19 @@ type provider_rest =
   | Rests_until_stated_end
   | No_stated_rest
 
+(** Whether the typed candidate failure establishes that no reviewer remains
+    in flight. Dispatch alone never proves a response was received. *)
+type failure_certainty = Before_dispatch | Definite_refusal | Outcome_unknown
+val failure_certainty : dispatch:Runtime_attempt_dispatch.t -> Agent_core.Error.t -> failure_certainty
+
 val run
   :  ?evaluator_runtime:string
   -> ?generator_runtime:string
   -> ?on_verdict:(review_result -> unit)
   -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?sw:Eio.Switch.t option
+  -> ?system_prompt:string
+  -> ?on_execution_failure:(runtime_id:string -> certainty:failure_certainty -> Agent_core.Error.t -> unit)
   -> log_info:(string -> unit)
   -> log_warn:(string -> unit)
   -> render_prompt:(unit -> (string, string) result)
@@ -246,6 +253,8 @@ val build_prompt
   -> (string, string) result
 
 val review_rendered :
+  system_prompt:string ->
+  ?on_execution_failure:(runtime_id:string -> certainty:failure_certainty -> Agent_core.Error.t -> unit) ->
   ?on_verdict:(review_result -> unit) ->
   ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
   ?sw:Eio.Switch.t option -> prompt:string -> lookup:lookup_surface ->
@@ -253,7 +262,10 @@ val review_rendered :
   review_request -> review_result
 (** Execute a retained exact prompt through the same media delivery, lookup
     success projection, slot failover and structured verdict channel as
-    {!review}. Does not read or re-render the current prompt registry. *)
+    {!review}. Both [system_prompt] and the review [prompt] are retained bytes.
+    Possible-dispatch unknown errors stop slot rotation and are observed
+    through [on_execution_failure]; ordinary {!run} and {!review} keep their
+    existing policy. Does not read or re-render the current prompt registry. *)
 
 val parse_review_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
 
@@ -293,6 +305,7 @@ val run_llm_reviewer_fn
       -> evaluator_runtime:string
       -> candidate_kind:Types_core.verifier_slot_kind
       -> prompt:string
+      -> ?system_prompt:string
       -> ?goal_blocks:Agent_core.Types.content_block list
       -> report_tool_schema:Types_core.tool_schema
       -> lookup:lookup_surface

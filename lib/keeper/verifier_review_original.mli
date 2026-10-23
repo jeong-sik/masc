@@ -65,6 +65,8 @@ val lookup_schemas : t -> string list
 val lookup_binding : t -> string
 (** The canonical authority digest of the host-built task review surface. *)
 val system_prompt_text : t -> string
+val system_instructions : t -> string
+(** The exact separate verifier system instructions captured at preparation. *)
 val output_contract : t -> string
 
 val to_json : t -> Yojson.Safe.t
@@ -76,3 +78,7 @@ val of_json : Yojson.Safe.t -> (t, string) result
 val digest : t -> (string, string) result
 (** SHA-256 of the canonical JSON of {!to_json}. Equal originals have equal
     digests whatever the key order they were read in. *)
+
+val successor : t -> (t, string) result
+(** Increment only the attempt identity. Preserve every frozen semantic byte,
+    including the exact prompt, question, evidence and authority binding. *)

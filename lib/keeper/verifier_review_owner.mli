@@ -3,8 +3,9 @@
     The immutable original of one verifier review attempt
     ({!Verifier_review_original.t}) is a decision's input, not a record; this
     module stores exactly one original per attempt and reads it back as the
-    same value. A retry is a new attempt, so it stores under a new request
-    identity and never overwrites a previous attempt's record.
+    same value. Wakes restore that attempt. Only a known terminal transient
+    refusal authorizes a linked successor whose input differs solely in its
+    attempt identity; it never overwrites a previous attempt's record.
 
     Storage goes through {!Lane_addon_tool_request_owner}, which persists the
     complete canonical request before any dispatch and reads it back through
@@ -78,7 +79,26 @@ val load_for_destination :
 val next_attempt :
   store:store -> verification_id:string -> installation_id:string -> package_id:string ->
   (int, load_error) result
-(** Allocate the next identity from the strictly validated durable inventory.
+(** Select the exact retained frontier from the strictly validated durable inventory.
+    New identities require a definite typed terminal retry and a durably linked
+    successor preserving the complete frozen input. A wake alone never allocates.
     The host holds its workspace process lease and serializes this verification
     through allocation, retain and dispatch. Missing inventory starts at zero;
     unreadable or malformed records never authorize a partial allocation. *)
+
+type retained
+val original : retained -> Verifier_review_original.t
+val progress : retained -> Lane_addon_request_progress.t
+val load_retained : store:store -> verification_id:string -> attempt:int ->
+  installation_id:string -> package_id:string -> (retained, load_error) result
+val advance : store:store -> retained -> Lane_addon_request_progress.event ->
+  (retained, load_error) result
+(** Publication must be confirmed from the exact durable owner record before
+    permitting an effect. An unknown save never authorizes redispatch. *)
+val result_to_json : Task.Anti_rationalization.review_result -> Yojson.Safe.t
+val result_of_json : Yojson.Safe.t -> (Task.Anti_rationalization.review_result, string) result
+
+val pending_commits : store:store -> installation_id:string -> package_id:string ->
+  (retained list, load_error) result
+(** Strict recovery discovery. Only original domain commit intents are returned;
+    this does not allocate a successor or authorize another provider. *)

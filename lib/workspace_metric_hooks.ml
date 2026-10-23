@@ -294,7 +294,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~candidate_kind ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~candidate_kind ~prompt ?system_prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
     let verdict_call = ref Task.Anti_rationalization.empty_verdict_call in
     let { Task.Anti_rationalization.schemas = lookup_schemas
         ; dispatch = dispatch_lookup
@@ -341,8 +341,9 @@ let install () =
       on_tool_result ~input:args result;
       result
     in
-    let system_prompt =
-      Prompt_registry.render_prompt_template Prompt_names.verification_system []
+    let system_prompt = match system_prompt with
+      | Some prompt -> Ok prompt
+      | None -> Prompt_registry.render_prompt_template Prompt_names.verification_system []
     in
     match system_prompt with
     | Error detail ->

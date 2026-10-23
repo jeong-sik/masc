@@ -244,15 +244,50 @@ let judgment_of_json ~original json =
      | None,_ | Some _,_ -> Error "retained host judgment lacks a verdict or its complete domain notes")
   | _ -> Error "retained host judgment differs from its complete original"
 
+let known_observations = function
+  | `List (_::_ as observations) ->
+    List.fold_left (fun state observation ->
+      let* reached,failed=state in
+      match observation with
+      | `Assoc fields when List.sort String.compare (List.map fst fields)=["fact"]
+          && List.assoc "fact" fields=`String "admission_refused" -> Ok (reached,failed)
+      | `Assoc fields when List.sort String.compare (List.map fst fields)=["fact";"runtime_id"] ->
+        (match List.assoc "fact" fields,List.assoc "runtime_id" fields with
+         | `String "reply_received",`String id when String.trim id<>"" -> Ok (true,failed)
+         | _ -> Error "invalid retained reviewer reply observation")
+      | `Assoc fields when List.sort String.compare (List.map fst fields)=["error_category";"fact";"runtime_id"] ->
+        (match List.assoc "fact" fields,List.assoc "runtime_id" fields,List.assoc "error_category" fields with
+         | `String "before_dispatch",`String id,`String category when String.trim id<>"" && String.trim category<>"" ->
+           Ok (reached,id::failed)
+         | `String "definite_refusal",`String id,`String category when String.trim id<>"" && String.trim category<>"" ->
+           Ok (true,id::failed)
+         | _ -> Error "retained reviewer failure is not definitely resolved")
+      | _ -> Error "invalid retained reviewer execution observations") (Ok (false,[])) observations
+  | _ -> Error "retained reviewer disposition has no concrete admission observations"
+
+let validate_admission evidence =
+  match evidence with
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=["observations";"result";"schema"]
+      && List.assoc "schema" fields=`String "verifier_admission_refusal/v1" ->
+    let* reached,_failed=known_observations (List.assoc "observations" fields) in
+    let* result=result_of_json (List.assoc "result" fields) in
+    (match reached,result.AR.verdict,result.gate with
+     | false,None,AR.Evaluator_unavailable -> Ok ()
+     | true,_,_ | false,Some _,_ | false,None,(Structured_tool | Invalid_verdict) ->
+       Error "retained admission refusal includes execution or a model reply")
+  | _ -> Error "invalid retained reviewer admission refusal"
+
 let retry_result evidence =
   match evidence with
   | `Assoc fields when List.sort String.compare (List.map fst fields)=
-      ["certainty";"result";"schema"]
+      ["certainty";"observations";"result";"schema"]
       && List.assoc "schema" fields = `String "verifier_review_refusal/v1"
       && List.assoc "certainty" fields = `String "definite" ->
+    let* reached,failed=known_observations (List.assoc "observations" fields) in
     let* result = result_of_json (List.assoc "result" fields) in
     (match result.AR.verdict,result.retryable_runtimes with
-     | None,_::_ -> Ok ()
+     | None,_::_ when reached && List.for_all (fun id -> List.mem id failed) result.retryable_runtimes -> Ok ()
+     | None,_::_ -> Error "terminal reviewer retry lacks its definite execution observations"
      | Some _,_ | None,[] -> Error "original refusal has no typed safe retry")
   | _ -> Error "original refusal does not establish a definite terminal retry"
 

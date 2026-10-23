@@ -39,6 +39,11 @@ let run_attempt ?on_verdict ?on_tool_result ?sw ~store ~verification_id ~attempt
   | Dispatch_pending _ -> Error (Execution_pending
       "original reviewer may have dispatched; no automatic provider replay")
   | Captured | Admission_wait _ ->
+  let* ()=match Progress.phase (O.progress retained) with
+    | Admission_wait evidence -> O.validate_admission evidence |> Result.map_error (fun d -> Original_corrupt d)
+    | Captured -> Ok ()
+    | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
+    | Rejected _ | Subdividing _ | Subdivided _ -> Error (Original_corrupt "reviewer admission state changed") in
   let subject = Authority.task_review_subject authority in
   let req = V.review_request original in
   let lookup = Authority.task_review_lookup authority in
@@ -60,10 +65,19 @@ let run_attempt ?on_verdict ?on_tool_result ?sw ~store ~verification_id ~attempt
     let* dispatching = save retained Progress.Dispatch_intended in
     let current = ref dispatching in
     let unknown = ref false in
-    let on_execution_failure ~runtime_id:_ ~certainty _error =
-      match certainty with
-      | AR.Outcome_unknown -> unknown := true
-      | Before_dispatch | Definite_refusal -> () in
+    let provider_reached = ref false in
+    let observations = ref [] in
+    let on_execution = function
+      | AR.Admission_refused -> observations := `Assoc ["fact",`String "admission_refused"] :: !observations
+      | Reply_received {runtime_id} -> provider_reached := true;
+        observations := `Assoc ["fact",`String "reply_received";"runtime_id",`String runtime_id] :: !observations
+      | Attempt_failed {runtime_id;certainty;error} ->
+        let fact=match certainty with
+          | AR.Outcome_unknown -> unknown:=true;provider_reached:=true;"outcome_unknown"
+          | Definite_refusal -> provider_reached:=true;"definite_refusal"
+          | Before_dispatch -> "before_dispatch" in
+        observations := `Assoc ["fact",`String fact;"runtime_id",`String runtime_id;
+          "error_category",`String Agent_core.Error.(category error |> category_label)] :: !observations in
     let exception Retention_failed of error in
     let retain_result result =
       let json = O.result_to_json result in
@@ -74,14 +88,18 @@ let run_attempt ?on_verdict ?on_tool_result ?sw ~store ~verification_id ~attempt
            | Error detail -> raise (Retention_failed (Original_corrupt detail)))
         | None when !unknown -> Progress.Execution_observed (Progress.Outcome_unknown
             (`Assoc ["schema",`String "verifier_review_unknown/v1";"result",json]))
+        | None when not !provider_reached -> Progress.Admission_declined (`Assoc [
+            "schema",`String "verifier_admission_refusal/v1";
+            "observations",`List (List.rev !observations);"result",json])
         | None -> Progress.Refused {stage=Progress.Execution;evidence=`Assoc [
-            "schema",`String "verifier_review_refusal/v1";"certainty",`String "definite";"result",json]} in
+            "schema",`String "verifier_review_refusal/v1";"certainty",`String "definite";
+            "observations",`List (List.rev !observations);"result",json]} in
       (match save !current event with
        | Error error -> raise (Retention_failed error)
        | Ok saved -> current := saved);
       Option.iter (fun callback -> callback result) on_verdict in
     try
-      let result = AR.review_rendered ~system_prompt:(V.system_instructions original) ~on_execution_failure ~on_verdict:retain_result
+      let result = AR.review_rendered ~system_prompt:(V.system_instructions original) ~on_execution ~on_verdict:retain_result
         ?on_tool_result ?sw ~prompt:(V.system_prompt_text original)
         ~lookup ~provider_rest ~base_path:(Authority.task_review_base_path authority) req in
       if !unknown then Error (Execution_pending "reviewer outcome unknown; exact original retained")

@@ -78,6 +78,7 @@ let run_llm_reviewer_fn
      report_tool_schema:Types_core.tool_schema ->
      lookup:lookup_surface ->
      on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
+     attempt_continuation:(dispatch:Runtime_attempt_dispatch.t -> Agent_core.Error.t -> Runtime_attempt_dispatch.continuation) ->
      on_runtime_attempt_error:
        (runtime_id:string
         -> attempt:int
@@ -85,7 +86,7 @@ let run_llm_reviewer_fn
         -> Agent_core.Error.t
         -> unit) ->
      unit -> (reviewer_reply, Agent_core.Error.t) result) Atomic.t
-  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       Error (Agent_core.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
 (** Issue #8436: the verdict vocabulary is owned by this variant. Witness
@@ -585,6 +586,11 @@ let append_unique left right =
 
 type failure_certainty = Before_dispatch | Definite_refusal | Outcome_unknown
 
+type execution_observation =
+  | Admission_refused
+  | Attempt_failed of { runtime_id:string; certainty:failure_certainty; error:Agent_core.Error.t }
+  | Reply_received of { runtime_id:string }
+
 let failure_certainty ~dispatch error =
   match dispatch with
   | Runtime_attempt_dispatch.Rejected_before_dispatch -> Before_dispatch
@@ -612,7 +618,7 @@ let run_with_execution_policy ~execution_policy
       ?(on_tool_result : input:Yojson.Safe.t -> Tool_result.result -> unit = fun ~input:_ _ -> ())
       ?(sw : Eio.Switch.t option = None)
       ?system_prompt
-      ?(on_execution_failure = fun ~runtime_id:_ ~certainty:_ _ -> ())
+      ?(on_execution = fun _ -> ())
       ~(log_info : string -> unit)
       ~(log_warn : string -> unit)
       ~(render_prompt : unit -> (string, string) result)
@@ -631,6 +637,7 @@ let run_with_execution_policy ~execution_policy
     on_verdict result;
     result
   in
+  let emit_admission result = on_execution Admission_refused; emit result in
   let task_info fmt = Stdlib.Format.ksprintf log_info fmt in
   let task_warn fmt = Stdlib.Format.ksprintf log_warn fmt in
   match resolve_evaluator_slots evaluator_runtime with
@@ -639,7 +646,7 @@ let run_with_execution_policy ~execution_policy
       ~outcome:"unavailable"
       ~runtime:unresolved_evaluator_runtime;
     task_warn "%s; no verdict committed" reason;
-    emit
+    emit_admission
       { verdict = None
       ; evaluator_runtime = unresolved_evaluator_runtime
       ; generator_runtime
@@ -656,7 +663,7 @@ let run_with_execution_policy ~execution_policy
       ~runtime:unresolved_evaluator_runtime;
     let reason = "verifier_exact exact-output lane resolved to no admitted slots" in
     task_warn "%s; no verdict committed" reason;
-    emit
+    emit_admission
       { verdict = None
       ; evaluator_runtime = unresolved_evaluator_runtime
       ; generator_runtime
@@ -675,7 +682,7 @@ let run_with_execution_policy ~execution_policy
          "prompt unavailable runtime=%s: %s"
          first_slot
          detail;
-       emit
+       emit_admission
          { verdict = None
          ; evaluator_runtime = first_slot
          ; generator_runtime
@@ -767,7 +774,7 @@ let run_with_execution_policy ~execution_policy
          let certainty = failure_certainty ~dispatch error in
          (match certainty with Outcome_unknown -> unknown_dispatch := true
           | Before_dispatch | Definite_refusal -> ());
-         on_execution_failure ~runtime_id ~certainty error
+         on_execution (Attempt_failed {runtime_id;certainty;error})
        in
        let run_attempt (slot, candidate_kind) =
          let prior_evidence = List.concat (List.rev !lookup_observations) in
@@ -794,6 +801,11 @@ let run_with_execution_policy ~execution_policy
                ~report_tool_schema:report_review_verdict_schema
                ~lookup
                ~on_tool_result
+               ~attempt_continuation:(fun ~dispatch error ->
+                 match execution_policy,failure_certainty ~dispatch error with
+                 | Retained_original,Outcome_unknown -> Runtime_attempt_dispatch.Original_must_resolve
+                 | Ordinary_review,(Before_dispatch | Definite_refusal | Outcome_unknown)
+                 | Retained_original,(Before_dispatch | Definite_refusal) -> Runtime_attempt_dispatch.Next_may_dispatch)
                ~on_runtime_attempt_error:
                  (fun ~runtime_id ~attempt:_ ~dispatch error ->
                     observe_failure ~runtime_id ~dispatch error;
@@ -809,6 +821,9 @@ let run_with_execution_policy ~execution_policy
                      "review evaluator raised unexpectedly: %s"
                      (Printexc.to_string exn)))
          in
+         (match result with
+          | Ok {selected_runtime_id;verdict=_} -> on_execution (Reply_received {runtime_id=selected_runtime_id})
+          | Error _ -> ());
          (* The walk reports after recording the refusal's rest. Retain that
             classification here: another candidate in this slot can outlive
             the stated reset and prune it before the slot answers. *)
@@ -943,11 +958,11 @@ let run_with_execution_policy ~execution_policy
 ;;
 
 let run ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result ?sw
-    ?system_prompt ?on_execution_failure ~log_info ~log_warn ~render_prompt ?goal_blocks
+    ?system_prompt ?on_execution ~log_info ~log_warn ~render_prompt ?goal_blocks
     ~lookup ~provider_rest ~base_path () =
   run_with_execution_policy ~execution_policy:Ordinary_review
     ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result ?sw
-    ?system_prompt ?on_execution_failure ~log_info ~log_warn ~render_prompt ?goal_blocks
+    ?system_prompt ?on_execution ~log_info ~log_warn ~render_prompt ?goal_blocks
     ~lookup ~provider_rest ~base_path ()
 ;;
 
@@ -956,7 +971,7 @@ let run ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result ?sw
 let run_review
       ?(execution_policy=Ordinary_review)
       ?system_prompt
-      ?on_execution_failure
+      ?on_execution
       ?evaluator_runtime
       ?generator_runtime
       ?on_verdict
@@ -990,7 +1005,7 @@ let run_review
     ?on_tool_result
     ~sw
     ?system_prompt
-    ?on_execution_failure
+    ?on_execution
     ?goal_blocks:(if image_blocks = [] then None else Some image_blocks)
     ~log_info:(fun message ->
       Log.Task.info "task_id=%s [task-completion-review] %s" req.task_id message)
@@ -1010,8 +1025,8 @@ let review ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result
     ~lookup ~provider_rest ~base_path req
 ;;
 
-let review_rendered ~system_prompt ?on_execution_failure ?on_verdict ?on_tool_result ?sw ~prompt ~lookup
+let review_rendered ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~prompt ~lookup
     ~provider_rest ~base_path req =
-  run_review ~execution_policy:Retained_original ~system_prompt ?on_execution_failure ?on_verdict ?on_tool_result ?sw ~render_prompt:(fun () -> Ok prompt)
+  run_review ~execution_policy:Retained_original ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~render_prompt:(fun () -> Ok prompt)
     ~lookup ~provider_rest ~base_path req
 ;;

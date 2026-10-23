@@ -109,3 +109,8 @@ val judgment_of_json : original:Verifier_review_original.t -> Yojson.Safe.t ->
   (Task.Anti_rationalization.review_result * string, string) result
 (** One durable host judgment binds the original digest, exact structured
     result and fully rendered domain notes in the same publication. *)
+
+val validate_admission : Yojson.Safe.t -> (unit, string) result
+(** Verify the retained no-dispatch observations and non-verdict result before
+    re-admitting the same original. A known execution or unknown result cannot
+    be reinterpreted as pre-admission. *)

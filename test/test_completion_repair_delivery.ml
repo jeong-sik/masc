@@ -847,7 +847,7 @@ let test_daemon_delivery ?(approve=false) ~start_before_commit () =
     Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
       (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_
           ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
-          ~on_runtime_attempt_error:_ () ->
+          ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
         incr reviewer_calls;
         Alcotest.fail "delivery recovery must not invoke a model");
     (* Poll only the durable result, never manually reconcile. The bound belongs

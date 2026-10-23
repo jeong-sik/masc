@@ -93,7 +93,7 @@ let test_frozen_prompt_media_and_lookup () = with_workspace (fun config store ->
     Out_channel.with_open_bin (Filename.concat root "receipt.txt") (fun out -> output_string out "retained evidence");
     let calls = ref 0 in
     with_reviewer (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
-        ?system_prompt ?goal_blocks ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+        ?system_prompt ?goal_blocks ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls;
       Alcotest.(check string) "original workspace reaches reviewer" config.base_path base_path;
       Alcotest.(check string) "exact stored prompt reaches reviewer" (V.system_prompt_text first) prompt;
@@ -116,7 +116,7 @@ let test_refusals_dispatch_nothing () = with_workspace (fun config store ->
   let a = authority config in
   let calls = ref 0 in
   with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
-      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls;Alcotest.fail "refused review dispatched") (fun () ->
     (match run store a 0 with Error W.Original_not_found -> () | _ -> Alcotest.fail "missing original accepted");
     retain store (original a 0);
@@ -142,7 +142,7 @@ let test_known_retry_preserves_frozen_original () = with_workspace (fun config s
   Alcotest.(check int) "wake without terminal retry keeps original" 0 (next ());
   let calls=ref 0 in
   with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
-      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error () ->
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error () ->
     incr calls;
     Alcotest.(check string) "retry preserves exact prompt" (V.system_prompt_text first) prompt;
     if !calls=1 then (
@@ -169,7 +169,7 @@ let test_unknown_and_cancelled_never_redispatch () = with_workspace (fun config 
   let a=authority config in retain store (original a 0);
   let calls=ref 0 in
   with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
-      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error () ->
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error () ->
     incr calls;
     let error=Agent_core.Error.Api (Agent_core.Error.Retry.NetworkError {message="reply lost";kind=Llm_provider.Http_client.Connection_reset}) in
     on_runtime_attempt_error ~runtime_id:"fixture-reviewer" ~attempt:0
@@ -190,7 +190,7 @@ let test_unknown_and_cancelled_never_redispatch () = with_workspace (fun config 
     let a=authority config in retain store (original a 0);
     let calls=ref 0 in
     with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
-        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls;
       raise (Eio.Cancel.Cancelled Exit)) (fun () ->
         (try ignore (run store a 0);Alcotest.fail "cancellation swallowed"
@@ -218,7 +218,7 @@ let test_actual_host_commit_restart () = with_workspace (fun config store ->
   let a=authority config in let first=original a 0 in retain store first;
   let calls=ref 0 in
   with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
-      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "checked")}) (fun () ->
     let result=loaded (run store a 0) in
     let notes=domain_notes result in
@@ -237,7 +237,7 @@ let test_actual_host_commit_cancel_after_domain_write () = with_workspace (fun c
   let task=prepare_domain config in let a=authority config in retain store (original a 0);
   let calls=ref 0 in
   with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
-      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "checked")}) (fun () ->
     let result=loaded (run store a 0) in let notes=domain_notes result in
     let hook=Atomic.get Workspace_hooks.task_terminal_committed_fn in
@@ -270,7 +270,7 @@ let test_judgment_recovery_precedes_actual_preparation () =
       retained (O.retain ~store ~verification_id ~attempt:0 ~installation_id ~package_id first);
       let calls=ref 0 in
       with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
-          ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+          ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
         incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "checked")}) (fun () ->
         let result=loaded (W.run_attempt ~prepare_notes:domain_notes ~store ~verification_id ~attempt:0
           ~installation_id ~package_id ~authority:a ~provider_rest:(fun _ -> AR.No_stated_rest) ()) in
@@ -296,7 +296,7 @@ let test_commit_unknown_recovers_exact_original () = with_workspace (fun config 
   let a=authority config in let first=original a 0 in retain store first;
   let calls=ref 0 in
   with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
-      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Reject "repair")}) (fun () ->
     let result=loaded (run store a 0) in
     let digest=get (V.digest first) in
@@ -318,6 +318,77 @@ let test_commit_unknown_recovers_exact_original () = with_workspace (fun config 
       ~observe ~apply |> Result.map_error (fun _ -> "commit recovery failed"));
     Alcotest.(check int) "lost commit reply causes no duplicate domain effect" 1 !commits;
     Alcotest.(check int) "lost commit reply causes no new provider" 1 !calls))
+
+let test_actual_inner_walk_respects_retained_disposition () =
+  let exercise retained_request = with_workspace (fun config store ->
+    let a=authority config in let first=original a 0 in retain store first;
+    let calls=ref [] in
+    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~attempt_continuation ~on_runtime_attempt_error () ->
+      Masc.Keeper_turn_driver.For_testing.attempt_runtime_candidates
+        ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+        ~runtime_id:evaluator_runtime ~runtime_id_of:Fun.id
+        ~quota_scope_of:(fun _ -> None)
+        ~candidate_backpressure_of:(fun _ -> None) ~candidate_dispatchable:(fun _ -> true)
+        ~read_usage_after_account_refusal:(fun _ -> ())
+        ~attempt_continuation ~on_attempt_error:on_runtime_attempt_error
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx ~runtime_id _candidate ->
+          calls:=runtime_id::!calls;
+          let result=if idx=0 then Error (Agent_core.Error.Api (Agent_core.Error.Retry.NetworkError
+            {message="lost after dispatch";kind=Llm_provider.Http_client.Connection_reset}))
+          else Ok {AR.selected_runtime_id=runtime_id;verdict=Some (AR.Approve "checked")} in
+          result,None,Masc.Keeper_provider_attempt_effect.No_effect_observed,
+          Masc.Keeper_attempt_dispatch.Dispatched)
+        ["first-provider";"second-provider"]) (fun () ->
+      if retained_request then (
+        (match run store a 0 with Error (W.Execution_pending _) -> ()
+         | Ok _ | Error _ -> Alcotest.fail "retained actual inner walk lost uncertainty");
+        Alcotest.(check (list string)) "actual inner admission blocks the second provider"
+          ["first-provider"] (List.rev !calls);
+        (match run store a 0 with Error (W.Execution_pending _) -> ()
+         | Ok _ | Error _ -> Alcotest.fail "retained inner unknown redispatched on restart");
+        Alcotest.(check int) "restart does not enter any provider" 1 (List.length !calls))
+      else (
+        let result=AR.review ~question ~lookup:(A.task_review_lookup a) ~lookup_root:(A.task_review_root a)
+          ~provider_rest:(fun _ -> AR.No_stated_rest) ~base_path:config.Workspace_core.base_path request in
+        Alcotest.(check (list string)) "ordinary consumer keeps existing inner walk admission"
+          ["first-provider";"second-provider"] (List.rev !calls);
+        match result.AR.verdict with Some (Approve "checked") -> ()
+        | Some (Approve _ | Reject _) | None -> Alcotest.fail "ordinary control did not reach its existing fallback"))) in
+  exercise true;exercise false
+
+let test_pre_admission_configuration_reenters_same_original () = with_workspace (fun config store ->
+  let a=authority config in let first=original a 0 in retain store first;
+  let calls=ref 0 in
+  with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+      ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+    incr calls;
+    Alcotest.(check string) "re-admission preserves original prompt" (V.system_prompt_text first) prompt;
+    Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "admitted")}) (fun () ->
+    Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
+      (fun () -> Error "fixture typed slot admission is unavailable");
+    (match run store a 0 with Ok {AR.verdict=None;_} -> ()
+     | Ok _ | Error _ -> Alcotest.fail "pre-admission refusal did not remain recoverable");
+    Alcotest.(check int) "slot refusal invokes no reviewer RPC" 0 !calls;
+    let retained=loaded (O.load_retained ~store ~verification_id ~attempt:0 ~installation_id ~package_id) in
+    (match Masc.Lane_addon_request_progress.phase (O.progress retained) with
+     | Admission_wait evidence ->
+       Alcotest.(check bool) "actual admission fact retained" true
+         (Yojson.Safe.Util.member "observations" evidence <> `Null)
+     | Captured | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
+     | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Alcotest.fail "pre-admission became execution terminal");
+    Alcotest.(check int) "configuration repair cannot allocate a successor" 0
+      (loaded (O.next_attempt ~store ~verification_id ~installation_id ~package_id));
+    Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
+      (fun () -> Ok ["fixture-reviewer",Types_core.Catalog_slot]);
+    (match run store a 0 with Ok {AR.verdict=Some (Approve "admitted");_} -> ()
+     | Ok _ | Error _ -> Alcotest.fail "fixed configuration could not re-admit exact original");
+    Alcotest.(check int) "one provider after real pre-admission repair" 1 !calls;
+    Alcotest.(check int) "same original owns the answer" 0
+      (loaded (O.next_attempt ~store ~verification_id ~installation_id ~package_id))))
 
 let test_bad_inventory_is_not_partial_authority () = with_workspace (fun _config store ->
   get (Masc.Lane_addon_tool_request_owner.retain ~store ~scope:"verifier-reviews"
@@ -341,4 +412,6 @@ let () =
     Alcotest.test_case "actual host recovers cancellation after domain write" `Quick test_actual_host_commit_cancel_after_domain_write;
     Alcotest.test_case "Judged recovery precedes actual preparation" `Quick test_judgment_recovery_precedes_actual_preparation;
     Alcotest.test_case "commit unknown recovers original" `Quick test_commit_unknown_recovers_exact_original;
+    Alcotest.test_case "actual inner walk respects retained disposition" `Quick test_actual_inner_walk_respects_retained_disposition;
+    Alcotest.test_case "pre-admission configuration repair reuses original" `Quick test_pre_admission_configuration_reenters_same_original;
     Alcotest.test_case "invalid inventory refuses allocation" `Quick test_bad_inventory_is_not_partial_authority]]

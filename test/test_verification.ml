@@ -1860,7 +1860,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                  Eio.Promise.resolve resolve_run_completed ()
                | _ -> ()));
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
                on_tool_result
                  ~input:(`Assoc [ "path", `String "evidence.md" ])
                  (Tool_result.ok
@@ -2301,7 +2301,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           W.write_backlog config { backlog with tasks };
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
             (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?system_prompt:_ ?goal_blocks:_
-                 ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+                 ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
                captured_prompt := Some prompt;
                captured_lookup := Some
                  (lookup.dispatch ~name:"masc_board_post_get"

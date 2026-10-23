@@ -67,7 +67,7 @@ let review () = review_with request ()
 
 (* A reviewer that answers per slot and records the attempt order. *)
 let recording_reviewer calls behaviors =
-  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     calls := !calls @ [ evaluator_runtime ];
     match List.assoc_opt evaluator_runtime behaviors with
     | Some behavior -> Result.map
@@ -188,7 +188,7 @@ let test_nested_runtime_retryable_attempt_survives_terminal_error () =
     ~reviewer:
       (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
            ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
-           ~on_runtime_attempt_error () ->
+           ~attempt_continuation:_ ~on_runtime_attempt_error () ->
          on_runtime_attempt_error
            ~runtime_id:"glm.test-model"
            ~attempt:0
@@ -216,7 +216,7 @@ let test_nested_retry_does_not_invent_a_serving_outer_slot () =
     ~slots:(fun () -> Ok ["outer-slot"])
     ~reviewer:(fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
-        ~on_runtime_attempt_error () ->
+        ~attempt_continuation:_ ~on_runtime_attempt_error () ->
       let failure = Agent_core.Error.Api
           (Agent_core.Error.Retry.RateLimited
              {retry_after=Some 300.0; message="nested rate limit"}) in
@@ -307,7 +307,7 @@ let account_refused =
    reports nothing is classified from its terminal error alone. *)
 let failing_slot_reviewer ~reports_attempt error =
   fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_
-      ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error () ->
+      ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error () ->
     if reports_attempt
     then
       on_runtime_attempt_error
@@ -385,7 +385,7 @@ let test_a_rest_expiring_inside_one_slot_still_retries () =
       (fun (label, first_error) ->
          let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
              ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
-             ~on_runtime_attempt_error () =
+             ~attempt_continuation:_ ~on_runtime_attempt_error () =
            Driver.For_testing.attempt_runtime_candidates
              ~walk_owner:Driver.One_shot_walk
              ~runtime_id:evaluator_runtime ~runtime_id_of:Fun.id
@@ -491,7 +491,7 @@ let test_recorded_images_ride_to_the_reviewer_as_blocks () =
     ~reviewer:
       (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks
            ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
-           ~on_runtime_attempt_error:_ () ->
+           ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
          received := goal_blocks;
          Ok {AR.selected_runtime_id="slot-a";verdict=Some (AR.Approve "")})
     (fun () ->
@@ -556,7 +556,7 @@ let test_acquired_candidate_kinds_survive_failover () =
   let seen = ref [] in
   let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind ~prompt:_
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
-      ~on_runtime_attempt_error:_ () =
+      ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
     seen := !seen @ [evaluator_runtime, candidate_kind];
     Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
       (fun () -> Error "new acquisition is now fenced");

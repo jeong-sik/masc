@@ -41,6 +41,7 @@ let run_named_with_masc_tools
     ?on_event
     ?on_yield
     ?on_resume
+    ?attempt_continuation
     ?on_runtime_attempt_error
     ?transport
     ?context
@@ -80,6 +81,7 @@ let run_named_with_masc_tools
       ?on_event
       ?on_yield
       ?on_resume
+      ?attempt_continuation
       ?on_runtime_attempt_error
       ?transport
       ?context

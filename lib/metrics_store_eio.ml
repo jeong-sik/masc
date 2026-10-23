@@ -157,29 +157,68 @@ let complete_metric metric ~success ?error_message ?handoff_to () =
     handoff_to;
   }
 
-(** Read metrics from a file - synchronous *)
-let read_metrics_file file : task_metric list =
-  if not (Fs_compat.file_exists file) then
-    []
-  else
-    let content = Fs_compat.load_file file in
-    let lines = String.split_on_char '\n' content
-      |> List.filter (fun s -> not (String.equal (String.trim s) "")) in
-    List.filter_map (fun line ->
-      try
-        let json = Yojson.Safe.from_string line in
-        match task_metric_of_yojson json with
-        | Ok m -> Some m
-        | Error e ->
-          let preview = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." line |> String_util.to_string in
-          Log.Metrics.error "Failed to parse metric: %s (line: %s)" e preview;
-          None
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        let preview = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." line |> String_util.to_string in
-        Log.Metrics.error "JSON parse error: %s (line: %s)"
-          (Stdlib.Printexc.to_string exn) preview;
-        None
-    ) lines
+type read_error =
+  | Invalid_agent_id of string
+  | Invalid_window of int
+  | Source_unavailable of { path : string; message : string }
+  | Invalid_record of { path : string; line : int; message : string }
+
+let read_error_to_string = function
+  | Invalid_agent_id name -> Printf.sprintf "invalid metric agent identity: %S" name
+  | Invalid_window days -> Printf.sprintf "metric days must be positive: %d" days
+  | Source_unavailable { path; message } -> Printf.sprintf "%s: %s" path message
+  | Invalid_record { path; line; message } ->
+      Printf.sprintf "%s:%d: %s" path line message
+
+let ( let* ) = Result.bind
+
+let valid_agent_id name =
+  not (String.equal (String.trim name) "" || String.equal name "." || String.equal name "..")
+  && String.equal (Filename.basename name) name
+  && not (String.contains name '\000')
+
+let owned_error path error =
+  Source_unavailable
+    { path; message = Fs_compat.owned_regular_file_read_error_to_string error }
+
+let read_inventory config path =
+  Fs_compat.read_owned_directory_if_present ~owner_uid:(Unix.getuid ())
+    ~ownership_root:(Workspace_utils.masc_dir config) path
+  |> Result.map_error (owned_error path)
+
+(** Every nonblank physical line must decode under the exact source identity.
+    A rejected row never becomes an empty or partially successful metric pool. *)
+let read_metrics_file config ~agent_id file =
+  let* contents =
+    Fs_compat.load_owned_regular_file
+      ~ownership_root:(Workspace_utils.masc_dir config) file
+    |> Result.map_error (owned_error file)
+  in
+  match contents with
+  | None -> Error (Source_unavailable { path = file; message = "captured metric file disappeared" })
+  | Some contents ->
+      let rec parse line_number acc = function
+        | [] -> Ok (List.rev acc)
+        | line :: rest when String.equal (String.trim line) "" ->
+            parse (line_number + 1) acc rest
+        | line :: rest ->
+            let invalid message = Error (Invalid_record { path = file; line = line_number; message }) in
+            let decoded =
+              try Ok (Yojson.Safe.from_string line)
+              with Yojson.Json_error _ -> invalid "invalid metric JSON"
+            in
+            let* json = decoded in
+            (match task_metric_of_yojson json with
+             | Error _ -> invalid "invalid metric record"
+             | Ok metric ->
+                 if not (String.equal metric.agent_id agent_id) then
+                   invalid "metric agent identity differs from directory"
+                 else if not (Float.is_finite metric.started_at)
+                   || not (Option.fold ~none:true ~some:Float.is_finite metric.completed_at) then
+                   invalid "metric timestamps must be finite"
+                 else parse (line_number + 1) (metric :: acc) rest)
+      in
+      parse 1 [] (String.split_on_char '\n' contents)
 
 let safe_yield () =
   Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
@@ -214,36 +253,45 @@ let filter_recent_month_filenames ~now ~days filenames =
       | None -> true)
     filenames
 
-(** Get recent metrics for an agent - synchronous *)
-let get_recent config ~agent_id ~days : task_metric list =
-  let now = Time_compat.now () in
-  let cutoff = now -. Masc_time_constants.days_to_seconds days in
-  let dir = agent_metrics_dir config agent_id in
-  if not (Sys.file_exists dir) then
-    []
-  else
-    let files =
-      Sys.readdir dir |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
-      |> filter_recent_month_filenames ~now ~days
-      |> List.map (fun f -> Filename.concat dir f)
-    in
-    let all_metrics =
-      List.concat_map
-        (fun file ->
-          safe_yield ();
-          read_metrics_file file)
-        files
-    in
-    List.filter (fun m -> Stdlib.Float.compare m.started_at cutoff >= 0) all_metrics
-
-(** Calculate aggregated metrics for fitness - synchronous *)
-let calculate_agent_metrics config ~agent_id ~days : agent_metrics option =
-  let metrics = get_recent config ~agent_id ~days in
-  if Stdlib.List.length metrics = 0 then
-    None
+(** Read and filter against one query window, without changing raw identity. *)
+let read_recent config ~agent_id ~days =
+  if not (valid_agent_id agent_id) then Error (Invalid_agent_id agent_id)
+  else if days <= 0 then Error (Invalid_window days)
   else
     let now = Time_compat.now () in
+    let cutoff = now -. Masc_time_constants.days_to_seconds days in
+    let dir = agent_metrics_dir config agent_id in
+    let* inventory = read_inventory config dir in
+    let files =
+      match inventory with
+      | None -> []
+      | Some names ->
+          names
+          |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+          |> filter_recent_month_filenames ~now ~days
+          |> List.map (Filename.concat dir)
+    in
+    let rec read acc = function
+      | [] -> Ok (List.rev acc)
+      | file :: rest ->
+          safe_yield ();
+          let* rows = read_metrics_file config ~agent_id file in
+          read (List.rev_append rows acc) rest
+    in
+    let* rows = read [] files in
+    Ok (now, List.filter
+      (fun (metric : task_metric) -> metric.started_at >= cutoff && metric.started_at <= now)
+      rows)
+
+let get_recent config ~agent_id ~days =
+  Result.map snd (read_recent config ~agent_id ~days)
+
+(** Calculate aggregated metrics for fitness - synchronous *)
+let calculate_agent_metrics config ~agent_id ~days =
+  let* now, metrics = read_recent config ~agent_id ~days in
+  if Stdlib.List.length metrics = 0 then
+    Ok None
+  else
     let period_start = now -. Masc_time_constants.days_to_seconds days in
     let total = List.length metrics in
     let completed = List.filter (fun m -> Option.is_some m.completed_at) metrics in
@@ -273,7 +321,7 @@ let calculate_agent_metrics config ~agent_id ~days : agent_metrics option =
     let all_collaborators = List.concat_map (fun m -> m.collaborators) metrics in
     let unique_collabs = List.sort_uniq String.compare all_collaborators in
 
-    Some {
+    Ok (Some {
       agent_id;
       period_start;
       period_end = now;
@@ -285,16 +333,21 @@ let calculate_agent_metrics config ~agent_id ~days : agent_metrics option =
       error_rate = if total > 0 then Stdlib.Float.of_int (List.length failed) /. Stdlib.Float.of_int total else 0.0;
       handoff_success_rate = handoff_rate;
       unique_collaborators = unique_collabs;
-    }
+    })
 
-(** Get all agents with metrics - synchronous *)
-let get_all_agents config : string list =
+(** Successful inventory includes only observed agent directories. *)
+let get_all_agents config =
   let dir = metrics_dir config in
-  if not (Sys.file_exists dir) then
-    []
-  else
-    let entries = Sys.readdir dir |> Array.to_list in
-    List.filter (fun e ->
-      let path = Filename.concat dir e in
-      Sys.is_directory path
-    ) entries
+  let* inventory = read_inventory config dir in
+  let rec directories acc = function
+    | [] -> Ok (List.rev acc)
+    | name :: rest ->
+        let path = Filename.concat dir name in
+        (match Fs_compat.exact_path_kind ~follow:false path with
+         | Exact_kind Unix.S_DIR -> directories (name :: acc) rest
+         | Exact_kind (Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK) ->
+             directories acc rest
+         | Exact_kind Unix.S_LNK | Exact_missing | Exact_unknown ->
+             Error (Source_unavailable { path; message = "metric directory identity unavailable" }))
+  in
+  match inventory with None -> Ok [] | Some names -> directories [] names

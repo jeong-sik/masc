@@ -61,6 +61,10 @@ let test_complete_metric () =
   assert (completed.handoff_to = Some "codex");
   print_endline "✓ test_complete_metric passed"
 
+let read_ok = function
+  | Ok value -> value
+  | Error error -> failwith (Metrics_store_eio.read_error_to_string error)
+
 let test_record_and_get () =
   with_temp_masc_dir (fun config ->
     (* Create and record a metric *)
@@ -73,7 +77,7 @@ let test_record_and_get () =
     Metrics_store_eio.record config completed;
 
     (* Get recent metrics *)
-    let recent = Metrics_store_eio.get_recent config ~agent_id:"claude" ~days:1 in
+    let recent = read_ok (Metrics_store_eio.get_recent config ~agent_id:"claude" ~days:1) in
     assert (List.length recent >= 1);
 
     (* Find our metric *)
@@ -97,7 +101,7 @@ let test_calculate_agent_metrics () =
     done;
 
     (* Calculate aggregated metrics *)
-    match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1 with
+    match read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1) with
     | Some metrics ->
       assert (metrics.total_tasks = 5);
       (* completed_tasks counts successful tasks: i=2 and i=4 (even numbers) *)
@@ -124,7 +128,7 @@ let test_get_all_agents () =
     ) agents;
 
     (* Get all agents *)
-    let all = Metrics_store_eio.get_all_agents config in
+    let all = read_ok (Metrics_store_eio.get_all_agents config) in
     assert (List.length all = 3);
     List.iter (fun a -> assert (List.mem a all)) agents
   );
@@ -141,7 +145,7 @@ let test_collaborators () =
     let completed = Metrics_store_eio.complete_metric metric ~success:true () in
     Metrics_store_eio.record config completed;
 
-    match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1 with
+    match read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1) with
     | Some metrics ->
       assert (List.mem "gemini" metrics.unique_collaborators);
       assert (List.mem "codex" metrics.unique_collaborators)
@@ -169,13 +173,41 @@ let test_handoff_tracking () =
     let c2 = Metrics_store_eio.complete_metric m2 ~success:true ~handoff_to:"codex" () in
     Metrics_store_eio.record config c2;
 
-    match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1 with
+    match read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1) with
     | Some metrics ->
       assert (metrics.handoff_success_rate = 1.0);  (* Both handoffs successful *)
       print_endline (Printf.sprintf "  Handoff success rate: %.0f%%" (metrics.handoff_success_rate *. 100.0))
     | None -> failwith "Expected metrics"
   );
   print_endline "✓ test_handoff_tracking passed"
+
+let test_source_observations () =
+  with_temp_masc_dir (fun config ->
+    assert (read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:"absent" ~days:1) = None);
+    let metric = Metrics_store_eio.create_metric ~agent_id:"Exact" ~task_id:"observed" () in
+    Metrics_store_eio.record config metric;
+    assert (Option.is_some (read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:"Exact" ~days:1)));
+    assert (read_ok (Metrics_store_eio.calculate_agent_metrics config ~agent_id:" Exact " ~days:1) = None);
+    (match Metrics_store_eio.get_recent config ~agent_id:"../Exact" ~days:1 with
+     | Error (Metrics_store_eio.Invalid_agent_id _) -> ()
+     | Error _ | Ok _ -> failwith "path identity was accepted");
+    let dir = Metrics_store_eio.agent_metrics_dir config "Exact" in
+    let file = Filename.concat dir "corrupt.jsonl" in
+    Fs_compat.save_file file "not-json\n";
+    (match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"Exact" ~days:1 with
+     | Error (Metrics_store_eio.Invalid_record { line = 1; _ }) -> ()
+     | Error _ | Ok _ -> failwith "corrupt sibling became partial metrics");
+    Fs_compat.save_file file (Yojson.Safe.to_string
+      (Metrics_store_eio.task_metric_to_yojson { metric with agent_id = "Other" }) ^ "\n");
+    (match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"Exact" ~days:1 with
+     | Error (Metrics_store_eio.Invalid_record _) -> ()
+     | Error _ | Ok _ -> failwith "another identity was accepted");
+    Sys.remove file;
+    Unix.symlink "/missing-metric-target" file;
+    (match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"Exact" ~days:1 with
+     | Error (Metrics_store_eio.Source_unavailable _) -> ()
+     | Error _ | Ok _ -> failwith "unreadable captured file became absence");
+    Unix.unlink file)
 
 let test_generate_id () =
   let ids = List.init 128 (fun _ -> Metrics_store_eio.generate_id ()) in
@@ -216,6 +248,7 @@ let () =
   test_get_all_agents ();
   test_collaborators ();
   test_handoff_tracking ();
+  test_source_observations ();
   test_generate_id ();
   test_filter_recent_month_filenames ();
-  print_endline "\n✅ All 9 Metrics_store_eio tests passed!\n"
+  print_endline "\n✅ All Metrics_store_eio tests passed!\n"

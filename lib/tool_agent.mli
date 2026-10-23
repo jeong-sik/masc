@@ -28,7 +28,11 @@ val handle_get_metrics :
   ?tool_name:string -> start_time:Tool_timing.started ->
   context -> Yojson.Safe.t -> Tool_result.result
 
-(** Handle masc_agent_fitness *)
+(** Handle masc_agent_fitness. Exact named rows without recent records contain
+    [metrics = null] and [components = null], not zero-valued metrics. Inventory
+    queries combine metric identities with the existing workspace agent listing;
+    this does not certify complete workspace membership.
+    A malformed or unreadable metric source is a failed tool result. *)
 val handle_agent_fitness :
   ?tool_name:string -> start_time:Tool_timing.started ->
   context -> Yojson.Safe.t -> Tool_result.result

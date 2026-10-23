@@ -28,7 +28,7 @@ let context ~instance_id ~automation ~stagehand ~live_bidi ~models = protect (fu
     "automation",(match automation with None -> `Null | Some configuration -> Browser_addon_automation.configuration_to_json configuration)]))
 let cleanup_descriptor_label = "native cleanup descriptor"
 let cleanup_descriptor_keys = ["automation";"directory";"kind";"live_bidi";"models";"stagehand"]
-let context_of_json ~instance_id = function
+let context_envelope_of_json ~instance_id = function
   | None -> Ok None
   | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=cleanup_descriptor_keys ->
     (match List.assoc "kind" fields,List.assoc "directory" fields with
@@ -38,15 +38,7 @@ let context_of_json ~instance_id = function
          || Unix.realpath (Filename.dirname root)<>Filename.dirname root then
          Error (Printf.sprintf "browser allocation directory %s must be an absolute path named %s under its own canonical parent"
            root expected)
-       else
-         let optional decode name=match List.assoc name fields with
-           | `Null -> Ok None
-           | value -> decode value |> Result.map Option.some in
-         let* automation=optional Browser_addon_automation.configuration_of_json "automation" in
-         let* models=optional Browser_addon_models.configuration_of_json "models" in
-         let* stagehand=optional Browser_addon_stagehand.configuration_of_json "stagehand" in
-         let* live_bidi=optional Browser_addon_live_bidi.configuration_of_json "live_bidi" in
-         Ok (Some (root,automation,models,stagehand,live_bidi))
+       else Ok (Some (root,fields))
      | kind,directory ->
        Error (Printf.sprintf "%s must have kind \"browser_socket\" and a string directory; it has kind %s and directory %s"
          cleanup_descriptor_label (Yojson.Safe.to_string kind) (Yojson.Safe.to_string directory)))
@@ -54,9 +46,24 @@ let context_of_json ~instance_id = function
     Error (Requirement.keys ~label:cleanup_descriptor_label ~found:(List.map fst fields) ~required:cleanup_descriptor_keys)
   | Some value ->
     Error (Printf.sprintf "%s must be a JSON object; it is %s" cleanup_descriptor_label (Yojson.Safe.to_string value))
-let context_path admission =
+let optional_configuration decode fields name = match List.assoc name fields with
+  | `Null -> Ok None
+  | value -> decode value |> Result.map Option.some
+let child_configurations fields =
+  let* stagehand=optional_configuration Browser_addon_stagehand.configuration_of_json fields "stagehand" in
+  let* live_bidi=optional_configuration Browser_addon_live_bidi.configuration_of_json fields "live_bidi" in
+  Ok (stagehand,live_bidi)
+let decode_context (root,fields) =
+  let* automation=optional_configuration Browser_addon_automation.configuration_of_json fields "automation" in
+  let* models=optional_configuration Browser_addon_models.configuration_of_json fields "models" in
+  let* stagehand,live_bidi=child_configurations fields in
+  Ok (root,automation,models,stagehand,live_bidi)
+let context_envelope admission =
   let* context=Native_addon_lease.cleanup_context admission |> Result.map_error Native_addon_lease.error_to_string in
-  context_of_json ~instance_id:(Native_addon_lease.instance_id admission) context
+  context_envelope_of_json ~instance_id:(Native_addon_lease.instance_id admission) context
+let context_path admission =
+  let* envelope=context_envelope admission in
+  match envelope with None -> Ok None | Some envelope -> Result.map Option.some (decode_context envelope)
 let slot admission directory =
   let directory=Unix.realpath directory in
   if List.mem directory (Native_addon_lease.directories admission) then
@@ -241,8 +248,11 @@ let acquisition ~instance_id ~root ~file ~directory =
     let* inode=number "inode" in
     let* state=text "state" in
     if incarnation<>instance_id then refuse "incarnation" (Printf.sprintf "%S" instance_id) (`String incarnation)
-    else if root<>known then refuse "directory" (Printf.sprintf "%S" root) (`String known)
-    else (match state with
+    else let* ()=match root with
+      | None -> Error "browser allocation record has no original allocation descriptor"
+      | Some root when root=known -> Ok ()
+      | Some root -> refuse "directory" (Printf.sprintf "%S" root) (`String known) in
+    (match state with
       | "acquired" -> Ok (Acquired (device,inode))
       | "cleaning" -> Ok (Cleaning (device,inode))
       | "retained" -> Ok (Retained (device,inode))
@@ -250,18 +260,31 @@ let acquisition ~instance_id ~root ~file ~directory =
   | Some value -> Error (Printf.sprintf
       "browser socket record %s must be {\"state\":\"released\"} or an object with exactly the keys %s; it is %s"
       file (String.concat ", " socket_record_keys) (Yojson.Safe.to_string value))
+let no_allocation ~instance_id ~directory =
+  let* identity=acquisition ~instance_id ~root:None ~file:(record_of_instance instance_id directory) ~directory in
+  match identity with
+  | Missing|Released -> Ok ()
+  | Acquired _|Cleaning _|Retained _ -> Error "browser allocation record has no original allocation descriptor"
+let released_directory_absent root = match Unix.lstat root with
+  | _ -> Error "released browser socket directory reappeared"
+  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
 let check_retained ~instance_id ~slot context = protect (fun () ->
-  let* root=context_of_json ~instance_id context in
-  match root with
-  | None -> Ok ()
-  | Some (root,_automation,_models,stagehand,live_bidi) ->
+  let* envelope=context_envelope_of_json ~instance_id context in
+  match envelope with
+  | None -> no_allocation ~instance_id ~directory:slot
+  | Some (root,fields) ->
+    let file=record_of_instance instance_id slot in
+    let* identity=acquisition ~instance_id ~root:(Some root) ~file ~directory:slot
+      |> Result.map_error (fun detail -> file ^ ": " ^ detail) in
+    match identity with
+    | Retained _ -> Ok ()
+    | Released -> released_directory_absent root
+    | Missing|Acquired _|Cleaning _ ->
+    let* _,_automation,_models,stagehand,live_bidi=decode_context (root,fields) in
     let* ()=match stagehand with None -> Ok () | Some c ->
       Browser_addon_stagehand.check_retained_child c ~incarnation:instance_id ~directory:root in
     let* ()=match live_bidi with None -> Ok () | Some c ->
       Browser_addon_live_bidi.check_retained_child c ~incarnation:instance_id ~directory:root in
-    let file=record_of_instance instance_id slot in
-    let* (_ : acquisition)=acquisition ~instance_id ~root ~file ~directory:slot
-      |> Result.map_error (fun detail -> file ^ ": " ^ detail) in
     Ok ())
 let cleanup ~admission ~directory = protect (fun () ->
   let* directory=slot admission directory in
@@ -269,19 +292,24 @@ let cleanup ~admission ~directory = protect (fun () ->
   let* ()=match status with
     | Native_addon_lease.Settled -> Ok ()
     | Awaiting_exec|Live _|Cleanup_pending _ -> Error "native browser resource cleanup is not settled" in
-  let* root=context_path admission in
-  match root with
-  | None -> Ok Allocation_released
-  | Some (root,automation,models,stagehand,live_bidi) ->
+  let instance_id=Native_addon_lease.instance_id admission in
+  let* envelope=context_envelope admission in
+  match envelope with
+  | None -> let* ()=no_allocation ~instance_id ~directory in Ok Allocation_released
+  | Some (root,fields) ->
+    let file=record admission directory in
+    let* identity=acquisition ~instance_id ~root:(Some root) ~file ~directory in
+    (* Retain transferred the whole allocation, including its backend payloads.
+       Only the original envelope and host record still belong to this check. *)
+    match identity with
+    | Retained _ -> Ok Allocation_retained
+    | Released -> let* ()=released_directory_absent root in Ok Allocation_released
+    | Missing|Acquired _|Cleaning _ ->
+    let* _,automation,models,stagehand,live_bidi=decode_context (root,fields) in
     let* ()=match stagehand with None -> Ok () | Some c ->
       Browser_addon_stagehand.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root in
     let* ()=match live_bidi with None -> Ok () | Some c ->
       Browser_addon_live_bidi.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root in
-    let file=record admission directory in
-    let* identity=acquisition ~instance_id:(Native_addon_lease.instance_id admission) ~root ~file ~directory in
-    (* The operator took a retained allocation over. Its contents are not read,
-       removed or released here. *)
-    match identity with Retained _ -> Ok Allocation_retained | Missing|Acquired _|Cleaning _|Released ->
     let* ()=match Unix.lstat root with
       | info ->
         let* ()=private_root root info in
@@ -324,17 +352,27 @@ let retain_with ~(save:string -> string -> (unit, Fs_compat.atomic_replace_failu
     let* ()=match status with
       | Native_addon_lease.Settled -> Ok ()
       | Awaiting_exec|Live _|Cleanup_pending _ -> Error "native browser resource cleanup is not settled" in
-    let* root=context_path admission in
-    match root with
-    | None -> Ok (Already Allocation_released)
-    | Some (root,_automation,_models,stagehand,live_bidi) ->
-      let incarnation=Native_addon_lease.instance_id admission in
+    let incarnation=Native_addon_lease.instance_id admission in
+    let* envelope=context_envelope admission in
+    match envelope with
+    | None -> let* ()=no_allocation ~instance_id:incarnation ~directory in Ok (Already Allocation_released)
+    | Some (root,fields) ->
+      let file=record admission directory in
+      let* identity=acquisition ~instance_id:incarnation ~root:(Some root) ~file ~directory in
+      match identity with
+      | Retained _ -> Ok (Already Allocation_retained)
+      | Released -> let* ()=released_directory_absent root in Ok (Already Allocation_released)
+      | Missing|Acquired _|Cleaning _ ->
+      (* Without any acquisition or handoff record, only the full current
+         descriptor can justify reporting an absent allocation as released. *)
+      let* ()=match identity with
+        | Missing -> let* _=decode_context (root,fields) in Ok ()
+        | Acquired _|Cleaning _|Retained _|Released -> Ok () in
+      let* stagehand,live_bidi=child_configurations fields in
       let* ()=match stagehand with None -> Ok () | Some c ->
         Browser_addon_stagehand.check_settled c ~incarnation ~directory:root in
       let* ()=match live_bidi with None -> Ok () | Some c ->
         Browser_addon_live_bidi.check_settled c ~incarnation ~directory:root in
-      let file=record admission directory in
-      let* identity=acquisition ~instance_id:incarnation ~root ~file ~directory in
       let retained ~device ~inode = Ok (Write_retained {file;root;device;inode}) in
       match identity,Unix.lstat root with
       | Released,_ -> Ok (Already Allocation_released)

@@ -79,6 +79,7 @@ let backend env base_path delivery delivery_observed : Runtime.For_testing.backe
     Protocol.initialize protocol client |> Result.map_error protocol_error |> get;
     let connection : Runtime.For_testing.connection = {
       browser=None;resource=Lane_addon_lifecycle.Container_resource instance_id;
+      await_exit=(fun () -> Format.asprintf "%a" Eio.Process.pp_status (Agent_core.Mcp.await_exit client));
       resolved_image=Some (Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') |> get);
       observe=(fun ~binding ~sources -> Protocol.observe protocol ~binding ~sources |> Result.map_error protocol_error);
       exported_tools=(fun () -> Protocol.exported_tools protocol);

@@ -26415,11 +26415,16 @@ and is loaded on demand through keeper_skill.
                           | Ok next -> update next
                           | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | _ -> ()))
+       (* A retained form owns its paste target, but a frame showing only the
+          resize prompt cannot accept hidden edits or submit writes. Keep
+          these key guards separate from text_input_target so a paste never
+          falls through into a different draft. *)
        (* Inline Runtime_params editing is modal: printable keys, including q,
           belong to the value.  Friendly mode turns the registry's declared
           type into a bool/number/string control; capital E is the explicit
           raw-JSON escape hatch.  The server remains the final authority. *)
-       | Some k when text_input_target state ~compact_viewport = Some Text_resource_save ->
+       | Some k when not compact_viewport
+           && text_input_target state ~compact_viewport = Some Text_resource_save ->
            (match state.resource_save_prompt with
             | None -> ()
             | Some prompt ->
@@ -26438,8 +26443,9 @@ and is loaded on demand through keeper_skill.
           draft is open, so a name with an s or an r in it does not fire the
           save and restore keys under it. *)
        | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_preset_name ->
+         when not compact_viewport
+              && text_input_target state ~compact_viewport
+                 = Some Text_preset_name ->
            (match state.preset_save_draft with
             | None -> ()
             | Some draft ->
@@ -26503,8 +26509,9 @@ and is loaded on demand through keeper_skill.
           Every printable key is the field's while it is open, so a name with
           an x or a D in it does not fire the lane keys under it. *)
        | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_runtime_lane_name ->
+         when not compact_viewport
+              && text_input_target state ~compact_viewport
+                 = Some Text_runtime_lane_name ->
            (match state.runtime_lane_name_draft with
             | None -> ()
             | Some entry ->
@@ -26595,8 +26602,9 @@ and is loaded on demand through keeper_skill.
                    | Error detail -> state.runtime_account_form <- Some
                        (Masc_tui_runtime_account_form.refused form detail)))
        | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_runtime_param ->
+         when not compact_viewport
+              && text_input_target state ~compact_viewport
+                 = Some Text_runtime_param ->
            (match state.runtime_param_edit with
             | None -> ()
             | Some edit ->

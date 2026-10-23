@@ -160,11 +160,13 @@ let decode ~source_path ~source_revision ~id fields =
   let manifest_path = Unix.realpath manifest_path in
   (* This revision names worker inputs. Desired activity is separate, so an
      accepting deployment does not replace unchanged workers and on/off does
-     not change the identity of preserved inputs or their document owner. *)
+     not change the identity of preserved inputs or their document owner.
+     Navigation category is also separate: changing it updates declaration
+     metadata without replacing a worker or its immutable package snapshot. *)
   let canonical =
     `Assoc ["id", `String id; "run_id", `String run_id;
       "manifest_path", `String manifest_path;
-      "package", Lane_addon_types.package_to_json package; "binding", binding]
+      "package", Lane_addon_types.package_to_json {package with ui_category=None}; "binding", binding]
     |> Yojson.Safe.sort |> Yojson.Safe.to_string
   in
   let revision = Digestif.SHA256.(to_hex (digest_string canonical)) in

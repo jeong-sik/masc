@@ -28,6 +28,8 @@ type declaration =
   | Valid of {
       installation_id : string; enabled : bool; run_id : string; package_id : string;
       title : string; desired_revision : string; source_revision : string;
+      ui_category : Lane_addon_category.t option;
+      (** Current valid declaration metadata, independent of applied workers. *)
       application : Lane_addon_application.t;
       exact_outputs : exact_output list;  (** Declared ones in manifest order, then table-only ones. *)
     }
@@ -40,6 +42,8 @@ type presence = Live | Retained
 type instance = {
   instance_id : string; incarnation : string; run_id : string;
   package_id : string; title : string; package_revision : string;
+  ui_category : Lane_addon_category.t option;
+  (** Original worker metadata. Invalid/unobserved declarations cannot borrow it. *)
   presence : presence; phase : phase; applied_revision : string option;
 }
 type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved

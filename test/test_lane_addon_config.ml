@@ -838,9 +838,55 @@ let persistent_state_is_explicit_and_revisioned () = with_directory (fun _root p
     [ {|mode = "writable"|}; {|mode = true|}; {|mode = "persistent"
 path = "/host"|} ])
 
+let ui_category_is_strict_display_metadata () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let path = Filename.concat directory "observer.toml" in
+  write path (declaration msx_binding);
+  let original = unwrap (Config.load_file ~path) in
+  check bool "absence remains unclassified" true (original.package.ui_category=None);
+  let module Category = Lane_addon_category in
+  let cases = ["memory_judgment",Category.Memory_and_judgment;
+    "browser",Category.Browser;"external_communications",Category.External_communications;
+    "voice_media",Category.Voice_and_media;"execution_environment",Category.Execution_environment;
+    "analysis",Category.Analysis] in
+  List.iter (fun (wire,expected) ->
+    write manifest (Printf.sprintf "ui_category = %S\n%s" wire (package ()));
+    let found = unwrap (Config.load_file ~path) in
+    check bool "declared category is typed without using package identity" true
+      (found.package.ui_category=Some expected);
+    check bool "the package wire retains its original declaration" true
+      (Yojson.Safe.Util.member "ui_category" (Lane_addon_types.package_to_json found.package)=`String wire);
+    check string "category is excluded from worker input identity" original.revision found.revision;
+    check bool "all other worker inputs remain equal" true
+      (Lane_addon_types.same_execution_package original.package found.package)) cases;
+  let changed = {original.package with ui_category=Some Category.Analysis} in
+  List.iter (fun package -> check bool "category never hides a changed worker input" false
+    (Lane_addon_types.same_execution_package original.package package))
+    [{changed with command=["different-worker"]};
+     {changed with model_access=Lane_addon_types.Host_sampling};
+     {changed with worker_service=Lane_addon_types.Browser_service};
+     {changed with tool_hooks=[Lane_addon_types.Validate_input]}];
+  List.iter (fun category ->
+    write manifest ("ui_category = " ^ category ^ "\n" ^ package ());
+    check bool "invalid declared category is not absence or a guessed role" true
+      (Result.is_error (Config.load_file ~path)))
+    ["\"unknown\"";"\"\"";"\"Browser\"";"\" browser\"";"\"browser \"";
+     "true";"1";"1.5";"[]";"[\"browser\", \"analysis\"]";"{}";"2026-10-23"];
+  write manifest ("ui_category = \"analysis\"\nui_category = \"browser\"\n" ^ package ());
+  check bool "duplicate category is rejected before installation" true
+    (Result.is_error (Config.load_file ~path));
+  List.iter (fun value -> check bool "wire categories reject unsupported JSON" true
+    (Result.is_error (Category.of_json value)))
+    [`Null;`Bool false;`Int 0;`List [];`Assoc [];`String "unknown"];
+  check bool "unclassified package wire invents no category" true
+    (match Lane_addon_types.package_to_json original.package with
+     | `Assoc fields -> not (List.mem_assoc "ui_category" fields)
+     | _ -> false))
+
 let () = run "Lane Add-on declarative composition"
   ["configuration",
-    [test_case "browser service is explicit and names only supported capabilities" `Quick browser_service_is_explicit;
+    [test_case "UI category is strict metadata outside worker identity" `Quick ui_category_is_strict_display_metadata;
+     test_case "browser service is explicit and names only supported capabilities" `Quick browser_service_is_explicit;
       test_case "native execution declares no container isolation" `Quick native_execution_has_no_container_claims;
       test_case "runtime resources name only enforceable limits" `Quick runtime_selects_enforceable_resources;
      test_case "persistent state is explicit and revisioned" `Quick persistent_state_is_explicit_and_revisioned;

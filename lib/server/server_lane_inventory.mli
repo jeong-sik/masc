@@ -20,7 +20,9 @@ type declaration =
       (** [exact_outputs]: the package's declared outputs in manifest order,
           then the tables runtime.toml has for outputs it does not declare.
           [application] comes from the host's exact reconciled declaration;
-          missing, incomplete or mismatched observations remain Unknown. *)
+          missing, incomplete or mismatched observations remain Unknown.
+          Its JSON [ui_category] is current declaration metadata; instances
+          independently retain their original package category. *)
   | Invalid of string list
   | Absent
   | Unobserved

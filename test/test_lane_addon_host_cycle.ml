@@ -575,6 +575,91 @@ let test_capture_factory_uses_actual_live_declaration_before_any_rpc () =
      | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "Off export admitted capture");
     check int "capture and refusal perform no worker RPC" 0 !calls)
 
+let test_category_edit_preserves_original_export_and_worker () =
+  let tool = Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "queue_question";
+    "inputSchema",`Assoc ["type",`String "object"]]) |> unwrap in
+  let calls = ref 0 in
+  let invoke _ = incr calls; Ok (Mcp_protocol.Mcp_types.tool_result_of_text "original worker") in
+  let body = manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n" in
+  let categorized category = "ui_category=\"" ^ category ^ "\"\n" ^ body in
+  with_installation ~manifest:(categorized "analysis") ~exported_tool:(tool,invoke)
+    (fun clock config _worker _state root ->
+      let access = Lane_addon_sources.Operator_configuration in
+      let current () = match (Runtime.tool_export_reading ~config ~access ~reserved:[] |> unwrap).exports with
+        | [export] -> Some export | _ -> None in
+      await clock (fun () -> Option.is_some (current ()));
+      let original = Option.get (current ()) in
+      let snapshot () = Runtime.dispatch ~access ~config ~operation:Runtime.Inspect (`Assoc [])
+        |> Result.map_error Runtime.error_to_string |> unwrap in
+      let worker () = snapshot () |> member "instances" |> Yojson.Safe.Util.to_list
+        |> List.find (fun item -> text "instance_id" item=original.instance_id) in
+      let source = Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
+      let before = Lane_addon_config.load_file ~path:source |> unwrap in
+      let admit () = match Runtime.with_tool_request_destination ~config ~access ~reserved:[] ~export:original
+          ~publish:(fun destination -> Ok destination.configuration_revision) with
+        | Ok revision -> check string "original destination keeps its worker inputs" before.revision revision
+        | Error _ -> fail "category edit revoked the original configured destination" in
+      let call () = match Runtime.call_exported_tool ~config ~access ~reserved:[] ~export:original
+          ~arguments:(`Assoc []) with
+        | Ok reply -> check bool "the original handler still reaches its worker" false (reply.is_error=Some true)
+        | Error _ -> fail "category edit revoked the original tool handler" in
+      admit (); call ();
+      write (Filename.concat root ".masc/package.toml") (categorized "memory_judgment");
+      (* Fresh declaration admission happens before cached reconciliation too. *)
+      admit ();
+      let observed = Runtime.reconcile_configuration ~config
+        ~directory:(Runtime.configuration_directory config) |> unwrap in
+      let declared = observed |> member "declarations" |> Yojson.Safe.Util.to_list in
+      (match declared with
+       | [declaration] -> check string "inventory publishes the current declared category"
+           "memory_judgment" (text "ui_category" declaration)
+       | _ -> fail "category rewrite lost the actual declaration");
+      let after = Lane_addon_config.load_file ~path:source |> unwrap in
+      check string "navigation edit preserves the configuration authority" before.revision after.revision;
+      let updated = Option.to_result ~none:"category rewrite lost the original export" (current ()) |> unwrap in
+      check string "navigation edit preserves the live incarnation" original.instance_id updated.instance_id;
+      check bool "navigation edit preserves the exact tool owner" true
+        (Lane_addon_tool_export.equal_owner original.owner updated.owner);
+      check string "worker history keeps its original immutable package category" "analysis"
+        (worker () |> member "package" |> text "ui_category");
+      let inventory = Server_lane_inventory.snapshot ~config |> Server_lane_inventory.to_json
+        |> Tui_decode_lane_inventory.decode |> unwrap in
+      let row = List.find (fun (row : Tui_decode_lane_inventory.row) ->
+        row.selection=Tui_decode_lane_inventory.Declaration source) inventory.rows in
+      (match row.state with
+       | Tui_decode_lane_inventory.Package_state {
+           declaration=Some (Tui_decode_lane_inventory.Valid declared);instances=[instance]} ->
+           check bool "common inventory decodes the current declaration category" true
+             (declared.ui_category=Some Lane_addon_category.Memory_and_judgment);
+           check bool "common inventory independently decodes the original worker category" true
+             (instance.ui_category=Some Lane_addon_category.Analysis)
+       | Tui_decode_lane_inventory.Package_state {
+           declaration=Some (Tui_decode_lane_inventory.Valid _);instances=([]|_::_::_)}
+       | Tui_decode_lane_inventory.Package_state {
+           declaration=(None|Some (Tui_decode_lane_inventory.Invalid _|Absent|Unobserved));instances=_}
+       | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ ->
+           fail "common inventory lost the exact installation and original worker");
+      admit (); call ();
+      check int "both original handler calls reached the original worker" 2 !calls;
+      (match Runtime.with_tool_request_destination ~config ~access ~reserved:["queue_question"]
+          ~export:original ~publish:(fun _ -> fail "category granted a reserved tool name") with
+       | Error (Runtime.Unavailable _) -> ()
+       | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) ->
+           fail "category changed reserved-name authority");
+      write (Filename.concat root ".masc/package.toml") (categorized "unsupported");
+      let invalid = Runtime.reconcile_configuration ~config
+        ~directory:(Runtime.configuration_directory config) |> unwrap in
+      check bool "invalid category remains a configuration issue" true
+        (Yojson.Safe.Util.to_list (member "issues" invalid)<>[]);
+      check int "invalid current declaration does not borrow worker metadata" 0
+        (List.length (Yojson.Safe.Util.to_list (member "declarations" invalid)));
+      (match Runtime.with_tool_request_destination ~config ~access ~reserved:[] ~export:original
+          ~publish:(fun _ -> fail "unreadable declaration reused old category as authority") with
+       | Error (Runtime.Unavailable _) -> ()
+       | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) ->
+           fail "invalid category was silently admitted");
+      check int "refusals send no extra worker calls" 2 !calls)
+
 let test_a_request_that_is_not_final_waits_for_the_next_event () =
   with_installation ~listing:[ exact "r2" ] ~mode:Off (fun clock config worker state  _root->
     await clock (fun () -> cycles config >= 1);
@@ -1436,6 +1521,8 @@ let () =
             test_original_tool_destination_survives_replacement_and_reattachment
         ; test_case "capture uses actual live provenance before RPC" `Quick
             test_capture_factory_uses_actual_live_declaration_before_any_rpc
+        ; test_case "UI category edits preserve original workers and tool authority" `Quick
+            test_category_edit_preserves_original_export_and_worker
         ; test_case "a request that is not final waits for the next event" `Quick
             test_a_request_that_is_not_final_waits_for_the_next_event
         ; test_case "a request listed again after delivery ends the cycle" `Quick

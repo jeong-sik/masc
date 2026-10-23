@@ -72,6 +72,9 @@ type package = {
   id : string;
   revision : string;
   title : string;
+  ui_category : Lane_addon_category.t option;
+  (** Optional primary navigation category. No service, execution, permission or
+      lifecycle decision may use this declaration. *)
   contributions : contribution list;
   execution : execution;
   worker_service : worker_service;
@@ -131,5 +134,8 @@ val coverage_to_json : coverage -> Yojson.Safe.t
 val phase_to_json : phase -> Yojson.Safe.t
 val phase_of_json : Yojson.Safe.t -> (phase, string) result
 val package_to_json : package -> Yojson.Safe.t
+val same_execution_package : package -> package -> bool
+(** Compare every package field except [ui_category]. Callers retain their
+    original owner, configuration and invocation checks; this is not admission. *)
 val output_selection_to_json : output_selection -> Yojson.Safe.t
 val output_ports_to_json : output_ports -> Yojson.Safe.t

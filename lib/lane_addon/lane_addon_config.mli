@@ -26,7 +26,8 @@ type snapshot = {
 
 (** Resolve relative manifest and snapshot-file paths from the declaration's
     directory. The semantic revision excludes comments and the source filename,
-    but includes the resolved package, selected [tool_hooks] and [exact_outputs]
+    and UI-only [package.ui_category], but includes every other resolved package
+    field, selected [tool_hooks] and [exact_outputs]
     overrides and ordered binding values. Omitted hooks use the package default;
     [] disables both optional tool-contract hooks. Omitted [exact_outputs] keeps
     every package-declared output; [] disables model-generation outputs for this

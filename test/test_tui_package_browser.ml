@@ -2,7 +2,7 @@ open Alcotest
 module Catalog = Masc.Lane_addon_catalog
 module Browser = Masc_tui_package_browser
 let ok = function Ok value -> value | Error message -> fail message
-let metadata = Catalog.{title="Readable package";revision="rev-a";description=Some "Actual input choices"}
+let metadata = Catalog.{title="Readable package";revision="rev-a";description=Some "Actual input choices";ui_category=None}
 let write path contents = Out_channel.with_open_bin path (fun channel -> output_string channel contents)
 let temporary f =
   let root = Filename.temp_file "masc-package-discovery-" "" in

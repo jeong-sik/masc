@@ -107,6 +107,7 @@ type inventory_presence = Live | Retained
 type inventory_instance = {
   instance_id : string; incarnation : string; run_id : string;
   package_id : string; title : string; package_revision : string;
+  ui_category : Lane_addon_category.t option;
   configuration : configuration_owner option;
   presence : inventory_presence; phase : phase;
 }
@@ -2033,7 +2034,7 @@ let with_tool_request_destination ~config ~access ~reserved ~(export : tool_expo
         else Error (Unavailable "New work requires a complete fresh Add-on declaration reading") in
       let* declaration = match List.find_opt (fun (d : Lane_addon_config.declaration) ->
           d.id=owner.id && d.source_path=owner.source_path && d.revision=owner.revision
-          && d.enabled && d.package=e.package) snapshot.declarations with
+          && d.enabled && same_execution_package d.package e.package) snapshot.declarations with
         | Some declaration -> Ok declaration
         | None -> Error (Unavailable "Fresh Add-on declaration no longer permits the configured installation") in
       let reading = live_reading m access in
@@ -2229,6 +2230,12 @@ let retained_inventory_instance ~recovering path json : (inventory_instance, ret
   let* package_id = invalid (text fields "addon_id") in
   let* title = invalid (text fields "title") in
   let* package_revision = invalid (text fields "revision") in
+  let* ui_category = invalid (match List.assoc_opt "package" fields with
+    | None -> Ok None
+    | Some (`Assoc package) -> (match List.assoc_opt "ui_category" package with
+        | None -> Ok None
+        | Some value -> Lane_addon_category.of_json value |> Result.map Option.some)
+    | Some _ -> Error "invalid retained package metadata") in
   let* configuration = match List.assoc_opt "configuration" fields with
     | None -> invalid (Error "missing retained configuration owner")
     | Some _ -> invalid (configuration_of_fields fields) in
@@ -2240,7 +2247,7 @@ let retained_inventory_instance ~recovering path json : (inventory_instance, ret
         Lifecycle.Detaching previous
     | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ ->
         Lifecycle.Failed (Lifecycle.failed Lifecycle.Previous_process) in
-  Ok {instance_id;incarnation;run_id;package_id;title;package_revision;
+  Ok {instance_id;incarnation;run_id;package_id;title;package_revision;ui_category;
       configuration;presence=Retained;phase=Lifecycle.project state}
 let check_inventory_record ~path json =
   match retained_inventory_instance ~recovering:(fun _ -> false) (Some path) json, json with
@@ -2255,6 +2262,7 @@ let inventory_at_root ~root =
     | Some m -> entries m |> List.map (fun (e : entry) ->
         { instance_id=e.instance_id; incarnation=e.instance_id; run_id=e.run_id;
           package_id=e.package.id; title=e.package.title; package_revision=e.package.revision;
+          ui_category=e.package.ui_category;
           configuration=e.configuration; presence=Live; phase=phase_of e }) in
   let pending = match manager with None -> [] | Some m -> recovery_bindings m [] in
   let records = List.filter (fun (_,json) -> match manager,json with
@@ -2606,12 +2614,14 @@ let configuration_json m ~access =
           | Some owner -> owner.id = d.id | None -> false) in
         let active = match live with [e] -> Some e | [] | _ :: _ -> None in
         let application = configuration_application m ~reading ~inventory d in
-        `Assoc ["id", `String d.id; "source_path", `String d.source_path; "enabled", `Bool d.enabled;
+        `Assoc (["id", `String d.id; "source_path", `String d.source_path; "enabled", `Bool d.enabled;
           "source_revision", `String d.source_revision;
           "desired_revision", `String d.revision;
           "applied_revision", nullable (Option.bind active (fun e -> Option.map (fun owner -> owner.revision) e.configuration));
           "instance_id", nullable (Option.map (fun (e : entry) -> e.instance_id) active);
-          "application", Lane_addon_application.to_json application] in
+          "application", Lane_addon_application.to_json application]
+          @ (match d.package.ui_category with None -> []
+             | Some category -> ["ui_category", Lane_addon_category.to_json category])) in
       (* Unreadable retained records are read at this call, not at the last
          reconciliation, and are listed for the operator beside the
          reconciliation's own issues. *)

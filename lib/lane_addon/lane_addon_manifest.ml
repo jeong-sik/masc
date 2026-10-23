@@ -129,6 +129,15 @@ let load ~path =
       let* value = read key Otoml.get_string in
       if String.trim value = "" then Error (String.concat "." key ^ " is blank") else Ok value
     in
+    let* ui_category = match Otoml.find_opt document Fun.id ["ui_category"] with
+      | None -> Ok None
+      | Some (Otoml.TomlString value) -> Lane_addon_category.of_string value
+          |> Result.map Option.some
+      | Some (Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+          | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+          | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+          | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) ->
+          Error "ui_category must be a supported string" in
     let* worker_service = match Otoml.find_opt document Fun.id ["service"] with
       | None | Some (Otoml.TomlString "tools") -> Ok Mcp_tools
       | Some (Otoml.TomlString "browser") -> Ok Browser_service
@@ -359,7 +368,7 @@ let load ~path =
     if command = [] || List.exists (fun arg -> String.trim arg = "" || String.contains arg '\000') command
     then Error "command requires non-blank argv entries without NUL"
     else if contributions = [] then Error "at least one contribution is required"
-    else Ok { id; revision; title; contributions = List.rev contributions; execution; worker_service; command;
+    else Ok { id; revision; title; ui_category; contributions = List.rev contributions; execution; worker_service; command;
       directory = Filename.dirname path; skills_directory; action_tool; state_storage;
       tool_invocation; exported_tools; tool_hooks; outputs; refresh_policy; model_access;
       binding_schema; presentation; exact_outputs; operator_asks }

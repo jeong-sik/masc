@@ -51,7 +51,9 @@ type worker_service = Mcp_tools | Browser_service
 type request_schema_policy = Package_schema_only | Consumer_request_schema
 type exact_output = { name : string; schema : Yojson.Safe.t; request_schema : request_schema_policy }
 type package = {
-  id : string; revision : string; title : string; contributions : contribution list;
+  id : string; revision : string; title : string;
+  ui_category : Lane_addon_category.t option;
+  contributions : contribution list;
   execution : execution;
   worker_service : worker_service;
   command : string list; directory : string;
@@ -69,6 +71,8 @@ type package = {
   exact_outputs : exact_output list; operator_asks : bool;
 }
 let host_requests_tool = "lane_host_requests"
+let same_execution_package left right =
+  {left with ui_category=None} = {right with ui_category=None}
 let host_result_tool = "lane_host_result"
 let uses_host_requests package = package.exact_outputs <> [] || package.operator_asks
 let max_reply_bytes (package : package) = match package.execution with
@@ -230,6 +234,8 @@ let package_to_json (p : package) =
     | Host_process specification -> ["runtime", string "host_process"], [],
         `Assoc ["max_reply_bytes", `Int specification.max_reply_bytes] in
   `Assoc (runtime
+    @ (match p.ui_category with None -> []
+       | Some category -> ["ui_category", Lane_addon_category.to_json category])
     @ (match p.worker_service with Mcp_tools -> [] | Browser_service -> ["service", string "browser"])
     @ (match p.tool_hooks with [] -> [] | hooks ->
       ["tool_hooks", strings (List.map (function

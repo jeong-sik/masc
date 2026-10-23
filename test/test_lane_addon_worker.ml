@@ -354,7 +354,7 @@ let with_fixture f =
 
 let package directory mode : Types.package = {
   id = "worker-test"; revision = "fixture-1"; title = "Worker test";
-  contributions = [ Types.Observe ];
+  ui_category = None; contributions = [ Types.Observe ];
   execution = Types.Container {runtime=Types.Docker;image="fixture/image";
     resources={cpus=0.5;memory_bytes=67_108_864L;pids=Some 16;max_reply_bytes=4096}};
   command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; state_storage=Types.Ephemeral;tool_invocation=Types.Direct; exported_tools = []; outputs = [];
@@ -1655,8 +1655,14 @@ let test_declared_sampling_requires_exact_host_callback () = with_fixture (fun e
       (Yojson.Safe.Util.member "params" original_request) with
     | Ok params -> params | Error detail -> fail detail in
   let direct_handler = match Masc.Lane_addon_sampling.for_worker sampling_handler
-      ~package:{(package dir "sampling") with model_access=Types.Host_sampling}
+      ~package:{(package dir "sampling") with model_access=Types.Host_sampling;
+        ui_category=Some Masc.Lane_addon_category.Analysis}
       ~instance_id:"sampling-worker" with Ok handler -> handler | Error detail -> fail detail in
+  check bool "category never grants sampling to different worker inputs" true
+    (Result.is_error (Masc.Lane_addon_sampling.for_worker sampling_handler
+      ~package:{(package dir "sampling") with model_access=Types.Host_sampling;
+        ui_category=Some Masc.Lane_addon_category.Analysis;command=["another-worker"]}
+      ~instance_id:"sampling-worker"));
   let before_outside = !calls in
   let before_records = sampling_requests store ~instance_id:"sampling-worker" in
   check bool "out-of-observation callback is refused" true (Result.is_error (direct_handler params));

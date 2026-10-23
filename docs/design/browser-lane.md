@@ -194,9 +194,10 @@ so a selector or node means the same on both; ego's own mouse and keyboard
 input clicks, hovers, scrolls at a point and types. Finding a target and acting
 on it are two runs that share the command's window.
 
-Semantic pointer actions share one action classification and one decoder for
-observed geometry and URL. Native drag adapters share the intermediate waypoint
-calculation; each retains its own native input and release handling.
+Native adapters share the semantic pointer decoder for observed geometry and
+URL. WebDriver, BiDi and ego also share the action classification; Stagehand
+retains its timing preflight. Native drag adapters share the intermediate
+waypoint calculation; each retains its own native input and release handling.
 
 Ego serves `drag_to` and `drag` with its native mouse API on agent pages.
 It visits the supplied viewport waypoints, or the midpoint for an empty route,

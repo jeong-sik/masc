@@ -972,6 +972,113 @@ let queue_files ~base_path =
   , Filename.concat dir Keeper_event_queue_persistence.transition_wal_filename )
 ;;
 
+let test_queue_operational_failures_refuse_recovery () =
+  with_workspace @@ fun config ->
+  let module Q = Keeper_event_queue_persistence in
+  let base_path = config.Workspace.base_path in
+  let empty = R.examine config in
+  let keeper = "sound" in
+  let dir = queue_dir ~base_path in
+  Fs_compat.mkdir_p (Filename.dirname dir);
+  Unix.symlink (Filename.basename dir) dir;
+  let observed =
+    match Q.validate_existing_state_read_only_classified_result ~base_path ~keeper_name:keeper with
+    | Error ((Q.State_failed (Q.File_rejected {cause=Q.Inspection_failure; _})) as failure) -> failure
+    | Error failure -> fail (Q.read_only_failure_to_string failure)
+    | Ok _ -> fail "the actual ELOOP was accepted as readable"
+  in
+  let check_mandatory ?(keeper=keeper) failure =
+    let examination = R.For_testing.record_event_queue_failure ~keeper failure empty in
+    check int "operational failure is mandatory" 1 (List.length examination.R.unreadable);
+    check int "operational failure is not a quarantine candidate" 0
+      (List.length examination.R.undecodable);
+    List.iter (fun accept_quarantine ->
+      match R.admit ~accept_quarantine examination with
+      | Error [R.Unreadable _] -> ()
+      | Error _ -> fail "operational failure lost its mandatory refusal"
+      | Ok _ -> fail "quarantine flag bypassed an operational queue failure") [false;true];
+    let report = R.quarantine ~now:0. config examination in
+    check int "direct quarantine carries the failure" 1 (List.length report.R.failed);
+    check int "direct quarantine moves nothing" 0 (List.length report.R.quarantined)
+  in
+  check_mandatory observed;
+  (match Q.move_aside_undecodable_result ~base_path ~keeper_name:keeper
+     ~rejected_path_of:(fun path -> path ^ ".rejected-operational") with
+   | Error _ -> ()
+   | Ok _ -> fail "actual inspection failure started quarantine");
+  check string "the looping entry remains" (Filename.basename dir) (Unix.readlink dir);
+  Unix.unlink dir;
+  (match Q.validate_existing_state_read_only_classified_result ~base_path ~keeper_name:keeper with
+   | Error ((Q.State_failed (Q.State_missing _)) as missing) -> check_mandatory missing
+   | _ -> fail "required missing state lost its original cause");
+  (match Q.validate_existing_state_read_only_classified_result ~base_path ~keeper_name:"invalid/keeper" with
+   | Error ((Q.Owner_unresolved _) as owner) -> check_mandatory ~keeper:"invalid/keeper" owner
+   | _ -> fail "invalid owner lost its original cause");
+  (* These are pure policy inputs, not injected or executed I/O/close faults. *)
+  (match observed with
+   | Q.State_failed (Q.File_rejected failure) ->
+     List.iter (fun cause -> check_mandatory (Q.State_failed (Q.File_rejected
+       {failure with cause}))) [Q.Io_failure; Coherence_failure];
+     let cleanup : Fs_compat.private_jsonl_operation_failure =
+       {operation=Close_transaction_data; exception_=Unix.Unix_error (Unix.EIO,"close",failure.path);
+        backtrace=Printexc.get_callstack 0} in
+     check_mandatory (Q.State_failed (Q.File_rejected
+       {failure with cause=Q.Invalid_json; cleanup_failure=Some cleanup}));
+     check_mandatory (Q.Read_raised "pure unexpected-read failure input")
+   | State_failed (State_missing _) | Owner_unresolved _ | Read_raised _ ->
+     fail "fixture lost its classified file failure")
+;;
+
+let test_queue_reread_refuses_a_new_inspection_failure () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot "{invalid-snapshot";
+  write_bytes wal "{invalid-wal\n";
+  let examination = R.examine config in
+  let admitted = match R.admit ~accept_quarantine:true examination with
+    | Ok admitted -> admitted
+    | Error _ -> fail "content rejection was not admitted explicitly" in
+  let dir = queue_dir ~base_path in
+  let retained = Filename.concat base_path "retained-queue" in
+  Unix.rename dir retained;
+  Unix.symlink (Filename.basename dir) dir;
+  let report = R.quarantine ~now:0. config admitted in
+  check int "new inspection failure refuses the stale move" 1 (List.length report.R.failed);
+  check int "no queue was quarantined" 0 (List.length report.R.quarantined);
+  check string "replacement entry retained" (Filename.basename dir) (Unix.readlink dir);
+  check string "snapshot evidence remains unchanged" "{invalid-snapshot"
+    (Fs_compat.load_file (Filename.concat retained (Filename.basename snapshot)));
+  check string "WAL evidence remains unchanged" "{invalid-wal\n"
+    (Fs_compat.load_file (Filename.concat retained (Filename.basename wal)));
+  check bool "no journal was started" false
+    (Sys.file_exists (Filename.concat retained "event-queue-quarantine-v1.json"))
+;;
+
+let test_queue_tail_requires_explicit_quarantine () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  let tail = "{incomplete-tail" in
+  write_bytes wal tail;
+  let examination = R.examine config in
+  check int "tail damage is not an operational refusal" 0 (List.length examination.R.unreadable);
+  (match R.admit ~accept_quarantine:false examination with
+   | Error [R.Undecodable _] -> ()
+   | Error _ | Ok _ -> fail "tail damage did not require explicit quarantine");
+  let admitted = match R.admit ~accept_quarantine:true examination with
+    | Ok admitted -> admitted
+    | Error _ -> fail "tail damage lost explicit format quarantine policy" in
+  check string "validation does not truncate tail bytes" tail (Fs_compat.load_file wal);
+  let report = R.quarantine ~now:0. config admitted in
+  match report.R.failed, report.R.quarantined with
+  | [], [{R.path; rejected_path; _}] ->
+    check string "the WAL is the rejected file" wal path;
+    check string "the complete damaged bytes are retained" tail (Fs_compat.load_file rejected_path)
+  | _ -> fail "explicit tail quarantine did not preserve the queue pair"
+;;
+
 let check_queue_starts_empty ~base_path =
   let module Q = Keeper_event_queue_persistence in
   (match Q.durable_state_exists_result ~base_path ~keeper_name:"sound" with
@@ -1101,8 +1208,10 @@ let check_quarantine_refuses ~config ~snapshot =
   (match Q.load_state_result ~base_path ~keeper_name:"sound" with
    | Error _ -> () | Ok _ -> fail "fresh cache bypassed incomplete quarantine");
   (match Q.validate_existing_state_read_only_classified_result ~base_path ~keeper_name:"sound" with
-   | Error (Q.State_failed (Q.File_rejected {file=Q.Quarantine_intent; path; _})) ->
-     check string "typed refusal names the recovery record" intent path
+   | Error ((Q.State_failed (Q.File_rejected {file=Q.Quarantine_intent; path; _})) as failure) ->
+     check string "typed refusal names the recovery record" intent path;
+     check bool "the recovery policy preserves explicit journal resume" true
+       (Q.recovery_decision failure = Q.Resume_quarantine)
    | Error _ -> fail "incomplete quarantine lost its typed authority"
    | Ok _ -> fail "read-only validation admitted incomplete quarantine");
   let observed = Q.observe_snapshot_with_errors ~base_path ~keeper_name:"sound" in
@@ -1112,8 +1221,17 @@ let check_quarantine_refuses ~config ~snapshot =
    | Error _ -> () | Ok () -> fail "mutation bypassed incomplete quarantine");
   check bool "refused mutation never transforms state" false !transformed;
   check string "refused accesses preserve the recovery record" digest (file_digest intent);
+  let examination = R.examine config in
   check (list string) "boot names the incomplete quarantine" [intent]
-    (List.map (fun (u : R.undecodable) -> u.R.path) (R.examine config).R.undecodable);
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  check int "journal resume is not mislabeled as operational I/O" 0
+    (List.length examination.R.unreadable);
+  (match R.admit ~accept_quarantine:false examination with
+   | Error [R.Undecodable _] -> ()
+   | Error _ | Ok _ -> fail "incomplete quarantine did not require explicit resume");
+  (match R.admit ~accept_quarantine:true examination with
+   | Ok _ -> ()
+   | Error _ -> fail "the new recovery policy blocked explicit journal resume");
   (match D.reader D.Id.Keeper_event_queue with
    | D.Refuse_boot (_, scan) ->
      (match D.run scan ~base_path with
@@ -1784,7 +1902,13 @@ let () =
             test_refusal_names_each_store_and_both_ways_forward
         ] )
     ; ( "quarantine"
-      , [ test_case "session quarantine rereads a changed I/O failure" `Quick
+      , [ test_case "queue operational causes refuse recovery" `Quick
+            test_queue_operational_failures_refuse_recovery
+        ; test_case "queue quarantine rereads a changed inspection failure" `Quick
+            test_queue_reread_refuses_a_new_inspection_failure
+        ; test_case "queue incomplete tail requires explicit quarantine" `Quick
+            test_queue_tail_requires_explicit_quarantine
+        ; test_case "session quarantine rereads a changed I/O failure" `Quick
             test_session_quarantine_reread_refuses_a_new_io_failure
         ; test_case "undecodable stores are moved aside once" `Quick
             test_undecodable_stores_are_moved_aside_once

@@ -152,6 +152,28 @@ let examine_official_client_session (config : Workspace.config) examination =
    deploy preflight runs. A queue this build cannot decode keeps its keeper
    from registering (#37900), so it refuses boot. The row names the file the
    read failed on; the move takes the snapshot and the WAL together. *)
+let record_event_queue_failure ~keeper failure examination =
+  let path =
+    match failure with
+    | Keeper_event_queue_persistence.State_failed (File_rejected { path; _ }) -> path
+    | State_failed (State_missing _) | Owner_unresolved _ | Read_raised _ -> keeper
+  in
+  let detail = Keeper_event_queue_persistence.read_only_failure_to_string failure in
+  match Keeper_event_queue_persistence.recovery_decision failure with
+  | Refuse_recovery ->
+    { examination with
+      unreadable =
+        { store = D.Refusing.Event_queue; keeper; path; error = detail }
+        :: examination.unreadable
+    }
+  | Start_quarantine | Resume_quarantine ->
+    { examination with
+      undecodable =
+        { store = D.Refusing.Event_queue; keeper; path; rejection = detail }
+        :: examination.undecodable
+    }
+;;
+
 let examine_event_queue (config : Workspace.config) examination =
   let base_path = config.Workspace.base_path in
   let discovery = Keeper_event_queue_persistence.discover_keeper_names_with_durable_state ~base_path in
@@ -174,26 +196,7 @@ let examine_event_queue (config : Workspace.config) examination =
        with
        | Ok (_ : Keeper_event_queue_state.t) ->
          { examination with readable = examination.readable + 1 }
-       | Error failure ->
-         (* Only a rejected file has a path. An unresolvable owner, a raised
-            read or state gone since discovery still refuses, as the preflight
-            does; the row then shows the keeper name. *)
-         let path =
-           match failure with
-           | Keeper_event_queue_persistence.State_failed (File_rejected { path; _ }) -> path
-           | Keeper_event_queue_persistence.State_failed (State_missing (_ : string))
-           | Keeper_event_queue_persistence.Owner_unresolved (_ : string)
-           | Keeper_event_queue_persistence.Read_raised (_ : string) -> keeper
-         in
-         { examination with
-           undecodable =
-             { store = D.Refusing.Event_queue
-             ; keeper
-             ; path
-             ; rejection = Keeper_event_queue_persistence.read_only_failure_to_string failure
-             }
-             :: examination.undecodable
-         })
+       | Error failure -> record_event_queue_failure ~keeper failure examination)
     examination
     discovery.keeper_names
 ;;
@@ -259,7 +262,7 @@ let admit ~accept_quarantine examination =
 let refusal_to_string undecodable =
   let guidance =
     if List.exists (function Unreadable _ -> true | Undecodable _ | Discovery_failed _ | Quarantine_failed _ -> false) undecodable
-    then "repair the reported file access or file kind and run `deployment_preflight_helper validate-stores` against this base path before restarting; quarantine cannot bypass a file I/O failure"
+    then "repair the reported store access, file kind, ownership or unavailable current state and run `deployment_preflight_helper validate-stores` against this base path before restarting; quarantine cannot bypass an unavailable store"
     else if List.exists (function Discovery_failed _ -> true | Undecodable _ | Unreadable _ | Quarantine_failed _ -> false) undecodable
     then "repair directory access and run `deployment_preflight_helper validate-stores` against this base path before restarting; quarantine cannot bypass an unread inventory"
     else if List.exists (function Quarantine_failed _ -> true | Undecodable _ | Unreadable _ | Discovery_failed _ -> false) undecodable
@@ -277,7 +280,7 @@ let refusal_to_string undecodable =
               Printf.sprintf "  %s keeper=%s path=%s: %s"
                 (store_to_string u.store) u.keeper u.path u.rejection
              | Unreadable failure ->
-               Printf.sprintf "  %s keeper=%s path=%s: file unreadable: %s"
+               Printf.sprintf "  %s keeper=%s path=%s: store unavailable: %s"
                  (store_to_string failure.store) failure.keeper failure.path failure.error
             | Discovery_failed failure ->
               Printf.sprintf "  %s inventory path=%s: %s (repair directory access; quarantine cannot recover an unread inventory)"
@@ -431,3 +434,7 @@ let summary report =
     (List.length report.quarantined)
     (List.length report.failed)
 ;;
+
+module For_testing = struct
+  let record_event_queue_failure = record_event_queue_failure
+end

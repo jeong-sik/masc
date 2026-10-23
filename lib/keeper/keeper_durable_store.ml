@@ -506,11 +506,12 @@ let event_queue_store =
                    count_row
                      report
                      (Keeper_event_queue_persistence
-                      .validate_existing_state_read_only_result
+                      .validate_existing_state_read_only_classified_result
                         ~base_path
                         ~keeper_name
                       |> Result.map (fun (_ : Keeper_event_queue_state.t) -> ())
-                      |> Result.map_error (fun detail -> keeper_name ^ ": " ^ detail)))
+                      |> Result.map_error (fun failure -> keeper_name ^ ": "
+                        ^ Keeper_event_queue_persistence.read_only_failure_to_string failure)))
                 empty_report
                 discovery.keeper_names))
   }

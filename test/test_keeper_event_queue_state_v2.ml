@@ -1210,7 +1210,222 @@ let test_dangling_primary_is_not_absence () =
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "dangling primary link treated as first boot");
     Alcotest.(check string) "primary link retained" missing_target (Unix.readlink primary);
-    Alcotest.(check bool) "missing target not created" false (Sys.file_exists missing_target))
+    Alcotest.(check bool) "missing target not created" false (Sys.file_exists missing_target);
+    (match Persistence.validate_existing_state_read_only_classified_result ~base_path ~keeper_name with
+     | Error (Persistence.State_failed (Persistence.File_rejected failure)) ->
+       Alcotest.(check bool) "indirect entry is a deliberate content policy" true
+         (failure.cause = Persistence.Invalid_entry
+          && Persistence.recovery_decision (State_failed (File_rejected failure)) = Start_quarantine)
+     | _ -> Alcotest.fail "indirect entry lost its classified rejection");
+    let moved = Persistence.move_aside_undecodable_result ~base_path ~keeper_name
+      ~rejected_path_of:(fun path -> path ^ ".rejected-indirect")
+      |> require_ok "explicit indirect-entry quarantine" in
+    Alcotest.(check string) "entry moved without following its target" missing_target
+      (Unix.readlink moved.rejected_path))
+;;
+
+let test_classified_failures_preserve_quarantine_policy () =
+  let snapshot_bytes = State.to_yojson State.empty |> Yojson.Safe.to_string in
+  let cases =
+    [ "snapshot-json", Persistence.Snapshot, "{", Persistence.Invalid_json
+    ; "snapshot-schema", Persistence.Snapshot, "{}", Persistence.Invalid_content
+    ; "snapshot-domain", Persistence.Snapshot,
+        Yojson.Safe.to_string (`Assoc ["schema", `String Keeper_event_queue_schema.state]),
+        Persistence.Invalid_content
+    ; "wal-json", Persistence.Transition_wal, "{\n", Persistence.Invalid_json
+    ; "wal-domain", Persistence.Transition_wal, "{}\n", Persistence.Invalid_content
+    ; "wal-tail", Persistence.Transition_wal, "{", Persistence.Incomplete_wal_tail
+    ] in
+  List.iter (fun (keeper_name, file, bytes, cause) ->
+    with_temp_dir "keeper-queue-classified" (fun base_path ->
+      let dir = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
+      Fs_compat.mkdir_p dir;
+      let snapshot = Filename.concat dir Persistence.snapshot_filename in
+      let wal = Filename.concat dir Persistence.transition_wal_filename in
+      let write path bytes = Out_channel.with_open_bin path (fun oc -> output_string oc bytes) in
+      write snapshot snapshot_bytes;
+      let path = match file with
+        | Persistence.Snapshot -> snapshot
+        | Transition_wal -> wal
+        | Quarantine_intent -> Alcotest.fail "not a content fixture" in
+      write path bytes;
+      let failure = match Persistence.validate_existing_state_read_only_classified_result
+        ~base_path ~keeper_name with
+        | Error (Persistence.State_failed (Persistence.File_rejected failure)) -> failure
+        | Error failure -> Alcotest.fail (Persistence.read_only_failure_to_string failure)
+        | Ok _ -> Alcotest.fail "invalid durable bytes were accepted" in
+      Alcotest.(check bool) "original cause retained" true (failure.cause = cause);
+      Alcotest.(check string) "actual failed path retained" path failure.path;
+      Alcotest.(check bool) "content permits explicit quarantine" true
+        (Persistence.recovery_decision (State_failed (File_rejected failure)) = Start_quarantine);
+      Alcotest.(check string) "validation does not truncate or replace bytes" bytes
+        (In_channel.with_open_bin path In_channel.input_all);
+      let cleanup : Fs_compat.private_jsonl_operation_failure =
+        { operation = Close_transaction_data
+        ; exception_ = Unix.Unix_error (Unix.EIO, "close", path)
+        ; backtrace = Printexc.get_callstack 0 } in
+      Alcotest.(check bool) "independent cleanup failure refuses recovery" true
+        (Persistence.recovery_decision (State_failed (File_rejected
+           { failure with cleanup_failure = Some cleanup })) = Refuse_recovery);
+      List.iter (fun operational_cause ->
+        Alcotest.(check bool) "operational cause refuses recovery" true
+          (Persistence.recovery_decision (State_failed (File_rejected
+             { failure with cause = operational_cause })) = Refuse_recovery))
+        [Persistence.Io_failure; Inspection_failure; Coherence_failure; Quarantine_incomplete];
+      let moved = Persistence.move_aside_undecodable_result ~base_path ~keeper_name
+        ~rejected_path_of:(fun path -> path ^ ".rejected-classified")
+        |> require_ok "explicit content quarantine" in
+      Alcotest.(check string) "locked re-read names original failed path" path moved.path;
+      Alcotest.(check string) "rejected bytes retained exactly" bytes
+        (In_channel.with_open_bin moved.rejected_path In_channel.input_all))) cases
+;;
+
+let test_classified_absence_intent_and_inspection_are_distinct () =
+  with_temp_dir "keeper-queue-operational" (fun base_path ->
+    let keeper_name = "operational" in
+    Persistence.load_state_result ~base_path ~keeper_name
+    |> require_ok "ordinary absent queue remains empty" |> fun state ->
+    Alcotest.(check bool) "missing queue is empty" true (Queue.is_empty (State.pending state));
+    (match Persistence.validate_existing_state_read_only_classified_result ~base_path ~keeper_name with
+     | Error ((Persistence.State_failed (Persistence.State_missing _)) as failure) ->
+       Alcotest.(check bool) "missing durable state refuses recovery" true
+         (Persistence.recovery_decision failure = Refuse_recovery)
+     | _ -> Alcotest.fail "required absence lost its constructor");
+    (match Persistence.validate_existing_state_read_only_classified_result
+       ~base_path ~keeper_name:"invalid/keeper" with
+     | Error ((Persistence.Owner_unresolved _) as failure) ->
+       Alcotest.(check bool) "unresolved owner refuses recovery" true
+         (Persistence.recovery_decision failure = Refuse_recovery)
+     | _ -> Alcotest.fail "invalid owner lost its constructor");
+    let dir = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
+    Fs_compat.mkdir_p dir;
+    let intent = Filename.concat dir "event-queue-quarantine-v1.json" in
+    let write path bytes = Out_channel.with_open_bin path (fun oc -> output_string oc bytes) in
+    write intent "{";
+    (match Persistence.validate_existing_state_read_only_classified_result ~base_path ~keeper_name with
+     | Error (Persistence.State_failed (Persistence.File_rejected failure)) ->
+       Alcotest.(check bool) "observed intent has its own cause" true
+         (failure.file = Persistence.Quarantine_intent && failure.cause = Persistence.Quarantine_incomplete);
+       Alcotest.(check bool) "observed intent permits only explicit validated resume" true
+         (Persistence.recovery_decision (State_failed (File_rejected failure)) = Resume_quarantine);
+       let cleanup : Fs_compat.private_jsonl_operation_failure =
+         { operation = Close_transaction_data
+         ; exception_ = Unix.Unix_error (Unix.EIO, "close", intent)
+         ; backtrace = Printexc.get_callstack 0 } in
+       Alcotest.(check bool) "cleanup failure forbids even journal resume" true
+         (Persistence.recovery_decision (State_failed (File_rejected
+            { failure with cleanup_failure = Some cleanup })) = Refuse_recovery)
+     | _ -> Alcotest.fail "present malformed intent was not retained");
+    (match Persistence.move_aside_undecodable_result ~base_path ~keeper_name
+       ~rejected_path_of:(fun path -> path ^ ".rejected-inspection") with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "malformed journal was replaced");
+    Alcotest.(check string) "journal bytes retained" "{" (In_channel.with_open_bin intent In_channel.input_all);
+    Unix.unlink intent;
+    Unix.rmdir dir;
+    Unix.symlink (Filename.basename dir) dir;
+    (* This produces real ELOOP even for privileged users. The failing object
+       is journal inspection through an ancestor, not invalid JSON. *)
+    (match Unix.lstat intent with
+     | exception Unix.Unix_error (Unix.ELOOP, _, _) -> ()
+     | _ -> Alcotest.fail "fixture did not produce actual ELOOP");
+    (match Persistence.validate_existing_state_read_only_classified_result ~base_path ~keeper_name with
+     | Error (Persistence.State_failed (Persistence.File_rejected failure)) ->
+       Alcotest.(check bool) "inspection failure is not a present intent" true
+         (failure.file = Persistence.Quarantine_intent && failure.cause = Persistence.Inspection_failure);
+       Alcotest.(check bool) "inspection refuses recovery" true
+         (Persistence.recovery_decision (State_failed (File_rejected failure)) = Refuse_recovery)
+     | _ -> Alcotest.fail "inspection failure lost its constructor");
+    (match Persistence.move_aside_undecodable_result ~base_path ~keeper_name
+       ~rejected_path_of:(fun path -> path ^ ".rejected-inspection") with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "inspection failure started quarantine");
+    Alcotest.(check string) "blocking entry remains" (Filename.basename dir) (Unix.readlink dir))
+;;
+
+let test_locked_quarantine_preserves_changed_snapshot () =
+  List.iter (fun fail_inspection ->
+    with_temp_dir "keeper-queue-changed-read" (fun base_path ->
+      let keeper_name = "changed" in
+      let dir = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
+      Fs_compat.mkdir_p dir;
+      let snapshot = Filename.concat dir Persistence.snapshot_filename in
+      let replacement = Filename.concat dir "replacement" in
+      let retained = Filename.concat dir "retained" in
+      let write path bytes = Out_channel.with_open_bin path (fun oc -> output_string oc bytes) in
+      write snapshot "{";
+      (match Persistence.validate_existing_state_read_only_classified_result ~base_path ~keeper_name with
+       | Error (Persistence.State_failed (Persistence.File_rejected {cause=Persistence.Invalid_json; _})) -> ()
+       | _ -> Alcotest.fail "initial rejection was not invalid JSON");
+      let healthy = State.to_yojson State.empty |> Yojson.Safe.to_string in
+      write snapshot healthy;
+      write replacement healthy;
+      Persistence.For_testing.reset_snapshot_cache_for_testing ();
+      let interleaved = ref false in
+      let result = Persistence.For_testing.move_aside_with_read_interleave
+        ~base_path ~keeper_name ~rejected_path_of:(fun path -> path ^ ".rejected-changed")
+        ~after_read:(fun () ->
+          interleaved := true;
+          if fail_inspection then Unix.rename snapshot retained
+          else Unix.rename replacement snapshot) in
+      Alcotest.(check bool) "authoritative locked read reached interleave" true !interleaved;
+      (match result with
+       | Error _ -> ()
+       | Ok () -> Alcotest.fail "changed or uninspectable snapshot started quarantine");
+      let actual = if fail_inspection then retained else snapshot in
+      Alcotest.(check string) "current readable bytes retained" healthy
+        (In_channel.with_open_bin actual In_channel.input_all);
+      Alcotest.(check bool) "no quarantine journal published" false
+        (Sys.file_exists (Filename.concat dir "event-queue-quarantine-v1.json"));
+      Alcotest.(check bool) "no rejected destination created" false
+        (Sys.file_exists (snapshot ^ ".rejected-changed")))) [false; true]
+;;
+
+let test_a_later_journal_cannot_erase_a_read_failure () =
+  with_temp_dir "keeper-queue-guard-precedence" (fun base_path ->
+    let keeper_name = "guard-precedence" in
+    let dir = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
+    Fs_compat.mkdir_p dir;
+    let snapshot = Filename.concat dir Persistence.snapshot_filename in
+    let wal = Filename.concat dir Persistence.transition_wal_filename in
+    let intent = Filename.concat dir "event-queue-quarantine-v1.json" in
+    let replacement = Filename.concat dir "replacement" in
+    let rejected path = path ^ ".rejected-precedence" in
+    let write path bytes = Out_channel.with_open_bin path (fun oc -> output_string oc bytes) in
+    let healthy = State.to_yojson State.empty |> Yojson.Safe.to_string in
+    let damaged = "{invalid-wal\n" in
+    write snapshot healthy;
+    write wal damaged;
+    (* Obtain an actual production journal while stopping before its first
+       move. Reuse these bytes; the fixture does not implement its codec. *)
+    (match Persistence.For_testing.move_aside_with_sync ~base_path ~keeper_name
+       ~rejected_path_of:rejected ~sync_intent:(fun _ -> Error "pause before first move") with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "the staging interruption did not stop before moves");
+    let journal = Fs_compat.load_file intent in
+    Alcotest.(check string) "staging left the original WAL" damaged (Fs_compat.load_file wal);
+    Unix.unlink intent;
+    write replacement healthy;
+    Persistence.For_testing.reset_snapshot_cache_for_testing ();
+    let interleaved = ref false in
+    let result = Persistence.For_testing.move_aside_with_read_interleave ~base_path ~keeper_name
+      ~rejected_path_of:(fun _ -> Alcotest.fail "no new intent may be started")
+      ~after_read:(fun () ->
+        interleaved := true;
+        Unix.rename replacement snapshot;
+        let channel = Unix.openfile intent [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL] 0o600
+          |> Unix.out_channel_of_descr in
+        Fun.protect ~finally:(fun () -> close_out channel)
+          (fun () -> output_string channel journal)) in
+    Alcotest.(check bool) "snapshot replacement and journal appeared during locked read" true !interleaved;
+    (match result with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "the later journal erased the coherence failure");
+    Alcotest.(check string) "the WAL was not moved before snapshot identity refusal" damaged
+      (Fs_compat.load_file wal);
+    Alcotest.(check bool) "no rejected WAL was created" false (Sys.file_exists (rejected wal));
+    Alcotest.(check string) "the healthy replacement stays in place" healthy (Fs_compat.load_file snapshot);
+    Alcotest.(check string) "the appearing journal is retained unchanged" journal (Fs_compat.load_file intent))
 ;;
 
 let test_undecodable_primary_retains_wal_and_absence_recovers () =
@@ -2440,6 +2655,14 @@ let () =
             `Quick test_dangling_primary_is_not_absence
         ; Alcotest.test_case "primary replacement cannot poison cache"
             `Quick test_primary_replacement_cannot_poison_cache
+        ; Alcotest.test_case "classified failures preserve explicit quarantine policy"
+            `Quick test_classified_failures_preserve_quarantine_policy
+        ; Alcotest.test_case "absence, journal and actual inspection failure stay distinct"
+            `Quick test_classified_absence_intent_and_inspection_are_distinct
+        ; Alcotest.test_case "locked quarantine preserves a changed snapshot"
+            `Quick test_locked_quarantine_preserves_changed_snapshot
+        ; Alcotest.test_case "a later journal cannot erase an original read failure"
+            `Quick test_a_later_journal_cannot_erase_a_read_failure
         ; Alcotest.test_case
             "checkpoint retention spends the caller snapshot"
             `Quick

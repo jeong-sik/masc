@@ -30,14 +30,23 @@ let stat path =
   | exception (Unix.Unix_error _ as exn) -> Error (Printexc.to_string exn)
 ;;
 
+type guard_failure =
+  | Intent_present of string
+  | Inspection_failed of string
+
+let guard_failure_to_string = function
+  | Intent_present intent ->
+    Printf.sprintf
+      "event queue quarantine is incomplete at %s; queue access is refused; resume with explicit store quarantine or repair the recorded entries" intent
+  | Inspection_failed detail -> detail
+;;
+
 let guard ~snapshot =
   let intent = path ~snapshot in
-  let* present = stat intent in
-  match present with
-  | None -> Ok ()
-  | Some _ ->
-    Error (Printf.sprintf
-      "event queue quarantine is incomplete at %s; queue access is refused; resume with explicit store quarantine or repair the recorded entries" intent)
+  match stat intent with
+  | Error detail -> Error (Inspection_failed detail)
+  | Ok None -> Ok ()
+  | Ok (Some _) -> Error (Intent_present intent)
 ;;
 
 let same_stat (a : Unix.stats) (b : Unix.stats) =

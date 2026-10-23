@@ -108,9 +108,12 @@ val prepare_keeper_persistence :
     this build cannot decode makes preparation fail with
     [Store_quarantine_refused] and nothing is moved (RFC-0420). An unread store inventory
     refuses preparation even with the flag; repair directory access first.
-    Keeper metadata and official-client session file I/O failures also
+    Keeper metadata, official-client session and event-queue file I/O failures also
     refuse with the flag; repair
     file access or the file kind instead of quarantining unread bytes.
+    Queue owner, inspection, coherence, missing-state and cleanup failures
+    likewise refuse; an observed queue journal permits only explicit resume
+    after its recorded entries validate.
     Failed quarantine moves also refuse preparation: accepting the move does
     not authorize continuing with the unreadable store still in place. *)
 

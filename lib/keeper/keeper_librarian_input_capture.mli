@@ -11,3 +11,9 @@ val of_json : Yojson.Safe.t -> (Keeper_librarian.input, string) result
     Existing complete domain codecs own fact/Goal/Task/turn identity parsing.
     This data restoration does not confirm physical owner, source freshness,
     provenance truth, live configuration or permission to perform any effect. *)
+
+val message_json : Agent_core.Types.message -> Yojson.Safe.t
+val message_of_json : Yojson.Safe.t -> (Agent_core.Types.message, string) result
+(** The same complete message codec for retained checkpoint and fragment data.
+    This preserves fields omitted by provider/checkpoint projections and grants
+    no source or execution authority. *)

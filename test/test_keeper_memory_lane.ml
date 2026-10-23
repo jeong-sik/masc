@@ -1,3 +1,4 @@
+module Original = Masc.Keeper_librarian_durable_capture
 (** Tests for Keeper_memory_lane (RFC-0257).
 
     The lane detaches post-turn memory work from the keeper turn lane:
@@ -568,7 +569,7 @@ let test_purge_bracket_excludes_late_wakes () =
       try Eio.Promise.await never with Eio.Cancel.Cancelled _ as exn ->
         cancelled := true;
         ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
-          ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+          ~commit:(fun _original ->
             Alcotest.fail "disabled observer reached model"));
         raise exn));
     Eio.Promise.await started;
@@ -718,7 +719,7 @@ let test_durable_drain_publishes_scoped_health () =
       Config_dir_resolver.reset ();
       let keeper_name = "health-observed" in
       let run () = ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
-        ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+        ~commit:(fun _original ->
           Alcotest.fail "empty history must not call the model")) in
       let observed () =
         match Queue_refresh.last_measurement ~config ~keeper_name with

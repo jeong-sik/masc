@@ -759,9 +759,55 @@ let test_durable_runtime_returns_refusal_reports ~base_path () =
      working_context=Keeper_librarian_context.empty;
      messages=[Agent_core.Types.user_msg "Unread conversation."];
      tool_observations=[];counterpart_observations=[]} in
-  (match Keeper_librarian_durable_consumer.commit_with_runtime
-    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None
-    ~range_id:None ~official_range_id:None input with
+  let config = Workspace.default_config base_path in
+  Masc_test_deps.declare_fixture_keeper ~sandbox_image:"base" ~base_path
+    ~sandbox_profile:(Some Keeper_types_profile.Docker) keeper_id;
+  Keeper_types_profile.invalidate_keeper_profile_snapshots ();
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name", `String keeper_id; "trace_id", `String keeper_id])
+    |> function
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> () | Error detail -> Alcotest.fail detail);
+  let baseline = [Agent_core.Types.user_msg "Already read baseline."] in
+  let messages = baseline @ input.messages in
+  let checkpoint : Agent_core.Checkpoint.t =
+    {version=Agent_core.Checkpoint.checkpoint_version;session_id=keeper_id;
+     agent_name=keeper_id;model="fixture";system_prompt=None;messages;
+     usage=Agent_core.Types.empty_usage;turn_count=2;created_at=1000.;tools=[];
+     tool_choice=None;disable_parallel_tool_use=false;temperature=None;top_p=None;
+     top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
+     preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
+     context=Agent_core.Context.create_sync ();pending_input=None;mcp_sessions=[];working_context=None} in
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) keeper_id in
+  (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+   | Ok (Keeper_checkpoint_store.Saved _) -> ()
+   | Ok (Stale_noop _) -> Alcotest.fail "stale durable refusal fixture"
+   | Error detail -> Alcotest.fail detail);
+  let append turn history_at_start messages =
+    let position = match Keeper_turn_boundaries.position_of_messages messages with
+      | Ok position -> position | Error detail -> Alcotest.fail detail in
+    match Keeper_turn_boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
+      {recorded_at=Float.of_int turn;event=Turn_ended {
+        task_context=Keeper_turn_task_context.No_task;
+        turn_ref=Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:turn;
+        history_at_start;position}} with
+    | Ok () -> () | Error error -> Alcotest.fail (Keeper_turn_boundaries.append_error_to_string error) in
+  append 1 Keeper_turn_boundaries.Fresh_history baseline;
+  append 2 Keeper_turn_boundaries.Continued_history messages;
+  let consume commit = match Keeper_librarian_durable_consumer.consume_one ~config ~keeper_name:keeper_id ~commit with
+    | Ok outcome -> outcome
+    | Error error -> Alcotest.fail (Keeper_librarian_durable_consumer.error_to_string error) in
+  (match consume (fun _ -> Alcotest.fail "baseline dispatched a provider") with
+   | Keeper_librarian_durable_consumer.Baseline_advanced _ -> ()
+   | Nothing_to_read | Pending | Memory_not_committed _ | Progress_advanced _ | Official_advanced _ ->
+     Alcotest.fail "the durable refusal fixture did not establish its baseline");
+  let result = ref None in
+  ignore (consume (fun original ->
+    let value = Keeper_librarian_durable_consumer.commit_with_runtime
+      ~base_path ~keepers_dir ~keeper_id original in
+    result := Some value; value));
+  (match (match !result with Some value -> value | None -> Alcotest.fail "actual selector skipped commit") with
    | Keeper_librarian_durable_consumer.Memory_committed ->
      Alcotest.fail "the failed walk claimed Memory committed"
    | Memory_pending ->

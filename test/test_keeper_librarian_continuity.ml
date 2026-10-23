@@ -1,3 +1,4 @@
+module Original = Masc.Keeper_librarian_durable_capture
 open Alcotest
 module P = Masc.Keeper_librarian_continuity
 module B = Masc.Keeper_turn_boundaries
@@ -949,7 +950,7 @@ let test_a_memory_pass_carries_the_counterparts_of_its_turn () =
   check (option int) "the pass saved and published the turn" (Some 1)
     (Option.map (fun (saved : S.t) -> saved.end_atom) (P.read ~config ~keeper_name |> get));
   check int "the durable pass moves past the saved turn without the model" 1
-    (durable_reads config ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+    (durable_reads config ~commit:(fun _original ->
        fail "the durable pass sent the saved turn again"))
 
 (* The CLI slot reports a limit the turn fits without its counterpart and not
@@ -989,8 +990,10 @@ let test_a_turn_too_large_with_its_counterparts_is_left_to_the_durable_pass () =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path in
   let received = ref [] in
   check int "the durable pass reads the turn" 1
-    (durable_reads config ~commit:(fun ~expected_revision:_ ~range_id ~official_range_id
-       (input : Masc.Keeper_librarian.input) ->
+    (durable_reads config ~commit:(fun original ->
+      let range_id = Original.range_id original in
+      let official_range_id = Original.official_range_id original in
+      let input = Original.input original in
        received := List.map (fun (o : Masc.Keeper_counterpart_observation.t) -> o.content)
            input.counterpart_observations;
        match Current.apply_disposition ~revisions:[] ?durable_range_id:range_id
@@ -1743,7 +1746,7 @@ let test_uncommitted_memory_message_floor ?native case () =
       (Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
        |> Result.map_error Progress.read_error_to_string |> get |> Option.is_none);
     check int "the durable consumer advances across the proved atom without another Memory call" 1
-      (durable_reads config ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+      (durable_reads config ~commit:(fun _original ->
         fail "the durable consumer sent an atom already covered by the real Memory program"));
     (match case with
      | Appended_memory_suffix ->
@@ -1852,7 +1855,7 @@ let test_queue_memory_floor_retains_proven_api_holes ~all_refused () =
   check bool "Context-only regeneration retains exactly the same hole" true
     ((P.read ~config ~keeper_name |> get |> some).unread_messages=holes);
   check int "durable recovery advances without sending either accounted source again" 1
-    (durable_reads config ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+    (durable_reads config ~commit:(fun _original ->
       fail "durable recovery duplicated the Memory program's accounted atom"));
   check bool "advancing the consumer cannot erase unread evidence" true
     (Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get = holes)

@@ -5,6 +5,8 @@ module Owner = Lane_addon_tool_request_owner
 
 let ( let* ) = Result.bind
 
+type store = Lane_addon_store.t
+
 let scope = "verifier-reviews"
 let tool_name = "verifier_review"
 
@@ -30,13 +32,24 @@ let summary_of (original : V.t) : (Yojson.Safe.t, string) result =
 type retain_error =
   | Original_invalid of string
   | Identity_mismatch of string
-  | Store_unavailable of string
+  | Retain_store_unavailable of string
   | Already_retained of string
 
+(* [load_error] deliberately names its store failure differently from
+   [retain_error]'s [Retain_store_unavailable]: the two error types are not a
+   recursion group, and sharing a constructor name here made the type-checker
+   merge them, hiding [Already_retained] from [retain]'s mapping. *)
 type load_error =
-  | Store_unavailable of string
+  | Load_store_unavailable of string
   | Not_found
   | Corrupt_original of string
+
+let map_retain_error ~request_id (err : Owner.error) : retain_error =
+  match err with
+  | Owner.Binding_conflict -> Already_retained request_id
+  | Owner.Store_unavailable detail -> Retain_store_unavailable detail
+  | Owner.Invalid_identity detail -> Identity_mismatch detail
+  | Owner.Invalid_request detail -> Original_invalid detail
 
 let retain ~store ~verification_id ~attempt ~installation_id ~package_id original =
   let* request_id =
@@ -69,58 +82,34 @@ let retain ~store ~verification_id ~attempt ~installation_id ~package_id origina
   let* summary =
     summary_of original |> Result.map_error (fun detail -> Original_invalid detail)
   in
-  let* existing =
-    Owner.load ~store ~scope ~request_id
-    |> Result.map_error (function
-      | Owner.Store_unavailable detail -> Store_unavailable detail
-      | Owner.Binding_conflict -> Already_retained request_id
-      | Owner.Invalid_identity detail -> Identity_mismatch detail
-      | Owner.Invalid_request detail -> Original_invalid detail)
-  in
-  match existing with
-  | Some record ->
-    (* The durable owner names the request by its digest. Compare digests so
-       we do not depend on [retained.request] field access, and so a re-read
-       through the verified store is what decides identity. *)
-    let* stored_digest =
-      Owner.request_digest record.Owner.request
-      |> Result.map_error (fun detail -> Store_unavailable detail)
-    in
-    let* incoming_digest =
-      Owner.request_digest request_json
-      |> Result.map_error (fun detail -> Original_invalid detail)
-    in
-    if String.equal stored_digest incoming_digest
-    then Ok ()
-    else Error (Already_retained request_id)
-  | None ->
-    Owner.retain
-      ~store
-      ~scope
-      ~request_id
-      ~installation_id
-      ~package_id
-      ~tool:tool_name
-      ~summary
-      ~request:request_json
-    |> Result.map_error (function
-      | Owner.Binding_conflict -> Already_retained request_id
-      | Owner.Store_unavailable detail -> Store_unavailable detail
-      | Owner.Invalid_identity detail -> Identity_mismatch detail
-      | Owner.Invalid_request detail -> Original_invalid detail)
+  (* Delegate the keep-exactly-one guarantee to [Owner.retain]: it compares the
+     whole record (scope, request_id, installation, package, tool, digest,
+     summary and body) and is idempotent only when every destination field
+     matches, so a retain aimed at a different installation, package or tool
+     is a [Binding_conflict], never an overwrite. We add nothing on top. *)
+  Owner.retain
+    ~store
+    ~scope
+    ~request_id
+    ~installation_id
+    ~package_id
+    ~tool:tool_name
+    ~summary
+    ~request:request_json
+  |> Result.map_error (map_retain_error ~request_id)
 
 let load ~store ~verification_id ~attempt =
   let* request_id =
     attempt_request_id ~verification_id ~attempt
-    |> Result.map_error (fun detail -> Store_unavailable detail)
+    |> Result.map_error (fun detail -> Load_store_unavailable detail)
   in
   let* existing =
     Owner.load ~store ~scope ~request_id
     |> Result.map_error (function
-      | Owner.Store_unavailable detail -> Store_unavailable detail
-      | Owner.Binding_conflict -> Store_unavailable "verifier review owner binding conflict"
-      | Owner.Invalid_identity detail -> Store_unavailable detail
-      | Owner.Invalid_request detail -> Store_unavailable detail)
+      | Owner.Store_unavailable detail -> Load_store_unavailable detail
+      | Owner.Binding_conflict -> Load_store_unavailable "verifier review owner binding conflict"
+      | Owner.Invalid_identity detail -> Load_store_unavailable detail
+      | Owner.Invalid_request detail -> Load_store_unavailable detail)
   in
   match existing with
   | None -> Error Not_found

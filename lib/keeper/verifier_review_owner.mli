@@ -25,12 +25,16 @@ type retain_error =
       (** The original could not be serialised for storage. *)
   | Identity_mismatch of string
       (** The key does not name the original's own verification_id and attempt. *)
-  | Store_unavailable of string
+  | Retain_store_unavailable of string
   | Already_retained of string
       (** A different original already sits at this attempt key. *)
 
+(* [load_error] deliberately names its store failure differently from
+   [retain_error]'s [Retain_store_unavailable]: the two error types are not a
+   recursion group, and sharing a constructor name would make the type-checker
+   merge them, hiding [Already_retained] from [retain]'s mapping. *)
 type load_error =
-  | Store_unavailable of string
+  | Load_store_unavailable of string
   | Not_found
   | Corrupt_original of string
       (** The stored bytes exist but do not decode to a review original. *)

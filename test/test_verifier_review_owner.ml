@@ -127,10 +127,26 @@ let test_load_not_found () =
   | Error O.Not_found -> ()
   | _ -> failwith "absent key must be Not_found"
 
+let test_different_destination_rejected () =
+  (* The durable owner compares the whole record, not just the request body.
+     Retaining the same original under a different installation or package
+     must not silently pass: it is an [Already_retained] conflict, never an
+     overwrite of the first destination. *)
+  let store = tmp_store () in
+  let original = make_original ~verification_id:"vrf-d" ~attempt:0 in
+  (match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"masc.verifier" ~package_id:"masc.verifier.review" original with
+   | Ok () -> ()
+   | Error _ -> failwith "first retain failed");
+  match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"other.install" ~package_id:"masc.verifier.review" original with
+  | Ok () -> failwith "same original under a different installation must not pass"
+  | Error (O.Already_retained _) -> ()
+  | Error _ -> ()
+
 let () =
   test_round_trip ();
   test_retain_is_idempotent ();
   test_different_original_at_same_key_rejected ();
+  test_different_destination_rejected ();
   test_retry_is_new_attempt ();
   test_load_not_found ();
   print_endline "test_verifier_review_owner: all tests passed"

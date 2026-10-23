@@ -278,7 +278,7 @@ val run_named :
   goal:string ->
   ?goal_blocks:Agent_core.Types.content_block list ->
   ?goal_metadata:Agent_core.Types.metadata ->
-  ?session_id:string ->
+  input_source:Keeper_request_source.t ->
   system_prompt:string ->
   ?tools:Agent_core.Tool.t list ->
   ?loading_plan:Keeper_official_client_host.loading_plan ->

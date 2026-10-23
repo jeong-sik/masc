@@ -464,12 +464,327 @@ let test_second_call_after_a_verdict_is_a_violation () =
   | Some (AR.Approve "ok") -> ()
   | _ -> Alcotest.fail "the first recorded verdict stands"
 
+let actual_inline_review_view ~base_path result =
+  let refusal = ref None in
+  let projected = Tool_bridge.to_agent_core_typed_result ~base_path
+      ~model_projection:(Tool_output.Inline_up_to
+        { maximum_bytes = Tool_shard_limits.verification_evidence_max_bytes })
+      ~on_externalization_error:(fun error -> refusal := Some error) result in
+  let model_result, media = match projected with
+    | Ok output ->
+      `Assoc ["content", `String output.Agent_core.Types.content; "is_error", `Bool false],
+      Option.value output.content_blocks ~default:[]
+    | Error error ->
+      `Assoc ["content", `String error.Agent_core.Types.message; "is_error", `Bool true
+             ; "recoverable", `Bool error.recoverable
+             ; "error_class", Option.fold ~none:`Null
+                 ~some:Agent_core.Types.tool_error_class_to_yojson error.error_class], []
+  in
+  model_result, media, !refusal
+;;
+
+(* Actual [AR.run] slot traversal with an injected evaluator callback. No
+   provider transport runs here; the callback dispatches the real supplied
+   lookup surface before returning typed candidate failures. *)
+let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
+  let module T = Agent_core.Types in
+  let slots = ["evidence-small"; "evidence-second"; "evidence-large"] in
+  let saved_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn saved_slots)
+    (fun () ->
+      Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
+        (fun () -> Ok (List.map (fun slot -> slot, Types_core.Catalog_slot) slots));
+      let prompt = "Review the original submission without discarding evidence." in
+      let image data = T.Image { media_type = "image/png"; data; source_type = T.Base64 } in
+      let attachment = image "submitted-original-image" in
+      let original = [T.Text prompt; attachment] in
+      let args = `Assoc ["path", `String "repo/evidence.json"; "include_image", `Bool true] in
+      let old_body = String.make 32768 'a' and new_body = String.make 32768 'b' in
+      let block_image index = image (if index = 0 then "lookup-first-image" else "lookup-changed-image") in
+      let json_entry = function
+        | T.Text text ->
+          (try
+             match Yojson.Safe.from_string text with
+             | `Assoc ["prior_review_lookup", entry] -> Some entry
+             | _ -> None
+           with Yojson.Json_error _ -> None)
+        | T.Thinking _ | T.RedactedThinking _ | T.ReasoningDetails _
+        | T.ToolUse _ | T.ToolResult _ | T.Image _ | T.Document _ | T.Audio _ -> None
+      in
+      let run_review () =
+        let reads = ref 0 and calls = ref [] and results = ref [] and views = ref [] in
+        let source_lookup : AR.lookup_surface =
+          { lookup with dispatch = (fun ~name ~args:actual ->
+              Alcotest.(check string) "actual requested lookup name" "keeper_read_file" name;
+              Alcotest.(check bool) "actual requested lookup arguments" true (actual = args);
+              let index = !reads in
+              incr reads;
+              let body = if index = 0 then old_body else new_body in
+              let result = Tool_result.make_ok ~tool_name:name ~start_time:(Tool_timing.start ())
+                  ~data:(`Assoc ["original_body", `String body])
+                  ~content_blocks:[T.Text body; block_image index] () in
+              results := !results @ [result];
+              views := !views @ [actual_inline_review_view ~base_path:(Filename.get_temp_dir_name ()) result];
+              result) }
+        in
+        with_reviewer
+          (fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:actual_prompt
+              ?goal_blocks ~report_tool_schema:_ ~lookup:offered_lookup
+              ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+            let index = List.length !calls in
+            calls := !calls @ [evaluator_runtime];
+            Alcotest.(check string) "every candidate retains the original prompt" prompt actual_prompt;
+            let blocks = match goal_blocks with
+              | Some blocks -> blocks | None -> Alcotest.fail "submitted media disappeared" in
+            Alcotest.(check bool) "original prompt and attachment remain the leading blocks" true
+              (List.take (List.length original) blocks = original);
+            let entries = List.filter_map json_entry blocks in
+            Alcotest.(check int) "only this invocation's earlier observations are attached" index (List.length entries);
+            List.iteri (fun prior entry ->
+              let member = Yojson.Safe.Util.member in
+              Alcotest.(check bool) "lookup keeps its originating evaluator slot" true
+                (member "evaluator_slot" entry = `String (List.nth slots prior));
+              Alcotest.(check bool) "lookup name is retained" true
+                (member "tool_name" entry = `String "keeper_read_file");
+              Alcotest.(check bool) "lookup arguments are retained" true (member "arguments" entry = args);
+              let model_result, media, refusal = List.nth !views prior in
+              Alcotest.(check bool) "normal fixture is accepted by the actual full bridge" true
+                (refusal = None);
+              Alcotest.(check bool) "lookup disposition is preserved independently of its model projection" true
+                (member "disposition" entry = `String (Tool_result.string_of_disposition (List.nth !results prior)));
+              Alcotest.(check bool) "only the original actual bridge model view is retained" true
+                (member "result" entry = model_result);
+              Alcotest.(check bool) "every actual bridge media block remains native" true
+                (List.for_all (fun block -> List.mem block blocks) media);
+              Alcotest.(check bool) "original lookup media remains a native media block" true
+                (List.mem (block_image prior) blocks)) entries;
+            if index < 2 then begin
+              let fresh = offered_lookup.dispatch ~name:"keeper_read_file" ~args in
+              Alcotest.(check bool) "a new slot performs its own lookup, retaining its changed result" true
+                (fresh = List.nth !results index);
+              if index = 1 then begin
+                Alcotest.(check bool) "a changed fresh read cannot replace the earlier source view" true
+                  (Tool_result.to_json (List.nth !results 0) <> Tool_result.to_json fresh);
+                Alcotest.(check bool) "the earlier observation remains in this slot's immutable input" true
+                  (let model_result, _, _ = List.hd !views in
+                   Yojson.Safe.Util.member "result" (List.hd entries) = model_result)
+              end;
+              Error (Agent_core.Error.Api
+                (if index = 0 then Agent_core.Retry.InvalidRequest
+                   { message = "fixture provider body-size refusal"
+                   ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 } }
+                 else Agent_core.Retry.ContextOverflow { message = "fixture context overflow"; limit = None }))
+            end else Ok { AR.selected_runtime_id = evaluator_runtime; verdict = Some (AR.Approve "checked") })
+          (fun () ->
+            let result = AR.run ~log_info:ignore ~log_warn:ignore
+                ~render_prompt:(fun () -> Ok prompt) ~goal_blocks:[attachment]
+                ~lookup:source_lookup ~provider_rest:(fun _ -> AR.No_stated_rest)
+                ~base_path:(Filename.get_temp_dir_name ()) () in
+            Alcotest.(check (list string)) "declared slot order remains intact" slots !calls;
+            Alcotest.(check int) "each failed slot performed a fresh lookup" 2 !reads;
+            match result.verdict with
+            | Some (AR.Approve "checked") -> ()
+            | Some (AR.Approve _) | Some (AR.Reject _) | None -> Alcotest.fail "later evaluator lost its verdict")
+      in
+      run_review ();
+      (* First-candidate input is checked empty of prior observations again. *)
+      run_review ())
+;;
+
+let test_oversized_lookup_handoff_preserves_the_inline_refusal () =
+  let module T = Agent_core.Types in
+  let saved_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn saved_slots)
+    (fun () ->
+      Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
+        (fun () -> Ok ["refused-source", Types_core.Catalog_slot; "next-reviewer", Types_core.Catalog_slot]);
+      let prompt = "Review the submitted evidence without bypassing its explicit inline guard." in
+      let image data = T.Image { media_type = "image/png"; data; source_type = T.Base64 } in
+      let attachment = image "submitted-original-image" in
+      let rejected_media = image "oversized-lookup-image" in
+      let body = String.make (Tool_shard_limits.verification_evidence_max_bytes + 1) 'z' in
+      let arguments = `Assoc ["path", `String "repo/oversized-evidence.json"] in
+      let raw = Tool_result.make_ok ~tool_name:"keeper_read_file" ~start_time:(Tool_timing.start ())
+          ~data:(`String body) ~content_blocks:[T.Text body; rejected_media] () in
+      let _, _, actual_refusal = actual_inline_review_view
+          ~base_path:(Filename.get_temp_dir_name ()) raw in
+      let refusal_message = match actual_refusal with
+        | Some { Tool_bridge.kind = Inline_budget_exceeded; message } -> message
+        | Some { Tool_bridge.kind = Artifact_storage_failure; _ } -> Alcotest.fail "inline guard attempted storage"
+        | None -> Alcotest.fail "the full bridge must refuse the SSOT limit-plus-one fixture"
+      in
+      let reads = ref 0 and calls = ref [] in
+      let source_lookup : AR.lookup_surface = { lookup with dispatch = (fun ~name ~args ->
+        incr reads;
+        Alcotest.(check string) "actual oversized lookup name" "keeper_read_file" name;
+        Alcotest.(check bool) "actual oversized lookup arguments" true (args = arguments);
+        raw) } in
+      with_reviewer
+        (fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:actual_prompt
+            ?goal_blocks ~report_tool_schema:_ ~lookup:offered_lookup
+            ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+          let first = !calls = [] in
+          calls := !calls @ [evaluator_runtime];
+          Alcotest.(check string) "the original prompt remains unchanged" prompt actual_prompt;
+          let blocks = match goal_blocks with
+            | Some blocks -> blocks | None -> Alcotest.fail "original attachment was lost" in
+          Alcotest.(check bool) "submitted prompt and attachment remain intact" true
+            (List.take 2 blocks = [T.Text prompt; attachment]);
+          if first then begin
+            ignore (offered_lookup.dispatch ~name:"keeper_read_file" ~args:arguments);
+            Error (Agent_core.Error.Api (Agent_core.Retry.InvalidRequest
+              { message = "fixture body-size refusal"
+              ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 } }))
+          end else begin
+            let entry = match List.drop 2 blocks with
+              | [T.Text text] ->
+                Yojson.Safe.Util.member "prior_review_lookup" (Yojson.Safe.from_string text)
+              | _ -> Alcotest.fail "refused handoff must carry one diagnostic and no rejected media" in
+            let member = Yojson.Safe.Util.member in
+            Alcotest.(check bool) "refusal retains the original slot relation" true
+              (member "evaluator_slot" entry = `String "refused-source");
+            Alcotest.(check bool) "refusal retains the actual lookup name" true
+              (member "tool_name" entry = `String "keeper_read_file");
+            Alcotest.(check bool) "refusal retains actual lookup arguments" true
+              (member "arguments" entry = arguments);
+            Alcotest.(check bool) "a completed raw lookup keeps its disposition even when projection fails" true
+              (member "disposition" entry = `String (Tool_result.string_of_disposition raw));
+            Alcotest.(check bool) "raw rejected Tool_result is not handed to the next slot" true
+              (member "result" entry = `Null);
+            let refusal = member "projection_refusal" entry in
+            Alcotest.(check bool) "typed inline refusal survives failover" true
+              (member "kind" refusal = `String "inline_budget_exceeded");
+            Alcotest.(check bool) "the actual shared guard message survives failover" true
+              (member "message" refusal = `String refusal_message);
+            Alcotest.(check bool) "rejected lookup media is absent" false (List.mem rejected_media blocks);
+            Alcotest.(check bool) "rejected raw bytes are absent from every text block" false
+              (List.exists (function T.Text text -> String_util.contains_substring text body
+                | T.Thinking _ | T.RedactedThinking _ | T.ReasoningDetails _
+                | T.ToolUse _ | T.ToolResult _ | T.Image _ | T.Document _ | T.Audio _ -> false) blocks);
+            Ok { AR.selected_runtime_id = evaluator_runtime; verdict = Some (AR.Approve "checked refusal") }
+          end)
+        (fun () ->
+          let result = AR.run ~log_info:ignore ~log_warn:ignore
+              ~render_prompt:(fun () -> Ok prompt) ~goal_blocks:[attachment]
+              ~lookup:source_lookup ~provider_rest:(fun _ -> AR.No_stated_rest)
+              ~base_path:(Filename.get_temp_dir_name ()) () in
+          Alcotest.(check (list string)) "next declared slot was reached" ["refused-source"; "next-reviewer"] !calls;
+          Alcotest.(check int) "one actual supplied lookup dispatch" 1 !reads;
+          match result.verdict with
+          | Some (AR.Approve "checked refusal") -> ()
+          | Some (AR.Approve _) | Some (AR.Reject _) | None -> Alcotest.fail "refusal erased the next evaluator's verdict"))
+;;
+
+let test_failed_lookup_handoff_uses_the_full_bridge_envelope () =
+  let module T = Agent_core.Types in
+  let maximum_bytes = Tool_shard_limits.verification_evidence_max_bytes in
+  let payload = String.make (maximum_bytes + 1) 'm' in
+  let failed ?data ?metadata () =
+    Tool_result.make_err ~tool_name:"keeper_read_file" ~class_:Tool_result.Policy_rejection
+      ~start_time:(Tool_timing.start ()) ?data ?metadata "short read failure" in
+  let cases =
+    [ "large failure metadata", failed ~metadata:(`Assoc ["large_metadata", `String payload]) (), true
+    ; "large explicit failure data", failed ~data:(`Assoc ["large_data", `String payload]) (), true
+    ; "small failure envelope", failed ~metadata:(`Assoc ["reason", `String "permission denied"]) (), false
+    ] in
+  List.iter (fun (label, raw, must_refuse) ->
+    Alcotest.(check bool) (label ^ ": raw message alone misses the envelope") true
+      (String.length (Tool_result.message raw) < maximum_bytes);
+    let model_result, media, actual_refusal = actual_inline_review_view
+        ~base_path:(Filename.get_temp_dir_name ()) raw in
+    Alcotest.(check bool) (label ^ ": actual full bridge owns inline admission") must_refuse
+      (Option.is_some actual_refusal);
+    Alcotest.(check bool) (label ^ ": failed projection has no success media") true (media = []);
+    let saved_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn saved_slots)
+      (fun () ->
+        Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
+          (fun () -> Ok ["failed-lookup-source", Types_core.Catalog_slot; "failed-lookup-next", Types_core.Catalog_slot]);
+        let prompt = "Review this source while retaining its tool failure accurately." in
+        let attachment = T.Image { media_type = "image/png"; data = "submitted-original-image"; source_type = T.Base64 } in
+        let args = `Assoc ["path", `String "repo/failing-evidence.json"] in
+        let reads = ref 0 and calls = ref [] in
+        let source_lookup : AR.lookup_surface = { lookup with dispatch = (fun ~name ~args:actual ->
+          incr reads;
+          Alcotest.(check string) "actual failed lookup name" "keeper_read_file" name;
+          Alcotest.(check bool) "actual failed lookup arguments" true (actual = args);
+          raw) } in
+        with_reviewer
+          (fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:actual_prompt
+              ?goal_blocks ~report_tool_schema:_ ~lookup:offered_lookup
+              ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+            let first = !calls = [] in
+            calls := !calls @ [evaluator_runtime];
+            Alcotest.(check string) "failure does not replace the original prompt" prompt actual_prompt;
+            let blocks = match goal_blocks with
+              | Some blocks -> blocks | None -> Alcotest.fail "original failure-review attachment disappeared" in
+            Alcotest.(check bool) "original evidence survives a failed lookup" true
+              (List.take 2 blocks = [T.Text prompt; attachment]);
+            if first then begin
+              ignore (offered_lookup.dispatch ~name:"keeper_read_file" ~args);
+              Error (Agent_core.Error.Api (Agent_core.Retry.InvalidRequest
+                { message = "fixture candidate body refusal"
+                ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 } }))
+            end else begin
+              let entry = match List.drop 2 blocks with
+                | [T.Text text] -> Yojson.Safe.Util.member "prior_review_lookup" (Yojson.Safe.from_string text)
+                | _ -> Alcotest.fail "failed lookup handoff must contain only its one model-view record" in
+              let member = Yojson.Safe.Util.member in
+              Alcotest.(check bool) "failure retains the original slot" true
+                (member "evaluator_slot" entry = `String "failed-lookup-source");
+              Alcotest.(check bool) "failure retains the original lookup name" true
+                (member "tool_name" entry = `String "keeper_read_file");
+              Alcotest.(check bool) "failure retains actual lookup arguments" true (member "arguments" entry = args);
+              Alcotest.(check bool) "failure disposition remains authoritative" true
+                (member "disposition" entry = `String (Tool_result.string_of_disposition raw));
+              (match actual_refusal with
+               | Some { Tool_bridge.kind; message } ->
+                 let wire_kind = match kind with
+                   | Tool_bridge.Inline_budget_exceeded -> "inline_budget_exceeded"
+                   | Tool_bridge.Artifact_storage_failure -> "artifact_storage_failure" in
+                 Alcotest.(check bool) "a rejected full failure envelope cannot be smuggled as raw result" true
+                   (member "result" entry = `Null);
+                 Alcotest.(check bool) "failure handoff carries the actual bridge refusal" true
+                   (member "projection_refusal" entry
+                    = `Assoc ["kind", `String wire_kind; "message", `String message])
+               | None ->
+                 Alcotest.(check bool) "small failure preserves actual content/is_error/recoverable/error_class" true
+                   (member "result" entry = model_result);
+                 Alcotest.(check bool) "an accepted failure has no invented projection refusal" true
+                   (member "projection_refusal" entry = `Null));
+              Alcotest.(check bool) "large metadata/data payload never enters any handoff text" false
+                (List.exists (function T.Text text -> String_util.contains_substring text payload
+                  | T.Thinking _ | T.RedactedThinking _ | T.ReasoningDetails _
+                  | T.ToolUse _ | T.ToolResult _ | T.Image _ | T.Document _ | T.Audio _ -> false) blocks);
+              Ok { AR.selected_runtime_id = evaluator_runtime; verdict = Some (AR.Approve "checked failure view") }
+            end)
+          (fun () ->
+            let result = AR.run ~log_info:ignore ~log_warn:ignore ~render_prompt:(fun () -> Ok prompt)
+                ~goal_blocks:[attachment] ~lookup:source_lookup ~provider_rest:(fun _ -> AR.No_stated_rest)
+                ~base_path:(Filename.get_temp_dir_name ()) () in
+            Alcotest.(check (list string)) "failure proceeds in declared slot order"
+              ["failed-lookup-source"; "failed-lookup-next"] !calls;
+            Alcotest.(check int) "one actual supplied failed lookup" 1 !reads;
+            match result.verdict with
+            | Some (AR.Approve "checked failure view") -> ()
+            | Some (AR.Approve _) | Some (AR.Reject _) | None -> Alcotest.fail "failure handoff lost the later verdict"))) cases
+;;
+
 let () =
   configure_prompt_registry ();
   Alcotest.run
     "anti_rationalization_structured_only"
     [ ( "review boundary"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "failed lookup handoff uses the full bridge envelope" `Quick
+            test_failed_lookup_handoff_uses_the_full_bridge_envelope
+        ; Alcotest.test_case "oversized lookup handoff retains the inline refusal" `Quick
+            test_oversized_lookup_handoff_preserves_the_inline_refusal
+        ; Alcotest.test_case "lookup evidence survives failover only within this review" `Quick
+            test_lookup_evidence_survives_slot_failover_but_not_a_new_review
+        ; Alcotest.test_case
             "structured tool verdict"
             `Quick
             test_structured_tool_is_the_only_semantic_verdict

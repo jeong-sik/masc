@@ -109,7 +109,7 @@ let test_candidate_baseline_keeps_original_source () =
 let official_front continuity = Driver.librarian_position ~messages continuity
   |> Result.map_error Agent_core.Error.to_string |> require
 let start_projection front ~capacity history =
-  Host.start_range_projection ~measure_message_bytes:measure_native ~capacity_bytes:capacity
+  Host.start_range_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "frozen-fixture" }) ~measure_message_bytes:measure_native ~capacity_bytes:capacity
     ~unbounded_capacity_bytes:max_int ~reserved_bytes:0 ~librarian_front:(fun _ -> Ok front)
     ~turn_start:(Front.Turn_boundary {end_atom=2}) ~keeper_name:"frozen-fixture"
     ~runtime_id:"fixture.native" history

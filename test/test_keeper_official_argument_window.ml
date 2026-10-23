@@ -61,7 +61,7 @@ let projection ?(history_prefix=[]) ?tools source base_path =
   Option.bind source (fun source -> Host.argument_projection source ~tools ~history_prefix)
 let project ?argument_projection ?(capacity_bytes=max_int) ?carried_front_seed
     ?(librarian_front=progress) ?on_carried_front ?on_model_input_window_observation messages =
-  Host.start_range_projection ?argument_projection ~measure_message_bytes:measure
+  Host.start_range_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "official-arguments" }) ?argument_projection ~measure_message_bytes:measure
     ~capacity_bytes ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
     ?carried_front_seed ~librarian_front:(fun _ -> Ok librarian_front)
     ?on_carried_front ?on_model_input_window_observation
@@ -234,9 +234,55 @@ let test_zero_history_floor_does_not_write_dropped_slots () = with_base @@ fun b
   check bool "dropped slots caused no writes" false
     (Sys.file_exists (Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:base)))
 
+let test_completion_review_preserves_the_full_evidence_without_history_reads () =
+  with_base @@ fun base ->
+  let attachment = T.make_message ~role:T.User
+      [T.Text "Review the attached original evidence."
+      ; T.Image { media_type = "image/png"; data = "original-image-bytes"; source_type = T.Base64 }]
+  in
+  let evidence = raw_history @ [attachment] in
+  let original = List.map Agent_core.Checkpoint.message_to_json evidence in
+  let argument_projection = match projection (source base) base with
+    | Some projection -> projection
+    | None -> fail "the fixture must offer an eligible argument demotion plan"
+  in
+  let late_seed = accepted_seed evidence 2 in
+  List.iter (fun boundary ->
+    let seed_reads = ref 0 and librarian_reads = ref 0 and measured = ref 0 in
+    let windows = ref 0 and carried_fronts = ref 0 in
+    let sent = Host.start_range_projection
+        ~input_source:Keeper_request_source.Completion_review ~argument_projection
+        ~measure_message_bytes:(fun message -> incr measured; measure message)
+        ~capacity_bytes:1 ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
+        ~carried_front_seed:(fun () -> incr seed_reads;
+          { Keeper_carried_front.no_seed_read with seed = Some late_seed })
+        ~librarian_front:(fun _ -> incr librarian_reads;
+          Error (Agent_core.Error.Internal "completion evidence must not read Keeper continuity"))
+        ~on_model_input_window_observation:(fun _ -> incr windows)
+        ~on_carried_front:(fun _ ~transmitted_bytes:_ -> incr carried_fronts)
+        ~turn_start:boundary ~keeper_name:"completion-evidence-fixture"
+        ~runtime_id:"official.sample" evidence
+      |> Result.map_error Agent_core.Error.to_string |> require
+    in
+    check bool "all evidence, attachment and paired tool messages remain exact" true
+      (List.map Agent_core.Checkpoint.message_to_json sent = original);
+    check bool "large closed arguments stay inline as their original JSON" true
+      (input "alpha" sent = alpha && input "beta" sent = beta && input "current" sent = current);
+    check int "no durable Keeper seed read" 0 !seed_reads;
+    check int "no Librarian continuity read" 0 !librarian_reads;
+    check int "no capacity measurement or shrink planning" 0 !measured;
+    check int "no history-window projection callback" 0 !windows;
+    check int "no carried-history projection callback" 0 !carried_fronts;
+    check bool "argument demotion wrote no artifact" false
+      (Sys.file_exists (Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:base))))
+    [ turn_start
+    ; Keeper_carried_front.Turn_boundary_unknown { reason = "no Keeper boundary owns completion evidence" }
+    ]
+
 let () = Alcotest.run "official argument window"
   ["source and transport",
-    [test_case "actual codec/reader and current turn" `Quick test_actual_codec_and_reader_preserve_json_and_current_arguments;
+    [test_case "completion evidence bypasses history projection" `Quick test_completion_review_preserves_the_full_evidence_without_history_reads;
+     test_case "actual codec/reader and current turn" `Quick test_actual_codec_and_reader_preserve_json_and_current_arguments;
      test_case "raw seed witness and retained-only writes" `Quick test_seed_witness_uses_raw_source_and_dropped_arguments_are_not_written;
      test_case "pinned prefix and media replay" `Quick test_declared_pinned_prefix_and_media_replay_keep_occurrence_coordinates;
      test_case "authority/reader/open seed" `Quick test_absent_authority_surface_and_open_seed_leave_arguments_verbatim;

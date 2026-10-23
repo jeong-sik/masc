@@ -72,7 +72,7 @@ let measure_model_input_message_bytes message =
    which keeps the messages and drops the counts, so every official-client turn
    wrote a record with no window reading and no input composition -- which is
    what [/context] reads. Same measurement, reported instead of discarded. *)
-let model_input_projection_for_capacity
+let model_input_projection_for_capacity ~input_source
     ?argument_projection
     ~capacity_bytes
     ~observed_next_shrink_capacity_bytes
@@ -86,9 +86,12 @@ let model_input_projection_for_capacity
     ~runtime_id
     source_projection
     messages =
-  let* frozen = Host.read_librarian_front librarian_front messages in
+  let* frozen = match input_source with
+    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
+    | Keeper_request_source.Keeper_history _ -> Host.read_librarian_front librarian_front messages in
   let* windowed =
     Host.start_range_projection
+      ~input_source
       ?argument_projection
       ~measure_message_bytes:measure_model_input_message_bytes
       ~capacity_bytes
@@ -554,10 +557,10 @@ module For_testing = struct
   let recovery_failure_of_client_error = recovery_failure_of_client_error
   let recovery_failure_of_attempt = recovery_failure_of_attempt
 
-  let start_seed_projection ~capacity_bytes ?carried_front_seed ?librarian_front ?on_carried_front
+  let start_seed_projection ~input_source ~capacity_bytes ?carried_front_seed ?librarian_front ?on_carried_front
         ~turn_start ?on_model_input_window_observation ~keeper_name ~runtime_id messages
     =
-    model_input_projection_for_capacity
+    model_input_projection_for_capacity ~input_source
       ~capacity_bytes
       ~observed_next_shrink_capacity_bytes:(ref None)
       ~observed_floor_capacity_bytes:(ref None)
@@ -1577,7 +1580,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                   recovery_detail))))
 ;;
 
-let run ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1615,7 +1618,9 @@ let run ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?c
         (* The provider's typed overflow narrows the initially unbounded turn. *)
         ~starting_capacity:unbounded_model_input_capacity_bytes
         ~same_run_retry_authorized:(fun () ->
-          !context_overflow_retry_safe)
+          match input_source with
+          | Keeper_request_source.Completion_review -> false
+          | Keeper_request_source.Keeper_history _ -> !context_overflow_retry_safe)
         ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
           Option.value
             !observed_next_shrink_capacity_bytes
@@ -1672,7 +1677,7 @@ let run ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?c
                       Option.bind argument_source (fun source ->
                         Host.argument_projection source ~tools ~history_prefix)
                     | Runtime_claude_code.Resume _ -> None in
-                  model_input_projection_for_capacity
+                  model_input_projection_for_capacity ~input_source
                    ?argument_projection
                    ~capacity_bytes
                    ~observed_next_shrink_capacity_bytes

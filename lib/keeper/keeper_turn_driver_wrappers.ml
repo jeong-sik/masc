@@ -22,6 +22,7 @@ let run_named_with_masc_tools
     ~runtime_id
     ?(keeper_name = "")
     ~walk_owner
+    ~input_source
     ~goal
     ?goal_blocks
     ~base_path
@@ -63,6 +64,7 @@ let run_named_with_masc_tools
       ~runtime_id
         ~keeper_name
       ~walk_owner
+      ~input_source
       ~goal
       ?goal_blocks
       ~base_path

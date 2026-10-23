@@ -1618,8 +1618,8 @@ let run_turn
                       ~goal:user_message
                       ?goal_blocks:user_blocks
                       ~goal_metadata:input_metadata
-                      ~session_id:
-                        (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                      ~input_source:(Keeper_request_source.Keeper_history
+                        { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id })
                       ~raw_trace
                       ~system_prompt:turn_system_prompt
                       ~tools:built_tools

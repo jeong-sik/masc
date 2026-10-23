@@ -1,7 +1,6 @@
 (* The NEXT REQUEST band of the context inspector: the turn's own composition
    run forward by the server (the carried range from the pair's front over
-   the durable history), drawn in tokens at the tab's scale. Binding marks
-   are configuration, not an input to this forecast's range calculation.
+   the durable history), drawn in tokens at the tab's scale.
    Under the figures, the same parts in the order the request carries them. *)
 
 module Inspector = Masc_tui_context_inspector
@@ -145,21 +144,6 @@ let candidate_lines ~runtime_details ~prose ~fact ~safe ~scale ~(walk : Inspecto
                     (Inspector.format_tokens counted))
            | None -> [])
   in
-  let settings_lines =
-    match candidate.lane, candidate.marks with
-    | Inspector.Lane_not_applicable _, (Some _ | None) -> []
-    | Inspector.Lane_agent_core, Some marks ->
-        prose
-          (Printf.sprintf
-             "Config / Runtime: this binding sets context-high-water-tokens to %s tok \
-              and context-low-water-tokens to %s tok. Without Librarian continuity, \
-              these marks evict oldest carried history at a turn boundary. \
-              They are neither this forecast's size nor the model limit."
-             (Inspector.format_tokens marks.high_water_tokens)
-             (Inspector.format_tokens marks.low_water_tokens))
-    | Inspector.Lane_agent_core, None ->
-        prose "Config / Runtime: this binding has no context-high-water-tokens or context-low-water-tokens setting."
-  in
   (* The request in the order it travels, one numbered row per slot, the
      [system context] blocks named in the order the assembly concatenates
      them. Only drawn when the server laid it out, which is when both the
@@ -199,7 +183,7 @@ let candidate_lines ~runtime_details ~prose ~fact ~safe ~scale ~(walk : Inspecto
   in
   head @ List.concat_map (fun line -> fact (safe line)) (runtime_details candidate.runtime_id)
   @ prose (walk_sentence ~safe walk candidate) @ parts_line @ carried_lines
-  @ settings_lines @ assembly_lines
+  @ assembly_lines
 ;;
 
 let lines ?(runtime_details = fun _ -> []) ~prose ~fact ~safe ~scale

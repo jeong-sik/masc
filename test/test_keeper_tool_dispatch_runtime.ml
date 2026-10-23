@@ -9724,7 +9724,7 @@ default = "official.primary"
       let native_config = match Runtime.get_runtime_by_id "official.gate" with
         | Some {Runtime_instance.execution=Runtime_execution.Codex_app_server config; _} -> config
         | _ -> fail "native Gate fixture runtime missing" in
-      Masc.Keeper_codex_runtime.run
+      Masc.Keeper_codex_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id })
         ~context_window:(Some (Runtime_instance.max_context_of_runtime
           (Runtime.get_runtime_by_id "official.gate" |> Option.get)))
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input

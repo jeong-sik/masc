@@ -106,7 +106,7 @@ streaming = false
   let response_observed_model_inputs = ref [] in
   let attempt_errors = ref [] in
   let run ?(runtime_id = "fixture.sample") goal =
-    Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+    Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = "no-body-gate-proof" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
       ~system_prompt:"No body gate fixture."
       ~runtime_id ~keeper_name:"no-body-gate-proof" ~base_path
       ~agent_core_tools:[] ~goal ~sw ~net:env#net
@@ -336,9 +336,9 @@ streaming = false
   let expect_arguments_demoted = expect_demoted
     && (match argument_seed with Completed_seed -> true | Open_seed | No_seed -> false) in
   let result =
-    Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+    Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = trace_id }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
       ~input_policy ?argument_demotion_seed
-      ~session_id:trace_id
+
       ~system_prompt:"Demotion fixture."
       ~runtime_id:"fixture.sample"
       ~keeper_name:"demote-proof"

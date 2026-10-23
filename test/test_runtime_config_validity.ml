@@ -5228,7 +5228,7 @@ streaming = false
         | Ok _ -> fail "unavailable assignment dispatched" in
       let run keeper =
         let meta = meta keeper in
-        Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+        Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = keeper }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
           ~keeper_name:keeper ~base_path ~system_prompt:"Answer the fixture task."
           ~goal:"Return the fixture answer." ~agent_core_tools:[] ~sw ~net:env#net () in
       let assignment_projection keeper =

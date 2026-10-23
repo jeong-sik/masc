@@ -1,0 +1,27 @@
+{
+  "source_head": "837d2abc3f170ad37f8e53aa42404fd198ce79c4",
+  "script_sha256": "3bd19468f21fadf4e27a8f90ffdf8888c2477a3e6fa904c0cebd8c5b65cfcfe4",
+  "ocamlc_version": "5.5.1",
+  "captured_at_utc": "2026-10-23T10:59:23.301880+00:00",
+  "compile_argv": [
+    "ocamlfind",
+    "ocamlc",
+    "-package",
+    "yojson,digestif.ocaml",
+    "-linkpkg",
+    "-w",
+    "+a-4-27-40-41-42-70",
+    "-o",
+    "probe.exe",
+    "probe.ml"
+  ],
+  "compile_exit": 0,
+  "compile_stdout": "",
+  "compile_stderr": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\n",
+  "run_argv": [
+    "./probe.exe"
+  ],
+  "run_exit": 0,
+  "run_stdout": "PASS Completed oversize original prompt/media\nPASS Completed oversize original lookup identity\nPASS Completed oversize handler result not modified\nPASS Completed oversize original prompt/media\nPASS Completed oversize original slot/args relation\nPASS Completed oversize actual bridge refusal retained\nPASS Completed oversize raw body/media absent\nPASS Completed oversize one real injected lookup and declared slots\nPASS Failed metadata original prompt/media\nPASS Failed metadata original lookup identity\nPASS Failed metadata handler result not modified\nPASS Failed metadata original prompt/media\nPASS Failed metadata original slot/args relation\nPASS Failed metadata actual bridge refusal retained\nPASS Failed metadata raw body/media absent\nPASS Failed metadata one real injected lookup and declared slots\nPASS Failed explicit data original prompt/media\nPASS Failed explicit data original lookup identity\nPASS Failed explicit data handler result not modified\nPASS Failed explicit data original prompt/media\nPASS Failed explicit data original slot/args relation\nPASS Failed explicit data actual bridge refusal retained\nPASS Failed explicit data raw body/media absent\nPASS Failed explicit data one real injected lookup and declared slots\nPASS Complete original view original prompt/media\nPASS Complete original view original lookup identity\nPASS Complete original view handler result not modified\nPASS Complete original view original prompt/media\nPASS Complete original view original slot/args relation\nPASS actual content and native media preserved\nPASS host-only metadata not copied into handoff\nPASS Complete original view one real injected lookup and declared slots\nPASS Missing artifact manifest original prompt/media\nPASS Missing artifact manifest original lookup identity\nPASS Missing artifact manifest handler result not modified\nPASS Missing artifact manifest original prompt/media\nPASS Missing artifact manifest original slot/args relation\nPASS actual artifact manifest refusal retained\nPASS Missing artifact manifest one real injected lookup and declared slots\nPASS Frozen failed view original prompt/media\nPASS Frozen failed view original lookup identity\nPASS Frozen failed view handler result not modified\nPASS policy changes after A lookup returned and before B assembly\nPASS Frozen failed view original prompt/media\nPASS Frozen failed view original slot/args relation\nPASS failure formatting frozen before B assembly\nPASS Frozen failed view one real injected lookup and declared slots\nPASS probe never entered blob storage branch\n",
+  "run_stderr": ""
+}

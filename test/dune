@@ -6599,3 +6599,9 @@
  (modules test_keeper_addon_deferred_runtime)
  (deps (source_tree ../addons/candle-appraiser) ../addons/protocol.py ../addons/exact_worker.py)
  (libraries masc_test_deps masc_candle masc_candle_runtime mcp_protocol masc.skill_config))
+
+; Completion review keeps the original lookup through actual provider refusal.
+(test
+ (name test_completion_review_immutable_input)
+ (modules test_completion_review_immutable_input)
+ (libraries alcotest masc_test_deps eio_main unix))

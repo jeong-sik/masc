@@ -4914,8 +4914,8 @@ for line in sys.stdin:
    official clients name a fixture prompt the same way. *)
 (* A session trace whose boundary store holds no completed turn: the
    official-client lanes read the turn boundary as atom 0, so the whole
-   offered history is the carried range. A turn with no trace carries the
-   newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
+   offered history is the carried range. This Keeper fixture always declares
+   that history owner, including calls without an explicit test trace. *)
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
@@ -4926,6 +4926,8 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model ?accept () =
+  let input_source = Keeper_request_source.Keeper_history
+      { trace_id = Option.value session_id ~default:fixture_trace_with_no_completed_turn } in
   let owns_base_path = Option.is_none base_path in
   let base_path =
     Option.value base_path ~default:(temp_workspace "masc-codex-session-")
@@ -4968,7 +4970,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       | [] -> None
                       | _ :: _ -> Some (Agent_core.Context.create ())
                     in
-                    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                    Keeper_turn_driver.run_named ~input_source ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"codex.codex"
                       ~keeper_name
                       ~base_path
@@ -4985,7 +4987,6 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ?context_injector
                       ?context
                       ~raw_trace
-                      ?session_id
                       ?on_native_tool_progress ?on_native_tool_completion ?on_event
                       ?on_request_attribution
                       ~sw

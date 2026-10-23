@@ -416,8 +416,8 @@ let content_of_wire_message raw =
 
 (* A session trace whose boundary store holds no completed turn: the
    official-client lanes read the turn boundary as atom 0, so the whole
-   offered history is the carried range. A turn with no trace carries the
-   newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
+   offered history is the carried range. This Keeper fixture always declares
+   that history owner, including calls without an explicit test trace. *)
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
@@ -427,6 +427,8 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
     ?on_official_client_usage_report ?on_runtime_attempt
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?on_request_attribution ?official_client_continuation ?session_id ?accept ~base_path ~cli_path ~goal () =
+  let input_source = Keeper_request_source.Keeper_history
+      { trace_id = Option.value session_id ~default:fixture_trace_with_no_completed_turn } in
   Masc_test_deps.declare_fixture_keeper
     ~base_path ~sandbox_profile:None "claude-fixture";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -456,7 +458,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                     let run () =
                       Result.map
                         (fun selected -> selected.Keeper_turn_driver.run_result)
-                        (Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                        (Keeper_turn_driver.run_named ~input_source ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                            ~runtime_id:"claude.claude"
                            ~keeper_name:"claude-fixture"
                            ~base_path
@@ -477,7 +479,6 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ?on_official_client_usage_report ?on_runtime_attempt
                            ?on_request_attribution
                            ?official_client_continuation
-                           ?session_id
                            ?accept
                            ~sw
                            ~net:(Eio.Stdenv.net env)
@@ -3134,7 +3135,7 @@ let run_direct_attempt
                     | None -> config
                     | Some timeout_s -> { config with Runtime_execution.timeout_s }
                   in
-                  Keeper_claude_code_runtime.run
+                  Keeper_claude_code_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = "claude-pre-dispatch" })
                     ?argument_source ?librarian_front
                     ?on_memory_capacity_refusal
                     ?required_native_posture ?on_native_task_observation ?on_child_content_observation
@@ -5461,7 +5462,7 @@ let test_exit_before_turn_admission_rotates_to_next_candidate () =
                (fun () ->
                   Runtime.init_default ~config_path |> Result.get_ok;
                   let outcome =
-                    Keeper_turn_driver.run_named
+                    Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = "claude-fixture" })
                       ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"claude_failover"
                       ~keeper_name:"claude-fixture"
@@ -5712,7 +5713,7 @@ let test_a_start_seed_begins_at_the_carried_front () =
   let messages = start_seed_history () in
   let seed_read = seed_read_of [ completed_record ~messages ~transmitted:7 ] in
   match
-    Keeper_claude_code_runtime.For_testing.start_seed_projection
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~carried_front_seed:(fun () -> seed_read)
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
@@ -5776,7 +5777,7 @@ let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
       fail (Runtime_model_input_tail_window.budget_error_to_string error)
   in
   match
-    Keeper_claude_code_runtime.For_testing.start_seed_projection
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
       ~carried_front_seed:(fun () -> seed_read)
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
@@ -5808,7 +5809,7 @@ let test_a_cold_start_with_no_completed_turn_carries_everything () =
   let observed = ref None in
   let messages = start_seed_history () in
   match
-    Keeper_claude_code_runtime.For_testing.start_seed_projection
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~carried_front_seed:(fun () -> seed_read_of [])
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
@@ -5837,7 +5838,7 @@ let test_a_cold_start_begins_at_the_turn_start () =
   let observed = ref None in
   let messages = start_seed_history () in
   match
-    Keeper_claude_code_runtime.For_testing.start_seed_projection
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~carried_front_seed:(fun () -> seed_read_of [])
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 112 })
@@ -5903,7 +5904,7 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
   let messages = start_seed_history () in
   let seen_front = ref None in
   let project librarian_front =
-    Keeper_claude_code_runtime.For_testing.start_seed_projection
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~librarian_front
       ~on_carried_front:(fun front ~transmitted_bytes -> seen_front := Some (front, transmitted_bytes))
@@ -5989,7 +5990,7 @@ let test_a_working_state_that_would_displace_atoms_stays_out () =
   let observed = ref None in
   let project snapshot =
     observed := None;
-    Keeper_claude_code_runtime.For_testing.start_seed_projection
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
       ~librarian_front:(fun _ ->
         Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
@@ -6053,7 +6054,7 @@ let test_a_working_state_beside_the_turn_carrier_passes_the_composition_check ()
     List.fold_left (fun total message -> total + measure message) 0 (attach_native_unread ~unread:Keeper_librarian_request_unread.empty messages) * 2
   in
   match
-    Keeper_claude_code_runtime.For_testing.start_seed_projection
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
       ~librarian_front:(fun _ ->
         Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
@@ -6124,7 +6125,7 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
     let capacity_bytes = capacity_bytes
       + List.fold_left (fun total message -> total + measure message) 0
           (attach_native_unread ~unread []) in
-    Keeper_claude_code_runtime.For_testing.start_seed_projection
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
       ?librarian_front
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
@@ -6206,7 +6207,7 @@ let test_a_working_state_that_displaces_nothing_goes () =
   in
   let before = working_state_not_carried ~reason:"displaces_atoms" in
   match
-    Keeper_claude_code_runtime.For_testing.start_seed_projection
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
       ~librarian_front:(fun _ ->
         Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))

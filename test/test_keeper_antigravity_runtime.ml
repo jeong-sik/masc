@@ -458,13 +458,13 @@ let test_keeper_projects_mcp_tool_and_settles () =
                   |> Result.map_error (fun error -> fail error)
                   |> Result.get_ok;
                   match
-                    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                    Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = "fixture-trace-no-completed-turn" }) ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
                       ~base_path
                       (* A trace with no completed turn: the range is the whole
                          history, which the prompt checks below read. *)
-                      ~session_id:"fixture-trace-no-completed-turn"
+
                       ~goal:"Call masc_probe once"
                       ~system_prompt:"pre-dispatch fixture system prompt"
                       ~tools:[ tool ]
@@ -590,7 +590,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                            (Filename.concat base_path "antigravity-prompt.txt")
                            In_channel.input_all);
                     match
-                      Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                      Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                         ~runtime_id:"antigravity.gemini"
                         ~keeper_name:"antigravity-fixture"
                         ~base_path
@@ -641,7 +641,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         | Ok _ | Error _ -> fail "resumed session did not settle" in
                       let prompt_before_gate = In_channel.with_open_bin
                         (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
-                      (match Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                      (match Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal:"Resume the approved call"
                           ~official_client_continuation:gate_checkpoint
@@ -661,7 +661,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                          increments on later resumes. Fresh starts reset to 1.
                          The final control is a first resume, settled at 73. *)
                       let run_context ?official_client_composed_context ?(hooks = hooks) ~goal (system_prompt, initial_messages) =
-                        match Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                        match Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal ?official_client_composed_context
                           ~system_prompt ~tools:[tool] ~agent_core_tools:[tool]
@@ -748,7 +748,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       let before_blank = In_channel.with_open_bin
                         (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
                       let blank_hooks = composed_hooks "   " in
-                      (match Keeper_turn_driver.run_named ~raw_trace:None
+                      (match Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~raw_trace:None
                           ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal:"A blank effective prompt must not run"
@@ -994,7 +994,7 @@ let test_blank_success_requires_fresh_conversation () =
                 (fun () ->
                   Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
                   let run () =
-                    Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                    Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
                       ~base_path
@@ -1107,7 +1107,7 @@ let test_spawn_failure_is_pre_dispatch () =
                   in
                   let reports = ref [] in
                   let attempt =
-                    Keeper_antigravity_runtime.run
+                    Keeper_antigravity_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-pre-dispatch" })
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get))
@@ -1207,7 +1207,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
                   in
                   let reports = ref [] in
                   let attempt =
-                    Keeper_antigravity_runtime.run
+                    Keeper_antigravity_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-blank-prompt" })
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get))
@@ -1265,7 +1265,7 @@ let plain_user_message text : Agent_core.Types.message =
 let carried_projection ?on_model_input_window_observation ?carried_front_seed ?librarian_front
     ?on_carried_front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
     source =
-  Keeper_antigravity_runtime.For_testing.carried_history_projection
+  Keeper_antigravity_runtime.For_testing.carried_history_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "alpha" })
     ?on_model_input_window_observation
     ?carried_front_seed
     ?librarian_front
@@ -1703,7 +1703,7 @@ let test_losing_claim_cannot_publish_native_policy () =
            | Ok _ -> won := true
            | Error detail -> fail detail);
           Agent_core.Hooks.Continue)} in
-        let attempt = Keeper_antigravity_runtime.run
+        let attempt = Keeper_antigravity_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = keeper_name })
           ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
           ~accepts_image_input:false ~required_native_posture:Runtime_native_tools.Native_read
           ~runtime_id:"antigravity.gemini" ~keeper_name ~pre_tool_rejects:(ref []) ~base_path
@@ -1759,7 +1759,7 @@ let test_native_policy_failure_releases_claim () =
           Unix.unlink settings;
           Unix.mkdir settings 0o700;
           Agent_core.Hooks.Continue)} in
-        let attempt = Keeper_antigravity_runtime.run
+        let attempt = Keeper_antigravity_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = keeper_name })
           ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
           ~accepts_image_input:false ~required_native_posture:Runtime_native_tools.Native_read
           ~runtime_id:"antigravity.gemini" ~keeper_name ~pre_tool_rejects:(ref []) ~base_path
@@ -1953,7 +1953,7 @@ end
 
 let test_projection_refusal_emits_no_carried_observations () =
   let projected = ref 0 and observed = ref 0 in
-  let result = Keeper_antigravity_runtime.For_testing.carried_history_projection
+  let result = Keeper_antigravity_runtime.For_testing.carried_history_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "refusal-fixture" })
     ~on_model_input_window_observation:(fun _ -> incr observed)
     ~on_carried_front:(fun _ ~transmitted_bytes:_ -> incr observed)
     ~librarian_front:Argument_start_fixture.librarian_front
@@ -2001,7 +2001,7 @@ let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
           let before=F.snapshot () in
           let transmissions=ref [] in
           let run seed =
-            let attempt=Keeper_antigravity_runtime.run
+            let attempt=Keeper_antigravity_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = keeper_name })
               ?argument_source:(F.source ~base_path ~keeper_name seed)
               ~accepts_image_input:false ~runtime_id:"antigravity.gemini" ~keeper_name
               ~pre_tool_rejects:(ref []) ~base_path ~goal:"Continue the work" ~goal_blocks:None
@@ -2081,7 +2081,7 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
                 (fun () ->
                   Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
                   let run ?on_event goal =
-                    Keeper_turn_driver.run_named ~raw_trace:None
+                    Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~raw_trace:None
                       ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"

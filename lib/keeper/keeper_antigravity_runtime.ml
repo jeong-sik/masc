@@ -128,16 +128,19 @@ let prompt_section_separator = Antigravity_input_frame.section_separator
    the CLI compacts its own conversation. The observation is mapped back to
    the durable history: a source-only atom is transmitted context, but cannot
    become a front that a later checkpoint history is expected to open. *)
-let carried_history_projection
+let carried_history_projection ~input_source
     ?argument_projection
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ~keeper_name ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun history_messages ->
-  let* frozen = Host.read_librarian_front librarian_front history_messages in
+  let* frozen = match input_source with
+    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
+    | Keeper_request_source.Keeper_history _ -> Host.read_librarian_front librarian_front history_messages in
   let window = ref None and front = ref None in
   let* sent = Host.start_range_projection
+      ~input_source
     ?argument_projection
     ~measure_message_bytes:Host.measure_message_bytes
     ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
@@ -455,7 +458,7 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
     }
 ;;
 
-let run_without_lifecycle ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
@@ -694,7 +697,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
            Ok {prepared with messages})
       else
         let project =
-          carried_history_projection
+          carried_history_projection ~input_source
             ?argument_projection:(Option.bind argument_source (fun source ->
               Host.argument_projection source ~tools:prepared.tools
                 ~history_prefix:[]))
@@ -1334,7 +1337,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
                   recovery_detail))))
 ;;
 
-let run ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1361,7 +1364,7 @@ let run ?argument_source ?official_task_reference ?composed_context ~accepts_ima
   in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
+      run_without_lifecycle ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
         ~required_native_posture
         ~runtime_id
         ~keeper_name

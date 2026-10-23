@@ -385,21 +385,28 @@ let read_keeper_continuity ~config ~keeper_name ~trace_id ~messages =
     Each field corresponds to a variable captured by the original closure.
     Fields are grouped by role: runtime identity, agent config, transport,
     session/checkpoint, Eio primitives, callbacks, and event bus. *)
+type request_input =
+  | Keeper_history of { trace_id : string; continuity : continuity }
+  | Completion_review
+
+let input_trace_id = function
+  | Keeper_history { trace_id; _ } -> Some trace_id
+  | Completion_review -> None
+
+let input_continuity = function
+  | Keeper_history { continuity; _ } -> Some continuity
+  | Completion_review -> None
+
 type try_provider_ctx =
   { (* Runtime identity *)
     runtime_id : string
   ; error_runtime_id : string
-  ; (* The marks the carried range is judged against once per candidate turn,
-       before its first composition (RFC keeper-context-window-in-tokens
-       §10.5), declared on the binding. [None] leaves eviction to a refusal
-       alone. *)
-    context_marks : Runtime_schema.context_marks option
   ; (* Where the carried range starts when the process holds no ledger for
        this (keeper, runtime) pair: the range the newest completed Agent Core
        turn record on the trace measured, whichever runtime ran it. Read once
        per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed_read
-  ; continuity : continuity option
+  ; request_input : request_input
   ; input_policy : Keeper_input_policy.t
   ; turn_boundary : Keeper_carried_front.turn_start
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
@@ -418,7 +425,6 @@ type try_provider_ctx =
   ; (* Metadata AGENT_CORE stamps on the User message it creates for the goal:
        the input speaker (RFC-0468 §3.2). *)
     goal_metadata : Agent_core.Types.metadata
-  ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
   ; initial_messages : Agent_core.Types.message list
@@ -1035,7 +1041,7 @@ type attempt_state =
    turn's trace id on the keeper's own turns; an attempt without one has no
    durable history and shares nothing. *)
 let ledger_session (ctx : try_provider_ctx) =
-  match ctx.session_id with
+  match (input_trace_id ctx.request_input) with
   | Some session -> session
   | None -> "-"
 ;;
@@ -1046,12 +1052,11 @@ let ledger_session (ctx : try_provider_ctx) =
 let new_attempt_state (ctx : try_provider_ctx) =
   { last_request = ref None
   ; request_range = ref None
-  ; ledger =
-      ref
-        (Keeper_model_input_ledger.Table.lookup
-           ~keeper_name:ctx.keeper_name
-           ~runtime_id:ctx.runtime_id
-           ~session_id:(ledger_session ctx))
+  ; ledger = ref (match ctx.request_input with
+      | Completion_review -> None
+      | Keeper_history _ -> Keeper_model_input_ledger.Table.lookup
+          ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
+          ~session_id:(ledger_session ctx))
   ; current_turn_results = ref Current_turn_verbatim
   ; current_turn_demotion = ref None
   }
@@ -1607,6 +1612,12 @@ let bounded_model_input_projection
       ~(provider_config : Llm_provider.Provider_config.t)
   : Agent_core.Agent.model_input_projection
   =
+  match ctx.request_input with
+  | Completion_review ->
+    (fun messages -> match ctx.model_input_projection with
+       | None -> Ok messages
+       | Some project -> project messages)
+  | Keeper_history _ ->
   let reserved_bytes =
     offload_model_input_cpu (fun () ->
       declared_request_reserve_bytes ~system_prompt:ctx.system_prompt ~tools:ctx.tools)
@@ -1722,7 +1733,7 @@ let bounded_model_input_projection
       |> List.map Agent_core.Tool.schema_to_json
     in
     let ( let* ) = Result.bind in
-    let* () = match ctx.continuity with
+    let* () = match (input_continuity ctx.request_input) with
       | None -> Ok ()
       | Some continuity -> offload_model_input_cpu (fun () -> validate_continuity ~messages continuity)
     in
@@ -1742,7 +1753,7 @@ let bounded_model_input_projection
        boundary as the turn's front ([turn_boundary_resend_sequence]), which
        [carried_front] reads here as it reads any front a refusal moved. *)
     let front, dropped_ledger =
-      match Option.map (fun (value : continuity) -> value.point) ctx.continuity with
+      match Option.map (fun (value : continuity) -> value.point) (input_continuity ctx.request_input) with
       | Some (Summarized _ | Absorbed _) -> None, None
       | None | Some Without_snapshot -> carried_front
         ~ledger:state.ledger
@@ -1781,7 +1792,7 @@ let bounded_model_input_projection
        from the turn and from the file, never from the process's ledger, so
        a restart and a lane's next candidate choose the same start. *)
     let accepted =
-      match Option.map (fun (value : continuity) -> value.point) ctx.continuity with
+      match Option.map (fun (value : continuity) -> value.point) (input_continuity ctx.request_input) with
       | Some (Summarized _ | Absorbed _) ->
         (match ctx.carried_front_after_refusal () with
          | Some _ as held -> held
@@ -1808,7 +1819,7 @@ let bounded_model_input_projection
     in
     let view =
       request_view
-        ~input_policy:ctx.input_policy ?continuity:ctx.continuity ?completed_arguments
+        ~input_policy:ctx.input_policy ?continuity:(input_continuity ctx.request_input) ?completed_arguments
         ~tools:prefix_tools
         ~provider_config
         ~measure_message_bytes
@@ -1865,7 +1876,7 @@ let bounded_model_input_projection
            offload_model_input_cpu (fun () ->
              let demoted =
                compose_carried_model_input
-                 ~input_policy:ctx.input_policy ?continuity:ctx.continuity ?completed_arguments
+                 ~input_policy:ctx.input_policy ?continuity:(input_continuity ctx.request_input) ?completed_arguments
                  ~measure_message_bytes
                  ~front
                  ~accepted
@@ -1929,7 +1940,7 @@ let bounded_model_input_projection
       Log.Keeper.info
         ~keeper_name:ctx.keeper_name
         "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
-         transmitted_bytes=%d reserved_bytes=%d marks=%s current_turn_results=%s"
+         transmitted_bytes=%d reserved_bytes=%d current_turn_results=%s"
         ctx.runtime_id
         (Keeper_carried_front.origin_to_string composed.origin)
         composed.projection.Runtime_model_input_tail_window.dropped_atoms
@@ -1937,10 +1948,6 @@ let bounded_model_input_projection
         history_atom_count
         transmitted_bytes
         reserved_bytes
-        (match ctx.context_marks with
-         | Some marks ->
-           Printf.sprintf "%d/%d" marks.high_water_tokens marks.low_water_tokens
-         | None -> "none")
         (current_turn_results_to_string current_turn_results);
       (* The cold seed is read only when no ledger answered; when it was, the
          records it could not decode and a refused turn-boundary store are
@@ -2054,7 +2061,7 @@ let bounded_model_input_projection
       | None -> Ok windowed
       | Some inner -> inner windowed in
     let result=Result.map (Keeper_librarian_request_unread.attach ~role:Agent_core.Types.User
-      (Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread ctx.continuity)) result in
+      (Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread (input_continuity ctx.request_input))) result in
     (match view.wire, result with
      | Ok _, Ok projected ->
        let changed = match ctx.model_input_projection with
@@ -2286,7 +2293,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ; runtime_id = Some ctx.runtime_id
           ; transport = ctx.transport_resolved
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
-          ; session_id = ctx.session_id
+          ; session_id = (input_trace_id ctx.request_input)
           ; cache_system_prompt = ctx.cache_system_prompt
           ; checkpoint_sink = Some checkpoint_sink
           ; context_injector = ctx.context_injector
@@ -2317,7 +2324,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                    let range = !(state.request_range) in
                    state.request_range := None;
                    Option.iter (fun range ->
-                     let selection = match Option.map (fun (value : continuity) -> value.point) ctx.continuity with
+                     let selection = match Option.map (fun (value : continuity) -> value.point) (input_continuity ctx.request_input) with
                        | Some (Summarized { snapshot; _ }) ->
                          Keeper_continuity_request.Summarized snapshot
                        | Some (Absorbed { trace_id; end_atom; _ }) ->
@@ -2325,11 +2332,11 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                        | Some Without_snapshot -> Keeper_continuity_request.Without_snapshot
                        | None -> Keeper_continuity_request.Not_applied in
                      Keeper_continuity_request.record_best_effort
-                       ~unread:(Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread ctx.continuity)
+                       ~unread:(Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread (input_continuity ctx.request_input))
                        ~config:(Workspace.default_config ctx.base_path)
                        ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
                        ~selection ~range ~wire:observation) range;
-                   let input = match Option.map (fun (value : continuity) -> value.point) ctx.continuity with
+                   let input = match Option.map (fun (value : continuity) -> value.point) (input_continuity ctx.request_input) with
                      | Some (Summarized {snapshot; _}) ->
                        Keeper_continuity_observation.Summarized
                          { trace_id = snapshot.trace_id; end_atom = snapshot.end_atom;
@@ -2338,7 +2345,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                        Keeper_continuity_observation.Absorbed { trace_id; end_atom }
                      | Some Without_snapshot -> Keeper_continuity_observation.Without_snapshot
                      | None -> Keeper_continuity_observation.Not_applied in
-                   if Option.is_some ctx.session_id then
+                   if Option.is_some (input_trace_id ctx.request_input) then
                      Keeper_continuity_observation.record
                      ~config:(Workspace.default_config ctx.base_path) ~keeper_name:ctx.keeper_name
                      { prepared_at = Time_compat.now (); runtime_id = ctx.runtime_id; input;
@@ -2570,7 +2577,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     in
     let checkpoint_after =
       Keeper_turn_driver_helpers.checkpoint_after_attempt
-        ?agent_before_attempt ?session_id:ctx.session_id ?working_context:ctx.checkpoint_sidecar
+        ?agent_before_attempt ?session_id:(input_trace_id ctx.request_input) ?working_context:ctx.checkpoint_sidecar
         ?agent_ref:ctx.agent_ref
         !attempt_agent_ref
     in
@@ -2595,7 +2602,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                (Option.bind ctx.runtime_manifest_context
                   (fun (context : Keeper_runtime_manifest.turn_context) ->
                      context.manifest_keeper_turn_id))
-             ?trace_id:ctx.session_id
+             ?trace_id:(input_trace_id ctx.request_input)
              ~runtime_id:ctx.runtime_id
              run_result.response;
            rejected)
@@ -2636,7 +2643,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
    conversation can still answer the same turn, so the lane retries the same
    candidate rather than rotating runtimes immediately. The Agent Core lane
    answers the same refusal by moving the carried front instead
-   ([run_try_provider_with_carried_range_eviction]). *)
+   ([run_try_provider_with_history_recovery]). *)
 (* Halving needs no token/byte conversion constant: the provider is the
    oracle for whether a view fits. Each retry is a content-free mechanical
    convergence step consulted only after a typed overflow, not a size
@@ -2795,16 +2802,6 @@ type eviction_retry =
       { first_atom : int
       ; atom_count : int
       }
-
-let eviction_retry_to_json = function
-  | Evicted_blocks step ->
-    [ "kind", `String "evicted_blocks"; "step", Keeper_carried_range.step_to_json step ]
-  | Halved_range { first_atom; atom_count } ->
-    [ "kind", `String "halved_range"
-    ; "first_atom", `Int first_atom
-    ; "atom_count", `Int atom_count
-    ]
-;;
 
 (* The eviction-retry policy over an injected [attempt], testable without a
    provider (RFC keeper-context-window-in-tokens §10.5). A refusal that
@@ -3118,7 +3115,7 @@ let memory_capacity_retry_sequence ~same_run_retry_authorized
   go ()
 ;;
 
-let run_try_provider_with_carried_range_eviction
+let run_try_provider_with_history_recovery
       ?(on_memory_capacity_refusal = fun ~refusal:_ ->
         Ok Keeper_memory_delivery_reprojection.Unchanged)
       ?continuation_checkpoint
@@ -3126,10 +3123,10 @@ let run_try_provider_with_carried_range_eviction
       candidate
   =
   let state = new_attempt_state ctx in
-  if Option.is_none ctx.continuity then
-    evict_at_turn_boundary
-      ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
-      ~context_marks:ctx.context_marks state.ledger;
+  match ctx.request_input with
+  | Completion_review ->
+    run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
+  | Keeper_history { continuity; _ } ->
   let checkpoint_after = ref None in
   let success_sample = ref None in
   let attempt_once () =
@@ -3188,10 +3185,10 @@ let run_try_provider_with_carried_range_eviction
       ()
   in
   let range_answer () =
-    match Option.map (fun (value : continuity) -> value.point) ctx.continuity with
-    | Some (Summarized _ | Absorbed _) ->
+    match continuity.point with
+    | Summarized _ | Absorbed _ ->
       boundary_resend ~source:Keeper_carried_front.Turn_start_after_librarian_refusal ()
-    | Some Without_snapshot ->
+    | Without_snapshot ->
       boundary_resend
         ~on_turn_start_extra:(fun (_ : Keeper_carried_front.seed) ->
           (* The refused seed gives way to the turn start; an unknown one puts
@@ -3202,49 +3199,6 @@ let run_try_provider_with_carried_range_eviction
               ~keeper_name:ctx.keeper_name ~reason
           | Keeper_carried_front.Turn_boundary _ -> ())
         ~source:Keeper_carried_front.Turn_start_after_seed_refusal
-        ()
-    | None ->
-      (* An uncapped runtime retries like any other. #36817 kept such a
-         runtime out of the token halving because that walk invented a seed
-         from a declared window and ran 18 refusals to zero; this walk moves a
-         position on the atom axis, stops at a single atom, and without it a
-         history that outgrew the provider would be refused every turn with
-         nothing declared to move the front. *)
-      carried_range_eviction_sequence
-        ~same_run_retry_authorized
-        ~ledger:(fun () -> !(state.ledger))
-        ~last_request:(fun () ->
-          Option.map (fun (sent : sent_request) -> sent.request) !(state.last_request))
-        ~marks:ctx.context_marks
-        ~hold_front:ctx.hold_carried_front
-        ~evict:(function
-          | Keeper_carried_range.Evicted { first_atom; front_digest; _ } ->
-            move_ledger_front state.ledger ~first_atom ~front_digest
-          | Keeper_carried_range.Unchanged _ -> false)
-        ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
-          (* With a ledger, the move cuts through its one block and the
-             blocks restart from the new front, and that ledger is this
-             candidate's; without one, the halved seed is what the next
-             composition reads, on this candidate and on every later one the
-             lane walks to in this turn. *)
-          halve_front
-            ~digest_at:
-              (Option.map (fun (sent : sent_request) -> sent.digest_at) !(state.last_request))
-            ~move_ledger:
-              (move_ledger_front state.ledger)
-            ~hold:ctx.hold_carried_front
-            ~first_atom
-            ~retry)
-        ~on_retry:(fun ~retry decision ->
-          let decision = eviction_retry_to_json decision in
-          emit_carried_range_retry_manifest ctx ~retry decision;
-          Log.Keeper.info
-            ~keeper_name:ctx.keeper_name
-            "model input carried range retry runtime=%s retry=%d %s"
-            ctx.runtime_id
-            retry
-            (Yojson.Safe.to_string (`Assoc decision)))
-        ~attempt
         ()
   in
   let result =
@@ -3439,7 +3393,7 @@ let run_try_provider_with_truncation_recovery
       candidate
   =
   let first_result, checkpoint_after, success_sample =
-    run_try_provider_with_carried_range_eviction ?on_memory_capacity_refusal ?continuation_checkpoint ctx candidate
+    run_try_provider_with_history_recovery ?on_memory_capacity_refusal ?continuation_checkpoint ctx candidate
   in
   let thinking_can_be_disabled = retry_without_thinking_admitted candidate in
   if not (native_retry_allowed ctx) then first_result, checkpoint_after, success_sample

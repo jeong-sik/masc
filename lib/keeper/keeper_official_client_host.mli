@@ -614,6 +614,7 @@ val argument_projection :
     omit this projection; it transmits no MASC history. No I/O is performed. *)
 
 val start_range_projection :
+  input_source:Keeper_request_source.t ->
   ?argument_projection:argument_projection ->
   measure_message_bytes:(Agent_core.Types.message -> int) ->
   capacity_bytes:int ->

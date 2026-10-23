@@ -82,20 +82,34 @@ let lines ~height ~render t =
     Printf.sprintf "%d/%d entries · lane.toml in this folder and immediate child folders"
       (if rows=[] then 0 else t.cursor+1) (List.length rows)] in
   let capacity = max 1 (height - List.length header - 6) in
-  let start = max 0 (min (t.cursor - capacity/2) (List.length rows-capacity)) in
-  let visible = rows |> List.mapi (fun index entry -> index, entry) |> List.drop start |> List.take capacity
-    |> List.map (fun (index, entry) ->
-      let heading = match placement entry with
-        | Navigation -> []
-        | Role category ->
-            let previous = if index=start then Navigation else placement (List.nth rows (index-1)) in
-            if previous = Role category then []
-            else [compact ("-- " ^ category_label category ^ " --")] in
-      let label = match entry with
-        | Catalog.Folder path -> "Folder  " ^ Filename.basename path
-        | Package package -> "Package " ^ package.metadata.title ^ " · " ^ package.metadata.revision
-        | Issue issue -> "Issue   " ^ Filename.basename (Filename.dirname issue.path) ^ "/" ^ Filename.basename issue.path in
-      heading @ [compact ((if index=t.cursor then "> " else "  ") ^ label)]) |> List.concat in
+  (* Role headers occupy screen lines, so the window is computed over the drawn
+     lines (headers included) and always contains the selected entry's line. *)
+  let drawn = rows |> List.mapi (fun index entry ->
+    let heading = match placement entry with
+      | Navigation -> None
+      | Role category ->
+          let previous = if index=0 then Navigation else placement (List.nth rows (index-1)) in
+          if previous = Role category then None else Some (compact ("-- " ^ category_label category ^ " --")) in
+    let label = match entry with
+      | Catalog.Folder path -> "Folder  " ^ Filename.basename path
+      | Package package -> "Package " ^ package.metadata.title ^ " · " ^ package.metadata.revision
+      | Issue issue -> "Issue   " ^ Filename.basename (Filename.dirname issue.path) ^ "/" ^ Filename.basename issue.path in
+    (index, heading, compact ((if index=t.cursor then "> " else "  ") ^ label))) in
+  let all_lines = List.concat_map (fun (index, heading, line) ->
+    (match heading with Some h -> [(index, Some h, h)] | None -> []) @ [(index, None, line)]) drawn in
+  let total = List.length all_lines in
+  let cursor_line = match List.find_index (fun (index, h, _) -> index=t.cursor && h=None) all_lines with
+    | Some i -> i | None -> 0 in
+  let start = max 0 (min (cursor_line - capacity/2) (total-capacity)) in
+  let window = all_lines |> List.drop start |> List.take capacity in
+  let current_heading index =
+    List.find_map (fun (i, h, _) -> if i=index then h else None) all_lines in
+  let visible = match window with
+    | (index, None, _) :: rest when start < cursor_line && index <> t.cursor && start > 0 ->
+        (match current_heading index with
+         | Some h -> List.map (fun (_, _, l) -> l) ((index, Some h, h) :: rest)
+         | None -> List.map (fun (_, _, l) -> l) window)
+    | _ -> List.map (fun (_, _, l) -> l) window in
   let details = match selected t with
     | None -> [match t.snapshot,t.directory with
                | None,None -> "Read a folder or use p to enter a manifest path."

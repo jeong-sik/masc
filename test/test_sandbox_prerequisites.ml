@@ -367,6 +367,13 @@ let test_an_ego_browser_answers_only_with_its_versions () =
    | Error detail -> fail detail);
   check bool "an answer naming no Chromium is refused" true
     (Result.is_error (B.ego_versions "ego-browser 0.6.0.16\n"));
+  (match B.ego_versions (String.concat "" (List.init 2_000 (fun _ -> "한"))) with
+   | Error detail ->
+     let refusal = "ego-browser --version named no ego lite and Chromium versions: " in
+     check bool "a long answer is cut to an excerpt" true
+       (String.length detail <= String.length refusal + 400 + String.length "...");
+     check bool "the excerpt is cut between characters" true (String.is_valid_utf_8 detail)
+   | Ok _ -> fail "an answer without versions was read");
   with_directory (fun path_dir ->
     let unfinished = write_program path_dir "ego-browser" unfinished_ego in
     (match B.probe_program B.Ego_browser unfinished with

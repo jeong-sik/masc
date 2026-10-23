@@ -119,6 +119,11 @@ let probe command =
      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
        Failed { command; path; status; detail = output })
 
+(* At most this much of what an ego-browser printed goes into the sentence
+   that refuses it: the sentence reaches the readiness JSON, the setup
+   command's error and the worker's start failure. Its answer comes first. *)
+let ego_answer_excerpt_bytes = 400
+
 (* ego-browser 0.6.0.16 prints its version on the first line and Chromium's
    on an indented "chromium" line. *)
 let ego_versions output =
@@ -130,7 +135,12 @@ let ego_versions output =
   match after "ego-browser ", after "chromium " with
   | Some version, Some engine when version <> "" && engine <> "" -> Ok (version, engine)
   | (None | Some _), (None | Some _) ->
-    Error ("ego-browser --version named no ego lite and Chromium versions: " ^ output)
+    let printed = String.trim output in
+    let excerpt = String_util.utf8_prefix ~max_bytes:ego_answer_excerpt_bytes printed in
+    Error
+      ("ego-browser --version named no ego lite and Chromium versions: "
+       ^ excerpt
+       ^ if String.length excerpt < String.length printed then "..." else "")
 
 (* geckodriver and Firefox answer by exiting 0. An ego-browser that exits 0
    without naming its versions belongs to an ego lite whose onboarding is not

@@ -1,0 +1,12 @@
+test suite	Test	2026-10-23T06:36:10.1176136Z   TARGET_SUITES: test_tui_keys,test_tui_palette_matching,test_tui_lane_inventory,test_server_lane_inventory,test_tui_lane_addons,test_tui_lane_addon_reading
+test suite	Test	2026-10-23T06:36:10.3484815Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+test suite	Test	2026-10-23T06:36:10.5470563Z [targeted] dune build test/test_tui_keys.exe test/test_tui_palette_matching.exe test/test_tui_lane_inventory.exe test/test_server_lane_inventory.exe test/test_tui_lane_addons.exe test/test_tui_lane_addon_reading.exe 
+test suite	Test	2026-10-23T06:38:01.4217863Z File "bin/masc_tui_lane_addons.ml", lines 1589-1596, characters 18-123:
+test suite	Test	2026-10-23T06:38:01.4218424Z 1589 | ..................(match view.overview_mode, current_category snapshot (`Instance item), item.ui_category with
+test suite	Test	2026-10-23T06:38:01.4218901Z 1590 |                    | Retained_runs, _, _ | _, Unverified, _ -> []
+test suite	Test	2026-10-23T06:38:01.4219617Z 1591 |                    | Current_installations, Classified now, Some started when now=started -> []
+test suite	Test	2026-10-23T06:38:01.4220037Z 1592 |                    | Current_installations, Unclassified, None -> []
+test suite	Test	2026-10-23T06:38:01.4220355Z 1593 |                    | Current_installations, now, started ->
+test suite	Test	2026-10-23T06:38:01.4222707Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-23T06:38:01.4223138Z   It will remain exhaustive when constructors are added to type current_category.
+test suite	Test	2026-10-23T06:38:18.5810937Z ##[error]Process completed with exit code 1.

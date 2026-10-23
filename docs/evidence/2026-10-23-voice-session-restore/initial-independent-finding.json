@@ -1,0 +1,14 @@
+{
+  "kind": "independent_reviewer_finding_message_preserved_by_integrator",
+  "reviewer": "voice_realtime_integration_review",
+  "author_of_this_record": "Root integrator",
+  "reviewed_base": "fe1e8f7292e2f1aedd12e39cc6a872679fe2a591",
+  "reviewed_patch_sha256": "1ed2fdd30ae99ccb849c0751979b23feea598e5c2050681a700a91908462af50",
+  "source_verdict": "FAIL",
+  "severity": "P2",
+  "file": "lib/keeper/keeper_tool_voice_runtime.ml",
+  "trigger": "An unavailable realtime session exists with Suspended status; keeper_voice_agent is called.",
+  "impact": "voice_agent_capability_fields uses Option.is_some active_session, reporting top-level session_active=true while nested status is suspended and voice_loop is false.",
+  "requested_fix": "Share a typed activity getter from the session manager with the direct Keeper consumer and verify actual tool response/state.",
+  "boundary": "This records the independent reviewer message, not a signed full review report. The reviewer turn subsequently ended with a capacity error. No execution, formal approval or installed-runtime observation is claimed."
+}

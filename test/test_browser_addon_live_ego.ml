@@ -150,6 +150,40 @@ let test_one_process_runs_the_connections_commands () =
       Ego.end_session session;
       check bool "a process that leaves its loop is not waited out" true (Eio.Time.now clock -. started < 1.))))
 
+let test_cancelled_start_reaps_its_process () =
+  let root = Unix.realpath (Filename.temp_dir ~perms:0o700 "owned-live-ego-" "") in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let command = Filename.concat root "ego-browser" in
+    let started = Filename.concat root "started" in
+    write command (Printf.sprintf "#!/bin/sh\nprintf '%%s\\n' \"$$\" > %s\nexec sleep 30\n"
+      (Filename.quote started));
+    Unix.chmod command 0o700;
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      Eio.Time.with_timeout_exn clock 5. (fun () ->
+        Eio.Switch.run (fun sw ->
+          let session = Ego.session ~sw ~env ~command ~directory:root in
+          Eio.Fiber.first
+            (fun () -> ignore (Ego.runner session ~window_s:30. "count");
+              fail "a cancelled start answered")
+            (fun () ->
+              let rec await_started () =
+                if Sys.file_exists started && String.trim (read started) <> "" then ()
+                else (Eio.Time.sleep clock 0.005; await_started ()) in
+              await_started ());
+          let pid = int_of_string (String.trim (read started)) in
+          let alive = match Unix.kill pid 0 with
+            | () -> true
+            | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false in
+          check bool "startup cancellation reaped its process" false alive;
+          check bool "startup cancellation removed its socket" false
+            (Sys.file_exists (Filename.concat root "s"));
+          write command session_stand_in;
+          (match Ego.runner session ~window_s:5. "count" with
+           | Ok _ -> ()
+           | Error failure -> fail (failure_name failure));
+          Ego.end_session session))))
+
 (* ego-browser as the worker runs it: [--version], and [nodejs -e] with
    the session loop, which this stand-in plays: it connects to the loop's
    socket and answers each script by the step its first line names. *)
@@ -338,6 +372,7 @@ let () =
       test_case "a run answers both streams, or why not" `Quick test_a_run_answers_both_streams_or_why_not;
       test_case "a stopped run answers within the peer's window" `Quick test_a_stopped_run_answers_within_the_peers_window;
       test_case "one process runs the connection's commands" `Quick test_one_process_runs_the_connections_commands;
+      test_case "startup cancellation reaps its process and the connection can restart" `Quick test_cancelled_start_reaps_its_process;
       test_case "the worker serves the space until retirement" `Quick (child "normal");
       test_case "a result delivered after the caller stopped waiting does not end the connection" `Quick (child "late");
       test_case "retirement stops a running command and ends the space" `Quick (child "retire");

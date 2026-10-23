@@ -695,9 +695,12 @@ let config_dir_env_key = "MASC_CONFIG_DIR"
 (** SSOT for auth env-var names (issue 8352). *)
 let admin_token_env_key = "MASC_ADMIN_TOKEN"
 
-(** Optional startup input for the stored Admin credential. When absent,
-    startup attempts to mint a token; this does not disable HTTP auth.
-    Requests resolve their bearer against the credential store. *)
+(** Optional startup input for the stored Admin credential. Without an input,
+    startup reuses a valid persisted Admin pair and mints only when both paths
+    are verified absent; invalid or unreadable authority refuses startup.
+    An explicit input retains its credential publication semantics.
+    This does not change HTTP auth enablement; requests resolve their bearer
+    against the credential store. *)
 let admin_token_opt () =
   raw_value_opt admin_token_env_key |> trim_opt
 

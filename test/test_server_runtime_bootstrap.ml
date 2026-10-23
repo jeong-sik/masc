@@ -5574,9 +5574,6 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
       let exe = Masc_test_runtime.find_main_eio_exe () in
       let port = find_free_port () in
       let log_file = Filename.concat dir "server.log" in
-      let log_fd =
-        Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
-      in
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
@@ -5596,9 +5593,24 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
               (Masc_domain.masc_error_to_string err)
       in
       Auth.save_private_text_file token_path seeded_hash;
+      let auth_config = Auth.load_auth_config dir in
+      Auth.save_auth_config dir { auth_config with enabled = false };
+      let startup_admin =
+        match Auth_login.mint ~base_path:dir ~host:"127.0.0.1" ~port
+            ~agent_name:"startup-admin-client" ~role:Masc_domain.Admin
+            ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.Long_lived () with
+        | Ok report -> report
+        | Error error -> Alcotest.failf "startup Admin fixture failed: %s"
+            (Masc_domain.masc_error_to_string error) in
+      Alcotest.(check (option string)) "Admin login owns the startup identity"
+        (Some startup_admin.agent_name) (Auth.read_initial_admin dir);
+      let admin_paths =
+        [ Auth.credential_file dir startup_admin.agent_name; startup_admin.raw_token_file ] in
+      let admin_before = List.map (fun path -> Unix.lstat path, read_file path) admin_paths in
       let env =
         main_eio_env_overrides
           [
+            ("MASC_ADMIN_TOKEN", "");
             ("MASC_BASE_PATH", dir);
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
@@ -5606,20 +5618,22 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
             ("DUNE_SOURCEROOT", project_root ());
           ]
       in
+      let log_fd =
+        Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644 in
+      Fun.protect ~finally:(fun () -> Unix.close log_fd) @@ fun () ->
       let pid =
         Unix.create_process_env exe
-          [|
-            exe;
-            "--host";
-            "127.0.0.1";
-            "--port";
-            string_of_int port;
-            "--base-path";
-            dir;
-          |]
-          env Unix.stdin log_fd log_fd
+            [|
+              exe;
+              "--host";
+              "127.0.0.1";
+              "--port";
+              string_of_int port;
+              "--base-path";
+              dir;
+            |]
+            env Unix.stdin log_fd log_fd
       in
-      Unix.close log_fd;
       Fun.protect
         ~finally:(fun () -> stop_process pid)
         (fun () ->
@@ -5644,6 +5658,18 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
             (credential.role = Masc_domain.Worker);
           Alcotest.(check string) "seeded raw token hashes to stored credential"
             credential.token (Auth.sha256_hash seed_raw_token);
+          List.iter2 (fun path (before, bytes) ->
+            let after = Unix.lstat path in
+            Alcotest.(check bool) "fresh-process startup preserves Admin pair bytes" true
+              (String.equal bytes (read_file path));
+            Alcotest.(check bool) "fresh-process startup preserves Admin pair inodes" true
+              (before.Unix.st_ino <> 0 && before.Unix.st_dev = after.Unix.st_dev
+               && before.Unix.st_ino = after.Unix.st_ino)) admin_paths admin_before;
+          (match Auth.verify_token dir ~agent_name:startup_admin.agent_name
+              ~token:startup_admin.bearer_token with
+           | Ok _ -> ()
+           | Error error -> Alcotest.failf "persisted Admin client bearer stopped verifying: %s"
+               (Masc_domain.masc_error_to_string error));
           match
             Auth.verify_token dir ~agent_name:"codex-mcp-client"
               ~token:seed_raw_token
@@ -5721,7 +5747,11 @@ let test_sync_admin_token_env_repairs_raw_token_file () =
       Auth.save_private_text_file token_file stale_token;
       with_env "MASC_ADMIN_TOKEN" (Some current_token) @@ fun () ->
       let state = Mcp_server.For_testing.create_state ~base_path:dir in
-      Server_runtime_startup_credentials.sync_admin_token_env state;
+      (match Server_runtime_startup_credentials.sync_admin_token_env state with
+       | Ok () -> ()
+       | Error error ->
+         Alcotest.failf "startup Admin env publication failed: %s"
+           (Masc_domain.masc_error_to_string error));
       Alcotest.(check (option string)) "raw token file follows startup env"
         (Some current_token) (Auth.load_raw_token dir ~agent_name:"admin");
       Alcotest.(check int) "startup raw token file is private" 0o600
@@ -5733,6 +5763,168 @@ let test_sync_admin_token_env_repairs_raw_token_file () =
       | Error error ->
           Alcotest.failf "startup admin bearer should verify: %s"
             (Masc_domain.masc_error_to_string error))
+
+let startup_admin_fixture dir ~lifetime =
+  let agent_name = "startup-admin-client" in
+  let auth_config = Auth.load_auth_config dir in
+  Auth.save_auth_config dir { auth_config with enabled = false };
+  match Auth_login.mint ~base_path:dir ~host:"127.0.0.1" ~port:8935
+      ~agent_name ~role:Masc_domain.Admin ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:lifetime () with
+  | Error error ->
+    Alcotest.failf "startup Admin fixture mint failed: %s"
+      (Masc_domain.masc_error_to_string error)
+  | Ok report ->
+    Alcotest.(check bool) "fixture uses Admin auth bootstrap" true
+      (report.auth_change = Auth_login.Auth_enabled);
+    Alcotest.(check (option string)) "fixture login owns the startup identity"
+      (Some agent_name) (Auth.read_initial_admin dir);
+    report
+
+let startup_admin_path_snapshot paths =
+  List.map (fun path ->
+    match Unix.lstat path with
+    | stat ->
+      Alcotest.(check bool) "fixture path has a material inode" true (stat.Unix.st_ino <> 0);
+      let content = match stat.Unix.st_kind with
+        | Unix.S_REG -> Some (read_file path)
+        | Unix.S_LNK -> Some (Unix.readlink path)
+        | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> None in
+      Some (stat.Unix.st_kind, stat.Unix.st_dev, stat.Unix.st_ino, stat.Unix.st_perm, content)
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None) paths
+
+let test_sync_admin_token_env_reuses_current_pair () =
+  List.iter (fun lifetime ->
+    with_temp_dir "startup-admin-reuse" (fun dir ->
+      with_config_input "MASC_ADMIN_TOKEN" None @@ fun () ->
+      let report = startup_admin_fixture dir ~lifetime in
+      let credential = match Auth.load_credential dir report.agent_name with
+        | Some credential -> credential
+        | None -> Alcotest.fail "fixture credential missing" in
+      let id = Masc_domain.Credential_id.generate () in
+      let credential = { credential with id = Some id } in
+      Auth.save_credential dir credential;
+      let paths =
+        [ Auth.credential_file dir report.agent_name
+        ; Auth.credential_file dir (Masc_domain.Credential_id.to_string id)
+        ; report.raw_token_file
+        ; Filename.concat (Auth.auth_dir dir) "initial_admin" ] in
+      let state = Mcp_server.For_testing.create_state ~base_path:dir in
+      let before = startup_admin_path_snapshot paths in
+      (match Server_runtime_startup_credentials.sync_admin_token_env state with
+       | Ok () -> ()
+       | Error error ->
+         Alcotest.failf "stored Admin pair refused: %s"
+           (Masc_domain.masc_error_to_string error));
+      Alcotest.(check bool) "reuse preserves bytes, permissions and inodes" true
+        (before = startup_admin_path_snapshot paths);
+      match Auth.verify_token dir ~agent_name:report.agent_name ~token:report.bearer_token with
+      | Ok current ->
+        Alcotest.(check bool) "reuse preserves complete credential identity and expiry" true
+          (current = credential)
+      | Error error ->
+        Alcotest.failf "persisted client bearer stopped verifying: %s"
+          (Masc_domain.masc_error_to_string error)))
+    [ Auth_login.Long_lived; Auth_login.Expires_in_hours 720 ]
+
+let test_sync_admin_token_env_mints_absent_pair () =
+  with_temp_dir "startup-admin-absent" (fun dir ->
+    with_config_input "MASC_ADMIN_TOKEN" None @@ fun () ->
+    let state = Mcp_server.For_testing.create_state ~base_path:dir in
+    (match Server_runtime_startup_credentials.sync_admin_token_env state with
+     | Ok () -> ()
+     | Error error ->
+       Alcotest.failf "absent Admin pair could not be prepared: %s"
+         (Masc_domain.masc_error_to_string error));
+    let raw = match Auth.load_raw_token dir ~agent_name:"admin" with
+      | Some raw -> raw
+      | None -> Alcotest.fail "minted Admin bearer was not persisted" in
+    Alcotest.(check int) "minted bearer is private" 0o600
+      ((Unix.stat (Auth.raw_token_file dir "admin")).Unix.st_perm land 0o777);
+    (match Auth.verify_token dir ~agent_name:"admin" ~token:raw with
+     | Ok credential ->
+       Alcotest.(check bool) "minted credential is Admin" true (credential.role = Masc_domain.Admin)
+     | Error error ->
+       Alcotest.failf "minted Admin bearer did not verify: %s"
+         (Masc_domain.masc_error_to_string error));
+    let paths = [ Auth.credential_file dir "admin"; Auth.raw_token_file dir "admin" ] in
+    let before = startup_admin_path_snapshot paths in
+    with_config_input "MASC_ADMIN_TOKEN" None (fun () ->
+      match Server_runtime_startup_credentials.sync_admin_token_env state with
+      | Ok () -> ()
+      | Error _ -> Alcotest.fail "second startup Admin preparation failed");
+    Alcotest.(check bool) "second preparation preserves the published pair" true
+      (before = startup_admin_path_snapshot paths))
+
+let test_sync_admin_token_env_refuses_invalid_authority () =
+  let validation = function
+    | Masc_domain.System (Masc_domain.System_error.ValidationError _) -> true
+    | _ -> false in
+  let io = function
+    | Masc_domain.System (Masc_domain.System_error.IoError _) -> true
+    | _ -> false in
+  let invalid_token = function
+    | Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) -> true
+    | _ -> false in
+  let expired = function
+    | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) -> true
+    | _ -> false in
+  let forbidden = function
+    | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) -> true
+    | _ -> false in
+  let update_credential dir (report : Auth_login.t) change =
+    match Auth.load_credential dir report.agent_name with
+    | Some credential -> Auth.save_credential dir (change credential)
+    | None -> Alcotest.fail "fixture credential missing" in
+  let cases =
+    [ "missing raw", None, (fun _dir report _owner -> Sys.remove report.Auth_login.raw_token_file), validation
+    ; "missing credential", None,
+      (fun dir report _owner -> Sys.remove (Auth.credential_file dir report.Auth_login.agent_name)), validation
+    ; "blank raw", None, (fun _dir report _owner -> write_file report.Auth_login.raw_token_file " \n"), validation
+    ; "corrupt credential", None,
+      (fun dir report _owner -> write_file (Auth.credential_file dir report.Auth_login.agent_name) "{"), validation
+    ; "mismatched raw", None,
+      (fun _dir report _owner -> write_file report.Auth_login.raw_token_file "replacement-admin-bearer"), invalid_token
+    ; "expired credential", None,
+      (fun dir report _owner -> update_credential dir report
+        (fun credential -> { credential with expires_at = Some "2000-01-01T00:00:00Z" })), expired
+    ; "non-Admin credential", None,
+      (fun dir report _owner -> update_credential dir report
+        (fun credential -> { credential with role = Masc_domain.Worker })), forbidden
+    ; "raw read failure", None,
+      (fun _dir report _owner -> Sys.remove report.Auth_login.raw_token_file;
+        Unix.symlink report.raw_token_file report.raw_token_file), io
+    ; "blank owner", None, (fun _dir _report owner -> write_file owner " \n"), validation
+    ; "owner read failure", None,
+      (fun _dir _report owner -> Sys.remove owner; Unix.symlink owner owner), io
+    ; "supplied bearer cannot read current raw", Some "supplied-startup-admin-bearer",
+      (fun _dir report _owner -> Sys.remove report.Auth_login.raw_token_file;
+        Unix.mkdir report.raw_token_file 0o700), validation
+    ] in
+  List.iter (fun (label, supplied, change, expected_error) ->
+    with_temp_dir "startup-admin-refusal" (fun dir ->
+      with_config_input "MASC_ADMIN_TOKEN" supplied @@ fun () ->
+      let report = startup_admin_fixture dir ~lifetime:Auth_login.Long_lived in
+      let owner = Filename.concat (Auth.auth_dir dir) "initial_admin" in
+      let paths = [ Auth.credential_file dir report.agent_name; report.raw_token_file; owner ] in
+      Fun.protect ~finally:(fun () ->
+        (* The fixture owns these loop links; unlink without following them so
+           the enclosing temp-directory cleanup can always finish. *)
+        List.iter (fun path ->
+          match Unix.lstat path with
+          | stat when stat.Unix.st_kind = Unix.S_LNK -> Unix.unlink path
+          | _ -> ()
+          | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()) paths)
+        (fun () ->
+          change dir report owner;
+          let state = Mcp_server.For_testing.create_state ~base_path:dir in
+          let before = startup_admin_path_snapshot paths in
+          (match Server_runtime_startup_credentials.sync_admin_token_env state with
+           | Error error -> Alcotest.(check bool) (label ^ " preserves typed refusal") true
+               (expected_error error)
+           | Ok () -> Alcotest.fail (label ^ " was accepted"));
+          Alcotest.(check bool) (label ^ " preserves occupied state") true
+            (before = startup_admin_path_snapshot paths)))) cases
 
 let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
   with_temp_dir "startup-keeper-credential-rotate" (fun dir ->
@@ -6823,6 +7015,12 @@ let () =
           Alcotest.test_case
             "startup admin env sync repairs raw token file"
             `Quick test_sync_admin_token_env_repairs_raw_token_file;
+          Alcotest.test_case "startup Admin reuses the complete current pair" `Quick
+            test_sync_admin_token_env_reuses_current_pair;
+          Alcotest.test_case "startup Admin mints only an absent pair" `Quick
+            test_sync_admin_token_env_mints_absent_pair;
+          Alcotest.test_case "startup Admin refuses invalid occupied authority" `Quick
+            test_sync_admin_token_env_refuses_invalid_authority;
           Alcotest.test_case
             "startup sync rotates shared bootable keeper tokens"
             `Quick

@@ -1425,6 +1425,16 @@ a successful native render does not establish that a device played it.
 
 In the phrase piano roll, `Space` plays or pauses, `0` restarts the active
 playback range and `.` stops. These controls also work while viewing harmony.
+`p` or `:play-cursor` starts a fresh audition at the edit cursor, through the
+end of the document (or the enabled loop range). If repetition is enabled,
+that temporary cursor-to-end window repeats; saved loop locators stay intact.
+The cursor must be inside the active range. Space pauses/resumes the current
+audition; `0` restarts its actual start, and `:seek` accepts positions inside
+that audition window. `0` retains that start while preparing or opening the
+player too; stop cancels an unfinished restart. Imported MIDI keeps its selected pattern and native
+PPQ/SMPTE timing. MIDI output reconstructs the entry state through the existing
+region player; FluidSynth and VST retain the complete source render and play
+its PCM window, including pre-cut pedal and instrument history.
 `i` lists instruments with separate **SoundFont · FluidSynth** and **SoundFont ·
 AlphaSynth** entries. `f` explicitly selects the configured SF2 with FluidSynth
 and previews it; the selected engine and frozen SF2 remain part of the saved

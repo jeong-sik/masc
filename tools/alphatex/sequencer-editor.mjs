@@ -5,6 +5,23 @@ import { validateSound } from './project-sound.mjs'
 import { noteSelectionCommand, retainNoteSelection, selectedNotes, moveSelectedNotes } from './note-selection.mjs'
 export { selectedNotes } from './note-selection.mjs'
 
+// An audition is a playback-only window. Saved loop locators, the source
+// performance and editor history keep their original identity.
+export function editorPlayback(editor, { loop = false, fromCursor = false } = {}) {
+  const source = editor.project.kind === 'midi-source'
+  if (source && !editor.performance) throw new Error('Choose a MIDI pattern before playback')
+  const end = source ? editor.performance.ticks : editor.project.length
+  const locators = source ? editor.sourceLoop : editor.project.loop
+  const range = { start: fromCursor ? editor.tick : loop ? locators.start : 0,
+    end: loop ? locators.end : end, repeat: loop }
+  if (fromCursor && (!Number.isSafeInteger(range.start) || range.start < (loop ? locators.start : 0)
+      || range.start >= range.end)) throw new Error('Place the cursor inside the playback range')
+  const windowed = loop || fromCursor
+  return { project: !source && fromCursor ? { ...editor.project, loop: { start: range.start, end: range.end } } : editor.project,
+    options: { loop: windowed, pattern: editor.pattern,
+      ...(source ? { sourceLoop: { start: range.start, end: range.end } } : {}) }, range }
+}
+
 export function editorSound(editor, sound) {
   validateSound(sound)
   const project = { ...editor.project, sound: structuredClone(sound) }
@@ -268,7 +285,7 @@ function runCommand(editor, line) {
       if (args[0] !== undefined && !['mix', 'track'].includes(args[0])) throw new Error('Use :harmony mix or :harmony track')
       return { editor, effect: { kind: 'harmony', scope: args[0] ?? 'mix' } }
     case 'harmony-export': count(1, Number.MAX_SAFE_INTEGER); return { editor, effect: { kind: 'harmony-export', path: args.join(' ') } }
-    case 'save': case 'play': case 'stop': case 'record': case 'help': case 'arrange':
+    case 'save': case 'play': case 'play-cursor': case 'stop': case 'record': case 'help': case 'arrange':
       count(0); return { editor, effect: { kind: command } }
     case 'save-as': case 'export': case 'wave': case 'output': case 'midi-output':
       count(1, Number.MAX_SAFE_INTEGER); return { editor, effect: { kind: command, path: args.join(' ') } }

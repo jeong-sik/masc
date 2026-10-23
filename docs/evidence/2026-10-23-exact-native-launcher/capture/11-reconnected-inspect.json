@@ -1,0 +1,713 @@
+{
+  "at": 1792751319.868866,
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/lane-addons",
+    "body": null,
+    "authorization": "private isolated admin bearer omitted"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name",
+      "access-control-expose-headers": "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining",
+      "vary": "Origin",
+      "etag": "W/\"bd72f16263eb\"",
+      "cache-control": "no-cache",
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "14303"
+    },
+    "body": {
+      "configuration": {
+        "directory": "/tmp/masc-exact-launcher-review-20261023/workspace/.masc/config/lane-addons",
+        "complete": true,
+        "issues": [],
+        "declarations": [
+          {
+            "id": "phrase-source",
+            "source_path": "/tmp/masc-exact-launcher-review-20261023/workspace/.masc/config/lane-addons/phrase-source.toml",
+            "enabled": true,
+            "source_revision": "70ccddbb5614340e9aa666780d16bc4b54f0d8cbdfd2fd459b5d48de1aeaa851",
+            "desired_revision": "66b81849b23e07c0b5eca3aea49252688a9bb54934fc7e10b18a22b420e22f55",
+            "applied_revision": "66b81849b23e07c0b5eca3aea49252688a9bb54934fc7e10b18a22b420e22f55",
+            "instance_id": "01a1684c-8c30-7000-9443-b69f977e36d8",
+            "application": {
+              "kind": "applied",
+              "instance_id": "01a1684c-8c30-7000-9443-b69f977e36d8"
+            },
+            "ui_category": "voice_media"
+          },
+          {
+            "id": "result-statistics",
+            "source_path": "/tmp/masc-exact-launcher-review-20261023/workspace/.masc/config/lane-addons/result-statistics.toml",
+            "enabled": true,
+            "source_revision": "b83f00fa409b2ad7ec81104605965273be580004b5e6f18d341c0e621962cc43",
+            "desired_revision": "4d1deae7eb25d85e0c0191c4f91b9694445df2f48b6727d747a67100494fe306",
+            "applied_revision": "4d1deae7eb25d85e0c0191c4f91b9694445df2f48b6727d747a67100494fe306",
+            "instance_id": "01a1684e-3662-7000-a3bc-86863a09eb2f",
+            "application": {
+              "kind": "applied",
+              "instance_id": "01a1684e-3662-7000-a3bc-86863a09eb2f"
+            },
+            "ui_category": "analysis"
+          }
+        ]
+      },
+      "instances": [
+        {
+          "runtime_presence": "live",
+          "host_requests": {
+            "cycles": 0,
+            "waiting": [],
+            "issue": null
+          },
+          "instance_id": "01a1684c-8c30-7000-9443-b69f977e36d8",
+          "incarnation": "01a1684c-8c30-7000-9443-b69f977e36d8",
+          "action_schema": null,
+          "run_id": "exact-launcher-review",
+          "addon_id": "vst-phrase",
+          "title": "Native MIDI phrase playback",
+          "revision": "0.1.0",
+          "phase": {
+            "kind": "attached"
+          },
+          "lifecycle": {
+            "kind": "attached"
+          },
+          "execution_authority": {
+            "kind": "host_process",
+            "installation_id": "phrase-source"
+          },
+          "resolved_image": null,
+          "observation_seq": 2,
+          "rows_count": 2,
+          "observation_pending": false,
+          "coalesced_wakes": 0,
+          "unchanged_source_refreshes": 0,
+          "binding": {
+            "sources": [
+              {
+                "path": "/tmp/masc-exact-launcher-review-20261023/workspace/inputs/phrase.json",
+                "source_id": "vst-phrase",
+                "kind": "snapshot_file"
+              }
+            ]
+          },
+          "source_access": {
+            "kind": "operator_configuration"
+          },
+          "package": {
+            "runtime": "host_process",
+            "ui_category": "voice_media",
+            "id": "vst-phrase",
+            "revision": "0.1.0",
+            "title": "Native MIDI phrase playback",
+            "contributions": [
+              "observe"
+            ],
+            "command": [
+              "python3",
+              "server.py"
+            ],
+            "directory": "/private/tmp/masc-exact-launcher-review-20261023/workspace/packages/vst-phrase",
+            "action_tool": null,
+            "state_storage": "ephemeral",
+            "tool_invocation": "direct",
+            "exported_tools": [],
+            "outputs": {
+              "phrase": {
+                "lanes": [
+                  "phrase"
+                ]
+              }
+            },
+            "refresh_policy": "every_hint",
+            "model_access": "disabled",
+            "binding_schema": {
+              "type": "object",
+              "properties": {
+                "sources": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "source_id": {
+                        "type": "string",
+                        "const": "vst-phrase"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "snapshot_file"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Native score companion snapshot.json on this host"
+                      }
+                    },
+                    "required": [
+                      "source_id",
+                      "kind",
+                      "path"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "sources"
+              ],
+              "additionalProperties": false
+            },
+            "presentation": {
+              "description": "Latest native phrase render and local player process state",
+              "readings": [
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "state"
+                  ],
+                  "label": "State",
+                  "unit": null,
+                  "format": "text"
+                },
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "selection",
+                    "name"
+                  ],
+                  "label": "Instrument",
+                  "unit": null,
+                  "format": "text"
+                },
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "selection",
+                    "preset_path"
+                  ],
+                  "label": "Preset",
+                  "unit": null,
+                  "format": "text"
+                },
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "render",
+                    "midi_sha256"
+                  ],
+                  "label": "MIDI SHA-256",
+                  "unit": null,
+                  "format": "text"
+                },
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "render",
+                    "duration_ms"
+                  ],
+                  "label": "Rendered audio",
+                  "unit": "ms",
+                  "format": "number"
+                },
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "error"
+                  ],
+                  "label": "Failure",
+                  "unit": null,
+                  "format": "text"
+                }
+              ]
+            },
+            "skills_directory": null,
+            "resources": {
+              "max_reply_bytes": 4194304
+            }
+          },
+          "visibility": {
+            "kind": "shared"
+          },
+          "configuration": {
+            "id": "phrase-source",
+            "source_path": "/tmp/masc-exact-launcher-review-20261023/workspace/.masc/config/lane-addons/phrase-source.toml",
+            "revision": "66b81849b23e07c0b5eca3aea49252688a9bb54934fc7e10b18a22b420e22f55"
+          },
+          "resource": {
+            "kind": "host_process",
+            "pid": 69936,
+            "started": "darwin:1792751209.524804"
+          }
+        },
+        {
+          "runtime_presence": "live",
+          "host_requests": {
+            "cycles": 0,
+            "waiting": [],
+            "issue": null
+          },
+          "instance_id": "01a1684e-3662-7000-a3bc-86863a09eb2f",
+          "incarnation": "01a1684e-3662-7000-a3bc-86863a09eb2f",
+          "action_schema": null,
+          "run_id": "exact-launcher-review",
+          "addon_id": "output-statistics",
+          "title": "Latest completed output statistics",
+          "revision": "0.1.0",
+          "phase": {
+            "kind": "attached"
+          },
+          "lifecycle": {
+            "kind": "attached"
+          },
+          "execution_authority": {
+            "kind": "host_process",
+            "installation_id": "result-statistics"
+          },
+          "resolved_image": null,
+          "observation_seq": 1,
+          "rows_count": 1,
+          "observation_pending": false,
+          "coalesced_wakes": 0,
+          "unchanged_source_refreshes": 0,
+          "binding": {
+            "sources": [
+              {
+                "source_id": "phrase-input",
+                "kind": "lane_output",
+                "installation_id": "phrase-source",
+                "output_id": "phrase",
+                "selection": "latest_completed"
+              }
+            ]
+          },
+          "source_access": {
+            "kind": "operator_configuration"
+          },
+          "package": {
+            "runtime": "host_process",
+            "ui_category": "analysis",
+            "id": "output-statistics",
+            "revision": "0.1.0",
+            "title": "Latest completed output statistics",
+            "contributions": [
+              "derive"
+            ],
+            "command": [
+              "python3",
+              "server.py"
+            ],
+            "directory": "/private/tmp/masc-exact-launcher-review-20261023/workspace/packages/output-statistics",
+            "action_tool": null,
+            "state_storage": "ephemeral",
+            "tool_invocation": "direct",
+            "exported_tools": [],
+            "outputs": {
+              "statistics": {
+                "all_lanes": true
+              }
+            },
+            "refresh_policy": "every_hint",
+            "model_access": "disabled",
+            "binding_schema": {
+              "type": "object",
+              "properties": {
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "Latest completed named output of another installation in the same run",
+                    "properties": {
+                      "source_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Name this input carries inside the package"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "lane_output"
+                      },
+                      "installation_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Stable id of the producing installation declaration"
+                      },
+                      "output_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Named output port published by the producer"
+                      },
+                      "selection": {
+                        "type": "string",
+                        "const": "latest_completed"
+                      }
+                    },
+                    "required": [
+                      "source_id",
+                      "kind",
+                      "installation_id",
+                      "selection"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "sources"
+              ],
+              "additionalProperties": false
+            },
+            "presentation": {
+              "description": null,
+              "readings": []
+            },
+            "skills_directory": null,
+            "resources": {
+              "max_reply_bytes": 4194304
+            }
+          },
+          "visibility": {
+            "kind": "shared"
+          },
+          "configuration": {
+            "id": "result-statistics",
+            "source_path": "/tmp/masc-exact-launcher-review-20261023/workspace/.masc/config/lane-addons/result-statistics.toml",
+            "revision": "4d1deae7eb25d85e0c0191c4f91b9694445df2f48b6727d747a67100494fe306"
+          },
+          "resource": {
+            "kind": "host_process",
+            "pid": 84600,
+            "started": "darwin:1792751318.630443"
+          }
+        },
+        {
+          "runtime_presence": "retained",
+          "phase": {
+            "kind": "detached"
+          },
+          "lifecycle": {
+            "kind": "detached",
+            "release": {
+              "kind": "native_released",
+              "installation_id": "result-statistics",
+              "instance_id": "01a1684d-3b95-7000-bd0e-95b4c4c6d51b"
+            }
+          },
+          "configuration": {
+            "id": "result-statistics",
+            "source_path": "/tmp/masc-exact-launcher-review-20261023/workspace/.masc/config/lane-addons/result-statistics.toml",
+            "revision": "4d1deae7eb25d85e0c0191c4f91b9694445df2f48b6727d747a67100494fe306"
+          },
+          "observation_seq": 1,
+          "instance_id": "01a1684d-3b95-7000-bd0e-95b4c4c6d51b",
+          "incarnation": "01a1684d-3b95-7000-bd0e-95b4c4c6d51b",
+          "action_schema": null,
+          "run_id": "exact-launcher-review",
+          "addon_id": "output-statistics",
+          "title": "Latest completed output statistics",
+          "revision": "0.1.0",
+          "execution_authority": {
+            "kind": "host_process",
+            "installation_id": "result-statistics"
+          },
+          "resolved_image": null,
+          "rows_count": 1,
+          "observation_pending": true,
+          "coalesced_wakes": 0,
+          "unchanged_source_refreshes": 0,
+          "binding": {
+            "sources": [
+              {
+                "source_id": "phrase-input",
+                "kind": "lane_output",
+                "installation_id": "phrase-source",
+                "output_id": "phrase",
+                "selection": "latest_completed"
+              }
+            ]
+          },
+          "source_access": {
+            "kind": "operator_configuration"
+          },
+          "package": {
+            "runtime": "host_process",
+            "ui_category": "analysis",
+            "id": "output-statistics",
+            "revision": "0.1.0",
+            "title": "Latest completed output statistics",
+            "contributions": [
+              "derive"
+            ],
+            "command": [
+              "python3",
+              "server.py"
+            ],
+            "directory": "/private/tmp/masc-exact-launcher-review-20261023/workspace/packages/output-statistics",
+            "action_tool": null,
+            "state_storage": "ephemeral",
+            "tool_invocation": "direct",
+            "exported_tools": [],
+            "outputs": {
+              "statistics": {
+                "all_lanes": true
+              }
+            },
+            "refresh_policy": "every_hint",
+            "model_access": "disabled",
+            "binding_schema": {
+              "type": "object",
+              "properties": {
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "Latest completed named output of another installation in the same run",
+                    "properties": {
+                      "source_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Name this input carries inside the package"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "lane_output"
+                      },
+                      "installation_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Stable id of the producing installation declaration"
+                      },
+                      "output_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Named output port published by the producer"
+                      },
+                      "selection": {
+                        "type": "string",
+                        "const": "latest_completed"
+                      }
+                    },
+                    "required": [
+                      "source_id",
+                      "kind",
+                      "installation_id",
+                      "selection"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "sources"
+              ],
+              "additionalProperties": false
+            },
+            "presentation": {
+              "description": null,
+              "readings": []
+            },
+            "skills_directory": null,
+            "resources": {
+              "max_reply_bytes": 4194304
+            }
+          },
+          "visibility": {
+            "kind": "shared"
+          },
+          "resource": {
+            "kind": "host_process",
+            "pid": 76284,
+            "started": "darwin:1792751254.424106"
+          }
+        }
+      ],
+      "rows": [
+        {
+          "id": "01a1684c-8c30-7000-9443-b69f977e36d8/2/2dd50728ba5027a50de337e80c1b00f6a5ee95b3a9ed44e1c5dd4d347c0b5710",
+          "lane_id": "01a1684c-8c30-7000-9443-b69f977e36d8/phrase",
+          "kind": "value",
+          "title": "SoundFont: failed",
+          "observed_at": 1792751303.093246,
+          "subject_id": "exact-launcher-fixture:2:1",
+          "clock": null,
+          "actor": null,
+          "fields": {
+            "source_id": "vst-phrase",
+            "incarnation": "declared-exact-launcher-fixture",
+            "source_event_id": "exact-launcher-fixture:2:1",
+            "state": "failed",
+            "selection": null,
+            "render": null,
+            "error": "Declared exact-launcher input v2 observation 1",
+            "scope": "latest_local_phrase_state",
+            "playback_evidence": "local player process events; device audibility is not measured",
+            "action_receipt": false
+          },
+          "evidence": [
+            {
+              "uri": "lane-evidence:72004f62c97b3a7fb19fd36c7a0d4e56322553687de6d667614bdc3ff5a70c0b",
+              "sha256": "72004f62c97b3a7fb19fd36c7a0d4e56322553687de6d667614bdc3ff5a70c0b"
+            }
+          ],
+          "related_ids": []
+        },
+        {
+          "id": "01a1684c-8c30-7000-9443-b69f977e36d8/2/70ee1464493e639cc78722a2338259c35519f71de10b47ceded7df7de77ef273",
+          "lane_id": "01a1684c-8c30-7000-9443-b69f977e36d8/phrase",
+          "kind": "value",
+          "title": "SoundFont: failed",
+          "observed_at": 1792751303.093248,
+          "subject_id": "exact-launcher-fixture:2:2",
+          "clock": null,
+          "actor": null,
+          "fields": {
+            "source_id": "vst-phrase",
+            "incarnation": "declared-exact-launcher-fixture",
+            "source_event_id": "exact-launcher-fixture:2:2",
+            "state": "failed",
+            "selection": null,
+            "render": null,
+            "error": "Declared exact-launcher input v2 observation 2",
+            "scope": "latest_local_phrase_state",
+            "playback_evidence": "local player process events; device audibility is not measured",
+            "action_receipt": false
+          },
+          "evidence": [
+            {
+              "uri": "lane-evidence:72004f62c97b3a7fb19fd36c7a0d4e56322553687de6d667614bdc3ff5a70c0b",
+              "sha256": "72004f62c97b3a7fb19fd36c7a0d4e56322553687de6d667614bdc3ff5a70c0b"
+            }
+          ],
+          "related_ids": []
+        },
+        {
+          "id": "01a1684e-3662-7000-a3bc-86863a09eb2f/1/42f3ad03980d81023374eeebc1f98e3321b6cd266d768f8fab9930ea17476f74",
+          "lane_id": "01a1684e-3662-7000-a3bc-86863a09eb2f/outputs/phrase-source/statistics",
+          "kind": "value",
+          "title": "Supplied output row statistics",
+          "observed_at": 1792751318.674426,
+          "subject_id": "phrase-source",
+          "clock": null,
+          "actor": null,
+          "fields": {
+            "source_id": "phrase-input",
+            "incarnation": "01a1684c-8c30-7000-9443-b69f977e36d8",
+            "source_event_id": "01a1684c-8c30-7000-9443-b69f977e36d8/output/2",
+            "scope": "supplied_latest_completed_output",
+            "observed_row_count": 2,
+            "observed_by_kind": {
+              "event": 0,
+              "value": 2,
+              "relation": 0
+            },
+            "input_complete": true,
+            "producer": {
+              "installation_id": "phrase-source",
+              "instance_id": "01a1684c-8c30-7000-9443-b69f977e36d8",
+              "run_id": "exact-launcher-review",
+              "configuration_revision": "66b81849b23e07c0b5eca3aea49252688a9bb54934fc7e10b18a22b420e22f55",
+              "package_revision": "0.1.0",
+              "observation_seq": 2,
+              "output_id": "phrase",
+              "output_selection": {
+                "lanes": [
+                  "phrase"
+                ]
+              },
+              "coverage_scope": "whole_producer"
+            },
+            "producer_status": {
+              "source_id": "01a1684c-8c30-7000-9443-b69f977e36d8",
+              "incarnation": "01a1684c-8c30-7000-9443-b69f977e36d8",
+              "cursor": "2",
+              "complete": true,
+              "detail": null
+            },
+            "upstream_coverage": [
+              {
+                "source_id": "vst-phrase",
+                "incarnation": "declared-exact-launcher-fixture",
+                "cursor": "2",
+                "complete": true,
+                "detail": "Explicit local input fixture v2: two observations; no audio or playback"
+              }
+            ],
+            "upstream_rows": [
+              {
+                "id": "01a1684c-8c30-7000-9443-b69f977e36d8/2/2dd50728ba5027a50de337e80c1b00f6a5ee95b3a9ed44e1c5dd4d347c0b5710",
+                "lane_id": "01a1684c-8c30-7000-9443-b69f977e36d8/phrase",
+                "kind": "value",
+                "subject_id": "exact-launcher-fixture:2:1",
+                "observed_at": 1792751303.093246,
+                "clock": null,
+                "actor": null,
+                "evidence": [
+                  {
+                    "uri": "lane-evidence:72004f62c97b3a7fb19fd36c7a0d4e56322553687de6d667614bdc3ff5a70c0b",
+                    "sha256": "72004f62c97b3a7fb19fd36c7a0d4e56322553687de6d667614bdc3ff5a70c0b"
+                  }
+                ]
+              },
+              {
+                "id": "01a1684c-8c30-7000-9443-b69f977e36d8/2/70ee1464493e639cc78722a2338259c35519f71de10b47ceded7df7de77ef273",
+                "lane_id": "01a1684c-8c30-7000-9443-b69f977e36d8/phrase",
+                "kind": "value",
+                "subject_id": "exact-launcher-fixture:2:2",
+                "observed_at": 1792751303.093248,
+                "clock": null,
+                "actor": null,
+                "evidence": [
+                  {
+                    "uri": "lane-evidence:72004f62c97b3a7fb19fd36c7a0d4e56322553687de6d667614bdc3ff5a70c0b",
+                    "sha256": "72004f62c97b3a7fb19fd36c7a0d4e56322553687de6d667614bdc3ff5a70c0b"
+                  }
+                ]
+              }
+            ]
+          },
+          "evidence": [
+            {
+              "uri": "lane-evidence:b6b91ab2c2f115c5761c0fe26d9fd021f38422543f5730574d8d6c84d3bf59f1",
+              "sha256": "b6b91ab2c2f115c5761c0fe26d9fd021f38422543f5730574d8d6c84d3bf59f1"
+            }
+          ],
+          "related_ids": []
+        }
+      ],
+      "coverage": [
+        {
+          "source_id": "01a1684c-8c30-7000-9443-b69f977e36d8",
+          "incarnation": "01a1684c-8c30-7000-9443-b69f977e36d8",
+          "cursor": "2",
+          "complete": true,
+          "detail": null
+        },
+        {
+          "source_id": "vst-phrase",
+          "incarnation": "declared-exact-launcher-fixture",
+          "cursor": "2",
+          "complete": true,
+          "detail": "Explicit local input fixture v2: two observations; no audio or playback"
+        },
+        {
+          "source_id": "01a1684e-3662-7000-a3bc-86863a09eb2f",
+          "incarnation": "01a1684e-3662-7000-a3bc-86863a09eb2f",
+          "cursor": "1",
+          "complete": true,
+          "detail": null
+        },
+        {
+          "source_id": "phrase-input",
+          "incarnation": "01a1684c-8c30-7000-9443-b69f977e36d8",
+          "cursor": "2",
+          "complete": true,
+          "detail": null
+        }
+      ]
+    }
+  }
+}

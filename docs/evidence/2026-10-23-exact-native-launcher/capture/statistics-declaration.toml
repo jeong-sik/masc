@@ -1,0 +1,6 @@
+enabled = true
+id = "result-statistics"
+run_id = "exact-launcher-review"
+manifest_path = "/tmp/masc-exact-launcher-review-20261023/workspace/packages/output-statistics/lane.toml"
+[binding]
+sources = [{source_id = "phrase-input", kind = "lane_output", installation_id = "phrase-source", output_id = "phrase", selection = "latest_completed"}]

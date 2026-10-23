@@ -1,0 +1,44 @@
+[
+  {
+    "candidate": "/private/tmp/masc-addon-goal-resume-20261021/native-39937556339/masc-native-addon-launcher",
+    "available": true,
+    "realpath": "/private/tmp/masc-addon-goal-resume-20261021/native-39937556339/masc-native-addon-launcher",
+    "sha256": "fe2803bcddbed5865a5d6213b8340da3c188d67e1a0063391255711ac046e93d"
+  },
+  {
+    "candidate": "/tmp/masc-addon-goal-resume-20261021/native-39937556339/masc-native-addon-launcher",
+    "available": true,
+    "realpath": "/private/tmp/masc-addon-goal-resume-20261021/native-39937556339/masc-native-addon-launcher",
+    "sha256": "fe2803bcddbed5865a5d6213b8340da3c188d67e1a0063391255711ac046e93d"
+  },
+  {
+    "candidate": "/opt/homebrew/bin/masc-native-addon-launcher",
+    "available": false,
+    "realpath": "/opt/homebrew/bin/masc-native-addon-launcher",
+    "sha256": null
+  },
+  {
+    "candidate": "/usr/bin/masc-native-addon-launcher",
+    "available": false,
+    "realpath": "/usr/bin/masc-native-addon-launcher",
+    "sha256": null
+  },
+  {
+    "candidate": "/bin/masc-native-addon-launcher",
+    "available": false,
+    "realpath": "/bin/masc-native-addon-launcher",
+    "sha256": null
+  },
+  {
+    "candidate": "/usr/sbin/masc-native-addon-launcher",
+    "available": false,
+    "realpath": "/usr/sbin/masc-native-addon-launcher",
+    "sha256": null
+  },
+  {
+    "candidate": "/sbin/masc-native-addon-launcher",
+    "available": false,
+    "realpath": "/sbin/masc-native-addon-launcher",
+    "sha256": null
+  }
+]

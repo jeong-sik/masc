@@ -1,0 +1,35 @@
+{
+  "source_id": "vst-phrase",
+  "incarnation": "declared-exact-launcher-fixture",
+  "cursor": "2",
+  "complete": true,
+  "detail": "Explicit local input fixture v2: two observations; no audio or playback",
+  "observations": [
+    {
+      "id": "exact-launcher-fixture:2:1",
+      "kind": "vst_phrase",
+      "observed_at": 1792751303.093246,
+      "actor": null,
+      "evidence": [],
+      "fields": {
+        "state": "failed",
+        "selection": null,
+        "render": null,
+        "error": "Declared exact-launcher input v2 observation 1"
+      }
+    },
+    {
+      "id": "exact-launcher-fixture:2:2",
+      "kind": "vst_phrase",
+      "observed_at": 1792751303.093248,
+      "actor": null,
+      "evidence": [],
+      "fields": {
+        "state": "failed",
+        "selection": null,
+        "render": null,
+        "error": "Declared exact-launcher input v2 observation 2"
+      }
+    }
+  ]
+}

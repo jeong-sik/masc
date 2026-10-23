@@ -1,0 +1,44 @@
+[
+  {
+    "path": "lib/keeper/keeper_carried_front.ml",
+    "first_line": 3,
+    "last_line": 8,
+    "sha256": "6c4b1c5dc104a429735529646e46380436e98c85b1e08bd733293ce662a32603"
+  },
+  {
+    "path": "lib/keeper/keeper_carried_front.ml",
+    "first_line": 15,
+    "last_line": 22,
+    "sha256": "ebc415181301d2522545421818a73a3ab3eb0783f132013d2bb26323454c8737"
+  },
+  {
+    "path": "lib/keeper/keeper_carried_front.ml",
+    "first_line": 339,
+    "last_line": 363,
+    "sha256": "62bcb45987661ee11731915b1dfc948ebac044210d6b5725e454cb8a9c34471f"
+  },
+  {
+    "path": "bin/masc_tui_context_inspector.ml",
+    "first_line": 81,
+    "last_line": 94,
+    "sha256": "dc4d3aa6dd7f277624f4085011e02b35e7d7cd0ff452fa2368148d06f0de85a6"
+  },
+  {
+    "path": "bin/masc_tui_context_inspector.ml",
+    "first_line": 244,
+    "last_line": 243,
+    "sha256": "f1bdcf5e360000131dc6c71b7c523acc150dc939dababef1635f67ed22286085"
+  },
+  {
+    "path": "bin/masc_tui_context_inspector.ml",
+    "first_line": 345,
+    "last_line": 357,
+    "sha256": "963db76967ee2c42025c4cfd2999df83eec5ed2bf0a9c5c039726fb75f85467a"
+  },
+  {
+    "path": "bin/masc_tui_context_inspector.ml",
+    "first_line": 961,
+    "last_line": 1006,
+    "sha256": "eedb58b1af88da508e14d589391e83e32b07def7d35fff43ce56b568d26050c3"
+  }
+]

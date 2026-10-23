@@ -605,49 +605,12 @@ val run_try_provider :
   * Agent_core.Checkpoint.t option
   * (string * Obj.t) option
 
-type eviction_retry =
-  | Evicted_blocks of Keeper_carried_range.step
-      (** The oldest blocks of the pair's ledger left. *)
-  | Halved_range of
-      { first_atom : int
-      ; atom_count : int
-      }
-      (** No block structure to walk: the range halved toward the newest
-          atom. *)
-
-val carried_range_eviction_sequence :
-  same_run_retry_authorized:(unit -> bool) ->
-  ledger:(unit -> Keeper_model_input_ledger.t option) ->
-  last_request:(unit -> Keeper_model_input_ledger.request option) ->
-  marks:Runtime_schema.context_marks option ->
-  evict:(Keeper_carried_range.step -> bool) ->
-  hold_front:(Keeper_carried_front.seed -> unit) ->
-  halve:(first_atom:int -> atom_count:int -> retry:int -> bool) ->
-  on_retry:(retry:int -> eviction_retry -> unit) ->
-  attempt:(unit -> ('ok, Agent_core.Error.t) result) ->
-  unit ->
-  ('ok, Agent_core.Error.t) result
-(** The Agent Core lane's retry policy over an injected [attempt] (RFC
-    keeper-context-window-in-tokens §10.5). A provider context overflow or a
-    size refusal on the byte axis is answered from the pair's ledger with
-    {!Keeper_carried_range.after_overflow}; [evict] applies a step beyond the
-    refused request's front and [hold_front] shares it with later candidates.
-    When the ledger has no block structure ahead of the actual request, no
-    usage counted yet or a single block, [last_request]'s range halves
-    toward the newest atom through [halve], which answers [false] when it
-    cannot name the halved front by its opening message and so ends the
-    sequence with the refusal in hand, as a refused single atom does
-    ({!current_turn_demotion_sequence} answers what is left). Every retry follows a move
-    that [evict] or [halve] reported, so the sequence never resends the range
-    that was refused. Every other error ends it at once, as does a refusal
-    once [same_run_retry_authorized] is [false]. *)
-
 val boundary_resend_on : Agent_core.Error.t -> bool
 (** The refusals {!turn_boundary_resend_sequence} answers: a typed size
     refusal ([ContextOverflow], [Request_body_refused_by_provider]) and a
     refusal whose reason agent core does not model
     ([Unknown_invalid_request]), which is how live size refusals arrive.
-    [refusal_evicts] names only the typed two (#38286). A refusal that was
+    [is_size_refusal] names only the typed two (#38286). A refusal that was
     not about size is refused again from the boundary, the front held before
     it is given back, and no accepted start at the boundary is recorded; one
     that was leaves atoms the Librarian still reads. *)
@@ -675,7 +638,7 @@ val turn_boundary_resend_sequence :
     [same_run_retry_authorized] holds, the boundary is given to [hold_front]
     as the turn's front, [on_turn_start] is told, and [attempt] runs once
     more; its result is returned as it is. When that second attempt is
-    refused for a reason {!refusal_evicts} does not name, [restore_front]
+    refused for a reason {!is_size_refusal} does not name, [restore_front]
     gets back what [held_front] reported before the hold, so a refusal that
     was not about size leaves the turn's front where it was. Every other failure is returned
     at once, so a candidate that already opens at the held boundary is not
@@ -704,7 +667,7 @@ val current_turn_demotion_sequence :
   ('ok, Agent_core.Error.t) result
 (** The last answer to a size refusal, on every continuity (RFC
     keeper-context-window-in-tokens §10.4, §13.9). When [first] fails with a
-    refusal {!carried_range_eviction_sequence} would move the front for,
+    typed size refusal {!is_size_refusal} names,
     [same_run_retry_authorized] holds, and [demotable] names the refused
     request's atom count because demoting this turn's tool results in it
     would carry fewer bytes, [demote] is told and [resend] runs once; its
@@ -924,30 +887,6 @@ module For_testing : sig
       by a valid later [after_refusal] front. With neither, [cold ()]. A ledger
       that does not hold is returned second; the current table entry is
       independently checked before discarding or adopting it. *)
-
-  val move_ledger_front :
-    Keeper_model_input_ledger.t option ref ->
-    first_atom:int -> front_digest:string -> bool
-  (** Move only the candidate's working value. *)
-
-  val evict_at_turn_boundary :
-    keeper_name:string -> runtime_id:string ->
-    context_marks:Runtime_schema.context_marks option ->
-    Keeper_model_input_ledger.t option ref -> unit
-  (** Apply this runtime's declared marks to its candidate's working value. *)
-
-  val halve_front :
-    digest_at:(int -> string option) option ->
-    move_ledger:(first_atom:int -> front_digest:string -> bool) ->
-    hold:(Keeper_carried_front.seed -> unit) ->
-    first_atom:int ->
-    retry:int ->
-    bool
-  (** One halving after a refusal: whether the retry carries a strictly
-      later front, chosen by {!Keeper_carried_front.halve} on the refused
-      request. [false] when [digest_at] has no atom there. Otherwise [hold]
-      keeps the seed even if the ledger predates that position and cannot
-      move to it; the next composition uses the held front. *)
 
   val offload_model_input_cpu : (unit -> 'a) -> 'a
 

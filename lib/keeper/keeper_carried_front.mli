@@ -18,13 +18,13 @@
     the trace -- and every runtime cuts its request from that one history,
     so a position measured on one names the same atom on the next. While the
     process holds a ledger for the (keeper, runtime) pair, the seed is the
-    ledger's: the last request's front as every eviction since moved it.
+    ledger's: the last request's observed front.
     Without one, it is the range the newest turn record joined to an actual
     provider response, whichever runtime observed it -- an official client's
     record counts the same history as an Agent Core one -- read as
     [total_atoms - transmitted_atoms]. A front a refusal moved in this turn
-    ({!Halved_after_refusal}, {!Evicted_after_refusal},
-    {!Turn_start_after_seed_refusal}) belongs to the turn and takes
+    ({!Turn_start_after_seed_refusal}, {!Turn_start_after_librarian_refusal})
+    belongs to the turn and takes
     precedence over an older front in a later candidate's ledger.
 
     A front is a position witnessed by an opening-message digest
@@ -35,17 +35,11 @@
     purge that rewrote the message opening the front drops it. *)
 
 type source =
-  | Ledger  (** The pair's ledger, moved by every eviction since its last request. *)
+  | Ledger  (** The pair's last observed request range. *)
   | Turn_record of { turn : int }
       (** The newest turn record on the trace with a request range joined to
           an actual provider response, whichever runtime ran it. The whole
           turn may still have ended in error after that response. *)
-  | Halved_after_refusal of { retry : int }
-      (** A provider or wire refusal with no block ahead to evict: the range
-          was halved toward the newest atom on retry [retry]. *)
-  | Evicted_after_refusal of { retry : int }
-      (** A provider or wire refusal moved the front past measured blocks.
-          The turn shares this position with its later candidates. *)
   | Turn_start_after_seed_refusal
       (** With no Librarian point, the provider refused the range a seed
           opened as too large: the front moved to the turn boundary, and the
@@ -273,10 +267,6 @@ val warn_if_origin_is_unknown_start : keeper_name:string -> origin -> unit
 (** {!warn_range_opens_on_newest_atom} when the request's range opened at
     [Turn_start_unknown]; nothing for any other origin. *)
 
-val halve : first_atom:int -> atom_count:int -> int option
-(** The front moved halfway to the newest atom, or [None] when the range is
-    already a single atom and cannot shrink. *)
-
 val source_to_string : source -> string
 val seed_to_json : seed -> Yojson.Safe.t
 (** [first_atom], [front] and [source]. *)
@@ -284,8 +274,7 @@ val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind], one per constructor: [ledger];
-    [turn_record] with [turn]; [halved_after_refusal] or
-    [evicted_after_refusal] with [retry]; [turn_start_after_seed_refusal];
+    [turn_record] with [turn]; [turn_start_after_seed_refusal];
     [turn_start_after_librarian_refusal];
     [librarian_snapshot] with [end_atom] and [boundary_line];
     [librarian_progress] with [end_atom]; [past_librarian_point] with

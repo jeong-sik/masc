@@ -1712,11 +1712,10 @@ streaming = true
 max-output-tokens = 128000
 
 [glm-coding.glm-5-3]
-# The marks are read only by a turn with no Librarian continuity, which a
-# Keeper turn on a trace always has (Keeper_turn_driver_try_provider
-# .evict_at_turn_boundary); such a turn starts at the absorbed point or the
-# turn boundary. RFC keeper-context-window-in-tokens §13.2 removes the marks
-# once its §13.7 preconditions hold.
+# These binding marks remain in the configuration and forecast metadata.
+# Keeper history starts at its checked continuity or accepted front;
+# completion review preserves its original evidence. Global declaration
+# removal follows RFC keeper-context-window-in-tokens §13.7 prerequisites.
 context-high-water-tokens = 100000
 context-low-water-tokens = 70000
 max-concurrent = 4

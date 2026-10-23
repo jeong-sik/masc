@@ -999,24 +999,12 @@ let test_clamp_keeps_the_front_on_an_atom () =
   check int "empty history" 0 (Front.clamp ~atom_count:0 3)
 ;;
 
-let test_halve_moves_halfway_and_stops_at_one_atom () =
-  check (option int) "10 of 20 carried: halfway is 15" (Some 15) (Front.halve ~first_atom:10 ~atom_count:20);
-  check (option int) "three carried" (Some 18) (Front.halve ~first_atom:17 ~atom_count:20);
-  check (option int) "two carried: one" (Some 19) (Front.halve ~first_atom:18 ~atom_count:20);
-  check (option int) "one carried cannot shrink" None (Front.halve ~first_atom:19 ~atom_count:20);
-  check (option int) "a front past the newest is one atom too" None (Front.halve ~first_atom:40 ~atom_count:20)
-;;
-
 let test_origin_json_names_its_kind () =
   let kind origin =
     Yojson.Safe.Util.(Front.origin_to_json origin |> member "kind" |> to_string)
   in
   check string "ledger" "ledger" (kind (Front.Carried Front.Ledger));
   check string "turn record" "turn_record" (kind (Front.Carried (Front.Turn_record { turn = 3 })));
-  check string "halved" "halved_after_refusal"
-    (kind (Front.Carried (Front.Halved_after_refusal { retry = 1 })));
-  check string "evicted" "evicted_after_refusal"
-    (kind (Front.Carried (Front.Evicted_after_refusal { retry = 1 })));
   check string "turn start" "turn_start" (kind (Front.Turn_start { end_atom = 12 }));
   check int "and the turn start names its atom" 12
     Yojson.Safe.Util.(Front.origin_to_json (Front.Turn_start { end_atom = 12 }) |> member "end_atom" |> to_int);
@@ -1120,7 +1108,6 @@ let () =
         ; test_case "a joining tool result keeps the front" `Quick
             test_a_tool_result_joining_the_front_atom_keeps_the_front
         ; test_case "clamp" `Quick test_clamp_keeps_the_front_on_an_atom
-        ; test_case "halve" `Quick test_halve_moves_halfway_and_stops_at_one_atom
         ; test_case "origin json" `Quick test_origin_json_names_its_kind
         ; test_case "only an unknown start origin warns" `Quick
             test_only_an_unknown_start_origin_warns

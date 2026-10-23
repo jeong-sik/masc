@@ -21,7 +21,15 @@ def control(conn):
     with conn:
         req=json.loads(conn.makefile("rb").readline())
         if req["incarnation"]!=a.incarnation: raise RuntimeError("wrong incarnation")
-        if req["operation"]!="snapshot": raise RuntimeError("fixture exposes snapshot only")
+        op=req["operation"]
+        if op in ("download_claim","download_commit","download_release"):
+            with open(os.path.join(a.root,"downloads.json")) as src: downloads=json.load(src)
+            if req["id"] not in downloads: raise RuntimeError("unknown download grant")
+            if op=="download_claim": result={"reply":"download","value":{"kind":"published","receipt":downloads[req["id"]]}}
+            else: result={"reply":"receipt"}
+            conn.sendall((json.dumps(result)+"\n").encode())
+            return
+        if op!="snapshot": raise RuntimeError("fixture exposes snapshot and download grants only")
         with open(os.path.join(a.root,"clients.json")) as src: clients=json.load(src)
         result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False},"stagehand":{"activity":"disabled","registered":False,"session":"unknown","locate":False}}}}
         conn.sendall((json.dumps(result)+"\n").encode())
@@ -101,7 +109,7 @@ let response ~clients ~route verb answer =
   Mcp_protocol.Mcp_types.tool_result_to_yojson {
     content=[];is_error=Some (Tool_result.is_failed typed);structured_content=Some data;
     _meta=Lane_addon_tool_result.metadata typed}
-let with_worker ?(clients=[]) ~env ~config ~respond run =
+let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
   let root=Filename.temp_dir "browser-addon-fixture-" "" in
   let previous=Sys.getenv_opt "PATH" in
   let launcher=Filename.concat (Filename.dirname Sys.executable_name) "../bin/masc_native_addon_launcher.exe"
@@ -129,6 +137,8 @@ let with_worker ?(clients=[]) ~env ~config ~respond run =
           (Yojson.Safe.to_string (`List (List.map (fun client -> match W.client_to_json client with
              | `Assoc fields -> `Assoc (("interactions",`List [])::fields)
              | value -> value) clients)));
+        write (Filename.concat root "downloads.json")
+          (Yojson.Safe.to_string (`Assoc downloads));
         write (Filename.concat root "tool.json") (Yojson.Safe.to_string (`Assoc [
           "name",`String tool.name;"inputSchema",tool.input_schema;
           "outputSchema",Option.get tool.output_schema]));

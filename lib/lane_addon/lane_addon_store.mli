@@ -6,6 +6,10 @@ val create : root:string -> t
     resulting absolute ownership boundary is retained by the store. *)
 val root : t -> string
 val digest : string -> string
+(** SHA-256 of every original byte, unchanged by internal feed boundaries.
+    Bounded C feeds allow the runtime to service another systhread between
+    chunks; they neither cap the input nor introduce an Eio suspension. The
+    caller still owns CPU scheduling and cancellation of the complete work. *)
 val blob_reference : string -> Lane_addon_types.evidence
 (** Content-addressed reference without writing. It may be used to measure a
     complete acquisition envelope; publish it only after [write_blob] succeeds. *)

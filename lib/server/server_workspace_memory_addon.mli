@@ -101,9 +101,11 @@ type original = private {
 val discover : config:Workspace.config -> (original list, error) Stdlib.result
 (** Strict complete original discovery and physical/ancestry validation precede
     every recovery write. Recover only already durable Subdividing intentions,
-    including child-retained-before-parent-ACK, then freshly discover and fully
-    restore every original. A missing acknowledged child, malformed member or
-    incomplete publication rejects the inventory; no partial list is complete.
+    including child-retained-before-parent-ACK. Without a recoverable intention,
+    restore the already validated inventory from this pass. After any recovery,
+    freshly discover and fully restore every original. A missing acknowledged
+    child, malformed member or incomplete publication rejects the inventory;
+    no partial list is complete.
     Works locally while Off, minting no ID or new successor intention. It does
     not dispatch, settle domains, prepare observers or schedule new roots.
     Caller holds the workspace process lease and serializes the entire pass;
@@ -167,6 +169,13 @@ module For_testing : sig
     (original list, error) Stdlib.result
   (** Same actual complete discovery, physical forest validation and existing
       successor recovery. Only the store root/workspace is supplied. *)
+  val discover_observed : store:Lane_addon_store.t -> base_path:string ->
+    after_inventory:(unit -> unit) -> (original list, error) Stdlib.result
+  (** Same discovery, with a callback after each actual strict [Owner.discover]
+      return (including errors), before workspace/forest validation. The callback
+      runs in the inventory system thread, outside the store's inventory lock;
+      it neither supplies nor replaces the read result. This fixture edge can
+      observe reads and arrange a physical change before recovery/revalidation. *)
   val prepare_observation : store:Lane_addon_store.t -> base_path:string ->
     request_id:string -> now:(unit -> float) -> (observation, error) Stdlib.result
   (** Same real journal and strict restore; only the first observer clock edge

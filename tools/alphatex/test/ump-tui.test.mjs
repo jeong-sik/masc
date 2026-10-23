@@ -1,13 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { readFile } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import JZZ from 'jzz'
 import { newUmpEditor, umpEditorAction, umpEditorCommand } from '../ump-editor.mjs'
 import { umpSourceNotes } from '../ump-source.mjs'
 import { packet } from './helpers/captured-midi-fixture.mjs'
+import { loadSubstituted } from './helpers/substituted-module.mjs'
 
 const flush = () => new Promise(resolve => setImmediate(resolve))
 async function controller({ preview = async () => {}, exported = async () => {} } = {}) {
@@ -15,13 +14,10 @@ async function controller({ preview = async () => {}, exported = async () => {} 
     stdout: Object.assign(new EventEmitter(), { isTTY: true, columns: 100, rows: 24, write() {} }) }
   const asset = { name: 'Keys', parts: { midi: { sha256: 'a'.repeat(64) } } }
   const packets = [packet(0n, 'A', [JZZ.UMP.umpNoteOn(0, 0, 60, 0x9001)]), packet(100n, 'A', [JZZ.UMP.umpNoteOff(0, 0, 60, 0x1234)])]
-  const slot = `ump-controller-${randomUUID()}`
-  globalThis[slot] = { process, isDeepStrictEqual, newUmpEditor, umpEditorAction, umpEditorCommand, safeText: String, emitKeypressEvents() {} }
-  const source = (await readFile(new URL('../ump-tui.mjs', import.meta.url), 'utf8')).replace(/^import .*$/gm, '')
-  const prefix = `const {${Object.keys(globalThis[slot]).join(',')}}=globalThis[${JSON.stringify(slot)}];\n`
-  const { viewUmpEditor } = await import('data:text/javascript;base64,' + Buffer.from(prefix + source).toString('base64'))
+  const substitutes = { isDeepStrictEqual, newUmpEditor, umpEditorAction, umpEditorCommand, safeText: String, emitKeypressEvents() {} }
+  const { viewUmpEditor } = await loadSubstituted(new URL('../ump-tui.mjs', import.meta.url), substitutes, { globals: { process } })
   const abort = new AbortController()
-  const done = viewUmpEditor({ asset, packets, signal: abort.signal, onPreview: preview, onExport: exported }).finally(() => { delete globalThis[slot] })
+  const done = viewUmpEditor({ asset, packets, signal: abort.signal, onPreview: preview, onExport: exported })
   const key = (name, text = '', extra = {}) => process.stdin.emit('keypress', text, { name, ...extra })
   return { asset, packets, done, abort, process, key, command(line) { key(undefined, ':'); key(undefined, line); key('return') } }
 }

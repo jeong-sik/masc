@@ -4075,7 +4075,7 @@ module For_testing = struct
           | None -> ()
           | Some e ->
               let rec wait () =
-                if e.running then (Eio.Condition.await e.changed; wait ())
+                if e.running then (Eio.Condition.await_no_mutex e.changed; wait ())
               in wait ())
   let with_tool_change_handler handler f =
     let previous= !tool_change_handler in

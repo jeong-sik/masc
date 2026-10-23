@@ -40,13 +40,13 @@ related: ["workspace-curator-curates-changed-facts"]
 
 | 경우 | 기록에 남는 것 | 결과(final) |
 |---|---|---|
-| 서버가 멈춤 | 시작 표시 `null` 만 남는다(`lib/lane_addon/lane_addon_exact.ml:722`). 다음 프로세스가 읽을 때 복구가 결과를 쓴다(`:659-666`) | `outcome_unknown`, 마지막 시도 `null` |
+| 서버가 멈출 때 호출이 끝나지 않았고 proof 도 없음 | 시작 표시 `null` 이 남는다(`lib/lane_addon/lane_addon_exact.ml:722`, 취소 전파 `:729`). 다음 프로세스가 읽을 때 복구가 결과를 쓴다(`:659-666`) | `outcome_unknown`, 마지막 시도 `null` |
 | 프로세스 안에서 끊김 | 취소는 Exact 를 지나 위로 올라간다(`:729`). 저장 실패는 `Error` 로 끝난다(`:734-746`). 어느 쪽이든 시작 표시만 남고, 같은 프로세스가 다시 읽을 때 복구가 결과를 쓴다 | `outcome_unknown`, 마지막 시도 `null` |
 | 예외 | 그 자리에서 쓴다(`:726-733`, `:740-742`) | `outcome_unknown`, 마지막 시도 `{"status":"outcome_unknown","exception":"<문구>"}` |
 
 앞의 두 경우는 같은 기록을 남긴다. 그래서 지금은 구분할 방법이 없다.
 
-- 서버에는 종료 신호 처리기가 없다. `lib/` 와 `bin/` 의 서버 경로에 `Sys.signal` 도 `Sys.catch_break` 도 없다. takeover 는 응답하지 않는 이전 서버에 SIGTERM 을 보낸다(`lib/server/server_startup_takeover.ml:765`). 그래서 서버가 멈출 때는 OCaml 코드가 돌지 않고, 그 순간 아무것도 쓸 수 없다.
+- 서버는 `Sys.set_signal` 로 SIGTERM·SIGINT 처리기를 설치한다(`bin/main_eio.ml:773-780`). 처리기는 종료 중임을 표시하고, watcher 는 알림·shutdown hooks 뒤 Eio 로 서버와 배경 fiber 를 취소한다(`:829-928`). takeover 도 이전 서버에 SIGTERM 을 보낸다(`lib/server/server_startup_takeover.ml:765`). 종료 절차 중 호출이 끝나 proof 를 쓰면 그 결과를 복구한다. Eio 취소는 Exact 를 지나 전파되므로(`lane_addon_exact.ml:729`), proof 없이 시작 표시가 남을 수도 있다. SIGKILL 이나 프로세스의 급작스러운 종료도 같은 표시를 남길 수 있다. 재시작이라고 반드시 시작 표시만 남는 것은 아니다.
 - 프로세스 안에서 호출을 끊는 곳은 여럿이다.
   - runtime 은 Exact 호출을 `Eio.Cancel.sub` 로 감싸고, 자기가 건 취소만 삼킨다(`lib/lane_addon/lane_addon_runtime.ml:1062-1085`).
   - `retire_admission`(`:194-196`)이 호출을 `Worker_detached` 로 취소한다. 부르는 곳은 여섯이다. 요청 감시 실패(`:1252`), 상태 저장 실패(`:1282`), worker 프로세스 종료(`:1314`), browser 호출 취소(`:1948`), Keeper 의 export 도구 호출 취소(`:2173`), detach(`:3007`).
@@ -92,6 +92,7 @@ related: ["workspace-curator-curates-changed-facts"]
   - 표시의 incarnation 이 이 프로세스와 다르면 `interrupted` 다. 시작한 프로세스가 끝나기 전에 멈췄다.
   - 같으면 `cut` 이다. 이 프로세스가 시작했는데 지금 돌리지 않는다(claim 했으므로). 취소됐거나 호출 뒤 저장이 실패했다.
 - proof 가 있으면 지금처럼 proof 로 끝낸다(`:667-671`). 원인이 필요 없다.
+- graceful shutdown 중에도 같은 규칙을 쓴다. 종료 중임을 보고 원인을 덮어쓰지 않는다. 같은 incarnation 이 취소된 호출을 복구하면 `cut` 이고, 복구하지 못한 시작 표시를 다음 프로세스가 읽으면 `interrupted` 다. shutdown 알림·hooks 중 끝난 호출의 proof 는 어느 경우든 우선한다.
 - 복구는 시작 표시를 원인을 적은 시도로 바꾸고 결과를 쓴다.
   - `{"status":"outcome_unknown","cause":"interrupted"}`
   - `{"status":"outcome_unknown","cause":"cut"}`
@@ -181,7 +182,7 @@ type retained_observation =
 - Librarian
   - `observe_retained` 를 쓰는 두 곳(`keeper_librarian_durable_request.ml:314-320`, `keeper_librarian_admission_capture.ml:369-375`)은 `delivered` 로 worker 결과와 비교한다.
   - `outcome_unknown` 을 기다림으로 다루는 동작(`keeper_librarian_durable_owner.ml:171`)은 원인과 상관없이 그대로다.
-  - 공용 흐름의 증거 모양이 바뀌므로 Librarian 원본 기록도 하드컷 대상이다. 2026-10-23 기준 라이브에 Librarian 은 설치돼 있지 않다.
+  - 공용 흐름의 증거 모양이 바뀌므로 Librarian 원본 기록도 3.8 의 조건부 하드컷 대상이다. 2026-10-23 라이브 스냅샷에는 Librarian 설치가 없었다. 배포 때는 설치 유무와 별도로 남아 있는 원본 기록도 확인한다.
 - Candle Appraiser 는 자기 흐름을 쓰고 worker 결과만 본다(`server_candle_appraiser.ml:57`, `:179`). 바뀌지 않는다.
 - browser 모델 요청(`browser_addon_models.ml:122-127`, `browser_addon_locate.ml:50`)은 `run` 이 돌려주는 worker 결과만 본다. 바뀌지 않는다.
 - operator-quiz 는 worker 결과의 `status` 만 본다. 바뀌지 않는다.
@@ -194,8 +195,22 @@ type retained_observation =
    - 결과가 `outcome_unknown` 인 기록과, 결과 없이 `null` 시작 표시로 끝나는 기록이다.
 2. 1번 기록을 가리키는 Curator 사슬. 진행 기록(`lane-addons/tool-request-owners/5e5665b7…/`)과 본문(`lane-addons/tool-request-bodies/5e5665b7…/`)을 사슬째 옮긴다.
    - 옮기면 그 사슬이 막던 사실과 Briefing 패스가 다음 패스에 다시 준비된다.
+3. Librarian 기록이 있는 배포에서는 admission·history 원본도 확인한다. 1번 Exact 기록을 가리키거나 원인 없는 `outcome_unknown` 거절 증거가 있는 원본을 찾고, 그 원본의 물리 소유자별로 아래 scope 묶음을 옮긴다. 현재 설치가 없어도 저장된 기록은 대상이다.
+   - admission 의 물리 소유자는 원본의 `owner` 이다. workspace·keepers 의 경로/device/inode, Keeper ID, queue generation 으로 `Keeper_librarian_admission_capture.scope_identity` 와 `scope_hash` 가 정하는 값을 `A` 라 한다(`keeper_librarian_admission_capture.ml:45-51`). 영향받은 admission 소유자에 대해 다음 네 scope 전체를 함께 옮긴다.
+     - `keeper-librarian-parts/<A>`
+     - `keeper-librarian-partitions/<A>`
+     - `keeper-librarian-execution-<A>`
+     - `keeper-librarian-admission-gate/<A>`
+   - parts 와 partitions 는 부모·자식·supersession frontier 를 서로 가리키고, execution 은 `parent_part_id` 를, gate 는 `execution_id` 와 이전 gate 를 가리킨다(`keeper_librarian_admission_parts.ml:129-180`, `:473-536`, `keeper_librarian_admission_owner.ml:80-103`). 실패한 execution 하나만 빼면 남은 원본을 복구할 수 없으므로, 이 하드컷은 해당 소유자의 admission 원본 묶음을 다시 준비하는 범위다.
+   - history 는 원본의 workspace·keepers·runtime 의 경로/device/inode 와 Keeper ID 로 `Keeper_librarian_durable_request.scope` 가 정하는 전체 문자열을 `H` 라 한다(`keeper_librarian_durable_request.ml:53-61`). 영향받은 history 소유자에 대해 다음 두 scope 전체를 함께 옮긴다.
+     - `H` (`keeper-librarian-history-execution-<owner hash>`)
+     - `keeper-librarian-durable-gate/<SHA256(H)>`
+   - history execution 의 predecessor·replacement intent 와 gate 의 execution·predecessor 참조를 남기지 않도록 묶음째 옮긴다(`keeper_librarian_durable_execution.ml:175-214`, `keeper_librarian_durable_gate.ml:6-8`, `keeper_librarian_original_gate.ml:52-79`, `:257-307`).
+   - scope 마다 `lane-addons/tool-request-owners/<digest(scope)>/` 와 `lane-addons/tool-request-bodies/<digest(scope)>/` 를 함께 옮긴다. 경로는 위 문자열과 `Lane_addon_store.digest` 로 계산하고, 실제 원본의 `scope` 와 대조한다. Keeper 이름만으로 hash 나 경로를 추측하지 않는다. 본문에는 아직 게시하지 않은 successor·replacement intent 가 가리키는 값도 있으므로, 게시된 JSON 파일만 골라 옮기지 않는다.
+   - 원본 queue·current memory·이미 커밋한 candidate receipt, history source 와 소비 확인 위치는 옮기지 않는다. 다음 패스가 이 정본에서 미처리 입력을 다시 준비한다. 기존 원본의 cause 를 추측해 채우거나 다른 모양으로 고치는 코드는 만들지 않는다.
+   - 공용 `validate-stores` 의 owner 검사는 원본과 본문의 envelope 를 검사하며, Librarian 거절 증거의 의미까지 검사하지 않는다(`lane_addon_tool_request_owner.ml:150-154`). 따라서 이 조건부 목록은 별도로 읽어 배포 영수증에 남긴다. 재시작 전에는 남겨 둔 admission/history 원본의 복구 검사도 성공해야 한다.
 
-2026-10-23 08:30Z 에 라이브를 읽기만 해서 셌다. 1번은 셋(`25f4c4b5…`, `401b5d28…`, `25711699…`)이고, 결과 없이 `null` 로 끝나는 기록은 없었다. 2번은 1장 표의 원본 셋이다. 배포 직전에 다시 센다.
+2026-10-23 08:30Z 에 라이브를 읽기만 해서 셌다. 1번은 셋(`25f4c4b5…`, `401b5d28…`, `25711699…`)이고, 결과 없이 `null` 로 끝나는 기록은 없었다. 2번은 1장 표의 원본 셋이다. 이 스냅샷에는 Librarian 설치가 없었지만, 그것을 3번 원본 기록이 0건이라는 실측으로 대신하지 않는다. 배포 직전에 1·2·3번을 다시 세고, Librarian 대상이 없으면 그 조회 범위와 0건을 영수증에 적는다.
 
 worker 상태 볼륨, 실행 기록 payload, 관찰 영수증은 그대로 둔다. 셋 다 worker 가 받는 결과 모양만 담는다.
 
@@ -234,6 +249,7 @@ worker 상태 볼륨, 실행 기록 payload, 관찰 영수증은 그대로 둔�
 - Exact
   - 다른 incarnation 이 남긴 시작 표시를 복구하면 `interrupted` 가 되고, 시작 표시가 원인 시도로 바뀐다.
   - 같은 프로세스에서 취소된 호출을 다시 읽으면 `cut` 이다.
+  - SIGTERM graceful shutdown 의 취소 경로를 확인한다. 종료 중 같은 incarnation 에서 proof 없는 시작 표시를 복구하면 `cut`, 그 표시를 미복구 상태로 남겨 다음 프로세스가 복구하면 `interrupted` 다. 종료 알림·hooks 중 proof 가 남았으면 원인 판정 대신 그 결과로 끝낸다.
   - 호출 뒤 proof 저장이 실패한 시도를 같은 프로세스가 다시 읽으면 `cut` 이다. proof 가 있으면 지금처럼 proof 로 끝낸다.
   - 예외는 `raised` 와 문구를 남긴다. worker 가 받는 결과는 지금과 같은 바이트다.
   - 기록 검사는 3.3 의 거절 목록을 모두 거절한다.
@@ -246,6 +262,8 @@ worker 상태 볼륨, 실행 기록 payload, 관찰 영수증은 그대로 둔�
   - `interrupted` 로 끝난 분류 원본의 사실을 다음 뿌리가 다시 고른다. 그 사슬은 관찰 영수증이 확인된 뒤 옮긴다.
   - `interrupted` 로 끝난 Briefing 은 같은 상태의 패스를 막지 않는다.
   - `cut` 이나 `raised` 로 끝난 원본의 사실은 다시 고르지 않는다.
+- 하드컷
+  - Librarian admission 의 부모·partition·execution·gate 와 history 의 predecessor·replacement·gate 가 있는 저장소에서, 3.8 의 조건부 묶음을 옮긴 뒤 남은 원본을 복구할 수 있다. queue·커밋 receipt·history 소비 확인 위치는 보존되고, 미처리 입력만 다시 준비된다.
 - 규칙을 하나씩 깨뜨린 mutant 가 위 테스트에서 실패한다.
   - `interrupted` 도 막기
   - `cut` 도 풀기
@@ -255,7 +273,7 @@ worker 상태 볼륨, 실행 기록 payload, 관찰 영수증은 그대로 둔�
 
 배포 뒤 라이브에서 본다.
 
-- 세 사슬을 옮긴 뒤 첫 분류 패스가 사실 695개를 오래된 순으로 다시 고른다. Briefing 패스가 다시 준비된다.
+- 세 사슬을 옮기면 분류 사실 695개가 그 거절 때문에 제외되지 않는다. 다음 분류는 남은 pending 사실 중 오래된 순으로 고르며, 한 묶음은 현재 프레임과 최근 응답의 배치 크기를 따른다. 배포 직전의 695개 ID 목록을 기준으로 여러 패스에 걸친 재선택·처리 수와 아직 pending 인 수를 잰다. 첫 패스에 695개 전부가 들어간다고 가정하지 않는다. Briefing 패스도 같은 거절 때문에 막히지 않고 다시 준비된다.
 - 원인별 `outcome_unknown` 수.
 
 ## 8. 다루지 않는 것

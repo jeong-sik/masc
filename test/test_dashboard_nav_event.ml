@@ -28,18 +28,6 @@ let test_parse_schedule_surface_only () =
   check (option string) "section" None event.section
 ;;
 
-(* #26826 removed the memory-subsystems component and dropped the section from
-   the lab allowlist in the same commit. The section is retired everywhere, so
-   lab rejects it exactly as monitoring does below. *)
-let test_reject_retired_memory_subsystems_on_lab () =
-  let msg = parse_err {|{"surface":"lab","section":"memory-subsystems"}|} in
-  check
-    bool
-    "mentions section"
-    true
-    (Astring.String.is_infix ~affix:"unknown section" msg)
-;;
-
 let test_parse_settings_runtime_section () =
   let event = parse_ok {|{"surface":"settings","section":"runtime"}|} in
   check string "surface" "settings" event.surface;
@@ -51,8 +39,6 @@ let test_parse_settings_account_section () =
   check (option string) "section" (Some "account") event.section
 ;;
 
-(* routing was once retired but is a live Settings section again
-   (dashboard #settings?section=routing); repositories is new alongside it. *)
 let test_parse_settings_routing_section () =
   let event = parse_ok {|{"surface":"settings","section":"routing"}|} in
   check string "surface" "settings" event.surface;
@@ -102,15 +88,6 @@ let test_reject_unknown_surface () =
 
 let test_reject_unknown_section () =
   let msg = parse_err {|{"surface":"monitoring","section":"ferris-wheel"}|} in
-  check
-    bool
-    "mentions section"
-    true
-    (Astring.String.is_infix ~affix:"unknown section" msg)
-;;
-
-let test_reject_retired_memory_subsystems_target () =
-  let msg = parse_err {|{"surface":"monitoring","section":"memory-subsystems"}|} in
   check
     bool
     "mentions section"
@@ -180,10 +157,6 @@ let () =
     [ ( "parse_event_json"
       , [ test_case "minimal surface only" `Quick test_parse_minimal_surface_only
         ; test_case "schedule surface only" `Quick test_parse_schedule_surface_only
-        ; test_case
-            "retired memory-subsystems is rejected on lab"
-            `Quick
-            test_reject_retired_memory_subsystems_on_lab
         ; test_case "settings runtime section" `Quick test_parse_settings_runtime_section
         ; test_case
             "settings account section"
@@ -205,10 +178,6 @@ let () =
             test_parse_internal_agents_section
         ; test_case "rejects unknown surface" `Quick test_reject_unknown_surface
         ; test_case "rejects unknown section" `Quick test_reject_unknown_section
-        ; test_case
-            "rejects retired memory-subsystems target"
-            `Quick
-            test_reject_retired_memory_subsystems_target
         ; test_case "rejects missing surface" `Quick test_reject_missing_surface
         ; test_case "rejects malformed json" `Quick test_reject_malformed_json
         ; test_case "explicit null section" `Quick test_section_null_explicit

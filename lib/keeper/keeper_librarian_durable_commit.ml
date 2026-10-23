@@ -6,6 +6,7 @@ module Exact = Lane_addon_exact
 module Gate = Keeper_librarian_absorb_gate
 module Journal = Keeper_librarian_durable_gate
 module Current = Keeper_memory_os_current
+module Memory_types = Keeper_memory_os_types
 module Cursor = Keeper_external_read_cursor
 module Atom = Keeper_librarian_progress
 module Official = Keeper_librarian_official_progress
@@ -26,8 +27,8 @@ let advance ~store record event =
   | Error error -> Error (Owner.update_error_to_string error)
 let judgment (record : Owner.retained) = match Progress.phase record.progress with
   | Progress.Judged value -> Ok value
-  | Committing commit | Commit_unknown (commit,_) | Finished commit -> Ok commit.judgment
-  | Captured | Admission_wait _ | Dispatch_pending _ | Conflicted _ | Rejected _
+  | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) -> Ok commit.judgment
+  | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
   | Subdividing _ | Subdivided _ -> Error "History publication has no answered original judgment"
 let reload ~store request =
   let* ()=Request.confirm_owner request in
@@ -87,10 +88,65 @@ let marker request (record : Owner.retained) ~root ~committed =
     "external_prepared",Cursor.observation_to_json (Source.external_prepared source)])
 let commit_matches record ~before ~after = match Progress.phase record.Owner.progress with
   | Progress.Judged _ -> Ok ()
-  | Committing commit | Commit_unknown (commit,_) | Finished commit ->
+  | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
     let* ()=same before commit.change.before in same after commit.change.after
-  | Captured | Admission_wait _ | Dispatch_pending _ | Conflicted _ | Rejected _
+  | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
   | Subdividing _ | Subdivided _ -> Error "History publication has an unsupported original phase"
+let expected_basis request : Current.disposition_basis =
+  let source=Request.source request in
+  { expected_revision=Source.expected_revision source;
+    expected_facts=Option.map (fun (current : Keeper_librarian.current_selection) -> current.facts)
+      (Source.input source).current }
+let observed_basis snapshot : Current.disposition_basis =
+  { expected_revision=Option.map (fun (current : Current.t) -> current.revision) snapshot;
+    expected_facts=Option.map (fun (current : Current.t) -> current.facts) snapshot }
+let basis_to_json (basis : Current.disposition_basis) =
+  let optional encode=Option.fold ~none:`Null ~some:encode in
+  `Assoc ["revision",optional (fun value -> `Int value) basis.expected_revision;
+    "facts",optional (fun facts -> `List (List.map Memory_types.fact_to_json facts)) basis.expected_facts]
+let closed_fields expected = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=List.sort String.compare expected -> Ok fields
+  | _ -> Error "Original history basis evidence has unknown, duplicate or missing fields"
+let basis_of_json json =
+  let* fields=closed_fields ["revision";"facts"] json in
+  let* expected_revision=match List.assoc "revision" fields with
+    | `Null -> Ok None
+    | `Int value when value>=1 -> Ok (Some value)
+    | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ ->
+      Error "Original history basis revision is invalid" in
+  let* expected_facts=match List.assoc "facts" fields with
+    | `Null -> Ok None
+    | `List facts ->
+      let* facts=List.fold_right (fun json tail ->
+        let* fact=Memory_types.fact_of_json json |> Result.map_error Memory_types.wire_error_to_string in
+        let* tail=tail in Ok (fact::tail)) facts (Ok []) in Ok (Some facts)
+    | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+      Error "Original history basis facts are invalid" in
+  let* ()=match expected_revision,expected_facts with
+    | None,None | Some _,Some _ -> Ok ()
+    | None,Some _ | Some _,None -> Error "Original history basis presence differs" in
+  Ok {Current.expected_revision;expected_facts}
+let check_supersession request evidence =
+  let* fields=closed_fields ["version";"kind";"original_basis";"observed_basis"] evidence in
+  let* ()=require (List.assoc "version" fields=`Int 1
+    && List.assoc "kind" fields=`String "librarian-history-basis-superseded")
+    "Original history conflict is not a known typed basis observation" in
+  let* original=basis_of_json (List.assoc "original_basis" fields) in
+  let* observed=basis_of_json (List.assoc "observed_basis" fields) in
+  let* ()=same (basis_to_json (expected_basis request)) (basis_to_json original) in
+  require (original<>observed) "Original history conflict has no different Memory basis"
+let supersession_evidence request observed =
+  let* evidence=Lane_addon_action.canonical (`Assoc ["version",`Int 1;
+    "kind",`String "librarian-history-basis-superseded";
+    "original_basis",basis_to_json (expected_basis request);
+    "observed_basis",basis_to_json (observed_basis observed)]) in
+  let* ()=check_supersession request evidence in Ok evidence
+let is_superseded ~request ~(record : Owner.retained) =
+  match Progress.phase record.progress with
+  | Progress.Conflicted (_,evidence) ->
+    let* ()=check_supersession request evidence in Ok true
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok false
 let atom_target source = Option.map (fun (range : Current.durable_range_id) : Atom.t ->
   {position={trace_id=range.trace_id;end_atom=range.end_atom;last_atom_digest=range.last_atom_digest};
     boundary_lines_seen=range.boundary_lines_seen}) (Source.range_id source)
@@ -153,7 +209,8 @@ let validate ~store ~request ~(record : Owner.retained) =
   match Progress.phase record.progress with
   | Progress.Captured | Admission_wait _ | Dispatch_pending _ -> Ok ()
   | Judged _ -> let* _=original_answer ~store request record in Ok ()
-  | Committing _ | Commit_unknown _ | Finished _ ->
+  | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ ->
+    let* _=is_superseded ~request ~record in
     let* _,proposal=original_answer ~store request record in
     let* ()=match Progress.preparation record.progress with
       | Some (Preparation_confirmed _) -> Ok ()
@@ -164,15 +221,15 @@ let validate ~store ~request ~(record : Owner.retained) =
     let* after=marker request record ~root:root.request_id ~committed:true in
     let* ()=commit_matches record ~before ~after in
     (match Progress.phase record.progress with
-     | Progress.Finished _ ->
+     | Progress.Finished _ | Conflicted _ ->
        let* latest=Journal.latest ~store ~owner ~capture:request in
-       let* latest=Option.to_result ~none:"Finished history gate chain is absent" latest in
+       let* latest=Option.to_result ~none:"Terminal history gate chain is absent" latest in
        let* gate=Journal.restore_size_evidence ~store ~owner ~parent_execution:request
          ~gate_request_id:latest.Owner.request_id in
        (match Gate.failure_detail ~absorbed:proposal.accepted.selection.absorbed gate with
         | None -> Ok () | Some detail -> Error detail)
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-     | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok ())
+     | Rejected _ | Subdividing _ | Subdivided _ -> Ok ())
   | Rejected {stage=Progress.Execution;evidence} ->
     let* exact=Request.request request in
     let* schema=Option.to_result ~none:"Original history refusal lacks its schema" exact.schema in
@@ -182,7 +239,7 @@ let validate ~store ~request ~(record : Owner.retained) =
      | Exact.Call_final (Answered _) -> Error "History refusal contains an answered host result"
      | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
      | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok ())
-  | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+  | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
     Error "Original history record has an unsupported domain phase"
 type preparation = Ready of Owner.retained | Unavailable of string
 let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.retained) ~proposal:_ ~fresh_authority =
@@ -200,6 +257,8 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
     let* raw,proposal=original_answer ~store request current in
     let* ()=validate ~store ~request ~record:current in
     Ok (current,raw,proposal)) in
+  let* superseded=is_superseded ~request ~record:current in
+  if superseded then Ok (Publication.Publication_superseded current) else
   let prepare current =
     match Progress.preparation current.Owner.progress with
     | Some (Progress.Preparation_pending _ | Preparation_confirmed _) -> Ok (Ready current)
@@ -300,10 +359,8 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
               let* ()=same (Progress.to_json actual.progress) (Progress.to_json record.Owner.progress) in
               let* proved=receipt_state request in
               let* ()=require (not proved) "Original history Memory effect is already receipt-proved" in
-              Current.apply_disposition ~on_committed:(fun disposition -> committed:=Some disposition)
-                ~expected_basis:{Current.expected_revision=Source.expected_revision source;
-                  expected_facts=Option.map (fun (current : Keeper_librarian.current_selection) -> current.facts)
-                    (Source.input source).current}
+              Ok (Current.apply_disposition_guarded ~on_committed:(fun disposition -> committed:=Some disposition)
+                ~expected_basis:(expected_basis request)
                 ~dropped_statements:accepted.selection.dropped
                 ?durable_range_id:(Source.range_id source) ?official_range_id:(Source.official_range_id source)
                 ~explicit_candidate_ids:accepted.explicit_candidate_ids
@@ -314,7 +371,7 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
                 ~keepers_dir:(Request.keepers_dir owner) ~keeper_id
                 ~now:(Time_compat.now ())
                 ~source:{Current.kind=Current.Librarian;trace_id=Ids.Turn_ref.trace_id (Source.input source).turn_ref}
-                ~new_claims:(Gate.without_copies gate accepted.selection.new_claims) ())) in
+                ~new_claims:(Gate.without_copies gate accepted.selection.new_claims) ()))) in
           (* An atomic save or outer source-lock release can fail after Memory
              publication. The real receipts, never the returned status, decide. *)
           let* proved=io (fun () -> let* ()=Request.confirm_owner request in receipt_state request) in
@@ -332,11 +389,22 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
                 |> List.iter (fun error -> Log.Keeper.warn ~keeper_name:keeper_id "%s"
                   (Keeper_memory_os_events.append_error_to_string error)) in
             confirm record)
-          else
-          let detail=match applied with Error detail -> detail
-            | Ok _ -> "Original history disposition returned without its actual range receipts" in
-          let* _,_=event record (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in
-          pending detail in
+          else match applied with
+          | Ok (Error (Current.Basis_superseded observed)) ->
+            (* Only the locked store guard can establish this decision. Its
+               recovery may have completed an earlier publication, so the
+               actual original receipt check above always wins first. *)
+            let* evidence=supersession_evidence request observed in
+            let* _,record=event record (Progress.Commit_conflicted evidence) in
+            let* ()=io (fun () -> validate ~store ~request ~record) in
+            Ok (Publication.Publication_superseded record)
+          | Error detail | Ok (Error (Current.Disposition_store_failed detail)) ->
+            let* _,_=event record (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in
+            pending detail
+          | Ok (Ok _) ->
+            let detail="Original history disposition returned without its actual range receipts" in
+            let* _,_=event record (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in
+            pending detail in
         let* proved=io (fun () -> receipt_state request) in
         if proved then confirm current else
         match Progress.phase current.progress with

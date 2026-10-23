@@ -6,7 +6,6 @@ module Boundaries = Keeper_turn_boundaries
 module Progress = Keeper_librarian_progress
 module Official = Keeper_librarian_official_progress
 module Cursor = Keeper_external_read_cursor
-module Current = Keeper_memory_os_current
 let ( let* ) = Result.bind
 let require condition detail = if condition then Ok () else Error detail
 let rec prefix equal before current = match before,current with
@@ -44,16 +43,9 @@ let validate_state request =
     && official=(Capture.positions source).official)
     "Original history read positions changed before Memory publication" in
   let* external_cursor=Cursor.observe ~runtime_keepers_dir ~keeper_name:keeper_id in
-  let* ()=require (Yojson.Safe.equal (Cursor.observation_to_json external_cursor)
+  require (Yojson.Safe.equal (Cursor.observation_to_json external_cursor)
     (Cursor.observation_to_json (Capture.external_prepared source)))
-    "Original external preparation changed before Memory publication" in
-  let* snapshot=Current.read_for_keepers_dir ~keepers_dir:(Request.keepers_dir owner) ~keeper_id in
-  let revision=Option.map (fun (snapshot : Current.t) -> snapshot.revision) snapshot in
-  let facts=Option.map (fun (snapshot : Current.t) -> snapshot.facts) snapshot in
-  let original_facts=Option.map (fun (current : Keeper_librarian.current_selection) -> current.facts)
-    (Capture.input source).current in
-  require (revision=Capture.expected_revision source && facts=original_facts)
-    "Original complete current Memory changed before publication"
+    "Original external preparation changed before Memory publication"
 let with_original ~request publish =
   let source=Request.source request and owner=Request.physical_owner request in
   let checkpoint,traces=parts (Capture.source source) in

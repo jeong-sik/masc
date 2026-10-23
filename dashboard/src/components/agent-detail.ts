@@ -362,16 +362,16 @@ export function AgentDetailOverlay() {
           <${AgentDetailMemory} agentName=${agentName} keeper=${keeper} />
           <${AgentWorkerBrief} agentName=${agentName} />
           ${agentFitness.value ? html`
-            <${CollapsibleSection} title="적합도 (7일)" mountWhenOpen=${true}>
+            <${CollapsibleSection} title="관측된 작업 성과 (시작일 기준 7일)" mountWhenOpen=${true}>
               <div class="grid grid-cols-3 gap-3">
                 ${([
                   ['완료율', agentFitness.value.completion],
                   ['신뢰도', agentFitness.value.reliability],
-                  ['핸드오프', agentFitness.value.handoff],
-                ] as [string, number][]).map(([label, val]) => html`
+                  ['인계 관련 작업 성공률', agentFitness.value.handoff_task_success],
+                ] as [string, number | null][]).map(([label, val]) => html`
                   <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3 text-center">
                     <div class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)] mb-1">${label}</div>
-                    <div class="text-lg font-bold ${val >= 0.7 ? 'text-[var(--color-status-ok)]' : val >= 0.4 ? 'text-[var(--color-status-warn)]' : 'text-[var(--bad-light)]'}">${formatPct(val)}</div>
+                    <div class="text-lg font-bold ${val === null ? 'text-[var(--color-fg-muted)]' : val >= 0.7 ? 'text-[var(--color-status-ok)]' : val >= 0.4 ? 'text-[var(--color-status-warn)]' : 'text-[var(--bad-light)]'}">${val === null ? '미관측' : formatPct(val)}</div>
                   </div>
                 `)}
               </div>

@@ -10,7 +10,7 @@ import {
 } from '../store'
 import { findKeeper } from '../lib/keeper-utils'
 import { broadcastReceiptMessage, currentDashboardActor, fetchWorkspaceMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineResponse } from '../api'
-import { callMcpTool } from '../api/mcp'
+import { fetchAgentFitness, type AgentFitnessComponents } from '../api/agent-fitness'
 import { journal } from '../sse'
 import { route, navigate } from '../router'
 import { missionSnapshot } from '../mission-store'
@@ -36,15 +36,6 @@ export const agentTimeline = signal<AgentTimelineResponse | null>(null)
 export const mentionText = signal('')
 export const sendingMention = signal(false)
 
-// Agent fitness components, as emitted by masc_agent_fitness:
-//   { count, agents: [{ agent_id, components: {...}, metrics }] }
-// `speed` is omitted here on purpose: it is `min_avg / avg_completion_time_s`
-// over the queried pool, and this view queries one agent, so it is always 1.0.
-type AgentFitnessComponents = {
-  completion: number
-  reliability: number
-  handoff: number
-}
 export const agentFitness = signal<AgentFitnessComponents | null>(null)
 
 // --- Selectors ---
@@ -147,19 +138,7 @@ export async function refreshAgentDetail(): Promise<void> {
         console.warn('[agent-detail-state] fetchAgentTimeline failed', { agentName, err })
         return null
       }),
-      callMcpTool('masc_agent_fitness', { agent_name: agentName, days: 7 })
-        .then(raw => {
-          const parsed = JSON.parse(raw) as {
-            agents?: { components?: Partial<AgentFitnessComponents> }[]
-          }
-          const c = parsed.agents?.[0]?.components
-          if (!c) return null
-          return {
-            completion: c.completion ?? 0,
-            reliability: c.reliability ?? 0,
-            handoff: c.handoff ?? 0,
-          }
-        })
+      fetchAgentFitness(agentName)
         .catch((err: unknown) => {
           console.warn('[agent-detail-state] masc_agent_fitness fetch/parse failed', { agentName, err })
           return null

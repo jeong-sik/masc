@@ -40,9 +40,9 @@ export function Lab() {
       ` : null}
 
       ${section === 'keeper-memory-health' ? html`
+        <${KeeperMemoryHealth} />
         <${WorkspaceMemoryContextPanel} />
         <${WorkspaceMemoryLedgerPanel} />
-        <${KeeperMemoryHealth} />
       ` : null}
     </div>
   `

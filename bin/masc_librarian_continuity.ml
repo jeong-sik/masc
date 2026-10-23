@@ -473,7 +473,7 @@ let run_production_comparison options =
     | Ok () -> Ok ()
     | Error Masc.Exact_lane_run_registry.Already_installed ->
       Error "Production comparison requires its own isolated run registry" in
-  Masc.Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.set_markdown_dir prompt_dir;
   let infer ~previous_state ~unread_messages (input : Masc.Keeper_librarian.input) =
     Masc.Keeper_librarian_runtime.infer_working_state ~base_path ~keepers_dir
       ~keeper_id:(Masc.Keeper_identity.Keeper_id.to_string input.keeper_id)

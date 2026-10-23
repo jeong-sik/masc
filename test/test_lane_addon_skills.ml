@@ -90,6 +90,7 @@ let backend fixture : Lane.For_testing.backend = {
     let stopped = ref false in
     let exported = List.map worker_tool_definition package.exported_tools in
     let connection : Lane.For_testing.connection = {browser=None;
+        await_exit = (fun () -> Eio.Fiber.await_cancel ());
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
           | Ok image -> Some image | Error detail -> Alcotest.fail detail);
             host = None; resource = Masc.Lane_addon_lifecycle.Container_resource (digest instance_id);

@@ -85,6 +85,7 @@ let make_backend ?observe_step () =
           "inputSchema",input_schema]) with
         | Ok tool -> tool | Error message -> fail message) package.exported_tools in
       let connection : Runtime.For_testing.connection = {browser=None;
+        await_exit = (fun () -> Eio.Fiber.await_cancel ());
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
           | Ok image -> Some image | Error detail -> Alcotest.fail detail);
                 host = None; resource = Lifecycle.Container_resource (Store.digest instance_id);

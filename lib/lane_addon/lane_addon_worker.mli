@@ -67,6 +67,12 @@ val observe :
     caller's switch. Calling it again retries incomplete cleanup. *)
 val stop : t -> (unit, error) result
 
+(** Waits until this worker's MCP process has ended. It does not stop, close
+    or remove anything. Call it on a worker that [start] returned: a worker
+    seen only through [on_created] may never connect, and then this never
+    returns. *)
+val await_exit : t -> Eio.Process.exit_status
+
 (** Explicit detach after a host restart. [Some id] verifies that exact
     container's ownership label before removal. [None] recovers a lost create
     receipt using this instance's deterministic container name, then verifies

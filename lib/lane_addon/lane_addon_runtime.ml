@@ -67,6 +67,7 @@ type connection = {
   action_schema : unit -> Yojson.Safe.t option;
   act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
   stop : unit -> (Lifecycle.release, Lifecycle.failure) result;
+  await_exit : unit -> string;
   resource : Lifecycle.resource;
   resolved_image : Lane_addon_engine.image_identity option;
   host : host_port option;
@@ -1245,6 +1246,23 @@ let run ~sw ~read_browser_document backend m e =
         | Ok c ->
             e.connection <- Some {export_owner;worker=c}; e.started <- true;
             notify_exports m e;
+            (* Every stop this runtime asks for marks the entry stopping before
+               the worker is told. A process that ends without that request
+               cannot serve again, so the entry turns failed and stopping. Its
+               owner retires it as it retires a failed start: a declaration on
+               the next configuration pass, which then starts a new instance,
+               and an instance attached without one on the operator's Detach. *)
+            fork_isolated ~sw:worker_sw (fun () ->
+              let ended = c.await_exit () in
+              if not e.stopping then (
+                let cause = Lifecycle.Worker_failed ("worker process ended on its own: " ^ ended) in
+                Log.Misc.warn "Lane Add-on instance %s (package %s): %s" e.instance_id e.package.id
+                  (Lifecycle.failure_to_string cause);
+                retire_admission e;
+                e.state <- fail_state e cause;
+                notify_exports m e;
+                (match persist m e with Ok () -> wake_dependents m e | Error detail ->
+                  Log.Misc.error "Lane Add-on instance %s exit state persistence: %s" e.instance_id detail)));
             Option.iter (fun port -> Option.iter
               (run_host_watch ~sw:worker_sw ~cleanup_sw:sw ~backend m e port) port.await_change) c.host;
             (match c.host, e.configuration with
@@ -1607,6 +1625,9 @@ let backend ~store ~artifact_store () = match !override with
                   | None -> Lane_addon_native_worker.observe worker ~binding ~sources
                       |> Result.map_error Lane_addon_native_worker.error_to_string);
                 stop=(fun () -> stop_worker worker);
+                await_exit=(fun () -> match Lane_addon_native_worker.await_completion worker with
+                  | Ok release -> Format.asprintf "%a" Eio.Process.pp_status release.exit_status
+                  | Error error -> Lane_addon_native_worker.error_to_string error);
               } in
                match Lane_addon_native_worker.start ~sw ~clock ~admission ~launcher ~contract ~command
                  ?env
@@ -1661,7 +1682,8 @@ let backend ~store ~artifact_store () = match !override with
               let* () = Lane_addon_worker.stop worker |> Result.map_error Lane_addon_worker.cleanup_failure in
               match !recorded with
               | Some engine -> Ok (Lifecycle.Released {engine;container_id=Some (Lane_addon_worker.container_id worker)})
-              | None -> Error (Lifecycle.Cleanup_unconfirmed "container has no recorded engine")) } in
+              | None -> Error (Lifecycle.Cleanup_unconfirmed "container has no recorded engine"));
+            await_exit=(fun () -> Format.asprintf "%a" Eio.Process.pp_status (Lane_addon_worker.await_exit worker)) } in
           let* clock = Option.to_result ~none:(Lifecycle.Worker_failed "container clock is unavailable") clock in
           Lane_addon_worker.start ~sw ~clock ~control_timeout_sec ~mgr:Posix_spawn_process_mgr.mgr
             ~instance_id ~package ?state_owner ~on_engine ~is_live_instance ~scope
@@ -4094,6 +4116,7 @@ module For_testing = struct
     action_schema : unit -> Yojson.Safe.t option;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (Lifecycle.release, Lifecycle.failure) result;
+    await_exit : unit -> string;
     resource : Lifecycle.resource;
   resolved_image : Lane_addon_engine.image_identity option;
     host : host_port option;

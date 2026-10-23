@@ -55,6 +55,7 @@ let confirm t result = match t.confirmed with
             Error (Cleanup_unconfirmed "native admission has not settled")
         | Error error -> Error (Cleanup_unconfirmed (Native_addon_lease.error_to_string error))
 let release t = Option.map (confirm t) (Eio.Promise.peek t.completion)
+let await_completion t = Eio.Promise.await t.completion
 let stop t =
   request_stop t;
   Eio.Promise.await t.completion |> confirm t

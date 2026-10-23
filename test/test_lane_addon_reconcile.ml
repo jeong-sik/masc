@@ -64,6 +64,7 @@ type fake = {
   sweeps : int ref;
   swept : Lane_addon_slot.sweep_item list ref;
   liveness : (string -> bool) option ref;
+  ends : (string, unit Eio.Promise.u) Hashtbl.t;
 }
 
 let output : Types.output = {
@@ -83,7 +84,8 @@ let make_backend () =
   let state = { events = ref []; state_owners=Hashtbl.create 4; recovered_state_owners=Hashtbl.create 4; recovered_runtimes=Hashtbl.create 4; observations = ref []; recovery_barrier = ref None;
                 startup_available = ref true; startup_barrier = ref None; cleanup_available = ref true;
                 image_available = ref true; create_refusal = ref None;
-                world = Fake.create home; home; condition_checks = ref 0; sweeps = ref 0; swept = ref []; liveness = ref None } in
+                world = Fake.create home; home; condition_checks = ref 0; sweeps = ref 0; swept = ref []; liveness = ref None;
+                ends = Hashtbl.create 4 } in
   let record event = state.events := event :: !(state.events) in
   let proven ~engine work =
     Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
@@ -94,6 +96,9 @@ let make_backend () =
       Hashtbl.replace state.state_owners instance_id
         (Option.map (Lane_addon_worker_state.volume_name ~runtime:container.runtime) state_owner);
       let stopped, release_stop = Eio.Promise.create () in
+      (* The worker process ends when it is stopped, or when a test ends it. *)
+      let ended, end_worker = Eio.Promise.create () in
+      Hashtbl.replace state.ends instance_id end_worker;
       let stop_sent = ref false in
       let container_id = Store.digest instance_id in
       match (Fake.port state.world).read_engine () with
@@ -105,6 +110,7 @@ let make_backend () =
           Error (Lifecycle.Worker_failed detail)
       | Ok engine ->
       let connection : Runtime.For_testing.connection = {browser=None;
+        await_exit = (fun () -> Eio.Promise.await ended; "fixture worker exited");
         resolved_image = (match Lane_addon_engine.image_of_inspect container.runtime (match container.runtime with
           | Types.Docker -> "sha256:" ^ String.make 64 'a'
           | Types.Apple_container -> "[{\"configuration\":{\"descriptor\":{\"digest\":\"sha256:" ^ String.make 64 'a' ^ "\"}}}]") with
@@ -132,7 +138,8 @@ let make_backend () =
               if not !stop_sent then begin
                 stop_sent := true;
                 record (Stopped instance_id);
-                Eio.Promise.resolve release_stop ()
+                Eio.Promise.resolve release_stop ();
+                ignore (Eio.Promise.try_resolve end_worker ())
               end;
               Lifecycle.Released {engine;container_id=Some container_id}) removed);
       } in
@@ -318,6 +325,36 @@ let with_fixture f =
                   let state, backend = make_backend () in
                   Runtime.For_testing.with_backend backend (fun () ->
                     f env sw config directory packages state))))))))
+
+(* A worker process that ends while nothing asked it to stop turns its entry
+   failed. The next configuration pass retires it, as it retires a failed
+   start, and the declaration then starts a new instance instead of keeping
+   the dead one as its applied worker. *)
+let test_a_worker_that_ends_on_its_own_is_replaced () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let first = text "instance_id" (declared_instance config "observer") in
+    await_ready clock config first;
+    Eio.Promise.resolve (Hashtbl.find state.ends first) ();
+    await clock (fun () -> phase (instance config first) = "failed");
+    check string "the end is recorded as a worker failure" "worker_failed"
+      (failed_record (instance config first) |> member "cause" |> text "kind");
+    check (list string) "nothing stops or replaces it before the configuration pass" []
+      (stops state @ List.filter (fun id -> id <> first) (starts state));
+    ignore (reconcile config directory);
+    await_detached clock config first;
+    check (list string) "the pass stopped the ended worker" [first] (stops state);
+    check string "its release is confirmed" "released"
+      (instance config first |> lifecycle |> member "release" |> text "kind");
+    ignore (reconcile config directory);
+    let second = text "instance_id" (declared_instance config "observer") in
+    check bool "a new instance replaces it" true (second <> first);
+    await_ready clock config second;
+    check (list string) "the declaration started twice" [second; first] (starts state);
+    detach clock config second)
 
 let test_install_idempotence_rename_and_public_detach () =
   with_fixture (fun env _ config directory packages state ->
@@ -2108,6 +2145,8 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_a_container_under_another_name_is_never_the_slot;
   test_case "a worker clears its own leftover from the slot" `Quick
     test_a_worker_clears_its_own_leftover_from_the_slot;
+  test_case "a worker that ends on its own is replaced" `Quick
+    test_a_worker_that_ends_on_its_own_is_replaced;
   test_case "Detach keeps the declaration when cleanup fails" `Quick
     test_detach_keeps_the_declaration_when_cleanup_fails;
   test_case "Detach of a retained record keeps the declaration when cleanup fails" `Quick

@@ -94,6 +94,7 @@ let with_fixture f =
                   start=(fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
                     started := instance_id :: !started;
                     let connection : Runtime.For_testing.connection = {browser=None;
+        await_exit = (fun () -> Eio.Fiber.await_cancel ());
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
           | Ok image -> Some image | Error detail -> Alcotest.fail detail);
                       observe=(fun ~binding:_ ~sources:_ -> Ok output);

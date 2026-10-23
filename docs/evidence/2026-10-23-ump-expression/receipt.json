@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "observedDate": "2026-10-23",
+  "provenance": "direct",
+  "sourceHead": "76aef9ff673e491de5f860d9fbb2f3ff7af7d0e4",
+  "sourceBase": "be5477243f36e5cfde917e28433afbeee08ffdfa",
+  "node": {
+    "tests": 105,
+    "failures": 0,
+    "suites": [
+      "ump-expression",
+      "ump-source",
+      "ump-capture",
+      "ump-tui",
+      "arrangement-editor"
+    ]
+  },
+  "native": {
+    "clock": {
+      "denom": 3,
+      "numer": 125,
+      "origin": "10000000000000000000"
+    },
+    "kind": "edited-ump-native-proof",
+    "ownersRetired": true,
+    "protocol": 2,
+    "receivedCancel": {
+      "A": [
+        1124416515,
+        2046820353,
+        1125465343,
+        0,
+        1135951872,
+        4294967295,
+        1133853699,
+        28160,
+        1133854723,
+        2416015360,
+        1133855491,
+        2416017408,
+        1133856515,
+        2416020992,
+        1132806912,
+        0,
+        1132807936,
+        0,
+        1132806144,
+        0,
+        1132805120,
+        0,
+        1135951872,
+        0
+      ],
+      "B": [
+        1234309379,
+        4294934656,
+        1233260800,
+        0
+      ]
+    },
+    "receivedFull": {
+      "A": [
+        1124416515,
+        2046820353,
+        1125465343,
+        0,
+        1135951872,
+        4294967295,
+        1133853699,
+        28160,
+        1133854723,
+        2416015360,
+        1133855491,
+        2416017408,
+        1133856515,
+        2416020992,
+        1130707968,
+        2147483648,
+        1134902272,
+        4294967295,
+        1132805120,
+        305397760,
+        1132806144,
+        305397760,
+        1132806912,
+        305397760,
+        1132807936,
+        305397760,
+        1135951872,
+        0
+      ],
+      "B": [
+        1234309379,
+        4294934656,
+        1233260800,
+        4275830784
+      ]
+    },
+    "scope": "private CoreMIDI destinations"
+  },
+  "sourceTui": {
+    "mode": "source",
+    "result": "PASS",
+    "originalPackets": 5,
+    "expressionValues": [
+      4294967295,
+      0,
+      2147483648,
+      305419896
+    ],
+    "notePitch7_9": 30976,
+    "originalAssetRetained": true,
+    "variantPlaced": true,
+    "sourceClocksAndAddressesPreserved": true,
+    "reopenedExportSixFilesIdentical": true,
+    "exportSHA256": "52477dc4eecee25418a7d6065220511dba12ed239fa952f9a43a1c0fd0cf93e3",
+    "limits": [
+      "Synthetic capture fixture; no physical recording/audition",
+      "No intermediate undo/redo snapshots in this journey",
+      "No screen wording/layout assertions"
+    ]
+  },
+  "limits": [
+    "Native probe compiles four focused Swift sources and its temporary CoreMIDI probe; no Dune/full build or CI dispatch",
+    "Native actual destination receive words are covered; native receive host timestamps are not recorded",
+    "Source TUI fixture is synthetic; installed runtime, physical USB, acoustic timing and screen layout are not covered"
+  ]
+}

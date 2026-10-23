@@ -7,7 +7,7 @@ type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:
 type pointer_state = Released | Release_required
 type located_node = { node_id : string; description : string }
 type locate = scene:Browser_scene.t -> instruction:string option -> (located_node list, string) result
-type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable window_sizes : (string * (int * int)) list; mutable emulated : (string * (string * string)) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
+type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable window_sizes : (string * (int * int)) list; mutable emulated : (string * (string * string)) list; mutable blocks : (string * string) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
 type t = { start_downloads : Browser_downloads.start; binary : string option; locate : locate option; request : request; mutex : Eio.Mutex.t; active : int Atomic.t; mutable session : session option; mutable next_tab : int; observed_session : Browser_lane.session_observation Atomic.t }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -232,15 +232,16 @@ let element_call perform_effect id suffix body =
    id), but resetting a locale or time zone with null leaves the override in
    place (probed). Clearing therefore sets the values the tab had before its
    first override, which the page cannot tell from no override. *)
+let current_window t session = match call t session `GET "/window" None with
+  | Ok (`String handle) -> Ok handle
+  | Ok _ -> Error (Protocol "invalid current browser window")
+  | Error error -> Error error
 let emulate t session ~started emulation =
   let* connection = Result.map_error (fun detail -> Protocol detail) session.downloads in
   let send method_ params =
     started ();
     Result.map_error (fun detail -> Protocol (method_ ^ ": " ^ detail)) (connection.Browser_downloads.command method_ params) in
-  let* handle = match call t session `GET "/window" None with
-    | Ok (`String handle) -> Ok handle
-    | Ok _ -> Error (Protocol "invalid current browser window")
-    | Error error -> Error error in
+  let* handle = current_window t session in
   let contexts = ["contexts", `List [`String handle]] in
   let grant_geolocation () =
     let* origin = script t session "return location.origin;" [] in
@@ -293,9 +294,35 @@ let emulate t session ~started emulation =
         session.emulated <- List.remove_assoc handle session.emulated; Ok () in
     Ok (`Assoc ["cleared",`Bool true;"permissionsUnchanged",`Bool true;
       "note",`String "clearing restores environment overrides only; geolocation permission grants remain until this owned browser session closes"])
+(* A block is a BiDi intercept on the tab's context, which the connection
+   fails request by request. The session keeps which intercepts belong to
+   which tab, so unblocking one tab leaves the others' blocks in place. *)
+let block_requests t session ~started hosts =
+  let* connection = Result.map_error (fun detail -> Protocol detail) session.downloads in
+  let* handle = current_window t session in
+  match hosts with
+  | Some hosts ->
+    started ();
+    let* intercept = Result.map_error (fun detail -> Protocol ("network.addIntercept: " ^ detail))
+        (connection.Browser_downloads.block ~context:handle ~hosts) in
+    session.blocks <- (handle, intercept) :: session.blocks;
+    Ok (`Assoc ["blocked",`List (List.map (fun host -> `String host) hosts);
+      "note",`String "requests from this tab and its frames to these hosts now fail as network errors until unblock_requests or the session closes; a request already sent is not affected"])
+  | None ->
+    let rec remove count = function
+      | [] -> Ok (`Assoc ["unblocked",`Int count])
+      | intercept :: rest ->
+        started ();
+        let* () = Result.map_error (fun detail -> Protocol ("network.removeIntercept: " ^ detail))
+            (connection.Browser_downloads.unblock ~intercept) in
+        session.blocks <- List.filter (fun block -> block <> (handle, intercept)) session.blocks;
+        remove (count + 1) rest in
+    remove 0 (List.filter_map (fun (tab, intercept) -> if tab = handle then Some intercept else None) session.blocks)
 let interact t session ~perform_effect ~started = function
   | Browser_lane.Action.Set_emulation emulation -> emulate t session ~started (Some emulation)
   | Browser_lane.Action.Clear_emulation -> emulate t session ~started None
+  | Browser_lane.Action.Block_requests hosts -> block_requests t session ~started (Some hosts)
+  | Browser_lane.Action.Unblock_requests -> block_requests t session ~started None
   | Browser_lane.Action.Upload {selector;paths} ->
     let* id = element_id t session selector in
     let element = `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id] in
@@ -380,7 +407,8 @@ let execute_action t action =
       | Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back | Browser_lane.Action.Forward
       | Browser_lane.Action.Reload | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _
       | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
-      | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation ->
+      | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
+      | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests ->
         (* Do not issue another fallible browser request after an effect.
            The caller observes the resulting page with a separate read. *)
         Ok (`Assoc ["tabId",`Int id;"performed",`Bool true;"result",result]))
@@ -444,7 +472,7 @@ let rec execute_unlocked t = function
              | Transport _ | Protocol _ -> Browser_lane.Browser_unknown);Error error
          | exception exn -> Atomic.set t.observed_session Browser_lane.Browser_unknown;raise exn in
        let* id = string_field "sessionId" result in
-       let owned = { pointer_state = Released; id; handles = []; window_sizes = []; emulated = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
+       let owned = { pointer_state = Released; id; handles = []; window_sizes = []; emulated = []; blocks = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
        t.session <- Some owned;
        Eio.Switch.run (fun setup_sw ->
          let committed = ref false in

@@ -51,6 +51,22 @@ let test_unsubscribed_event_is_refused () =
   check bool "subscription list and event handler share one method table" true
     (List.map snd D.subscribed_methods = ["browsingContext.contextCreated";
       "browsingContext.downloadWillBegin";"browsingContext.downloadEnd"])
+(* The shape is WebDriver BiDi's network.BaseParameters: an intercepted
+   request carries isBlocked true and its request id under request.request. *)
+let test_held_request () =
+  let held = Masc.Browser_bidi_downloads.For_testing.held_request in
+  let event ?intercepts blocked request =
+    `Assoc (["context",`String "tab";"isBlocked",`Bool blocked;
+      "request",`Assoc (("url",`String "https://ads.example.com/a.js") :: Option.to_list (Option.map (fun id -> "request",`String id) request))]
+      @ Option.to_list (Option.map (fun ids -> "intercepts",`List (List.map (fun id -> `String id) ids)) intercepts)) in
+  check (option string) "a request an intercept holds is failed" (Some "req-1")
+    (held (event ~intercepts:["block-1"] true (Some "req-1")));
+  check (option string) "a held request is failed whichever intercept holds it" (Some "req-2")
+    (held (event ~intercepts:["not-yet-answered"] true (Some "req-2")));
+  check (option string) "a request no intercept holds goes on" None (held (event false (Some "req-3")));
+  check (option string) "a held event without a request id has nothing to fail" None (held (event true None));
+  check (option string) "a completed request is never held" None
+    (held (`Assoc ["context",`String "tab";"request",`Assoc ["request",`String "req-4"]]))
 let with_dir f =
   let root = Filename.temp_file "masc-download-test" "" in
   Sys.remove root; Unix.mkdir root 0o700;
@@ -98,4 +114,5 @@ let () = run "browser downloads" ["evidence",[
   test_case "download UUID and descendant frame correlation" `Quick test_download_identity_and_frames;
   test_case "malformed completion remains unresolved" `Quick test_malformed_completion;
   test_case "unsubscribed BiDi event is refused by name" `Quick test_unsubscribed_event_is_refused;
+  test_case "only a held request is failed" `Quick test_held_request;
   test_case "download reaches the real paged artifact reader" `Quick test_download_artifact_reader]]

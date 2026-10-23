@@ -197,6 +197,10 @@ let test_refusals_run_no_script () =
     (dispatch peer Live.Page_act (Lane.Action.to_json
       (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})))))
     [Lane.Action.Set_emulation emulation;Lane.Action.Clear_emulation];
+  List.iter (fun interaction -> ignore (before_effect "an unsupported request block"
+    (dispatch peer Live.Page_act (Lane.Action.to_json
+      (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})))))
+    [Lane.Action.Block_requests ["ads.example.com"];Lane.Action.Unblock_requests];
   check (list string) "no script ran" [] !ran
 
 let test_answers_outside_the_frame () =

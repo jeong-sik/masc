@@ -16,6 +16,8 @@ type interaction =
   | Delete_cookie of string
   | Set_emulation of emulation
   | Clear_emulation
+  | Block_requests of string list
+  | Unblock_requests
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
 type t = Open_tab of string | Open_window of string | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
@@ -119,6 +121,22 @@ let parse_emulation fields =
   if geolocation = None && locale = None && timezone = None
   then Error "set_emulation needs a location, a locale or a timezone"
   else Ok {geolocation; locale; timezone}
+(* BiDi compares a host for equality with the request URL's host, which is
+   lowercase, so only a lowercase host name or IPv4 address can ever match. A
+   host of any other shape is refused rather than sent to match nothing. *)
+let is_host text =
+  List.for_all (fun label -> label <> ""
+      && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-') label)
+    (String.split_on_char '.' text)
+let parse_hosts fields = match List.assoc_opt "hosts" fields with
+  | None -> Error "block_requests needs hosts"
+  | Some value ->
+    let* hosts = string_list "hosts" value in
+    (* An intercept with no URL pattern holds every request. *)
+    if hosts = [] then Error "block_requests needs at least one host"
+    else match List.find_opt (fun host -> not (is_host host)) hosts with
+      | Some host -> Error ("hosts must be lowercase host names or IPv4 addresses such as ads.example.com, not " ^ host)
+      | None -> Ok hosts
 let parse = function
   | `Assoc fields ->
     let string key = match List.assoc_opt key fields with
@@ -136,8 +154,10 @@ let parse = function
       let* () = exact ("tabId" :: "framePath" :: allowed) in
       let* frame_path = parse_frame_path (`Assoc fields) in
       let* () = match interaction, frame_path with
-        | (Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation), _ :: _ -> Error "this action operates on the top-level tab"
-        | ((Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation), [])
+        | (Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation
+          | Block_requests _ | Unblock_requests), _ :: _ -> Error "this action operates on the top-level tab"
+        | ((Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation
+           | Block_requests _ | Unblock_requests), [])
         | Upload _, _ -> Ok () in
       let* tab_id = integer "tabId" in
       if tab_id < 0 then Error "tabId must be nonnegative"
@@ -165,6 +185,8 @@ let parse = function
        let* emulation = parse_emulation fields in
        on_tab ["latitude";"longitude";"accuracyMeters";"locale";"timezone"] (Set_emulation emulation)
      | "clear_emulation" -> on_tab [] Clear_emulation
+     | "block_requests" -> let* hosts = parse_hosts fields in on_tab ["hosts"] (Block_requests hosts)
+     | "unblock_requests" -> on_tab [] Unblock_requests
      | "delete_cookie" ->
        let* name = cookie_name fields in
        on_tab ["cookieName"] (Delete_cookie name)
@@ -183,6 +205,8 @@ let to_json = function
       | Dismiss_dialog -> "dismiss_dialog", []
       | Delete_cookie name -> "delete_cookie", ["cookieName",`String name]
       | Clear_emulation -> "clear_emulation", []
+      | Block_requests hosts -> "block_requests", ["hosts",`List (List.map (fun host -> `String host) hosts)]
+      | Unblock_requests -> "unblock_requests", []
       | Set_emulation {geolocation;locale;timezone} ->
         "set_emulation",
         (match geolocation with

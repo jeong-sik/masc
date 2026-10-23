@@ -606,19 +606,12 @@ let rec execute_unlocked t = function
          own viewport coordinates (probed on Firefox 158 through geckodriver). *)
       let native_action = match enter_frames t session frame_path with
         | Error error -> Error error
-        | Ok () -> match action with
-        | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
-          let* resolved = script t session (Browser_scene_script.runtime ^ Browser_interaction.pointer_target_script) [args] in
-          let* action = Result.map_error (fun message -> Protocol message)
-            (Browser_interaction.resolve_pointer_action action resolved) in
-          let* url = string_field "url" resolved in
-          Ok (Some url,action)
-        | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
-        | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
-        | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
-        | Browser_lane.Tap_at _ | Browser_lane.Swipe _
-        | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
-        | Browser_lane.Fill_node _ -> Ok (expected_url,action) in
+        | Ok () ->
+          if Browser_interaction.needs_pointer_resolution action then
+            let* resolved = script t session (Browser_scene_script.runtime ^ Browser_interaction.pointer_target_script) [args] in
+            Result.map_error (fun message -> Protocol message)
+              (Browser_interaction.resolve_pointer_input action resolved)
+          else Ok (expected_url,action) in
       let* result = match native_action with
         | Error error -> Ok (`Assoc ["interactionFailure",`Assoc
             ["message",`String (error_message error);"effectStarted",`Bool false]])

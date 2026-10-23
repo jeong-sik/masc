@@ -622,18 +622,11 @@ let dispatch ?actor ?request_id t ~verb args =
       let* fields=pre (match args with `Assoc xs->Ok xs|_->Error "invalid interaction") in
       let* request=pre (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live))::fields))) in
       let* context = pre (frame_context t context request.frame_path) in
-      let* expected_url,action = match request.action with
-        | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+      let* expected_url,action =
+        if Browser_interaction.needs_pointer_resolution request.action then
           let* resolved = pre (script t context Browser_interaction.pointer_target_script args) in
-          let* action = pre (Browser_interaction.resolve_pointer_action request.action resolved) in
-          let* url = pre (string "url" resolved) in
-          Ok (Some url,action)
-        | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
-        | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
-        | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
-        | Browser_lane.Tap_at _ | Browser_lane.Swipe _
-        | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
-        | Browser_lane.Fill_node _ -> Ok (request.expected_url,request.action) in
+          pre (Browser_interaction.resolve_pointer_input request.action resolved)
+        else Ok (request.expected_url,request.action) in
       let args = Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url action in
       let* receipt = match action with
       | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->

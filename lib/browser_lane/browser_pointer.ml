@@ -60,6 +60,10 @@ type gesture =
   | Tap
   | Swipe of { via : point list; destination : point; duration_ms : int }
 
+let drag_waypoints ~start ~destination = function
+  | [] -> [{x=(start.x +. destination.x) /. 2.; y=(start.y +. destination.y) /. 2.}]
+  | first :: rest -> first :: rest
+
 let input_sources ~pointer_id ~wheel_id ~viewport ~start gesture =
   let coords (point : point) =
     let x, y = viewport_pixels viewport point in
@@ -80,9 +84,7 @@ let input_sources ~pointer_id ~wheel_id ~viewport ~start gesture =
   (* A press, the moves while it is held, and the release. A drag and a swipe are the same sequence; only
      the pointer that makes it differs. *)
   let held ?pointer_type ~start ~via ~destination ~duration_ms () =
-    let via = match via with
-      | [] -> [{x=(start.x +. destination.x) /. 2.; y=(start.y +. destination.y) /. 2.}]
-      | _::_ -> via in
+    let via = drag_waypoints ~start ~destination via in
     pointer ?pointer_type
       ([move ~duration_ms:0 start; button "pointerDown"]
        @ List.map (move ~duration_ms) (via @ [destination])

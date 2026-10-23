@@ -27,6 +27,10 @@ type gesture =
   | Swipe of { via : point list; destination : point; duration_ms : int }
       (** A touch pointer held through the same path a drag takes. *)
 
+val drag_waypoints : start:point -> destination:point -> point list -> point list
+(** The supplied intermediate route, or its midpoint when empty. Does not
+    include the destination or dispatch input; each adapter owns button release. *)
+
 (** Native WebDriver/BiDi input sources. A click presses and releases the
     button's WebDriver pointer button: 0 for [Primary], 1 for [Middle], 2 for
     [Secondary]. Drag visits every supplied waypoint

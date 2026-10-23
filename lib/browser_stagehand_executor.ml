@@ -398,7 +398,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
     | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
       let* resolved = evaluate ~runtime:Scene_runtime ~send:(send_guard call) ~args
           page_id Browser_interaction.pointer_target_script |> guard_result in
-      let* action = Browser_interaction.resolve_pointer_action action resolved
+      let* expected_url, action = Browser_interaction.resolve_pointer_input action resolved
         |> Result.map_error (fun detail -> Browser_lane.Rejected_before_effect detail) in
       let* action = match action with
         | Browser_lane.Drag {from;to_;viewport;via;duration_ms} ->
@@ -410,9 +410,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
           let via = match arrival with
             | None -> via
             | Some arrival ->
-              let path = match via with
-                | [] -> [Browser_lane.Pointer.{x=(from.x +. to_.x) /. 2.;y=(from.y +. to_.y) /. 2.}]
-                | _::_ -> via in
+              let path = Browser_lane.Pointer.drag_waypoints ~start:from ~destination:to_ via in
               path @ [arrival] in
           Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
         | Browser_lane.Double_click _ | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
@@ -421,8 +419,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
         | Browser_lane.Hover_at _ | Browser_lane.Click_at _ | Browser_lane.Scroll_at _
         | Browser_lane.Tap_at _ | Browser_lane.Swipe _
         | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Ok action in
-      let* url = string_field ~method_:"page.evaluate" "url" resolved |> guard_result in
-      Ok (action, Some url)
+      Ok (action, expected_url)
     | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
     | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
     | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
@@ -476,9 +473,8 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
     else
     let from_x = viewport_x viewport from and from_y = viewport_y viewport from in
     let to_x = viewport_x viewport to_ and to_y = viewport_y viewport to_ in
-    let route = match via with
-      | [] -> [Wire.{x=(from_x +. to_x) /. 2.;y=(from_y +. to_y) /. 2.}]
-      | _::_ -> List.map (fun point -> Wire.{x=viewport_x viewport point;y=viewport_y viewport point}) via in
+    let route = Browser_lane.Pointer.drag_waypoints ~start:from ~destination:to_ via
+      |> List.map (fun point -> Wire.{x=viewport_x viewport point;y=viewport_y viewport point}) in
     pointer ~call ~tab_id ~page_id ~args ~name
       (Wire.Page_drag_and_drop
          {page_id;from_x;from_y;to_x;to_y;route})

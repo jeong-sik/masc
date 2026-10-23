@@ -23,6 +23,11 @@ Source execution head: `9c17b847250dd8c7db6e79a43ccfadf979e2c297`.
 Source base: `f777165d3306d9173235349d4454b0ffacd83212` (the expression
 parent, still unmerged when this work began). Documentation-only head after these
 checks: `54c64fa3925e3699c65e9e0e10ebeb83621c9f0d`.
+After the expression parent merged, all 17 changed source/test files were byte
+identical at rebased source `03f47cd982563299beeb4835a91a6bf9108fc811`.
+The native time/receive/cancel probe passed again at docs head
+`8e32078577458b60fa2681e9b749081e25e6a087`; the public native receipt records
+that later execution.
 
 - Node: 112 passed, zero failed, including real Worker preparation, inward-only
   horizon preservation, mixed time/value/pitch history, invalid candidate

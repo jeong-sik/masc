@@ -86,5 +86,14 @@
     "No default launcher installation, USB instrument, acoustic latency or audio/MIDI sample alignment validation",
     "Explicit off-ID editing does not infer repeated-note voice ownership or move controls automatically",
     "Embedded JR/delta-clock retiming, message insertion/removal, raw practice editing and MIDI2 Clip import remain"
-  ]
+  ],
+  "nativeRevalidation": {
+    "executionHead": "8e32078577458b60fa2681e9b749081e25e6a087",
+    "rebasedSourceHead": "03f47cd982563299beeb4835a91a6bf9108fc811",
+    "sourceFilesIdenticalToExecutedSource": 17,
+    "log": "native-wire-rebased.log",
+    "sha256": "e2e01f931456eb8619afcde103e0af5729cf7f13f6c3f427a96942709d5003b6",
+    "bytes": 1210,
+    "result": "PASS"
+  }
 }

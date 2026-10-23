@@ -36,11 +36,26 @@ let with_workspace f =
       let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
       f config store root))))
 
+let measurement_path = "measurement-owner/measurement.json"
+let measurement_reference = "artifact:" ^ measurement_path
+let submit_measurement config goal_id value =
+  let content = Printf.sprintf "{\"value\":%d}" value in
+  let shared_root = Filename.concat
+    (Workspace_verification_store.project_root_of_base_path config.Workspace.base_path)
+    Playground_paths.all_playgrounds_prefix in
+  Out_channel.with_open_bin (Filename.concat shared_root measurement_path)
+    (fun out -> output_string out content);
+  let item = Workspace_verification_store.Evidence_artifact {
+    reference=measurement_reference; content; bytes=String.length content; truncated=false} in
+  ignore (stored (Goal_store.transact_goal config ~goal_id (fun goal ->
+    Result.map (fun record -> goal, record) (Goal_verification.mark_proof_pending
+      ~submitted_evidence:[item] config ~goal_id ~criterion:(Goal_store.criterion_of_goal goal)))))
+
 let pending config =
   let goal,_ = stored (Goal_store.upsert_goal config ~title:"Measure the original result"
-    ~metric:"artifact:measurement.json" ~target_value:"100" ()) in
-  ignore (proof (Workspace_goals.request_current_proof ~evidence_refs:["note:exact Goal submission"]
-    config ~goal_id:goal.id));
+    ~metric:measurement_reference ~target_value:"100" ()) in
+  ignore (proof (Workspace_goals.request_current_proof config ~goal_id:goal.id));
+  submit_measurement config goal.id 100;
   goal.id
 let prepared config store =
   let goal_id = pending config in
@@ -302,8 +317,7 @@ let test_actual_goal_commit_reply_loss_and_conflict () =
           ~decision:Workspace_goals.Proof_proven ~evidence:"actual proof" in
         if Tool_result.is_success result then Error "actual proof committed but reply lost"
         else Error (Tool_result.message result) in
-      if conflict then ignore (proof (Workspace_goals.request_current_proof config
-        ~goal_id:subject.goal_id ~evidence_refs:["note:replaced submission"]));
+      if conflict then submit_measurement config subject.goal_id 101;
       (match W.commit ~store ~retained ~change:{P.before; after} ~observe ~apply with
        | Error (W.Execution_pending _) -> () | Ok _ | Error _ -> Alcotest.fail "commit frontier was not retained");
       let restored = load store original in

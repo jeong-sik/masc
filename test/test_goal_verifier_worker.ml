@@ -131,6 +131,13 @@ let test_unknown_and_cancellation_never_redispatch () =
       let pending () = match run store retained authority with
         | Error (W.Execution_pending _) -> () | Ok _ | Error _ -> Alcotest.fail "unknown Goal original replayed" in
       pending (); pending ();
+      let original = W.original retained in
+      let subject = V.subject original in
+      (match checked (W.frontier ~store ~installation_id ~package_id ~goal_id:subject.goal_id
+          ~request_id:subject.request_id ~new_run:(fun () -> Alcotest.fail "unknown allocated a new run")) with
+       | Some restored -> Alcotest.(check int) "unknown frontier retains the original attempt" 0
+           (V.attempt (W.original restored))
+       | None -> Alcotest.fail "unknown original disappeared from frontier");
       Alcotest.(check int) "no slot fallback or restart replay after unknown" 1 !calls));
   with_workspace (fun config store _ ->
     let authority, retained = prepared config store in
@@ -197,8 +204,131 @@ let test_destination_authority_and_inventory () = with_workspace (fun config sto
     Alcotest.(check int) "no refused path calls model" 0 !calls;
     ignore authority))
 
+let test_linked_frontier_and_staged_run_recovery () =
+  let exercise crash_before_child = with_workspace (fun config store _ ->
+    let authority, retained = prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      incr calls;
+      Alcotest.(check string) "retry keeps complete original prompt" (V.prompt original) prompt;
+      if !calls = 1 then Error (Agent_core.Error.Api (Agent_core.Error.Retry.RateLimited
+        {retry_after=Some 1.; message="definite temporary refusal"}))
+      else Ok {AR.selected_runtime_id="goal-reviewer"; verdict=Some (AR.Approve "checked original")}) (fun () ->
+      let refusal = checked (run store retained authority) in
+      Alcotest.(check bool) "typed definite refusal retains retry candidate" true
+        (refusal.result.retryable_runtimes <> []);
+      let allocations = ref 0 in
+      let fixed_run : W.run_identity = {run_id="fixed-successor/" ^ subject.request_id;
+        started_at=Time_compat.now ()} in
+      if crash_before_child then (
+        (* Publish a real staged body and parent intent, then stop before child
+           publication. A separate actual store supplies the same opaque
+           request bytes as normal retain; no private owner record is forged. *)
+        let staged_store = Lane_addon_store.create
+          ~root:(Filename.concat (Workspace.masc_dir config) "staged-goal-fixture") in
+        let child = get (V.successor original) in
+        ignore (checked (W.retain ~store:staged_store ~installation_id ~package_id ~run:fixed_run child));
+        let load_scope store = get (Lane_addon_tool_request_owner.load_scope ~store
+            ~scope:"goal-proof-reviews" |> Result.map_error Lane_addon_tool_request_owner.error_to_string) in
+        let only = function [record] -> record | _ -> Alcotest.fail "fixture needs one actual owner" in
+        let child_record = only (load_scope staged_store) in
+        let parent_record = only (load_scope store) in
+        let successor = get (Lane_addon_tool_request_owner.prepare_successor ~store
+          ~scope:"goal-proof-reviews" ~request_id:child_record.request_id ~request:child_record.request
+          |> Result.map_error Lane_addon_tool_request_owner.error_to_string) in
+        ignore (get (Lane_addon_tool_request_owner.advance ~store ~expected:parent_record
+          ~event:(P.Successor_intended successor)
+          |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string)));
+      let next () = match checked (W.frontier ~store ~installation_id ~package_id
+          ~goal_id:subject.goal_id ~request_id:subject.request_id ~new_run:(fun () ->
+            if crash_before_child then Alcotest.fail "restart invented another child run";
+            incr allocations; fixed_run)) with
+        | Some child -> child | None -> Alcotest.fail "retained frontier disappeared" in
+      let child = next () in
+      Alcotest.(check int) "one linked successor" 1 (V.attempt (W.original child));
+      Alcotest.(check string) "fixed staged run survives" fixed_run.run_id (W.run_identity child).run_id;
+      ignore (next ());
+      Alcotest.(check int) "no run allocation during restart" (if crash_before_child then 0 else 1) !allocations;
+      ignore (checked (run store child authority));
+      Alcotest.(check int) "only definite terminal failure gets a new provider attempt" 2 !calls;
+      ignore (next ());
+      Alcotest.(check int) "judged frontier does not create another successor" 2 !calls)) in
+  exercise false;
+  exercise true
+
+let test_actual_goal_commit_reply_loss_and_conflict () =
+  let exercise conflict = with_workspace (fun config store _ ->
+    let authority, retained = prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      incr calls; Ok {AR.selected_runtime_id="goal-reviewer"; verdict=Some (AR.Approve "actual proof")}) (fun () ->
+      let receipt = checked (run store retained authority) in
+      let retained = load store original in
+      let judgment = checked (W.retained_judgment retained) in
+      let read () = match get (Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id) with
+        | Some record -> record | None -> Alcotest.fail "actual Goal proof vanished" in
+      let before = Goal_verification.record_to_yojson (read ()) in
+      let after = `Assoc ["schema", `String "goal_proof_commit/v1";
+        "original_digest", `String (get (V.digest original)); "receipt", judgment] in
+      let applications = ref 0 in
+      let observe (_:P.change) =
+        let record = read () in
+        match record.Goal_verification.completion with
+        | Proof_proven verdict when verdict.request_id = subject.request_id
+            && verdict.verification_run_id = receipt.run.run_id
+            && Goal_store.criterion_equal verdict.criterion subject.criterion
+            && verdict.authority = Workspace_goals.verifier_authority
+            && verdict.evidence = "actual proof" ->
+          (match Goal_store.find_goal config ~goal_id:subject.goal_id with
+           | Goal_found goal when goal.phase = Goal_phase.Awaiting_confirmation -> Ok after
+           | Goal_found _ | Goal_absent | Store_unavailable _ -> Error "Goal phase not confirmed")
+        | Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ | Human_confirmed _ ->
+          Ok (Goal_verification.record_to_yojson record) in
+      let apply (_:P.change) =
+        incr applications;
+        let result = Workspace_goals.commit_verifier_decision
+          ~before_proof_commit:(Candle_snapshot.before_proof_commit config)
+          ~tool_name:"goal_fixture_commit" ~start_time:(Tool_timing.start ()) config
+          ~goal_id:subject.goal_id ~verification_run_id:receipt.run.run_id
+          ~request_id:subject.request_id ~criterion:subject.criterion
+          ~decision:Workspace_goals.Proof_proven ~evidence:"actual proof" in
+        if Tool_result.is_success result then Error "actual proof committed but reply lost"
+        else Error (Tool_result.message result) in
+      if conflict then ignore (proof (Workspace_goals.request_current_proof config
+        ~goal_id:subject.goal_id ~evidence_refs:["note:replaced submission"]));
+      (match W.commit ~store ~retained ~change:{P.before; after} ~observe ~apply with
+       | Error (W.Execution_pending _) -> () | Ok _ | Error _ -> Alcotest.fail "commit frontier was not retained");
+      let restored = load store original in
+      if conflict then (
+        Alcotest.(check int) "another request cannot authorize old proof" 0 !applications;
+        match P.phase (W.progress restored) with
+        | Conflicted _ -> ()
+        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+        | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> Alcotest.fail "conflict was not retained")
+      else (
+        checked (W.commit ~store ~retained:restored ~change:{P.before=`Null;after=`Null} ~observe ~apply);
+        ignore (checked (run store restored authority));
+        Alcotest.(check int) "exact committed state prevents duplicate proof/Candle effects" 1 !applications;
+        Alcotest.(check int) "commit recovery never calls another model" 1 !calls;
+        match P.phase (W.progress (load store original)) with
+        | Finished _ -> ()
+        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+        | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Alcotest.fail "commit was not confirmed"))) in
+  exercise false;
+  exercise true
+
 let () = Alcotest.run "retained Goal worker" ["execution", [
   Alcotest.test_case "actual retained visual lookup and restart receipt" `Quick test_actual_retained_lookup_and_restored_receipt;
   Alcotest.test_case "unknown and cancellation never redispatch" `Quick test_unknown_and_cancellation_never_redispatch;
   Alcotest.test_case "same-original pre-admission repair" `Quick test_pre_admission_repair_keeps_original;
-  Alcotest.test_case "authority destination and strict inventory" `Quick test_destination_authority_and_inventory]]
+  Alcotest.test_case "authority destination and strict inventory" `Quick test_destination_authority_and_inventory;
+  Alcotest.test_case "linked frontier restores the original staged run" `Quick test_linked_frontier_and_staged_run_recovery;
+  Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict]]

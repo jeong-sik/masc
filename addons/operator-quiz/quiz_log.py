@@ -579,6 +579,14 @@ class ExactRequested:
 
 
 @dataclass(frozen=True, slots=True)
+class AuthorContextRecorded:
+    """Domain context of the latest author request, independent of its wire body."""
+    session_id: str
+    request_id: str
+    history_scope: str  # all | open_debt_only
+
+
+@dataclass(frozen=True, slots=True)
 class Posed:
     session_id: str
     ask_id: str
@@ -652,7 +660,7 @@ class Disputed:
 
 Grading = Union[GradeRequested, Judged, GradeFailed, Disputed]
 
-Event = Union[SessionOpened, MaterialRead, ExactRequested, Posed, DraftRejected, SessionFailed, AnswerReceived,
+Event = Union[SessionOpened, MaterialRead, ExactRequested, AuthorContextRecorded, Posed, DraftRejected, SessionFailed, AnswerReceived,
               GradeRequested, Judged, GradeFailed, Disputed]
 
 
@@ -668,6 +676,9 @@ def event_to_json(event: Event) -> dict:
         case ExactRequested(session_id, request_id, output, digest):
             return {"event": "exact_requested", "session_id": session_id, "request_id": request_id,
                     "output": output, "digest": digest}
+        case AuthorContextRecorded(session_id, request_id, history_scope):
+            return {"event": "author_context_recorded", "session_id": session_id,
+                    "request_id": request_id, "history_scope": history_scope}
         case Posed(session_id, ask_id, question_id, item_id, topic, question, key, sources):
             return {"event": "posed", "session_id": session_id, "ask_id": ask_id, "question_id": question_id,
                     "item_id": item_id, "topic": topic, "question": question, "key": key_to_json(key),
@@ -719,6 +730,12 @@ def event_of_json(value: Any) -> Event:
             f = _exact(value, {"event", "session_id", "request_id", "output", "digest"}, "exact_requested")
             return ExactRequested(_text(f["session_id"], "session_id"), _text(f["request_id"], "request_id"),
                                   _text(f["output"], "output"), _text(f["digest"], "digest"))
+        case "author_context_recorded":
+            f = _exact(value, {"event", "session_id", "request_id", "history_scope"}, "author_context_recorded")
+            if f["history_scope"] not in ("all", "open_debt_only"):
+                raise LogError("author history_scope must be all or open_debt_only")
+            return AuthorContextRecorded(_text(f["session_id"], "session_id"),
+                                         _text(f["request_id"], "request_id"), f["history_scope"])
         case "posed":
             f = _exact(value, {"event", "session_id", "ask_id", "question_id", "item_id", "topic", "question",
                                "key", "sources"}, "posed")
@@ -939,6 +956,7 @@ class Session:
     posed: tuple[Posed, ...]
     answer: AnswerReceived | None
     grading: tuple[Grading, ...]  # in log order
+    history_scope: str | None  # None means no domain context was recorded; never infer it from request wire.
 
     @property
     def ask_id(self) -> str | None:
@@ -994,12 +1012,22 @@ def fold(events: list[Event]) -> list[Session]:
                                         "questions": questions, "grants": grants, "language": language,
                                         "opened_at": opened_at, "state": "writing", "failure": None,
                                         "superseded_by": None, "material": [], "requests": [], "rejected": [],
-                                        "posed": [], "answer": None, "grading": []}
+                                        "posed": [], "answer": None, "grading": [], "history_scope": None}
                 order.append(session_id)
             case MaterialRead(session_id=session_id):
                 writing(session_id, "material_read")["material"].append(event)
             case ExactRequested(session_id=session_id):
-                writing(session_id, "exact_requested")["requests"].append(event)
+                current = writing(session_id, "exact_requested")
+                current["requests"].append(event)
+                current["history_scope"] = None
+            case AuthorContextRecorded(session_id=session_id, request_id=request_id, history_scope=scope):
+                current = writing(session_id, "author_context_recorded")
+                latest = current["requests"][-1] if current["requests"] else None
+                if latest is None or latest.request_id != request_id or latest.output != "author":
+                    raise LogError("author context does not name the latest author request")
+                if scope not in ("all", "open_debt_only") or current["history_scope"] is not None:
+                    raise LogError("author context is invalid or already recorded")
+                current["history_scope"] = scope
             case DraftRejected(session_id=session_id):
                 writing(session_id, "draft_rejected")["rejected"].append(event)
             case Posed(session_id=session_id, ask_id=ask_id, question_id=question_id):
@@ -1070,5 +1098,5 @@ def fold(events: list[Event]) -> list[Session]:
     return [Session(s["session_id"], s["action_request_id"], s["questions"], s["grants"], s["language"],
                     s["opened_at"], s["state"], s["failure"],
                     s["superseded_by"], tuple(s["material"]), tuple(s["requests"]), tuple(s["rejected"]),
-                    tuple(s["posed"]), s["answer"], tuple(s["grading"]))
+                    tuple(s["posed"]), s["answer"], tuple(s["grading"]), s["history_scope"])
             for s in (sessions[session_id] for session_id in order)]

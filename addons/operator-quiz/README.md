@@ -14,6 +14,10 @@ with each result is a function of that log (`quiz_flow.py`), so a restarted
 worker lists the same request with the same body. A result is answered
 `accepted` only after the event that consumes it is on disk.
 
+Author history scope is retained as domain context alongside its request, rather
+than reconstructed from the request message wire. Missing recorded context is
+reported as unavailable; original questions, answers and request blobs stay intact.
+
 - `quiz_log.py`: the log's events, the session fold, and the body store.
 - `quiz_flow.py`: the listing and the consumption of each result, including
   the quote check of every draft against the record bytes the host retained.

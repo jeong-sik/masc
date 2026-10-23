@@ -36,6 +36,7 @@ EVERY_EVENT = [
     opened("s1", "act-1", 3),
     q.MaterialRead("s1", "read-1", "1" * 64),
     q.ExactRequested("s1", "author-1", "author", "2" * 64),
+    q.AuthorContextRecorded("s1", "author-1", "all"),
     q.DraftRejected("s1", "author-1", 1, "quote not found in p-2"),
     posed(),
     answered(),
@@ -170,6 +171,22 @@ class Sessions(unittest.TestCase):
         sessions = q.fold(start + [posed(), answered()])
         self.assertEqual([s.state for s in sessions], ["answered"])
         self.assertEqual(sessions[0].ask_id, "ask-1")
+
+    def test_author_context_is_bound_to_its_current_request(self):
+        request = q.ExactRequested("s1", "author-1", "author", "2" * 64)
+        context = q.AuthorContextRecorded("s1", "author-1", "all")
+        self.assertEqual(q.fold([opened(), request, context])[0].history_scope, "all")
+        self.assertIsNone(q.fold([opened(), request])[0].history_scope)
+        for events in ([opened(), context],
+                       [opened(), request, q.AuthorContextRecorded("s1", "other", "all")],
+                       [opened(), request, context, context],
+                       [opened(), request, posed(), context],
+                       [opened(), request, q.AuthorContextRecorded("s1", "author-1", "unknown")]):
+            with self.assertRaises(q.LogError):
+                q.fold(events)
+        with self.assertRaises(q.LogError):
+            q.event_of_json({"event": "author_context_recorded", "session_id": "s1",
+                               "request_id": "author-1", "history_scope": "unknown"})
 
     def test_a_later_compose_supersedes_only_a_writing_session(self):
         events = [opened("s1", "act-1", 1), opened("s2", "act-2", 1)]

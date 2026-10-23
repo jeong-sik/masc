@@ -104,6 +104,31 @@ max_output_tokens = 2048
 - 평일만 내려면 `recurrence_kind = "cron"`, `recurrence_cron = "30 8 * * 1-5"` 를 쓴다.
 - 바로 한 번 내려면 Lane Add-on 화면의 action 메뉴에서 `compose` 를 고른다.
 
+## 설치본 갱신과 출제 복구
+
+저장소 소스가 바뀌어도 실행 중인 설치 패키지는 자동으로 바뀌지 않는다. 패키지의
+`revision` 과 설치 경로, 실제 worker 원본을 함께 확인한다. 현재 패키지는 `0.2.1` 이고,
+이미지 `0.1.0` 은 Python 과 공용 protocol 모듈을 담는 실행 환경이다. worker 코드는
+설치한 패키지 폴더를 `/addon` 에 읽기 전용으로 붙여 실행한다.
+
+1. 원본 로그와 요청 blob, 설치 선언 및 현재 instance/volume 식별자를 보관한다.
+2. 검증한 패키지를 새 불변 경로에 설치한다. 실행 중인 패키지 폴더를 덮어쓰지 않는다.
+3. `masc_lane_declaration_read` 의 revision으로 선언을 저장해 새 manifest 경로를 가리킨다.
+   설치 `id`, `run_id`, package `id`, 기록 권한과 모델 바인딩은 유지한다. 같은 설치의
+   영속 volume은 그대로 사용되며, 새 instance가 연결됐는지 확인한다.
+4. 이력 조회와 호스트 요청 상태를 확인한다. `history_scope` 는 author 요청과 함께
+   기록한 domain event에서 읽는다. 그 event가 없는 세션은 `null`(미기록)이고, 과거
+   요청의 전송 형식을 다시 해석해 추정하지 않는다. 질문·답변·복습 이력은 그대로다.
+5. 보관된 author 요청이 현재 호스트 형식에 맞지 않아 출제가 막혔다면, 새 request id로
+   `compose` 를 한 번 보낸다. 기존 `writing` 세션만 `superseded` 로 남고 새 세션이
+   시작된다. 열린 질문과 답한 세션은 이 동작으로 지워지지 않는다. 로그나 blob을
+   고쳐 쓰거나 잘못된 전송 형식을 호스트에서 허용하지 않는다.
+6. action의 `confirmed` 는 시작 영수증이다. 새 세션의 실제 출제 수와 Approvals의 질문,
+   인용 근거까지 읽은 뒤에 출제 복구로 판단한다. 일일 Schedule은 별도로 유지한다.
+
+새 domain event가 기록된 volume에는 그 event를 읽을 수 있는 패키지를 사용한다.
+이전 reader를 다시 지정하는 것은 복구 절차가 아니다.
+
 ## 매일 쓰기
 
 - 시간 바꾸기: `masc_schedule_update`.

@@ -92,7 +92,7 @@ let terminal ~capture ~record final =
   | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
   | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> Ok (Terminal (final,record))
 let restore ~store ~workspace original =
-  Eio_unix.run_in_systhread (fun () -> Capture.restore ~workspace
+  Server_workspace_memory_curator_pass.restore ~run:(fun work -> Eio_unix.run_in_systhread work) (fun () -> Capture.restore ~workspace
     ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id
       |> Result.map_error Owner.error_to_string) original) |> rejected
 let restore_original ~config ~request_id =

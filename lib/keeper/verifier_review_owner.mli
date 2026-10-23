@@ -100,5 +100,12 @@ val result_of_json : Yojson.Safe.t -> (Task.Anti_rationalization.review_result, 
 
 val pending_commits : store:store -> installation_id:string -> package_id:string ->
   (retained list, load_error) result
-(** Strict recovery discovery. Only original domain commit intents are returned;
+(** Strict recovery discovery. Retained host judgments and domain commit intents are returned;
     this does not allocate a successor or authorize another provider. *)
+
+val judgment_to_json : original:Verifier_review_original.t -> notes:string ->
+  Task.Anti_rationalization.review_result -> (Yojson.Safe.t, string) result
+val judgment_of_json : original:Verifier_review_original.t -> Yojson.Safe.t ->
+  (Task.Anti_rationalization.review_result * string, string) result
+(** One durable host judgment binds the original digest, exact structured
+    result and fully rendered domain notes in the same publication. *)

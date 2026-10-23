@@ -14,6 +14,7 @@ val run_attempt :
   ?sw:Eio.Switch.t option ->
   store:Verifier_review_owner.store -> verification_id:string -> attempt:int ->
   installation_id:string -> package_id:string ->
+  prepare_notes:(Task.Anti_rationalization.review_result -> string) ->
   authority:Verification_authority_tools.task_review ->
   provider_rest:(string -> Task.Anti_rationalization.provider_rest) -> unit ->
   (Task.Anti_rationalization.review_result, error) result
@@ -22,7 +23,10 @@ val run_attempt :
     changed workspace, producer, full schema or submitted snapshot before
     dispatch. Execute the stored prompt and images; callers supply neither
     another question nor a lookup dispatch closure. The structured output
-    contract must still match the review protocol. *)
+    contract must still match the review protocol. [prepare_notes] belongs to
+    the host and renders its captured evidence metadata before the judgment
+    and notes are published atomically. Restored judgments do not rebuild or
+    validate lookup authority. *)
 
 val commit_attempt :
   store:Verifier_review_owner.store -> verification_id:string -> attempt:int ->

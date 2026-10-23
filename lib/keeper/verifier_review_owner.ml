@@ -226,6 +226,24 @@ let result_of_json json =
       model_absent_runtimes=strings "model_absent_runtimes"} in
   try decode () with Type_error _ | Undefined _ | Not_found -> Error "malformed retained verifier result"
 
+let judgment_to_json ~original ~notes result =
+  let* digest=V.digest original in
+  Ok (`Assoc ["schema",`String "verifier_host_judgment/v1";
+    "original_digest",`String digest;"result",result_to_json result;"notes",`String notes])
+
+let judgment_of_json ~original json =
+  let* digest=V.digest original in
+  match json with
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=
+      ["notes";"original_digest";"result";"schema"]
+      && List.assoc "schema" fields=`String "verifier_host_judgment/v1"
+      && List.assoc "original_digest" fields=`String digest ->
+    let* result=result_of_json (List.assoc "result" fields) in
+    (match result.AR.verdict,List.assoc "notes" fields with
+     | Some _,`String notes when String.trim notes<>"" -> Ok (result,notes)
+     | None,_ | Some _,_ -> Error "retained host judgment lacks a verdict or its complete domain notes")
+  | _ -> Error "retained host judgment differs from its complete original"
+
 let retry_result evidence =
   match evidence with
   | `Assoc fields when List.sort String.compare (List.map fst fields)=
@@ -317,6 +335,6 @@ let pending_commits ~store ~installation_id ~package_id =
     let* retained=load_retained ~store ~verification_id:(V.verification_id original)
       ~attempt:(V.attempt original) ~installation_id ~package_id in
     match Progress.phase record.progress with
-    | Committing _ | Commit_unknown _ -> Ok (retained::acc)
-    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _
+    | Judged _ | Committing _ | Commit_unknown _ -> Ok (retained::acc)
+    | Captured | Admission_wait _ | Dispatch_pending _ | Finished _
     | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok acc) (Ok []) records

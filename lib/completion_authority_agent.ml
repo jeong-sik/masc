@@ -779,7 +779,7 @@ let announce_stall ~notify ~task_id ~verification_id ~cause ~disposition =
 let commit_verdict_with_config
       (config : Workspace_utils_backend_setup.config) (task : Masc_domain.task)
       ~store ~attempt ~installation_id ~package_id
-      ~verification_id ~authority ~verdict:_ ~notes ~verdict_label ~on_commit
+      ~verification_id ~authority ~verdict:_ ~notes:_ ~verdict_label ~on_commit
       ~(evaluator_runtime : string option) =
   let module O = Verifier_review_owner in
   let module W = Verifier_review_worker in
@@ -796,7 +796,7 @@ let commit_verdict_with_config
       | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
         Error "domain commit lacks original retained judgment" in
     let* original_digest=Verifier_review_original.digest original in
-    let* result=O.result_of_json judgment in
+    let* result,notes=O.judgment_of_json ~original judgment in
     let* before,started_at =
       let status = match Lane_addon_request_progress.phase (O.progress retained) with
         | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
@@ -833,9 +833,10 @@ let commit_verdict_with_config
           && member "task_id" change.after=`String task.id
           && member "producer" change.after=`String (Verifier_review_original.review_request original).AR.agent_name
           && member "authority_actor" change.after=`String (Masc_domain.completion_authority_actor authority)
-          && Yojson.Safe.equal (member "review" change.after) judgment
+          && Yojson.Safe.equal (member "review" change.after) (O.result_to_json result)
           then Ok () else Error "domain commit intent differs from its immutable original" in
-        let notes=member "notes" change.after |> to_string in
+        let* ()=if member "notes" change.after=`String notes then Ok ()
+          else Error "original commit notes differ from retained host judgment" in
         let started_at=member "started_at" change.after |> to_string in
         let* result=O.result_of_json (member "review" change.after) in
         let* ()=match change.before with
@@ -1001,44 +1002,45 @@ let process_task_once
   let stop cause = complete (Stalled cause, registry_outcome_of_stop_cause cause) in
   let defer_unavailable ~stage ~detail = stop (Infrastructure_unavailable { stage; detail }) in
   try
-    match admission_of_status task.task_status with
-    | Not_awaiting ->
-      let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons") in
-      (match Verifier_review_owner.pending_commits ~store
-        ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review" with
-       | Error _ -> defer_unavailable ~stage:Verification_run_registry.Review_preparation
-           ~detail:"original pending commit inventory unavailable"
-       | Ok pending ->
-         (match List.find_opt (fun retained ->
-           let original=Verifier_review_owner.original retained in
-           Verifier_review_original.verification_id original=verification_id
-             && (Verifier_review_original.review_request original).task_id=task.id
-             && (Verifier_review_original.review_request original).agent_name=assignee) pending with
-          | None -> defer_unavailable ~stage:Verification_run_registry.Review_preparation
-              ~detail:"Task is not awaiting this verification and has no retained commit to recover"
-          | Some retained ->
-            let original=Verifier_review_owner.original retained in
-            let commit=match Lane_addon_request_progress.phase (Verifier_review_owner.progress retained) with
-              | Committing commit | Commit_unknown (commit,_) -> Some commit
-              | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _
-              | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> None in
-            (match commit with
-             | None -> stop (Raised {detail="pending commit changed during recovery"})
-             | Some commit ->
-               (match Verifier_review_owner.result_of_json commit.judgment with
-                | Error detail -> stop (Raised {detail})
-                | Ok result -> (match result.Task.Anti_rationalization.verdict with
-                    | None -> stop (Raised {detail="original commit has no structured verdict"})
-                    | Some review_verdict ->
-                      let on_commit=match review_verdict with
-                        | Approve reason -> Verification_run_registry.Approved {reason}
-                        | Reject reason -> Verification_run_registry.Rejected {reason} in
-                      complete ~evaluator_runtime:result.evaluator_runtime
-                        (commit_verdict runtime task ~store ~attempt:(Verifier_review_original.attempt original)
-                          ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review"
-                          ~verification_id ~authority ~verdict:(completion_verdict_of_review review_verdict)
-                          ~notes:"" ~verdict_label:(Task.Anti_rationalization.verdict_constructor_name review_verdict)
-                          ~on_commit ~evaluator_runtime:(Some result.evaluator_runtime)))))))
+    let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons") in
+    match Verifier_review_owner.pending_commits ~store
+      ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review" with
+    | Error _ -> defer_unavailable ~stage:Verification_run_registry.Review_preparation
+        ~detail:"original host judgment inventory unavailable"
+    | Ok pending ->
+      match List.find_opt (fun retained ->
+        let original=Verifier_review_owner.original retained in
+        Verifier_review_original.verification_id original=verification_id
+          && (Verifier_review_original.review_request original).task_id=task.id
+          && (Verifier_review_original.review_request original).agent_name=assignee) pending with
+      | Some retained ->
+        let original=Verifier_review_owner.original retained in
+        let judgment=match Lane_addon_request_progress.phase (Verifier_review_owner.progress retained) with
+          | Judged judgment -> Some judgment
+          | Committing commit | Commit_unknown (commit,_) -> Some commit.judgment
+          | Captured | Admission_wait _ | Dispatch_pending _ | Finished _
+          | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> None in
+        (match judgment with
+         | None -> stop (Raised {detail="retained host judgment changed during recovery"})
+         | Some judgment ->
+           (match Verifier_review_owner.judgment_of_json ~original judgment with
+            | Error detail -> stop (Raised {detail})
+            | Ok (result,notes) -> (match result.Task.Anti_rationalization.verdict with
+                | None -> stop (Raised {detail="original host judgment has no structured verdict"})
+                | Some review_verdict ->
+                  let on_commit=match review_verdict with
+                    | Approve reason -> Verification_run_registry.Approved {reason}
+                    | Reject reason -> Verification_run_registry.Rejected {reason} in
+                  complete ~evaluator_runtime:result.evaluator_runtime
+                    (commit_verdict runtime task ~store ~attempt:(Verifier_review_original.attempt original)
+                      ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review"
+                      ~verification_id ~authority ~verdict:(completion_verdict_of_review review_verdict)
+                      ~notes ~verdict_label:(Task.Anti_rationalization.verdict_constructor_name review_verdict)
+                      ~on_commit ~evaluator_runtime:(Some result.evaluator_runtime)))))
+      | None ->
+      match admission_of_status task.task_status with
+      | Not_awaiting -> defer_unavailable ~stage:Verification_run_registry.Review_preparation
+          ~detail:"Task is not awaiting this verification and has no retained host judgment"
     | Review_completion ->
     match
       prepare_review
@@ -1129,6 +1131,8 @@ let process_task_once
               in
               let* result =
               Verifier_review_worker.run_attempt
+                ~prepare_notes:(fun result -> review_notes ~request:prepared.request
+                  ~evidence_access:prepared.evidence_access ~unread_images:prepared.unread_images ~result ~authority)
                 ~on_tool_result
                 ~sw:(Some runtime.sw)
                 ~store:owner_store
@@ -1527,9 +1531,7 @@ let install_callback (runtime : runtime) =
            assignee))
 ;;
 
-let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
-  Eio.Switch.check sw;
-  let runtime =
+let make_runtime ~sw ~clock ~(config:Workspace_utils_backend_setup.config) =
     { config
     ; sw
     ; clock
@@ -1543,7 +1545,12 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     ; in_flight = Atomic.make []
     ; review_slots = Eio.Semaphore.make 4
     }
-  in
+
+;;
+
+let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
+  Eio.Switch.check sw;
+  let runtime=make_runtime ~sw ~clock ~config in
   let owner = Some runtime in
   match Atomic.compare_and_set active_runtime None owner with
   | false ->
@@ -1580,6 +1587,12 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
 ;;
 
 module For_testing = struct
+  let process_original_once ~config ~sw ~clock ~task ~assignee ~verification_id =
+    let runtime=make_runtime ~config ~sw ~clock in
+    match process_task_once runtime task ~assignee ~verification_id with
+    | Committed -> Ok ()
+    | Stalled cause -> Error (stop_cause_detail cause)
+
   let commit_original ~config ~task ~store ~attempt ~installation_id ~package_id ~verification_id ~notes =
     match commit_verdict_with_config config task ~store ~attempt ~installation_id ~package_id
       ~verification_id ~authority:system_authority ~verdict:Masc_domain.Verdict_approved

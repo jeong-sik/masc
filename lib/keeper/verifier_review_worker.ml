@@ -19,10 +19,26 @@ let map_load_error = function
   | O.Corrupt_original detail -> Original_corrupt detail
 
 let run_attempt ?on_verdict ?on_tool_result ?sw ~store ~verification_id ~attempt
-    ~installation_id ~package_id ~authority ~provider_rest () =
+    ~installation_id ~package_id ~prepare_notes ~authority ~provider_rest () =
   let* retained = O.load_retained ~store ~verification_id ~attempt
     ~installation_id ~package_id |> Result.map_error map_load_error in
   let original = O.original retained in
+  let restored json = O.judgment_of_json ~original json
+    |> Result.map fst |> Result.map_error (fun detail -> Original_corrupt detail) in
+  let save record event = O.advance ~store record event |> Result.map_error map_load_error in
+  let restore_refusal evidence = match evidence with
+    | `Assoc fields -> (match List.assoc_opt "result" fields with
+        | Some json -> O.result_of_json json |> Result.map_error (fun detail -> Original_corrupt detail)
+        | None -> Error (Original_corrupt "retained reviewer refusal has no exact result"))
+    | _ -> Error (Original_corrupt "retained reviewer refusal is malformed") in
+  match Progress.phase (O.progress retained) with
+  | Progress.Judged json -> restored json
+  | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
+    restored commit.judgment
+  | Rejected refusal | Subdividing (refusal,_) | Subdivided (refusal,_) -> restore_refusal refusal.evidence
+  | Dispatch_pending _ -> Error (Execution_pending
+      "original reviewer may have dispatched; no automatic provider replay")
+  | Captured | Admission_wait _ ->
   let subject = Authority.task_review_subject authority in
   let req = V.review_request original in
   let lookup = Authority.task_review_lookup authority in
@@ -41,22 +57,6 @@ let run_attempt ?on_verdict ?on_tool_result ?sw ~store ~verification_id ~attempt
     if String.equal (V.output_contract original) (V.canonical_output_contract ()) then Ok ()
     else Error (Original_corrupt "retained output contract differs from the review protocol") in
 
-  let restored json = O.result_of_json json
-    |> Result.map_error (fun detail -> Original_corrupt detail) in
-  let save record event = O.advance ~store record event |> Result.map_error map_load_error in
-  let restore_refusal evidence = match evidence with
-    | `Assoc fields -> (match List.assoc_opt "result" fields with
-        | Some json -> restored json
-        | None -> Error (Original_corrupt "retained reviewer refusal has no exact result"))
-    | _ -> Error (Original_corrupt "retained reviewer refusal is malformed") in
-  match Progress.phase (O.progress retained) with
-  | Progress.Judged json -> restored json
-  | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
-    restored commit.judgment
-  | Rejected refusal | Subdividing (refusal,_) | Subdivided (refusal,_) -> restore_refusal refusal.evidence
-  | Dispatch_pending _ -> Error (Execution_pending
-      "original reviewer may have dispatched; no automatic provider replay")
-  | Captured | Admission_wait _ ->
     let* dispatching = save retained Progress.Dispatch_intended in
     let current = ref dispatching in
     let unknown = ref false in
@@ -68,7 +68,10 @@ let run_attempt ?on_verdict ?on_tool_result ?sw ~store ~verification_id ~attempt
     let retain_result result =
       let json = O.result_to_json result in
       let event = match result.AR.verdict with
-        | Some _ -> Progress.Judgment_retained json
+        | Some _ ->
+          let judgment=O.judgment_to_json ~original ~notes:(prepare_notes result) result in
+          (match judgment with Ok judgment -> Progress.Judgment_retained judgment
+           | Error detail -> raise (Retention_failed (Original_corrupt detail)))
         | None when !unknown -> Progress.Execution_observed (Progress.Outcome_unknown
             (`Assoc ["schema",`String "verifier_review_unknown/v1";"result",json]))
         | None -> Progress.Refused {stage=Progress.Execution;evidence=`Assoc [
@@ -124,10 +127,16 @@ let commit_attempt ~store ~verification_id ~attempt ~installation_id ~package_id
     | Ok observed -> let* _ = save record (Progress.Commit_conflicted observed) in
       pending "original commit conflicts with authoritative current Task" in
   let recover record commit =
-    let* digest=V.digest (O.original record) |> Result.map_error (fun d -> Original_corrupt d) in
+    let original=O.original record in
+    let* result,notes=O.judgment_of_json ~original commit.Progress.judgment
+      |> Result.map_error (fun d -> Original_corrupt d) in
+    let* digest=V.digest original |> Result.map_error (fun d -> Original_corrupt d) in
     let* ()=match commit.Progress.change.after with
       | `Assoc fields when List.assoc_opt "original_digest" fields=Some (`String digest)
-        && List.assoc_opt "review" fields=Some commit.judgment -> Ok ()
+        && (match List.assoc_opt "review" fields with
+          | Some json -> Yojson.Safe.equal json (O.result_to_json result)
+          | None -> false)
+        && List.assoc_opt "notes" fields=Some (`String notes) -> Ok ()
       | _ -> Error (Original_corrupt "commit intent does not bind its exact original and judgment") in
     let* record = match Progress.phase (O.progress record) with
       | Progress.Committing _ -> save record (Progress.Commit_uncertain
@@ -141,7 +150,8 @@ let commit_attempt ~store ~verification_id ~attempt ~installation_id ~package_id
   | Progress.Finished _ -> Ok ()
   | Committing commit | Commit_unknown (commit,_) -> recover retained commit
   | Judged judgment ->
-    let* result = O.result_of_json judgment |> Result.map_error (fun d -> Original_corrupt d) in
+    let* result,_notes = O.judgment_of_json ~original:(O.original retained) judgment
+      |> Result.map_error (fun d -> Original_corrupt d) in
     (match result.AR.verdict with
      | None -> Error (Original_corrupt "non-verdict cannot authorize domain commit")
      | Some _ ->

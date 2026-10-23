@@ -22,7 +22,7 @@ let request : AR.review_request =
 let question : AR.verdict_question =
   {completion_contract=None;required_evidence=[];evidence_posture=AR.Note_only;few_shot_block=""}
 
-let with_workspace f =
+let with_workspace_runtime f =
   let base_path = Filename.temp_dir "verifier-worker-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.clear_fs ();Fs_compat.remove_tree base_path;
     Config_dir_resolver.reset ()) (fun () ->
@@ -33,8 +33,10 @@ let with_workspace f =
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Workspace_core.default_config base_path in
-      let store = Masc.Lane_addon_store.create ~root:(Filename.concat base_path "request-ownership") in
-      f config store))))
+      let store = Masc.Lane_addon_store.create ~root:(Filename.concat (Workspace_core.masc_dir config) "lane-addons") in
+      f config store (Eio.Stdenv.clock env)))))
+
+let with_workspace f = with_workspace_runtime (fun config store _clock -> f config store)
 
 let authority ?(worker=producer) ?(items=[]) config =
   let evidence_access = Store.Evidence_available {
@@ -50,8 +52,17 @@ let original ?(question=question) authority attempt =
 
 let retain store original = retained (O.retain ~store ~verification_id
   ~attempt:(V.attempt original) ~installation_id ~package_id original)
+let domain_notes result =
+  Masc.Completion_authority_agent.For_testing.review_notes
+    ~request:{Verification.id=verification_id;task_id;worker=producer;created_at=1.;output=`Null;criteria=[]}
+    ~evidence_access:(Store.Evidence_available {
+      request={id=verification_id;task_id;worker=producer;created_at=1.};items=[]})
+    ~unread_images:[] ~result
+    ~authority:(Masc_domain.System_llm_agent {
+      agent_run_id=Masc.Completion_authority_agent.For_testing.authority_actor})
+
 let run ?(package=package_id) store authority attempt =
-  W.run_attempt ~store ~verification_id ~attempt ~installation_id ~package_id:package
+  W.run_attempt ~prepare_notes:domain_notes ~store ~verification_id ~attempt ~installation_id ~package_id:package
     ~authority ~provider_rest:(fun _ -> AR.No_stated_rest) ()
 
 let with_reviewer reviewer f =
@@ -202,15 +213,6 @@ let prepare_domain config =
       started_at="2026-10-23T00:00:00Z";submitted_at="2026-10-23T00:01:00Z";verification_id}}) backlog.tasks};
   task_in_backlog config
 
-let domain_notes result =
-  Masc.Completion_authority_agent.For_testing.review_notes
-    ~request:{Verification.id=verification_id;task_id;worker=producer;created_at=1.;output=`Null;criteria=[]}
-    ~evidence_access:(Store.Evidence_available {
-      request={id=verification_id;task_id;worker=producer;created_at=1.};items=[]})
-    ~unread_images:[] ~result
-    ~authority:(Masc_domain.System_llm_agent {
-      agent_run_id=Masc.Completion_authority_agent.For_testing.authority_actor})
-
 let test_actual_host_commit_restart () = with_workspace (fun config store ->
   let task=prepare_domain config in
   let a=authority config in let first=original a 0 in retain store first;
@@ -258,6 +260,38 @@ let test_actual_host_commit_cancel_after_domain_write () = with_workspace (fun c
       (List.length (loaded (O.pending_commits ~store ~installation_id ~package_id)));
     Alcotest.(check int) "domain cancellation does not call another model" 1 !calls))
 
+let test_judgment_recovery_precedes_actual_preparation () =
+  with_workspace_runtime (fun config store clock ->
+    Eio.Switch.run (fun sw ->
+      let task=prepare_domain config in
+      let a=authority config in let first=original a 0 in
+      let installation_id="masc.completion-authority" in
+      let package_id="masc.completion-authority.review" in
+      retained (O.retain ~store ~verification_id ~attempt:0 ~installation_id ~package_id first);
+      let calls=ref 0 in
+      with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+          ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+        incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "checked")}) (fun () ->
+        let result=loaded (W.run_attempt ~prepare_notes:domain_notes ~store ~verification_id ~attempt:0
+          ~installation_id ~package_id ~authority:a ~provider_rest:(fun _ -> AR.No_stated_rest) ()) in
+        let saved=loaded (O.load_retained ~store ~verification_id ~attempt:0 ~installation_id ~package_id) in
+        (match Masc.Lane_addon_request_progress.phase (O.progress saved) with
+         | Judged _ -> ()
+         | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _ | Finished _
+         | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Alcotest.fail "fixture crossed commit boundary too early");
+        (* This request was deliberately never published to Verification: real
+           prepare_review would fail before it could rebuild a remote layout. *)
+        (match Verification.load_request config.Workspace_core.base_path verification_id with
+         | Error _ -> () | Ok _ -> Alcotest.fail "preparation refusal fixture is not real");
+        get (Masc.Completion_authority_agent.For_testing.process_original_once
+          ~config ~sw ~clock ~task ~assignee:producer ~verification_id);
+        Alcotest.(check int) "actual production restart never reaches another provider" 1 !calls;
+        (match (task_in_backlog config).Masc_domain.task_status with
+         | Done {notes=Some notes;_} -> Alcotest.(check string) "commit uses exact retained judgment notes"
+             (domain_notes result) notes
+         | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ ->
+           Alcotest.fail "production host did not recover Judged without preparation"))))
+
 let test_commit_unknown_recovers_exact_original () = with_workspace (fun config store ->
   let a=authority config in let first=original a 0 in retain store first;
   let calls=ref 0 in
@@ -268,7 +302,7 @@ let test_commit_unknown_recovers_exact_original () = with_workspace (fun config 
     let digest=get (V.digest first) in
     let before=`Assoc ["verification_id",`String verification_id;"phase",`String "awaiting"] in
     let after=`Assoc ["original_digest",`String digest;"review",O.result_to_json result;
-      "verification_id",`String verification_id;"phase",`String "rejected"] in
+      "notes",`String (domain_notes result);"verification_id",`String verification_id;"phase",`String "rejected"] in
     let canonical json=get (Masc.Lane_addon_action.canonical json) in
     let before=canonical before and after=canonical after in
     let domain=ref before and commits=ref 0 in
@@ -305,5 +339,6 @@ let () =
     Alcotest.test_case "unknown and cancellation never redispatch" `Quick test_unknown_and_cancelled_never_redispatch;
     Alcotest.test_case "actual host commit and restart" `Quick test_actual_host_commit_restart;
     Alcotest.test_case "actual host recovers cancellation after domain write" `Quick test_actual_host_commit_cancel_after_domain_write;
+    Alcotest.test_case "Judged recovery precedes actual preparation" `Quick test_judgment_recovery_precedes_actual_preparation;
     Alcotest.test_case "commit unknown recovers original" `Quick test_commit_unknown_recovers_exact_original;
     Alcotest.test_case "invalid inventory refuses allocation" `Quick test_bad_inventory_is_not_partial_authority]]

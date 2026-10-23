@@ -1629,7 +1629,7 @@ let test_the_upload_script_runs_in_node () =
    opens a file chooser when [opens] holds, one that takes several files when
    [multiple] does; its setFiles answers [set], or throws when [fails] holds.
    setFiles([]) closes the chooser. *)
-let chooser_stand_in ~opens ~multiple ~set ~fails = Printf.sprintf {js|
+let chooser_stand_in ~opens ~multiple ~set ~fails ~click_fails = Printf.sprintf {js|
 const fs = await import("node:fs");
 const nodePath = await import("node:path");
 const seen = [];
@@ -1638,21 +1638,28 @@ const elements = {"#attach": [{localName: "button"}], "button": [{localName: "bu
 globalThis.document = {title: "Form", querySelectorAll: selector => elements[selector] ?? []};
 globalThis.location = {href: "https://example.test/"};
 let waiting = null;
+let activeChooser = false;
+let clickFails = %b;
 const chooser = {
   isMultiple: async () => %b,
   setFiles: async paths => {
-    if (paths.length === 0) { seen.push("closed"); return {}; }
+    if (paths.length === 0) { activeChooser = false; seen.push("closed"); return {}; }
     if (%b) throw new Error("Target closed");
+    activeChooser = false;
     seen.push("chosen " + paths.map(path => nodePath.basename(path) + "/" + fs.statSync(path).size).join(",")); return %s;
   },
 };
 const page = {
   info: async () => ({url: "https://example.test/", title: "Form", w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600}),
   evaluate: async expression => { seen.push("evaluate"); return (0, eval)(expression); },
-  waitForFileChooser: options => { seen.push("wait " + options.timeout); return new Promise((resolve, reject) => { waiting = {resolve, reject}; }); },
+  waitForFileChooser: options => {
+    if (activeChooser) throw new Error("this Page is already waiting for a file chooser");
+    seen.push("wait " + options.timeout); return new Promise((resolve, reject) => { waiting = {resolve, reject}; });
+  },
   click: async (selector, options) => {
     seen.push("click " + selector + " " + options.label);
-    if (waiting !== null) { if (%b) waiting.resolve(chooser); else waiting.reject(new Error("page.waitForFileChooser timed out after 5000ms")); }
+    if (waiting !== null) { if (%b) { activeChooser = true; waiting.resolve(chooser); } else waiting.reject(new Error("page.waitForFileChooser timed out after 5000ms")); }
+    if (clickFails) throw new Error("click response lost");
     return {};
   },
 };
@@ -1661,20 +1668,27 @@ const taskSpace = async () => ({
   tabs: async () => [{label: "p1", openedBy: "agent", url: "https://example.test/", title: "Form", targetId: "T1", active: true}],
   page: () => page,
 });
-|js} multiple fails (Yojson.Safe.to_string set) opens
+|js} click_fails multiple fails (Yojson.Safe.to_string set) opens
 
 let test_the_chooser_script_runs_in_node () =
   let directory = Unix.realpath (capture_directory ()) in
   let path = Filename.concat directory "note.txt" and other = Filename.concat directory "two.txt" in
   Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel "hello");
   Out_channel.with_open_bin other (fun channel -> Out_channel.output_string channel "second");
-  let opens = ref true and multiple = ref false and set = ref (obj []) and fails = ref false and output = ref "" in
+  let opens = ref true and multiple = ref false and set = ref (obj []) and fails = ref false
+  and click_fails = ref false and output = ref "" in
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
     | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
     | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Form" ~url:"https://example.test/" ~active:true ()])
-    | "page.choose_files" -> output := in_node (chooser_stand_in ~opens:!opens ~multiple:!multiple ~set:!set ~fails:!fails ^ script); Ok !output
+    | "page.choose_files" ->
+      let recovery = if !click_fails then
+          "\nclickFails = false; const savedLog = console.log; console.log = () => {};\n{\n"
+          ^ script ^ "\n}\nconsole.log = savedLog;\n"
+        else "" in
+      output := in_node (chooser_stand_in ~opens:!opens ~multiple:!multiple ~set:!set ~fails:!fails ~click_fails:!click_fails
+        ^ "\n{\n" ^ script ^ "\n}\n" ^ recovery); Ok !output
     | other -> failf "unexpected step %s" other in
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -1701,6 +1715,12 @@ let test_the_chooser_script_runs_in_node () =
     (String_util.contains_substring (unknown "a failed setFiles" (choose [path])) "ego did not set the files");
   check bool "and that chooser is closed too" true (List.mem "closed" (seen ()));
   fails := false;
+  click_fails := true;
+  check bool "a click whose response fails retains its original outcome uncertainty" true
+    (String_util.contains_substring (unknown "a failed click response" (choose [path])) "ego did not click the opener: click response lost");
+  check bool "the chooser opened by that click is closed" true (List.mem "closed" (seen ()));
+  check bool "the next chooser upload succeeds in the same process" true (List.mem "chosen note.txt/5" (seen ()));
+  click_fails := false;
   multiple := true;
   ignore (choose [path; other]);
   check bool "a multiple chooser gets both" true (List.mem "chosen note.txt/5,two.txt/6" (seen ()));

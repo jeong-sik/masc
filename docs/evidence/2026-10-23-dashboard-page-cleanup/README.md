@@ -1,6 +1,6 @@
 # Remove synthetic and duplicate Dashboard pages
 
-Issue: #45428. Implementation: `213a4aacee09dbe36d955df697af4fb9ba3e550b`
+Issue: #45428. Implementation: `abb71c1abe9def6064c991d340105f917c16bb8c`
 over `22c1fc45c791948431185f3aeb4bf544b80b3255`.
 
 ## Removed product surfaces
@@ -37,8 +37,11 @@ can leave retained focus mode with its keyboard shortcut on a primary route
 
 The focus toggle is now mounted while focus mode is active independently of
 floating-chrome suppression. The status tray keeps its prior condition.
-Button/F11 state transitions pass after repair. An independent source reviewer
-accepted the repaired head above; source review is not formal GitHub approval.
+Button/F11 state transitions pass after repair. Independent source review
+accepted the exit-control repair at `213a4aacee09dbe36d955df697af4fb9ba3e550b`;
+the later actual screenshot also exposed the hidden navigation's retained 58px
+grid column. Compact chrome now allocates one full content column. Review of
+that final delta is separate; source review is not formal GitHub approval.
 
 ## Executed checks
 
@@ -68,11 +71,13 @@ no replacement backend or mock UI was substituted.
   actual Tools page reads resolved configuration paths from the live backend.
 - Inspector opens actual server configuration without the extra overview/tab.
 - The former Performance URL resolves to Lab Tools; Cockpit resolves to Overview.
-- Safety Harness remains routed. Its first captured frame was still loading,
-  so that capture does not establish complete Harness data correctness.
+- Safety Harness remains routed. Its first captured frame was still loading;
+  a subsequent frame displayed 4,999 actual verdicts. This is a bounded current
+  observation, not a guarantee of all Harness data or event freshness.
 - A retained focus-mode preference was seeded only on the private development
-  origin, followed by reload. The actual Exit button remained visible. Focus-mode
-  recovery tests above separately exercise the button and F11.
+  origin, followed by reload. The actual Exit button remained visible. Clicking
+  it restored the navigation and persisted false. Focus-mode recovery tests
+  above separately exercise the button and F11.
 
 Screenshots and original logs are retained privately because they include live
 workspace data. They were visually inspected; they are not public fixture data

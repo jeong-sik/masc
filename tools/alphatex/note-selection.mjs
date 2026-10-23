@@ -65,7 +65,7 @@ const overlaps = (a, b) => a.duration === 0
     : a.start < b.start + b.duration && b.start < a.start + a.duration
 function quantizedNotes(editor, notes, snap) {
   const starts = new Map(notes.map(note => [note.id, snap(note.start)])), groups = new Map()
-  for (const original of track(editor).notes) {
+  for (const original of source(editor) ? editor.performance.notes : track(editor).notes) {
     const key = JSON.stringify([original.port, original.channel, original.pitch])
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push({ original, changed: { ...original, start: starts.get(original.id) ?? original.start } })

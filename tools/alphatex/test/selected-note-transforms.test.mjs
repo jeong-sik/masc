@@ -91,6 +91,28 @@ test('quantize refuses new same-key source overlaps but preserves a source overl
   assert.deepEqual(command(preserved, 'undo').project, existing.project)
 })
 
+test('source quantize also checks other tracks sharing its MIDI destination, while distinct routes stay independent', () => {
+  for (const [port, channel] of [[0, 0], [1, 0], [0, 1]]) {
+    const file = new JZZ.MIDI.SMF(1, 1000)
+    file.push(new JZZ.MIDI.SMF.MTrk().add(140, JZZ.MIDI.noteOn(0, 60, 80))
+      .add(340, JZZ.MIDI.noteOff(0, 60, 45)).add(2000, JZZ.MIDI.smfEndOfTrack()))
+    file.push(new JZZ.MIDI.SMF.MTrk().add(0, JZZ.MIDI.smfMidiPort(port))
+      .add(360, JZZ.MIDI.noteOn(channel, 60, 70)).add(660, JZZ.MIDI.noteOff(channel, 60, 23))
+      .add(2000, JZZ.MIDI.smfEndOfTrack()))
+    const editor = command(newEditor(importMidiSource(file.toUint8Array())), 'select-all')
+    const before = structuredClone(editor)
+    if (port === 0 && channel === 0) {
+      assert.throws(() => command(editor, 'quantize-notes 0.25'), /overlapping/)
+      assert.deepEqual(editor, before)
+    } else {
+      const changed = command(editor, 'quantize-notes 0.25')
+      assert.equal(selectedNotes(changed)[0].start, 250)
+      const native = notes => notes.map(({ seconds, durationSeconds, ...note }) => note)
+      assert.deepEqual(native(changed.view.tracks[1].notes), native(editor.view.tracks[1].notes))
+    }
+  }
+})
+
 test('SMPTE selection uses frame grid and retains point notes', () => {
   let editor = newEditor(importMidiSource(sourceBytes({ smpte: true, point: true })))
   editor = commands(editor, ['channel 1', 'select-all', 'quantize-notes 1'])

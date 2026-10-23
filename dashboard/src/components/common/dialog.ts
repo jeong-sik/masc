@@ -1,4 +1,4 @@
-import { isImeComposing } from '../../lib/keyboard'
+import { isDismissEscape } from '../../lib/keyboard'
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
@@ -64,7 +64,7 @@ export function DialogOverlay({
     document.body.style.overflow = 'hidden'
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.defaultPrevented && !isImeComposing(event) && event.key === 'Escape') {
+      if (isDismissEscape(event)) {
         event.preventDefault()
         onClose()
       }

@@ -1,4 +1,4 @@
-import { isImeComposing } from '../../lib/keyboard'
+import { isDismissEscape } from '../../lib/keyboard'
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
@@ -1715,7 +1715,7 @@ export function SchDetail({
   // External-system sync: Escape-to-close keyboard listener (legitimate effect).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.defaultPrevented && !isImeComposing(event) && event.key === 'Escape') {
+      if (isDismissEscape(event)) {
         event.stopPropagation()
         onClose()
       }

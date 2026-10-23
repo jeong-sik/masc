@@ -18,7 +18,7 @@ import { globalPresenceSnapshot, presenceEntries, type KeeperPresenceStatus } fr
 import { activeIdeFocus } from './ide-state'
 import { ideEditorSelection } from './ide-editor-selection'
 import { buildIdeInterjectSurfaceContext } from './ide-interject-surface-context'
-import { isImeComposing } from './ide-keyboard'
+import { isImeComposing } from '../../lib/keyboard'
 
 // The input and button states flow through the same store/dispatch boundary
 // that live active-keeper wiring uses. Send remains disabled until a concrete

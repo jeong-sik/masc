@@ -1,5 +1,5 @@
 import { ModelSetupResumeControl } from './model-setup-resume-control'
-import { isImeComposing } from '../lib/keyboard'
+import { isDismissEscape, isImeComposing } from '../lib/keyboard'
 import { html } from 'htm/preact'
 import { Copy, RefreshCcw, RotateCcw, Save } from 'lucide-preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
@@ -297,7 +297,7 @@ function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authorit
   useEffect(() => {
     if (!onClose) return undefined
     const onKey = (e: KeyboardEvent) => {
-      if (!e.defaultPrevented && !isImeComposing(e) && e.key === 'Escape') {
+      if (isDismissEscape(e)) {
         e.stopPropagation()
         onClose()
       }

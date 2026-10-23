@@ -3,7 +3,7 @@ import { signal } from '@preact/signals'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type { CodeDocumentLine } from './code-document-store'
 import { escapeRegExp } from '../../lib/format-string'
-import { isImeComposing } from './ide-keyboard'
+import { isImeComposing } from '../../lib/keyboard'
 
 export interface FindOptions {
   readonly caseSensitive: boolean

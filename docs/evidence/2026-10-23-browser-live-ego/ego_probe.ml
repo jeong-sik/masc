@@ -41,7 +41,7 @@ let () =
       step "tabs.list" B.Tabs_list;
       step "open_tab" (B.Page_act (B.Action.Open_tab "https://example.com/"));
       step "page.read 2" (B.Page_read {tab_id=Some 2; max_chars=Some 80});
-      step "page.elements 2" (B.Page_elements {tab_id=Some 2; within=None});
+      step "page.elements 2" (B.Page_elements {tab_id=Some 2; filter=B.unfiltered_elements});
       step "page.scene 2" (B.Page_scene {tab_id=2; max_chars=400; view=B.Content; scope=None});
       step "page.capture 2" (B.Page_capture {tab_id=2});
       step "click 2" (B.Page_interact {tab_id=2;expected_url=None;frame_path=[];action=B.Click "a"});

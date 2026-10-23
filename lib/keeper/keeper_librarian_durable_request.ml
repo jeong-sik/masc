@@ -3,6 +3,7 @@ module Memory = Keeper_memory_os_current
 module Runtime = Keeper_librarian_runtime
 module Owner = Lane_addon_tool_request_owner
 module Exact = Lane_addon_exact
+module Progress = Lane_addon_request_progress
 let ( let* ) = Result.bind
 let ( let+ ) result f = Result.map f result
 let require condition detail = if condition then Ok () else Error detail
@@ -175,8 +176,24 @@ let preparation_of_json ~source_input json =
     variables;rendered_prompt;output_schema} in
   let+ ()=Runtime.validate_durable_preparation p in p
 
+type predecessor = {request_id:string;request_digest:string}
 type t = {id:string;owner:owner;destination:destination;source:Source.t;source_text:string;
+  predecessor:predecessor option;
   preparation:Runtime.durable_preparation}
+let predecessor capture=capture.predecessor
+let predecessor_json = function
+  | None -> `Null
+  | Some predecessor -> `Assoc ["request_id",`String predecessor.request_id;
+      "request_digest",`String predecessor.request_digest]
+let predecessor_of_json = function
+  | `Null -> Ok None
+  | json ->
+    let* f=fields ["request_id";"request_digest"] json in
+    let* request_id=nonblank (value "request_id" f) in
+    let* request_digest=nonblank (value "request_digest" f) in
+    let+ ()=require (String_util.is_lowercase_sha256_hex request_digest)
+      "Original history predecessor digest is invalid" in
+    Some {request_id;request_digest}
 let request_id capture=capture.id
 let physical_owner capture=capture.owner
 let destination capture=capture.destination
@@ -185,52 +202,92 @@ let preparation capture=capture.preparation
 let to_json capture = `Assoc ["schema",`Int 1;"kind",`String "completed-history-execution";
   "request_id",`String capture.id;"owner",owner_to_json capture.owner;
   "destination",destination_json capture.destination;"source_text",`String capture.source_text;
+  "predecessor",predecessor_json capture.predecessor;
   "preparation",preparation_json capture.preparation]
-let header_fields json = fields ["schema";"kind";"request_id";"owner";"destination";"source_text";"preparation"] json
+let header_fields json = fields ["schema";"kind";"request_id";"owner";"destination";"source_text";"predecessor";"preparation"] json
 let validate capture =
   let* expected_scope=scope_of_request_id capture.id in
   let* ()=require (expected_scope=scope capture.owner) "Original history execution belongs to another physical scope" in
+  let* ()=match capture.predecessor with
+    | None -> Ok ()
+    | Some predecessor ->
+      let* parent_scope=scope_of_request_id predecessor.request_id in
+      require (parent_scope=expected_scope && predecessor.request_id<>capture.id
+        && String_util.is_lowercase_sha256_hex predecessor.request_digest)
+        "Original history predecessor belongs to another scope or itself" in
   let* ()=require (capture.preparation.source_input=Source.input capture.source)
     "Original history source and preparation input differ" in
   let* ()=require (Keeper_identity.Keeper_id.to_string (Source.input capture.source).keeper_id=capture.owner.keeper_id)
     "Original history source belongs to another Keeper" in
-  let* actual=Fs_compat.with_owned_inventory_root (Source.runtime_keepers_dir capture.source)
-    (fun root -> Ok (physical root)) |> owned in
-  let* ()=require (actual=capture.owner.runtime)
-    "Original history source came from another physical runtime/output root" in
   let facts=match (Source.input capture.source).current with None -> [] | Some current -> current.facts in
   let ids=List.map Keeper_memory_os_types.memory_id facts in
   let* ()=require (List.length ids=List.length (List.sort_uniq String.compare ids))
     "Original history current Memory repeats an identity" in
   Runtime.validate_durable_preparation capture.preparation
-let create ~request_id ~owner ~destination ~source ~(preparation:Runtime.durable_preparation) =
+let confirm_source_root capture =
+  let* actual=Fs_compat.with_owned_inventory_root (Source.runtime_keepers_dir capture.source)
+    (fun root -> Ok (physical root)) |> owned in
+  require (actual=capture.owner.runtime)
+    "Original history source came from another physical runtime/output root"
+let create ?predecessor ~request_id ~owner ~destination ~source ~(preparation:Runtime.durable_preparation) () =
   let* destination=destination_of_json (destination_json destination) in
   let source_text=Yojson.Safe.to_string (Source.to_json source) in
   let* source=Source.of_json (Source.to_json source) |> Result.map_error Source.error_to_string in
   let* ()=require (preparation.source_input=Source.input source)
     "Original history preparation does not describe its source" in
   let* preparation=preparation_of_json ~source_input:(Source.input source) (preparation_json preparation) in
-  let capture={id=request_id;owner;destination;source;source_text;preparation} in
-  let+ ()=validate capture in capture
-let restore ~owner (record:Owner.retained) =
-  let* f=header_fields record.request in
+  let capture={id=request_id;owner;destination;source;source_text;predecessor;preparation} in
+  let* ()=validate capture in
+  let+ ()=confirm_source_root capture in capture
+let of_json ~owner json =
+  let* f=header_fields json in
   let* ()=require (value "schema" f=`Int 1 && value "kind" f=`String "completed-history-execution")
     "Unknown original history schema or kind" in
   let* id=nonblank (value "request_id" f) in
   let* ()=owner_matches_json owner (value "owner" f) in
   let* destination=destination_of_json (value "destination" f) in
+  let* predecessor=predecessor_of_json (value "predecessor" f) in
   let* source_text=text (value "source_text" f) in
   let* source_json=parse source_text in
   let* source=Source.of_json source_json |> Result.map_error Source.error_to_string in
   let* ()=require (Yojson.Safe.to_string (Source.to_json source)=source_text)
     "Original history source text is not its complete canonical encoding" in
   let* preparation=preparation_of_json ~source_input:(Source.input source) (value "preparation" f) in
-  let capture={id;owner;destination;source;source_text;preparation} in
+  let capture={id;owner;destination;source;source_text;predecessor;preparation} in
   let* ()=validate capture in
+  let+ ()=equal json (to_json capture) "Original history request encoding differs" in capture
+let restore ~owner (record:Owner.retained) =
+  let* capture=of_json ~owner record.request in
+  let* ()=confirm_source_root capture in
+  let id=capture.id and destination=capture.destination in
   let* ()=require (record.scope=scope owner && record.request_id=id
     && record.installation_id=destination.installation_id && record.package_id=destination.package_id
     && record.tool=destination.tool) "Original history host binding differs" in
   let+ ()=equal record.request (to_json capture) "Original history request encoding differs" in capture
+let confirm_predecessor ~store ~require_confirmed capture =
+  match capture.predecessor with
+  | None -> Ok ()
+  | Some predecessor ->
+    let owner=capture.owner in
+    let* parent=Owner.load ~store ~scope:(scope owner) ~request_id:predecessor.request_id
+      |> Result.map_error Owner.error_to_string in
+    let* parent=Option.to_result ~none:"History replacement predecessor is absent" parent in
+    let* ()=require (parent.request_digest=predecessor.request_digest)
+      "History replacement predecessor digest changed" in
+    let* _=restore ~owner parent in
+    let* ()=match Progress.phase parent.progress with
+      | Progress.Conflicted _ -> Ok ()
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Rejected _ | Subdividing _ | Subdivided _ ->
+        Error "History replacement predecessor is not conflicted" in
+    let* intended=match Progress.replacement parent.progress with
+      | Some (Preparation_confirmed intended) -> Ok intended
+      | Some (Preparation_pending intended) when not require_confirmed -> Ok intended
+      | None | Some (Preparation_pending _) ->
+        Error "History replacement has no acknowledged original publication" in
+    let* ()=require (intended.request_id=capture.id)
+      "History replacement predecessor names another child" in
+    equal intended.request (to_json capture) "History replacement differs from its full original parent intent"
 let observe_record_owner ~base_path ~keepers_dir (record:Owner.retained) =
   let* f=header_fields record.request in
   let* original=owner_of_json (value "owner" f) in

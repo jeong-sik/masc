@@ -33,12 +33,23 @@ type destination = {
 val package_id : string
 val tool : string
 type t
-val create : request_id:string -> owner:owner -> destination:destination ->
+type predecessor = {request_id:string;request_digest:string}
+val predecessor : t -> predecessor option
+val create : ?predecessor:predecessor -> request_id:string -> owner:owner -> destination:destination ->
   source:Keeper_librarian_durable_capture.t ->
-  preparation:Keeper_librarian_runtime.durable_preparation -> (t, string) result
+  preparation:Keeper_librarian_runtime.durable_preparation -> unit -> (t, string) result
 (** Full original source/input and immutable Memory preparation must agree.
+    A successor retains its immutable original predecessor ID/digest; its
+    complete inventory must establish known basis supersession before dispatch.
     Retention/restore performs no provider, Gate, Memory, source or cursor effect. *)
 val restore : owner:owner -> Lane_addon_tool_request_owner.retained -> (t, string) result
+val of_json : owner:owner -> Yojson.Safe.t -> (t, string) result
+(** Pure full original-request decoder used for a retained replacement intent.
+    This grants no physical-source, retained-owner or dispatch authority. *)
+val confirm_predecessor : store:Lane_addon_store.t -> require_confirmed:bool -> t -> (unit, string) result
+(** Blocking full parent read and immutable intent check. Retention may accept
+    the exact pending intent; dispatch and retained delivery require its ACK.
+    Offload the whole call. This performs no publication, ACK or provider work. *)
 val to_json : t -> Yojson.Safe.t
 val request_id : t -> string
 val physical_owner : t -> owner

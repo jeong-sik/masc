@@ -11,12 +11,14 @@ let error_to_string = Submit.error_to_string
 type wait = Submit.wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
   | Missing_after_dispatch | Journal_recheck
 type publication = Publication_pending of string | Publication_complete of Owner.retained
+  | Publication_superseded of Owner.retained
 type publish = original:Owner.retained -> request:Request.t ->
   proposal:Memory_runtime.durable_proposal -> (publication,error) result
 type call = expected:Request.destination -> original:Owner.retained -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result,Submit.call_error) result
 type outcome = Pending of wait * Owner.retained | Publication_waiting of string
   | Refused of Exact.final * Owner.retained | Finished of Owner.retained
+  | Basis_superseded of Owner.retained
 let io = Eio_unix.run_in_systhread
 let rejected value = Result.map_error (fun detail -> Rejected detail) value
 let owned value = Result.map_error (fun error -> Unavailable (Owner.error_to_string error)) value
@@ -29,8 +31,11 @@ let check_request request (record:Owner.retained) =
   let* restored=io (fun () -> Request.restore ~owner:(Request.physical_owner request) record) |> rejected in
   let* same=same (Request.to_json request) (Request.to_json restored) in
   require same "History owner differs from its complete original request"
+let check_predecessor ~store ~dispatch request =
+  io (fun () -> Request.confirm_predecessor ~store ~require_confirmed:dispatch request) |> rejected
 let retain ~store request =
   let* ()=io (fun () -> Request.confirm_owner request) |> rejected in
+  let* ()=check_predecessor ~store ~dispatch:false request in
   let destination=Request.destination request in
   let scope=Request.scope (Request.physical_owner request) and request_id=Request.request_id request in
   let* ()=io (fun () -> Owner.retain ~store ~scope ~request_id
@@ -86,7 +91,7 @@ let restore_answer ~store ~schema request record =
     Error (Rejected "Original history publication requires an actual answered host result")
 type terminal = Answer of Memory_runtime.durable_proposal * Owner.retained
   | Refusal of Exact.final * Owner.retained
-let check_completed ~store request ~original completed =
+let check_completed ~store ~superseded request ~original completed =
   let* ()=check_request request completed in
   let* ()=require (completed.Owner.request_digest=original.Owner.request_digest)
     "History publication changed its original request digest" in
@@ -94,11 +99,13 @@ let check_completed ~store request ~original completed =
   let* after=original_judgment completed in
   let* judgment_equal=same before after in
   let* ()=require judgment_equal "History publication changed its original judgment" in
-  let* ()=match Progress.phase completed.progress with
-    | Progress.Finished _ -> Ok ()
-    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-    | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
-      Error (Rejected "History publication has no durable Finished acknowledgment") in
+  let* ()=match superseded,Progress.phase completed.progress with
+    | false,Progress.Finished _ | true,Conflicted _ -> Ok ()
+    | false,(Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _)
+    | true,(Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Rejected _ | Subdividing _ | Subdivided _) ->
+      Error (Rejected "History publication has no matching durable terminal acknowledgment") in
   let previous=Progress.events original.progress and next=Progress.events completed.progress in
   let* ()=require (List.length next>=List.length previous
     && List.take (List.length previous) next=previous)
@@ -119,6 +126,7 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
     rejected (Request.owner_matches_json actual (Request.owner_to_json owner)) in
   let* ()=check_request request original in
   let* ()=confirm_live_owner () in
+  let* ()=check_predecessor ~store ~dispatch:true request in
   let* exact=rejected (Request.request request) in
   let* schema=match exact.schema with Some schema -> Ok schema
     | None -> Error (Rejected "Original history request has no output schema") in
@@ -144,10 +152,18 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
     match published with
     | Publication_pending detail -> Ok (Publication_waiting detail)
     | Publication_complete completed ->
-      let* ()=check_completed ~store request ~original:record completed in
+      let* ()=check_completed ~store ~superseded:false request ~original:record completed in
       let* ()=confirm_live_owner () in
       wake ();
-      Ok (Finished completed) in
+      Ok (Finished completed)
+    | Publication_superseded completed ->
+      let* ()=check_completed ~store ~superseded:true request ~original:record completed in
+      let* ()=confirm_live_owner () in
+      (match Progress.phase record.progress with
+       | Progress.Conflicted _ -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> wake ());
+      Ok (Basis_superseded completed) in
   let* result=Submit.resume ~store ~label:"History Memory" ~original ~request:exact ~schema ~prepare ~call ~terminal in
   match result with
   | Submit.Awaiting (wait,record) -> Ok (Pending (wait,record))
@@ -161,7 +177,9 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
      | Progress.Finished _ ->
        let* _=restore_answer ~store ~schema request record in
        Ok (Finished record)
-     | Conflicted _ -> Error (Rejected "Original history Memory publication is conflicted")
+     | Conflicted _ ->
+       let* _,proposal=restore_answer ~store ~schema request record in
+       publish_answer record proposal
      | Rejected _ | Subdividing _ | Subdivided _ ->
        Error (Rejected "Original history request has a terminal host refusal")
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ ->

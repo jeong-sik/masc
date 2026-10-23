@@ -26,6 +26,27 @@ function clockOf(manifest) {
   if (![numer, denom, manifest.sampleRate].every(value => Number.isSafeInteger(value) && value > 0)) throw new Error('Invalid captured timebase or sample rate')
   return { numer: BigInt(numer), denom: BigInt(denom), rate: BigInt(manifest.sampleRate) }
 }
+// Terminal seconds enter as decimal rationals. Quantize once at the native
+// host-clock boundary: nearest whole tick, exact half ties away from zero.
+export function captureSecondsToTicks(asset, text) {
+  const match = typeof text === 'string' && /^([+-]?)(?:(\d+)(?:\.(\d+))?|\.(\d+))$/.exec(text)
+  if (!match) throw new Error('Use decimal seconds without exponents')
+  const digits = match[3] ?? match[4] ?? '', divisor = 10n ** BigInt(digits.length)
+  const value = BigInt(match[2] ?? '0') * divisor + BigInt(digits || '0'), clock = clockOf(asset.manifest)
+  const numerator = value * 1_000_000_000n * clock.denom, denominator = divisor * clock.numer
+  const ticks = numerator / denominator + (2n * (numerator % denominator) >= denominator ? 1n : 0n)
+  return match[1] === '-' ? -ticks : ticks
+}
+// The editor's zero belongs to the recorded source, not the moving edge of an
+// authored overlay. Derived imports keep their declared original source span.
+export function captureHostAtSeconds(asset, text) {
+  const origin = BigInt(captureRange({ ...asset, ump: undefined }).origin)
+  return String(unsigned(String(origin + captureSecondsToTicks(asset, text)), 'authored MIDI time', uint64Max))
+}
+export function captureSecondsAtHost(asset, hostTime) {
+  const origin = BigInt(captureRange({ ...asset, ump: undefined }).origin), clock = clockOf(asset.manifest)
+  return seconds((unsigned(hostTime, 'event host time', uint64Max) - origin) * clock.numer, 1_000_000_000n * clock.denom)
+}
 export function captureRange(asset) {
   const manifest = asset.manifest, clock = clockOf(manifest), frames = unsigned(manifest.audioFrames, 'frame total', uint64Max)
   let origin = unsigned(manifest.clock.requestedStart, 'clock origin', uint64Max)

@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from 'node:util'
 import JZZ from 'jzz'
 import { newUmpEditor, umpEditorRows, umpEditorAction, umpEditorCommand } from '../ump-editor.mjs'
 import { umpSourceNotes } from '../ump-source.mjs'
+import { captureSecondsAtHost } from '../capture-time.mjs'
 import { packet } from './helpers/captured-midi-fixture.mjs'
 import { loadSubstituted } from './helpers/substituted-module.mjs'
 
@@ -12,9 +13,11 @@ const flush = () => new Promise(resolve => setImmediate(resolve))
 async function controller({ preview = async () => {}, exported = async () => {}, captured } = {}) {
   const process = { stdin: Object.assign(new EventEmitter(), { isTTY: true, isRaw: false, setRawMode(value) { this.isRaw = value }, resume() {} }),
     stdout: Object.assign(new EventEmitter(), { isTTY: true, columns: 100, rows: 24, write() {} }) }
-  const asset = { name: 'Keys', parts: { midi: { sha256: 'a'.repeat(64) } } }
+  const asset = { name: 'Keys', parts: { midi: { sha256: 'a'.repeat(64) } }, midiTime: { first: '10000000000000000000', last: '10000000000000000100' },
+    manifest: { sampleRate: 48000, audioFrames: '0', midiPacketCount: '2', clock: { kind: 'mach-host-time', numer: 125, denom: 3,
+      requestedStart: '10000000000000000000', firstAudioHostTime: null } } }
   const packets = captured ?? [packet(0n, 'A', [JZZ.UMP.umpNoteOn(0, 0, 60, 0x9001)]), packet(100n, 'A', [JZZ.UMP.umpNoteOff(0, 0, 60, 0x1234)])]
-  const substitutes = { isDeepStrictEqual, newUmpEditor, umpEditorRows, umpEditorAction, umpEditorCommand, safeText: String, emitKeypressEvents() {} }
+  const substitutes = { isDeepStrictEqual, newUmpEditor, umpEditorRows, umpEditorAction, umpEditorCommand, captureSecondsAtHost, safeText: String, emitKeypressEvents() {} }
   const { viewUmpEditor } = await loadSubstituted(new URL('../ump-tui.mjs', import.meta.url), substitutes, { globals: { process } })
   const abort = new AbortController()
   const done = viewUmpEditor({ asset, packets, signal: abort.signal, onPreview: preview, onExport: exported })
@@ -90,5 +93,18 @@ test('owned controller keeps original identities through event time edits, undo 
   assert.equal(result.changed, true); assert.deepEqual(result.asset.ump, exports[0].ump)
   assert.deepEqual(result.asset.ump.timing, [{ packet: 0, word: 0, hostTime: '10000000000000000001' },
     { packet: 1, word: 0, hostTime: '10000000000000000201' }])
+  assert.equal(view.process.stdin.listenerCount('keypress'), 0); assert.equal(view.process.stdin.isRaw, false)
+})
+
+test('owned controller exports decimal seconds as exact native ticks and drains its history before return', async () => {
+  let finishExport
+  const exported = new Promise(resolve => { finishExport = resolve }), exports = []
+  const view = await controller({ exported: async asset => { exports.push(asset); finishExport() } })
+  view.command('note-seconds 1:0 .1 .25'); view.command('select-event 1:0'); view.command('shift-seconds -.125')
+  view.command('undo'); view.command('clock'); view.command('export /unused/decimal-output')
+  await exported; view.key('q'); const result = await view.done
+  assert.equal(result.changed, true); assert.deepEqual(exports[0].ump, result.asset.ump)
+  assert.deepEqual(result.asset.ump.timing, [{ packet: 0, word: 0, hostTime: '10000000000002400000' },
+    { packet: 1, word: 0, hostTime: '10000000000006000000' }])
   assert.equal(view.process.stdin.listenerCount('keypress'), 0); assert.equal(view.process.stdin.isRaw, false)
 })

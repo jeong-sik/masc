@@ -104,7 +104,7 @@ let test_a_job_whose_caller_left_in_the_queue_never_starts () =
 
 (* One loopback server on the caller's domain, answering every request with
    [body]. *)
-let serve ~sw ~net body =
+let serve ?(before_response = fun () -> ()) ~sw ~net body =
   let socket =
     Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
@@ -115,6 +115,7 @@ let serve ~sw ~net body =
     | _ -> Alcotest.fail "the loopback listener has no TCP port"
   in
   let callback _conn _request _body =
+    before_response ();
     Cohttp_eio.Server.respond_string ~status:`OK ~body ()
   in
   let server = Cohttp_eio.Server.make ~callback () in
@@ -139,6 +140,46 @@ let test_a_request_through_the_domain_comes_back () =
         (status, body)
   | Error detail -> Alcotest.failf "the request failed: %s" detail
 
+(* An owned history read has no overall deadline. Even a peer that accepts
+   the GET and never answers must be released when its caller leaves. Wait
+   for the real request to reach the peer before withdrawing the caller. *)
+let test_cancelling_an_unanswered_request_releases_the_work () =
+  with_io_domain @@ fun ~env domain ->
+  Eio.Switch.run @@ fun sw ->
+  let received, set_received = Eio.Promise.create () in
+  let released, set_released = Eio.Promise.create () in
+  let requests = ref 0 in
+  let before_response () =
+    incr requests;
+    if !requests=1 then begin
+      Eio.Promise.resolve set_received ();
+      Eio.Fiber.await_cancel ()
+    end
+  in
+  let url = serve ~before_response ~sw ~net:(Eio.Stdenv.net env) "after cancellation" in
+  let clock = Eio.Stdenv.clock env in
+  let inflight () = Masc_tui_io_domain.run domain (fun () ->
+    Masc_http_client.all_domain_pools () |> List.fold_left (fun total (_, pool) ->
+      total + (Masc_http_client.Pool.stats pool).total_inflight) 0) in
+  let original_inflight = inflight () in
+  Eio.Fiber.first
+    (fun () ->
+      Masc_tui_io_domain.run domain (fun () ->
+        Fun.protect
+          ~finally:(fun () -> Eio.Promise.resolve set_released ())
+          (fun () ->
+            ignore (Masc_http_client.get_sync ~clock ~url ~headers:[] ());
+            Alcotest.fail "the unanswered request returned before cancellation")))
+    (fun () -> Eio.Promise.await received);
+  Eio.Promise.await released;
+  Alcotest.(check int) "cancellation releases the actual pool borrower"
+    original_inflight (inflight ());
+  match Masc_tui_io_domain.run domain (fun () ->
+    Masc_http_client.get_sync ~clock ~url ~headers:[] ()) with
+  | Ok answer -> Alcotest.(check (pair int string))
+      "the same request domain serves the next read" (200, "after cancellation") answer
+  | Error detail -> Alcotest.failf "request after cancellation failed: %s" detail
+
 let () =
   Alcotest.run "tui_io_domain"
     [
@@ -156,5 +197,7 @@ let () =
             `Quick test_a_job_whose_caller_left_in_the_queue_never_starts;
           Alcotest.test_case "a request through the domain comes back" `Quick
             test_a_request_through_the_domain_comes_back;
+          Alcotest.test_case "cancelling an unanswered request releases the work" `Quick
+            test_cancelling_an_unanswered_request_releases_the_work;
         ] );
     ]

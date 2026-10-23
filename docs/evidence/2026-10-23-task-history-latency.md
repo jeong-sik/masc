@@ -53,3 +53,40 @@ than three blocks, UTF-8, forward continuation anchors and changed anchors.
   separate from GitHub approval, CI, merge and installed-runtime verification.
 - The live server/TUI were not replaced. Candidate server, live API and
   visible TUI timings remain unverified.
+
+## Review follow-up
+
+Run `39912714570`, on the earlier stack top
+`e645a96c60d354124466e7bf0cac993ee66156c5`, compiled its selected target but
+failed during test initialization: `masc_browser_act`'s `latitude.minimum`
+was encoded as an integer where the schema requires a float. No history
+scenario ran, so this run is neither a history regression nor a passing
+history test. The current rebased stack includes the independent float-bound
+repair `fa641e57e2a` from main.
+
+The upper-layer review requested evidence that an unanswered read really
+stops when the owner leaves. `test_tui_io_domain` now sends a real loopback
+GET without an overall timeout, waits for the server to receive it without
+answering, then cancels the caller. It awaits the actual request worker's
+cleanup, checks that the pool's inflight count returns to its original
+value, and checks a subsequent request on the same origin/domain. The full
+test module passes focused typechecking against existing dependency
+interfaces. A focused native relink of that test against existing local
+production archives then passed all seven IO-domain scenarios, including
+the new unanswered-GET case (Alcotest run `YQVE5FW6`, 0.163 seconds).
+The first attempt could not bind the loopback socket inside the filesystem/
+network sandbox; rerunning the same executable with loopback access passed.
+This is not a clean candidate build or exact-head CI result. Minimal CI run
+`39915980810` was separately requested on source head
+`f179140e7f67b455aa4ca0f66df551a74be1a809` for `test_h2_journal` and
+`test_tui_io_domain`. It stopped during compilation at the unrelated Plugin
+`current_category` fragile match. The independent repair is #45426,
+merged as `123f2f821a60f5c6d2250d6dbea7f049aec1faae`; the whole history
+stack must include that fix before rerunning these selected scenarios.
+
+This checks withdrawal of an owned observation, not server progress while
+the operator remains on the same view. An unanswered peer stays pending
+until withdrawal, transport failure or shutdown. An idle/first-byte timer
+would also reject a legitimate scan that has not produced response bytes.
+The independent reader probe above is not an end-to-end claim that every
+production history scan now finishes below ten seconds.

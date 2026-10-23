@@ -1,0 +1,15 @@
+{"deferred_rows":0,"layout":"prefix","observation_time":5.0,"samples":41,"ready":true,"p50_ms":0.095833,"p95_ms":0.19075,"p50_allocated_bytes":7400.0}
+{"deferred_rows":0,"layout":"prefix","observation_time":100.0,"samples":41,"ready":true,"p50_ms":0.054416,"p95_ms":0.150333,"p50_allocated_bytes":7400.0}
+{"deferred_rows":0,"layout":"front","observation_time":5.0,"samples":41,"ready":true,"p50_ms":0.05875,"p95_ms":0.113041,"p50_allocated_bytes":7400.0}
+{"deferred_rows":1,"layout":"prefix","observation_time":5.0,"samples":41,"ready":true,"p50_ms":0.079542,"p95_ms":0.140958,"p50_allocated_bytes":51464.0}
+{"deferred_rows":1,"layout":"prefix","observation_time":100.0,"samples":41,"ready":true,"p50_ms":0.07675,"p95_ms":0.152416,"p50_allocated_bytes":45632.0}
+{"deferred_rows":1,"layout":"front","observation_time":5.0,"samples":41,"ready":true,"p50_ms":0.07725,"p95_ms":0.130417,"p50_allocated_bytes":45712.0}
+{"deferred_rows":32,"layout":"prefix","observation_time":5.0,"samples":41,"ready":true,"p50_ms":0.752833,"p95_ms":1.282458,"p50_allocated_bytes":1422608.0}
+{"deferred_rows":32,"layout":"prefix","observation_time":100.0,"samples":41,"ready":true,"p50_ms":0.645292,"p95_ms":0.837,"p50_allocated_bytes":1230824.0}
+{"deferred_rows":32,"layout":"front","observation_time":5.0,"samples":41,"ready":true,"p50_ms":0.646458,"p95_ms":0.978375,"p50_allocated_bytes":1238544.0}
+{"deferred_rows":256,"layout":"prefix","observation_time":5.0,"samples":41,"ready":true,"p50_ms":5.646708,"p95_ms":6.741333,"p50_allocated_bytes":11346320.0}
+{"deferred_rows":256,"layout":"prefix","observation_time":100.0,"samples":41,"ready":true,"p50_ms":5.056167,"p95_ms":5.685125,"p50_allocated_bytes":9794792.0}
+{"deferred_rows":256,"layout":"front","observation_time":5.0,"samples":41,"ready":true,"p50_ms":5.109459,"p95_ms":5.960333,"p50_allocated_bytes":9873808.0}
+{"deferred_rows":1024,"layout":"prefix","observation_time":5.0,"samples":41,"ready":true,"p50_ms":23.234334,"p95_ms":25.648084,"p50_allocated_bytes":45411728.0}
+{"deferred_rows":1024,"layout":"prefix","observation_time":100.0,"samples":41,"ready":true,"p50_ms":20.661,"p95_ms":23.355208,"p50_allocated_bytes":39156968.0}
+{"deferred_rows":1024,"layout":"front","observation_time":5.0,"samples":41,"ready":true,"p50_ms":21.335208,"p95_ms":26.254125,"p50_allocated_bytes":39521680.0}

@@ -1,0 +1,15 @@
+{"deferred_rows":0,"layout":"prefix","observation_time":5.0,"samples":41,"ready":true,"p50_ms":0.062833,"p95_ms":0.160542,"p50_allocated_bytes":7440.0}
+{"deferred_rows":0,"layout":"prefix","observation_time":100.0,"samples":41,"ready":true,"p50_ms":0.038625,"p95_ms":0.101875,"p50_allocated_bytes":7440.0}
+{"deferred_rows":0,"layout":"front","observation_time":5.0,"samples":41,"ready":true,"p50_ms":0.040333,"p95_ms":0.153333,"p50_allocated_bytes":7440.0}
+{"deferred_rows":1,"layout":"prefix","observation_time":5.0,"samples":41,"ready":true,"p50_ms":0.08470800000000001,"p95_ms":0.257458,"p50_allocated_bytes":51504.0}
+{"deferred_rows":1,"layout":"prefix","observation_time":100.0,"samples":41,"ready":true,"p50_ms":0.118875,"p95_ms":0.585,"p50_allocated_bytes":45672.0}
+{"deferred_rows":1,"layout":"front","observation_time":5.0,"samples":41,"ready":true,"p50_ms":0.13,"p95_ms":0.548708,"p50_allocated_bytes":45712.0}
+{"deferred_rows":32,"layout":"prefix","observation_time":5.0,"samples":41,"ready":true,"p50_ms":1.049334,"p95_ms":1.554208,"p50_allocated_bytes":1417488.0}
+{"deferred_rows":32,"layout":"prefix","observation_time":100.0,"samples":41,"ready":true,"p50_ms":0.66125,"p95_ms":1.354667,"p50_allocated_bytes":1230864.0}
+{"deferred_rows":32,"layout":"front","observation_time":5.0,"samples":41,"ready":true,"p50_ms":0.660292,"p95_ms":1.013542,"p50_allocated_bytes":1232144.0}
+{"deferred_rows":256,"layout":"prefix","observation_time":5.0,"samples":41,"ready":true,"p50_ms":5.9385,"p95_ms":7.368458,"p50_allocated_bytes":11287824.0}
+{"deferred_rows":256,"layout":"prefix","observation_time":100.0,"samples":41,"ready":true,"p50_ms":5.293541,"p95_ms":8.001291999999999,"p50_allocated_bytes":9794832.0}
+{"deferred_rows":256,"layout":"front","observation_time":5.0,"samples":41,"ready":true,"p50_ms":6.561708,"p95_ms":9.536958,"p50_allocated_bytes":9805072.0}
+{"deferred_rows":1024,"layout":"prefix","observation_time":5.0,"samples":41,"ready":true,"p50_ms":30.635458,"p95_ms":37.582875,"p50_allocated_bytes":45128976.0}
+{"deferred_rows":1024,"layout":"prefix","observation_time":100.0,"samples":41,"ready":true,"p50_ms":22.376625,"p95_ms":44.379458,"p50_allocated_bytes":39157008.0}
+{"deferred_rows":1024,"layout":"front","observation_time":5.0,"samples":41,"ready":true,"p50_ms":24.200708,"p95_ms":41.348166,"p50_allocated_bytes":39197968.0}

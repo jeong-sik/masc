@@ -4065,6 +4065,18 @@ module For_testing = struct
     | Browser_narrower_than_consumer
     | Several_browser_services
   let choose_document_service = choose_document_service
+  let await_run_stopped ~config ~instance_id =
+    Eio_context.run_on_owner_domain (fun () ->
+      let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+      match Hashtbl.find_opt managers root with
+      | None -> ()
+      | Some m ->
+          match Hashtbl.find_opt m.entries instance_id with
+          | None -> ()
+          | Some e ->
+              let rec wait () =
+                if e.running then (Eio.Condition.await e.changed; wait ())
+              in wait ())
   let with_tool_change_handler handler f =
     let previous= !tool_change_handler in
     tool_change_handler:=handler;

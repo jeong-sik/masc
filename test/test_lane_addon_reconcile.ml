@@ -291,15 +291,11 @@ let await_detached clock config id =
 let detach clock config id =
   ignore (dispatch config Runtime.Detach ["instance_id", `String id]);
   await_detached clock config id
-(* A start that fails turns its phase Failed before its run fiber has
-   finished persisting that failure. A beat in that gap leaves the entry to
-   its still-running fiber and does nothing else, so the failed attempt is
-   retired one beat later than a test expects. Observe is refused once the
-   fiber has stopped, so the next beat a test sends sees the ended attempt. *)
+(* Failed is published before the run fiber finishes persisting the failure.
+   Wait for that original fiber, independently of Observe admission policy. *)
 let await_failed_start clock config id =
   await clock (fun () -> phase (instance config id) = "failed");
-  await clock (fun () -> Result.is_error
-    (Runtime.dispatch ~config ~operation:Runtime.Observe (`Assoc ["instance_id", `String id])))
+  Runtime.For_testing.await_run_stopped ~config ~instance_id:id
 
 let with_fixture f =
   let root = Filename.temp_dir "lane-reconcile-" "" in
@@ -830,6 +826,90 @@ let test_historical_never_started_leaves_no_binding () =
     let new_id = declared_instance config "observer" |> text "instance_id" in
     await_ready clock config new_id;
     detach clock config new_id)
+
+(* Repeated create refusals have authority but never acquire a resource.
+   Each confirmed release must remove its binding, while an operator-retained
+   native admission must keep the record even with the same empty history. *)
+let test_create_refusals_leave_no_binding_but_native_retention_keeps_one () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let path = Filename.concat directory "observer.toml" in
+    let manifest = package packages "ready" in
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let bindings () = unwrap (Store.bindings store) in
+    let await_removed id =
+      await clock (fun () ->
+        not (List.exists (fun value -> text "instance_id" value = id) (instances config))) in
+    state.create_refusal := Some "engine refused create";
+    write path (declaration ~id:"observer" ~manifest ());
+    for attempt = 1 to 3 do
+      ignore (reconcile config directory);
+      let id = declared_instance config "observer" |> text "instance_id" in
+      await_failed_start clock config id;
+      let failed = instance config id in
+      check bool "create refusal follows durable authority" true
+        (member "execution_authority" failed <> `Null);
+      check int "refused create has no observations" 0 (number "observation_seq" failed);
+      check bool "refused create has no resource" true (member "resource" failed = `Null);
+      check int "one failed start per maintenance attempt" attempt (attempts state);
+      ignore (reconcile config directory);
+      await_removed id;
+      check int "confirmed release leaves no binding on every beat" 0 (List.length (bindings ()))
+    done;
+    check int "every recorded engine confirmed absent resources" 3 (recovery_requests state);
+    let native_manifest = Filename.concat packages "native.toml" in
+    write native_manifest {|id = "native-retained"
+revision = "fixture-1"
+title = "Retained native admission"
+runtime = "host_process"
+command = ["fixture-native-worker"]
+contributions = ["observe"]
+[resources]
+max_reply_bytes = 4096
+|};
+    write path (declaration ~id:"observer" ~manifest:native_manifest ());
+    let _, backend = make_backend () in
+    let recoveries = ref 0 in
+    let native : Runtime.For_testing.backend = {backend with
+      start = (fun ~sw:_ ~state_owner:_ ~instance_id:_ ~installation_id
+          ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created:_ ->
+        let* () = on_authority (Lifecycle.Native_admission {installation_id})
+          |> Result.map_error (fun detail -> Lifecycle.Persistence_failed detail) in
+        Error (Lifecycle.Worker_failed "native admission did not create a resource"));
+      recover_stop = (fun ~state_owner:_ ~instance_id ~authority ~resource ->
+        match authority,resource with
+        | Lifecycle.Native_admission {installation_id},None ->
+            incr recoveries;
+            Ok (Lifecycle.Native_retained {installation_id;instance_id})
+        | Lifecycle.Container_authority _,(None | Some _)
+        | Lifecycle.Native_admission _,Some _ ->
+            Error (Lifecycle.Cleanup_unconfirmed "unexpected native retention owner"));
+    } in
+    Runtime.For_testing.with_backend native (fun () ->
+      ignore (reconcile config directory);
+      let id = declared_instance config "observer" |> text "instance_id" in
+      await_failed_start clock config id;
+      let failed = instance config id in
+      check int "native admission has no observations" 0 (number "observation_seq" failed);
+      check bool "native admission has no resource" true (member "resource" failed = `Null);
+      Sys.remove path;
+      ignore (reconcile config directory);
+      await clock (fun () ->
+        phase (instance config id) = "detached"
+        && text "runtime_presence" (instance config id) = "retained");
+      for _ = 1 to 3 do ignore (reconcile config directory) done;
+      check int "native retention cleanup is not repeated" 1 !recoveries;
+      let retained = bindings () in
+      check int "Native_retained preserves exactly one binding" 1 (List.length retained);
+      let record = List.hd retained in
+      check string "retained binding belongs to the original admission" id (text "instance_id" record);
+      let release = Lifecycle.state_of_json (member "lifecycle" record) |> unwrap in
+      check bool "operator retention is preserved rather than reclassified as release" true
+        (match release with
+         | Lifecycle.Detached (Lifecycle.Native_retained {instance_id;installation_id}) ->
+             instance_id=id && installation_id="observer"
+         | Lifecycle.Detached (Lifecycle.Never_created | Lifecycle.Released _ | Lifecycle.Native_released _)
+         | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Failed _ | Lifecycle.Detaching _ -> false)))
 
 let test_cleanup_failure_retries_on_maintenance_without_hotloop () =
   with_fixture (fun env sw config directory packages state ->
@@ -2053,6 +2133,8 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_historical_missing_container_identity_is_recovered;
   test_case "historical never-started binding leaves no file" `Quick
     test_historical_never_started_leaves_no_binding;
+  test_case "create refusals remove each binding while native retention preserves one" `Quick
+    test_create_refusals_leave_no_binding_but_native_retention_keeps_one;
   test_case "cleanup failures wait for maintenance rather than hotloop" `Quick
     test_cleanup_failure_retries_on_maintenance_without_hotloop;
   test_case "install, idempotence, rename, and explicit removal" `Quick

@@ -778,7 +778,7 @@ let test_retained_addon_results_resume_the_original_payout () =
   let store = Lane_addon_store.create ~root:(Filename.concat config.base_path "request-ownership") in
   let retain ~request_id ~request = Lane_addon_tool_request_owner.retain ~store
     ~scope:"candle-appraisals" ~request_id ~installation_id:"original-installation"
-    ~package_id:"candle-appraiser" ~tool:"candle_appraise" ~request
+    ~package_id:"candle-appraiser" ~tool:"candle_appraise" ~summary:`Null ~request
     |> Result.map_error (fun error -> Lane_addon_runtime.Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
   let appraise = Server_candle_appraiser.For_testing.run ~registry ~base_path:config.base_path ~retain ~call in
   Eio.Switch.run (fun sw ->

@@ -4290,6 +4290,10 @@ let test_full_health_refresh_timeout_preserves_last_snapshot () =
 let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
   let request = Httpun.Request.create `GET "/health?full=1" in
+  let before = Server_routes_http_runtime.make_health_response_json request in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "cold memory availability is explicitly unobserved" "warming"
+    (before |> member "keeper_memory_execution" |> member "status" |> to_string);
   let timeout_failure =
     Proactive_refresh.Timed_out
       { label = "full_health_snapshot"
@@ -4316,6 +4320,10 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
     (match after |> member "full_health_snapshot" |> member "stale_age_ms" with
      | `Int age -> age >= 0
      | _ -> false);
+  Alcotest.(check string) "failed cold memory availability stays explicit" "timeout"
+    (after |> member "keeper_memory_execution" |> member "status" |> to_string);
+  Alcotest.(check bool) "failed cold memory observation names the timeout" true
+    (after |> member "keeper_memory_execution" |> member "component_timed_out" |> to_bool);
   (* The TUI reads this same body. A cold refresh that timed out is a failure
      with the server's reason in it, not a fleet of zeros and not a snapshot
      that is merely being rebuilt. *)

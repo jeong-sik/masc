@@ -816,6 +816,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "keeper_reaction_ledger",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_reaction_ledger" );
+    ( "keeper_memory_execution",
+      full_health_component_placeholder ~component_timed_out ~status
+        "keeper_memory_execution" );
     ( "keeper_owner",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_owner" );

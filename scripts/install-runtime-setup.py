@@ -1166,9 +1166,6 @@ def show_presentation_readiness(readiness):
 BROWSER_TOOLS = ('geckodriver', 'firefox')
 # ego lite's command: looked for on its own, by its own row (ego_row).
 EGO_PROGRAM = 'ego-browser'
-# `Browser_lane_ego_setup.default_space`: the space `--mode ego` names when
-# the table is new, which is the case this step is for.
-EGO_SPACE = 'masc'
 BROWSER_TOOL_NAMES = {'geckodriver': 'geckodriver', 'firefox': 'Firefox', EGO_PROGRAM: 'ego-browser'}
 
 
@@ -2810,7 +2807,7 @@ def ego_row(binary, base):
     readiness, _ = browser_tool(binary, EGO_PROGRAM)
     if not readiness.available:
         return None
-    notice = ('\nThe ego lite route has MASC open a task space named ' + EGO_SPACE + ' in your ego lite. imp sees '
+    notice = ('\nThe ego lite route has MASC open a task space of its own in your ego lite. imp sees '
               'only the tabs in that space, and clicks and types only on the pages it opened there. Those pages '
               'share the cookies of your ego lite profile, so imp reads and acts as you on the sites you are '
               'logged in to. With the BiDi route chosen as well, a request that names no browser connection is '

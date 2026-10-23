@@ -258,8 +258,20 @@ val tool_surface_sha256 :
     vendor session. An opaque account import revision also prevents reuse after
     the selected account signs in again; no credential digest is persisted. *)
 
-val load : base_path:string -> keeper_name:string -> (t option, string) result
-(** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an
+type read_failure = { path : string; detail : string }
+
+type read_error =
+  | Invalid_path of string
+  | Unreadable of read_failure
+  | Invalid_json of read_failure
+  | Not_current of read_failure
+
+val read_error_to_string : read_error -> string
+(** Diagnostic rendering only; recovery decisions match the constructors. *)
+
+val load : base_path:string -> keeper_name:string -> (t option, read_error) result
+(** Only filesystem absence is [Ok None]; lookup and read failures are
+    [Unreadable]. Malformed, retired, or ambiguous state is an
     error and never degrades to a new session. A Muse binding that names a
     session without the host's count for it is such an error, and so is a
     binding of another client that records a count. *)
@@ -267,7 +279,7 @@ val load : base_path:string -> keeper_name:string -> (t option, string) result
 type stored_binding =
   { keeper_name : string
   ; path : string
-  ; decoded : (t, string) result
+  ; decoded : (t, read_error) result
   }
 
 val stored_bindings : base_path:string -> (stored_binding list, string) result
@@ -280,12 +292,24 @@ val stored_bindings : base_path:string -> (stored_binding list, string) result
     or listed. Reads only. The deploy preflight and boot reconcile both read
     the store through this. *)
 
+type move_error =
+  | Move_read_failed of read_error
+  | Binding_readable of string
+  | Binding_missing of string
+  | Lock_failed of File_lock_eio.durable_lock_error
+  | Rename_failed of string
+
+val move_error_to_string : move_error -> string
+
 val move_aside :
-  base_path:string -> keeper_name:string -> rejected_path:string -> (unit, string) result
+  base_path:string -> keeper_name:string -> rejected_path:string -> (unit, move_error) result
 (** Rename the keeper's binding to [rejected_path] while holding the store
     lock every claim and transition takes. The binding is read again under
     the lock; one that decodes now, or is gone, is left alone and the result
-    is [Error]. The keeper's next claim finds no binding and starts a new
+    is [Error]. An I/O or path failure from this fresh read is
+    [Move_read_failed] and never authorizes a rename. Only [Invalid_json]
+    or [Not_current] content rejection permits moving the file. The
+    keeper's next claim finds no binding and starts a new
     vendor session. A rename that completed stays [Ok] even when releasing
     the lock fails; that failure is logged. *)
 

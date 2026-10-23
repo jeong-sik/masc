@@ -3881,7 +3881,11 @@ status: reference
   구분한다. `examine`이 관측한 meta `Unreadable`은 quarantine 플래그와 무관하게
   부팅을 거절하며 파일 접근·종류를 먼저 고쳐야 한다. `Invalid_json`과
   `Not_current`는 운영자가 상태 손실을 받아들인 뒤에만 격리할 수 있다.
-  이 판정은 `examine`이 읽은 실패에 대한 부팅 결정이다. store 를
+  이 meta 판정은 `examine`이 읽은 실패에 대한 부팅 결정이다.
+  official-client session의 `read_error`도 경로·I/O·JSON·schema 거절을 구분하며,
+  I/O는 플래그와 무관하게 부팅을 거절한다. `move_aside`는 claim lock 안에서
+  다시 읽고, 그 읽기가 I/O로 실패하면 파일을 옮기지 않는다. 읽은 바이트의
+  JSON·schema 거절에 대한 명시적 격리만 허용한다. store 를
   `Refuse_boot` 로 보내려면 `Keeper_durable_store.Refusing.t` 에 생성자를 더해야
   하고, 부팅의 이름·검사·옮기는 법이 그 타입을 exhaustive 로 match 하므로 셋을 다
   채워야 컴파일된다. **경계**: Board 판정의 `Quarantined`(Board Attention

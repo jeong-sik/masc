@@ -357,7 +357,7 @@ let test_roundtrip_and_settlement () =
     check int "cross-runtime failover starts at turn one" 1 changed_runtime_plan.turn_count;
     check bool "cross-runtime failover never resumes old session" true
       (Option.is_none changed_runtime_plan.previous_settlement);
-    match load ~base_path ~keeper_name with
+    match load ~base_path ~keeper_name |> Result.map_error read_error_to_string with
     | Error detail -> fail detail
     | Ok None -> fail "durable session disappeared"
     | Ok (Some loaded) ->
@@ -416,7 +416,7 @@ let test_duplicate_claim_and_cas_are_fail_closed () =
      with
      | Error _ -> ()
      | Ok _ -> fail "stale expected state bypassed compare-and-swap");
-    match load ~base_path ~keeper_name with
+    match load ~base_path ~keeper_name |> Result.map_error read_error_to_string with
     | Ok (Some loaded) -> check bool "active preserved" true (loaded = active)
     | Error detail -> fail detail
     | Ok None -> fail "CAS failure removed durable state")
@@ -1730,7 +1730,7 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
       | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
       | _ -> fail "binding encoding is not an object" in
     Yojson.Safe.to_file state_path unbound_json;
-    match load ~base_path ~keeper_name with
+    match load ~base_path ~keeper_name |> Result.map_error read_error_to_string with
     | Ok (Some binding) ->
       check bool "absent optional proof preserves session without fabricating acknowledgement" true
         (binding.context_frontier = None && binding.phase = released.phase);
@@ -2378,11 +2378,50 @@ let test_a_muse_binding_without_the_host_count_does_not_load () =
         {|{"kind":"reported","turns":1,"extra":true}|}; {|{"kind":"other","turns":1}|} ])
 ;;
 
+let test_typed_read_preserves_lookup_and_content_failures () =
+  with_workspace "masc-session-read-causes-" (fun base_path ->
+    let keeper_name = "read-causes" in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    check bool "verified absence is optional state" true
+      (load ~base_path ~keeper_name = Ok None);
+    let directory = Filename.dirname state_path in
+    Fs_compat.mkdir_p (Filename.dirname directory);
+    let retained = "a file cannot be a session directory" in
+    write_file directory retained;
+    (match load ~base_path ~keeper_name with
+     | Error (Unreadable failure) ->
+       check string "the failed lookup retains its path" state_path failure.path
+     | Error (Invalid_path _ | Invalid_json _ | Not_current _)
+     | Ok _ -> fail "a non-directory parent did not remain an I/O failure");
+    check string "lookup does not change the obstruction" retained
+      (Fs_compat.load_file directory);
+    Unix.unlink directory;
+    Fs_compat.mkdir_p directory;
+    let malformed = "{invalid-session" in
+    write_file state_path malformed;
+    (match load ~base_path ~keeper_name with
+     | Error (Invalid_json failure) ->
+       check string "the parse failure retains its path" state_path failure.path
+     | Error (Invalid_path _ | Unreadable _ | Not_current _)
+     | Ok _ -> fail "readable malformed JSON lost its parse failure");
+    check string "the malformed bytes are untouched" malformed (Fs_compat.load_file state_path);
+    let rejected = "{}" in
+    write_file state_path rejected;
+    (match load ~base_path ~keeper_name with
+     | Error (Not_current failure) ->
+       check string "the schema failure retains its path" state_path failure.path
+     | Error (Invalid_path _ | Unreadable _ | Invalid_json _)
+     | Ok _ -> fail "parsed rejected content lost its schema failure");
+    check string "the rejected object is untouched" rejected (Fs_compat.load_file state_path))
+;;
+
 let () =
   run
     "official client session store"
     [ ( "durable owner"
-      , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
+      , [ test_case "typed read preserves lookup and content failures" `Quick
+            test_typed_read_preserves_lookup_and_content_failures
+        ; test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
         ; test_case "context frontier wire keeps digest authority with the guard" `Quick
             test_context_frontier_wire_keeps_digest_authority_with_the_guard
         ; test_case "held context from the acknowledged frontier" `Quick

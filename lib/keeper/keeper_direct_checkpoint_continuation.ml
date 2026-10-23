@@ -50,7 +50,7 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
   match pending with
   | None -> Ok None
   | Some (Semantic.Official_client observed) ->
-    let* expected = Native.load ~base_path ~keeper_name in
+    let* expected = Native.load ~base_path ~keeper_name |> Result.map_error Native.read_error_to_string in
     let* checkpoint = prepare_official_resume ~observed ~expected in
     Ok (Some { authority = Official_client checkpoint; observed = Semantic.Official_client observed })
   | Some (Semantic.Agent_core observed) ->
@@ -114,7 +114,7 @@ let defer_official ~base_path ~keeper_name ~operation_id ~(settled_session : Nat
     | (Native.Ready | Native.Start _ | Native.Active _ | Native.Turn_inflight _
       | Native.Recovery_required _ | Native.Settled _), (Some _ | None) ->
       Error "official cooperative yield has no settled authority for the original operation" in
-  let* current = Native.load ~base_path ~keeper_name in
+  let* current = Native.load ~base_path ~keeper_name |> Result.map_error Native.read_error_to_string in
   let* () = match current with
     | Some current when current = settled_session -> Ok ()
     | Some _ | None -> Error "official-client settlement changed before cooperative retention" in

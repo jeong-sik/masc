@@ -712,7 +712,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       match Session_store.load ~base_path ~keeper_name with
       | Ok session -> Ok session
       | Error detail ->
-        Error (internal_error ("Claude Code session binding load failed: " ^ detail))
+        Error (internal_error ("Claude Code session binding load failed: " ^ Session_store.read_error_to_string detail))
     in
     let* stored_session =
       match stored_session with

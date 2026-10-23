@@ -162,7 +162,7 @@ let load ~base_path ~keeper_name =
     error
       Service_unavailable
       "official_client_session_load_failed"
-      message
+      (Keeper_official_client_session_store.read_error_to_string message)
 ;;
 
 let snapshot ~base_path ~keeper_name =

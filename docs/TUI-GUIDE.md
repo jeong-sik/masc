@@ -1023,17 +1023,24 @@ The Channels tab lists every transport and its channel bindings. A channel
 reads `name (id)` when the connector's name directory knows it, and
 `id (name unknown)` when it does not.
 
-The Items tab is one `]` after Info. It lists the 18 portrait accessories by
-slot. `j`/`k`, the page keys, and Home/End select an item; the portrait beside
-the list previews that item over the Keeper's current observed outfit. An
-`equipped` label describes the current picture, while the preview changes no
-equipment or Candle ledger entry. The Item account read shows the Keeper's
-balance, purchased items and configured prices; `Off`, `Disabled`, and an
-unreadable account each have their own message. On a narrower pane the selected
-item's price and ownership sit below the list. If the server cannot report
-equipment, the tab gives the reason and leaves the picture unavailable. The
-catalog remains readable without a picture. Buying and equipping remain
-Keeper-owned tool actions.
+The Items tab is one `]` after Info. `v` cycles through All, Owned, Can buy,
+and the face/neck/head/hand/base slots. `j`/`k`, the page keys, and Home/End
+select within that view. The portrait tries the selected accessory over the
+Keeper's observed outfit; Space compares it with the current outfit. The wallet
+shows Candle and the number of purchased accessories. The selected item shows
+ownership, price, affordability or the missing Candle amount, even in a narrow
+pane. Wearing an accessory from the starting outfit does not make it purchased.
+Off, Disabled and unreadable accounts remain distinct; account-dependent views
+do not invent an empty wallet. An unavailable portrait leaves the catalog readable.
+
+`a` opens an editable chat draft asking this Keeper to buy and equip the selected
+item, or only equip it if already owned. The purchase request caps the price at
+the observed milli-Candle amount, including zero for free items. Enter sends the
+draft through normal chat. An existing text or attachment draft is preserved;
+send or save it before preparing the Item request again. Buying and equipping
+remain Keeper-owned tool actions, and the reply reports their result. Return to
+Items to read the resulting ownership and outfit. Browsing, comparison and draft
+preparation do not change the Candle ledger.
 
 | Key | Effect |
 |-----|--------|

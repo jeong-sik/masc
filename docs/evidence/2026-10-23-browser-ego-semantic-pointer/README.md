@@ -3,6 +3,8 @@
 Captured 2026-10-23 from `feat/browser-ego-semantic-pointer-20261023`, based on
 `29f764b36676fecf308f56cee039ae5749efd2e1` (upper layer of Stack #45598).
 Tracking: <https://github.com/jeong-sik/masc/issues/45556>.
+Published as code #45627 and evidence #45631 on a fresh stack from main
+`9c2256fea8fad3bb8ca7e5aed8a92cd803fcbdda`; the boundary hash below is unchanged.
 
 `scripts/probe-browser-ego-semantic-pointer.mjs` extracts the production
 `nativeTargetInput` function from `Browser_ego_peer` and executes that exact
@@ -31,7 +33,7 @@ only from the expected frame origin and window. Fresh snapshots supply each
 iframe ref; refs are not guessed from a prior run.
 
 `proof.json` records the boundary results and separately read application state.
-`ego.log` retains AX snapshots and runtime output. The screenshot
+`ego.log` retains AX snapshots and runtime output, with trailing blank lines removed. The screenshot
 `trusted-frame-results.png` shows the two controls and the observed trusted event
 log; the coding session opened and visually inspected it.
 

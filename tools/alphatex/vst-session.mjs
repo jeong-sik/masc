@@ -84,6 +84,9 @@ export function openVstSession({ command = vstHostPath, args = [], spawnProcess 
     child.once('close', (code, signal) => {
       if (host === owned) host = null
       hosts.delete(owned)
+      // Enrich the retained failure only at close, after stderr drains. Keep
+      // its identity, code and cause rather than replacing the terminal error.
+      if (failure && stderr.length) failure.message += '\n' + stderr.toString('utf8')
       const error = failure ?? new Error(`${label} host ended (${signal ?? code}): ${stderr.toString('utf8')}`)
       for (const [id, job] of pending) {
         if (job.owner === owned) { pending.delete(id); job.reject(error) }

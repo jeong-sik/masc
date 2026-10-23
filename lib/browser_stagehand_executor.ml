@@ -392,10 +392,12 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
   let* page_id = page_of ~tabs tab_id in
   let name = Browser_lane.interaction_verb action in
   let args = Browser_lane.interaction_args ~tab_id ~frame_path:[] ~expected_url action in
-  let* action, expected_url = match (action : Browser_lane.interaction) with
-    | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
+  (* The shared exhaustive classifier owns the action inventory; Stagehand
+     additionally refuses semantic drag timing before resolving a target. *)
+  let* action, expected_url = match Browser_interaction.needs_pointer_resolution action, action with
+    | true, Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
       Error (Browser_lane.Rejected_before_effect "drag movement timing requires automation or a live BiDi connection")
-    | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+    | true, _ ->
       let* resolved = evaluate ~runtime:Scene_runtime ~send:(send_guard call) ~args
           page_id Browser_interaction.pointer_target_script |> guard_result in
       let* expected_url, action = Browser_interaction.resolve_pointer_input action resolved
@@ -420,12 +422,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
         | Browser_lane.Tap_at _ | Browser_lane.Swipe _
         | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Ok action in
       Ok (action, expected_url)
-    | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
-    | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
-    | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
-    | Browser_lane.Tap_at _ | Browser_lane.Swipe _
-    | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
-    | Browser_lane.Fill_node _ -> Ok (action, expected_url) in
+    | false, _ -> Ok (action, expected_url) in
   let args = Browser_lane.interaction_args ~tab_id ~frame_path:[] ~expected_url action in
   match (action : Browser_lane.interaction) with
   | Browser_lane.Set_zoom _ -> Error (Browser_lane.Rejected_before_effect "set_zoom requires a connected WebExtension browser")

@@ -384,6 +384,23 @@ frames for SMPTE MIDI. Onsets, attack dynamics, selection anchor, clipboard and
 unselected notes remain unchanged. Each command is one undoable edit, retained
 by save/reopen, MIDI export and arrangement handoff.
 
+Use `:stretch-notes 2` to make a selected passage twice as long, including
+the distances between its attacks. `:stretch-notes 1/2` compresses it.
+The default fixed position is the selection origin: the range start for
+`:select-notes`, or the earliest selected attack for `:select-all`.
+An explicit position changes that fixed point, for example
+`:stretch-notes 3/2 0` expands the selected passage about the document start.
+The ratio is dimensionless; the optional position uses beats in phrase/PPQ
+documents and frames in SMPTE sources. Ratios accept exact decimals or integer
+fractions and must be positive. Every resulting distance and length must fit
+whole native ticks. The selection origin follows the same transformation and
+must stay at or after zero. Unselected notes, pitch, dynamics, source release
+form and routing stay unchanged. The clipboard keeps its original content.
+The entire edit is one undo step; range, routing and new overlap errors reject
+it without rounding or partly changing the selection. Source point notes stay
+points. Save/reopen, MIDI export, harmony analysis and arrangement handoff use
+the edited attacks and releases.
+
 Phrase lengths must stay positive and within the phrase. Imported MIDI permits
 zero-length point notes and can extend its performance to keep edited releases.
 Native release velocity/form and on/off IDs stay intact. Negative or fractional

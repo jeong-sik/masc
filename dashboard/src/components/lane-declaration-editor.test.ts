@@ -95,7 +95,7 @@ describe('Lane declaration editing through the status surface', () => {
     lane.fetchLaneAddonSlice.mockResolvedValue({ rows: [row], coverage: [], complete: true })
     const screen = render(html`<${LaneAddonsPanel} />`)
     await screen.findByRole('table', { name: 'TOML declarations' })
-    fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
     await screen.findByText('Only A evidence')
     fireEvent.click(screen.getByRole('radio'))
     fireEvent.click(screen.getByRole('checkbox'))
@@ -103,7 +103,7 @@ describe('Lane declaration editing through the status surface', () => {
     expect(screen.getByRole('region', { name: 'Selected Lane event' })).toBeTruthy()
     let lateSlice!: (value: { rows: typeof row[]; coverage: never[]; complete: boolean }) => void
     lane.fetchLaneAddonSlice.mockReturnValueOnce(new Promise(resolve => { lateSlice = resolve }))
-    fireEvent.click(screen.getByRole('button', { name: 'Slice', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
     let finish!: (value: typeof snapshot) => void
     lane.fetchLaneAddons.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
     act(() => observeWorkspace('/workspace-b'))
@@ -437,7 +437,7 @@ describe('Lane declaration editing through the status surface', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
     await screen.findByRole('button', { name: 'Saving TOML…' })
     fireEvent.click(screen.getByRole('button', { name: 'Close editor' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     await open(screen)
     const newer = '# edited after discovering the created file\n' + original
     fireEvent.input(source(screen), { target: { value: newer } })
@@ -466,7 +466,7 @@ describe('Lane declaration editing through the status surface', () => {
     const createDraft = '# unsaved while creating\n' + original
     fireEvent.input(source(screen), { target: { value: createDraft } })
     fireEvent.click(screen.getByRole('button', { name: 'Close editor' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     await open(screen)
     const reopenedDraft = '# separate reopened edits\n' + original
     fireEvent.input(source(screen), { target: { value: reopenedDraft } })
@@ -484,7 +484,7 @@ describe('Lane declaration editing through the status surface', () => {
     expect(within(screen.getByLabelText('Retained create draft 1 comparison')).getByText('raw-revision-2')).toBeTruthy()
     expect(source(screen).value).toBe(reopenedDraft)
     fireEvent.click(screen.getByRole('button', { name: 'Close editor' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     fireEvent.click(within(screen.getByRole('table', { name: 'TOML declarations' })).getByRole('button', { name: `Edit TOML ${path}` }))
     await waitFor(() => expect(source(screen).value).toBe(reopenedDraft))
     expect((screen.getByLabelText('Retained create draft 1') as HTMLTextAreaElement).value).toBe(createDraft)
@@ -509,7 +509,7 @@ describe('Lane declaration editing through the status surface', () => {
     await screen.findByText(/Create response lost/)
     const newer = '# kept while checking\n' + original
     fireEvent.input(source(screen), { target: { value: newer } })
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     fireEvent.click(within(screen.getByRole('table', { name: 'TOML declarations' })).getByRole('button', { name: `Edit TOML ${path}` }))
     await waitFor(() => expect(source(screen).value).toBe(original))
     expect(files.fetchLaneDeclaration).toHaveBeenCalledWith(path, expect.any(AbortSignal))
@@ -546,10 +546,10 @@ describe('Lane declaration editing through the status surface', () => {
     const screen = render(html`<${LaneAddonsPanel} />`)
     await screen.findByText('Configuration read: incomplete')
     for (const sourcePath of paths.slice(0, -2)) {
-      expect(screen.queryByRole('button', { name: `Edit TOML ${sourcePath}`, exact: true })).toBeNull()
+      expect(screen.queryByRole('button', { name: `Edit TOML ${sourcePath}` })).toBeNull()
     }
-    expect(screen.getByRole('button', { name: `Edit TOML ${directory}/.toml`, exact: true })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: `Edit TOML ${path}`, exact: true }))
+    expect(screen.getByRole('button', { name: `Edit TOML ${directory}/.toml` })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: `Edit TOML ${path}` }))
     await waitFor(() => expect(source(screen).value).toBe(original))
     expect(files.fetchLaneDeclaration).toHaveBeenCalledTimes(1)
     expect(files.fetchLaneDeclaration).toHaveBeenCalledWith(path, expect.any(AbortSignal))
@@ -565,7 +565,7 @@ describe('Lane declaration editing through the status surface', () => {
     await screen.findByText(/File changed.*Your draft is preserved/)
     expect(screen.getByLabelText('Current file source').textContent).toBe(current.source_text)
     expect(source(screen).value).toBe(draft)
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     await waitFor(() => expect(lane.fetchLaneAddons).toHaveBeenCalledTimes(2))
     expect(source(screen).value).toBe(draft)
     expect(files.saveLaneDeclaration).toHaveBeenCalledTimes(1)

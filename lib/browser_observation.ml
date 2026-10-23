@@ -11,7 +11,8 @@ module Field_names = Set.Make (String)
 (* Durable bytes are also read by non-OCaml consumers. Reject ambiguous JSON
    throughout the observation instead of depending on their duplicate-key
    selection policy (including nested node and geometry fields). *)
-let rec unambiguous_json = function
+let rec unambiguous_json (json : Yojson.Safe.t) =
+  match json with
   | `Assoc fields ->
     let rec loop seen = function
       | [] -> Ok ()
@@ -29,7 +30,6 @@ let rec unambiguous_json = function
       | value :: rest -> let* () = unambiguous_json value in loop rest
     in loop values
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Ok ()
-  | `Tuple _ | `Variant _ -> Error "retained observation requires standard JSON"
 
 let of_json json =
   let* () = unambiguous_json json in

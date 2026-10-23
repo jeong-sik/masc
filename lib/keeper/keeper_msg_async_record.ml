@@ -282,7 +282,8 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
 let same_entry_record (left : entry) (right : entry) = left = right
 
 let normalize_request_context request_context =
-  let rec normalize_json path = function
+  let rec normalize_json path (json : Yojson.Safe.t) =
+    match json with
     | `Assoc fields ->
       let rec normalize_fields seen normalized = function
         | [] ->
@@ -322,8 +323,6 @@ let normalize_request_context request_context =
     | `Float _ -> Error "request_context float must be finite"
     | (`Null | `Bool _ | `Int _ | `String _) as value ->
       Ok value
-    | `Tuple _ | `Variant _ ->
-      Error "request_context must contain JSON-compatible values"
   in
   match request_context with
   | None -> Ok None

@@ -1590,7 +1590,7 @@ let overview_lines ~width view =
                    | Retained_runs, _, _ | _, Unverified, _ -> []
                    | Current_installations, Classified now, Some started when now=started -> []
                    | Current_installations, Unclassified, None -> []
-                   | Current_installations, now, started ->
+                   | Current_installations, ((Classified _ | Unclassified) as now), started ->
                        let word = function Some c -> category_label c | None -> "unclassified" in
                        [Printf.sprintf "    role: worker started as %s · declaration now %s" (word started)
                           (match now with Classified c -> category_label c | Unclassified | Unverified -> "unclassified")])

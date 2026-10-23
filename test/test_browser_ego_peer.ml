@@ -425,6 +425,7 @@ let test_input_acts_through_the_shared_page_scripts () =
   by_step ["page.input",(fun _ -> refusal ~started:true)];
   check string "a failure after the edit started" "unknown" (failure_kind (interact fill));
   (* Refused before any run. *)
+  let elsewhere = {Lane.Pointer.x=0.75;y=0.5} in
   let before = runs () in
   check string "inside a frame" "before effect"
     (failure_kind (dispatch peer Live.Page_interact (interact_args ~frame_path:["iframe"] (Lane.Click "#send"))));

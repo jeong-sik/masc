@@ -216,7 +216,7 @@ let test_ego_table () =
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
   check (list string) "reads, capture, the tab list, its own tabs and input on them"
     ["list_tabs";"open_tab";"close_tab";"navigate";"follow_link";"read_text";"read_elements";"read_scene";"read_regions";"screenshot";
-     "click";"double_click";"right_click";"middle_click";"hover";"scroll_page";"scroll_at";
+     "click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
      "fill";"type_text";"press_key";"key_chord";"select_option"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with

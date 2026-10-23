@@ -1,0 +1,418 @@
+{
+  "verdict": "PASS",
+  "kind": "independent_final_main_integration_source_boundary_review",
+  "reviewer": "feature_navigation_review",
+  "reviewed_at": "2026-10-23T06:32:36.677645+00:00",
+  "base": "a502bcf98878eb0916095a94d87fa3040ac0d93a",
+  "head": "d769a6c2ce4861abc8f7d113a2d7e7127ebc76f9",
+  "stack": 45418,
+  "member_vector": [
+    {
+      "pr": 45415,
+      "base": "a502bcf98878eb0916095a94d87fa3040ac0d93a",
+      "head": "e28861fb453d58a27d4d82036a3f9ebc3df80a68",
+      "diff_sha256": "ca9d2adf6647dcdeb3c85a80922a3c0dadb95f92fa27c293f6c5a4de74e0c76e"
+    },
+    {
+      "pr": 45416,
+      "base": "e28861fb453d58a27d4d82036a3f9ebc3df80a68",
+      "head": "6e9e2c2928f50fb452daa39898cdb5b75b014e95",
+      "diff_sha256": "7685fb7ce7bfc6af4a465a6476dc66d5559a6b31944ab0af14cc717d3d64fdd7"
+    },
+    {
+      "pr": 45417,
+      "base": "6e9e2c2928f50fb452daa39898cdb5b75b014e95",
+      "head": "d769a6c2ce4861abc8f7d113a2d7e7127ebc76f9",
+      "diff_sha256": "78e4d19d1933b62200aac09a3fb4d3c58f0520acfa79e4fe0c026d45365b7b55"
+    }
+  ],
+  "complete_diff_sha256": "5c4ab7d8ae10fabed88441a7c077f2f2a6bb20ee2a4472d8c5031487cbd17c7c",
+  "file_matrix": [
+    {
+      "path": "bin/masc_tui.ml",
+      "sha256": "3dde5e309f49adc01a8507c6cfe6398c372841543ef9112b481b58a5a9f5f63f",
+      "bytes": 1826565,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "bin/masc_tui_keys.ml",
+      "sha256": "3ddb8cd25d52e5b90e5769c2993426b1a5043899521b33b754de9758624be6cb",
+      "bytes": 124039,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "bin/masc_tui_lane_addons.ml",
+      "sha256": "2ebe77ddcd69dc0df51fa88428c10617eed5b50c3976981e051a8e50b18497f0",
+      "bytes": 130813,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "bin/masc_tui_lane_addons.mli",
+      "sha256": "14beb1dc1c990e33f0f33524a3abd32f780acb6e85b6cb512f1bb8755afc1f73",
+      "bytes": 15575,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "bin/masc_tui_lane_installer.ml",
+      "sha256": "26bc5b6e1a46978d1c54260cbbea21337240ea24e3dfa4aa9c50bcfee65e1984",
+      "bytes": 10919,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "bin/masc_tui_lane_inventory.ml",
+      "sha256": "b8022baf79cfec543a5982f1f061603218839322f7edc20ed5621359cad13f9d",
+      "bytes": 21361,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "bin/masc_tui_lane_inventory.mli",
+      "sha256": "a314eadd76bd3a01b7d12a073ae7448d846c72c1093b89209761ed0e2534177e",
+      "bytes": 4512,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "bin/masc_tui_palette.ml",
+      "sha256": "454c332d1f1677582b33e3a56b754b24cfde8f8ab5e13513920e8a9cddf1c991",
+      "bytes": 20496,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "bin/masc_tui_render_lanes.ml",
+      "sha256": "ebe826e0038aed0f9b4d3ceee2c007041f8c9dffc140b0b9ff0677abe6553f76",
+      "bytes": 95833,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "bin/masc_tui_render_overlays.ml",
+      "sha256": "c0793227d38f6cd31a34e66f9f97ea76c820723df5c305ad5279638abc4cd429",
+      "bytes": 52185,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "bin/masc_tui_render_runtime.ml",
+      "sha256": "ffe028de182a3bdca5f4b092f351c1792386cc173d3a3990061bda3008755d60",
+      "bytes": 74151,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "bin/masc_tui_types.ml",
+      "sha256": "fe3aef0fc552832b99b60bcfe1ff27b615e7291c9904143d4ec819dc2c2cd638",
+      "bytes": 1005799,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "dashboard/src/api/fixtures/lane-inventory.json",
+      "sha256": "cb44a69ae132a1d42ee0120a13b5c4934246950540a70d546434cdc2956fbde5",
+      "bytes": 13845,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "dashboard/src/api/lane-inventory.ts",
+      "sha256": "e0062b0df6e2ce950cf7002a21d0a78c130f865f018b9735a619e1185ada54c2",
+      "bytes": 9546,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "dashboard/src/lib/lane-addon-category.test.ts",
+      "sha256": "2a04dfb7159010b85a16fa2ea84fbcb4432da57e0bc6f2003b8a714847c2e3bd",
+      "bytes": 6265,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "dashboard/src/lib/lane-addon-category.ts",
+      "sha256": "213a7b7b1f2a7a438322fadf97eba3bcfeea52751f02e64d01b2c1d7f4adb97c",
+      "bytes": 3477,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+      "sha256": "25e0950e9a55bdd926162df8e46f566eb2652761e62b405cf769bf23904fd3c1",
+      "bytes": 3805,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/category-authority-independent-review.json",
+      "sha256": "8918e55f02371768fb63a47f29e6f640b85d486fc2559c9e4ae2638c7dd4f8a4",
+      "bytes": 10016,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/category-authority-independent-review.md",
+      "sha256": "04345cd65ddadb4ecfd4f4d8a9b37907b8f16a7fe8fb91b85f4450e334ebdbf5",
+      "bytes": 4273,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/category-authority-source.json",
+      "sha256": "e01fa19b1c7e6cc3d164214dd4e109cb718cae49b0bd8422ffc015c5c49e74c8",
+      "bytes": 5782,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/inspect-independent-review.json",
+      "sha256": "4d3882d666e03099a41677cad2d8bbfa6e031b846a80e666e90c9897c24aee58",
+      "bytes": 4309,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/inspect-independent-review.md",
+      "sha256": "c0afccc881437bb152122dce360919a7810ced06f56b4152ce461a04ca0ae267",
+      "bytes": 2673,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/inspect-original-fail.json",
+      "sha256": "99a93bc87efe90f28370116f08b48843a6694abbdbe4f64c76b1ef06c318613d",
+      "bytes": 4101,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/inspect-original-fail.md",
+      "sha256": "3419f52cb92b5d74870d9cda5c7e3f2e655ee9afac6a5e284fa6d474d435f17e",
+      "bytes": 2283,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/inspect-source.json",
+      "sha256": "aa4312ccebbead59ecb5447887a135a8c9499d3f4e6df8ce6348d74a2e4729df",
+      "bytes": 4300,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/navigation-independent-review.json",
+      "sha256": "84ffa1d5759d1742b655874c46e70daae4268dc3a29c5d0f85df3bc4ac68548b",
+      "bytes": 5240,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/navigation-independent-review.md",
+      "sha256": "2cc9dc3426ee9917d2be7911101f0aa2b1bfd7f4d7f57b22b22fc57df6f2b262",
+      "bytes": 2824,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/navigation-source.json",
+      "sha256": "1964cd716b9275fd48d4c0da687f204bdf44d9ebb1c1ff4d37b3c2516eadf2f1",
+      "bytes": 2942,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/evidence/2026-10-23-addon-role-ui-followup/prior-grouping-selected-execution.json",
+      "sha256": "db2b2293bc64d87c9109e02ea479d6518054f10ab5dd5d4f30f4453e8a55cdaa",
+      "bytes": 986,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/guides/TUI-KEYS.md",
+      "sha256": "763fe42684ccad39c8f36cb6cacf9f9565bacf4dbd9ef2fe6ba71b1cc91ca185",
+      "bytes": 46960,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "docs/guides/lane-inventory.md",
+      "sha256": "7586d8e8386e2be382a3f85d028cc6c2188c322cd8d9e7b98b0e492475b050f3",
+      "bytes": 9837,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "lib/server/server_lane_inventory.ml",
+      "sha256": "7ddbf9ffd3fed0d5a0494baa7febc2d5d30fe7f5b79cf70d595b761ea7134579",
+      "bytes": 17096,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "lib/server/server_lane_inventory.mli",
+      "sha256": "cc8a9d156adb328430ef35e345a0fd7307ac3cb64d18226324877503499fafa1",
+      "bytes": 4637,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.ml",
+      "sha256": "348d01bb580de332c7cbf250ec90d3f979bc0e33c5df722070d0a8ff5c1d29e2",
+      "bytes": 20896,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.mli",
+      "sha256": "053f8dd5071389e994d32b6e0d142b2428e5f48510c40b00d94628f90fcc8d39",
+      "bytes": 4239,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "test/dune",
+      "sha256": "387e8d2ac7c320c98251a0d0c791e80796e9c5713dafe4c76637b2069a16acb8",
+      "bytes": 207727,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": false
+    },
+    {
+      "path": "test/test_server_lane_inventory.ml",
+      "sha256": "9266a2ec56e977db0b58049a3008aaafeb7b888634c33a5ff5e1dbbd64a2db25",
+      "bytes": 40248,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "test/test_tui_keys.ml",
+      "sha256": "fe94bea061e292f3f4b18aeb2f47fae3b8214d325f3ed63c78a245a936472d86",
+      "bytes": 81875,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "test/test_tui_lane_addon_reading.ml",
+      "sha256": "bc37bf1e8079c7205deeeb14fdb6c9c78d7db7eed608c10423bfb100a411c863",
+      "bytes": 4773,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "test/test_tui_lane_addons.ml",
+      "sha256": "e943047f6d8dbc4a9b2f7542d96b19584e139f79b6365619cc1e905b0b4efaf2",
+      "bytes": 144222,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "test/test_tui_lane_inventory.ml",
+      "sha256": "fb4c3998e19b0cc42a34403b6644901b7549096d1a532eb39e1389720625efcc",
+      "bytes": 32470,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    },
+    {
+      "path": "test/test_tui_palette_matching.ml",
+      "sha256": "fbd3a73ca0f0988def0a45f8b2556639244bb540c6b4786bd19fa8fb051d2a91",
+      "bytes": 27488,
+      "same_as_0c_candidate": true,
+      "same_as_authored_top": true
+    }
+  ],
+  "numeric_changelog_reviewed": [
+    {
+      "path": "changelog.d/45415.md",
+      "sha256": "66829f8850a0c4bf82723e4bf1ec3c56f5354d5eb147f3528e6684c0edd90c3a"
+    },
+    {
+      "path": "changelog.d/45416.md",
+      "sha256": "5a1d272bf64dbd943ee9889a55d1080c8d069b479ab9f8a0748bcdfbe82236d3"
+    },
+    {
+      "path": "changelog.d/45417.md",
+      "sha256": "50846de11f8b88370688a60f2ab9bc2ebeeb1dd83b0364daeb7dc8a7ae59a8b9"
+    }
+  ],
+  "comparisons": {
+    "prior_integration_base": "0c5a4dfb74826febbd3d300f69f4d0ab41bb21cd",
+    "prior_integration_top": "14aa41a41b65590aea9f7c6ab531ecaa8bd35c96",
+    "all_42_same_as_prior_integration": true,
+    "authored_top": "7f67cc78e2d13f37d6652caf066fdf9f70c33cd0",
+    "same_as_authored": 41,
+    "authored_difference": [
+      "test/dune"
+    ],
+    "difference_detail": "Exactly one inherited include of stanzas/test_browser_lane_table_writes.inc; own direct test dependencies remain unchanged"
+  },
+  "new_main_delta": {
+    "paths": [
+      "changelog.d/45402.md",
+      "changelog.d/45412.md",
+      "dashboard/src/components/internal-agents-monitor.test.ts",
+      "dashboard/src/components/lane-addons-panel.test.ts",
+      "dashboard/src/components/lane-addons-workspace.test.ts",
+      "dashboard/src/components/lane-declaration-editor.test.ts",
+      "dashboard/src/components/lane-package-activity-panel.test.ts",
+      "dashboard/src/components/published-artifacts/artifacts-surface.test.ts",
+      "test/test_browser_task_capabilities.ml"
+    ],
+    "dashboard_test_repairs": "All six test-file diffs directly read: removes unsupported exact:true only from get/find/query ByRole option objects. Name arguments, roles, assertions and product request/state expectations remain. No product UI/API/schema, package dependency or tsconfig changes.",
+    "browser_test_repair": "test_resize_viewport_table now expects Owned_gecko set_viewport support true, matching the earlier inherited backend extension; only the expectation/name changes. It adds no production capability or feature-role coupling.",
+    "direct_boundaries": "No changed lib/bin code or type/interface, no changed category decoder or navigation/action consumers between the two fixed main bases.",
+    "execution_claim": "These are source observations only; the reviewer did not execute Dashboard typecheck/tests or browser tests."
+  },
+  "prior_boundary_review": "addon-role-ui-followup-main-integration-independent-review-20261023.json remains the record for 0c->14aa; it is not rewritten or transferred as current approval.",
+  "p0_p1_p2": [],
+  "p3": [],
+  "checks": [
+    {
+      "name": "Pinned 42-file final Git-object hashes",
+      "result": "PASS"
+    },
+    {
+      "name": "42 files against prior integration",
+      "result": "PASS",
+      "same": 42
+    },
+    {
+      "name": "42 files against authored source",
+      "result": "PASS",
+      "same": 41,
+      "inherited_only": 1
+    },
+    {
+      "name": "Member ancestry and complete per-member diff identities",
+      "result": "PASS"
+    },
+    {
+      "name": "git diff --check fixed base/head",
+      "result": "PASS"
+    }
+  ],
+  "no_mutation": [
+    "No candidate source changed",
+    "No commits or push",
+    "No GitHub approval"
+  ],
+  "not_run": [
+    "OCaml typing",
+    "Dune build",
+    "OCaml tests",
+    "Dashboard tests",
+    "TypeScript checking",
+    "CI",
+    "live server",
+    "installed or visible TUI"
+  ],
+  "limits": [
+    "Source boundary PASS is pinned to a502bcf.../d769a6c...; later evidence-only commits still need their own current scope identity.",
+    "Previous approve footers are not reused on new heads; only exact inspected source/hash scopes are preserved.",
+    "Root is separately re-executing Dashboard checks for this test-environment base; no result was assumed or polled here.",
+    "Historical original grouping execution and authored Dashboard checks do not establish final current TUI/runtime execution.",
+    "The earlier unmeasured narrow-viewport Inspect visibility remains unverified."
+  ]
+}

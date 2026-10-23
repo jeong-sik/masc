@@ -299,7 +299,7 @@ let support backend operation = match backend with
     | Read_clipboard | Write_clipboard | Intercept_network -> missing
     | Read_storage -> gecko_only backend (invoke ~mode:"cookies" Read)
         [observed;"The cookies the tab's page can see, at most 200, with the total. Name, domain, path, secure, httpOnly, sameSite and expiry; the value is never returned.";
-         "Only cookies are covered. Web storage (localStorage, sessionStorage) is not read."]
+         "The reply also lists the page origin's localStorage and sessionStorage key names and its IndexedDB database names (at most 100 each, names cut at 200 characters) under storage, with counts. Storage values are never read."]
     | Write_storage -> missing
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations
 let operation_name = function

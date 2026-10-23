@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import { captureRange, captureHostAtSeconds, captureSecondsAtHost, captureSecondsToTicks, captureBeatsToTicks, captureHostAtBeats } from './capture-time.mjs'
 import { binary } from './exact-time.mjs'
+import { scaleTicks } from './tick-units.mjs'
 import { absoluteUmpPitch, umpSourceView, editUmpNotes, editUmpExpressions, editUmpTimes, editUmpNoteTime, revoiceUmpNotes, umpOnsetHarmony } from './ump-source.mjs'
 
 export function newUmpEditor(asset, packets, { tempo } = {}) {
@@ -8,7 +9,7 @@ export function newUmpEditor(asset, packets, { tempo } = {}) {
   const { notes, expressions, events } = umpSourceView(packets, asset.ump, asset.parts.midi.sha256)
   if (!events.length) throw new Error('Captured source has no UMP events to edit')
   return { asset, packets, tempo, notes, expressions, events, selection: notes.length ? { kind: 'note', id: notes[0].id }
-    : expressions.length ? { kind: 'expression', id: expressions[0].id } : { kind: 'event', id: events[0].id }, undo: [], redo: [] }
+    : expressions.length ? { kind: 'expression', id: expressions[0].id } : { kind: 'event', id: events[0].id }, eventSelection: [], undo: [], redo: [] }
 }
 export const umpEditorRows = editor => editor.selection.kind === 'note' ? editor.notes : editor.selection.kind === 'expression' ? editor.expressions : editor.events
 function adopt(editor, asset, history = {}) {
@@ -51,7 +52,40 @@ export function umpEditorCommand(editor, line) {
     if (editor.selection.kind !== kind) throw new Error(`Select the native MIDI2 ${kind} view first`)
     return editor.selection.id
   }
+  const group = () => {
+    if (!editor.eventSelection.length) throw new Error('Select original events with :select-events PACKET:WORD... first')
+    const ids = new Set(editor.eventSelection), events = editor.events.filter(event => ids.has(event.id))
+    if (events.length !== ids.size) throw new Error('The native event selection is stale')
+    return events
+  }
+  const timeGroup = transform => change(editor, editUmpTimes(editor.packets, current, hash,
+    group().map(event => ({ kind: 'time', id: event.id, hostTime: String(transform(BigInt(event.hostTime))) }))))
   switch (command) {
+    case 'select-events': {
+      count(1, Number.MAX_SAFE_INTEGER)
+      const ids = new Set(args), available = new Set(editor.events.map(event => event.id))
+      if (ids.size !== args.length || args.some(id => !available.has(id))) throw new Error('Select distinct original UMP packet:word identities')
+      return { editor: { ...editor, eventSelection: [...args] } }
+    }
+    case 'deselect-events': count(0); return { editor: { ...editor, eventSelection: [] } }
+    case 'reset-event-times': count(0); return { editor: change(editor, editUmpTimes(editor.packets, current, hash,
+      group().map(event => ({ kind: 'reset', id: event.id })))) }
+    case 'shift-events-ticks': case 'shift-events-seconds': case 'shift-events-beats': {
+      count(1)
+      let offset
+      if (command === 'shift-events-ticks') {
+        if (!/^(0|-?[1-9][0-9]*)$/.test(args[0])) throw new Error('Use an exact signed host-tick offset')
+        offset = BigInt(args[0])
+      } else offset = command === 'shift-events-seconds' ? captureSecondsToTicks(editor.asset, args[0])
+        : captureBeatsToTicks(editor.asset, args[0], editor.tempo)
+      return { editor: timeGroup(tick => tick + offset) }
+    }
+    case 'stretch-events': {
+      count(1, 2)
+      const anchor = args[1] === undefined ? group().reduce((min, event) => BigInt(event.hostTime) < min ? BigInt(event.hostTime) : min,
+        BigInt(group()[0].hostTime)) : BigInt(captureHostAtBeats(editor.asset, args[1], editor.tempo))
+      return { editor: timeGroup(tick => anchor + scaleTicks(tick - anchor, args[0])) }
+    }
     case 'select': count(1); return { editor: umpEditorAction(editor, { kind: 'select', id: args[0] }) }
     case 'select-expression': count(1); return { editor: umpEditorAction(editor, { kind: 'select-expression', id: args[0] }) }
     case 'select-event': count(1); return { editor: umpEditorAction(editor, { kind: 'select-event', id: args[0] }) }

@@ -27,10 +27,17 @@ export function tickUnits(value, per, { signed = false, label = 'Position' } = {
   return wholeTicks(numerator * BigInt(per), denominator, signed, invalid)
 }
 // Ratios change tick distances, independently of PPQ beats or SMPTE frames.
+// BigInt distances retain native host-clock precision; their caller validates
+// the final timestamp range. Number callers keep safe-integer admission.
 export function scaleTicks(ticks, factor) {
   const invalid = () => { throw new Error('Stretch requires a positive ratio and exact whole source ticks') }
-  if (!Number.isSafeInteger(ticks)) invalid()
+  if (typeof ticks !== 'bigint' && !Number.isSafeInteger(ticks)) invalid()
   const { numerator, denominator } = rational(factor, invalid)
   if (numerator <= 0n) invalid()
+  if (typeof ticks === 'bigint') {
+    const scaled = ticks * numerator
+    if (scaled % denominator) invalid()
+    return scaled / denominator
+  }
   return wholeTicks(BigInt(ticks) * numerator, denominator, true, invalid)
 }

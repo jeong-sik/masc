@@ -1,0 +1,35 @@
+{
+  "schema": "masc.independent_source_review.v1",
+  "reviewer": "deferred_skill_dependency_review",
+  "reviewed_at": "2026-10-23T07:57:49.737208+00:00",
+  "verdict": "PASS",
+  "evidence_layer": "source_review_only",
+  "base": "83660dc2c99552b8a8b704477f4a9adbd125738e",
+  "head": "6d6e8a570dcde89d260b85b04564119ea5ae11f1",
+  "changed_files": [
+    "test/dune"
+  ],
+  "patch_sha256": "9823d9f3eec83f12bb92346cb34ae9b165b5b30089eb98da192bc61f83d18afb",
+  "p0_p1_p2_findings": [],
+  "checks": {
+    "full_diff_read": true,
+    "full_fixture_read": true,
+    "fixture_bytes_identical": true,
+    "diff_check_exit": 0,
+    "actual_failure_log_read": 39920131507,
+    "provider": "lib/skill_config/dune: masc.skill_config; wrapped false; module Skill_source_config",
+    "visibility_boundary": "dune-project:37 implicit_transitive_deps false; test/deps/dune re_exports masc.skill_snapshot but not masc.skill_config",
+    "existing_snapshot_provider": "lib/skill_snapshot/dune exports Skill_catalog_snapshot and is already re_exported by masc_test_deps",
+    "scope": "One stanza dependency only. Production files, test assertions, actual deferred loader, RPC authority, Off/replacement and original-request read checks unchanged."
+  },
+  "not_run": [
+    "local Dune",
+    "OCaml type checking",
+    "link/build",
+    "test executable",
+    "CI dispatch",
+    "runtime",
+    "installed UI"
+  ],
+  "remaining": "A successful exact-head selected execution must still show compile and actual fixture behavior. This source review does not claim main green or original54 completion."
+}

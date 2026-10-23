@@ -1,0 +1,18 @@
+{
+  "base": "83660dc2c99552b8a8b704477f4a9adbd125738e",
+  "scope": [
+    "test/dune"
+  ],
+  "patch_sha256": "9823d9f3eec83f12bb92346cb34ae9b165b5b30089eb98da192bc61f83d18afb",
+  "failure_run": 39920131507,
+  "failure_head": "bdccda5a872bcc3e5b6ac0c44d78c8b3bd4f5ec6",
+  "cause": "Skill_source_config is provided by standalone wrapped=false masc.skill_config, absent from direct test libraries and masc_test_deps re_exports.",
+  "existing_dependency": "Skill_catalog_snapshot is already re_exported by masc_test_deps via masc.skill_snapshot.",
+  "change": "Add only masc.skill_config to the one failing test stanza; no test assertions or production interfaces change.",
+  "validation": {
+    "diff_check": 0,
+    "local_build": "not_run per constitution execution_protocol",
+    "tests": "not_run"
+  },
+  "source_head": "6d6e8a570dcde89d260b85b04564119ea5ae11f1"
+}

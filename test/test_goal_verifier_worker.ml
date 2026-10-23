@@ -435,7 +435,7 @@ let test_actual_partial_proof_and_nonverifying_boot () =
        | None -> hosted (H.commit_proof ~config ~store ~registry:(R.global ()) (host_load store original))
        | Some action ->
          ignore (stored (Workspace_goals.reconcile_committed_proof config ~goal_id:subject.goal_id));
-         transition config subject.goal_id action);
+         transition config subject.goal_id (match action with `Pause -> "pause" | `Block -> "block"));
       (* In the suspended cases no Host call or final owner ACK happened: the
          actual scan must find Judged even outside Verifying, without a model. *)
       drain config;
@@ -443,10 +443,10 @@ let test_actual_partial_proof_and_nonverifying_boot () =
       let expected_phase = match suspension, rejected with
         | None, false -> Goal_phase.Awaiting_confirmation
         | None, true -> Goal_phase.Executing
-        | Some "pause", false -> Goal_phase.Paused Resume_awaiting_confirmation
-        | Some "pause", true -> Goal_phase.Paused Resume_executing
-        | Some _, false -> Goal_phase.Blocked Resume_awaiting_confirmation
-        | Some _, true -> Goal_phase.Blocked Resume_executing in
+        | Some `Pause, false -> Goal_phase.Paused Resume_awaiting_confirmation
+        | Some `Pause, true -> Goal_phase.Paused Resume_executing
+        | Some `Block, false -> Goal_phase.Blocked Resume_awaiting_confirmation
+        | Some `Block, true -> Goal_phase.Blocked Resume_executing in
       Alcotest.(check bool) "post-commit operator suspension remains intact" true
         (phase config subject.goal_id=expected_phase);
       (match R.get (R.global ()) ~run_id:receipt.run.run_id with
@@ -458,7 +458,7 @@ let test_actual_partial_proof_and_nonverifying_boot () =
       | None | Some _ -> Alcotest.fail "real proof was lost")) in
   exercise false None;
   exercise true None;
-  List.iter (fun action -> exercise false (Some action); exercise true (Some action)) ["pause"; "block"]
+  List.iter (fun action -> exercise false (Some action); exercise true (Some action)) [`Pause; `Block]
 
 let test_cloned_workspace_cannot_commit_original () = with_workspace (fun config store _ ->
   let authority, retained = host_prepared config store in

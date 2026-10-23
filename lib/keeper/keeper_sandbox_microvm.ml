@@ -1242,8 +1242,9 @@ let apple_listing_row_id fields =
      | Some _ | None -> None)
 ;;
 
-let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =
-  let name = work_volume_trim_name ~keeper_name in
+(* Remove a one-shot volume helper by its stable name and prove it is gone.
+   [helper] names it in the messages ("trim", "repair"). *)
+let remove_apple_volume_helper ~run ~timeout_sec ~remove_timeout_sec ~name ~helper =
   (* Removal's exit code alone cannot prove absence: --rm may already have
      removed the container, or a timed-out CLI may have left it running. *)
   let removal_status, removal_out, removal_err =
@@ -1256,20 +1257,26 @@ let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_
       | `Assoc fields :: rest ->
         (match apple_listing_row_id fields with
          | Some id when String.equal id name ->
-           Error (Printf.sprintf "trim container %s remains after removal (%s): %s"
-             name (Keeper_sandbox_exec_failure.status_label removal_status)
+           Error (Printf.sprintf "%s container %s remains after removal (%s): %s"
+             helper name (Keeper_sandbox_exec_failure.status_label removal_status)
              (output_for_log ~stdout:removal_out ~stderr:removal_err))
          | Some _ -> absent rest
-         | None -> Error "trim cleanup inventory contains a container without an id")
-      | _ :: _ -> Error "trim cleanup inventory contains a non-object container"
+         | None -> Error (helper ^ " cleanup inventory contains a container without an id"))
+      | _ :: _ -> Error (helper ^ " cleanup inventory contains a non-object container")
     in
     (match Yojson.Safe.from_string listing with
      | `List entries -> absent entries
-     | _ -> Error "trim cleanup inventory is not a JSON array"
-     | exception Yojson.Json_error detail -> Error ("trim cleanup inventory is invalid JSON: " ^ detail))
+     | _ -> Error (helper ^ " cleanup inventory is not a JSON array")
+     | exception Yojson.Json_error detail ->
+       Error (helper ^ " cleanup inventory is invalid JSON: " ^ detail))
   | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
-    Error (Printf.sprintf "cannot verify trim container %s was removed (%s): %s"
-      name (Keeper_sandbox_exec_failure.status_label status) (output_for_log ~stdout ~stderr))
+    Error (Printf.sprintf "cannot verify %s container %s was removed (%s): %s"
+      helper name (Keeper_sandbox_exec_failure.status_label status) (output_for_log ~stdout ~stderr))
+;;
+
+let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =
+  remove_apple_volume_helper ~run ~timeout_sec ~remove_timeout_sec
+    ~name:(work_volume_trim_name ~keeper_name) ~helper:"trim"
 ;;
 
 let reclaim_apple_work_volume ~run ~on_cleanup_error ~timeout_sec ~remove_timeout_sec
@@ -1292,6 +1299,104 @@ let reclaim_apple_work_volume ~run ~on_cleanup_error ~timeout_sec ~remove_timeou
     Ok (status, output_for_log ~stdout ~stderr))
   in
   match !released with Ok () -> result | Error _ as error -> error
+;;
+
+(* RFC keeper-volume-filesystem-repair §3.3. *)
+let volume_repair_guest_root = "/masc-repair"
+let volume_repair_capabilities = [ "CAP_SYS_ADMIN" ]
+
+(* util-linux and e2fsprogs paths in the catalog images, measured in
+   [masc-sandbox:general] on 2026-10-22 (e2fsck 1.47.0). The trim helper's
+   [tune2fs] comes from the same e2fsprogs package. *)
+let findmnt_guest_path = "/usr/bin/findmnt"
+let umount_guest_path = "/usr/bin/umount"
+let e2fsck_guest_path = "/usr/sbin/e2fsck"
+
+let volume_repair_name ~keeper_name =
+  Keeper_sandbox_container_name.make
+    (Keeper_sandbox_container_name.Micro_vm_volume_repair { keeper_name })
+  |> Keeper_sandbox_container_name.to_string
+;;
+
+(* The runtime mounts the volume at [volume_repair_guest_root], and e2fsck
+   needs it unmounted. [--mountpoint] matches only that mount; [--target]
+   would find the root filesystem once the volume is gone (measured
+   2026-10-22). The two e2fsck exit codes are printed as evidence only: the
+   host reads the superblock again to decide what the repair did. *)
+let volume_repair_script_with ~findmnt ~umount ~e2fsck ~guest_root =
+  Printf.sprintf
+    "device=$(%s --noheadings --output SOURCE --mountpoint %s)\n\
+     %s %s\n\
+     if %s --mountpoint %s >/dev/null; then echo 'volume is still mounted; e2fsck not run' >&2; exit 1; fi\n\
+     set +e\n\
+     %s -f -y \"$device\"\n\
+     echo \"e2fsck repair exit $?\"\n\
+     %s -f -n \"$device\"\n\
+     echo \"e2fsck verify exit $?\""
+    findmnt
+    guest_root
+    umount
+    guest_root
+    findmnt
+    guest_root
+    e2fsck
+    e2fsck
+;;
+
+let volume_repair_script =
+  volume_repair_script_with
+    ~findmnt:findmnt_guest_path
+    ~umount:umount_guest_path
+    ~e2fsck:e2fsck_guest_path
+    ~guest_root:volume_repair_guest_root
+;;
+
+let apple_volume_repair_argv ~keeper_name ~volume_name ~image =
+  command_argv_for Backend.Apple_container
+  @ [ "run"; "--rm"; "--name"; volume_repair_name ~keeper_name
+    ; "--user"; "0"; "--cap-drop"; "ALL" ]
+  @ List.concat_map (fun capability -> [ "--cap-add"; capability ]) volume_repair_capabilities
+  @ [ "--network"; "none"; "--read-only"; "--tmpfs"; "/tmp"
+    ; "--entrypoint"; "/bin/sh"
+    ; "--volume"; volume_name ^ ":" ^ volume_repair_guest_root
+    ; image; "-eu"; "-c"; volume_repair_script ]
+;;
+
+let remove_apple_volume_repair ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =
+  remove_apple_volume_helper ~run ~timeout_sec ~remove_timeout_sec
+    ~name:(volume_repair_name ~keeper_name) ~helper:"repair"
+;;
+
+type volume_repair_run =
+  { status : Unix.process_status
+  ; stdout : string
+  ; stderr : string
+  ; cleanup : (unit, string) result
+  }
+
+(* The lifecycle of [reclaim_apple_work_volume]: a leftover helper is removed
+   first, and the release handler removes this one whatever happens. Once
+   the helper has run, a failed removal is reported beside its result, never
+   in place of it: e2fsck may have written the image. [run_helper] has no
+   timeout: cutting e2fsck short is worse than waiting for it. *)
+let repair_apple_volume ~run ~run_helper ~on_start ~on_cleanup_error ~timeout_sec
+    ~remove_timeout_sec ~keeper_name ~volume_name ~image =
+  let cleanup () = remove_apple_volume_repair ~run ~timeout_sec ~remove_timeout_sec ~keeper_name in
+  let released = ref (Ok ()) in
+  let result = Eio.Switch.run (fun sw ->
+    Eio.Switch.on_release sw (fun () ->
+      released := cleanup ();
+      match !released with Ok () -> () | Error detail -> on_cleanup_error detail);
+    match cleanup () with
+    | Error _ as error -> error
+    | Ok () ->
+      on_start ();
+      let status, stdout, stderr =
+        run_helper (apple_volume_repair_argv ~keeper_name ~volume_name ~image)
+      in
+      Ok (status, stdout, stderr))
+  in
+  Result.map (fun (status, stdout, stderr) -> { status; stdout; stderr; cleanup = !released }) result
 ;;
 
 (** The keeper's root on the work volume: [<work root>/<keeper>], the

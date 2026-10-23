@@ -51,8 +51,12 @@ let test_the_image_path_is_inspected_once () =
   let _, first = observe ~inspect ~read_image ~volume in
   let _, second = observe ~inspect ~read_image ~volume in
   check int "one inspect for two reads" 1 !inspected;
-  check (option string) "source kept" (Some "/images/watch-path-once.img") second.Watch.source;
-  check bool "first read clean" true (first.Watch.result = Ok Fs.Clean)
+  check (option string) "source kept" (Some "/images/watch-path-once.img") (Watch.source second);
+  check
+    bool
+    "first read clean"
+    true
+    (first.Watch.result = Ok { Watch.source = "/images/watch-path-once.img"; state = Fs.Clean })
 ;;
 
 let test_a_failed_read_inspects_again () =
@@ -70,7 +74,7 @@ let test_an_inspect_failure_is_kept_as_such () =
   let inspect ~volume:_ = Error "XPC timeout" in
   let read_image ~path:_ = fail "no image to read" in
   let _, observation = observe ~inspect ~read_image ~volume in
-  check (option string) "no source" None observation.Watch.source;
+  check (option string) "no source" None (Watch.source observation);
   check bool "inspect refused" true (observation.Watch.result = Error (Watch.Inspect_refused "XPC timeout"))
 ;;
 
@@ -99,13 +103,25 @@ let test_an_unparsed_inspect_is_typed () =
     (observation.Watch.result = Error (Watch.Inspect_unparsed (Fs.Entries { count = 0 })))
 ;;
 
+(* A failed read still names the image it tried, for Keeper status. *)
+let test_an_unreadable_image_keeps_its_path () =
+  let volume = "watch-unreadable-path" in
+  let _, inspect, read_image = fakes [ Error (Fs.Truncated { bytes = 0 }) ] in
+  let _, observation = observe ~inspect ~read_image ~volume in
+  check (option string) "path kept" (Some "/images/watch-unreadable-path.img") (Watch.source observation)
+;;
+
 let test_latest_is_what_status_reads () =
   let volume = "watch-latest" in
   let _, inspect, read_image = fakes [ Ok damaged ] in
   let _ = observe ~inspect ~read_image ~volume in
   match Watch.latest ~volume with
   | Some observation ->
-    check bool "latest read" true (observation.Watch.result = Ok damaged)
+    check
+      bool
+      "latest read"
+      true
+      (observation.Watch.result = Ok { Watch.source = "/images/watch-latest.img"; state = damaged })
   | None -> fail "the read was not recorded"
 ;;
 
@@ -117,6 +133,7 @@ let () =
         ; test_case "failed read inspects again" `Quick test_a_failed_read_inspects_again
         ; test_case "inspect failure kept" `Quick test_an_inspect_failure_is_kept_as_such
         ; test_case "unparsed inspect typed" `Quick test_an_unparsed_inspect_is_typed
+        ; test_case "unreadable image keeps its path" `Quick test_an_unreadable_image_keeps_its_path
         ; test_case "damage appears once" `Quick test_damage_appears_once
         ; test_case "latest is what status reads" `Quick test_latest_is_what_status_reads
         ] )

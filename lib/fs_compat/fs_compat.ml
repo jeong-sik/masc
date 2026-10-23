@@ -1691,6 +1691,13 @@ let publish_paths exchange left right =
 let exchange_paths left right = publish_paths true left right
 let rename_noreplace src dst = publish_paths false src dst
 
+external clone_file_raw : string -> string -> unit = "caml_masc_clone_file"
+
+let clone_file src dst =
+  if String.contains src '\000' || String.contains dst '\000' then
+    invalid_arg "clone paths cannot contain NUL";
+  clone_file_raw src dst
+
 let rename (src : string) (dst : string) : unit =
   with_fs_or_fallback
     ~path:src

@@ -1,0 +1,41 @@
+(** Gecko profiles that masc creates for its automation sessions.
+
+    Each automation instance owns [<root>/<instance_id>/], and each session
+    runs Firefox with [-profile] on a fresh [<instance_id>/<uuid>]. The root
+    lives under the Lane Add-on store, not in the instance's temporary
+    allocation, so a browser that relaunches itself after its instance ended
+    is still found there. masc removes a profile only while it holds the
+    profile's lock itself, so a browser that starts on it meanwhile finds it in
+    use. *)
+
+val lock_name : string
+(** [.parentlock], the file Firefox write-locks while it runs a profile. *)
+
+val root : lane_addon_root:string -> string
+(** [<lane_addon_root>/gecko-profiles]. *)
+
+val prepare_instance : root:string -> instance_id:string -> (string, string) result
+(** Creates or checks [root] and [root]/[instance_id] as private directories
+    with canonical paths, and returns the instance directory. [instance_id]
+    must be a canonical UUID. *)
+
+val is_masc_name : string -> bool
+(** Whether an instance or profile directory name is a canonical UUID, the only
+    names masc gives them. *)
+
+val check_root : string -> (unit, string) result
+val check_instance : string -> (unit, string) result
+(** Each refuses a directory that is not a private directory with a canonical
+    path. *)
+
+val create : instance:string -> (string, string) result
+(** Creates a fresh private profile directory named by a new UUID. *)
+
+type removal =
+  | Removed
+  | In_use  (** A process holds the profile's lock; the profile is kept. *)
+
+val remove_if_free : string -> (removal, string) result
+(** Takes the profile's lock and removes the profile under it. A profile
+    another process holds is kept and reported as [In_use]; this never signals
+    that process. *)

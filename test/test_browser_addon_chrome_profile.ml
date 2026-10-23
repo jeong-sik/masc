@@ -124,11 +124,15 @@ let refused label result = check label true (Result.is_error result)
 let admitted label result = check label true (Result.is_ok result)
 let decoders () =
   admitted "an automation configuration decodes"
-    (Automation.configuration_of_json (`Assoc ["driver",`String "/bin/driver";"binary",`Null]));
+    (Automation.configuration_of_json (`Assoc ["driver",`String "/bin/driver";"binary",`Null;"profiles",`String "/p"]));
   refused "an automation key set without binary is refused"
-    (Automation.configuration_of_json (`Assoc ["driver",`String "/bin/driver"]));
+    (Automation.configuration_of_json (`Assoc ["driver",`String "/bin/driver";"profiles",`String "/p"]));
+  refused "an automation key set without profiles is refused"
+    (Automation.configuration_of_json (`Assoc ["driver",`String "/bin/driver";"binary",`Null]));
   refused "a relative automation driver is refused"
-    (Automation.configuration_of_json (`Assoc ["driver",`String "driver";"binary",`Null]));
+    (Automation.configuration_of_json (`Assoc ["driver",`String "driver";"binary",`Null;"profiles",`String "/p"]));
+  refused "a relative profiles directory is refused"
+    (Automation.configuration_of_json (`Assoc ["driver",`String "/bin/driver";"binary",`Null;"profiles",`String "p"]));
   refused "a list is not an automation configuration" (Automation.configuration_of_json (`List []));
   let id=`Assoc ["device",`Int 1;"inode",`Int 2] in
   let firefox ~port ~profile ~root=`Assoc ["claim_directory",`String "/c";"firefox",`String "/f";"gate",id;

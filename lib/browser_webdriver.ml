@@ -7,8 +7,9 @@ type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:
 type pointer_state = Released | Release_required
 type located_node = { node_id : string; description : string }
 type locate = scene:Browser_scene.t -> instruction:string option -> (located_node list, string) result
-type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable window_sizes : (string * (int * int)) list; mutable emulated : (string * (string * string)) list; mutable blocks : (string * string) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
-type t = { start_downloads : Browser_downloads.start; binary : string option; locate : locate option; request : request; mutex : Eio.Mutex.t; active : int Atomic.t; mutable session : session option; mutable next_tab : int; observed_session : Browser_lane.session_observation Atomic.t }
+type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable window_sizes : (string * (int * int)) list; mutable emulated : (string * (string * string)) list; mutable blocks : (string * string) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result; profile : string option }
+type profiles = { fresh : unit -> (string, string) result; ended : string -> unit }
+type t = { start_downloads : Browser_downloads.start; binary : string option; locate : locate option; profiles : profiles option; request : request; mutex : Eio.Mutex.t; active : int Atomic.t; mutable session : session option; mutable next_tab : int; observed_session : Browser_lane.session_observation Atomic.t }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string_field key json = match field key json with
@@ -48,16 +49,20 @@ let decode_response ~status body =
         | Some (`String message) -> Ok message
         | _ -> Error (Protocol "missing string field: message") in
       Error (Remote { code = remote_error_of_code code; message })
-let create ?binary ?locate ~start_downloads ~request () = { start_downloads; binary; locate; request; mutex = Eio.Mutex.create (); active = Atomic.make 0; session = None; next_tab = 1; observed_session = Atomic.make Browser_lane.Browser_closed }
+let create ?binary ?locate ?profiles ~start_downloads ~request () = { start_downloads; binary; locate; profiles; request; mutex = Eio.Mutex.create (); active = Atomic.make 0; session = None; next_tab = 1; observed_session = Atomic.make Browser_lane.Browser_closed }
 let session_observation t = Atomic.get t.observed_session
 let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
-let release_resources session =
+let profile_ended t = function
+  | None -> ()
+  | Some path -> Option.iter (fun profiles -> profiles.ended path) t.profiles
+let release_resources t session =
   Result.iter (fun (d : Browser_downloads.connection) -> d.close ()) session.downloads;
-  Browser_lane.Upload_lease.release_owner session.uploads
+  Browser_lane.Upload_lease.release_owner session.uploads;
+  profile_ended t session.profile
 let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
   (match result with
-   | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources session
+   | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources t session
    | Error (Transport _ | Protocol _) -> Atomic.set t.observed_session Browser_lane.Browser_unknown
    | Ok _ -> (match session.downloads with Ok _ -> Atomic.set t.observed_session Browser_lane.Browser_open | Error _ -> ())
    | Error (Remote { code = No_such_window | No_such_alert | Unexpected_alert_open | Other _; _ }) -> ());
@@ -85,7 +90,7 @@ let close_unlocked ?request t = match t.session with
       | result -> result
       | exception exn -> Atomic.set t.observed_session Browser_lane.Browser_unknown; raise exn in
     match result with
-    | Ok _ | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources session; Ok ()
+    | Ok _ | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources t session; Ok ()
     | Error ((Transport _ | Protocol _
              | Remote { code = No_such_window | No_such_alert | Unexpected_alert_open | Other _; _ }) as error) ->
       Atomic.set t.observed_session Browser_lane.Browser_unknown; Error error
@@ -402,7 +407,7 @@ let execute_action t action =
       match interaction with
       | Browser_lane.Action.Close_tab ->
         session.handles <- List.filter (fun (_,known) -> known <> id) session.handles;
-        (match result with `List [] -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources session | _ -> ());
+        (match result with `List [] -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources t session | _ -> ());
         Ok (`Assoc ["tabId",`Int id;"closed",`Bool true])
       | Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back | Browser_lane.Action.Forward
       | Browser_lane.Action.Reload | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _
@@ -456,7 +461,12 @@ let rec execute_unlocked t = function
          (match t.session with None -> () | Some _ -> Atomic.set t.observed_session Browser_lane.Browser_unknown);error) in
        Ok (`Assoc ["opened", `Bool true; "reused", `Bool true])
      | None ->
-       let args = if Option.value ~default:true headless then [`String "-headless"] else [] in
+       let* profile = match t.profiles with
+         | None -> Ok None
+         | Some profiles -> profiles.fresh () |> Result.map Option.some
+           |> Result.map_error (fun detail -> Protocol ("the session profile was not created: " ^ detail)) in
+       let args = (if Option.value ~default:true headless then [`String "-headless"] else [])
+         @ (match profile with None -> [] | Some path -> [`String "-profile"; `String path]) in
        let caps = `Assoc ["capabilities", `Assoc ["alwaysMatch", `Assoc
          ["browserName", `String "firefox";
           "webSocketUrl", `Bool true;
@@ -469,10 +479,13 @@ let rec execute_unlocked t = function
          | Ok result -> Atomic.set t.observed_session Browser_lane.Browser_unknown;Ok result
          | Error error ->
            Atomic.set t.observed_session (match error with Remote _ -> Browser_lane.Browser_closed
-             | Transport _ | Protocol _ -> Browser_lane.Browser_unknown);Error error
-         | exception exn -> Atomic.set t.observed_session Browser_lane.Browser_unknown;raise exn in
-       let* id = string_field "sessionId" result in
-       let owned = { pointer_state = Released; id; handles = []; window_sizes = []; emulated = []; blocks = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
+             | Transport _ | Protocol _ -> Browser_lane.Browser_unknown);
+           profile_ended t profile;Error error
+         | exception exn -> Atomic.set t.observed_session Browser_lane.Browser_unknown;profile_ended t profile;raise exn in
+       let* id = match string_field "sessionId" result with
+         | Ok _ as id -> id
+         | Error _ as missing -> profile_ended t profile;missing in
+       let owned = { pointer_state = Released; id; handles = []; window_sizes = []; emulated = []; blocks = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying"; profile } in
        t.session <- Some owned;
        Eio.Switch.run (fun setup_sw ->
          let committed = ref false in
@@ -484,6 +497,15 @@ let rec execute_unlocked t = function
                  ("BiDi setup incomplete; session cleanup failed: " ^ error_message error));
          let* capabilities = match field "capabilities" result with
            | Some value -> Ok value | None -> Error (Protocol "Firefox omitted capabilities") in
+         (* A browser left on the driver's fixed Marionette port by an earlier
+            session would otherwise answer this one. *)
+         let* () = match profile, field "moz:profile" capabilities with
+           | None, (Some _ | None) -> Ok ()
+           | Some expected, Some (`String reported) when String.equal reported expected -> Ok ()
+           | Some expected, Some (`String reported) ->
+             Error (Protocol (Printf.sprintf "Firefox runs profile %s, not this session's profile %s" reported expected))
+           | Some _, Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) | Some _, None ->
+             Error (Protocol "Firefox did not report the session's moz:profile") in
          let* websocket_url = string_field "webSocketUrl" capabilities in
          let* downloads = Result.map_error (fun detail -> Protocol ("Firefox download setup failed: " ^ detail))
            (t.start_downloads ~session_id:id ~websocket_url) in

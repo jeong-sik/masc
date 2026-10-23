@@ -1,4 +1,4 @@
-let argv ~driver ~port ~profile_root =
+let argv ~driver ~port ~marionette_port =
   [ driver
   ; "--host"
   ; Masc_network_defaults.masc_http_default_host
@@ -6,6 +6,6 @@ let argv ~driver ~port ~profile_root =
   ; string_of_int port
   ; "--websocket-port"
   ; "0"
-  ; "--profile-root"
-  ; profile_root
+  ; "--marionette-port"
+  ; string_of_int marionette_port
   ]

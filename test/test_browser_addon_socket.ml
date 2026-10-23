@@ -79,7 +79,7 @@ let model_configuration_cleanup () =
     check "model bootstrap is released with original allocation" false (Sys.file_exists root);
     check "separate model receipts survive resource cleanup" true (Sys.file_exists retained))
 let owned_backend_cleanup () =
-  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let profiles=Filename.concat root "profiles" and downloads=Filename.concat root "downloads" in
@@ -101,7 +101,7 @@ let owned_backend_cleanup () =
       released (Socket.cleanup ~admission ~directory);
       check "receipt and empty trees release allocation" false (Sys.file_exists root))
 let interrupted_owned_cleanup () =
-  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let receipt=Filename.concat root "automation-closed.json" in
@@ -126,7 +126,7 @@ let acquisition_state directory =
       | _ -> Alcotest.fail "acquisition record is not an object")
   | names -> Alcotest.failf "expected one acquisition record, found %d" (List.length names)
 let operator_retains_unconfirmed_allocation () =
-  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let profiles=Filename.concat root "profiles" in
@@ -147,7 +147,7 @@ let operator_retains_unconfirmed_allocation () =
       check "the operator retains the allocation" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained);
       check "a repeated retain changes nothing" true (Sys.file_exists file && acquisition_state directory = "retained"))
 let retain_refuses_replaced_directory () =
-  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let original=Filename.concat directory "original" in
@@ -156,7 +156,7 @@ let retain_refuses_replaced_directory () =
       refused "a different directory identity is not retained" (Socket.retain ~admission ~directory);
       check "the refused retain keeps the acquisition" true (acquisition_state directory = "acquired"))
 let retain_reports_a_released_allocation () =
-  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       Out_channel.with_open_bin (Filename.concat root "automation-closed.json") (fun out ->
@@ -193,7 +193,7 @@ let retain_requires_a_settled_child_without_signalling () =
 let retain_reports_where_a_record_write_failed () =
   let failing stage _path _contents = Error {Fs_compat.path="record";stage;
     exception_=Failure "disk full";backtrace=Printexc.get_callstack 0} in
-  let attempt save = with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+  let attempt save = with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory _root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       lease (Lease.retire admission);

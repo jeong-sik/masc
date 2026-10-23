@@ -140,12 +140,12 @@ let private_root root info =
   Requirement.canonical ~label:socket_directory_label root
 let socket_record = {Requirement.kind=Unix.S_REG;owner=Effective_user;mode=Any_mode;links=Exactly_one}
 let owned_directory = {Requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Any_mode;links=Any_count}
-(* Only empty directory trees may be removed. Files, links and uncertain
+(* Only empty download trees may be removed. Files, links and uncertain
    acquisitions are retained for the original incarnation; never recursive rm. *)
 let rec empty_tree path =
   match Unix.lstat path with
   | info ->
-      let* ()=Requirement.check ~label:"owned browser profile or download entry" owned_directory ~path info in
+      let* ()=Requirement.check ~label:"owned browser download entry" owned_directory ~path info in
       let* ()=Array.fold_left (fun acc name -> let* ()=acc in empty_tree (Filename.concat path name)) (Ok ()) (Sys.readdir path) in
       Unix.rmdir path;Ok ()
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
@@ -192,7 +192,7 @@ let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi 
   let* ()=match automation with
     | None -> if List.for_all ((=) "s") names then Ok () else Error "browser socket directory contains unknown resources"
     | Some configuration ->
-      let* ()=if List.for_all (fun name -> List.mem name ["s";"automation.json";"automation-closed.json";"webdriver.log";"profiles";"downloads"]) names
+      let* ()=if List.for_all (fun name -> List.mem name ["s";"automation.json";"automation-closed.json";"webdriver.log";"downloads"]) names
         then Ok () else Error "owned browser directory contains unknown resources" in
       let* ()=if confirmed then Ok () else (
       let* spec=read "automation.json" in
@@ -201,7 +201,6 @@ let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi 
       let* receipt=read "automation-closed.json" in
       if receipt=`Assoc ["incarnation",`String (Native_addon_lease.instance_id admission)] then Ok ()
         else Error "owned browser cleanup is unconfirmed") in
-      let* ()=empty_tree (Filename.concat root "profiles") in
       empty_tree (Filename.concat root "downloads") in
   let* ()=confirm () in
   List.fold_left (fun acc name -> let* ()=acc in

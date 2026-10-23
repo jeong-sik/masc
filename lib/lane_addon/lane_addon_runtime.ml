@@ -1574,13 +1574,17 @@ let backend ~store ~artifact_store () = match !override with
                         |> Result.map Option.some
                     | None | Some {live_enabled=false;_}
                     | Some {live_enabled=true;live_bidi=None;_} -> Ok None in
-                  Browser_addon_socket.context ~instance_id ~stagehand ~live_bidi
+                  let* automation=match configuration with
+                    | Some {automation_enabled=true;automation=Some {driver;binary};_} ->
+                      let root=Browser_gecko_profile.root ~lane_addon_root:(Lane_addon_store.root store) in
+                      let* profiles=Browser_gecko_profile.prepare_instance ~root ~instance_id in
+                      Ok (Some {Browser_addon_automation.driver;binary;profiles})
+                    | None | Some {automation_enabled=false;_}
+                    | Some {automation_enabled=true;automation=None;_} -> Ok None in
+                  Browser_addon_socket.context ~instance_id ~stagehand ~live_bidi ~automation
                     ~models:(if not (uses_host_requests package) then None else Some {
                       Browser_addon_models.store_root=Filename.concat (Lane_addon_store.root store) "worker-model-results";
                       outputs=package.exact_outputs})
-                    ~automation:(match configuration with
-                      | Some configuration when configuration.automation_enabled -> configuration.automation
-                      | None|Some _ -> None)
                   |> Result.map (fun context -> Some context,live_ego))
                   |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
             let* admission = prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_live_instance in

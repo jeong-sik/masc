@@ -229,7 +229,7 @@ let operator_retain () = with_fixture (fun clock root config ->
     Unix.mkdir slot 0o700;
     let lease result = result |> Result.map_error Native_addon_lease.error_to_string |> require in
     let context = require (Browser_addon_socket.context ~instance_id ~stagehand:None ~live_bidi:None ~models:None
-      ~automation:(Some {Browser_configuration.driver="/fixture/geckodriver";binary=None})) in
+      ~automation:(Some {Browser_addon_automation.driver="/fixture/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})) in
     let admission = lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
     let allocation = require (Browser_addon_socket.acquire ~admission ~directory:slot) in
     let profiles = Filename.concat (Filename.dirname (Browser_addon_socket.socket_path allocation)) "profiles" in

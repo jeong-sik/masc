@@ -106,6 +106,11 @@ val record : config -> task_metric -> (record_receipt, record_error) result
 (** [record config metric] persists [metric] to
     \[<agent_metrics_dir>/<YYYY-MM>.jsonl\].
 
+    The workspace ownership root must already exist. Fixtures initialize it
+    through [Workspace.init config ~agent_name:None] before recording. This
+    writer prepares metric subdirectories, not the workspace root; an absent
+    ownership root returns [Metric_store_failure].
+
     Concurrency: when the flush fiber is active (post-
     {!start_flush_fiber}), the metric is serialised and pushed to
     the queue (lock-free).  Otherwise falls back to direct

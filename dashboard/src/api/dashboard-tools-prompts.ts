@@ -2007,7 +2007,7 @@ export type PromptSource = 'override' | 'file' | 'missing'
 
 export interface DashboardPromptItem {
   key: string
-  authoring_issues?: readonly PromptAuthoringIssue[]
+  authoring_issues: readonly PromptAuthoringIssue[]
   category: string
   description: string
   current: string

@@ -131,6 +131,7 @@ const promptApiMock = vi.hoisted(() => ({
         char_count: 35,
         required_file: true,
         template_variables: ['keeper', 'namespace'],
+        authoring_issues: [],
       },
     ],
   })),

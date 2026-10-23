@@ -5,6 +5,7 @@ module W = Masc.Verifier_review_worker
 module A = Masc.Verification_authority_tools
 module Store = Workspace_verification_store
 module Workspace = Masc.Workspace
+module Verification = Masc.Verification
 let get = function Ok x -> x | Error detail -> Alcotest.fail detail
 let retained = function Ok x -> x | Error _ -> Alcotest.fail "original retain failed"
 let loaded = function Ok x -> x | Error _ -> Alcotest.fail "original load failed"

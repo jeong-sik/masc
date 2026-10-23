@@ -1,5 +1,5 @@
 id = "operator-quiz"
-revision = "0.2.0"
+revision = "0.2.1"
 title = "Operator quiz"
 ui_category = "memory_judgment"
 contributions = ["derive", "act"]

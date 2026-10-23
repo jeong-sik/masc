@@ -144,6 +144,42 @@ class WorkerCase(unittest.TestCase):
         self.assertEqual(worker.act("act-1", {"kind": "compose"})["status"], "failed_before_effect")
         self.assertEqual(worker.ok("lane_host_requests", {}), {"requests": []})
 
+    def test_observation_and_recovery_do_not_decode_historical_request_wire(self):
+        from test_operator_quiz_flow import f, q
+        from test_operator_quiz_log import opened, posed, answered
+
+        # These are preserved transport artifacts, not an accepted host format.
+        # Historical display must not interpret or rewrite their message wire.
+        bodies = [{"kind": "exact_output", "request_id": name, "output": "author",
+                   "messages": [json.dumps({"history_scope": "all"})]}
+                  for name in ("s1-author-0", "s2-author-0")]
+        blobs = q.Blobs(self.state, "requests")
+        digests = [f.digest(body) for body in bodies]
+        for digest, body in zip(digests, bodies):
+            blobs.write(digest, body)
+        log = q.Log(self.state)
+        log.append([opened(), q.ExactRequested("s1", "s1-author-0", "author", digests[0]),
+                    posed(), answered(), opened("s2", "stuck"),
+                    q.ExactRequested("s2", "s2-author-0", "author", digests[1])])
+        before = log.path.read_bytes()
+        worker = self.start()
+        observed = self.rows(worker.observe(), "quiz/sessions")
+        self.assertEqual([row["fields"]["history_scope"] for row in observed], [None, None])
+        self.assertEqual(log.path.read_bytes(), before)
+        self.assertEqual(worker.act("recover-current-wire", {"kind": "compose", "questions": 1})["status"], "confirmed")
+        self.host.author = answering(first_quote)
+        worker.run_host(self.host)
+        sessions = self.rows(worker.observe(), "quiz/sessions")
+        self.assertEqual([row["fields"]["state"] for row in sessions], ["answered", "superseded", "asked"])
+        self.assertEqual(sessions[-1]["fields"]["history_scope"], "all")
+        self.assertTrue(log.path.read_bytes().startswith(before))
+        for digest, body in zip(digests, bodies):
+            self.assertEqual(blobs.read(digest), body)
+        worker.close()
+        restarted = self.start()
+        self.assertEqual(len(self.rows(restarted.observe(), "quiz/questions")), 1)
+        self.assertEqual(self.rows(restarted.observe(), "quiz/sessions")[-1]["fields"]["state"], "asked")
+
     def test_state_survives_a_worker_restart_on_the_same_volume(self):
         first = self.start()
         first.observe()

@@ -516,7 +516,7 @@ class Flow:
                 "messages": [{"role": "user", "text": json.dumps(payload, ensure_ascii=False, sort_keys=True)}]}
 
     def _request_author(self, session: q.Session, sessions: list[q.Session], *, scope: str,
-                        records: list[dict]) -> q.Event:
+                        records: list[dict]) -> tuple[q.Event, ...]:
         """Writes the body of the author request and returns the event that
         names it. While the request does not fit the frame, the material is
         cut to its newer half, as after an input refusal (§7)."""
@@ -525,9 +525,10 @@ class Flow:
             if self.fits(body):
                 key = digest(body)
                 self.requests.write(key, body)
-                return q.ExactRequested(session.session_id, body["request_id"], AUTHOR, key)
+                return (q.ExactRequested(session.session_id, body["request_id"], AUTHOR, key),
+                        q.AuthorContextRecorded(session.session_id, body["request_id"], scope))
             if len(records) == 1:
-                return q.SessionFailed(session.session_id, q.AuthorRequestExceedsFrame(body["request_id"]))
+                return (q.SessionFailed(session.session_id, q.AuthorRequestExceedsFrame(body["request_id"])),)
             records = records[len(records) // 2:]
 
     @staticmethod
@@ -622,10 +623,9 @@ class Flow:
         return [requested, q.GradeFailed(posed.ask_id, posed.question_id, request_id, "request_exceeds_frame", None)]
 
     def history_scope(self, session: q.Session) -> str | None:
-        """The history scope of the session's latest author request."""
-        if not session.requests:
-            return None
-        return self._payload(self.requests.read(session.requests[-1].digest))["history_scope"]
+        """Recorded domain context, or None when not recorded. Historical
+        observations never decode a provider request to reconstruct it."""
+        return session.history_scope
 
     # -- consuming results --------------------------------------------------
 
@@ -686,7 +686,7 @@ class Flow:
         if not records and not g.items([s for s in sessions if s.session_id != session.session_id]):
             self.log.append([read, q.SessionFailed(session.session_id, q.NoMaterial())])
             return
-        self.log.append([read, self._request_author(after, sessions, scope=SCOPE_ALL, records=records)])
+        self.log.append([read, *self._request_author(after, sessions, scope=SCOPE_ALL, records=records)])
 
     def _deliver_author(self, session: q.Session, sessions: list[q.Session], body: dict, result: dict) -> None:
         request_id = body["request_id"]
@@ -727,7 +727,7 @@ class Flow:
         else:
             self.log.append([q.SessionFailed(session.session_id, q.AuthorInputRefused(body["request_id"], kind))])
             return
-        self.log.append([requested])
+        self.log.append(list(requested))
 
     def _deliver_drafts(self, session: q.Session, sessions: list[q.Session], body: dict, result: dict) -> None:
         output = result.get("output")

@@ -25950,15 +25950,23 @@ and is loaded on demand through keeper_skill.
            unfocused composer's entry key. A focused composer still owns
            every typed character, including i. *)
         && not ((not state.composer_focused)
-          && (match state.view, key with
-              | Overview, Some "i" -> true
-              | Resources, Some "i" -> state.resource_focus = Right_pane
-              | Config, Some "i" -> state.config_pane = Config_prompts
-              | Lanes, Some ("d" | "i") ->
-                  state.lanes_mode = Lanes_overview
+          && (match state.view with
+              | Overview -> key = Some "i"
+              | Resources ->
+                  key = Some "i" && state.resource_focus = Right_pane
+              | Config ->
+                  key = Some "i" && state.config_pane = Config_prompts
+              | Lanes ->
+                  (key = Some "d" || key = Some "i")
+                  && state.lanes_mode = Lanes_overview
                   && Option.is_none state.slot_editor
                   && Option.is_none state.runtime_lane_pick
-              | _ -> false))
+              | Keepers (Keeper_list | Keeper_detail | Keeper_logs
+                        | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+              | Acting | Metrics | Memory | Clients | Board | Approvals
+              | Planning | Schedules | Verification | Harness | Fusion
+              | Repositories | Code | Changes | Connectors | Runtime
+              | Tools | System_logs -> false))
         && (not (modal_owns_keys state))
         (* Any open field takes the key before the composer does. This was six
            conditions naming six fields, and the ones added later were not in
@@ -26162,8 +26170,16 @@ and is loaded on demand through keeper_skill.
                 | _ -> ()))
        (* Hidden Add-ons actions keep their draft and receipts, but cannot
           dispatch while the resize fallback is the only painted frame. *)
-       | Some _ when compact_viewport && Option.is_some state.lane_addons -> ()
-       | Some key when Option.is_some state.lane_addons && not state.palette_open ->
+       | Some "esc" when compact_viewport && Option.is_some state.lane_addons ->
+           (match state.lane_addons with
+            | None -> ()
+            | Some view ->
+                state.lane_addons_cached <- view;
+                state.lane_addons <- None)
+       | Some _ when compact_viewport && Option.is_some state.lane_addons
+                     && not quit_key -> ()
+       | Some key when Option.is_some state.lane_addons && not state.palette_open
+                       && not (compact_viewport && quit_key) ->
            let module Addons = Masc_tui_lane_addons in
            (match state.lane_addons with
             | None -> ()

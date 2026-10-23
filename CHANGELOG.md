@@ -131,6 +131,24 @@
 - The browser Add-on owner holds one live connection per transport, so a BiDi Firefox and an ego task space can attach to one worker (#45235).
 - Remove dead `Tuple`/`Variant` Yojson pattern matches in `browser_observation.ml`, `keeper_msg_async_record.ml`, `keeper_projection_change.ml`, and `keeper_tool_plan.ml`. yojson 3.0.0 cannot construct these variants, so the branches were unreachable; explicit `Yojson.Safe.t` annotations replace them (#45273).
 
+### Known issues
+
+The full regression Test run [39907019462](https://github.com/jeong-sik/masc/actions/runs/39907019462) (head `76aa2393`, TARGET_SUITES empty = full regression) ended in **failure**. It is a separate regression record, not a publication gate; the gate was RC [39906992396](https://github.com/jeong-sik/masc/actions/runs/39906992396). Suite names below are read from its `test-suite-log/test-suite.log`.
+
+**New between v0.62.0 and v0.63.0 (4)**
+- `auth_token_rotation_transaction` — rotation 12 `supplied writer refuses special-file preflight` (FIFO)
+- `keeper_ask_answer_wake` — wake 3 `only the original canonical answer input supplies a Tool result`
+- `metrics_store_eio` — `Yojson Json_error("NaN value not allowed in standard JSON")`
+- `tool_board_coverage` — post_crud 24 `metric ownership root is absent`
+
+**Already failing in the v0.62.0 candidate full regression run 39843865243 (16)**
+- Deterministic: `mcp_server_eio_call_tool`, `task_tool_toml_parity`, `keeper_tool_dispatch_runtime`, `keeper_memory_select_provider_wire`, `keeper_memory_successor_http_replay`, `keeper_claude_code_runtime`
+- Also failing: `browser_addon_owner`, `browser_addon_tool` (`Eio__Time.Timeout` after its asserts passed), `candle_appraiser_contract`, `http_pages_asset_read`, `keeper_checkpoint_read_once` (`Permission denied`, possibly runner-dependent), `keeper_owned_jobs`, `keeper_prepared_edit`, `play_invite`, `tui_features`, `verification_collaboration_evidence`
+
+`browser_addon_live_bidi` and `lane_addon_reconcile`, which failed for v0.62.0, pass in this run. Fixes land on main; none was classified P0/P1, so nothing was cherry-picked to `release/v0.63.0`.
+
+**Release approval**: https://github.com/jeong-sik/masc/pull/45427 (code-reviewer, head `76aa2393285f3a27a2fe7f994478777371103c48`, run 39906992396)
+
 ## [0.62.0] - 2026-10-22
 
 ### Upgrade notes

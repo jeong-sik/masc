@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
+import { captureRange, captureHostAtSeconds, captureSecondsAtHost, captureSecondsToTicks } from './capture-time.mjs'
 import { absoluteUmpPitch, umpSourceView, editUmpNotes, editUmpExpressions, editUmpTimes, editUmpNoteTime, revoiceUmpNotes, umpOnsetHarmony } from './ump-source.mjs'
 
 export function newUmpEditor(asset, packets) {
@@ -76,6 +77,13 @@ export function umpEditorCommand(editor, line) {
     case 'reset-expression': count(0); return { editor: change(editor, editUmpExpressions(editor.packets, current, hash, [{ kind: 'reset', id: selected('expression') }])) }
     case 'reset-note': count(0); return { editor: change(editor, editUmpNotes(editor.packets, current, hash, [{ kind: 'reset', id: selected('note') }])) }
     case 'time': count(1); return { editor: change(editor, editUmpTimes(editor.packets, current, hash, [{ kind: 'time', id: editor.selection.id, hostTime: args[0] }])) }
+    case 'at-seconds': count(1); return { editor: change(editor, editUmpTimes(editor.packets, current, hash, [{ kind: 'time', id: editor.selection.id, hostTime: captureHostAtSeconds(editor.asset, args[0]) }])) }
+    case 'shift-seconds': {
+      count(1)
+      const event = editor.events.find(event => event.id === editor.selection.id)
+      return { editor: change(editor, editUmpTimes(editor.packets, current, hash, [{ kind: 'time', id: event.id,
+        hostTime: String(BigInt(event.hostTime) + captureSecondsToTicks(editor.asset, args[0])) }])) }
+    }
     case 'shift-time': {
       count(1)
       if (!/^(0|-?[1-9][0-9]*)$/.test(args[0])) throw new Error('Use an exact signed host-tick offset')
@@ -84,6 +92,20 @@ export function umpEditorCommand(editor, line) {
     }
     case 'reset-time': count(0); return { editor: change(editor, editUmpTimes(editor.packets, current, hash, [{ kind: 'reset', id: editor.selection.id }])) }
     case 'note-time': count(3); return { editor: change(editor, editUmpNoteTime(editor.packets, current, hash, selected('note'), args[0], args[1], args[2])) }
+    case 'note-seconds': count(3); return { editor: change(editor, editUmpNoteTime(editor.packets, current, hash, selected('note'), args[0],
+      captureHostAtSeconds(editor.asset, args[1]), captureHostAtSeconds(editor.asset, args[2]))) }
+    case 'duration-seconds': {
+      count(2)
+      const ticks = captureSecondsToTicks(editor.asset, args[1]), on = editor.notes.find(note => note.id === selected('note'))
+      if (ticks <= 0n) throw new Error('Duration must round to at least one positive host tick')
+      return { editor: change(editor, editUmpNoteTime(editor.packets, current, hash, on.id, args[0], on.hostTime, String(BigInt(on.hostTime) + ticks))) }
+    }
+    case 'clock': {
+      count(0)
+      const event = editor.events.find(event => event.id === editor.selection.id)
+      return { editor, clock: { sourceOrigin: captureRange({ ...editor.asset, ump: undefined }).origin,
+        hostTime: event.hostTime, originalHostTime: event.originalHostTime, seconds: captureSecondsAtHost(editor.asset, event.hostTime) } }
+    }
     case 'duration-ticks': {
       count(2)
       if (!/^[1-9][0-9]*$/.test(args[1])) throw new Error('Use a positive exact host-tick duration')

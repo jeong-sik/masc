@@ -1,6 +1,7 @@
 import { emitKeypressEvents } from 'node:readline'
 import { isDeepStrictEqual } from 'node:util'
 import { newUmpEditor, umpEditorRows, umpEditorAction, umpEditorCommand } from './ump-editor.mjs'
+import { captureSecondsAtHost } from './capture-time.mjs'
 import { safeText } from './terminal.mjs'
 
 // The arrangement lends its terminal. All file/device effects remain owned by
@@ -31,6 +32,9 @@ export async function viewUmpEditor({ asset, packets, signal, onPreview, onExpor
       ':events shows all original messages; :select-event PACKET:WORD; :time HOST_TICKS edits the selected event',
       ':note-time OFF_ID START_HOST END_HOST edits an explicitly chosen attack/release; no pairing is inferred',
       ':shift-time SIGNED_TICKS moves the selected event; :duration-ticks OFF_ID TICKS sets the explicit release',
+      ':at-seconds S / :shift-seconds S edit decimal seconds; :note-seconds OFF_ID START_S END_S edits a pair',
+      ':duration-seconds OFF_ID S sets length; seconds round to nearest native tick, half ties away from zero',
+      'Seconds use this asset’s fixed original source zero; * marks authored time; :clock shows exact ticks',
       ':reset-time restores selected original time; ticks are exact UInt64; controls and WAV do not follow notes',
       'Sources containing JR/delta-clock utility messages need an embedded-clock editor before time changes.',
       'Per-note registered/assignable controllers, pitch bend and poly pressure keep their original note addresses.',
@@ -41,7 +45,7 @@ export async function viewUmpEditor({ asset, packets, signal, onPreview, onExpor
       'Manufacturer/Profile attributes cannot be overwritten by absolute pitch; velocity edits retain their bytes',
     ])
     else for (const row of rows.slice(first, first + height)) lines.push(
-      `${row.id === editor.selection.id ? '>' : ' '} ${row.id} ${row.source} g${row.group + 1}/ch${row.channel + 1} host:${row.hostTime}${row.hostTime === row.originalHostTime ? '' : ` (recorded:${row.originalHostTime})`} `
+      `${row.id === editor.selection.id ? '>' : ' '} ${row.id} ${row.source} g${row.group + 1}/ch${row.channel + 1} t:${captureSecondsAtHost(editor.asset, row.hostTime).toFixed(6)}s${row.hostTime === row.originalHostTime ? '' : '*'} `
       + (noteView ? `index:${row.index} pitch:${row.pitch / 512} (${row.basis}) vel16:${row.velocity}` : eventView
         ? row.words.map(word => word.toString(16).padStart(8, '0')).join(' ')
         : `index:${row.index} ${row.kind}${row.controller === undefined ? '' : ` #${row.controller}`} value32:${row.value}`))
@@ -54,6 +58,7 @@ export async function viewUmpEditor({ asset, packets, signal, onPreview, onExpor
   async function command(line) {
     const result = umpEditorCommand(editor, line); editor = result.editor
     if (result.harmony) status = `${result.harmony.kind}: ${result.harmony.candidates.join(', ') || 'no 12-TET chord label'}`
+    else if (result.clock) status = `host:${result.clock.hostTime} original:${result.clock.originalHostTime} zero:${result.clock.sourceOrigin}`
     else status = 'Edited'
     if (result.effect?.kind === 'help') showHelp = !showHelp
     if (result.effect?.kind === 'play') {

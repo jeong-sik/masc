@@ -163,7 +163,7 @@ let test_resize_viewport_table () =
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
   check bool "live BiDi sets the viewport" true (reaches (Cap.Connected Lane.Webdriver_bidi));
   check bool "Stagehand sets the viewport" true (reaches Cap.Owned_chromium);
-  check bool "the owned Firefox driver does not" false (reaches Cap.Owned_gecko);
+  check bool "the owned Firefox driver sizes its window to the viewport" true (reaches Cap.Owned_gecko);
   check bool "the extension does not" false (reaches (Cap.Connected Lane.Web_extension));
   check bool "Safari does not" false (reaches Cap.Safari_unavailable)
 

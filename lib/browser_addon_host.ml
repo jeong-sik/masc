@@ -68,32 +68,35 @@ let issue ?upload_paths ?(required_actions=[]) t ~preference verb =
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
     |Page_act (Open_tab _|Open_window _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
     |Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> None in
+  (* The grant is staged for the exact route the command goes to: the owned
+     Gecko, or a live connection the worker runs, which the selection names. *)
   let preparation=match upload,upload_paths,preference with
     | None,None,_ -> Ok None
-    | Some paths,Some supplied,Browser_selection.Exact Browser_lane.Automation_route
+    | Some paths,Some supplied,Browser_selection.Exact (Browser_lane.Automation_route|Live_route (Some _) as route)
         when paths=supplied && Browser_lane.Upload_lease.pending ~paths ->
-        Ok (Some (Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ()))))
-    | (None|Some _),(None|Some _),(Browser_selection.Automatic|Exact (Live_route _|Automation_route|Stagehand_route)) -> Error "upload requires an exact pending host snapshot batch and owned automation route" in
+        Ok (Some (Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())),route))
+    | (None|Some _),(None|Some _),(Browser_selection.Automatic|Exact (Live_route _|Automation_route|Stagehand_route)) ->
+        Error "upload requires an exact pending host snapshot batch and the owned automation route or an explicit live browser" in
   let* upload_id=match preparation with
     | Ok id -> Ok id | Error detail -> fail ~class_:Tool_result.Workflow_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect detail in
-  let discard ()=Option.iter (fun id -> Eio.Cancel.protect (fun () ->
+  let discard ()=Option.iter (fun (id,_) -> Eio.Cancel.protect (fun () ->
     ignore (R.call_browser_service ~config:t.config ~access:t.access ~service:t.service
       ~command:(Browser_addon_wire.Upload_discard id)))) upload_id in
   Fun.protect ~finally:discard (fun () ->
   let* ()=match upload_id with
     | None -> Ok ()
-    | Some id ->
+    | Some (id,route) ->
       match R.call_browser_service ~config:t.config ~access:t.access ~service:t.service
         ~command:(Browser_addon_wire.Upload_stage {id;actor=Lane_addon_call_context.actor_label t.principal;
-          route=Browser_lane.Automation_route;verb}) with
+          route;verb}) with
       | Ok Browser_addon_wire.Receipt -> Ok ()
       | Ok (Browser_addon_wire.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _|Service_refusal _) ->
         fail ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
           "worker upload staging was refused; no browser command was dispatched"
       | Error error -> fail ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect
           (match error with Browser_addon_client.Unavailable detail|Outcome_unknown detail -> detail) in
-  let grant=match upload_id with None -> []|Some id -> ["uploadId",`String id] in
+  let grant=match upload_id with None -> []|Some (id,_) -> ["uploadId",`String id] in
   match call t ~arguments:(`Assoc (route_fields @ required @ grant @ ["command",Browser_lane.verb_json verb])) with
   | Error error -> Error (error_result ~start_time error)
   | Ok result ->

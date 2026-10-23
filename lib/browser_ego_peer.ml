@@ -70,7 +70,7 @@ type pointer_state = Released | Release_uncertain
 type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
 
 type t = { run : runner; now : unit -> float; space_id : int; version : string; capture_directory : string;
-  downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t;
+  downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t; uploads : Browser_lane.Upload_lease.owner;
   mutable pointer_state : pointer_state; mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
 let space_id t = t.space_id
@@ -173,14 +173,20 @@ let open_space ~run ~now ~space ~version ~capture_directory ~downloads =
   | Some (`Int space_id), Some (`String ownership)
     when String.equal ownership agent_ownership || String.equal ownership delegated_ownership ->
     Ok {run; now; space_id; version; capture_directory; downloads; published = Hashtbl.create 16;
+      uploads = Browser_lane.Upload_lease.create_owner ();
       pointer_state=Released; pages=[]; next_tab=0; captures=0}
   | Some (`Int _), Some (`String ownership) ->
     Error (Printf.sprintf "ego task space %S belongs to %s, not to an agent" space ownership)
   | _ -> Error "ego answered the task space without its number and owner"
 
+(* The space's end closes its pages, so the files they were given are no
+   longer read; only then is their lease let go. A finish that failed keeps
+   them, as a Gecko session that did not confirm its end keeps its own. *)
 let finish t =
-  Result.map ignore (ask t ~step:"space.finish" ~args:`Null
-    "  await task.finish({keep: []});\n  emit({ok: true, value: null});")
+  let* () = Result.map ignore (ask t ~step:"space.finish" ~args:`Null
+    "  await task.finish({keep: []});\n  emit({ok: true, value: null});") in
+  Browser_lane.Upload_lease.release_owner t.uploads;
+  Ok ()
 
 (* A page blocked on a JavaScript dialog runs no page script until the
    dialog is answered: ego 0.6.0.16 refuses page.evaluate then, and a move
@@ -710,6 +716,78 @@ let answer_dialog t id ~accept text =
       | None -> [] in
     Ok (obj (["tabId",`Int id;"action",str action] @ answered))
 
+(* A file input takes the worker's copies of the files a Keeper chose. The
+   selector means what it means for the owned Gecko: one CSS match, a file
+   input itself, multiple when it is given more than one file. ego would
+   also take a label or a container, so the run checks that first and
+   names the input to ego as loc=css:. ego 0.6.0.16 sets a path that does
+   not exist as an empty file without a word, so each path is checked
+   before the run. It reads a file only when the page does, so this
+   connection owns the files' lease from before the upload until its space
+   has ended ({!finish}). *)
+let upload_check = page_function {js|
+const request = arguments[0];
+const nodes = document.querySelectorAll(request.selector);
+if (nodes.length !== 1) return {refused: nodes.length === 0 ? "no element matches the upload selector" : "the upload selector matches " + nodes.length + " elements"};
+const input = nodes[0];
+if (input.localName !== "input" || input.type !== "file") return {refused: "upload requires a file input"};
+if (request.count > 1 && !input.multiple) return {refused: "this file input takes one file"};
+return {ok: true};|js}
+let upload_files = page_function {js|
+const input = document.querySelectorAll(arguments[0].selector)[0];
+return {url: location.href, title: document.title,
+  files: input === undefined || input.files === null ? null : Array.from(input.files, file => ({name: file.name, size: file.size}))};|js}
+let regular_file path = match Unix.stat path with
+  | {Unix.st_kind = Unix.S_REG; _} -> true
+  | {Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _} -> false
+  | exception Unix.Unix_error _ -> false
+let upload t id ~selector ~paths =
+  let* label = label_of t id in
+  let* () = match paths with
+    | [] -> Error (Live.Before_effect "upload needs at least one file")
+    | _ :: _ -> (match List.find_opt (fun path -> not (regular_file path)) paths with
+      | Some path -> Error (Live.Before_effect ("the upload file " ^ Filename.basename path ^ " is not there"))
+      | None -> Ok ()) in
+  let interaction = Browser_lane.Action.Upload {selector; paths} in
+  Browser_lane.Upload_lease.claim ~owner:t.uploads ~paths;
+  match run_step t ~window_s:(tab_window id interaction) ~step:"page.upload"
+          ~args:(obj ["label",str label;"tabId",`Int id;"selector",str selector;"paths",`List (List.map str paths);
+            "check",str upload_check;"files",str upload_files]) (String.concat "\n" [
+      "  const reason = " ^ message ^ ";";
+      page_call;
+      unblocked_agent_page;
+      "    const page = task.page(args.label);";
+      "    const checked = await page.evaluate(pageCall(args.check, JSON.stringify({selector: args.selector, count: args.paths.length})));";
+      "    const found = checked.pageError === undefined ? JSON.parse(checked.answer) : {refused: \"the upload selector could not be read: \" + checked.pageError};";
+      "    if (found.refused !== undefined) emit({ok: false, before: true, error: found.refused});";
+      "    else {";
+      "      let failure = null;";
+      "      try { await page.setInputFiles(\"loc=css:\" + args.selector, args.paths); } catch (error) { failure = reason(error); }";
+      "      const dialog = " ^ open_dialog "page" ^ ";";
+      "      const after = dialog === null ? await page.evaluate(pageCall(args.files, JSON.stringify({selector: args.selector}))) : null;";
+      "      const tab = " ^ row_after ^ ";";
+      "      emit({ok: true, value: {error: failure, dialog, after, tab: tab === undefined ? null : {url: tab.url, title: tab.title}}});";
+      "    }";
+      "  }" ]) with
+  | Error failure ->
+    Error (effect_failure ~unknown:(Printf.sprintf "the file input of tab %d may have been set: read tab %d before another upload" id id) failure)
+  | Ok value ->
+    let receipt extra = obj (["tabId",`Int id;"action",str "upload"] @ tab_fields (field "tab" value) @ extra) in
+    match field "error" value, field "dialog" value, field "after" value with
+    | Some (`String detail), _, _ ->
+      Error (Live.Outcome_unknown (Printf.sprintf "ego did not set the files (%s); read tab %d before another upload" (head detail) id))
+    | Some `Null, Some (`Assoc _ as dialog), _ ->
+      (match ego_dialog dialog with
+       | Ok dialog -> Ok (receipt ["dialog",Browser_surface.dialog_json dialog])
+       | Error reason -> Error (Live.Outcome_unknown ("the upload opened a dialog this connection cannot read: " ^ reason)))
+    | Some `Null, Some `Null, Some after ->
+      (match page_json after with
+       | Ok page -> (match field "files" page with
+         | Some (`List _ as files) -> Ok (receipt ["files",files])
+         | Some _ | None -> Error (Live.Outcome_unknown (Printf.sprintf "the file input of tab %d was not found after the upload" id)))
+       | Error detail -> Error (Live.Outcome_unknown (detail ^ "; read tab " ^ string_of_int id)))
+    | _ -> Error (Live.Outcome_unknown "ego answered an upload outside its frame")
+
 (* Input acts as a move or a close does: on a page an agent opened, checked
    in the run that acts. The page scripts the BiDi connection runs find the
    target, check that the document, URL and viewport are the observed ones,
@@ -1133,11 +1211,12 @@ let act t args =
     answer_dialog t tab_id ~accept:true text
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Dismiss_dialog}) ->
     answer_dialog t tab_id ~accept:false None
-  | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Upload _
-      | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Upload {selector; paths}}) ->
+    upload t tab_id ~selector ~paths
+  | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
-    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, hand_off and take_over only")
+    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off and take_over only")
 
 let dispatch t ~verb args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

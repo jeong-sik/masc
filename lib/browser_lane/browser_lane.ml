@@ -444,6 +444,7 @@ type live_capability =
   | Frame_read
   | Operator_handoff
   | Download_listing
+  | File_upload
 [@@deriving enumerate]
 
 let live_capability_to_wire = function
@@ -475,6 +476,7 @@ let live_capability_to_wire = function
   | Dialog_answer -> "dialog_answer"
   | Frame_read -> "frame_read"
   | Download_listing -> "download_listing"
+  | File_upload -> "file_upload"
 ;;
 
 let live_capability_of_wire raw =
@@ -519,8 +521,9 @@ let live_capability = function
   | Page_context { mode = `Dialog; _ } | Page_console _ | Page_network _ | Page_cookies _ -> None
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
+  | Page_act (Action.On_tab {interaction = Action.Upload _; _}) -> Some File_upload
   | Session_open _ | Session_close | Session_status
-  | Page_act (Action.On_tab { interaction = (Action.Upload _ | Action.Set_cookie _ | Action.Delete_cookie _ | Action.Set_emulation _ | Action.Clear_emulation
+  | Page_act (Action.On_tab { interaction = (Action.Set_cookie _ | Action.Delete_cookie _ | Action.Set_emulation _ | Action.Clear_emulation
       | Action.Block_requests _ | Action.Unblock_requests); _ }) -> None
   | Page_instruct _ | Page_locate _ | Page_extract _ -> None
 ;;
@@ -650,7 +653,8 @@ let live_transport_of_string = function
    (RFC-browser-live-ego). It reads that space's pages with the same page
    scripts as the other connections, and opens, moves and closes only the
    pages an agent opened there. It hands its space to the operator and takes
-   it back, and lists downloads saved into the worker's own folder;
+   it back, lists downloads saved into the worker's own folder, and sets files
+   on their file inputs from the worker's upload copies;
    test_browser_ego_peer holds its column to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
@@ -662,16 +666,17 @@ let live_transport_serves transport capability =
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input
-                    | Operator_handoff | Download_listing) -> false
+                    | Operator_handoff | Download_listing | File_upload) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read) -> true
-  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Operator_handoff | Download_listing) -> false
+  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Operator_handoff | Download_listing
+                    | File_upload) -> false
   | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_answer
-                    | Snapshot_target_input | Operator_handoff | Download_listing) -> true
+                    | Snapshot_target_input | Operator_handoff | Download_listing | File_upload) -> true
   | Ego_task_space, (Document_source | Touch_input | Browser_zoom | Viewport_resize
                     | Tab_activation | Frame_read) -> false
 ;;

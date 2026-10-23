@@ -455,6 +455,7 @@ errors, retain earlier results across subsequent file changes/reads, and
 exercise same-inode rewrite, shrink, growth and replacement during sync.
 Nine alternating before/after repetitions measure durable double reads of the
 same warm private regular file, including actual file/parent `fsync`:
+The timed loop also compares every returned byte with the expected payload.
 
 | Record size | Reads | Before median ms | After median ms | Before allocated bytes | After allocated bytes |
 |---|---:|---:|---:|---:|---:|

@@ -1,0 +1,84 @@
+{
+  "kind": "OCaml syntax only",
+  "observed_at": "2026-10-23T12:29:57.672824+00:00",
+  "source_parent_head": "9ed280ba2a16b5f82e58b3201eaddb9b77560a6a",
+  "source_state": "Working content with per-file hashes; native observation test is a separate uncommitted delta at capture time. Not an executed-whole-head receipt.",
+  "files": [
+    {
+      "path": "lib/keeper/keeper_librarian_runtime.mli",
+      "sha256": "a836694ac38dcc645491cb2df77f7f18ce147b109381dbe4507a027b8e304377"
+    },
+    {
+      "path": "lib/keeper/keeper_librarian_runtime.ml",
+      "sha256": "140bd8b48b4e5c0638b55f1912fe765a55c8452d73466ddff43c62398e9a0053"
+    },
+    {
+      "path": "lib/keeper/keeper_librarian_queue_refresh.ml",
+      "sha256": "7f0902f98ce9d04501c355a24aba19e16d247bd053cb0faf6840636dbea98904"
+    },
+    {
+      "path": "lib/server/server_runtime_bootstrap.mli",
+      "sha256": "f82cb6cd29a6c68e66f6cc855bcb8888d5f581c004a49eb251d3d7e8ebc51447"
+    },
+    {
+      "path": "lib/server/server_runtime_bootstrap.ml",
+      "sha256": "b6bed043803e3fa7e35d10fd224f545154823bd17fd74c27ff6e583620660389"
+    },
+    {
+      "path": "lib/librarian_production_evaluation.mli",
+      "sha256": "06cb052457bb0416127e5e160fe602785f9489caabac6b09e83ccebd3d9598b8"
+    },
+    {
+      "path": "lib/librarian_production_evaluation.ml",
+      "sha256": "8a7f6f7d49bc0ba66e8c109770f0c5fc7d06cbd3e12509a06ee9fde2d8ab4636"
+    },
+    {
+      "path": "bin/masc_librarian_continuity.ml",
+      "sha256": "80d1c57700382dd8be1b89665a892a8255234ca2c6771a47bbd089a6b56a31cf"
+    },
+    {
+      "path": "test/test_librarian_production_evaluation.ml",
+      "sha256": "2fdb73385694bb913ea677ce251f1fa224e66a7e880f379761776f9aac79ed30"
+    },
+    {
+      "path": "test/test_exact_output_binding_wire.ml",
+      "sha256": "aab2d5792a8e0fa9642b7f11939710162e90299190c3b1ce71affb95e591daaa"
+    }
+  ],
+  "command": [
+    "opam",
+    "exec",
+    "--",
+    "ocamlc",
+    "-stop-after",
+    "parsing",
+    "-w",
+    "+4+32+69",
+    "-warn-error",
+    "+a",
+    "-c",
+    "lib/keeper/keeper_librarian_runtime.mli",
+    "lib/keeper/keeper_librarian_runtime.ml",
+    "lib/keeper/keeper_librarian_queue_refresh.ml",
+    "lib/server/server_runtime_bootstrap.mli",
+    "lib/server/server_runtime_bootstrap.ml",
+    "lib/librarian_production_evaluation.mli",
+    "lib/librarian_production_evaluation.ml",
+    "bin/masc_librarian_continuity.ml",
+    "test/test_librarian_production_evaluation.ml",
+    "test/test_exact_output_binding_wire.ml"
+  ],
+  "exit_code": 0,
+  "stdout": "",
+  "stderr": "",
+  "not_executed": [
+    "whole typing",
+    "native regression suite",
+    "Dune",
+    "CI",
+    "production model/JEV",
+    "installed runtime",
+    "official-client fragments",
+    "visible I4"
+  ]
+}

@@ -93,7 +93,9 @@ let rides_provider_default =
 thinking-control-format = "none"|}
 ;;
 
-let with_runtime ?(explicit_publication = false) f =
+type publication = Boot_config | Explicit_file | Captured_observation
+
+let with_runtime ?(publication = Boot_config) f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
@@ -116,14 +118,27 @@ let with_runtime ?(explicit_publication = false) f =
        Llm_provider.Model_catalog.clear_global ();
        let load ~protocol ~endpoint ~stance =
          let path = Filename.concat root
-             (if explicit_publication then "manual-probe.toml" else "runtime.toml") in
+             (match publication with Boot_config -> "runtime.toml"
+               | Explicit_file | Captured_observation -> "manual-probe.toml") in
          Fs_compat.save_file path
            (runtime_toml ~protocol ~endpoint ~stance
               ~lane_slot:"ollama_cloud.deepseek-flash");
-         if explicit_publication then
-           Fs_compat.save_file (Filename.concat root "runtime.toml")
-             (runtime_toml ~protocol ~endpoint ~stance ~lane_slot:"ambient.missing");
-         Runtime.init_default ~config_path:path |> require_ok "runtime initialization";
+         (match publication with
+          | Boot_config -> ()
+          | Explicit_file | Captured_observation ->
+            Fs_compat.save_file (Filename.concat root "runtime.toml")
+              (runtime_toml ~protocol ~endpoint ~stance ~lane_slot:"ambient.missing"));
+         let observation = match publication with
+           | Boot_config | Explicit_file ->
+             Runtime.init_default ~config_path:path |> require_ok "runtime initialization";
+             None
+           | Captured_observation ->
+             let observation=Runtime.load_config_observation ~runtime_config_path:path ()
+               |> require_ok "observe explicit configuration" in
+             ignore (Runtime.init_default_degraded_observation observation
+               |> Result.map_error Runtime.strict_init_error_to_string
+               |> require_ok "initialize captured configuration");
+             Some observation in
          let keeper_config =
            match Runtime.get_runtimes () with
            | [ runtime ] ->
@@ -135,7 +150,8 @@ let with_runtime ?(explicit_publication = false) f =
               | Runtime_execution.Muse_serve _ -> fail "expected the HTTP runtime")
            | _ -> fail "expected one runtime"
          in
-         (if explicit_publication then
+         (match publication,observation with
+          | Explicit_file,None ->
             Masc_test_deps.with_process_env Env_config_core.config_dir_env_key (Some root)
               (fun () ->
                  Config_dir_resolver.reset ();
@@ -144,9 +160,15 @@ let with_runtime ?(explicit_publication = false) f =
                      (Some (Filename.concat root "runtime.toml")) (Runtime.config_path ());
                    Server_runtime_bootstrap.publish_exact_output_registry_from_file
                      ~config_path:path))
-          else
-            Server_runtime_bootstrap.For_testing.configure_exact_output_registry
-              ~config_root:root ());
+          | Boot_config,None ->
+            Server_runtime_bootstrap.For_testing.configure_exact_output_registry ~config_root:root ()
+          | Captured_observation,Some observation ->
+            (* The path no longer contains the observed lane table. Reopening
+               it would either admit the wrong lane or reject the experiment. *)
+            Fs_compat.save_file path "this is deliberately invalid TOML [";
+            Server_runtime_bootstrap.publish_exact_output_registry_from_observation observation
+          | (Boot_config | Explicit_file),Some _ | Captured_observation,None ->
+            fail "publication fixture lost its configuration observation");
          let registry = Registry.current () |> require_ok "published registry" in
          let admitted =
            match Registry.resolve_lane registry ~lane_id with
@@ -297,13 +319,22 @@ let test_a_row_that_rides_the_provider_default_still_projects () =
 ;;
 
 let test_explicit_file_wins_over_ambient_config () =
-  with_runtime ~explicit_publication:true @@ fun load ->
+  with_runtime ~publication:Explicit_file @@ fun load ->
   let keeper, admitted =
     load ~protocol:"openai-compatible-http" ~endpoint:"https://ollama.com/v1"
       ~stance:declared_effort
   in
   let projected = EO.projection_target admitted in
   check_wire "explicit file" ~keeper ~exact:projected.config
+;;
+
+let test_observation_survives_source_file_change () =
+  with_runtime ~publication:Captured_observation @@ fun load ->
+  let keeper, admitted =
+    load ~protocol:"openai-compatible-http" ~endpoint:"https://ollama.com/v1"
+      ~stance:declared_effort in
+  let projected = EO.projection_target admitted in
+  check_wire "captured observation after path corruption" ~keeper ~exact:projected.config
 ;;
 
 let () =
@@ -316,6 +347,9 @@ let () =
     "Exact binding wire"
     [ ( "wire"
       , [ test_case
+            "captured configuration still publishes its lane after the path changes"
+            `Quick test_observation_survives_source_file_change
+        ; test_case
             "an explicit noncanonical file overrides conflicting ambient lanes"
             `Quick test_explicit_file_wins_over_ambient_config
         ; test_case

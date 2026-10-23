@@ -9662,6 +9662,7 @@ let prompts_payload =
                ("file_exists", `Bool true);
                ("file_path", `String "config/prompts/keeper.md");
                ("source", `String "file");
+               ("authoring_issues", `List []);
                ("template_variables", `List [ `String "keeper_instructions" ]);
              ];
            `Assoc
@@ -9671,6 +9672,7 @@ let prompts_payload =
                ("has_override", `Bool true);
                ("file_exists", `Bool false);
                ("source", `String "override");
+               ("authoring_issues", `List []);
              ];
          ]);
       ( "runtime_assets"
@@ -9857,6 +9859,7 @@ let test_decode_prompts_reads_a_moved_default () =
       ([ ("key", `String "keeper")
        ; ("effective", `String "the operator's prompt")
        ; ("source", `String "override")
+       ; ("authoring_issues", `List [])
        ]
        @ match moved with None -> [] | Some moved -> [ ("override_default_moved", `Bool moved) ])
   in
@@ -9867,7 +9870,7 @@ let test_decode_prompts_reads_a_moved_default () =
   in
   Alcotest.(check (list bool)) "true, false, and absent" [ true; false; false ]
     (decode [ row ~moved:(Some true); row ~moved:(Some false); row ~moved:None ]);
-  match Tui_decode.decode_prompts (`Assoc [ ("prompts", `List [ `Assoc [ ("key", `String "keeper"); ("source", `String "file"); ("override_default_moved", `String "yes") ] ]) ]) with
+  match Tui_decode.decode_prompts (`Assoc [ ("prompts", `List [ `Assoc [ ("key", `String "keeper"); ("source", `String "file"); ("authoring_issues", `List []); ("override_default_moved", `String "yes") ] ]) ]) with
   | Ok _ -> Alcotest.fail "a string where the wire promises a boolean decoded"
   | Error _ -> ()
 
@@ -9913,6 +9916,7 @@ let test_decode_prompts_rejects_unknown_operator_surface () =
                 [ "key", `String "future"
                 ; "operator_surface", `String "mystery"
                 ; "source", `String "file"
+                ; "authoring_issues", `List []
                 ]
             ] )
       ]
@@ -9955,27 +9959,28 @@ let test_decode_prompt_authoring_report_preserves_body_and_source () =
         true (row.pr_source = expected_source);
       Alcotest.(check bool) "reported effective placement is preserved"
         true (row.pr_operator_surface = Tui_decode.Prompt_primary);
-      let issues = match row.pr_authoring_issues with
-        | Some issues -> issues
-        | None -> Alcotest.fail "authoring diagnostic was lost" in
       let observed = List.map
           (function Tui_decode.Invalid_operator_surface {value; source_file} ->
              value, source_file)
-          issues in
+          row.pr_authoring_issues in
       Alcotest.(check (list (pair string string)))
         "authored value and diagnostic file are not replaced or normalized"
         ["primray\nraw", "/fixture/prompts/authored.md"] observed)
     ["file", Tui_decode.Prompt_file; "override", Tui_decode.Prompt_override]
 
-let test_decode_prompt_authoring_report_distinguishes_unreported_and_clean () =
-  List.iter (fun (report, expected) ->
-    match Tui_decode.decode_prompts (prompt_with_authoring_report ~source:"file" report) with
-    | Error detail -> Alcotest.fail detail
-    | Ok snapshot ->
+let test_decode_prompt_authoring_report_requires_reported_clean () =
+  (match Tui_decode.decode_prompts (prompt_with_authoring_report ~source:"file" []) with
+   | Ok _ -> Alcotest.fail "an absent authoring report must not decode"
+   | Error detail ->
+       Alcotest.(check string) "reported as an absence"
+         "missing required field 'authoring_issues'" detail);
+  match Tui_decode.decode_prompts
+    (prompt_with_authoring_report ~source:"file" ["authoring_issues", `List []]) with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
       let row = List.hd snapshot.Tui_decode.ps_rows in
-      Alcotest.(check bool) "absence and reported clean have distinct states"
-        true (row.pr_authoring_issues = expected))
-    [[], None; ["authoring_issues", `List []], Some []]
+      Alcotest.(check int) "reported clean has no authoring issues" 0
+        (List.length row.pr_authoring_issues)
 
 let test_decode_prompt_authoring_report_refuses_protocol_drift () =
   let changed name value =
@@ -10009,6 +10014,7 @@ let test_decode_prompts_rejects_an_unknown_source () =
             [ `Assoc
                 [ "key", `String "future"
                 ; "source", `String "inherited"
+                ; "authoring_issues", `List []
                 ]
             ] )
       ]
@@ -10025,7 +10031,8 @@ let test_decode_prompts_rejects_an_unknown_source () =
    prompt has no text at all. *)
 let test_decode_prompts_rejects_a_row_with_no_source () =
   let json =
-    `Assoc [ "prompts", `List [ `Assoc [ "key", `String "sourceless" ] ] ]
+    `Assoc [ "prompts", `List [ `Assoc [ "key", `String "sourceless";
+      "authoring_issues", `List [] ] ] ]
   in
   match Tui_decode.decode_prompts json with
   | Ok _ -> Alcotest.fail "a row with no source must not decode"
@@ -10048,7 +10055,8 @@ let test_decode_prompts_survives_a_sparse_row () =
 let test_decode_prompts_rejects_a_row_with_no_key () =
   (* The key is what a write is addressed to. A row without one cannot be
      edited, so it is a decode failure rather than a row drawn as blank. *)
-  let json = `Assoc [ ("prompts", `List [ `Assoc [ ("category", `String "x") ] ]) ] in
+  let json = `Assoc [ ("prompts", `List [ `Assoc [ ("category", `String "x");
+    ("authoring_issues", `List []) ] ]) ] in
   match Tui_decode.decode_prompts json with
   | Ok _ -> Alcotest.fail "a keyless prompt row must not decode"
   | Error _ -> ()
@@ -10061,6 +10069,7 @@ let test_decode_prompts_rejects_a_partial_template_variable_list () =
             [ `Assoc
                 [ "key", `String "librarian"
                 ; "template_variables", `List [ `String "current_memory"; `Int 1 ]
+                ; "authoring_issues", `List []
                 ]
             ] )
       ]
@@ -14093,8 +14102,8 @@ let () =
           test_decode_prompts_rejects_unknown_operator_surface;
         Alcotest.test_case "authoring metadata preserves body and source" `Quick
           test_decode_prompt_authoring_report_preserves_body_and_source;
-        Alcotest.test_case "authoring report distinguishes absent and clean" `Quick
-          test_decode_prompt_authoring_report_distinguishes_unreported_and_clean;
+        Alcotest.test_case "authoring report requires explicit clean result" `Quick
+          test_decode_prompt_authoring_report_requires_reported_clean;
         Alcotest.test_case "authoring report refuses protocol drift" `Quick
           test_decode_prompt_authoring_report_refuses_protocol_drift;
         Alcotest.test_case "rejects an unknown source" `Quick

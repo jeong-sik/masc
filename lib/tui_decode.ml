@@ -4982,7 +4982,7 @@ type prompt_row = {
   pr_effective : string;
   pr_file_path : string;
   pr_source : prompt_source;
-  pr_authoring_issues : prompt_authoring_issue list option;
+  pr_authoring_issues : prompt_authoring_issue list;
   pr_template_variables : string list;
   pr_override_default_moved : bool;
 }
@@ -5030,10 +5030,9 @@ let decode_prompt_authoring_issue json =
 
 let decode_prompt_authoring_issues json =
   match Json_util.assoc_member_opt "authoring_issues" json with
-  | None -> Ok None
+  | None -> Error "missing required field 'authoring_issues'"
   | Some (`List issues) ->
-    let* issues = decode_list "authoring_issues" decode_prompt_authoring_issue issues in
-    Ok (Some issues)
+    decode_list "authoring_issues" decode_prompt_authoring_issue issues
   | Some value -> field_type_error "authoring_issues" "a list" value
 
 (* A prompt with no description, or none on disk, is still a prompt the

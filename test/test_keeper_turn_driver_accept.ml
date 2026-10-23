@@ -2408,7 +2408,7 @@ let test_lost_capture_failure_does_not_log_another_execution () =
   let since_seq = (Log.Ring.bounds ()).total - 1 in
   let projected = Keeper_official_client_host.host_stop_result
     ~runtime_id:"official.test" ~model:"test-model" ~session_id:"session-observation"
-    ~turn_id:"vendor-turn-observation" ~turns_used:1 ~latency_ms:(Some 12)
+    ~turn_id:"vendor-turn-observation" ~provider_turn_ordinal:7 ~turns_used:1 ~latency_ms:(Some 12)
     ~request_context:None
     (Keeper_official_client_host.Terminal_tool_boundary
        {outcome=Terminal_completed; tool_name="test"}) in

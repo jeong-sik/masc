@@ -1,0 +1,12 @@
+DUNE_SOURCEROOT=/private/tmp/masc-37900-runbook-20261023-felmfyxh/repo ./probe.exe --color=never
+Testing `supervisor readiness boundary'.
+This run has ID `ROVWGCS9'.
+
+  [OK]          actual shell fixtures          0   test_supervisor_control_st...
+  [OK]          actual shell fixtures          1   test_supervisor_liveness_w...
+  [OK]          actual shell fixtures          2   test_supervisor_promotes_p...
+
+Full test results in `/private/tmp/masc-37900-runbook-20261023-felmfyxh/readiness-regression/_build/_tests/supervisor readiness boundary'.
+Test Successful in 5.355s. 3 tests run.
+
+exit=0

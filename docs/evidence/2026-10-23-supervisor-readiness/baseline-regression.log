@@ -1,0 +1,34 @@
+Baseline acaaee9828a7cfaa94a28c02d62b9f97aa4ecfd4 actual supervisor/control scripts
+DUNE_SOURCEROOT=/private/tmp/masc-37900-runbook-20261023-felmfyxh/readiness-regression/baseline-source /private/tmp/masc-37900-runbook-20261023-felmfyxh/readiness-regression/probe.exe test actual shell fixtures 1 --color=never
+Testing `supervisor readiness boundary'.
+This run has ID `2MF55U0B'.
+
+  [SKIP]        actual shell fixtures          0   test_supervisor_control_st...
+> [FAIL]        actual shell fixtures          1   test_supervisor_liveness_w...
+  [SKIP]        actual shell fixtures          2   test_supervisor_promotes_p...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        actual shell fixtures          1   test_supervisor_livenes...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT the frontend liveness probe succeeds
+ASSERT unready child preserves its real terminal exit
+File "supervisor_fixture.ml", line 386, character 6:
+FAIL unready child preserves its real terminal exit
+
+   Expected: `23'
+   Received: `143'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Supervisor_fixture.test_supervisor_liveness_without_readiness_preserves_terminal in file "supervisor_fixture.ml", line 386, characters 6-72
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `/private/tmp/masc-37900-runbook-20261023-felmfyxh/readiness-regression/_build/_tests/supervisor readiness boundary/actual shell fixtures.001.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/private/tmp/masc-37900-runbook-20261023-felmfyxh/readiness-regression/_build/_tests/supervisor readiness boundary'.
+1 failure! in 1.824s. 1 test run.
+
+exit=1 (expected nonzero)

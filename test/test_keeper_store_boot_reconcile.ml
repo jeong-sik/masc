@@ -302,6 +302,105 @@ let test_refusal_names_each_store_and_both_ways_forward () =
     (List.length (String.split_on_char '\n' text))
 ;;
 
+let test_metadata_io_failure_never_accepts_quarantine () =
+  with_workspace @@ fun config ->
+  let keeper = "blocked" in
+  let path = Keeper_types_profile.keeper_meta_path config keeper in
+  (* A directory at the canonical file path is a real read failure even
+     when the test user can bypass permission bits. Retain valid bytes
+     inside it so any rename or replacement is observable. *)
+  Fs_compat.mkdir_p path;
+  let retained = Filename.concat path "original" in
+  let bytes = Keeper_meta_json.meta_to_json (meta keeper) |> Yojson.Safe.to_string in
+  write_bytes retained bytes;
+  let error =
+    match Keeper_meta_store.validate_current_meta_file_result path with
+    | Error (Keeper_meta_store.Unreadable detail) -> detail
+    | Error (Keeper_meta_store.Invalid_json _ | Keeper_meta_store.Not_current _) ->
+      fail "a file I/O failure was classified as rejected content"
+    | Ok () -> fail "a directory was accepted as metadata"
+  in
+  (match Keeper_meta_store.read_meta_file_path_read_only
+           ~ownership_root:config.Workspace.base_path path with
+   | Error (Keeper_meta_store.Unreadable _) -> ()
+   | Error (Keeper_meta_store.Invalid_json _ | Keeper_meta_store.Not_current _)
+   | Ok _ -> fail "the strict reader lost the I/O failure");
+  let examination = R.examine config in
+  let check_failure (failure : R.failure) =
+    check string "the metadata owner" keeper failure.R.keeper;
+    check string "the canonical path" path failure.R.path;
+    check bool "the metadata store" true (failure.R.store = D.Refusing.Keeper_meta);
+    check string "the reader's original failure" error failure.R.error
+  in
+  let failure =
+    match examination.R.unreadable with
+    | [ failure ] -> check_failure failure; failure
+    | [] | _ :: _ -> fail "examination did not retain the unreadable metadata"
+  in
+  check bool "I/O is never a quarantine candidate" true (examination.R.undecodable = []);
+  Fun.protect ~finally:B.For_testing.reset_keeper_persistence_lifecycle (fun () ->
+    List.iter (fun accept_quarantine ->
+      (match R.admit ~accept_quarantine examination with
+       | Error refusals ->
+         check bool "admission retains the mandatory I/O refusal" true
+           (refusals = [ R.Unreadable failure ])
+       | Ok _ -> fail "admission lost the mandatory I/O refusal");
+      B.For_testing.reset_keeper_persistence_lifecycle ();
+      match B.prepare_keeper_persistence ~accept_store_quarantine:accept_quarantine ~config () with
+      | Error error ->
+        check bool "boot retains the mandatory I/O refusal" true
+          (error = B.Store_quarantine_refused [ R.Unreadable failure ])
+      | Ok _ -> fail "boot admitted unreadable metadata") [ false; true ]);
+  let report = R.quarantine ~now:0. config examination in
+  (match report.R.failed, report.R.quarantined with
+   | [ failure ], [] -> check_failure failure
+   | ([], _ | _ :: _, _) -> fail "quarantine did not preserve the I/O refusal");
+  check bool "the canonical path remains a directory" true (Sys.is_directory path);
+  check string "the retained bytes never moved or changed" bytes (Fs_compat.load_file retained)
+;;
+
+let test_invalid_json_metadata_remains_an_explicit_quarantine () =
+  with_workspace @@ fun config ->
+  let keeper = "malformed" in
+  let path = Keeper_types_profile.keeper_meta_path config keeper in
+  let bytes = "{invalid-metadata" in
+  write_bytes path bytes;
+  (match Keeper_meta_store.validate_current_meta_file_result path with
+   | Error (Keeper_meta_store.Invalid_json _) -> ()
+   | Error (Keeper_meta_store.Unreadable _ | Keeper_meta_store.Not_current _)
+   | Ok () -> fail "the gate lost the JSON parse failure");
+  (match Keeper_meta_store.read_meta_file_path_read_only
+           ~ownership_root:config.Workspace.base_path path with
+   | Error (Keeper_meta_store.Invalid_json _) -> ()
+   | Error (Keeper_meta_store.Unreadable _ | Keeper_meta_store.Not_current _)
+   | Ok _ -> fail "the strict reader lost the JSON parse failure");
+  let examination = R.examine config in
+  check bool "readable invalid JSON is not I/O failure" true (examination.R.unreadable = []);
+  let row =
+    match examination.R.undecodable with
+    | [ row ] -> check string "the refused path" path row.R.path; row
+    | [] | _ :: _ -> fail "examination lost the rejected JSON"
+  in
+  (match R.admit ~accept_quarantine:false examination with
+   | Error refusals ->
+     check bool "invalid JSON requires explicit acceptance" true
+       (refusals = [ R.Undecodable row ])
+   | Ok _ -> fail "invalid JSON bypassed explicit acceptance");
+  check string "refusal preserves rejected bytes" bytes (Fs_compat.load_file path);
+  let admitted =
+    match R.admit ~accept_quarantine:true examination with
+    | Ok admitted -> admitted
+    | Error _ -> fail "explicit acceptance did not admit invalid JSON for quarantine"
+  in
+  let report = R.quarantine ~now:0. config admitted in
+  (match report.R.quarantined, report.R.failed with
+   | [ moved ], [] ->
+     check string "the moved path" path moved.R.path;
+     check string "quarantine retains original bytes" bytes (Fs_compat.load_file moved.R.rejected_path)
+   | ([], _ | _ :: _, _) -> fail "accepted invalid JSON was not quarantined");
+  check bool "the rejected file left its canonical path" false (Sys.file_exists path)
+;;
+
 let test_undecodable_stores_are_moved_aside_once () =
   with_workspace
   @@ fun config ->
@@ -1591,7 +1690,11 @@ let () =
             test_examination_does_not_create_an_absent_runtime_root
         ] )
     ; ( "admit"
-      , [ test_case "partial queue discovery refuses quarantine" `Quick
+      , [ test_case "metadata I/O failure never accepts quarantine" `Quick
+            test_metadata_io_failure_never_accepts_quarantine
+        ; test_case "invalid JSON metadata requires explicit quarantine" `Quick
+            test_invalid_json_metadata_remains_an_explicit_quarantine
+        ; test_case "partial queue discovery refuses quarantine" `Quick
             test_event_queue_discovery_failure_refuses_quarantine
         ; test_case "unreadable inventory refuses even with quarantine" `Quick
             test_unreadable_session_inventory_refuses_even_with_quarantine

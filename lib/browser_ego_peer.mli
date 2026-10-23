@@ -87,7 +87,9 @@ val space_id : t -> int
     interrupted as {!Browser_downloads} does, a completed file once
     published. Input finds its target, checks the observed page and
     makes its DOM edits with the page scripts the BiDi connection runs, and
-    sends mouse and keys through ego. Snapshot target input checks the URL
+    sends mouse and keys through ego. ego shows each mouse step's label beside
+    its cursor: MASC, [actor] (or "agent"), and the interaction, as the BiDi
+    connection's overlay does. Snapshot target input checks the URL
     again after the native selector wait; this is not an atomic navigation
     guard. Re-read a snapshot after page changes or input and on a native
     stale/unknown ref refusal. Native drags share the observed waypoint
@@ -100,7 +102,8 @@ val space_id : t -> int
     connection does not serve are refused before any effect; selection
     refuses them earlier ({!Browser_lane.live_transport_serves}). *)
 val dispatch
-  :  t
+  :  ?actor:string
+  -> t
   -> verb:Browser_live_peer.verb
   -> Yojson.Safe.t
   -> (Yojson.Safe.t, Browser_live_peer.failure) result

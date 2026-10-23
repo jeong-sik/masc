@@ -77,7 +77,7 @@ let ego_dialog ?(default="") kind message = obj ["url",str "https://app.slack.co
 let in_page value = obj ["answer",str (Yojson.Safe.to_string value)]
 let page_answer ~label value = answered (obj ["label",str label;"answer",in_page value])
 
-let dispatch peer verb args = Peer.dispatch peer ~verb args
+let dispatch ?actor peer verb args = Peer.dispatch ?actor peer ~verb args
 let before_effect name = function
   | Error (Live.Before_effect detail) -> detail
   | Ok _ -> failf "%s was served" name
@@ -427,6 +427,11 @@ let test_input_acts_through_the_shared_page_scripts () =
   check (pair int int) "at that point" (400, 150) (to_int (field "x" right), to_int (field "y" right));
   let wheel = gesture "a wheel" (Lane.Scroll_at {point;viewport;x=0;y=120}) in
   check (pair int int) "the wheel's delta" (0, 120) (to_int (field "dx" wheel), to_int (field "dy" wheel));
+  (* ego shows who acts and what beside its cursor. *)
+  check string "an input with no actor is the agent's" "MASC · agent · scroll_at" (text (field "cursor" wheel));
+  (match dispatch peer ~actor:"keeper/sangsu" Live.Page_interact (interact_args (Lane.Click_at {point;viewport;button=Lane.Pointer.Primary})) with
+   | Ok _ -> check string "an input names its actor" "MASC · keeper/sangsu · click_at" (text (field "cursor" (last ()).args))
+   | other -> failf "a click with an actor was %s" (failure_kind other));
   (* Keys. *)
   by_step ["page.keyboard",(fun _ -> input_answer ())];
   let keys action = text (field "keys" (gesture "keys" action)) in
@@ -1196,7 +1201,7 @@ const page = {
   },
   mouse: {
     move: async () => { seen.push("move"); },
-    click: async () => { seen.push("click"); if (opensOn === "click") open = opening; return open === null ? {} : {dialog: open}; },
+    click: async (x, y, options) => { seen.push("click " + options.label); if (opensOn === "click") open = opening; return open === null ? {} : {dialog: open}; },
   },
   acceptDialog: async text => { seen.push(text === undefined ? "accept" : "accept " + text); if (open === null) return false; open = null; return true; },
   dismissDialog: async () => { seen.push("dismiss"); if (open === null) return false; open = null; return true; },
@@ -1255,7 +1260,7 @@ let test_dialog_scripts_in_node () =
        {|{"tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"confirm","message":"sure?"}}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "a click that opened a dialog was %s" (failure_kind other));
-  check (list string) "no page script after the dialog opened" ["info";"evaluate";"click";"info"] (seen ());
+  check (list string) "no page script after the dialog opened, and ego's click carried its label" ["info";"evaluate";"click MASC · agent · click";"info"] (seen ());
   scenario := (`Null, alert, "evaluate");
   (match interact (Lane.Fill {selector="#message";text="hi"}) with
    | Error (Live.Partial_failure {receipt; _}) -> check string "a fill the dialog stopped"

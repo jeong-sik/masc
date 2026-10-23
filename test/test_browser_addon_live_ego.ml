@@ -266,7 +266,7 @@ def run(script,answer):
             'viewport':{'documentId':'d1','width':800,'height':600,'scrollX':0,'scrollY':0}})})
     elif step=='page.pointer':
         page={'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','scrollX':0,'scrollY':0})}
-        (root/'clicked').write_text(json.dumps([args['x'],args['y'],args['button']]))
+        (root/'clicked').write_text(json.dumps([args['x'],args['y'],args['button'],args['cursor']]))
         answer({'guard':page,'receipt':page,'error':None})
     elif step=='page.downloads':
         # What the page's download wait saved: <downloads>/<id>, in folders
@@ -362,7 +362,8 @@ let scenario mode =
           (Yojson.Safe.to_string (answered (issue (B.Page_goto {url="https://fixture.test/next";tab_id=Some 2}))));
         check string "a click" {|{"ok":true,"data":{"tabId":1,"action":"click","urlBefore":"https://fixture.test/","url":"https://fixture.test/","title":"Fixture","scrollX":0,"scrollY":0}}|}
           (Yojson.Safe.to_string (answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Click "#send"}))));
-        check string "where ego clicked" {|[200, 300, "left"]|} (read (Filename.concat root "clicked"));
+        check string "where ego clicked, and the label beside its cursor names the actor"
+          {|[200, 300, "left", "MASC \u00b7 keeper/live-fixture \u00b7 click"]|} (read (Filename.concat root "clicked"));
         (* A download the page saved reaches the caller as a grant of this
            connection's route, never as a path, and is published from it. *)
         let actor = "keeper/live-fixture" and route = B.Live_route (Some client.client_id)

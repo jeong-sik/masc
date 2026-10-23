@@ -805,10 +805,15 @@ let button_name = function
   | Browser_lane.Pointer.Primary -> "left"
   | Browser_lane.Pointer.Middle -> "middle"
   | Browser_lane.Pointer.Secondary -> "right"
+(* ego shows a mouse step's [label] beside its own cursor highlight. It says
+   who acts and what, from the same pieces as the BiDi connection's overlay
+   badge (Browser_pointer_feedback): MASC, the actor, the interaction. *)
+let cursor_label ~actor ~verb = String.concat " · " ["MASC"; Option.value actor ~default:"agent"; verb]
 let motion_lines = function
-  | Move -> ["        await page.mouse.move(args.x, args.y);"]
-  | Press _ -> ["        await page.mouse.click(args.x, args.y, {button: args.button, clickCount: args.count});"]
-  | Wheel _ -> ["        await page.mouse.move(args.x, args.y);"; "        await page.mouse.wheel(args.dx, args.dy);"]
+  | Move -> ["        await page.mouse.move(args.x, args.y, {label: args.cursor});"]
+  | Press _ -> ["        await page.mouse.click(args.x, args.y, {button: args.button, clickCount: args.count, label: args.cursor});"]
+  | Wheel _ -> ["        await page.mouse.move(args.x, args.y, {label: args.cursor});";
+                "        await page.mouse.wheel(args.dx, args.dy, {label: args.cursor});"]
 let motion_fields = function
   | Move -> []
   | Press {button; count} -> ["button",str (button_name button);"count",`Int count]
@@ -817,15 +822,15 @@ let motion_fields = function
 (* Native ego calls, not synthetic page events. A failed down may already
    have pressed, so its finally block always attempts release. *)
 let drag_input = {js|
-async function dragInput(page, path) {
+async function dragInput(page, path, label) {
   let error = null, released = true;
   const reason = failure => String(failure?.message ?? failure);
   try {
-    await page.mouse.move(path[0].x, path[0].y);
+    await page.mouse.move(path[0].x, path[0].y, {label});
     try {
       released = false;
       await page.mouse.down({button:'left'});
-      for (const point of path.slice(1)) await page.mouse.move(point.x, point.y);
+      for (const point of path.slice(1)) await page.mouse.move(point.x, point.y, {label});
     } finally {
       await page.mouse.up({button:'left'});
       released = true;
@@ -1088,7 +1093,7 @@ let target_input t ~id ~label ~deadline ~expected_url ~target ~operation =
        | Error detail, _ | _, Error detail -> outcome detail)
     | _ -> outcome "ego answered the input outside its answer frame"
 
-let interact t args =
+let interact ?actor t args =
   let before result = Result.map_error (fun detail -> Live.Before_effect detail) result in
   let* fields = before (match args with `Assoc fields -> Ok fields | _ -> Error "invalid interaction") in
   let* request = before (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live)) :: fields))) in
@@ -1120,10 +1125,11 @@ let interact t args =
       let* resolved = resolve t ~label ~deadline (input ~expected_url:request.expected_url request.action) in
       before (Browser_interaction.resolve_pointer_input request.action resolved)
     else Ok (request.expected_url, request.action) in
+  let cursor = "cursor",str (cursor_label ~actor ~verb) in
   let pointer (viewport : Browser_lane.Pointer.viewport) point motion =
     let x, y = Browser_lane.Pointer.viewport_pixels viewport point in
     guarded_input t ~id ~label ~deadline ~verb ~step:"page.pointer" ~guard:Browser_interaction.pointer_guard_script
-      ~input:(input ~expected_url action) ~lines:(motion_lines motion) ~fields:(["x",`Int x;"y",`Int y] @ motion_fields motion) in
+      ~input:(input ~expected_url action) ~lines:(motion_lines motion) ~fields:(["x",`Int x;"y",`Int y;cursor] @ motion_fields motion) in
   let keyboard keys =
     guarded_input t ~id ~label ~deadline ~verb ~step:"page.keyboard" ~guard:Browser_interaction.keyboard_guard_script
       ~input:(input ~expected_url action) ~lines:(keys_lines keys) ~fields:(keys_fields keys) in
@@ -1133,10 +1139,10 @@ let interact t args =
     let path = from :: (Browser_lane.Pointer.drag_waypoints ~start:from ~destination:to_ via @ [to_;to_]) in
     guarded_input ~holds_button:true t ~id ~label ~deadline ~verb ~step:"page.drag"
       ~guard:Browser_interaction.pointer_guard_script ~input:(input ~expected_url action)
-      ~lines:["        const outcome = await (" ^ drag_input ^ ")(page, args.path);";
+      ~lines:["        const outcome = await (" ^ drag_input ^ ")(page, args.path, args.cursor);";
         "        pointerReleased = outcome.released;";
         "        if (outcome.error !== null) throw new Error(outcome.error);"]
-      ~fields:["path",`List (List.map pixels path)] in
+      ~fields:["path",`List (List.map pixels path);cursor] in
   let on_target ~target operation = match expected_url with
     | Some expected_url -> target_input t ~id ~label ~deadline ~expected_url ~target ~operation
     | None -> Error (Live.Before_effect "a snapshot target requires expectedUrl") in
@@ -1218,7 +1224,7 @@ let act t args =
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
     Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off and take_over only")
 
-let dispatch t ~verb args =
+let dispatch ?actor t ~verb args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in
   match (verb : Live.verb) with
   | Browser_info -> Ok (obj ["name",str "ego lite";"version",str t.version])
@@ -1232,4 +1238,4 @@ let dispatch t ~verb args =
   | Page_snapshot -> pre (snapshot t args)
   | Page_downloads -> pre (downloads t args)
   | Page_act -> act t args
-  | Page_interact -> interact t args
+  | Page_interact -> interact ?actor t args

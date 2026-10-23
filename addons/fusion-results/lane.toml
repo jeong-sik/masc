@@ -1,6 +1,7 @@
 id = "fusion-results"
 revision = "0.1.2"
 title = "Fusion results and retained evidence"
+ui_category = "analysis"
 contributions = ["observe", "derive"]
 image = "masc-lane-fusion-results:0.1.2"
 command = ["python3", "server.py"]

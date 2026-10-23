@@ -1,6 +1,7 @@
 id = "wkbl-score-runs"
 revision = "0.1.0"
 title = "WKBL unanswered scoring runs"
+ui_category = "analysis"
 contributions = ["derive"]
 image = "masc-lane-wkbl-score-runs:0.1.0"
 command = ["python3", "server.py"]

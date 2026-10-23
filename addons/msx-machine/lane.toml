@@ -1,6 +1,7 @@
 id = "msx-machine"
 revision = "0.2.0"
 title = "MSX machine"
+ui_category = "execution_environment"
 contributions = ["observe"]
 image = "masc-lane-msx-machine:0.2.0"
 command = ["/usr/local/bin/masc-msx-addon-worker", "--base-path", "/state"]

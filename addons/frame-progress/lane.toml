@@ -1,6 +1,7 @@
 id = "frame-progress"
 revision = "0.1.0"
 title = "MSX observed frame progress"
+ui_category = "analysis"
 contributions = ["derive"]
 image = "masc-lane-frame-progress:0.1.0"
 command = ["python3", "server.py"]

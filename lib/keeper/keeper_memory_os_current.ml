@@ -3143,6 +3143,11 @@ type disposition =
   ; revisions_applied : Keeper_memory_os_types.revision list
   }
 
+type disposition_basis =
+  { expected_revision : int option
+  ; expected_facts : Keeper_memory_os_types.fact list option
+  }
+
 type program_source =
   | Atom_program_source of
       { range : durable_range_id
@@ -3221,6 +3226,7 @@ let apply_program ?on_committed ?clock ~keepers_dir ~keeper_id ~now ~anchor ~sou
   apply_program_with_io ?on_committed ?clock ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program
 
 let apply_disposition
+      ?expected_basis
       ?on_committed
       ?clock
       ?dropped_statements
@@ -3339,6 +3345,13 @@ let apply_disposition
     ~keeper_id
     ~now
     (fun ~snapshot_content:_ previous ->
+       let* () = match expected_basis with
+         | None -> Ok ()
+         | Some (basis : disposition_basis) ->
+           let revision = Option.map (fun (snapshot : t) -> snapshot.revision) previous in
+           let facts = Option.map (fun (snapshot : t) -> snapshot.facts) previous in
+           if revision = basis.expected_revision && facts = basis.expected_facts
+           then Ok () else Error "current Memory OS disposition basis changed" in
        let plan = plan_of previous in
        let* next = make_snapshot_from_maintained ~previous ~now ~source ~facts:plan.facts
          ~invalidated:plan.invalidated () in

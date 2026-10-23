@@ -2393,6 +2393,7 @@ let parse_transcript_rows ~path ~redaction rows =
 type captured_row = { raw_line : string; projected_line : string; captured_message : chat_message }
 
 let captured_row_message row = row.captured_message
+let captured_row_same_source left right = String.equal left.raw_line right.raw_line
 let captured_row_to_json row =
   `Assoc ["raw_line", `String row.raw_line; "projected_line", `String row.projected_line]
 

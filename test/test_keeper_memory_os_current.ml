@@ -72,6 +72,7 @@ let replace
 
 let apply_disposition
       ~keepers_dir
+      ?expected_basis
       ?dropped_statements
       ?durable_range_id
       ?official_range_id
@@ -81,6 +82,7 @@ let apply_disposition
       ()
   =
   Current.apply_disposition
+    ?expected_basis
     ?dropped_statements
     ?durable_range_id
     ?official_range_id
@@ -1721,6 +1723,75 @@ let map_field key f = function
   | `Assoc fields -> `Assoc (List.map (fun (name, value) ->
       name, if String.equal name key then f value else value) fields)
   | _ -> fail "expected object"
+;;
+
+let disposition_store_bytes ~keepers_dir =
+  let keeper_id="keeper" in
+  [Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
+   Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
+   Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
+   Current.publication_receipt_path ~keepers_dir ~keeper_id;
+   Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id;
+   Current.unread_ledger_path ~keepers_dir ~keeper_id;
+   Current.epoch_path ~keepers_dir ~keeper_id;
+   Masc.Keeper_memory_absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id]
+  |> List.map (fun path -> path,Fs_compat.load_file_opt path)
+let basis_of_snapshot (snapshot:Current.t) : Current.disposition_basis =
+  {expected_revision=Some snapshot.revision;expected_facts=Some snapshot.facts}
+type changed_disposition_basis = Stale_revision | Different_fact_at_same_revision
+let test_disposition_basis_refuses_effects change () = with_temp_keepers @@ fun keepers_dir ->
+  let a=fact ~claim:"Original A to absorb" () and b=fact ~claim:"Original B to retire" () in
+  let captured=replace ~keepers_dir ~facts:[a;b] () |> require_ok in
+  let basis=basis_of_snapshot captured in
+  let basis,actual=match change with
+    | Stale_revision ->
+      let changed=Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:250.
+        ~source:(source Current.Explicit_write) (fact ~claim:"Independent explicit writer" ()) |> require_upsert_ok in
+      basis,changed
+    | Different_fact_at_same_revision ->
+      (* Revision equality alone must not authorize a different complete fact
+         value. Keep identity and claim equal while changing a stored field. *)
+      let different=List.map (fun (value:Types.fact) -> {value with last_seen=value.last_seen+.1.}) captured.facts in
+      {basis with expected_facts=Some different},captured in
+  let before=disposition_store_bytes ~keepers_dir in
+  let together=fact ~claim:"Original A condensed" () in
+  let result=apply_disposition ~keepers_dir ~expected_basis:basis
+    ~durable_range_id ~official_range_id
+    ~absorbed:[{Types.absorbed=Types.memory_id a;into=Types.memory_id together}]
+    ~dropped_statements:[{Types.memory_id=Types.memory_id b;reason="Original basis retired B"}]
+    ~new_claims:[together] () in
+  (match result with Error detail -> check string "complete locked basis refuses this new disposition"
+      "current Memory OS disposition basis changed" detail
+   | Ok _ -> fail "a changed complete Memory basis was committed");
+  check bool "refusal writes no new Memory, journal, archive, absorbed rows or range receipts" true
+    (before=disposition_store_bytes ~keepers_dir);
+  check bool "independent current state remains exact" true
+    ((Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok)=Some actual)
+let test_disposition_fresh_basis_publishes_original_effects () = with_temp_keepers @@ fun keepers_dir ->
+  let a=fact ~claim:"Original A to absorb" () and b=fact ~claim:"Original B to retire" () in
+  let captured=replace ~keepers_dir ~facts:[a;b] () |> require_ok in
+  let together=fact ~claim:"Original A condensed" () in
+  let committed=apply_disposition ~keepers_dir ~expected_basis:(basis_of_snapshot captured)
+    ~durable_range_id ~official_range_id
+    ~absorbed:[{Types.absorbed=Types.memory_id a;into=Types.memory_id together}]
+    ~dropped_statements:[{Types.memory_id=Types.memory_id b;reason="Original basis retired B"}]
+    ~new_claims:[together] () |> require_ok in
+  check (list string) "the fresh original basis publishes exactly its complete disposition"
+    [together.claim] (List.map (fun (value:Types.fact) -> value.claim) committed.facts);
+  check int "fresh basis creates one new revision" (captured.revision+1) committed.revision;
+  check bool "actual atom receipt belongs to this original disposition" true
+    ((Current.committed_durable_range ~keepers_dir ~keeper_id:"keeper"
+      ~receipt_scope:durable_range_id.receipt_scope |> require_ok)=Some durable_range_id);
+  require_official ~keepers_dir;
+  let records=Masc.Keeper_memory_absorbed.read ~keepers_dir ~keeper_id:"keeper" |> require_ok in
+  (match records with
+   | [_,Ok (row:Masc.Keeper_memory_absorbed.record)] -> check string "fresh absorption archives its original source identity"
+       (Types.memory_id a) row.memory_id
+   | [_,Error error] -> fail (Masc.Keeper_memory_absorbed.read_error_to_string error)
+   | [] | _::_::_ -> fail "fresh original absorption lacks its exact retained source row");
+  let retired=Current.read_dropped ~keepers_dir ~keeper_id:"keeper" ~current_facts:committed.facts |> require_ok in
+  check (list string) "fresh original retirement archives its actual original fact" [b.claim]
+    (List.map (fun (row:Current.archived_fact) -> row.original.claim) retired)
 ;;
 
 let unread_receipt_fixture () =
@@ -4925,7 +4996,14 @@ let test_generic_publication_conflict_preserves_stores () =
 let () =
   run
     "keeper_memory_os_current"
-    [ ("ordered identity recall", [
+    [ ("locked disposition basis", [
+        test_case "a later explicit writer refuses stale basis before any new effect" `Quick
+          (test_disposition_basis_refuses_effects Stale_revision);
+        test_case "same revision with a different complete fact value refuses all effects" `Quick
+          (test_disposition_basis_refuses_effects Different_fact_at_same_revision);
+        test_case "fresh complete basis publishes real Memory archive and range receipts" `Quick
+          test_disposition_fresh_basis_publishes_original_effects]);
+      ("ordered identity recall", [
         test_case "raw same-ID replacement cannot revive bindings" `Quick test_successor_recall_rejects_raw_same_identity_incarnation;
         test_case "explicit ordered net-zero edges remain Following rather than direct aliases" `Quick test_successor_recall_follows_ordered_net_zero_incarnation;
         test_case "program revision and absorption preserve the exact ordered successor path" `Quick test_successor_recall_follows_program_revision_and_absorption;

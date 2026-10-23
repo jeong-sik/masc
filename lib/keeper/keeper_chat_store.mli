@@ -583,6 +583,8 @@ type captured_row
 val load_captured_result : select:(chat_message -> bool) -> base_dir:string -> keeper_name:string ->
   (captured_row list, strict_decode_error) result
 val captured_row_message : captured_row -> chat_message
+val captured_row_same_source : captured_row -> captured_row -> bool
+(** Exact original row bytes, independent of later redaction changes. *)
 val captured_row_to_json : captured_row -> Yojson.Safe.t
 val captured_row_of_json : Yojson.Safe.t -> (captured_row, string) result
 

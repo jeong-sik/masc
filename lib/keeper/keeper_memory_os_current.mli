@@ -687,8 +687,17 @@ val apply_program :
     A later journal failure leaves a committed target with recoverable proof,
     not a rejection of the already published Memory. *)
 
+type disposition_basis =
+  { expected_revision : int option
+  ; expected_facts : Keeper_memory_os_types.fact list option
+  }
+(** Complete original Memory basis for a disposition. Both [None] values name
+    an absent snapshot; [Some []] still names an existing empty snapshot.
+    Ordered facts include every stored field, not only identity or claim text. *)
+
 val apply_disposition
-  :  ?on_committed:(disposition -> unit)
+  :  ?expected_basis:disposition_basis
+  -> ?on_committed:(disposition -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
   -> ?durable_range_id:durable_range_id
@@ -705,8 +714,13 @@ val apply_disposition
   -> new_claims:Keeper_memory_os_types.fact list
   -> unit
   -> (disposition, string) result
-(** Apply a librarian's decision to whatever the snapshot holds when the lock
-    is taken.
+(** Apply a librarian's decision to the snapshot held under the write lock.
+    With [expected_basis], compare the complete original revision and ordered
+    facts under the existing aggregate/snapshot locks before disposition
+    planning, absorbed rows, or this disposition's publication/receipts. A
+    mismatch refuses this new disposition; recovery/reconciliation of an
+    earlier publication still precedes the comparison. Without it, use whatever
+    snapshot exists when the write lock is taken.
 
     The librarian says what changes: retire this one for the reason in
     [dropped_statements], add these new claims. Keeping is what happens to

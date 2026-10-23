@@ -8,7 +8,9 @@ tag, finds the `### Added` section, and reports:
 
 - total added bullets (top-level `- ` lines inside the section)
 - guideless count and their bullets (markers: 가이드 없음(대상 문서: ...) and
-  가이드 없음(문서 없음))
+  가이드 없음(문서 없음), plus the English v0.54.0 spelling
+  "No guide yet (none found in docs/guides, TUI-GUIDE.md or
+  KEEPER-USER-MANUAL.md)")
 - a JSON and a Markdown summary (so the number can be committed next to the
   note, e.g. docs/releases/guide-metrics-<tag>.md)
 
@@ -29,7 +31,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-MARKER_OPEN = "가이드 없음("
+# All guideless spellings the counter recognises. The Korean markers are the
+# canonical spelling (see docs/releases/guide-metrics-v0.54.0.md); the
+# English "No guide yet (" form was used once, in the published v0.54.0
+# notes, so old notes keep counting the same way.
+GUIDELESS_MARKERS = (
+    "가이드 없음(",
+    "No guide yet (",
+)
 
 
 def read_note(path: str | None, tag: str, from_github: bool) -> str:
@@ -88,7 +97,7 @@ def added_bullets(note: str) -> list[str]:
 
 
 def is_guideless(bullet: str) -> bool:
-    return MARKER_OPEN in bullet
+    return any(marker in bullet for marker in GUIDELESS_MARKERS)
 
 
 def main() -> int:

@@ -163,7 +163,7 @@ describe('Ops command-surface skin (keeper-v2 command.jsx parity)', () => {
     expect(links?.querySelector('.tm-lane-t')?.textContent).toBe('Gate 열기')
   })
 
-  it('omits cmd-gatelinks on the default view (approvals surface is inline there)', async () => {
+  it('omits cmd-gatelinks on the default view', async () => {
     const stores = await loadOps()
     seedStores(stores)
     stores.operatorActionLog.value = []

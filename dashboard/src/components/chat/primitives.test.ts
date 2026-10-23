@@ -257,8 +257,7 @@ describe('ChatTranscript', () => {
       .find(button => button.textContent?.includes('승인 화면 열기'))
     expect(openGate).toBeDefined()
     fireEvent.click(openGate!)
-    expect(window.location.hash).toContain('command')
-    expect(window.location.hash).toContain('view=gate')
+    expect(window.location.hash).toBe('#approvals')
     window.location.hash = originalHash
   })
 

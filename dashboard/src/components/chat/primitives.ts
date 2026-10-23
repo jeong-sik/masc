@@ -2711,7 +2711,7 @@ function ChatControlStatusCard({
             <button
               type="button"
               class="inline-flex items-center gap-1.5 rounded-[var(--r-1)] border border-[var(--warn-35)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)] ${CHAT_FOCUS_RING}"
-              onClick=${() => navigate('command', { section: 'operations', view: 'gate' })}
+              onClick=${() => navigate('approvals')}
             >
               승인 화면 열기
               <${ArrowRight} size=${13} aria-hidden="true" />

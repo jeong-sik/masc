@@ -230,6 +230,6 @@ describe('CmdGateLinks (keeper-v2 command parity)', () => {
     ;(container.querySelector('.tm-lane') as HTMLButtonElement).click()
     await flushUi()
 
-    expect(replaceRoute).toHaveBeenCalledWith('command', { section: 'operations', view: 'gate' })
+    expect(replaceRoute).toHaveBeenCalledWith('approvals')
   })
 })

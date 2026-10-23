@@ -58,7 +58,7 @@ import './styles/ss-keeper-v2-bridge.css'
 // and serialized into repeated merge conflicts across parallel surface PRs;
 // the glob removes that shared anchor. Ordering note: all *-v2.css load at this
 // point (after variables.css and dashboard.css), preserving the cases where a
-// v2 rule overrides its v1 counterpart (.gd-board, .mg-board, .ide-plane-shell).
+// v2 rule overrides its v1 counterpart (for example, .ide-plane-shell).
 import.meta.glob('./styles/*-v2.css', { eager: true })
 
 // ── keeper-v2 prototype CSS — the SSOT skin (big-bang v2 reskin) ──

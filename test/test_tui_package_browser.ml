@@ -60,7 +60,7 @@ let navigation () =
     entries=[Folder "/workspace/packages/nested";Package {manifest_path="/workspace/packages/p/lane.toml";metadata};Issue {path="/workspace/packages/bad/lane.toml";message="parse failed"}]} in
   let state=Browser.receive (Catalog.to_json snapshot) (Browser.create ()) |> ok in
   (match Browser.handle ~key:"enter" state |> ok with Browse (Some path) -> check string "folder navigation" "/workspace/packages/nested" path | _ -> fail "folder did not open");
-  let state=move "j" state in
+  let state=move "j" (move "j" state) in
   (match Browser.handle ~key:"enter" state |> ok with Preview path -> check string "fresh preview of selected manifest" "/workspace/packages/p/lane.toml" path | _ -> fail "missing preview");
   (match Browser.handle ~key:"right" state |> ok with Browse (Some path) -> check string "package directory remains navigable" "/workspace/packages/p" path | _ -> fail "missing package directory");
   List.iter (fun key ->
@@ -70,12 +70,30 @@ let navigation () =
   let reordered={snapshot with entries=List.rev snapshot.entries} in
   let state=Browser.receive (Catalog.to_json reordered) state |> ok in
   check (option string) "refresh preserves exact selected manifest" (Some "/workspace/packages/p/lane.toml") (Browser.selected_manifest state);
-  let bad=move "home" state in
+  let bad=move "j" (move "home" state) in
   check bool "issue is not installable" true (Result.is_error (Browser.handle ~key:"enter" bad));
   check bool "manual path remains available" true (Browser.handle ~key:"p" state = Ok Browser.Manual);
   check bool "directory jump available" true (Browser.handle ~key:"g" state = Ok Browser.Jump);
   check bool "n opens the raw TOML declaration editor" true (Browser.handle ~key:"n" state = Ok Browser.Declare);
   check bool "unknown response does not fabricate entries" true (Result.is_error (Browser.receive (`Assoc []) state))
+
+let roles () =
+  let package name category = Catalog.Package {manifest_path="/w/"^name^"/lane.toml";
+    metadata={metadata with title=name;ui_category=category}} in
+  let a=package "analysis" (Some Masc.Lane_addon_category.Analysis)
+  and b=package "browser" (Some Masc.Lane_addon_category.Browser)
+  and u=package "plain" None
+  and b2=package "browser2" (Some Masc.Lane_addon_category.Browser) in
+  let snapshot=Catalog.{directory="/w";parent=None;entries=[u;a;Folder "/w/f";b;Issue {path="/w/bad/lane.toml";message="bad"};b2]} in
+  let state=Browser.receive (Catalog.to_json snapshot) (Browser.create ()) |> ok in
+  let walk state = List.fold_left (fun (state,seen) _ ->
+    let seen=Browser.selected_manifest state :: seen in (move "j" state, seen)) (state,[]) (List.init 6 Fun.id) |> snd |> List.rev in
+  check (list (option string)) "folders and issues first, then roles; headers never selected"
+    [None;None;Some "/w/browser/lane.toml";Some "/w/browser2/lane.toml";Some "/w/analysis/lane.toml";Some "/w/plain/lane.toml"] (walk state);
+  let state=move "j" (move "j" (move "j" state)) in
+  (match Browser.handle ~key:"enter" state |> ok with Preview path -> check string "Enter previews the displayed package" "/w/browser2/lane.toml" path | _ -> fail "missing preview");
+  let refreshed=Browser.receive (Catalog.to_json {snapshot with entries=List.rev snapshot.entries}) state |> ok in
+  check (option string) "refresh keeps manifest identity" (Some "/w/browser2/lane.toml") (Browser.selected_manifest refreshed)
 
 let reachable_large_list () =
   let snapshot=Catalog.{directory="/workspace";parent=None;entries=List.init 100 (fun i -> Folder (Printf.sprintf "/workspace/folder-%03d" i))} in
@@ -104,5 +122,6 @@ let () = run "Local package discovery and selection" ["journeys",[
   test_case "discover actual directory with explicit loader outcomes" `Quick discover_workspace;
   test_case "never load manifests outside workspace" `Quick containment;
   test_case "folder to package selection and existing preview handoff" `Quick navigation;
+  test_case "packages are grouped by role without moving folders or issues" `Quick roles;
   test_case "all entries reachable in a short terminal" `Quick reachable_large_list;
   test_case "an unread remembered folder still reaches the workspace root" `Quick unread_remembered_folder]]

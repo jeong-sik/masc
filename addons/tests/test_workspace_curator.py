@@ -10,6 +10,7 @@ import stat
 import sys
 import tempfile
 import tomllib
+import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -280,6 +281,75 @@ class CuratorWorker(unittest.TestCase):
                        "result": exact_worker.REQUEST_BODY_REFUSED}
             self.assertEqual([self.output(reply) for reply in replies[:2]], [refused, refused])
             self.assertEqual(self.output(replies[2])["requests"], [])
+
+    def finished_store(self, count, body):
+        """A store with [count] finished requests whose system text is [body]."""
+        directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, directory)
+        worker = exact_worker.Worker(directory, FRAME, self.module().CONTRACT)
+        for index in range(count):
+            original = {**request(f"original-finished-{index}"), "system": body}
+            worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"})
+            worker.host_result({"request_id": original["request_id"], "result": {"status": "outcome_unknown"}})
+        return directory
+
+    def peak(self, directory, *, before=lambda _worker: None, during):
+        worker = exact_worker.Worker(directory, FRAME, self.module().CONTRACT)
+        before(worker)
+        tracemalloc.start()
+        try:
+            during(worker)
+            return tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
+    def test_finished_bodies_are_held_one_at_a_time_and_read_once(self):
+        body = "x" * 1_000_000
+        one, six = self.finished_store(1, body), self.finished_store(6, body)
+        listing_of = lambda worker: worker.host_requests({})
+        # The first inventory reads every record, one body at a time (#45456).
+        self.assertLess(self.peak(six, during=listing_of), 2 * self.peak(one, during=listing_of))
+
+        def later(worker):
+            worker.invoke({"kind": "submit", "request": request("original-new")}, {"kind": "operator"})
+            worker.host_requests({})
+            worker.observe({"binding": {}, "sources": []})
+        # After it, submits, listings and observations read no finished body.
+        self.assertLess(self.peak(six, before=listing_of, during=later), len(body))
+
+    def test_a_pending_record_changed_outside_the_worker_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)
+            original = request()
+            worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"})
+            self.assertEqual(worker.host_requests({}), {"requests": [original]})
+            path = worker.store.path(original["request_id"])
+            record = json.loads(path.read_text())
+            path.write_text(json.dumps({**record, "result": {"status": "outcome_unknown"}}))
+            with self.assertRaises(exact_worker.InvalidInput):
+                worker.host_requests({})
+            path.unlink()
+            with self.assertRaises(FileNotFoundError):
+                worker.host_requests({})
+
+    def test_a_reopened_worker_reports_the_same_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.module().CONTRACT
+            small, large = request("original-small"), {**request("original-large"), "system": "x" * FRAME}
+            finished, pending = request("original-finished"), request("original-pending")
+            worker = exact_worker.Worker(Path(directory), FRAME, contract)
+            for original in (large, finished, pending):
+                worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"})
+            worker.host_result({"request_id": finished["request_id"], "result": {"status": "outcome_unknown"}})
+            worker.invoke({"kind": "submit", "request": small}, {"kind": "operator"})
+            observation = lambda w: w.observe({"binding": {}, "sources": []})["rows"][0]["fields"]
+            fields = observation(worker)
+            self.assertEqual((fields["pending"], fields["finished"]), (2, 2))
+            reopened = exact_worker.Worker(Path(directory), FRAME, contract)
+            self.assertEqual(observation(reopened), fields)
+            self.assertEqual(reopened.host_requests({}), worker.host_requests({}))
+            self.assertCountEqual(worker.host_requests({})["requests"],
+                                  [contract.host_request(pending), contract.host_request(small)])
 
     def test_shared_import_works_in_the_packaged_mount_layout(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -100,6 +100,13 @@ def record_id(record: dict) -> str:
     return record["request"]["request_id"] if "request" in record else record["request_id"]
 
 
+@dataclass(frozen=True)
+class Retained:
+    """What a listing or an observation needs from a record, without its body."""
+    request_id: str
+    pending: bool
+
+
 def pairs(items) -> dict:
     result = {}
     for key, value in items:
@@ -161,6 +168,9 @@ class Store:
             raise InvalidInput("Exact request store is not a directory")
         self.identity = (info.st_dev, info.st_ino)
         self.failed = False
+        # Every record's identity and state by file name, built by the first
+        # inventory and kept current by write: this worker is the only writer.
+        self.index: dict[str, Retained] | None = None
         # A first request ACK requires both its directory entry and the new
         # store entry in the installation state root to survive a crash.
         self.sync_directory(self.directory)
@@ -238,13 +248,33 @@ class Store:
                 # and its identity is checked again before returning to caller.
                 return None
 
-    def records(self) -> list[dict]:
+    def inventory(self) -> list[tuple[str, Retained]]:
+        """Every record's file name, request id and state, in name order.
+
+        The first call reads and checks each record once, one at a time, so it
+        holds one request body instead of the whole store. Later calls answer
+        from memory; finished bodies are not read again."""
         if self.failed:
             raise InvalidInput("Exact request persistence is unconfirmed")
+        if self.index is None:
+            index = {}
+            with self.open_directory() as directory_fd:
+                with os.scandir(directory_fd) as entries:
+                    names = sorted(entry.name for entry in entries if entry.name.endswith(".json"))
+                for name in names:
+                    record = self.read_path(name, directory_fd)
+                    index[name] = Retained(record_id(record), record["result"] is None)
+            self.index = index
+        return sorted(self.index.items())
+
+    def pending(self) -> list[dict]:
+        """The pending records in name order, read and checked again."""
+        names = [name for name, retained in self.inventory() if retained.pending]
         with self.open_directory() as directory_fd:
-            with os.scandir(directory_fd) as entries:
-                names = sorted(entry.name for entry in entries if entry.name.endswith(".json"))
-            return [self.read_path(name, directory_fd) for name in names]
+            records = [self.read_path(name, directory_fd) for name in names]
+        if any(record["result"] is not None for record in records):
+            raise InvalidInput("an Exact request record changed outside this worker")
+        return records
 
     def write(self, record: dict) -> None:
         if self.failed:
@@ -252,6 +282,7 @@ class Store:
         try:
             with self.open_directory() as directory_fd:
                 temporary = ".exact-" + uuid.uuid4().hex
+                name = self.path(record_id(record)).name
                 fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                              0o600, dir_fd=directory_fd)
                 try:
@@ -259,10 +290,11 @@ class Store:
                         target.write(canonical(record) + "\n")
                         target.flush()
                         os.fsync(target.fileno())
-                    os.replace(temporary, self.path(record_id(record)).name,
-                               src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+                    os.replace(temporary, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
                     temporary = None
                     os.fsync(directory_fd)
+                    if self.index is not None:
+                        self.index[name] = Retained(record_id(record), record["result"] is None)
                 finally:
                     if temporary is not None:
                         os.unlink(temporary, dir_fd=directory_fd)
@@ -337,8 +369,7 @@ class Worker:
                         refused["tool"] = tool_name
                     self.store.write(refused)
                     return self.status(request_id, refused)
-                pending = [self.host_request(record["request"]) for record in self.store.records()
-                           if record["result"] is None]
+                pending = [self.host_request(record["request"]) for record in self.store.pending()]
                 if not self.fits({"requests": pending + listing}):
                     return {"request_id": request_id, "state": "capacity_wait"}
                 accepted = {"version": 1, "request": request, "digest": request_digest, "result": None}
@@ -362,11 +393,7 @@ class Worker:
         exact(args, set(), "host listing")
         if self.store.failed:
             raise InvalidInput("Exact request persistence is unconfirmed")
-        requests = []
-        for record in self.store.records():
-            if record["result"] is None:
-                candidate = self.host_request(record["request"])
-                requests.append(candidate)
+        requests = [self.host_request(record["request"]) for record in self.store.pending()]
         if not self.fits({"requests": requests}):
             raise InvalidInput("retained pending requests exceed the current declared reply frame")
         return {"requests": requests}
@@ -389,10 +416,10 @@ class Worker:
 
     def observe(self, args) -> dict:
         exact(args, {"binding", "sources"}, "observation")
-        records = self.store.records()
-        fields = {"pending": sum(record["result"] is None for record in records),
-                  "finished": sum(record["result"] is not None for record in records),
-                  "requests": [record_id(record) for record in records]}
+        inventory = [retained for _, retained in self.store.inventory()]
+        fields = {"pending": sum(retained.pending for retained in inventory),
+                  "finished": sum(not retained.pending for retained in inventory),
+                  "requests": [retained.request_id for retained in inventory]}
         output = {"rows": [{"id": self.contract.row_id, "lane_id": self.contract.lane_id, "kind": "value",
                             "title": self.contract.title, "observed_at": time.time(),
                             "subject_id": self.contract.tool_name, "clock": None, "actor": None,

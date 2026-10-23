@@ -74,7 +74,7 @@ caller envelope.
 Build the optional container from the repository root:
 
 ```sh
-docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.2 addons
+docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.3 addons
 ```
 
 The host mounts the package at `/addon` and its installation-owned persistent

@@ -1,8 +1,8 @@
 id = "keeper-librarian"
-revision = "0.2.0"
+revision = "0.2.1"
 title = "Keeper Librarian proposal worker"
 contributions = ["derive"]
-image = "masc-lane-keeper-librarian:0.2.0"
+image = "masc-lane-keeper-librarian:0.2.1"
 command = ["python3", "server.py", "--state", "/state"]
 
 [world.state]

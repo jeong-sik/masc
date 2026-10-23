@@ -49,7 +49,7 @@ does not mean the host committed its ledger or published a complete briefing.
 Build the optional image from the repository root:
 
 ```sh
-docker build -f addons/workspace-curator/Dockerfile -t masc-lane-workspace-curator:0.1.1 addons
+docker build -f addons/workspace-curator/Dockerfile -t masc-lane-workspace-curator:0.1.2 addons
 ```
 
 The image includes `exact_worker.py` and `protocol.py` outside the read-only

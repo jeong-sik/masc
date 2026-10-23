@@ -502,8 +502,9 @@ let rec execute_unlocked t = function
                  ("BiDi setup incomplete; session cleanup failed: " ^ error_message error));
          let* capabilities = match field "capabilities" result with
            | Some value -> Ok value | None -> Error (Protocol "Firefox omitted capabilities") in
-         (* A browser left on the driver's fixed Marionette port by an earlier
-            session would otherwise answer this one. *)
+         (* geckodriver reaches the browser through the Marionette port the
+            given profile reports; a session whose browser runs another
+            profile is not the one this client started. *)
          let* () = match profile, field "moz:profile" capabilities with
            | None, (Some _ | None) -> Ok ()
            | Some expected, Some (`String reported) when String.equal reported expected -> Ok ()

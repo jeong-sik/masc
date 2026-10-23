@@ -75,7 +75,9 @@ expression view, preventing edits to a hidden target.
 In any view, `:time HOST_TICKS` sets the selected message's authored UInt64 host
 time; `:shift-time SIGNED_TICKS` moves it by an exact integer offset. Use
 `:reset-time` to restore its original timestamp. The list retains the original
-packet/word ID and shows original and authored times together. Time edits never
+packet/word ID and shows approximate source-relative seconds, with `*` for an
+authored time. `:clock` inspects the selected event's exact current and original
+source timestamps and the source origin. Time edits never
 round through floating-point seconds or a PPQ projection. Even messages recorded
 inside one packet can move independently. Derived packets contain complete UMP
 messages in host-time order; equal times retain original presentation order.
@@ -111,6 +113,47 @@ manifest has the edited packet count, an explicit `umpSourceSpan`, and an origin
 matching that span. Standalone inspection/audition and arrangement placement
 consume this same span. Export/import does not restore prior editor history;
 save the arrangement for that.
+
+## Edit in seconds
+
+Use decimal source seconds when absolute host ticks are inconvenient:
+
+```
+at-seconds -.125
+shift-seconds .025
+note-seconds 4:0 .2 .6
+duration-seconds 4:0 .4
+clock
+```
+
+`:at-seconds S` positions the selected event relative to this asset's fixed
+original source origin; `:shift-seconds S` moves it relative to its current
+authored time. `:note-seconds OFF_ID START_S END_S` positions an explicit
+attack/release pair, while `:duration-seconds OFF_ID S` sets the release relative
+to the current attack. The same explicit release-address checks and atomic
+history as host-tick commands apply. These commands do not infer tempo or beats.
+
+The fixed zero includes the original take's pre-roll and declared source span.
+It is not necessarily WAV frame zero or the current earliest authored event.
+Moving an event before zero does not change the meaning of the next seconds
+command. An exported derived session imported as a new take uses that new
+asset's declared source origin; it does not restore the previous editor's
+history or redefine an imported authored event as an original recording.
+
+Decimal input is parsed as an integer rational and quantized once to the nearest
+whole host-clock tick, with exact half ties away from zero. Positive durations
+that round to zero ticks and results outside UInt64 host time are refused.
+Signs and a leading decimal point are allowed; exponents, hexadecimal, infinity
+and nonnumeric values are refused. No floating-point absolute timestamp is used
+to make a time edit. Existing source-region start/end commands keep their own
+inward rounding policy.
+
+The event list's six decimal places are an approximate display, not the stored
+precision. `:clock` is read-only and returns exact current host time, original
+event time within this source, and fixed source zero. If this asset was imported
+from an authored export, its original source-event time can itself be authored;
+the earliest recorded timestamp provenance remains in the native packets and
+original source bundle. Reset/undo and exports continue to use full native ticks.
 
 `:revoice SYMBOL MODE [OCTAVE [INVERSION]]` changes the exact-onset group sharing
 the selected attack's source, group and channel. Voices sort by their current

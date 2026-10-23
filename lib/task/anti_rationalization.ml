@@ -900,16 +900,15 @@ let run
 
 (* The Task lane: its own prompt variables, its own log subject. Everything
    after the prompt string is the shared {!run}. *)
-let review
+let run_review
       ?evaluator_runtime
       ?generator_runtime
       ?on_verdict
       ?on_tool_result
 
       ?(sw : Eio.Switch.t option = None)
-      ~(question : verdict_question)
+      ~render_prompt
       ~(lookup : lookup_surface)
-      ~(lookup_root : lookup_root)
       ~provider_rest
       ~base_path
       (req : review_request)
@@ -939,9 +938,22 @@ let review
       Log.Task.info "task_id=%s [task-completion-review] %s" req.task_id message)
     ~log_warn:(fun message ->
       Log.Task.warn "task_id=%s [task-completion-review] %s" req.task_id message)
-    ~render_prompt:(fun () -> build_prompt ~question ~lookup ~lookup_root req)
+    ~render_prompt
     ~lookup:lookup_for_judge
     ~provider_rest
     ~base_path
     ()
+;;
+
+let review ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result
+    ?sw ~question ~lookup ~lookup_root ~provider_rest ~base_path req =
+  run_review ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result
+    ?sw ~render_prompt:(fun () -> build_prompt ~question ~lookup ~lookup_root req)
+    ~lookup ~provider_rest ~base_path req
+;;
+
+let review_rendered ?on_verdict ?on_tool_result ?sw ~prompt ~lookup
+    ~provider_rest ~base_path req =
+  run_review ?on_verdict ?on_tool_result ?sw ~render_prompt:(fun () -> Ok prompt)
+    ~lookup ~provider_rest ~base_path req
 ;;

@@ -19,6 +19,29 @@
 
 type t
 
+type task_review
+(** A host-built read-only surface bound to one submitted verification. *)
+
+val create_task_review :
+  config:Workspace.config -> verification_id:string -> task_id:string -> producer:string ->
+  evidence_access:Workspace_verification_store.submitted_evidence_access ->
+  (task_review, string) result
+(** Validate the submitted header and freeze the actual descriptors, evidence
+    snapshot, workspace, producer and root together. No caller dispatch closure
+    can be substituted for this surface. *)
+
+val task_review_binding : task_review -> string
+(** Canonical SHA-256 of the complete authority projection, including full tool
+    schemas and submitted evidence bytes, rather than only names or layout. *)
+val task_review_base_path : task_review -> string
+val task_review_root : task_review -> Task.Anti_rationalization.lookup_root
+val task_review_tools : task_review -> t
+val task_review_subject : task_review -> Workspace_verification_store.request_header
+val validate_task_review : task_review -> (unit, string) result
+val task_review_lookup : task_review -> Task.Anti_rationalization.lookup_surface
+(** Recheck route configuration before execution and each lookup. Actual file
+    containment and endpoint dispatch remain owned by the existing backend. *)
+
 val create :
   config:Workspace.config -> producer:string ->
   submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> (t, string) result

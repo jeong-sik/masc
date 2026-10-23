@@ -245,6 +245,16 @@ val build_prompt
   -> review_request
   -> (string, string) result
 
+val review_rendered :
+  ?on_verdict:(review_result -> unit) ->
+  ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
+  ?sw:Eio.Switch.t option -> prompt:string -> lookup:lookup_surface ->
+  provider_rest:(string -> provider_rest) -> base_path:string ->
+  review_request -> review_result
+(** Execute a retained exact prompt through the same media delivery, lookup
+    success projection, slot failover and structured verdict channel as
+    {!review}. Does not read or re-render the current prompt registry. *)
+
 val parse_review_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
 
 (** Which decision a refused [report_review_verdict] call named. *)

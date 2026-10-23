@@ -37,6 +37,7 @@ let make_original ~verification_id ~attempt =
       ~attempt
       ~question:sample_question
       ~lookup_root:sample_root
+      ~lookup_binding:(String.make 64 'a')
       ~lookup_schemas:sample_schemas
       sample_request
   with
@@ -102,7 +103,8 @@ let test_round_trip_with_blank_notes () =
         ~attempt:0
         ~question:sample_question
         ~lookup_root:sample_root
-        ~lookup_schemas:sample_schemas
+        ~lookup_binding:(String.make 64 'a')
+      ~lookup_schemas:sample_schemas
         blank_request
     with
     | Ok original -> original
@@ -140,6 +142,7 @@ let test_empty_lookup_schemas_rejected () =
       ~attempt:0
       ~question:sample_question
       ~lookup_root:sample_root
+      ~lookup_binding:(String.make 64 'a')
       ~lookup_schemas:[]
       sample_request
   with

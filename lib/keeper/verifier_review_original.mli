@@ -47,6 +47,7 @@ val prepare
   -> question:Task.Anti_rationalization.verdict_question
   -> lookup_root:Task.Anti_rationalization.lookup_root
   -> lookup_schemas:string list
+  -> lookup_binding:string
   -> Task.Anti_rationalization.review_request
   -> (t, string) result
 (** Capture the original of one review attempt. [lookup_schemas] is the tool
@@ -61,6 +62,8 @@ val review_request : t -> Task.Anti_rationalization.review_request
 val question : t -> Task.Anti_rationalization.verdict_question
 val lookup_root : t -> Task.Anti_rationalization.lookup_root
 val lookup_schemas : t -> string list
+val lookup_binding : t -> string
+(** The canonical authority digest of the host-built task review surface. *)
 val system_prompt_text : t -> string
 val output_contract : t -> string
 

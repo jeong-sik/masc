@@ -83,15 +83,18 @@ type t =
   ; question : AR.verdict_question
   ; lookup_root : AR.lookup_root
   ; lookup_schemas : string list
+  ; lookup_binding : string
   ; system_prompt : string
   ; output_contract : string
   }
 
-let prepare ~verification_id ~attempt ~question ~lookup_root ~lookup_schemas req =
+let prepare ~verification_id ~attempt ~question ~lookup_root ~lookup_schemas ~lookup_binding req =
   if String.trim verification_id = ""
   then Error "verifier review original requires a non-blank verification_id"
   else if attempt < 0
   then Error "verifier review original attempt must be a non-negative integer"
+  else if not (String_util.is_lowercase_sha256_hex lookup_binding)
+  then Error "verifier review original requires a canonical authority digest"
   else if lookup_schemas = []
   then Error "verifier review original requires the reviewer's lookup tool names"
   else (
@@ -106,6 +109,7 @@ let prepare ~verification_id ~attempt ~question ~lookup_root ~lookup_schemas req
       ; question
       ; lookup_root
       ; lookup_schemas
+      ; lookup_binding
       ; system_prompt
       ; output_contract = canonical_output_contract ()
       })
@@ -117,6 +121,7 @@ let review_request t = t.review_request
 let question t = t.question
 let lookup_root t = t.lookup_root
 let lookup_schemas t = t.lookup_schemas
+let lookup_binding t = t.lookup_binding
 let system_prompt_text t = t.system_prompt
 let output_contract t = t.output_contract
 
@@ -364,6 +369,7 @@ let lookup_schemas_of_json (json : Yojson.Safe.t) : (string list, string) result
 
 let field_names =
   [ "attempt"
+  ; "lookup_binding"
   ; "lookup_root"
   ; "lookup_schemas"
   ; "output_contract"
@@ -384,6 +390,7 @@ let to_json t =
     ; "question", verdict_question_to_json t.question
     ; "lookup_root", lookup_root_to_json t.lookup_root
     ; "lookup_schemas", lookup_schemas_to_json t.lookup_schemas
+    ; "lookup_binding", `String t.lookup_binding
     ; "system_prompt", `String t.system_prompt
     ; "output_contract", `String t.output_contract
     ]
@@ -413,6 +420,10 @@ let of_json json =
         else Error "verifier review original has an unknown schema"
       in
       let* verification_id = text "verification_id" in
+      let* lookup_binding = text "lookup_binding" in
+      let* () =
+        if String_util.is_lowercase_sha256_hex lookup_binding then Ok ()
+        else Error "verifier review original authority digest is invalid" in
       let* system_prompt = text "system_prompt" in
       let* output_contract = text "output_contract" in
       let* attempt =
@@ -439,6 +450,7 @@ let of_json json =
           ; question
           ; lookup_root
           ; lookup_schemas
+          ; lookup_binding
           ; system_prompt
           ; output_contract
           })

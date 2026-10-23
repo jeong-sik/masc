@@ -4719,6 +4719,7 @@ let rewrite_private_file_durable_locked_result path decide =
 type private_jsonl_append_error =
   | Incomplete_jsonl_tail
   | Incomplete_jsonl_tail_truncate_failed of durable_append_failure
+  | Existing_jsonl_refused of string
   | Invalid_jsonl_suffix
   | Negative_expected_end_offset of int
   | End_offset_mismatch of
@@ -4734,6 +4735,7 @@ let private_jsonl_append_error_to_string = function
     Printf.sprintf
       "existing JSONL file ends with an incomplete row that could not be cut: %s"
       (durable_append_failure_to_string failure)
+  | Existing_jsonl_refused detail -> "existing JSONL refused: " ^ detail
   | Invalid_jsonl_suffix ->
     "JSONL append suffix must be non-empty and newline-terminated"
   | Negative_expected_end_offset offset ->
@@ -4786,7 +4788,25 @@ let truncate_incomplete_jsonl_tail ~path ~fd ~end_offset =
            (run_unix_io ~operation:Incomplete_tail_fsync (fun () -> Unix.fsync fd))))
 ;;
 
+(* Called under the append lock; stops after the first row without loading the
+   journal. A file with only an incomplete first row is presented as-is. *)
+let read_first_jsonl_row fd =
+  ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+  let row = Buffer.create 256 in
+  let chunk = Bytes.create 4096 in
+  let rec loop () =
+    match Unix.read fd chunk 0 (Bytes.length chunk) with
+    | 0 -> Buffer.contents row
+    | count ->
+        (match Bytes.index_opt (Bytes.sub chunk 0 count) '\n' with
+         | Some newline -> Buffer.add_subbytes row chunk 0 newline; Buffer.contents row
+         | None -> Buffer.add_subbytes row chunk 0 count; loop ())
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop () in
+  loop ()
+;;
+
 let append_private_jsonl_durable_locked_with_expected_end_offset_with_io
+      ?validate_first_row
       ~io
       path
       ~expected_end_offset
@@ -4829,6 +4849,13 @@ let append_private_jsonl_durable_locked_with_expected_end_offset_with_io
                   ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
                   lock_whole_file fd;
                   let original_length = Unix.lseek fd 0 Unix.SEEK_END in
+                  let validation = match validate_first_row with
+                    | None -> Ok ()
+                    | Some _ when original_length = 0 -> Ok ()
+                    | Some validate ->
+                        validate (read_first_jsonl_row fd)
+                        |> Result.map_error (fun detail -> Existing_jsonl_refused detail) in
+                  Result.bind validation (fun () ->
                   match expected_end_offset with
                   | Some expected when expected <> original_length ->
                     Error
@@ -4881,7 +4908,7 @@ let append_private_jsonl_durable_locked_with_expected_end_offset_with_io
                        |> Result.map_error (fun error ->
                          Durable_jsonl_append_failed error)
                        |> Result.map (fun () ->
-                         append_from + String.length suffix)))))
+                         append_from + String.length suffix))))))
 ;;
 
 let append_private_jsonl_durable_locked_with_expected_end_offset_result
@@ -4916,6 +4943,14 @@ let append_private_jsonl_durable_locked_at_end_offset_result
 
 let append_private_jsonl_durable_locked_result path suffix =
   append_private_jsonl_durable_locked_with_end_offset_result path suffix
+  |> private_file_transaction_map ignore
+;;
+
+let append_private_jsonl_durable_locked_validated_result ~validate_first_row path suffix =
+  append_private_jsonl_durable_locked_with_expected_end_offset_with_io
+    ~validate_first_row
+    ~io:private_jsonl_transaction_unix_io
+    path ~expected_end_offset:None suffix
   |> private_file_transaction_map ignore
 ;;
 

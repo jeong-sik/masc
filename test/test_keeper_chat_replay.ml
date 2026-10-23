@@ -253,6 +253,7 @@ let test_read_result_names_missing_corrupt_and_unreadable () =
   with_base "keeper-chat-replay-read" (fun base_dir ->
     let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
     (match L.read_journal_path_result path with
+     | Error (L.Journal_unsupported_version version) -> Alcotest.fail (L.version_mismatch_to_string version)
      | Error L.Journal_missing -> ()
      | Error (L.Journal_unreadable d) -> Alcotest.fail ("missing read as unreadable: " ^ d)
      | Error (L.Journal_corrupt d) -> Alcotest.fail ("missing read as corrupt: " ^ d)
@@ -267,6 +268,7 @@ let test_read_result_names_missing_corrupt_and_unreadable () =
     close_out oc;
     (match L.read_journal_path_result path with
      | Error (L.Journal_corrupt _) -> ()
+     | Error (L.Journal_unsupported_version version) -> Alcotest.fail (L.version_mismatch_to_string version)
      | Error L.Journal_missing -> Alcotest.fail "corrupt read as missing"
      | Error (L.Journal_unreadable d) -> Alcotest.fail ("corrupt read as unreadable: " ^ d)
      | Ok _ -> Alcotest.fail "a corrupt line decoded");
@@ -279,6 +281,7 @@ let test_read_result_names_missing_corrupt_and_unreadable () =
         (fun () ->
            match L.read_journal_path_result path with
            | Error (L.Journal_unreadable _) -> ()
+           | Error (L.Journal_unsupported_version version) -> Alcotest.fail (L.version_mismatch_to_string version)
            | Error L.Journal_missing -> Alcotest.fail "unreadable read as missing"
            | Error (L.Journal_corrupt d) -> Alcotest.fail ("unreadable read as corrupt: " ^ d)
            | Ok _ -> Alcotest.fail "an unreadable file yielded entries")
@@ -435,14 +438,14 @@ let test_handler_replay_degrades_to_nothing () =
     (* An append cut before its newline is not a row: the complete rows
        replay, so a client resumes from the last seq it was handed. *)
     let oc = open_out_gen [ Open_append; Open_wronly ] 0o600 path in
-    output_string oc "{\"v\":1,\"seq\":99,\"ts\":9.0,\"event\":{\"type\":\"text_de";
+    output_string oc "{\"v\":2,\"seq\":99,\"ts\":9.0,\"event\":{\"type\":\"text_de";
     close_out oc;
     Alcotest.(check (list string))
       "a torn tail replays the complete rows"
       (replay L.Whole_turn |> List.map frame)
       (replay_frames () |> List.map frame);
     let oc = open_out_gen [ Open_append; Open_wronly ] 0o600 path in
-    output_string oc "lta\",\"delta\":\"x\"}}\n{\"v\":1,\"seq\":100}\n";
+    output_string oc "lta\",\"delta\":\"x\"}}\n{\"v\":2,\"seq\":100}\n";
     close_out oc;
     Alcotest.(check int)
       "corrupt journal replays nothing rather than a prefix"

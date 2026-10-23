@@ -908,7 +908,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                 (fun (keeper, operation_id, verdict) ->
                    match verdict with
                    | Keeper_chat_journal_audit.Match -> ()
-                   | (Keeper_chat_journal_audit.Journal_missing | Keeper_chat_journal_audit.Journal_truncated | Keeper_chat_journal_audit.Mismatch _ | Keeper_chat_journal_audit.Journal_unreadable _ | Keeper_chat_journal_audit.Journal_corrupt _ | Keeper_chat_journal_audit.Store_unreadable _ | Keeper_chat_journal_audit.Liveness_unknown _) as verdict -> Otel_metric_store.inc_counter
+                   | (Keeper_chat_journal_audit.Journal_missing | Keeper_chat_journal_audit.Journal_truncated | Keeper_chat_journal_audit.Mismatch _ | Keeper_chat_journal_audit.Journal_unreadable _ | Keeper_chat_journal_audit.Journal_corrupt _ | Keeper_chat_journal_audit.Journal_unsupported_version _ | Keeper_chat_journal_audit.Store_unreadable _ | Keeper_chat_journal_audit.Liveness_unknown _) as verdict -> Otel_metric_store.inc_counter
                        Keeper_metrics.(to_string ChatJournalAuditMismatches)
                        ~labels:
                          [ "keeper", keeper

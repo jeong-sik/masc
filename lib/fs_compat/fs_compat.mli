@@ -1748,6 +1748,8 @@ type private_jsonl_append_error =
   | Incomplete_jsonl_tail_truncate_failed of durable_append_failure
       (** Reading the file to find the last ['\n'], cutting the final row that
           has none, or fsyncing the cut failed. The suffix was not written. *)
+  | Existing_jsonl_refused of string
+      (** A caller validator rejected the first existing row before any mutation. *)
   | Invalid_jsonl_suffix
   | Negative_expected_end_offset of int
   | End_offset_mismatch of
@@ -1796,6 +1798,16 @@ val append_private_jsonl_durable_locked_result :
   string ->
   string ->
   (unit, private_jsonl_append_error) private_file_transaction_outcome
+
+val append_private_jsonl_durable_locked_validated_result :
+  validate_first_row:(string -> (unit, string) result) ->
+  string -> string ->
+  (unit, private_jsonl_append_error) private_file_transaction_outcome
+(** Like {!append_private_jsonl_durable_locked_result}, but a non-empty file's
+    first row (or its fragment when no complete row exists) must pass the
+    caller's validator under the same exclusive append lock, before any tail
+    truncation or append. Empty files need no validation. A rejection preserves
+    all existing bytes. The callback must be pure and must not re-enter file IO. *)
 
 val append_private_jsonl_durable_locked_at_end_offset_with_io_for_testing :
   io:private_jsonl_transaction_io_for_testing ->

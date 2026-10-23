@@ -227,8 +227,10 @@ let test_envelope_round_trip () =
     { seq = 3; ts = 1_762_300_000.25; event = E.Text_delta {text="hi"; response=Unobserved_scope (None)} }
   in
   let encoded = L.journaled_event_to_json entry in
+  Alcotest.(check int) "writer names the persisted epoch" 2
+    Yojson.Safe.Util.(encoded |> member "v" |> to_int);
   match L.journaled_event_of_json encoded with
-  | Error detail -> Alcotest.failf "envelope decode failed: %s" detail
+  | Error detail -> Alcotest.failf "envelope decode failed: %s" (L.decode_failure_to_string detail)
   | Ok decoded ->
     Alcotest.(check int) "seq" 3 decoded.seq;
     Alcotest.(check (float 0.0)) "ts" 1_762_300_000.25 decoded.ts;
@@ -238,17 +240,21 @@ let test_envelope_round_trip () =
       (Yojson.Safe.to_string (L.keeper_chat_event_to_json decoded.event))
 
 let test_envelope_rejects_unknown_version () =
-  let json =
-    `Assoc
-      [ "v", `Int 99
-      ; "seq", `Int 0
-      ; "ts", `Float 1.0
-      ; "event", `Assoc [ "type", `String "text_delta"; "delta", `String "x" ]
-      ]
-  in
-  match L.journaled_event_of_json json with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "unknown codec version must be rejected"
+  List.iter (fun actual ->
+    (* Even an unrecognizable payload belongs to its explicit foreign epoch. *)
+    let json = `Assoc ["v", `Int actual; "foreign_payload", `Null] in
+    match L.journaled_event_of_json json with
+    | Error (L.Unsupported_version { expected = 2; actual = observed }) ->
+        Alcotest.(check int) "foreign epoch is retained" actual observed
+    | Error (L.Unsupported_version _) | Error (L.Malformed _) | Ok _ ->
+        Alcotest.fail "foreign codec must produce a typed version refusal") [1; 99];
+  List.iter (fun json ->
+    match L.journaled_event_of_json json with
+    | Error (L.Malformed _) -> ()
+    | Error (L.Unsupported_version _) | Ok _ ->
+        Alcotest.fail "absent, malformed, or duplicate versions must not choose an epoch")
+    [`Assoc []; `Assoc ["v", `Null]; `Assoc ["v", `String "2"];
+     `Assoc ["v", `Int 1; "v", `Int 2]; `Assoc ["v", `Int 2; "v", `Int 1]]
 
 let test_codec_rejects_unknown_tag () =
   match L.keeper_chat_event_of_json (`Assoc [ "type", `String "nope" ]) with
@@ -278,6 +284,75 @@ let read_ok = function
   | Error L.Journal_missing -> Alcotest.fail "journal missing"
   | Error (L.Journal_unreadable detail) -> Alcotest.fail ("journal unreadable: " ^ detail)
   | Error (L.Journal_corrupt detail) -> Alcotest.fail ("journal corrupt: " ^ detail)
+  | Error (L.Journal_unsupported_version version) -> Alcotest.fail (L.version_mismatch_to_string version)
+
+let test_persisted_epoch_is_preserved () =
+  let base_dir = temp_base_path "keeper-chat-journal-epoch" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    let keeper_name = "legacy" and operation_id = "old-op" in
+    let journal = L.open_journal ~base_dir ~keeper_name ~operation_id () in
+    let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
+    let write bytes =
+      let channel = open_out_bin path in
+      Fun.protect ~finally:(fun () -> close_out channel)
+        (fun () -> output_string channel bytes) in
+    let bytes () =
+      let channel = open_in_bin path in
+      Fun.protect ~finally:(fun () -> close_in channel)
+        (fun () -> really_input_string channel (in_channel_length channel)) in
+    let check_version actual = function
+      | Error (L.Journal_unsupported_version version) ->
+          Alcotest.(check int) "expected epoch" 2 version.expected;
+          Alcotest.(check int) "persisted epoch" actual version.actual
+      | Ok _ | Error (L.Journal_missing | L.Journal_unreadable _ | L.Journal_corrupt _) ->
+          Alcotest.fail "foreign persisted epoch must remain a typed refusal" in
+    let check_page actual = function
+      | Error (L.Page_unsupported_version version) ->
+          Alcotest.(check int) "page retains epoch" actual version.actual
+      | Ok _ | Error (L.Page_corrupt _ | L.Page_cursor_mismatch _
+          | L.Page_limit_not_positive _ | L.Page_offset_inside_row _ | L.Page_offset_past_rows _) ->
+          Alcotest.fail "foreign persisted page must remain a typed refusal" in
+    List.iter (fun actual ->
+      (* The historical message_start row lacks stream_scope. Epoch rejection
+         precedes this field's current-schema validation. *)
+      let complete = Printf.sprintf
+        "{\"v\":%d,\"seq\":0,\"ts\":1791523291.997777,\"event\":{\"type\":\"agent_core_stream_message_start\",\"provider_message_id\":\"legacy-message\",\"model\":\"gpt-6-luna\"}}\n"
+        actual in
+      List.iter (fun tail ->
+        let original = complete ^ tail in
+        write original;
+        check_version actual (L.read_journal_path_result path);
+        check_version actual (L.next_sequence journal);
+        check_version actual (L.next_sequence ~require_existing:true journal);
+        check_page actual (L.page_of_rows ~path ~since_seq:L.Whole_turn
+          ~start:L.first_row ~limit:10 complete);
+        (match L.read_page_path ~path ~since_seq:L.Whole_turn ~start:L.first_row ~limit:10 with
+         | Ok result -> check_page actual result
+         | Error _ -> Alcotest.fail "window read did not retain its page failure");
+        Alcotest.(check bool) "direct append refuses the old file" true
+          (Result.is_error (L.append_result journal ~seq:1 ~ts:2. E.Agent_core_stream_ping));
+        Alcotest.(check bool) "settlement cannot append into the old epoch" true
+          (Result.is_error (L.record_terminal_error journal ~ts:2. ~message:"settled"));
+        Alcotest.(check string) "reads and failed writes preserve every byte" original (bytes ()))
+        [""; "{\"v\":1,\"seq\":1"];
+      let current = L.journaled_event_to_string
+        {seq=0;ts=1.;event=E.Agent_core_stream_ping} ^ "\n" in
+      write (current ^ complete);
+      check_version actual (L.read_journal_path_result path)) [1;99];
+    List.iter (fun fragment ->
+      write fragment;
+      Alcotest.(check bool) "a first-row fragment cannot establish an epoch" true
+        (Result.is_error (L.append_result journal ~seq:0 ~ts:1. E.Agent_core_stream_ping));
+      Alcotest.(check bool) "settlement preserves an unidentifiable first row" true
+        (Result.is_error (L.record_terminal_error journal ~ts:2. ~message:"settled"));
+      Alcotest.(check string) "first-row fragment is never guessed or truncated" fragment (bytes ()))
+      ["{\"v\":1"; "{\"v\":2"];
+    (* A well-formed explicit current epoch still validates its payload. *)
+    write "{\"v\":2,\"seq\":0,\"ts\":1,\"event\":{\"type\":\"agent_core_stream_message_start\"}}\n";
+    (match L.read_journal_path_result path with
+     | Error (L.Journal_corrupt _) -> ()
+     | _ -> Alcotest.fail "malformed current payload is corruption"))
+;;
 
 let scripted_clock timestamps =
   let remaining = ref timestamps in
@@ -438,7 +513,7 @@ let test_journal_torn_tail_reads_complete_rows () =
        in
        let seqs entries = List.map (fun (entry : L.journaled_event) -> entry.seq) entries in
        (* The first bytes of a large envelope, cut before its newline. *)
-       append_raw "{\"v\":1,\"seq\":2,\"ts\":1762300000.5,\"event\":{\"type\":\"text_del";
+       append_raw "{\"v\":2,\"seq\":2,\"ts\":1762300000.5,\"event\":{\"type\":\"text_del";
        (match L.read_journal_path_result path with
         | Ok entries ->
           Alcotest.(check (list int)) "the complete rows are the journal" [ 0; 1 ] (seqs entries)
@@ -446,7 +521,9 @@ let test_journal_torn_tail_reads_complete_rows () =
         | Error (L.Journal_unreadable detail) ->
           Alcotest.fail ("torn tail read as unreadable: " ^ detail)
         | Error (L.Journal_corrupt detail) ->
-          Alcotest.fail ("torn tail read as corrupt: " ^ detail));
+          Alcotest.fail ("torn tail read as corrupt: " ^ detail)
+        | Error (L.Journal_unsupported_version version) ->
+          Alcotest.fail (L.version_mismatch_to_string version));
        (* A page reads the same rows: the fragment is not one, and the offset
           it hands back is the end of the complete rows, not of the file. *)
        (match L.read_journal_rows_path path with
@@ -469,7 +546,7 @@ let test_journal_torn_tail_reads_complete_rows () =
        (* A file holding only a fragment has no row yet. *)
        let fragment_only = Filename.concat (Filename.dirname path) "op-fragment.jsonl" in
        let oc = open_out_bin fragment_only in
-       output_string oc "{\"v\":1,\"seq\":0";
+       output_string oc "{\"v\":2,\"seq\":0";
        close_out oc;
        (match L.read_journal_path_result fragment_only with
         | Ok [] -> ()
@@ -486,6 +563,8 @@ let test_journal_torn_tail_reads_complete_rows () =
        L.append journal ~seq:3 ~ts:1_762_300_001.0 (E.Text_delta {text="four"; response=Unobserved_scope (None)});
        (match L.read_journal_path_result path with
         | Error (L.Journal_corrupt _) -> ()
+        | Error (L.Journal_unsupported_version version) ->
+          Alcotest.fail (L.version_mismatch_to_string version)
         | Error L.Journal_missing -> Alcotest.fail "corrupt read as missing"
         | Error (L.Journal_unreadable detail) ->
           Alcotest.fail ("corrupt read as unreadable: " ^ detail)
@@ -533,7 +612,7 @@ let test_read_page_path_matches_page_of_rows () =
              (E.Text_delta { text; response = Unobserved_scope None })
          done;
          if Random.State.int state 5 = 0 then append_raw "this complete line is not an envelope\n";
-         if Random.State.bool state then append_raw "{\"v\":1,\"seq\":999,\"ts\":1";
+         if Random.State.bool state then append_raw "{\"v\":2,\"seq\":999,\"ts\":1";
          let whole = L.read_journal_rows_path path in
          let row_ends =
            match whole with
@@ -603,7 +682,7 @@ let test_read_page_path_in_a_pool_job () =
            (E.Text_delta { text = "row"; response = Unobserved_scope None });
          if seq mod 3 = 0 then append_raw "\n"
        done;
-       append_raw "{\"v\":1,\"seq\":999,\"ts\":1";
+       append_raw "{\"v\":2,\"seq\":999,\"ts\":1";
        (* Every answer of a walk from the first row that follows the cursors
           each page hands back. *)
        let walk read =
@@ -699,7 +778,7 @@ let test_journal_files_age_out_with_shared_prune () =
        Fs_compat.mkdir_p keeper_dir;
        let write path =
          let oc = open_out path in
-         output_string oc "{\"v\":1}\n";
+         output_string oc "{\"v\":2}\n";
          close_out oc
        in
        let old_file = Filename.concat keeper_dir "old-op.jsonl" in
@@ -1519,7 +1598,8 @@ let () =
             test_codec_rejects_unknown_tag
         ] )
     ; ( "journal"
-      , [ Alcotest.test_case "round trip" `Quick test_journal_round_trip
+      , [ Alcotest.test_case "persisted codec epochs preserve old files" `Quick test_persisted_epoch_is_preserved
+        ; Alcotest.test_case "round trip" `Quick test_journal_round_trip
         ; Alcotest.test_case
             "append is fail-open"
             `Quick

@@ -39,6 +39,8 @@ type verdict =
           [Journal_unreadable], reported rather than dropped. *)
   | Journal_truncated
       (** No terminal event: the turn crashed or was interrupted. *)
+  | Journal_unsupported_version of Keeper_chat_event_log.version_mismatch
+      (** An explicit persisted codec epoch this build does not support. *)
   | Journal_corrupt of string
       (** {!Keeper_chat_event_log.read_journal_path_result} found a row that
           does not decode, or the sweep hit an unexpected per-file failure. *)
@@ -57,7 +59,7 @@ type verdict =
 
 (** Bounded constructor name of a verdict, for metric labels:
     ["match" | "mismatch" | "journal_missing" | "journal_unreadable" |
-    "journal_truncated" | "journal_corrupt" | "store_unreadable" |
+    "journal_truncated" | "journal_corrupt" | "journal_unsupported_version" | "store_unreadable" |
     "liveness_unknown"]. {!show_verdict} embeds exception strings (paths,
     [Unix_error]s) and must stay out of metric labels — it belongs in the log
     line. *)

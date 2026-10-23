@@ -1,7 +1,6 @@
 (** Versioned JSON codec and per-operation JSONL journal for
-    [Keeper_chat_events.keeper_chat_event] (RFC-0412 §4.1, stage 1:
-    dual-write only; read paths unchanged; the journal is fail-open — a
-    journal failure must never break the live turn). *)
+    [Keeper_chat_events.keeper_chat_event] (RFC-0412 §4.1).
+    Persisted codec v2 refuses earlier epochs without rewriting their files. *)
 
 (** One journaled event: the bus-assigned sequence number, the publish-time
     timestamp (Unix epoch seconds), and the event itself. *)
@@ -29,8 +28,20 @@ val keeper_chat_event_of_json :
 (** Strict inverse of {!keeper_chat_event_to_json}. Unknown tags are an
     [Error]. *)
 
+type version_mismatch = { expected : int; actual : int }
+[@@deriving show, eq]
+
+type decode_failure =
+  | Unsupported_version of version_mismatch
+  | Malformed of string
+
+val version_mismatch_to_string : version_mismatch -> string
+val decode_failure_to_string : decode_failure -> string
+
 val journaled_event_to_json : journaled_event -> Yojson.Safe.t
-val journaled_event_of_json : Yojson.Safe.t -> (journaled_event, string) result
+val journaled_event_of_json : Yojson.Safe.t -> (journaled_event, decode_failure) result
+(** Only persisted codec v2 is supported. The explicit version is checked before
+    the payload; v1 and unknown epochs are refused without migration or defaults. *)
 
 val journaled_event_to_string : journaled_event -> string
 (** Single journal line payload (no trailing newline). *)
@@ -93,7 +104,10 @@ val append_result :
   (unit, string) result
 (** The same durable append with its commit result exposed. [Ok ()] confirms
     the event was written and synced; a descriptor cleanup failure after that
-    commit is logged separately. [Error] never authorizes a live replay cursor.
+    commit is logged separately. The existing first row must belong to v2; this
+    check holds the append lock and precedes any torn-tail truncation. Unsupported
+    epochs and a fragment-only file that cannot establish an epoch are preserved
+    byte-for-byte. [Error] never authorizes a live replay cursor.
     Only [Eio.Cancel.Cancelled] propagates. *)
 
 (** Why a read of a journal produced no entries. *)
@@ -102,6 +116,8 @@ type read_failure =
   | Journal_unreadable of string
       (** The file exists but could not be opened or read (the exception's
           text). *)
+  | Journal_unsupported_version of version_mismatch
+      (** The explicit persisted epoch is unsupported; the file is preserved. *)
   | Journal_corrupt of string  (** A complete row failed the strict decode. *)
 
 val read_journal_path_result : string -> (journaled_event list, read_failure) result
@@ -116,7 +132,8 @@ val read_journal_path_result : string -> (journaled_event list, read_failure) re
     append that never completed, not a row — it is logged, the complete rows
     before it are returned, and the next append cuts it before writing, so
     any later row follows exactly those rows. A bad complete row is
-    [Journal_corrupt]. Never raises except [Eio.Cancel.Cancelled]. *)
+    [Journal_corrupt]; a complete foreign-epoch row is [Journal_unsupported_version].
+    Never raises except [Eio.Cancel.Cancelled]. *)
 
 val read_journal : journal -> (journaled_event list, read_failure) result
 (** {!read_journal_path_result} over an open journal's path. *)
@@ -131,7 +148,7 @@ val read_journal_rows_path : string -> (string, read_failure) result
 val next_sequence : ?require_existing:bool -> journal -> (int, read_failure) result
 (** Cursor for a new producer segment of the same operation. Missing journals
     start at zero unless [require_existing] is true for a retained continuation;
-    corrupt, unreadable or torn journals refuse resume. A retained continuation
+    corrupt, unreadable, unsupported-epoch or torn journals refuse resume. A retained continuation
     also requires a durable last Run_finished/Event_error boundary, so a dropped
     final append cannot reuse a sequence already delivered to a live reader. *)
 
@@ -297,6 +314,7 @@ type page_failure =
       (** The two cursors did not come from the same page. *)
   | Page_limit_not_positive of int
       (** A page of fewer than one row serves nothing and never advances. *)
+  | Page_unsupported_version of version_mismatch
   | Page_corrupt of string  (** A row the page decoded failed the strict decode. *)
 
 val page_failure_to_string : page_failure -> string

@@ -391,7 +391,7 @@ let test_chat_events_page_refuses_what_it_cannot_place () =
      with
      | L.Page_corrupt _ -> true
      | L.Page_offset_past_rows _ | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _
-     | L.Page_limit_not_positive _ ->
+     | L.Page_limit_not_positive _ | L.Page_unsupported_version _ ->
        false);
   check bool
     "an offset inside a row is refused"
@@ -399,7 +399,7 @@ let test_chat_events_page_refuses_what_it_cannot_place () =
     (match refused ~since_seq:L.Whole_turn ~start:(at_offset 1) ~limit:3 rows with
      | L.Page_offset_inside_row 1 -> true
      | L.Page_offset_inside_row _ | L.Page_offset_past_rows _ | L.Page_cursor_mismatch _
-     | L.Page_limit_not_positive _ | L.Page_corrupt _ -> false);
+     | L.Page_limit_not_positive _ | L.Page_corrupt _ | L.Page_unsupported_version _ -> false);
   check bool
     "an offset past the rows is refused"
     true
@@ -413,13 +413,13 @@ let test_chat_events_page_refuses_what_it_cannot_place () =
      | L.Page_offset_past_rows { offset; rows_end } ->
        offset = String.length rows + 1 && rows_end = String.length rows
      | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _ | L.Page_limit_not_positive _
-     | L.Page_corrupt _ -> false);
+     | L.Page_corrupt _ | L.Page_unsupported_version _ -> false);
   let first = page ~since_seq:L.Whole_turn ~limit:3 () in
   let mismatch ~since_seq ~start =
     match refused ~since_seq ~start ~limit:3 rows with
     | L.Page_cursor_mismatch mismatch -> mismatch
     | L.Page_offset_past_rows _ | L.Page_offset_inside_row _ | L.Page_limit_not_positive _
-    | L.Page_corrupt _ ->
+    | L.Page_corrupt _ | L.Page_unsupported_version _ ->
       fail "a cursor pair was not refused as a mismatch"
   in
   (* The offset is behind its seq: the rows between them are ones the client
@@ -472,7 +472,7 @@ let test_chat_events_page_refuses_what_it_cannot_place () =
     (match refused ~since_seq:L.Whole_turn ~start:L.first_row ~limit:0 rows with
      | L.Page_limit_not_positive 0 -> true
      | L.Page_limit_not_positive _ | L.Page_offset_past_rows _
-     | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _ | L.Page_corrupt _ -> false)
+     | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _ | L.Page_corrupt _ | L.Page_unsupported_version _ -> false)
 ;;
 
 (* An empty page still hands back a pair: the offset moves past every row it
@@ -744,7 +744,7 @@ let test_http_journal_redacts_content_without_rewriting_native_identity () =
       let response = serve page in
       let served = match field "events" response with
         | `List values -> List.map (fun value -> match L.journaled_event_of_json value with
-          | Ok entry -> entry | Error error -> fail (label ^ ": " ^ error)) values
+          | Ok entry -> entry | Error error -> fail (label ^ ": " ^ L.decode_failure_to_string error)) values
         | _ -> fail "events is not a list" in
       List.iter2 (fun (before:L.journaled_event) (after:L.journaled_event) ->
         check int (label ^ ": sequence unchanged") before.seq after.seq;
@@ -911,6 +911,24 @@ let test_journal_error_has_safe_public_response () =
 ;;
 
 
+let test_unsupported_journal_epoch_has_owned_public_error () =
+  let rows = "{\"v\":1,\"seq\":0,\"ts\":1,\"event\":{\"type\":\"agent_core_stream_message_start\"}}\n" in
+  let failure = match L.page_of_rows ~path:"preserved-v1" ~since_seq:L.Whole_turn
+      ~start:L.first_row ~limit:1 rows with
+    | Error failure -> failure
+    | Ok _ -> fail "old journal was served as current events" in
+  let status, body = Api.For_testing.page_failure_response failure in
+  check bool "persisted epoch conflict is stable, not transient corruption" true (status = `Conflict);
+  check string "explicit unsupported codec code" "journal_unsupported_version"
+    Yojson.Safe.Util.(body |> member "error" |> to_string);
+  check bool "shared client vocabulary recognizes the same fact" true
+    (Keeper_chat_public_error.of_code "journal_unsupported_version"
+      = Some Keeper_chat_public_error.Journal_unsupported_version);
+  check string "public message names the unsupported stored version"
+    "This server does not support the stored event journal version."
+    Yojson.Safe.Util.(body |> member "message" |> to_string)
+;;
+
 let test_parser_error_has_safe_public_response () =
   let status,body = Api.For_testing.invalid_input_response
     "invalid json: orchid river seventy nine at /private/example/.masc/keepers/alpha" in
@@ -969,6 +987,7 @@ let () =
         ; test_case "mutation bodies are closed" `Quick test_mutation_bodies_are_closed
         ; test_case "owner errors preserve only public facts" `Quick test_owner_error_has_safe_public_response
         ; test_case "journal errors preserve only public facts" `Quick test_journal_error_has_safe_public_response
+        ; test_case "unsupported journal epoch has its own public error" `Quick test_unsupported_journal_epoch_has_owned_public_error
         ; test_case "parser errors preserve only public facts" `Quick test_parser_error_has_safe_public_response
         ; test_case "cursor errors preserve their owned code" `Quick test_cursor_error_keeps_its_owned_code
         ; test_case "healthy event cursors produce no error incidents" `Quick test_valid_event_cursors_do_not_log_errors

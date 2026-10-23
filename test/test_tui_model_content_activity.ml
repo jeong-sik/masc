@@ -230,7 +230,7 @@ let test_fresh_worker_generation_in_same_journal () =
   List.iter publish stale_stop.chat_events;
   let lines = List.rev !reversed |> List.map (fun line ->
     match J.journaled_event_of_json (J.journaled_event_to_json line) with
-    | Ok line -> line | Error detail -> fail detail) in
+    | Ok line -> line | Error detail -> fail (J.decode_failure_to_string detail)) in
   let replay = Log.create ~keeper_name:"fixture" ~request_id:"r" ~started_at:0. in
   ignore (Log.add_journaled replay lines);
   let _,wire = List.fold_left (fun (state,wire) (line:J.journaled_event) ->

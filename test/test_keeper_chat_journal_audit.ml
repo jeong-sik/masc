@@ -348,6 +348,21 @@ let test_audit_operation_corrupt_journal () =
        | other ->
          Alcotest.failf "expected Journal_corrupt, got %s" (Audit.show_verdict other))
 
+let test_audit_operation_unsupported_epoch () =
+  let base_dir = temp_base_path "keeper-chat-journal-audit-epoch" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    let path = L.journal_path ~base_dir ~keeper_name:"k" ~operation_id:"old" in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let channel = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out channel)
+      (fun () -> output_string channel "{\"v\":1,\"payload\":\"historical\"}\n");
+    let actual = Audit.audit_operation ~base_dir ~keeper_name:"k" ~operation_id:"old" in
+    Alcotest.(check verdict) "foreign epoch is not a mismatch or corruption"
+      (Audit.Journal_unsupported_version {expected=2;actual=1}) actual;
+    Alcotest.(check string) "metrics retain the bounded epoch verdict"
+      "journal_unsupported_version" (Audit.verdict_label actual))
+;;
+
 let test_audit_operation_store_unreadable () =
   let base_dir = temp_base_path "keeper-chat-journal-audit-store" in
   Fun.protect
@@ -484,7 +499,7 @@ let test_sweep_reports_unanswered_registry_and_retries () =
             | Audit.Liveness_unknown _ -> false
             | Audit.Match | Audit.Mismatch _ | Audit.Journal_missing
             | Audit.Journal_unreadable _ | Audit.Journal_truncated
-            | Audit.Journal_corrupt _ | Audit.Store_unreadable _ -> true)
+            | Audit.Journal_corrupt _ | Audit.Journal_unsupported_version _ | Audit.Store_unreadable _ -> true)
        | other, _ ->
          Alcotest.failf "expected one verdict, got %d" (List.length other))
 
@@ -592,6 +607,7 @@ let () =
             "corrupt journal is Journal_corrupt"
             `Quick
             test_audit_operation_corrupt_journal
+        ; Alcotest.test_case "unsupported journal epoch is explicit" `Quick test_audit_operation_unsupported_epoch
         ; Alcotest.test_case
             "unreadable store is Store_unreadable"
             `Quick

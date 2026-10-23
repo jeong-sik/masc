@@ -1,12 +1,12 @@
 (** Versioned JSON codec and per-operation JSONL journal for
     [Keeper_chat_events.keeper_chat_event] (RFC-0412 §4.1).
 
-    Stage 1 is dual-write only: read paths are unchanged, and the journal is
-    fail-open — a journal failure must never break the live turn. *)
+    Persisted codec v2 is a hard boundary. Earlier epochs remain on disk but
+    cannot be decoded, resumed, or appended by this codec. *)
 
 open Keeper_chat_events
 
-let codec_version = 1
+let codec_version = 2
 
 (* One page of the journal over the wire (RFC-0412 §3.2): what a read
    returns when it names no count, and the most it may ask for. The server
@@ -698,6 +698,35 @@ type journaled_event =
   ; event : keeper_chat_event
   }
 
+type version_mismatch = { expected : int; actual : int }
+[@@deriving show, eq]
+
+type decode_failure =
+  | Unsupported_version of version_mismatch
+  | Malformed of string
+
+let version_mismatch_to_string { expected; actual } =
+  Printf.sprintf "unsupported journal codec version %d (expected %d)" actual expected
+;;
+
+let decode_failure_to_string = function
+  | Unsupported_version mismatch -> version_mismatch_to_string mismatch
+  | Malformed detail -> detail
+;;
+
+(* The epoch owns the payload schema. Do not inspect or reinterpret a foreign
+   epoch's payload, even when it resembles a current event. *)
+let check_codec_version = function
+  | `Assoc fields ->
+      (match List.filter (fun (name, _) -> String.equal name "v") fields with
+       | [(_, `Int actual)] when actual = codec_version -> Ok ()
+       | [(_, `Int actual)] -> Error (Unsupported_version { expected = codec_version; actual })
+       | [] -> Error (Malformed "journaled_event: missing version")
+       | [_] -> Error (Malformed "journaled_event: version is not an integer")
+       | _ -> Error (Malformed "journaled_event: duplicate version"))
+  | _ -> Error (Malformed "journaled_event: expected an object")
+;;
+
 type operation_settlement =
   { operation_id : Keeper_chat_operation.Operation_id.t
   ; completed_at : float
@@ -740,27 +769,14 @@ let journaled_event_payload_of_json json =
     let* () = if seq >= 0 then Ok () else Error "journaled_event: negative seq" in
     let ts = json |> member "ts" |> to_float in
     let* () = if Float.is_finite ts then Ok () else Error "journaled_event: non-finite ts" in
-    let version = json |> member "v" |> to_int in
-    if version <> codec_version
-    then
-      Error
-        (Printf.sprintf
-           "journaled_event: unsupported version %d (codec v%d)"
-           version
-           codec_version)
-    else
-      Result.map
-        (fun event ->
-           { seq
-           ; ts
-           ; event
-           })
-        (keeper_chat_event_of_json (json |> member "event"))
+    Result.map
+      (fun event -> { seq; ts; event })
+      (keeper_chat_event_of_json (json |> member "event"))
   with
   | Type_error (message, _) -> Error ("journaled_event: " ^ message)
 ;;
 
-let journaled_envelope_of_json json =
+let current_journaled_envelope_of_json json =
   let ( let* ) = Result.bind in
   let* entry = journaled_event_payload_of_json json in
   let* settlement = match json with
@@ -814,6 +830,12 @@ let journaled_envelope_of_json json =
     | Tool_context_block _ ) -> Error "operation settlement must identify an error terminal"
 ;;
 
+let journaled_envelope_of_json json =
+  Result.bind (check_codec_version json) (fun () ->
+    Result.map_error (fun detail -> Malformed detail)
+      (current_journaled_envelope_of_json json))
+;;
+
 let journaled_event_of_json json = Result.map fst (journaled_envelope_of_json json)
 
 (* String-level framing: the single place where JSONL line conversion and
@@ -826,7 +848,7 @@ let journaled_event_to_string journaled =
     returned as [Error]. *)
 let journaled_event_of_string line =
   try journaled_event_of_json (Yojson.Safe.from_string line) with
-  | Yojson.Json_error message -> Error ("journaled_event: invalid JSON: " ^ message)
+  | Yojson.Json_error message -> Error (Malformed ("journaled_event: invalid JSON: " ^ message))
 ;;
 
 (** {1 Journal} *)
@@ -955,7 +977,11 @@ let append_journaled_result ?operation_settlement journal ~seq ~ts event =
         | None, _ -> envelope
         | Some _, _ -> assert false in
       let line = Yojson.Safe.to_string envelope ^ "\n" in
-      match Fs_compat.append_private_jsonl_durable_locked_result journal.path line with
+      let validate_first_row row =
+        Result.map (fun (_ : journaled_event) -> ()) (journaled_event_of_string row)
+        |> Result.map_error decode_failure_to_string in
+      match Fs_compat.append_private_jsonl_durable_locked_validated_result
+          ~validate_first_row journal.path line with
       | Fs_compat.Private_file_succeeded () -> Ok ()
       | Fs_compat.Private_file_succeeded_with_cleanup_failure
           { value = (); cleanup_failure } ->
@@ -992,6 +1018,7 @@ let append journal ~seq ~ts event =
 type read_failure =
   | Journal_missing
   | Journal_unreadable of string
+  | Journal_unsupported_version of version_mismatch
   | Journal_corrupt of string
 
 (* Strict decode of the complete rows: the first line that is not an envelope
@@ -1006,7 +1033,8 @@ let decode_rows_with decode ~path rows =
       else begin
         match decode line with
         | Ok journaled -> loop (journaled :: acc) rest
-        | Error detail ->
+        | Error (Unsupported_version version) -> Error (Journal_unsupported_version version)
+        | Error (Malformed detail) ->
           Error
             (Journal_corrupt
                (Printf.sprintf
@@ -1047,15 +1075,17 @@ let log_torn_tail ~path ~rows_end ~end_offset =
    when the process died between its write and its rollback — is not a row.
    Such a fragment is logged and the complete rows are served; the next
    append cuts it before writing, so any later row follows exactly those
-   rows. The three failure shapes stay apart: a missing journal is the normal
-   state of a queued operation, an unreadable one is an operator problem, a
-   corrupt one is a codec problem. *)
+   rows. Missing, unreadable, malformed current rows, and unsupported persisted
+   epochs remain distinct failures. *)
 let read_complete_rows ~allow_torn_tail path =
   let of_rows = function
     | Fs_compat.Private_jsonl_rows.Rows_missing -> Error Journal_missing
-    | Fs_compat.Private_jsonl_rows.Rows_present { rows_end; end_offset; _ }
+    | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset }
       when rows_end < end_offset && not allow_torn_tail ->
-      Error (Journal_corrupt "cannot resume a journal with an incomplete final row")
+      (* A foreign epoch remains a version refusal even when its tail is torn. *)
+      (match decode_rows ~path rows with
+       | Error failure -> Error failure
+       | Ok _ -> Error (Journal_corrupt "cannot resume a journal with an incomplete final row"))
     | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset } ->
       log_torn_tail ~path ~rows_end ~end_offset;
       Ok rows
@@ -1084,7 +1114,7 @@ let read_journal journal = read_journal_path_result journal.path
 let read_journal_envelopes journal =
   let decode line =
     try journaled_envelope_of_json (Yojson.Safe.from_string line) with
-    | Yojson.Json_error detail -> Error detail in
+    | Yojson.Json_error detail -> Error (Malformed detail) in
   Result.bind (read_complete_rows ~allow_torn_tail:true journal.path)
     (decode_rows_with decode ~path:journal.path)
 ;;
@@ -1098,7 +1128,7 @@ let read_journal_envelopes journal =
 let sequence_after_complete_rows ~allow_torn_tail ~require_existing journal =
   match read_journal_path ~allow_torn_tail journal.path with
   | Error Journal_missing when not require_existing -> Ok 0
-  | Error (Journal_missing | Journal_unreadable _ | Journal_corrupt _) as error -> error
+  | Error (Journal_missing | Journal_unreadable _ | Journal_corrupt _ | Journal_unsupported_version _) as error -> error
   | Ok entries ->
     let rec last previous = function
       | [] -> Ok previous
@@ -1234,20 +1264,22 @@ let find_operation_terminal journal ~settlement =
   | Ok entries -> Ok (existing_operation_terminal settlement (List.rev entries))
   | Error Journal_missing -> Ok None
   | Error (Journal_unreadable detail | Journal_corrupt detail) -> Error detail
+  | Error (Journal_unsupported_version version) -> Error (version_mismatch_to_string version)
 ;;
 
 let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
   let ( let* ) = Result.bind in
   let read_error = function
     | Journal_missing -> "operation journal disappeared during settlement"
-    | Journal_unreadable detail | Journal_corrupt detail -> detail in
+    | Journal_unreadable detail | Journal_corrupt detail -> detail
+    | Journal_unsupported_version version -> version_mismatch_to_string version in
   let* seq =
     sequence_after_complete_rows ~allow_torn_tail:true ~require_existing:false journal
     |> Result.map_error read_error in
   let* entries = match read_journal_envelopes journal with
     | Ok entries -> Ok entries
     | Error Journal_missing -> Ok []
-    | Error (Journal_unreadable _ | Journal_corrupt _ as error) -> Error (read_error error) in
+    | Error (Journal_unreadable _ | Journal_corrupt _ | Journal_unsupported_version _ as error) -> Error (read_error error) in
   match segment, List.rev entries with
   | Existing_segment, ({ event = Keeper_chat_events.Event_error { message }; seq; ts }, _) :: _ ->
     Ok (Existing_terminal_error { seq; ts; message })
@@ -1426,6 +1458,7 @@ type page_failure =
   | Page_offset_inside_row of int
   | Page_cursor_mismatch of cursor_mismatch
   | Page_limit_not_positive of int
+  | Page_unsupported_version of version_mismatch
   | Page_corrupt of string
 
 let cursor_mismatch_to_string = function
@@ -1463,6 +1496,7 @@ let page_failure_to_string = function
   | Page_limit_not_positive limit ->
     Printf.sprintf "a page of %d rows serves nothing and never advances" limit
   | Page_corrupt detail -> detail
+  | Page_unsupported_version version -> version_mismatch_to_string version
 ;;
 
 let empty_page start = { events = []; has_more = false; next_offset = page_start_offset start }
@@ -1486,13 +1520,13 @@ let rec row_ending_at rows ~row_end =
     else Some (row_start, line))
 ;;
 
-let corrupt_row ~path ~offset detail =
-  Page_corrupt
-    (Printf.sprintf
-       "keeper_chat_event_log: corrupt journal line path=%s offset=%d: %s"
-       path
-       offset
-       detail)
+let decode_row_failure ~path ~offset = function
+  | Unsupported_version version -> Page_unsupported_version version
+  | Malformed detail ->
+    Page_corrupt
+      (Printf.sprintf
+         "keeper_chat_event_log: corrupt journal line path=%s offset=%d: %s"
+         path offset detail)
 ;;
 
 (* A held offset and a held seq have to be the two halves of one page's answer.
@@ -1514,7 +1548,7 @@ let cursor_pair_failure ~path ~since_seq ~start ~row_before =
         | None -> None
         | Some (row_start, line) ->
           (match journaled_event_of_string line with
-           | Error detail -> Some (corrupt_row ~path ~offset:row_start detail)
+           | Error detail -> Some (decode_row_failure ~path ~offset:row_start detail)
            | Ok (journaled : journaled_event) ->
              if journaled.seq > held
              then
@@ -1645,7 +1679,7 @@ let page_of_rows ~path ~since_seq ~start ~limit rows =
           then loop ~row_start:row_end ~first ~served ~count ~next_offset
           else (
             match journaled_event_of_string line with
-            | Error detail -> Error (corrupt_row ~path ~offset:row_start detail)
+            | Error detail -> Error (decode_row_failure ~path ~offset:row_start detail)
             | Ok journaled ->
               (match
                  if first then first_row_failure ~since_seq ~start journaled else None
@@ -1778,7 +1812,7 @@ let page_of_windows ~path ~since_seq ~start ~limit =
             then loop window ~row_start:row_end ~first ~served ~count ~next_offset
             else (
               match journaled_event_of_string line with
-              | Error detail -> page_failed (corrupt_row ~path ~offset:row_start detail)
+              | Error detail -> page_failed (decode_row_failure ~path ~offset:row_start detail)
               | Ok journaled ->
                 (match
                    if first then first_row_failure ~since_seq ~start journaled else None

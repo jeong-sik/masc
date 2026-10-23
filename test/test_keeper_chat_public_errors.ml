@@ -63,6 +63,7 @@ let read_journal path =
   | Ok entries -> entries
   | Error L.Journal_missing -> fail "actual journal was not written"
   | Error (Journal_unreadable detail | Journal_corrupt detail) -> fail detail
+  | Error (Journal_unsupported_version version) -> fail (L.version_mismatch_to_string version)
 ;;
 
 let test_public_journal_copy_redacts_captured_exact_secret () =
@@ -111,7 +112,7 @@ let test_legacy_empty_error_has_safe_public_terminal () =
        (Some E.public_error_message) event.message
    | _ -> fail "empty diagnostic lost its valid terminal fact");
   check bool "malformed journal schema remains rejected" true
-    (Result.is_error (L.journaled_event_of_json (`Assoc ["v",`Int 1;"seq",`Int 0])))
+    (Result.is_error (L.journaled_event_of_json (`Assoc ["v",`Int 2;"seq",`Int 0])))
 ;;
 
 let test_public_protocol_error_keeps_kind_without_diagnostic () =

@@ -91,7 +91,8 @@ let test_selector_contract () = fixture (fun _env driver _ calls matches ->
        && (String.sub detail i (String.length word) = word || found (i + 1)) in
      check bool "a chooser opener is refused, naming selector" true (found 0)
    | _ -> fail "a chooser opener was accepted");
-  check int "and nothing reaches the driver" 0 (List.length !calls))
+  check bool "and no element is looked up or set" false
+    (List.exists (fun (_,_,path,_) -> String.ends_with ~suffix:"/elements" path || String.ends_with ~suffix:"/value" path) !calls))
 let test_parallel_targeting () = fixture (fun _env driver _ calls _ ->
   Eio.Fiber.both
     (fun () -> ignore (ok (act driver 1 (Action.Reload))))

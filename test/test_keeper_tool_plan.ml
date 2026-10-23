@@ -874,7 +874,7 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
       ; successful_tasks = 1
       ; failed_tasks = 1
       ; avg_completion_time_s = Some 42.5
-      ; task_completion_rate = 0.66
+      ; task_completion_rate = 2.0 /. 3.0
       ; task_success_rate = Some 0.5
       ; error_rate = Some 0.5
       ; handoff_tasks = 1
@@ -1085,8 +1085,8 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
                  [ "agent_id", `String "albini"
                  ; ( "components"
                    , `Assoc
-                       [ "completion", `Float 0.66
-                       ; "reliability", `Float 0.67
+                       [ "completion", `Float (2.0 /. 3.0)
+                       ; "reliability", `Float 0.5
                        ; "speed", `Float 1.0
                        ; "handoff_task_success", `Float 1.0
                        ] )

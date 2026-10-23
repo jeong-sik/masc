@@ -327,7 +327,8 @@ let test_invalid_observations_and_real_zero () =
     let zero = { metric with completed_at = Some metric.started_at; success = true } in
     record_ok config zero;
     assert ((aggregate config "validated").avg_completion_time_s = Some 0.0);
-    let invalid = [ { metric with task_id = " " }; { metric with started_at = Float.nan };
+    let invalid = [ { metric with task_id = " " }; { metric with handoff_to = Some " " };
+      { metric with collaborators = [""] }; { metric with started_at = Float.nan };
       { metric with success = true };
       { metric with completed_at = Some (metric.started_at -. 1.0) };
       { metric with started_at = -. Float.max_float; completed_at = Some Float.max_float } ] in

@@ -104,6 +104,10 @@ let record_error_to_string = function
 (** Shared writer/reader validation; no storage or clock effects. *)
 let validate_metric (metric : task_metric) =
   if String.equal (String.trim metric.task_id) "" then Error "Task identity must be nonblank"
+  else if not (List.for_all valid_agent_id metric.collaborators
+    && Option.fold ~none:true ~some:valid_agent_id metric.handoff_from
+    && Option.fold ~none:true ~some:valid_agent_id metric.handoff_to)
+  then Error "collaborator and handoff identities must be nonblank"
   else if not (Float.is_finite metric.started_at) then Error "start time must be finite"
   else match metric.completed_at with
     | None -> if metric.success then Error "pending Task cannot have a successful outcome" else Ok ()

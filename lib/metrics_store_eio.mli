@@ -117,7 +117,7 @@ val record : config -> task_metric -> (record_receipt, record_error) result
     Publication failure can leave a complete binding in place. It is not rolled
     back or a receipt for the metric body.
     The bounded stream applies backpressure, it does not silently drop overflow.
-    Invalid Task identities, inconsistent pending outcomes and nonfinite or negative
+    Blank Task/collaborator/handoff identities, inconsistent pending outcomes and nonfinite or negative
     durations are rejected before storage preparation.
     Expected filesystem and identity failures return [Error]; cancellation and
     unexpected exceptions propagate. Metadata and append are not one transaction.

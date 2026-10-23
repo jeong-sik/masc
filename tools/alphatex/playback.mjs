@@ -5,8 +5,10 @@ import { randomUUID } from 'node:crypto'
 
 export const transportPath = fileURLToPath(new URL('./music-transport', import.meta.url))
 export const midiTransportPath = fileURLToPath(new URL('./music-midi', import.meta.url))
+export const midiClipTransportPath = fileURLToPath(new URL('./music-midi-clip', import.meta.url))
 export const arrangementTransportPath = fileURLToPath(new URL('./music-arrangement', import.meta.url))
-export async function midiDestinations({ executable = midiTransportPath, signal } = {}) {
+export async function midiDestinations({ executable = midiTransportPath, signal, protocol = 1 } = {}) {
+  if (![1, 2].includes(protocol)) throw new Error('Unknown MIDI destination protocol family')
   signal?.throwIfAborted()
   const child = spawn(executable, ['destinations'], { stdio: ['ignore', 'pipe', 'pipe'] })
   let output = '', detail = '', failure = null, cancelled = false
@@ -29,7 +31,7 @@ export async function midiDestinations({ executable = midiTransportPath, signal 
   if (result.kind !== 'destinations' || !Array.isArray(result.destinations)) throw new Error('Malformed MIDI destination list')
   const ids = new Set()
   for (const device of result.destinations) {
-    if (device.kind !== 'midi' || device.protocol !== 1 || typeof device.id !== 'string' || !device.id
+    if (device.kind !== 'midi' || device.protocol !== protocol || protocol === 2 && ![1, 2].includes(device.nativeProtocol) || typeof device.id !== 'string' || !device.id
         || typeof device.name !== 'string' || ids.has(device.id)) throw new Error('Malformed MIDI destination identity')
     ids.add(device.id)
   }
@@ -38,12 +40,19 @@ export async function midiDestinations({ executable = midiTransportPath, signal 
 
 // One owned child is one transport. Completion means its pipes and process have
 // closed, rather than merely receiving a stopped acknowledgement.
-export function openPlayback({ path, output, midiOutput, midiBindings, frameRange, loop = false, format = 'wave', onEvent = () => {}, signal,
-  executable = ['wave-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'hybrid-arrangement', 'capture-audio-arrangement'].includes(format) ? arrangementTransportPath : midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
+export function openPlayback({ path, output, midiOutput, midiBindings, midiClipSource, frameRange, loop = false, format = 'wave', onEvent = () => {}, signal,
+  executable = format === 'midi-clip' ? midiClipTransportPath : ['wave-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'hybrid-arrangement', 'capture-audio-arrangement'].includes(format) ? arrangementTransportPath : midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
   signal?.throwIfAborted()
   const hybrid = format === 'hybrid-arrangement'
+  const clip = format === 'midi-clip'
+  if (clip && (midiOutput === undefined || output !== undefined || midiBindings !== undefined || loop
+      || !midiClipSource || !Number.isInteger(midiClipSource.ppq) || midiClipSource.ppq < 1 || midiClipSource.ppq > 65535
+      || ![midiClipSource.originalSha256, midiClipSource.documentSha256].every(value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)))) {
+    throw new Error('Native Clip playback requires its admitted source and explicit MIDI2 output')
+  }
+  if (clip) midiClipSource = structuredClone(midiClipSource)
   const captured = ['capture-session', 'capture-arrangement'].includes(format), mixed = format === 'mixed-arrangement' || captured || hybrid
-  if (!['wave', 'wave-arrangement', 'midi-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'hybrid-arrangement', 'capture-audio-arrangement'].includes(format) || ['wave-arrangement', 'capture-audio-arrangement'].includes(format) && midiOutput !== undefined) throw new Error('Invalid arrangement playback route or loop')
+  if (!['wave', 'wave-arrangement', 'midi-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'hybrid-arrangement', 'capture-audio-arrangement', 'midi-clip'].includes(format) || ['wave-arrangement', 'capture-audio-arrangement'].includes(format) && midiOutput !== undefined) throw new Error('Invalid arrangement playback route or loop')
   if ((format === 'midi-arrangement' || mixed) && (midiOutput === undefined || midiBindings === undefined)) throw new Error('MIDI arrangement requires explicit bindings')
   if (format === 'capture-session' && loop) throw new Error('Arrange the captured take before selecting a loop')
   if (mixed && !captured && output === undefined) throw new Error('Mixed arrangement requires an explicit audio output')
@@ -73,6 +82,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, frameRang
     ...(frameRange ? ['--offset-frames', String(frameRange.offsetFrames), '--frame-count', String(frameRange.frameCount)] : [])]
   const child = spawnProcess(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   let failure = null, final = null, current = null, firstDevice = null, loopBindings = null, nativeBindings = null, started = false, closed = false, stopping = false, detail = ''
+  let clipPrepared = false, clipDuration = null, clipSetup = null
   let resolveReady, rejectReady, resolveDone, rejectDone
   const epochs = new Map()
   function rejectEpochs(error) { for (const pending of epochs.values()) pending.reject(error); epochs.clear() }
@@ -97,14 +107,25 @@ export function openPlayback({ path, output, midiOutput, midiBindings, frameRang
         fail(new Error(event.message))
         onEvent(event); return
       }
-      if (!['playing', 'paused', 'stopped'].includes(event.kind) || final
+      if (!(clip ? ['ready', 'playing', 'paused', 'stopped'] : ['playing', 'paused', 'stopped']).includes(event.kind) || final
           || !Number.isFinite(event.currentTime) || !Number.isFinite(event.duration)
-          || (midiBindings === undefined ? event.duration <= 0 : event.duration < 0) || event.currentTime < 0 || event.currentTime > event.duration
+          || (midiBindings === undefined && !clip ? event.duration <= 0 : event.duration < 0) || event.currentTime < 0 || event.currentTime > event.duration
           || event.refusal !== undefined && (event.kind === 'stopped' || typeof event.refusal !== 'string' || !event.refusal)
           || typeof event.device?.id !== 'string' || !event.device.id || typeof event.device.name !== 'string'
           || (mixed || midiOutput === undefined ? !Number.isInteger(event.device.outputs) || event.device.outputs <= 0
-            : event.device.kind !== 'midi' || event.device.protocol !== 1) || event.loop !== loop) {
+            : event.device.kind !== 'midi' || event.device.protocol !== (clip ? 2 : 1)) || event.loop !== loop) {
         throw new Error('Malformed playback state')
+      }
+      if (clip) {
+        const integer = value => typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value) && BigInt(value) < 0xffffffffffffffffn
+        if (event.format !== format || event.clock?.kind !== 'monotonic-nanoseconds' || event.device.nativeProtocol !== 2
+            || !integer(event.currentNanoseconds) || !integer(event.durationNanoseconds) || !integer(event.setupNanoseconds)
+            || BigInt(event.currentNanoseconds) > BigInt(event.durationNanoseconds) || BigInt(event.setupNanoseconds) > BigInt(event.durationNanoseconds)
+            || event.currentTime !== Number(event.currentNanoseconds) / 1e9 || event.duration !== Number(event.durationNanoseconds) / 1e9
+            || event.source?.originalSha256 !== midiClipSource.originalSha256 || event.source?.documentSha256 !== midiClipSource.documentSha256
+            || event.source?.ppq !== midiClipSource.ppq || clipDuration !== null && clipDuration !== event.durationNanoseconds
+            || clipSetup !== null && clipSetup !== event.setupNanoseconds) throw new Error('Native Clip state differs from the admitted clock, source or protocol')
+        clipDuration ??= event.durationNanoseconds; clipSetup ??= event.setupNanoseconds
       }
       if (mixed && (event.format !== format || event.clock?.kind !== 'mach-host-time')) throw new Error('Missing combined arrangement clock')
       if (frameRange && (event.frameRange?.offsetFrames !== frameRange.offsetFrames
@@ -147,6 +168,13 @@ export function openPlayback({ path, output, midiOutput, midiBindings, frameRang
       if (selectedID !== undefined && event.device.id !== selectedID || firstDevice !== null && event.device.id !== firstDevice) {
         throw new Error('Playback output differs from the selected device')
       }
+      if (clip && event.kind === 'ready') {
+        if (clipPrepared || current || event.currentNanoseconds !== '0' || event.refusal !== undefined) throw new Error('Invalid native Clip preparation acknowledgement')
+        clipPrepared = true; firstDevice = event.device.id
+        if (!stopping) child.stdin.write('{"kind":"start"}\n')
+        onEvent(event); return
+      }
+      if (clip && event.kind !== 'stopped' && !clipPrepared) throw new Error('Native Clip playback did not prepare before starting')
       if (!current && event.kind !== 'playing' && event.kind !== 'stopped') throw new Error('Playback did not begin with a playing acknowledgement')
       firstDevice ??= event.device.id
       current = event
@@ -197,7 +225,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, frameRang
   if (signal?.aborted) abort()
   return { ready, completion, stop,
     recordingEpoch({ signal } = {}) {
-      if (format === 'wave') return Promise.reject(new Error('Recording epochs require an arrangement'))
+      if (format === 'wave' || clip) return Promise.reject(new Error('Recording epochs require an arrangement'))
       if (signal?.aborted) return Promise.reject(signal.reason)
       const request = randomUUID()
       return new Promise((resolve, reject) => {
@@ -211,8 +239,14 @@ export function openPlayback({ path, output, midiOutput, midiBindings, frameRang
     },
     pause: () => command('pause'), resume: () => command('resume'), status: () => command('status'),
     seek(seconds) {
+      if (clip) throw new Error('Native Clip seeking requires exact nanoseconds')
       if (!Number.isFinite(seconds) || seconds < 0 || !current || seconds > current.duration) throw new Error('Seek must be between zero and the playback duration, inclusive')
       command('seek', { seconds })
+    },
+    seekNanoseconds(value) {
+      if (!clip || typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)
+          || clipDuration === null || BigInt(value) > BigInt(clipDuration)) throw new Error('Seek must be exact nanoseconds within the admitted native Clip')
+      command('seek', { nanoseconds: value })
     },
     // The native owner handles SIGTERM by releasing its held MIDI keys before
     // closing. Completion still owns that cleanup; SIGKILL would leave notes on.

@@ -383,15 +383,8 @@ let overview_entries_raw ?(mode=Current_installations) snapshot =
                     instance.id=id && instance.source_path=Some declaration.source_path) instances)
                   declaration.instance_id in
                 if has_worker then None else Some (`Declaration (index, declaration))))
-let category_label = function
-  | Category.Memory_and_judgment -> "Memory & judgment"
-  | Category.Browser -> "Browser"
-  | Category.External_communications -> "External communications"
-  | Category.Voice_and_media -> "Voice & media"
-  | Category.Execution_environment -> "Execution environment"
-  | Category.Analysis -> "Analysis"
-let category_order = [Category.Memory_and_judgment; Category.Browser; Category.External_communications;
-  Category.Voice_and_media; Category.Execution_environment; Category.Analysis]
+let category_label = Masc_tui_addon_category.label
+let category_order = Masc_tui_addon_category.order
 type current_category = Classified of Category.t | Unclassified | Unverified
 (* The current group comes from the declaration whose installation id and
    source path both match. A worker's own start-time category is never
@@ -412,7 +405,7 @@ let category_rank = function
   | Unverified -> List.length category_order + 1
 let category_heading = function
   | Classified c -> category_label c
-  | Unclassified -> "Unclassified"
+  | Unclassified -> Masc_tui_addon_category.unclassified
   | Unverified -> "Unclassified (declaration not read)"
 (* Current installations are grouped by role; within a group the order is the
    raw order, so identity-based cursor anchors stay stable. Retained runs keep

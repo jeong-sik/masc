@@ -46,6 +46,9 @@ let handle ~key t =
            if key="l" || key="right" then Ok (Browse (Some (Filename.dirname package.manifest_path)))
            else Ok (Preview package.manifest_path))
   | _ -> Ok (Updated t)
+let role_word = function
+  | Some category -> Masc_tui_addon_category.label category
+  | None -> Masc_tui_addon_category.unclassified
 let left_hint t = match t.snapshot,t.directory with
   | None,Some _ -> "Left:workspace root"
   | Some _,_ | None,None -> "Left:parent"
@@ -66,6 +69,7 @@ let lines ~height ~render t =
       let label = match entry with
         | Catalog.Folder path -> "Folder  " ^ Filename.basename path
         | Package package -> "Package " ^ package.metadata.title ^ " · " ^ package.metadata.revision
+            ^ " · " ^ role_word package.metadata.ui_category
         | Issue issue -> "Issue   " ^ Filename.basename (Filename.dirname issue.path) ^ "/" ^ Filename.basename issue.path in
       compact ((if start+index=t.cursor then "> " else "  ") ^ label)) in
   let details = match selected t with
@@ -76,7 +80,9 @@ let lines ~height ~render t =
     | Some (Folder path) -> [path;"Enter opens this folder."]
     | Some (Issue issue) -> [issue.path;issue.message]
     | Some (Package package) ->
-        [package.metadata.title ^ " · revision " ^ package.metadata.revision;package.manifest_path]
+        [package.metadata.title ^ " · revision " ^ package.metadata.revision;
+         "Role · " ^ role_word package.metadata.ui_category ^ " (navigation only; grants nothing)";
+         package.manifest_path]
         @ Option.to_list package.metadata.description
         @ ["Enter rereads the package execution; nothing is installed yet."] in
   header @ visible @ List.concat_map render details

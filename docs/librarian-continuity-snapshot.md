@@ -39,6 +39,13 @@ masc-librarian-continuity compare \
 
 `test_librarian_working_state_cli.py`는 로컬 HTTP 응답으로 이 연결을 검사한다. 그 고정 점수는 실제 JEV 측정값이 아니다. `compare` 또한 합성 경계를 사용하는 별도 실험이며 운영 Keeper의 요약 생성·front 전진·다음 요청 조립을 연결하지 않는다. 현재 구현만으로 연속성 개선이나 운영 적용을 입증했다고 주장하지 않는다.
 
+실제 Librarian 추론 경로를 사용하는 별도 명령은
+[`compare-production`](librarian-production-evaluation.md)이다.
+명시적인 합성 입력으로 실제 레인·프롬프트·출력 스키마를 사용하고,
+그 회차의 준비 증거와 응답 슬롯, 저장·재읽기·복원, 양쪽 JEV 결과를 기록한다.
+실제 모델을 호출해 완료한 측정값과 명령 구현·고정 응답 테스트는 구분한다.
+공식 클라이언트 fragment와 배포된 연속 턴·I4 표시는 이 명령의 증거 범위 밖이다.
+
 
 ## 이미 실행 중이던 Keeper의 첫 저장본
 

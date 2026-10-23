@@ -12,16 +12,18 @@ type options =
   ; config_path : string
   ; runtime_id : string
   ; publish_base_path : string option
+  ; prompt_dir : string option
   }
 
 let usage =
   "masc-librarian-continuity --input DATASET.json --output REPORT.json \
    --config runtime.toml --runtime EXACT_ID [--publish-base-path DIR]\n\n\
+   Production comparison: compare-production --prompts-dir config/prompts [same options]\n\n\
    Storage experiments: masc-librarian-continuity capture --help | restore --help"
 
 let parse_options ?(start = 0) () =
   let input = ref None and output = ref None and config = ref None in
-  let runtime = ref None and publish = ref None in
+  let runtime = ref None and publish = ref None and prompts = ref None in
   let set target value = target := Some value in
   Arg.parse_argv ~current:(ref start) Sys.argv
     [ "--input", Arg.String (set input), "Explicit synthetic dataset JSON"
@@ -29,6 +31,7 @@ let parse_options ?(start = 0) () =
     ; "--config", Arg.String (set config), "Runtime TOML configuration"
     ; "--runtime", Arg.String (set runtime), "Exact Agent Core runtime ID"
     ; "--publish-base-path", Arg.String (set publish), "Publish a blob copy under this base path"
+    ; "--prompts-dir", Arg.String (set prompts), "Production comparison: explicit production prompt directory"
     ]
     (fun argument -> raise (Arg.Bad ("Unexpected argument: " ^ argument)))
     usage;
@@ -46,6 +49,7 @@ let parse_options ?(start = 0) () =
     ; config_path = Config_dir_resolver.absolute_path config_path
     ; runtime_id
     ; publish_base_path = Option.map Config_dir_resolver.absolute_path !publish
+    ; prompt_dir = Option.map Config_dir_resolver.absolute_path !prompts
     }
 
 let read_dataset_with parse path =
@@ -67,7 +71,7 @@ let check_output options =
     | Fs_compat.Exact_kind _ -> Error ("Output already exists: " ^ options.output_path)
     | Fs_compat.Exact_unknown -> Error ("Cannot inspect output path: " ^ options.output_path)
 
-let prepare_runtime options =
+let prepare_runtime ?(prepare_exact_lane = false) options =
   let* observation =
     try
       let (_ : string option) =
@@ -88,6 +92,10 @@ let prepare_runtime options =
               ~exact_slots:(Runtime.exact_slot_degradation ())
               ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
               (Some degradation))));
+  let* () = if prepare_exact_lane then
+    try Server_runtime_bootstrap.publish_exact_output_registry_from_observation observation; Ok ()
+    with Env_config_core.Config_error detail -> Error detail
+    else Ok () in
   let* provider_cfg =
     match Runtime.get_runtime_by_id options.runtime_id with
     | None -> Error ("Configured runtime not found: " ^ options.runtime_id)
@@ -341,12 +349,12 @@ let run options =
 
 (* Both answer arms share the reference, question, Memory facts and configured
    provider. Only the representation of the covered history changes. *)
-let run_comparison options =
-  let module M = Masc.Librarian_working_state_evaluation in
+let run_paired options ~schema ~extra_fields ~parse_dataset ~case_id
+    ~case_to_yojson ~initial_progress ~progress_to_yojson ~evaluate_case ~scored ~prepare_exact_lane =
   let* () = check_output options in
-  let* input_bytes, dataset = read_dataset_with M.parse_dataset options.input_path in
-  let snapshot_path (case : M.case) =
-    options.output_path ^ ".snapshot-" ^ Digestif.SHA256.(to_hex (digest_string case.id)) ^ ".json"
+  let* input_bytes, (provenance, cases) = read_dataset_with parse_dataset options.input_path in
+  let snapshot_path case =
+    options.output_path ^ ".snapshot-" ^ Digestif.SHA256.(to_hex (digest_string (case_id case))) ^ ".json"
   in
   let rec check_snapshots = function
     | [] -> Ok ()
@@ -357,14 +365,14 @@ let run_comparison options =
        | Fs_compat.Exact_kind _ -> Error ("Snapshot already exists: " ^ path)
        | Fs_compat.Exact_unknown -> Error ("Cannot inspect snapshot path: " ^ path))
   in
-  let* () = check_snapshots dataset.cases in
-  let* config_revision, provider_cfg = prepare_runtime options in
+  let* () = check_snapshots cases in
+  let* config_revision, provider_cfg = prepare_runtime ~prepare_exact_lane options in
   let identity = Masc.Build_identity.current () in
-  let samples = List.map (fun case -> case, M.initial_progress) dataset.cases in
+  let samples = List.map (fun case -> case, initial_progress) cases in
   let report samples =
     `Assoc
-      [ "schema", `String "masc.librarian-working-state.v1"
-      ; "provenance", R.provenance_to_yojson dataset.provenance
+      ([ "schema", `String schema
+      ; "provenance", R.provenance_to_yojson provenance
       ; "run_id", `String identity.runtime_instance_id
       ; "started_at", `String identity.started_at
       ; "input_path", `String options.input_path
@@ -374,15 +382,16 @@ let run_comparison options =
       ; "binary_commit", (match identity.binary_commit with None -> `Null | Some value -> `String value)
       ; "executable_sha256", (match identity.executable_sha256 with None -> `Null | Some value -> `String value)
       ; "samples", `List (List.map (fun (case, progress) -> `Assoc
-          [ "case", M.case_to_yojson case
+          [ "case", case_to_yojson case
           ; "snapshot_path", `String (snapshot_path case)
-          ; "progress", M.progress_to_yojson progress ]) samples)
-      ]
+          ; "progress", progress_to_yojson progress ]) samples)
+      ] @ extra_fields)
   in
   let encode samples = Yojson.Safe.pretty_to_string (report samples) ^ "\n" in
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       Eio_context.set_env env;
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio_context.set_switch sw;
       Eio_context.set_net (Eio.Stdenv.net env);
       Eio_context.set_clock (Eio.Stdenv.clock env);
@@ -401,7 +410,7 @@ let run_comparison options =
                 (encode (List.rev_append completed ((case, progress) :: rest)))
               |> Result.map_error Masc.Keeper_fs.durable_write_error_to_string
             in
-            let* progress = M.evaluate_case ~generate
+            let* progress = evaluate_case ~generate
               ~judge:(judge ~clock:(Eio.Stdenv.clock env))
               ~judge_endpoint:(Masc.Typesafeai_client.endpoint_for_observation named.endpoint)
               ~judge_model:named.model
@@ -409,12 +418,7 @@ let run_comparison options =
             loop ((case, progress) :: completed) rest
         in
         let* completed = loop [] samples in
-        let arm_scored = function
-          | R.Scored _ -> true
-          | R.Not_started | R.Question_failed _ | R.Question_ready _ | R.Answer_failed _
-          | R.Answer_ready _ | R.Judge_failed _ -> false in
-        let all_scored = List.for_all (fun (_, (progress : M.progress)) ->
-          arm_scored progress.baseline && arm_scored progress.restored) completed in
+        let all_scored = List.for_all (fun (_, progress) -> scored progress) completed in
         let bytes = encode completed in
         (* Reuse publication handling, which treats a blob as a copy. The
            comparison report itself remains the authoritative artifact. *)
@@ -433,6 +437,55 @@ let run_comparison options =
              | Ok sha -> ["blob_sha256", (match sha with None -> `Null | Some value -> `String value)]
              | Error detail -> ["blob_sha256", `Null; "publication_error", `String detail])));
         Ok (if all_scored then 0 else 1))))
+
+let arm_scored = function
+  | R.Scored _ -> true
+  | R.Not_started | R.Question_failed _ | R.Question_ready _ | R.Answer_failed _
+  | R.Answer_ready _ | R.Judge_failed _ -> false
+
+let run_comparison options =
+  let module M = Masc.Librarian_working_state_evaluation in
+  let parse_dataset json = Result.map (fun (dataset : M.dataset) ->
+    dataset.provenance,dataset.cases) (M.parse_dataset json) in
+  run_paired options ~schema:"masc.librarian-working-state.v1" ~extra_fields:[] ~prepare_exact_lane:false
+    ~parse_dataset ~case_id:(fun (case : M.case) -> case.id)
+    ~case_to_yojson:M.case_to_yojson ~initial_progress:M.initial_progress
+    ~progress_to_yojson:M.progress_to_yojson ~evaluate_case:M.evaluate_case
+    ~scored:(fun (progress : M.progress) -> arm_scored progress.baseline && arm_scored progress.restored)
+
+let run_production_comparison options =
+  let module M = Masc.Librarian_production_evaluation in
+  let* prompt_dir = match options.prompt_dir with
+    | Some path -> Ok path
+    | None -> Error "compare-production requires --prompts-dir for the actual production templates" in
+  let* () = check_output options in
+  let* _ = read_dataset_with M.parse_dataset options.input_path in
+  (* New isolated workspace, never the operator's live runtime root. Keep the
+     directory with the measurement so failures retain their diagnostics. *)
+  let* base_path = try
+      let (_ : string) = Masc.Keeper_fs.ensure_dir (Filename.dirname options.output_path) in
+      Ok (Filename.temp_dir ~temp_dir:(Filename.dirname options.output_path) "librarian-evaluation-" "")
+    with Sys_error detail -> Error detail in
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  let registry = Masc.Exact_lane_run_registry.create
+    ~path:(Filename.concat base_path Masc.Exact_lane_run_registry.storage_filename) () in
+  let* () = match Masc.Exact_lane_run_registry.install_global registry with
+    | Ok () -> Ok ()
+    | Error Masc.Exact_lane_run_registry.Already_installed ->
+      Error "Production comparison requires its own isolated run registry" in
+  Masc.Prompt_registry.set_markdown_dir prompt_dir;
+  let infer ~previous_state ~unread_messages (input : Masc.Keeper_librarian.input) =
+    Masc.Keeper_librarian_runtime.infer_working_state ~base_path ~keepers_dir
+      ~keeper_id:(Masc.Keeper_identity.Keeper_id.to_string input.keeper_id)
+      ~previous_state ~unread_messages input in
+  let parse_dataset json = Result.map (fun (dataset : M.dataset) ->
+    dataset.provenance,dataset.cases) (M.parse_dataset json) in
+  run_paired options ~schema:"masc.librarian-production-working-state.v1" ~prepare_exact_lane:true
+    ~extra_fields:["evaluation_base_path",`String base_path;"prompt_directory",`String prompt_dir]
+    ~parse_dataset ~case_id:(fun (case : M.case) -> case.id)
+    ~case_to_yojson:M.case_to_yojson ~initial_progress:M.initial_progress
+    ~progress_to_yojson:M.progress_to_yojson ~evaluate_case:(M.evaluate_case ~infer)
+    ~scored:(fun (progress : M.progress) -> arm_scored progress.baseline && arm_scored progress.restored)
 
 (* Storage/assembly experiment for RFC section 7(d). These explicit commands
    write only the requested artifact; they never advance a live read cursor. *)
@@ -539,6 +592,7 @@ let run_snapshot mode =
 let () =
   let result =
     try match Array.to_list Sys.argv with
+    | _ :: "compare-production" :: _ -> let* options = parse_options ~start:1 () in run_production_comparison options
     | _ :: "compare" :: _ -> let* options = parse_options ~start:1 () in run_comparison options
     | _ :: "capture" :: _ -> run_snapshot Capture
     | _ :: "restore" :: _ -> run_snapshot Restore

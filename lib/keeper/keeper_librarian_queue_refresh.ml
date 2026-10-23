@@ -636,8 +636,8 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
               (fun (snapshot : Current.t) -> {Keeper_librarian.facts=snapshot.facts}) in
           let empty = {input with current;messages=[];
             historical_task_contexts=[];tool_observations=[];counterpart_observations=[]} in
-          (match Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
-            ~keeper_id:keeper_name ~previous_state:None ~unread_messages empty with
+          (match (Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
+            ~keeper_id:keeper_name ~previous_state:None ~unread_messages empty).outcome with
            | Runtime.Inferred {working_state;served_by} -> Ok (working_state,Some served_by)
            | Runtime.Not_inferred failure -> Error (refusal_detail failure.reports)) in
       Ok (inferred.anchor,inferred.program,working_state,served_by) in
@@ -711,8 +711,8 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            | None ->
              let empty = {input with messages=[];historical_task_contexts=[];
                tool_observations=[];counterpart_observations=[]} in
-             (match Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
-               ~keeper_id:keeper_name ~previous_state:None ~unread_messages empty with
+             (match (Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
+               ~keeper_id:keeper_name ~previous_state:None ~unread_messages empty).outcome with
               | Runtime.Inferred {working_state;served_by} -> Ok (working_state,Some served_by,holes)
               | Runtime.Not_inferred failure -> Error (refusal_detail position failure)))
         | source::sources,message::remaining ->
@@ -723,8 +723,8 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
             else None) input.historical_task_contexts in
           let selected_input = {input with messages=[message]; historical_task_contexts;
             tool_observations=[];counterpart_observations=[]} in
-          (match Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
-            ~keeper_id:keeper_name ~previous_state:state ~unread_messages selected_input with
+          (match (Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
+            ~keeper_id:keeper_name ~previous_state:state ~unread_messages selected_input).outcome with
            | Runtime.Inferred {working_state;served_by} ->
              read (Some working_state) (Some served_by) (position + 1) holes sources remaining
            | Runtime.Not_inferred failure ->

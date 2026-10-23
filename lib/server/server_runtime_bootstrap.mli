@@ -109,6 +109,12 @@ val publish_exact_output_registry_from_file : config_path:string -> unit
     Raises [Env_config_core.Config_error] when a mandatory lane is unusable
     or the registry refuses the declarations. *)
 
+val publish_exact_output_registry_from_observation : Runtime.config_observation -> unit
+(** Same publication policy using the exact configuration bytes already
+    loaded by [Runtime.init_default_degraded_observation]. The caller must use
+    that observation for both operations without loading another runtime
+    table between them. Does not reopen the configuration path. *)
+
 module For_testing : sig
   val configure_exact_output_registry : ?config_root:string -> unit -> unit
 

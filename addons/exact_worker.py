@@ -332,7 +332,9 @@ class Worker:
                 exact(args, {"kind", "request_id"}, "read")
                 request_id = text(args["request_id"], "request_id")
                 record = self.store.read(request_id)
-                if record is not None and self.contract.request_tool(record["request"]) != tool_name:
+                # A bodyless admission refusal has only its ID and fixed
+                # request_body_refused result, with no purpose-bound payload.
+                if record is not None and "request" in record and self.contract.request_tool(record["request"]) != tool_name:
                     raise InvalidInput("retained Exact request belongs to another tool")
                 return self.status(request_id, record)
             case _:

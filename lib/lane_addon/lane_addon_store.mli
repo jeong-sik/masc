@@ -129,6 +129,10 @@ val save_tool_request_body : t -> scope:string -> request_digest:string -> strin
     Bytes that do not match [request_digest] are refused before writing.
     Writing the same body again publishes the same file. Same serializer and
     durability as record publication. *)
+val load_tool_request_body : t -> scope:string -> request_digest:string -> (string option, string) result
+(** Read one staged or published body under its scope serializer. Only a
+    SHA-256 name is accepted; the consumer verifies canonical bytes against
+    that digest. A body alone grants no ownership or execution authority. *)
 val load_tool_request : t -> scope:string -> request_id:string ->
   name_body:(Yojson.Safe.t -> ('record * string, string) result) ->
   (('record * string option) option, string) result

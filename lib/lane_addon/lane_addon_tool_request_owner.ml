@@ -152,18 +152,43 @@ let check_published ~read_body ~directory_name ~file_name json =
   let* bytes = read_body ~scope:record.Record.scope ~request_digest:record.request_digest in
   let* _ = request_of_body ~request_digest:record.request_digest bytes in
   Ok ()
+let unavailable result = Result.map_error (fun detail -> Store_unavailable detail) result
+let load_listed ~store (record : Record.t) =
+  let* original = load ~store ~scope:record.scope ~request_id:record.request_id in
+  match original with
+  | Some original when same_listed record (listed original) -> Ok original
+  | Some _ -> Error (Store_unavailable "an inventoried original changed")
+  | None -> Error (Store_unavailable "an inventoried original disappeared")
+let load_scope ~store ~scope =
+  let* records = discover ~store ~scope in
+  let rec restore found = function
+    | [] -> Ok (List.rev found)
+    | record::rest ->
+      let* original = load_listed ~store record in
+      restore (original::found) rest in
+  restore [] records
 let discover_all ~store =
   let* rows = Lane_addon_store.tool_request_owner_inventory_all store |> unavailable in
   let rec restore records = function
     | [] -> Ok (List.rev records)
     | (directory_name,file_name,json)::rest ->
       let* record = decode_published ~directory_name ~file_name json |> unavailable in
-      let* original = load ~store ~scope:record.Record.scope ~request_id:record.request_id in
-      let* original = match original with
-        | Some original -> Ok original
-        | None -> Error (Store_unavailable "an inventoried original disappeared") in
+      let* original = load_listed ~store record in
       restore (original::records) rest in
   restore [] rows
+let prepare_successor ~store ~scope ~request_id ~request =
+  let* () = validate_identity ["scope",scope;"request_id",request_id] in
+  let* request = Lane_addon_action.canonical request
+    |> Result.map_error (fun detail -> Invalid_request detail) in
+  let bytes = Yojson.Safe.to_string request in
+  let request_digest = Lane_addon_store.digest bytes in
+  let* () = Lane_addon_store.save_tool_request_body store ~scope ~request_digest bytes |> unavailable in
+  Ok {Lane_addon_request_progress.request_id;request_digest}
+let load_successor_request ~store ~scope (successor : Lane_addon_request_progress.successor) =
+  let* () = validate_identity ["scope",scope;"request_id",successor.request_id] in
+  let* bytes = Lane_addon_store.load_tool_request_body store ~scope
+    ~request_digest:successor.request_digest |> unavailable in
+  request_of_body ~request_digest:successor.request_digest bytes |> unavailable
 let retain ~store ~scope ~request_id ~installation_id ~package_id ~tool ~summary ~request =
   let* () = validate_identity ["scope", scope; "request_id", request_id;
     "installation_id", installation_id; "package_id", package_id; "tool", tool] in

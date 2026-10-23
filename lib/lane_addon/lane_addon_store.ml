@@ -633,6 +633,18 @@ let load_tool_request_owner t ~scope ~request_id =
   serialized_tool_request_read t ~scope (fun () -> tool_request_owner_record t ~scope ~request_id)
 let tool_request_body_path ~scope ~request_digest =
   Filename.concat tool_request_bodies_directory (Filename.concat (digest scope) (request_digest ^ ".json"))
+let tool_request_body t ~scope ~request_digest =
+  let* () = if String_util.is_lowercase_sha256_hex request_digest then Ok ()
+    else Error "a request body is named by a SHA-256 digest" in
+  let name = request_digest ^ ".json" in
+  let* body = read_tool_request_scope ~namespace:tool_request_bodies_directory ~sync_parent:Unix.fsync t ~scope
+    (fun ~owner_uid held names ->
+      if not (List.mem name names) then Ok None
+      else read_owned_tool_request_bytes ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
+        |> Result.map Option.some) in
+  Ok (Option.join body)
+let load_tool_request_body t ~scope ~request_digest =
+  serialized_tool_request_read t ~scope (fun () -> tool_request_body t ~scope ~request_digest)
 (* The record and the body it names under one hold of the serializer that a
    settle moves both under, so an original is read whole or found gone. *)
 let load_tool_request t ~scope ~request_id ~name_body =
@@ -642,15 +654,8 @@ let load_tool_request t ~scope ~request_id ~name_body =
     | None -> Ok None
     | Some json ->
       let* record,request_digest = name_body json in
-      let* () = if String_util.is_lowercase_sha256_hex request_digest then Ok ()
-        else Error "a request body is named by a SHA-256 digest" in
-      let name = request_digest ^ ".json" in
-      let* body = read_tool_request_scope ~namespace:tool_request_bodies_directory ~sync_parent:Unix.fsync t ~scope
-        (fun ~owner_uid held names ->
-          if not (List.mem name names) then Ok None
-          else read_owned_tool_request_bytes ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
-            |> Result.map Option.some) in
-      Ok (Some (record,Option.join body)))
+      let* body = tool_request_body t ~scope ~request_digest in
+      Ok (Some (record,body)))
 (* A body is named by the digest of its bytes, so writing it again publishes
    the same file; each write is atomic and synced with its directory. *)
 let save_tool_request_body t ~scope ~request_digest bytes =

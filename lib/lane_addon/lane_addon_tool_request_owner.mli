@@ -63,6 +63,19 @@ val discover_all : store:Lane_addon_store.t -> (retained list, error) result
 (** Validate the directory and record identity of each published scope, then
     strictly load each original body. This observation is not an atomic
     cross-scope snapshot or permission for effects. *)
+val load_scope : store:Lane_addon_store.t -> scope:string -> (retained list, error) result
+(** Discover record identities, then strictly load each unchanged original.
+    Missing or changed observations reject the whole result. Unlike
+    {!discover}, this explicitly reads every request body in the scope. *)
+val prepare_successor : store:Lane_addon_store.t -> scope:string -> request_id:string ->
+  request:Yojson.Safe.t -> (Lane_addon_request_progress.successor, error) result
+(** Durably stage canonical input before retaining its digest-only successor
+    intent. Does not publish an owner record or allow child execution. *)
+val load_successor_request : store:Lane_addon_store.t -> scope:string ->
+  Lane_addon_request_progress.successor -> (Yojson.Safe.t, error) result
+(** Verify the complete canonical input named by a retained successor intent.
+    Missing, changed or noncanonical bytes are errors, never permission to
+    regenerate an input or create another child. *)
 val check_published :
   read_body:(scope:string -> request_digest:string -> (string option, string) result) ->
   directory_name:string -> file_name:string -> Yojson.Safe.t -> (unit, string) result

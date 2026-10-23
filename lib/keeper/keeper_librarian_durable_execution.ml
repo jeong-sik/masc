@@ -95,7 +95,7 @@ let advance_original ~store record event =
     | Ok (Retained.Stored record | Already_stored record) -> Ok record
     | Ok (Unconfirmed detail) -> Error detail
     | Error error -> Error (Retained.update_error_to_string error))
-let replacement_request (parent:Retained.retained) parent_request (intended:Progress.successor) =
+let replacement_request (parent:Retained.retained) parent_request (intended:Progress.preparation_intent) =
   let* child=Request.of_json ~owner:(Request.physical_owner parent_request) intended.request in
   let* ()=require (Request.request_id child=intended.request_id)
     "Original history replacement intent names another request" in
@@ -158,7 +158,7 @@ let capture ?replacement_parent ~store ~config ~reserved ~keeper_name source =
       let* original=Owner.retain ~store request |> Result.map_error Owner.error_to_string in
       Ok (original,request)
     | Some (parent,parent_request) ->
-      let intended:Progress.successor={request_id;request=Request.to_json request} in
+      let intended:Progress.preparation_intent={request_id;request=Request.to_json request} in
       let* parent=advance_original ~store parent (Progress.Replacement_intended intended) in
       recover_replacement ~store (parent,parent_request))
 let completed_outcome request =

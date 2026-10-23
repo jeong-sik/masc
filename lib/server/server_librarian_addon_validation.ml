@@ -6,6 +6,13 @@ module Exact = Lane_addon_exact
 module History = Keeper_librarian_durable_request
 let ( let* ) = Result.bind
 let io work = Eio_unix.run_in_systhread work
+let undecided detail = Exact.Undecided {detail}
+let load_original ~store ~scope ~request_id =
+  let* record = Owner.load ~store ~scope ~request_id
+    |> Result.map_error (fun error -> undecided (Owner.error_to_string error)) in
+  match record with
+  | Some record -> Ok record
+  | None -> Error (Exact.Unowned {reason="Namespaced Librarian request has no original host capture"})
 
 type authorization = {
   validate_output : Exact.output_validator;
@@ -22,9 +29,8 @@ let namespace id = match Capture.scope_of_request_id id with
 let authorize_history ~base_path ~store ~declaration_id ~(package:Lane_addon_types.package)
     (request:Exact.request) scope =
   io (fun () ->
-    let* record=Owner.load ~store ~scope ~request_id:request.request_id
-      |> Result.map_error Owner.error_to_string in
-    let* record=Option.to_result ~none:"Namespaced history request has no original host capture" record in
+    let* record=load_original ~store ~scope ~request_id:request.request_id in
+    let restore () =
     let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let* owner=History.observe_record_owner ~base_path ~keepers_dir record in
     let* capture=History.restore ~owner record in
@@ -58,21 +64,20 @@ let authorize_history ~base_path ~store ~declaration_id ~(package:Lane_addon_typ
         match Keeper_memory_lane.with_external_effect ~base_path ~keeper_name:(History.keeper_id owner) run with
         | Ok result -> result
         | Error error -> Error (Keeper_memory_lane.external_effect_error_to_string error));
-    }))
+    }) in
+    restore () |> Result.map_error undecided)
 
 let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.package)
     (request : Exact.request) =
   match namespace request.request_id with
   | Other ->
-    if package.id=Capture.package_id then Error "Librarian exact request lacks its original host identity"
+    if package.id=Capture.package_id then Error (Exact.Unowned {reason="Librarian exact request lacks its original host identity"})
     else Ok None
   | History scope -> authorize_history ~base_path ~store ~declaration_id ~package request scope
   | Admission scope ->
     io (fun () ->
-      let* record=Owner.load ~store ~scope ~request_id:request.request_id
-        |> Result.map_error Owner.error_to_string in
-      let* record=match record with Some record -> Ok record
-        | None -> Error "Namespaced Librarian exact request has no original host capture" in
+      let* record=load_original ~store ~scope ~request_id:request.request_id in
+      let restore () =
       let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
       let* owner=Capture.observe_record_owner ~base_path ~keepers_dir record in
       let restore_gate ~parent_execution ~gate_request_id =
@@ -109,4 +114,5 @@ let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.pac
           match Keeper_memory_lane.with_external_effect ~base_path ~keeper_name:(Capture.keeper_id owner) run with
           | Ok result -> result
           | Error error -> Error (Keeper_memory_lane.external_effect_error_to_string error));
-      }))
+      }) in
+      restore () |> Result.map_error undecided)

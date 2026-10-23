@@ -497,7 +497,7 @@ let validate_root_lineage inventory =
           "Overlapping roots have no original terminal supersession lineage") rest in pairs rest in
   pairs lineage
 let validate_execution_inventory ~store ~owner inventory =
-  let* records=Owner.discover ~store ~scope:(Capture.scope owner) |> owner_error in
+  let* records=Owner.load_scope ~store ~scope:(Capture.scope owner) |> owner_error in
   let* captures=traverse (Capture.restore ~owner ~load_parent:(load_parent inventory)) records in
   let parents=List.map Capture.parent_part_id captures in
   require (List.length parents=List.length (List.sort_uniq String.compare parents))
@@ -549,15 +549,15 @@ let check_current_owner owner =
   Capture.owner_matches_json current (Capture.owner_to_json owner)
 let discover ~store ~owner ~restore_gate =
   let* ()=check_current_owner owner in
-  let* raw_parts=Owner.discover ~store ~scope:(scope owner) |> owner_error in
+  let* raw_parts=Owner.load_scope ~store ~scope:(scope owner) |> owner_error in
   let* parts=List.map (decode_record ~owner) raw_parts |> sequence in
-  let* raw_partitions=Owner.discover ~store ~scope:(partition_scope owner) |> owner_error in
+  let* raw_partitions=Owner.load_scope ~store ~scope:(partition_scope owner) |> owner_error in
   let* partitions=List.map (decode_partition ~owner) raw_partitions |> sequence in
   let inventory={parts;partitions} in
   let+ ()=validate_forest ~store ~owner ~restore_gate inventory in inventory
 let retain_part ~store (part:part) = Owner.retain ~store ~scope:(scope part.owner) ~request_id:part.id
   ~installation_id:part.destination.installation_id ~package_id:part.destination.package_id
-  ~tool:part.destination.tool ~request:(to_json part) |> owner_error
+  ~tool:part.destination.tool ~summary:`Null ~request:(to_json part) |> owner_error
 let admitted_publish ~destination ~admit publish =
   let published=ref false in
   let* ()=admit ~destination ~publish:(fun () -> let+ ()=publish () in published:=true) in
@@ -672,6 +672,6 @@ let partition ~store ~owner ~restore_gate ~(parent:part) ~(evidence:size_evidenc
   let* ()=admitted_publish ~destination:parent.destination ~admit (fun () ->
     Owner.retain ~store ~scope:(partition_scope owner) ~request_id:partition_id
       ~installation_id:parent.destination.installation_id ~package_id:parent.destination.package_id
-      ~tool:parent.destination.tool ~request |> owner_error) in
+      ~tool:parent.destination.tool ~summary:`Null ~request |> owner_error) in
   let* recovered=recover_partitions ~store ~owner ~restore_gate in
   let* left=find recovered ~part_id:left_id in let+ right=find recovered ~part_id:right_id in left,right

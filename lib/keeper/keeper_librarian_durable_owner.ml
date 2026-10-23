@@ -39,7 +39,7 @@ let retain ~store request =
   let destination=Request.destination request in
   let scope=Request.scope (Request.physical_owner request) and request_id=Request.request_id request in
   let* ()=io (fun () -> Owner.retain ~store ~scope ~request_id
-    ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
+    ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool ~summary:`Null
     ~request:(Request.to_json request)) |> owned in
   let* record=io (fun () -> Owner.load ~store ~scope ~request_id) |> owned in
   let* record=match record with Some record -> Ok record
@@ -47,7 +47,7 @@ let retain ~store request =
   let* ()=check_request request record in Ok record
 let discover ~store ~base_path ~keepers_dir ~keeper_id =
   let* scope=io (fun () -> Request.discovery_scope ~base_path ~keepers_dir ~keeper_id) |> rejected in
-  let* records=io (fun () -> Owner.discover ~store ~scope) |> owned in
+  let* records=io (fun () -> Owner.load_scope ~store ~scope) |> owned in
   let rec restore found = function
     | [] -> Ok (List.rev found)
     | record::rest ->

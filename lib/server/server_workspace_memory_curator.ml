@@ -9,6 +9,7 @@ module Binding = Server_workspace_memory_addon_validation
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
+module Pass = Server_workspace_memory_curator_pass
 let ( let* ) = Result.bind
 let io work=Eio_unix.run_in_systhread work
 let consumer value=Result.map_error Consumer.error_to_string value
@@ -41,8 +42,9 @@ let divisible (original : Consumer.original)=match original.summary.Capture.Summ
   | Capture.Summary.Classification {selected;_} -> (match selected with _::_::_ -> true | [] | [_] -> false)
   | Capture.Summary.Briefing {selected_count;_} -> selected_count > 1
 let changed original record=phase original <> Progress.phase record.Owner.progress
+let discover ~config = Pass.with_phase Pass.Discovery (fun () -> Consumer.discover ~config)
 let narrow ~config original =
-  let* result=Consumer.narrow ~config ~request_id:(id original) |> consumer in
+  let* result=Pass.with_phase Pass.Successor (fun () -> Consumer.narrow ~config ~request_id:(id original)) |> consumer in
   match result with
   | Consumer.Successor_ready _ -> Ok true
   | Indivisible record | Successor_waiting record -> Ok (changed original record)
@@ -55,7 +57,7 @@ let step ~config ~new_work original =
      | Consumer.Committed record | Commit_conflict record | Commit_waiting record -> Ok (changed original record))
   | Consumer.Awaiting (_,record) | Settled record -> Ok (changed original record)
   | Consumer.Terminal (_,record) ->
-    let* fresh=Consumer.discover ~config |> consumer in
+    let* fresh=discover ~config |> consumer in
     let* current=match List.find_opt (fun current -> id current=id original) fresh with
       | Some current -> Ok current | None -> Error "Original Curator terminal vanished before successor evaluation" in
     let* eligible=size_refusal current in
@@ -71,7 +73,7 @@ let observed (original : Consumer.original) =
    record read. *)
 let observe ~config ~on_observation_failure originals =
   List.fold_left (fun complete original ->
-    match Consumer.deliver_observation ~config ~request_id:(id original) with
+    match Pass.with_phase Pass.Observer (fun () -> Consumer.deliver_observation ~config ~request_id:(id original)) with
     | Ok _ -> complete
     | Error (Consumer.Registry_delivery_failed _ as error) ->
       on_observation_failure ();
@@ -109,7 +111,7 @@ let one_successor ~config originals =
     | original::rest ->
       let* size=size_refusal original in
       let* current=if size && divisible original then
-        let* capture=Consumer.restore_original ~config ~request_id:(id original) |> consumer in
+        let* capture=Pass.with_phase Pass.Successor (fun () -> Consumer.restore_original ~config ~request_id:(id original)) |> consumer in
         Consumer.successor_is_current ~config ~capture |> consumer
         else Ok false in
       collect (if current then original::acc else acc) rest in
@@ -198,8 +200,8 @@ let briefing_new ~config ~originals ~new_work ~busy =
     let* ()=if Yojson.Safe.equal (Briefing.to_json state) (Briefing.to_json prepared) then Ok ()
       else io (fun () -> Briefing.save ~directory prepared) in
     let* _=Consumer.capture_briefing ~config ~prompt:resolution ~batch |> consumer in Ok true
-let run_domain ~config ~on_inventory ~on_observation_failure domain =
-  let* originals=Consumer.discover ~config |> consumer in
+let run_domain_work ~config ~on_inventory ~on_observation_failure domain =
+  let* originals=discover ~config |> consumer in
   on_inventory originals;
   let new_work=observe ~config ~on_observation_failure originals in
   settle ~config domain originals;
@@ -228,13 +230,17 @@ let run_domain ~config ~on_inventory ~on_observation_failure domain =
         (* A failed publication is not absence. Rediscover before any new root;
            a recovered child is now runnable on the next pass, never alongside
            another capture derived from the previous frontier. *)
-        let* fresh=Consumer.discover ~config |> consumer in
+        let* fresh=discover ~config |> consumer in
         on_inventory fresh;
         let new_work=observe ~config ~on_observation_failure fresh in
         let selected=leaves fresh |> List.filter (fun original -> kind original=domain) in
         let* running=one_active selected in
         match running with Some _ -> Ok true | None -> prepare ~originals:selected ~new_work
+let run_domain ~config ~on_inventory ~on_observation_failure domain =
+  let observed_domain = match domain with Classification -> Pass.Classification | Synthesis -> Pass.Briefing in
+  Pass.with_domain observed_domain (fun () -> run_domain_work ~config ~on_inventory ~on_observation_failure domain)
 let run ~config ~on_inventory ~on_observation_failure =
+  Pass.with_pass ~base_path:config.Workspace.base_path (fun () ->
   let classify=run_domain ~config ~on_inventory ~on_observation_failure Classification in
   let synthesize=run_domain ~config ~on_inventory ~on_observation_failure Synthesis in
   let changed=function Ok changed -> changed | Error detail ->
@@ -244,7 +250,7 @@ let run ~config ~on_inventory ~on_observation_failure =
     on_observation_failure ();
     Log.Server.error "workspace curator original owner: %s" detail;false in
   let classified=changed classify and synthesized=changed synthesize in
-  classified || synthesized
+  classified || synthesized)
 
 type idle_checkpoint = unit ref
 type idle_result = Owner_idle of idle_checkpoint | Owner_stopped | Owner_missing

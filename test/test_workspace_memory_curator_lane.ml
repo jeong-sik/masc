@@ -4,6 +4,7 @@
 open Alcotest
 open Masc
 module Curator = Server_workspace_memory_curator
+module Pass = Server_workspace_memory_curator_pass
 module Consumer = Server_workspace_memory_addon
 module Capture = Workspace_memory_execution_capture
 module Owner = Lane_addon_tool_request_owner
@@ -329,16 +330,72 @@ let with_fixture ?(on_response_error=(fun _ _ -> ()))
         Curator.For_testing.stop ~base_path;
         write source (declaration false);
         ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get))))))))))
+let restore_metric name domain phase =
+  Otel_metric_store.metric_value_or_zero name ~labels:["domain",domain;"phase",phase] ()
+let calls_metric = "masc_workspace_curator_restore_calls_per_pass"
+let failures_metric = "masc_workspace_curator_restore_failures_per_pass"
+let restore_total domain =
+  List.fold_left (fun sum phase -> sum +. restore_metric calls_metric domain phase) 0.
+    ["discovery";"observer";"successor";"primary"]
+let test_restore_calls_follow_actual_observer_invocations () =
+  with_fixture ~start_owner:false
+    (fun ~sw:_ ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode:_ ~delivery:_ ->
+    await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
+    let capture=capture_classification config in
+    let request_id=Capture.Request_id.to_string (Capture.request_id capture) in
+    let bad_id=Capture.Request_id.to_string (Capture.Request_id.fresh ()) in
+    let bad_request=match Capture.to_json capture with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
+          if key="request_id" then `String bad_id
+          else if key="rendered_prompt_sha256" then `String (String.make 64 '0') else value) fields)
+      | _ -> fail "capture object" in
+    let destination=Capture.destination capture in
+    owned (Owner.retain ~store ~scope:Capture.scope ~request_id:bad_id
+      ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
+      ~summary:(Capture.Summary.to_json (get (Capture.summary capture))) ~request:bad_request);
+    let before=restore_metric calls_metric "classification" "observer"
+    and failures=restore_metric failures_metric "classification" "observer" in
+    let prepare request_id=Consumer.For_testing.prepare_observation ~store ~base_path ~request_id ~now:(fun () -> 42.) in
+    Pass.with_pass ~base_path (fun () -> Pass.with_domain Pass.Classification (fun () ->
+      Pass.with_phase Pass.Observer (fun () ->
+        ignore (prepare request_id |> consumed);
+        ignore (prepare request_id |> consumed);
+        check bool "an invalid captured prompt refuses actual restore" true (Result.is_error (prepare bad_id)))));
+    check (float 0.) "repeated restore of one original is two calls, plus the failed call" 3.
+      (restore_metric calls_metric "classification" "observer" -. before);
+    check (float 0.) "the failed actual restore is counted" 1.
+      (restore_metric failures_metric "classification" "observer" -. failures);
+    ignore (prepare request_id |> consumed);
+    check (float 0.) "out-of-pass restore is not attributed to a finished pass" (before +. 3.)
+      (restore_metric calls_metric "classification" "observer");
+    check int "observation preparation never dispatched a provider" 0 (F.post_count server))
+let test_unentered_restore_submission_is_not_a_call () = Eio_main.run (fun _ ->
+  let before=restore_metric calls_metric "outside_domain" "primary" in
+  Pass.with_pass ~base_path:"executor-not-entered" (fun () ->
+    let outcome=Pass.restore ~run:(fun _ -> Error "submission refused")
+      (fun () -> fail "the executor must not enter this restore") in
+    check bool "executor refusal remains the caller's result" true (outcome=Error "submission refused"));
+  check (float 0.) "an unentered callback adds no restore call" before
+    (restore_metric calls_metric "outside_domain" "primary"))
 let test_actual_production_pipeline ()=with_fixture ~invalid_first:true (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode:_ ~delivery:_ ->
+  let classified_before=restore_total "classification" and briefing_before=restore_total "briefing" in
   Curator.start ~sw ~config;
   settle_all clock base_path store 1;
+  check bool "actual classification-stage restores are measured" true (restore_total "classification" > classified_before);
+  check bool "actual Briefing-stage restores are measured" true (restore_total "briefing" > briefing_before);
   check int "one classification and one Briefing original" 2 (List.length (every_original store));
   check int "each domain reaches the admitted good HTTP candidate" 2 (F.post_count server);
   let snapshots ()=every_original store
     |> List.map (fun original -> original.stored_id,Progress.to_json original.stored_progress)
     |> List.sort (fun (a,_) (b,_) -> String.compare a b) in
   let before=snapshots () in
+  let calls_before=restore_total "classification" +. restore_total "briefing" in
+  let samples_before=restore_metric (Otel_metric_store.histogram_count_name calls_metric) "classification" "primary" in
   ignore (Curator.request ~base_path);await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
+  check bool "idle wake contributes a zero-restore pass sample" true
+    (restore_metric (Otel_metric_store.histogram_count_name calls_metric) "classification" "primary" > samples_before);
+  check (float 0.) "idle pass restores no observed original" calls_before
+    (restore_total "classification" +. restore_total "briefing");
   check int "unchanged wake does not replay HTTP" 2 (F.post_count server);
   check (list (pair string json)) "original terminal and observer intents stay immutable" before (snapshots ()))
 let test_off_then_actual_metadata_on ()=with_fixture ~off:true (fun ~sw:_ ~clock ~base_path ~config ~store ~source ~declaration ~server ~urls:_ ~mode:_ ~delivery:_ ->
@@ -1161,6 +1218,8 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
     (test_briefing_unknown_policy Lane_addon_exact.Cut);
   test_case "Raised Briefing keeps the identical prepared state fenced" `Quick
     (test_briefing_unknown_policy Lane_addon_exact.Raised);
+  test_case "actual observer restores, failures and out-of-pass isolation" `Quick test_restore_calls_follow_actual_observer_invocations;
+  test_case "unentered executor submission is not a restore call" `Quick test_unentered_restore_submission_is_not_a_call;
   test_case "public owner uses real worker, semantic candidates and original terminal" `Quick test_actual_production_pipeline;
   test_case "actual Addon On wakes sources parked while Off" `Quick test_off_then_actual_metadata_on;
   test_case "actual output publication resumes the same original request" `Quick test_original_waits_for_actual_route_publication;

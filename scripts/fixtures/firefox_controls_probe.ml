@@ -68,7 +68,7 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     (* A click that opens a JavaScript dialog can report an error after the page
        took the click, so the dialog itself is the evidence. *)
     let click_opening_dialog id selector = ignore (interact_raw id (Browser_lane.Click selector)) in
-    let elements id = success (run (Browser_lane.Page_elements {tab_id=Some id;within=None})) in
+    let elements id = success (run (Browser_lane.Page_elements {tab_id=Some id;filter={within=None;selector=None}})) in
     let observation = elements first in
     check "element observation names its tab" (integer (member "tabId" observation)=first);
     let controls = member "elements" observation |> Yojson.Safe.Util.to_list in
@@ -127,7 +127,7 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let frame_path = [outer;inner] in
     let frame_input action = success (interact_in first ~frame_path action) in
     check "nested cross-origin frame controls are readable"
-      (context first frame_path (`Elements None) |> member "elements" |> Yojson.Safe.Util.to_list |> List.length = 2);
+      (context first frame_path (`Elements Browser_lane.unfiltered_elements) |> member "elements" |> Yojson.Safe.Util.to_list |> List.length = 2);
     check "nested fill executed" (member "tabId" (frame_input (Browser_lane.Fill {selector="#nested-input";text="프레임 입력"})) = `Int first);
     check "nested click executed" (member "tabId" (frame_input (Browser_lane.Click "#nested-apply")) = `Int first);
     check "nested frame contains submitted input" (contains (context first frame_path (`Text 1000) |> member "text" |> string) "프레임 입력");

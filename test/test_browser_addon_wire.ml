@@ -12,9 +12,9 @@ let roundtrips () =
     Page_scene {tab_id=7;max_chars=1000;view=B.Regions;scope=Some {document_id="doc";node_id="region"}};
     Page_interact {frame_path=[];tab_id=7;expected_url=Some "https://example.org";action=B.Fill_node {target={document_id="doc";node_id="edit"};text=""}};
     Session_open {headless=Some false};Session_close;Session_status;
-    Page_goto {url="https://example.org";tab_id=Some 7};Page_elements {tab_id=Some 7;within=None};
-    Page_elements {tab_id=None;within=Some "nav[aria-label=\"Channels\"] > ul"};
-    Page_context {tab_id=7;frame_path=["#frame"];mode=`Elements (Some "#sidebar")};
+    Page_goto {url="https://example.org";tab_id=Some 7};Page_elements {tab_id=Some 7;filter={within=None;selector=None}};
+    Page_elements {tab_id=None;filter={within=Some "nav[aria-label=\"Channels\"] > ul";selector=Some "[role=row]"}};
+    Page_context {tab_id=7;frame_path=["#frame"];mode=`Elements {within=Some "#sidebar";selector=None}};
     Page_act (B.Action.On_tab {tab_id=7;frame_path=["#frame"];interaction=B.Action.Upload {selector="#edit";paths=["/staged/a.txt"]}});
     Page_context {tab_id=7;frame_path=["#frame"];mode=`Text 1000};
     Page_instruct {tab_id=7;instruction="Open the menu"};Page_locate {tab_id=7;instruction=None};

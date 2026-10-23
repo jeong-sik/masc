@@ -83,9 +83,9 @@ let verb_of_json ~route value =
   | "page.cookies" -> one_tab (fun tab_id -> B.Page_cookies {tab_id})
   | "page.capture" -> one_tab (fun tab_id -> B.Page_capture {tab_id})
   | "page.elements" ->
-      let* fields = fields ["tabId";"within"] in let* tab_id = optional_tab fields in
-      let* within = Browser_page_script.within_of_json (List.assoc_opt "within" fields) in
-      Ok (B.Page_elements {tab_id;within})
+      let* fields = fields ["tabId";"within";"selector"] in let* tab_id = optional_tab fields in
+      let* filter = Browser_page_script.elements_filter_of_json (fun key -> List.assoc_opt key fields) in
+      Ok (B.Page_elements {tab_id;filter})
   | "page.scene" ->
       let* fields = fields ["tabId";"maxChars";"view";"scope"] in
       let* raw = required fields "tabId" in let* tab_id = tab raw in
@@ -108,15 +108,15 @@ let verb_of_json ~route value =
       let* _ = object_fields ["action";"tabId";"framePath";"url";"selector";"text";"key";"value";"x";"y";"paths"] args in
       B.Action.parse args |> Result.map (fun action -> B.Page_act action)
   | "page.context" ->
-      let* fields = fields ["tabId";"framePath";"mode";"maxChars";"within"] in
+      let* fields = fields ["tabId";"framePath";"mode";"maxChars";"within";"selector"] in
       let* raw = required fields "tabId" in let* tab_id = tab raw in
       let* frame_path = B.Action.parse_frame_path args in
       let* name = text_field fields "mode" in
-      let* within = Browser_page_script.within_of_json (List.assoc_opt "within" fields) in
-      let* mode = match name,List.assoc_opt "maxChars" fields,within with
-        | "text",Some raw,None -> let* cap = integer raw in let* _ = Browser_page_script.text_cap (Some cap) in Ok (`Text cap)
-        | "elements",None,within -> Ok (`Elements within)
-        | "frames",None,None -> Ok `Frames | "dialog",None,None -> Ok `Dialog
+      let* filter = Browser_page_script.elements_filter_of_json (fun key -> List.assoc_opt key fields) in
+      let* mode = match name,List.assoc_opt "maxChars" fields,filter.within,filter.selector with
+        | "text",Some raw,None,None -> let* cap = integer raw in let* _ = Browser_page_script.text_cap (Some cap) in Ok (`Text cap)
+        | "elements",None,_,_ -> Ok (`Elements filter)
+        | "frames",None,None,None -> Ok `Frames | "dialog",None,None,None -> Ok `Dialog
         | _ -> Error "invalid context read mode" in
       Ok (B.Page_context {tab_id;frame_path;mode})
   | "page.instruct" -> let* fields = fields ["tabId";"instruction"] in

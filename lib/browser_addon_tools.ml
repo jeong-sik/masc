@@ -4,7 +4,7 @@ module C = Browser_capabilities
 module Legacy = Tool_misc_browser_lane
 let ( let* ) = Result.bind
 type projection = Raw | Inventory | Session | Scene of Browser_scene.request | Screenshot of int
-  | Scoped_elements of string
+  | Scoped_elements of B.elements_filter
 type prepared = {preference:Browser_selection.preference;verb:B.verb;
   required_actions:C.operation list;projection:projection}
 let fields allowed = function
@@ -33,20 +33,20 @@ let absolute_url = function
   | None|Some _ -> Error "url is required"
 let prepare_read ~keeper_name json =
   let* fields=fields ["lane";"clientId";"tabId";"maxChars";"mode";"framePath";
-    "scope";"expectedUrl";"navigationSource";"within"] json in
+    "scope";"expectedUrl";"navigationSource";"within";"selector"] json in
   let* request=surface fields in
   let* ()=bound request in
   let* frame_path=B.Action.parse_frame_path json in
   let* mode=Legacy.read_mode_of_args json in
   let* cap=optional_int "maxChars" fields in
   let* max_chars=Browser_page_script.text_cap cap in
-  let* within=Browser_page_script.within_of_json (List.assoc_opt "within" fields) in
-  let* ()=match mode,within with
-    | `Elements,(None|Some _)
-    | (`Text|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),None -> Ok ()
-    | (`Text|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),Some _ ->
-        Error "within applies to mode elements only" in
-  let elements_projection=match within with None -> Raw | Some selector -> Scoped_elements selector in
+  let* filter=Browser_page_script.elements_filter_of_json (fun key -> List.assoc_opt key fields) in
+  let* ()=match mode,(filter.within,filter.selector) with
+    | `Elements,((None|Some _),(None|Some _))
+    | (`Text|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),(None,None) -> Ok ()
+    | (`Text|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),((Some _,_)|(_,Some _)) ->
+        Error "within and selector apply to mode elements only" in
+  let elements_projection=match filter.within,filter.selector with None,None -> Raw | (Some _,_|_,Some _) -> Scoped_elements filter in
   let top_scene=frame_path=[] && (match mode with `Scene|`Regions -> true
     | `Text|`Elements|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog -> false) in
   let* ()=if not top_scene && List.exists (fun key -> List.mem_assoc key fields)
@@ -63,7 +63,7 @@ let prepare_read ~keeper_name json =
       | Automatic,_|Exact Stagehand_route,_ -> Error "frame and dialog reads require an explicit automation or live browser" in
     let* tab_id=tab request in
     let* mode=match mode with
-      | `Text -> Ok (`Text max_chars) | `Elements -> Ok (`Elements within) | `Frames -> Ok `Frames
+      | `Text -> Ok (`Text max_chars) | `Elements -> Ok (`Elements filter) | `Frames -> Ok `Frames
       | `Dialog when frame_path=[] -> Ok `Dialog
       | `Dialog|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies -> Error "framePath supports text, elements and frames" in
     let projection=match mode with `Elements _ -> elements_projection
@@ -96,7 +96,7 @@ let prepare_read ~keeper_name json =
         | Automatic|Exact (Live_route _|Stagehand_route) -> Error "cookie reads require automation" in
       let* tab_id=tab request in prepared request Raw (B.Page_cookies {tab_id})
   | `Text -> prepared request Raw (B.Page_read {tab_id=request.tab_id;max_chars=Some max_chars})
-  | `Elements -> prepared request elements_projection (B.Page_elements {tab_id=request.tab_id;within})
+  | `Elements -> prepared request elements_projection (B.Page_elements {tab_id=request.tab_id;filter})
   | `Frames|`Dialog -> Error "contextual read requires a frame or dialog mode"
 let prepare ~keeper_name ~upload_paths tool json =
   let* _=Lane_addon_action.canonical json in
@@ -178,8 +178,8 @@ let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
       with_capabilities (annotate data)
   | Session -> with_capabilities (annotate receipt.data)
   | Scene scene -> Browser_scene.project scene ~binding:receipt.binding ~started receipt.data
-  | Scoped_elements selector ->
-      let* data=Browser_page_script.check_scoped_elements ~within:(Some selector) receipt.data in
+  | Scoped_elements filter ->
+      let* data=Browser_page_script.check_scoped_elements ~filter receipt.data in
       Ok (annotate data)
   | Screenshot tab_id ->
       let* keeper_name=Option.to_result ~none:"screenshot requires an owning Keeper" keeper_name in

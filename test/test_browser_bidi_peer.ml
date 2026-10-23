@@ -804,6 +804,7 @@ let test_framed_interaction_runs_in_the_child_context () =
 let test_context_reads_run_in_the_frame () =
   Eio_main.run (fun _ ->
     let targets = ref [] in
+    let passed = ref `Null in
     let command method_ args = match method_ with
       | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
       | "script.callFunction" ->
@@ -815,6 +816,7 @@ let test_context_reads_run_in_the_frame () =
                  "value",obj ["context",`String "child"]]])
         else begin
           targets := context :: !targets;
+          passed := args |> member "arguments" |> index 0 |> member "value" |> to_string |> Yojson.Safe.from_string;
           Ok (script_value (obj ["url",`String "https://example.test/frame";"frames",`List []]))
         end
       | _ -> fail ("unexpected command: " ^ method_) in
@@ -829,8 +831,10 @@ let test_context_reads_run_in_the_frame () =
            (Yojson.Safe.Util.member "framePath" receipt = `List [`String "iframe"]
             && Yojson.Safe.Util.member "tabId" receipt = `Int 1)
        | Error _ -> fail (mode ^ " must be read in the frame"));
-      check (list string) (mode ^ " runs only in the child context") ["child"] !targets)
-      ["text",["maxChars",`Int 100]; "elements",[]; "frames",[]];
+      check (list string) (mode ^ " runs only in the child context") ["child"] !targets;
+      if List.mem_assoc "selector" extra then
+        check bool "both filters reach the child script" true (!passed = obj extra))
+      ["text",["maxChars",`Int 100]; "elements",[]; "elements",["within",`String "nav";"selector",`String "[role=row]"]; "frames",[]];
     targets := [];
     (match read "dialog" [] with
      | Error (Peer.Before_effect _) -> ()
@@ -922,7 +926,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | Tab_listing -> Tabs_list
       | Text_read -> Page_read {tab_id=Some 1; max_chars=None}
       | Document_source -> Page_document {tab_id=1}
-      | Element_inventory -> Page_elements {tab_id=Some 1;within=None}
+      | Element_inventory -> Page_elements {tab_id=Some 1;filter={within=None;selector=None}}
       | Viewport_capture -> Page_capture {tab_id=1}
       | Scene_read -> Page_scene {tab_id=1; max_chars=1000; view=Content; scope=None}
       | Dom_interaction -> interact (Click "#button")

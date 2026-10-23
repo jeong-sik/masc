@@ -37,7 +37,7 @@ const actionRoles = new Set('button link checkbox radio switch menuitem menuitem
 // [within] is a CSS selector read by the page's own engine: only controls that
 // match it, or sit inside an element that matches it, are observed. An invalid
 // selector is refused rather than read as the whole page.
-const within = (arguments[0] || {}).within;
+const {within, selector: requestedSelector} = arguments[0] || {};
 let scope = null;
 if (within !== undefined) {
   try { scope = new Set(document.querySelectorAll(within)); }
@@ -49,8 +49,15 @@ const inScope = el => {
   for (let node = el; node; node = node.parentElement) if (scope.has(node)) return true;
   return false;
 };
-const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'))
-  .filter(el => scope === null || inScope(el));
+// Explicit CSS reads may observe custom rows and other non-control nodes.
+// Observation does not claim that a matched node supports an interaction.
+let matches;
+try {
+  matches = Array.from(document.querySelectorAll(requestedSelector === undefined
+    ? 'a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'
+    : requestedSelector));
+} catch { throw new Error('invalid_css_selector'); }
+const nodes = matches.filter(el => scope === null || inScope(el));
 // A single synchronous observation shares styles and ancestor visibility.
 // Large feeds have many controls under the same ancestors; walking and
 // restyling that chain for every control repeats the same work.
@@ -115,10 +122,10 @@ const observable = el => (el.getClientRects().length || labelTextRects(el).lengt
   && styleOf(el).visibility !== 'hidden' && styleOf(el).visibility !== 'collapse'
   && displayed(el);
 const visible = nodes.filter(el=>observable(el)
-  && (!el.getAttribute('role') || actionRoles.has(effectiveRole(el))
+  && (requestedSelector !== undefined || !el.getAttribute('role') || actionRoles.has(effectiveRole(el))
     || ['a','button','input','textarea','select','summary','label'].includes(el.localName)
     || el.getAttribute('onclick') !== null || el.getAttribute('contenteditable') === 'true')
-  && (el.localName!=='label' || el.hasAttribute('onclick') || actionRoles.has(effectiveRole(el))
+  && (requestedSelector !== undefined || el.localName!=='label' || el.hasAttribute('onclick') || actionRoles.has(effectiveRole(el))
     || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type) && !observable(el.control))));
 function disabled(el) {
   const target=(el.localName==='label' && el.control) || el;
@@ -175,39 +182,44 @@ function observe(el) {
 }
 return {url:location.href,title:document.title,
   ...(scope === null ? {} : {within,withinMatches:scope.size}),
+  ...(requestedSelector === undefined ? {} : {selector:requestedSelector,selectorMatches:matches.length}),
   total:visible.length,truncated:visible.length>200,
   elements:visible.slice(0,200).map(observe)};
 |}
 
-(* The argument object [elements] reads. An empty selector would match
-   nothing in the page and is refused here; any other text goes to the
-   page's CSS engine, which decides whether it is a selector. *)
-let within_of_json = function
+(* The browser's CSS engine validates syntax; boundary parsing validates types. *)
+let css_filter_of_json key = function
   | None -> Ok None
-  | Some (`String "") -> Error "within must be a non-empty CSS selector"
+  | Some (`String "") -> Error (key ^ " must be a non-empty CSS selector")
   | Some (`String selector) -> Ok (Some selector)
-  | Some _ -> Error "within must be a CSS selector string"
+  | Some _ -> Error (key ^ " must be a CSS selector string")
 ;;
 
-let elements_args within =
-  `Assoc (Option.to_list (Option.map (fun selector -> "within", `String selector) within))
+let elements_filter_of_json field =
+  let ( let* ) = Result.bind in
+  let* within = css_filter_of_json "within" (field "within") in
+  let* selector = css_filter_of_json "selector" (field "selector") in
+  Ok Browser_lane.{within; selector}
 ;;
 
-(* A browser-lane extension built before [within] ignores it and answers with
-   every control, which would read as a scoped answer. The page's own
-   [withinMatches] count is the proof that the scope was applied. *)
-let scoped_elements_refused =
-  "the connected browser answered without applying within; its browser-lane extension \
-   predates within, so update it or read without within"
+let elements_args filter = `Assoc (Browser_lane.elements_filter_fields filter)
 
-let check_scoped_elements ~within reply =
-  match within, reply with
-  | None, _ -> Ok reply
-  | Some _, `Assoc fields ->
-    (match List.assoc_opt "withinMatches" fields with
-     | Some (`Int _) -> Ok reply
-     | Some _ | None -> Error scoped_elements_refused)
-  | Some _, _ -> Error scoped_elements_refused
+(* An extension may still run an older background script after its files were
+   updated. Never pass its unfiltered controls on as a filtered answer. *)
+let check_scoped_elements ~(filter : Browser_lane.elements_filter) reply =
+  let fields = match reply with `Assoc fields -> fields | _ -> [] in
+  let rec check = function
+    | [] -> Ok reply
+    | (key, requested) :: rest ->
+        (match requested with
+         | None -> check rest
+         | Some value ->
+             match List.assoc_opt key fields, List.assoc_opt (key ^ "Matches") fields with
+             | Some (`String applied), Some (`Int count) when applied = value && count >= 0 -> check rest
+             | _ -> Error ("the connected browser did not confirm " ^ key ^
+                 "; update browser-lane, then reload the extension in this browser \
+                  (reconnecting its native host alone does not reload background.js)")) in
+  check ["within", filter.within; "selector", filter.selector]
 ;;
 
 let frames = {|

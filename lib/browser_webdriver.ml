@@ -387,12 +387,12 @@ let rec execute_unlocked t = function
       match data with
       | `Assoc fields -> Ok (`Assoc (("tabId",`Int id) :: fields))
       | _ -> Error (Protocol "malformed semantic scene"))
-  | Browser_lane.Page_elements {tab_id=target_tab_id;within} ->
+  | Browser_lane.Page_elements {tab_id=target_tab_id;filter} ->
     let* session = session t in
     with_tab t session target_tab_id (fun () ->
       let* handle = call t session `GET "/window" None in
       let* handle = match handle with `String value -> Ok value | _ -> Error (Protocol "invalid current window") in
-      let* data = script t session Browser_page_script.elements [Browser_page_script.elements_args within] in
+      let* data = script t session Browser_page_script.elements [Browser_page_script.elements_args filter] in
       match data with
       | `Assoc fields -> Ok (`Assoc (("tabId",`Int (tab_id t session handle)) :: fields))
       | _ -> Error (Protocol "malformed elements observation"))
@@ -402,7 +402,7 @@ let rec execute_unlocked t = function
       let* () = enter_frames t session frame_path in
       let* data = match mode with
         | `Dialog -> dialog_text t session
-        | `Elements within -> script t session Browser_page_script.elements [Browser_page_script.elements_args within]
+        | `Elements filter -> script t session Browser_page_script.elements [Browser_page_script.elements_args filter]
         | `Frames -> script t session Browser_page_script.frames []
         | `Text cap ->
           let* cap = Result.map_error (fun detail -> Protocol detail) (Browser_page_script.text_cap (Some cap)) in

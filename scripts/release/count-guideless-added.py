@@ -108,6 +108,10 @@ def main() -> int:
                         help="read the note body from the GitHub Release")
     parser.add_argument("--out-json", help="write the JSON summary here")
     parser.add_argument("--out-md", help="write the Markdown summary here")
+    parser.add_argument("--expect-added", type=int, default=None,
+                        help="fail (exit 1) unless added_total equals this")
+    parser.add_argument("--expect-guideless", type=int, default=None,
+                        help="fail (exit 1) unless guideless_total equals this")
     args = parser.parse_args()
 
     note = read_note(args.note_path, args.tag, args.from_github)
@@ -120,6 +124,16 @@ def main() -> int:
         "guideless_total": len(guideless),
         "guideless_items": guideless,
     }
+
+    if args.expect_added is not None and summary["added_total"] != args.expect_added:
+        print(f"FAIL: added_total={summary['added_total']} != expected "
+              f"{args.expect_added}", file=sys.stderr)
+        return 1
+    if (args.expect_guideless is not None
+            and summary["guideless_total"] != args.expect_guideless):
+        print(f"FAIL: guideless_total={summary['guideless_total']} != expected "
+              f"{args.expect_guideless}", file=sys.stderr)
+        return 1
 
     if args.out_json:
         Path(args.out_json).write_text(

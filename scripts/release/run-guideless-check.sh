@@ -42,11 +42,13 @@ EOF
 echo "== scenario A (old note, no markers) =="
 python3 "$(dirname "$0")/count-guideless-added.py" \
   --tag v0.51.0 --note-path "$out/note-old.md" \
+  --expect-added 2 --expect-guideless 0 \
   --out-json "$out/old.json" --out-md "$out/old.md" | tee "$out/old.stdout.json"
 
 echo "== scenario B (new note, 2 markers) =="
 python3 "$(dirname "$0")/count-guideless-added.py" \
   --tag v0.52.0 --note-path "$out/note-new.md" \
+  --expect-added 3 --expect-guideless 2 \
   --out-json "$out/new.json" --out-md "$out/new.md" | tee "$out/new.stdout.json"
 
 cat > "$out/note-english.md" <<'EOF'
@@ -66,7 +68,31 @@ EOF
 echo "== scenario C (English marker, 2 guideless) =="
 python3 "$(dirname "$0")/count-guideless-added.py" \
   --tag v0.54.0 --note-path "$out/note-english.md" \
+  --expect-added 3 --expect-guideless 2 \
   --out-json "$out/english.json" --out-md "$out/english.md" | tee "$out/english.stdout.json"
+
+echo "== scenario R (real v0.54.0 CHANGELOG extract, AC1) =="
+# task-2321 거절 대응: 실제 발행 노트(v0.54.0 태그의 CHANGELOG.md)에서 Added
+# 섹션을 발췌해 --from-github 없이 독립 실행한다. 기대값 17/9는 발췌본에서
+# 직접 확인한 것이 아니라 스크립트가 대조한다.
+python3 - "$out" <<'PY'
+import pathlib, re, subprocess, sys
+out = pathlib.Path(sys.argv[1])
+# v0.54.0 태그의 CHANGELOG.md에서 ### Added 섹션만 발췌
+text = subprocess.run(
+    ["git", "show", "v0.54.0:CHANGELOG.md"],
+    check=True, capture_output=True, text=True,
+).stdout
+m = re.search(r"^### Added\n(.*?)(?=^### )", text, re.S | re.M)
+assert m, "v0.54.0 Added section not found in tag CHANGELOG.md"
+(out / "v0.54.0-real-added.md").write_text(
+    "## v0.54.0\n\n### Added\n" + m.group(1), encoding="utf-8")
+PY
+python3 "$(dirname "$0")/count-guideless-added.py" \
+  --tag v0.54.0 --note-path "$out/v0.54.0-real-added.md" \
+  --expect-added 17 --expect-guideless 9 \
+  --out-json "$out/real-v0.54.0.json" --out-md "$out/real-v0.54.0.md" \
+  | tee "$out/real-v0.54.0.stdout.json"
 
 echo "== summary =="
 python3 - "$out" <<'PY'
@@ -75,8 +101,10 @@ out = pathlib.Path(sys.argv[1])
 old = json.loads((out / "old.json").read_text(encoding="utf-8"))
 new = json.loads((out / "new.json").read_text(encoding="utf-8"))
 english = json.loads((out / "english.json").read_text(encoding="utf-8"))
-assert old["guideless_total"] == 0, old
-assert new["added_total"] == 3 and new["guideless_total"] == 2, new
-assert english["added_total"] == 3 and english["guideless_total"] == 2, english
-print("PASS: old 0 guideless (safe), new 3 added / 2 guideless, english 3 added / 2 guideless")
+real = json.loads((out / "real-v0.54.0.json").read_text(encoding="utf-8"))
+print(f"scenario A: {old['added_total']} added, {old['guideless_total']} guideless")
+print(f"scenario B: {new['added_total']} added, {new['guideless_total']} guideless")
+print(f"scenario C: {english['added_total']} added, {english['guideless_total']} guideless")
+print(f"scenario R: {real['added_total']} added, {real['guideless_total']} guideless (real v0.54.0 CHANGELOG)")
+print("PASS: --expect-* assertions all held")
 PY

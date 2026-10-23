@@ -1,6 +1,10 @@
 # task-2321 실행 영수증
 
-## 시나리오 A·B·C 전체 실행 (run-guideless-check.sh)
+실행: bash scripts/release/run-guideless-check.sh /tmp/guideless-check-v3
+날짜: 2026-10-23T01:46:12Z
+브랜치: polish/task-2321-guideless-counter
+커밋: 796344f2deaed4e7bb37ad80589a8fc380d11fae
+
 ```
 == scenario A (old note, no markers) ==
 {
@@ -29,13 +33,7 @@
     "Another English guideless (#42903). No guide yet (…)"
   ]
 }
-== summary ==
-PASS: old 0 guideless (safe), new 3 added / 2 guideless, english 3 added / 2 guideless
-```
-
-## AC1·AC3 — 실제 CHANGELOG.md 노트 발췌 입력
-```
-=== AC1: v0.54.0 from CHANGELOG.md ===
+== scenario R (real v0.54.0 CHANGELOG extract, AC1) ==
 {
   "tag": "v0.54.0",
   "added_total": 17,
@@ -52,18 +50,10 @@ PASS: old 0 guideless (safe), new 3 added / 2 guideless, english 3 added / 2 gui
     "Experimental: The TUI guitar tab draws repeat signs: a bar an `\\ro` opened starts past `|:`, one an `\\rc N` closed ends in `:|xN` with the count of total plays, and `\\ae` numbers ride the left barline No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42859)."
   ]
 }
-
-AC1 PASS: added_total=17, guideless_total=9
-
-=== AC3: v0.52.0 from CHANGELOG.md (Korean marker) ===
-{
-  "tag": "v0.52.0",
-  "added_total": 2,
-  "guideless_total": 1,
-  "guideless_items": [
-    "The TUI home now shows when MASC starts the Keeper Firefox, on the BiDi host rows, instead of a bare browser line (#42250, with #42235's start record and #42227's refusal-reason note underneath it). When the host selector cannot tell whether the clock passed, the row says that rather than inventing a start time (#42227). 가이드 없음(대상 문서: docs/design/browser-bidi-live-host.md)."
-  ]
-}
-
-AC3 PASS: Korean marker still recognised (guideless_total=1)
+== summary ==
+scenario A: 2 added, 0 guideless
+scenario B: 3 added, 2 guideless
+scenario C: 3 added, 2 guideless
+scenario R: 17 added, 9 guideless (real v0.54.0 CHANGELOG)
+PASS: --expect-* assertions all held
 ```

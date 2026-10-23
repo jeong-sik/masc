@@ -58,6 +58,23 @@ function visibleIds(): string[] {
 }
 
 describe('LaneInstallationManager', () => {
+  it('filters and reclassifies without changing the exact installation action target', () => {
+    const declared = declaration('same', { ui_category: 'browser', source_path: '/config/custom.toml' })
+    const other = declaration('other', { ui_category: 'analysis' })
+    const installed = worker(declared, { package: { ...worker(declared).package, ui_category: 'analysis' } })
+    const view = mount(snapshot([other, declared], [worker(other), installed]))
+    fireEvent.change(screen.getByLabelText('설치 역할 필터'), { target: { value: 'browser' } })
+    fireEvent.click(within(installation('same')).getByRole('button', { name: 'Configure activity for same' }))
+    expect(view.onActivity).toHaveBeenLastCalledWith(declared)
+    const changed = { ...declared, ui_category: 'voice_media' as const }
+    view.update(snapshot([changed, other], [installed, worker(other)]))
+    fireEvent.change(screen.getByLabelText('설치 역할 필터'), { target: { value: 'voice_media' } })
+    fireEvent.click(within(installation('same')).getByRole('button', { name: 'Edit TOML /config/custom.toml' }))
+    fireEvent.click(observeButton(installation('same')))
+    expect(view.onEdit).toHaveBeenCalledExactlyOnceWith('/config/custom.toml')
+    expect(view.onObserve).toHaveBeenCalledExactlyOnceWith(installed.instance_id)
+    expect(view.onActivity).toHaveBeenCalledTimes(1)
+  })
   it('routes observation, TOML editing and activity to the exact installation identity', () => {
     const first = declaration('first')
     const second = declaration('second', { source_path: '/config/custom/second.toml' })

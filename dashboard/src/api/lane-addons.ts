@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import { get, post } from './core'
 import { parseLaneAddonHostRequests, type LaneAddonHostRequestObservation } from './lane-addon-host-requests'
+import { optionalLaneAddonCategory } from './lane-addon-category'
 
 const text = Schema.NonEmptyString
 const count = Schema.Int.pipe(Schema.nonNegative())
@@ -35,6 +36,7 @@ const configurationSchema = Schema.Struct({
   declarations: Schema.Array(Schema.Struct({
     id: text, source_path: text, enabled: Schema.Boolean, source_revision: text, desired_revision: text,
     applied_revision: nullableText, instance_id: nullableText,
+    ui_category: optionalLaneAddonCategory,
     application: laneAddonApplicationSchema,
   }).pipe(Schema.filter(declaration => {
     switch (declaration.application.kind) {
@@ -60,6 +62,7 @@ const instanceSchema = Schema.Struct({
   runtime_presence: Schema.Literal('live', 'retained'),
   incarnation: text, action_schema: Schema.NullOr(jsonObject),
   package: Schema.Struct({
+    ui_category: optionalLaneAddonCategory,
     outputs: Schema.Record({ key: text, value: outputSelectionSchema }),
     binding_schema: Schema.NullOr(jsonObject), presentation: presentationSchema,
   }),

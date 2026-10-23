@@ -21,6 +21,8 @@ import { lanePackageActivityObservationRevision } from '../lib/lane-package-acti
 import { useLaneNavigation, LaneNavigationNotice, clearLaneNavigation } from './lane-navigation'
 import { declarationIdentity, laneTargetLabel, type LaneNavigationTarget } from '../lib/lane-navigation'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
+import { addonCategoryGroups, categoryGroup, categoryLabel, groupAddonCategories, workerCategory, type AddonCategoryFilter } from '../lib/lane-addon-category'
+import { LaneAddonCategoryFilter } from './lane-addon-category-filter'
 
 const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transparent'
 const buttonClass = `${inputClass} cursor-pointer disabled:opacity-50`
@@ -253,6 +255,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   const [since, setSince] = useState('')
   const [until, setUntil] = useState('')
   const [instanceValue, setInstance] = useState('')
+  const [workerRole, setWorkerRole] = useState<AddonCategoryFilter>('all')
   const [keeper, setKeeper] = useState('')
   const [focusedRowValue, setFocusedRow] = useState<string | null>(null)
   const [selectedValue, setSelected] = useState<string[]>([])
@@ -265,6 +268,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   const selected = evidenceCurrent ? selectedValue : []
   useLayoutEffect(() => {
     setEvidenceAuthority(authority)
+    setWorkerRole('all')
     setReceivedSlice(null); setInstance(''); setFocusedRow(null); setSelected([]); setReceivedReceipt(null)
   }, [authority])
   const inventoryReads = useRef<AbortController | null>(null)
@@ -443,6 +447,8 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
   }, [navigationTarget, authority, snapshot, targetError, targetPending, navigationAttempt])
   function retryTarget() { setNavigationAttempt(value => value + 1); void refresh() }
   const rows = slice?.rows ?? snapshot?.rows ?? []
+  const workerGroups = snapshot === null ? [] : groupAddonCategories(snapshot.instances,
+    item => workerCategory(snapshot, item), workerRole)
   const selectionOwned = instance !== '' && selected.length > 0 && selected.every(id =>
     rows.some(row => row.id === id && row.lane_id.startsWith(`${instance}/`)))
   const focused = rows.find(row => row.id === focusedRow)
@@ -542,9 +548,13 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
         <button class=${buttonClass} type="submit" disabled=${authority === null || snapshot === null}>Attach</button>
       </form>
     </details>
+    <${LaneAddonCategoryFilter} label="실행 역할 필터" value=${workerRole} onChange=${setWorkerRole}
+      groups=${addonCategoryGroups} />
     <div class="overflow-x-auto"><table class="w-full text-left"><thead><tr>
       <th>Instance / package</th><th>Run / revision</th><th>Status</th><th>Cursor / rows</th><th>Actions</th>
-    </tr></thead><tbody>${snapshot?.instances.map(item => html`<tr key=${item.instance_id}
+    </tr></thead>${workerGroups.map(group => html`<tbody key=${group.category}>
+    <tr><th colspan="5" scope="colgroup">${categoryLabel(group.category)}</th></tr>
+    ${group.items.map(item => html`<tr key=${JSON.stringify([item.instance_id, item.incarnation])}
       ref=${navigationTarget?.kind === 'instance' && item.instance_id === navigationTarget.instance && item.incarnation === navigationTarget.incarnation ? instanceFocus : undefined}
       tabIndex=${navigationTarget?.kind === 'instance' && item.instance_id === navigationTarget.instance && item.incarnation === navigationTarget.incarnation ? -1 : undefined}
       aria-label=${`Worker ${item.instance_id} · incarnation ${item.incarnation}`}>
@@ -556,6 +566,8 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
             onClick=${() => { if (item.configuration !== null) editToml(item.configuration.source_path) }} aria-label=${`Edit TOML for ${item.instance_id}`}>Edit TOML</button>`}
         </div>`}
         ${item.package.presentation.description !== null && html`<p>${item.package.presentation.description}</p>`}
+        <p>실행 당시 역할: ${categoryLabel(categoryGroup(item.package.ui_category))}
+          ${item.runtime_presence === 'retained' ? ' · 보존된 원본' : item.configuration === null ? ' · 수동 연결' : ' · 현재 선언은 그룹에 표시'}</p>
         <details><summary>Package input and display contracts</summary>
           <pre class="whitespace-pre-wrap break-all">${JSON.stringify({ binding_schema: item.package.binding_schema,
             presentation: item.package.presentation }, null, 2)}</pre>
@@ -576,7 +588,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
         : item.configuration === null
         ? 'Cleans up this worker and its owned resources. Retained observations and evidence remain.'
         : 'Deletes the matching installation TOML from disk and cleans up its worker. Retained observations and evidence remain.'}</p></td>
-    </tr>`)}</tbody></table></div>
+    </tr>`)}</tbody>`)}</table></div>
     ${snapshot?.instances.length === 0 && html`<p>No attached packages.</p>`}
     <${LaneAddonActions} instances=${snapshot?.instances ?? []} authority=${authority} />
     <form class="flex flex-wrap gap-2" onSubmit=${(e: Event) => { e.preventDefault(); void query() }}>

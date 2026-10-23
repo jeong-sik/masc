@@ -66,6 +66,25 @@ function fill(screen: Screen) {
   fireEvent.change(screen.getByLabelText(/^binding.enabled \*$/), { target: { value: 'false' } })
 }
 describe('Web package discovery to explicit declaration save', () => {
+  it('keeps the original manifest input selection through filtering and a category-only preview refresh', async () => {
+    api.fetchLanePackageCatalog.mockResolvedValue({ ...catalog, entries: [{ ...catalog.entries[0], ui_category: 'analysis' }] })
+    api.fetchLanePackagePreview.mockResolvedValue({ ...preview, package: { ...preview.package, ui_category: 'analysis' } })
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await choose(screen); fill(screen)
+    const authority = executionWorkspaceAuthority.peek()!
+    const owner = lanePackageInstallationFor(authority, directory)
+    const key = owner.state.peek().selected!
+    const original = owner.state.peek().drafts.get(key)!
+    fireEvent.change(screen.getByLabelText('패키지 역할 필터'), { target: { value: 'browser' } })
+    expect(owner.state.peek().selected).toBe(key)
+    expect(owner.state.peek().drafts.get(key)).toBe(original)
+    api.fetchLanePackagePreview.mockResolvedValue({ ...preview, package: { ...preview.package, ui_category: 'voice_media' } })
+    await act(() => owner.preview(preview.manifest_path, authority))
+    expect(owner.state.peek().selected).toBe(key)
+    expect(owner.state.peek().drafts.get(key)).toMatchObject({ id: original.id, runId: original.runId,
+      input: original.input, preview: { manifest_path: preview.manifest_path, package: { ui_category: 'voice_media' } } })
+    expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+  })
   it('retains unsubmitted folder and manifest paths across remount and workspace return', async () => {
     let screen = render(html`<${LaneAddonsPanel} />`)
     fireEvent.click(await screen.findByRole('button', { name: 'Install package' }))

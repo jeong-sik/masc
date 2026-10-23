@@ -2,6 +2,7 @@ import { Schema } from 'effect'
 import { get } from './core'
 import { laneAddonApplicationSchema } from './lane-addons'
 import { LANE_IDS, parseStandaloneLanesSnapshot } from './dashboard-standalone-lanes'
+import { optionalLaneAddonCategory } from './lane-addon-category'
 
 const text = Schema.NonEmptyString
 const texts = Schema.Array(text)
@@ -20,6 +21,7 @@ const exactOutputs = Schema.Array(exactOutput).pipe(Schema.filter(outputs =>
 const declaration = Schema.Union(
   Schema.Struct({ kind: Schema.Literal('valid'), enabled: Schema.Boolean, installation_id: text,
     run_id: text, package_id: text, title: text, desired_revision: text,
+    ui_category: optionalLaneAddonCategory,
     source_revision: text, exact_outputs: exactOutputs, application: laneAddonApplicationSchema }).pipe(Schema.filter(value => {
       switch (value.application.kind) {
         case 'starting': case 'applied': return value.enabled
@@ -36,6 +38,7 @@ const phase = Schema.Union(
 )
 const instance = Schema.Struct({ instance_id: text, incarnation: text, run_id: text, package_id: text,
   title: text, package_revision: text, presence: Schema.Literal('live', 'retained'), phase,
+  ui_category: optionalLaneAddonCategory,
   applied_revision: Schema.NullOr(text) })
 // The server reads the three built-in browser rows from the browser Add-on's
 // published observation: the observed value; with none, whether no Add-on is

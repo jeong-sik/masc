@@ -43,7 +43,7 @@ let sample_question : AR.verdict_question =
 let sample_root : AR.lookup_root = AR.Producer_tree [ "a"; "b" ]
 let sample_schemas = [ "lookup_read" ]
 
-let make_original ~verification_id ~attempt =
+let prepare_original ~request ~verification_id ~attempt =
   match
     V.prepare
       ~verification_id
@@ -51,18 +51,21 @@ let make_original ~verification_id ~attempt =
       ~question:sample_question
       ~lookup_root:sample_root
       ~lookup_schemas:sample_schemas
-      sample_request
+      request
   with
   | Ok original -> original
   | Error detail -> failwith ("prepare failed: " ^ detail)
 
+let make_original ~verification_id ~attempt =
+  prepare_original ~request:sample_request ~verification_id ~attempt
+
 let with_workspace f =
   let base_path = Filename.temp_dir "verifier-owner-" "" in
-  Fun.protect ~finally:(fun () -> Masc.Fs_compat.remove_tree base_path; Masc.Fs_compat.clear_fs ())
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path; Fs_compat.clear_fs ())
     (fun () -> f base_path)
 
 let tmp_store base_path =
-  Masc.Lane_addon_store.create ~root:(Filename.concat base_path "request-ownership")
+  Lane_addon_store.create ~root:(Filename.concat base_path "request-ownership")
 
 let test_round_trip () =
   with_workspace @@ fun base_path ->
@@ -95,29 +98,31 @@ let test_retain_is_idempotent () =
    | _ -> failwith "same original should retain idempotently")
 
 let test_different_original_at_same_key_rejected () =
+  (* The conflict is about the same attempt slot holding a different body.
+     Keep verification_id and attempt identical and change only the request
+     body, so the conflict is [Already_retained], not [Identity_mismatch]. *)
   with_workspace @@ fun base_path ->
   let store = tmp_store base_path in
   let first = make_original ~verification_id:"vrf-z" ~attempt:0 in
-  (* make a genuinely different original by bumping the attempt field in the value *)
   let different =
-    match V.of_json (V.to_json first) with
-    | Ok value ->
-      (match V.to_json value with
-       | `Assoc fields ->
-         `Assoc (List.map (fun (k, v) -> if k = "attempt" then k, `Int 1 else k, v) fields)
-       | _ -> failwith "unexpected")
-    | Error e -> failwith e
-  in
-  let different =
-    match V.of_json different with Ok v -> v | Error e -> failwith e
+    prepare_original
+      ~request:{ sample_request with AR.task_description = "Different original" }
+      ~verification_id:"vrf-z"
+      ~attempt:0
   in
   (match O.retain ~store ~verification_id:"vrf-z" ~attempt:0 ~installation_id:"i" ~package_id:"p" first with
    | Ok () -> ()
    | Error err -> failwith ("first retain failed: " ^ string_of_retain_error err));
-  match O.retain ~store ~verification_id:"vrf-z" ~attempt:0 ~installation_id:"i" ~package_id:"p" different with
-  | Ok () -> failwith "different original at same key must be rejected"
-  | Error (O.Already_retained _) -> ()
-  | Error _ -> ()
+  (match O.retain ~store ~verification_id:"vrf-z" ~attempt:0 ~installation_id:"i" ~package_id:"p" different with
+   | Ok () -> failwith "different body at same key must be rejected as Already_retained"
+   | Error (O.Already_retained _) -> ()
+   | Error err -> failwith ("wrong rejection: " ^ string_of_retain_error err));
+  (* the original body must still be the one stored, not the rejected body *)
+  (match O.load ~store ~verification_id:"vrf-z" ~attempt:0 with
+   | Ok loaded ->
+     let req = V.review_request loaded in
+     assert (req.AR.task_description = "Desc")
+   | Error err -> failwith ("readback after conflict failed: " ^ string_of_load_error err))
 
 let test_retry_is_new_attempt () =
   (* a retry under a fresh attempt key must not clobber the prior attempt *)
@@ -161,7 +166,11 @@ let test_different_destination_rejected () =
   match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"other.install" ~package_id:"masc.verifier.review" original with
   | Ok () -> failwith "same original under a different installation must not pass"
   | Error (O.Already_retained _) -> ()
-  | Error _ -> ()
+  | Error err -> failwith ("wrong rejection: " ^ string_of_retain_error err));
+  (* the first destination must still accept the same original afterwards *)
+  (match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"masc.verifier" ~package_id:"masc.verifier.review" original with
+   | Ok () -> ()
+   | Error err -> failwith ("original destination must still accept after rejected overwrite: " ^ string_of_retain_error err))
 
 let () =
   test_round_trip ();

@@ -1,3 +1,4 @@
+import { quantizeTick, quantizedStarts } from './note-quantize.mjs'
 import { pitch, editProject } from './sequencer-project.mjs'
 import { editMidiSourceNotes } from './midi-source.mjs'
 import { sourceEditor } from './midi-source-editor.mjs'
@@ -58,33 +59,6 @@ function clipboard(editor) {
     }) }
 }
 function transpose(value) { return integer(Number(value), 'transposition') }
-const overlaps = (a, b) => a.duration === 0
-  ? b.duration === 0 ? a.start === b.start : b.start <= a.start && a.start < b.start + b.duration
-  : b.duration === 0 ? a.start <= b.start && b.start < a.start + a.duration
-    : a.start < b.start + b.duration && b.start < a.start + a.duration
-function quantizedNotes(editor, notes, snap) {
-  const starts = new Map(notes.map(note => [note.id, snap(note.start)])), groups = new Map()
-  for (const original of source(editor) ? editor.performance.notes : track(editor).notes) {
-    const key = JSON.stringify([original.port, original.channel, original.pitch])
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key).push({ original, changed: { ...original, start: starts.get(original.id) ?? original.start } })
-  }
-  for (const group of groups.values()) {
-    if (!group.some(row => starts.has(row.original.id))) continue
-    group.sort((a, b) => a.changed.start - b.changed.start)
-    for (let i = 0; i < group.length; i++) {
-      const a = group[i]
-      for (let j = i + 1; j < group.length; j++) {
-        const b = group[j]
-        if (b.changed.start > a.changed.start + a.changed.duration) break
-        if (overlaps(a.changed, b.changed) && !overlaps(a.original, b.original)) {
-          throw new Error('Quantize creates overlapping notes of the same pitch, channel and port')
-        }
-      }
-    }
-  }
-  return notes.map(note => ({ kind: source(editor) ? 'change' : 'change-note', id: note.id, start: starts.get(note.id) }))
-}
 export function moveSelectedNotes(editor, offset, semitones) {
   integer(offset, 'selection offset'); integer(semitones, 'transposition')
   const notes = chosen(editor), origin = integer(editor.noteSelection.origin + offset, 'selection anchor')
@@ -129,12 +103,11 @@ export function noteSelectionCommand(editor, command, args) {
       count(1)
       const grid = units(editor, args[0])
       if (!grid) throw new Error('Quantize grid must be positive')
-      // Exact half-up rounding on the document's native tick grid, including
-      // positions near Number.MAX_SAFE_INTEGER. Do not round through a float.
-      const snap = value => integer(Number((2n * BigInt(value) + BigInt(grid))
-        / (2n * BigInt(grid)) * BigInt(grid)), 'quantized note position')
-      const next = apply(editor, quantizedNotes(editor, chosen(editor), snap))
-      return { ...next, noteSelection: { ...next.noteSelection, origin: snap(editor.noteSelection.origin) } }
+      const notes = chosen(editor)
+      const starts = quantizedStarts(source(editor) ? editor.performance.notes : track(editor).notes, notes, grid)
+      const next = apply(editor, notes.map(note => ({ kind: source(editor) ? 'change' : 'change-note',
+        id: note.id, start: starts.get(note.id) })))
+      return { ...next, noteSelection: { ...next.noteSelection, origin: quantizeTick(editor.noteSelection.origin, grid) } }
     }
     case 'velocity-notes': case 'velocity-add-notes': {
       count(1)

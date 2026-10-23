@@ -553,6 +553,16 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
          ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
          (Runtime.startup_degradation ())
   in
+  let memory_execution_json =
+    compute_section ~name:"keeper_memory_execution" ?section_timings_ref (fun () ->
+      match server_state with
+      | None -> `Assoc ["status",`String "snapshot_not_ready";
+          "operator_action_required",`Bool false]
+      | Some state ->
+        Keeper_memory_execution_availability.snapshot
+          ~config:(Mcp_server.workspace_config state) ~mode:`Live
+        |> Keeper_memory_execution_availability.to_json)
+  in
   let keeper_config_operator_action_required = keeper_config_schema_blocking in
   (* The sections come first and the rollup reads them, rather than the rollup
      being handed the eight it used to name. The three rollup fields are
@@ -596,6 +606,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("server_hibernation", Server_hibernation.status_json ());
     ("keeper_fleet_safety", keeper_fleet_safety);
     ("keeper_identity_drift", keeper_identity_drift_json);
+    ("keeper_memory_execution", memory_execution_json);
     ("publication_recovery_activation", publication_recovery_activation_json);
     ("keeper_reaction_ledger", reaction_ledger_json);
     ("keeper_owner", keeper_owner_json);

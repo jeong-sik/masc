@@ -780,6 +780,7 @@ let keeper_memory_health_http_json ~base_path =
   `Assoc
     [ "schema", `String "keeper.memory_os.current_health.v8"
     ; "generated_at", `Float generated_at
+    ; "execution", Keeper_memory_execution_availability.(to_json (snapshot ~config ~mode:`Live))
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"
       , `Assoc

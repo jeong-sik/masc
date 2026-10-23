@@ -113,8 +113,8 @@ let scope_of_request_id id =
 
 type destination = {installation_id:string;package_id:string;tool:string;
   source_revision:string;configuration_revision:string}
-let package_id="keeper-librarian"
-let tool="derive_memory"
+let package_id = Keeper_librarian_addon.package_id
+let tool = Keeper_librarian_addon.tool Keeper_librarian_addon.Durable
 let destination_json (destination:destination) = `Assoc [
   "installation_id",`String destination.installation_id;"package_id",`String destination.package_id;
   "tool",`String destination.tool;"source_revision",`String destination.source_revision;

@@ -962,17 +962,20 @@ let test_purged_original_does_not_block_another_keeper ()=with_fixture (fun ~sw:
           ~declaration_id:"librarian" ~schema exact |> get) with
        | Lane_addon_exact.No_completed_latest -> true | Completed_latest _ -> false)))
 
-let await_export_absent fixture =
+let await_installation_detached fixture =
   Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
     let rec loop ()=
       let snapshot=Runtime.tool_export_snapshot ~config:fixture.config
         ~access:Lane_addon_sources.Operator_configuration ~reserved:[] in
       if List.exists (fun (export : Runtime.tool_export) -> export.tool.name=Capture.tool) snapshot.exports
+         || Lane_addon_unready.declaring ~name:Capture.tool snapshot.unready <> []
       then (Eio.Time.sleep fixture.clock 0.02;loop ()) in
     loop ())
 let test_unattached_addon_reports_off_and_keeps_candidates ()=with_fixture (fun ~sw:_ fixture ->
   set_enabled fixture false;
-  await_export_absent fixture;
+  (* Retiring is unready, not absent. Off is asserted after the original
+     installation has finished its real lifecycle cleanup. *)
+  await_installation_detached fixture;
   let posts=F.post_count fixture.server in
   (match run_worker fixture with
    | Worker.Addon_unattached {pending} -> check int "every explicit candidate is reported waiting" 2 pending

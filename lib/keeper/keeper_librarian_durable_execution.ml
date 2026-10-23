@@ -21,18 +21,13 @@ let runtime_error = function
   | Host_refusal refusal -> match refusal with
     | Lane_addon_call_context.Rejected detail | Unavailable detail
     | Activity_disabled detail | Activity_unobserved detail -> detail
-let reserved () =
-  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas
-  @ (Keeper_tool_descriptor.all_descriptors () |> List.concat_map Keeper_tool_descriptor.registered_names)
-  |> List.sort_uniq String.compare
+let reserved = Keeper_librarian_addon.reserved
 let resolve ~config ~reserved =
-  let snapshot=Runtime.tool_export_snapshot ~config ~reserved ~access:Lane_addon_sources.Operator_configuration in
-  match List.find_opt (fun (conflict : Lane_addon_tool_export.conflict) -> conflict.name=Request.tool) snapshot.conflicts with
-  | Some conflict -> Error (Lane_addon_tool_export.conflict_to_string conflict)
-  | None ->
-    match List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name=Request.tool) snapshot.exports with
-    | None -> Ok None
-    | Some export -> Ok (Some export)
+  match Keeper_librarian_addon.resolve ~config ~reserved Keeper_librarian_addon.Durable with
+  | Ok export -> Ok (Some export)
+  | Error Keeper_librarian_addon.Unattached -> Ok None
+  | Error ((Unready _ | Export_conflict _ | Wrong_package _ | Manual_installation) as reason) ->
+    Error (Keeper_librarian_addon.unavailable_to_string reason)
 let destination (value : Runtime.tool_request_destination) : Request.destination = {
   installation_id=value.installation_id;package_id=value.package_id;tool=value.tool;
   source_revision=value.source_revision;configuration_revision=value.configuration_revision}

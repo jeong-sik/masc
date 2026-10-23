@@ -19,30 +19,16 @@ let runtime_error = function
   | Host_refusal refusal -> match refusal with
     | Lane_addon_call_context.Rejected detail | Unavailable detail
     | Activity_disabled detail | Activity_unobserved detail -> detail
-let reserved () =
-  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas
-  @ (Keeper_tool_descriptor.all_descriptors () |> List.concat_map Keeper_tool_descriptor.registered_names)
-  |> List.sort_uniq String.compare
-type export_state = Attached of Runtime.tool_export | Unattached | Export_conflict of string
-let export_state ~config ~reserved =
-  let snapshot=Runtime.tool_export_snapshot ~config ~reserved ~access:Lane_addon_sources.Operator_configuration in
-  match List.find_opt (fun (conflict : Lane_addon_tool_export.conflict) ->
-    conflict.name=Capture.tool) snapshot.conflicts with
-  | Some conflict -> Export_conflict (Lane_addon_tool_export.conflict_to_string conflict)
-  | None ->
-    match List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name=Capture.tool) snapshot.exports with
-    | None -> Unattached
-    | Some export -> Attached export
-let resolve ~config ~reserved = match export_state ~config ~reserved with
-  | Attached export -> Ok export
-  | Unattached -> Error "Librarian Addon is not enabled and attached"
-  | Export_conflict detail -> Error detail
-(* No keeper-librarian Add-on serves admit_memory right now: explicit
-   admission is off, as with the Curator and Candle Add-ons. A conflicting
-   export is a configuration error and stays one. *)
-let unattached ~config ~reserved = match export_state ~config ~reserved with
-  | Unattached -> true
-  | Attached _ | Export_conflict _ -> false
+let reserved = Keeper_librarian_addon.reserved
+let resolve ~config ~reserved =
+  Keeper_librarian_addon.resolve ~config ~reserved Keeper_librarian_addon.Admission
+  |> Result.map_error Keeper_librarian_addon.unavailable_to_string
+(* Only genuine absence means off. Starting, failed and conflicting workers
+   retain their actual cause and cannot turn pending originals into off. *)
+let unattached ~config ~reserved =
+  match Keeper_librarian_addon.resolve ~config ~reserved Keeper_librarian_addon.Admission with
+  | Error Keeper_librarian_addon.Unattached -> true
+  | Ok _ | Error (Unready _ | Export_conflict _ | Wrong_package _ | Manual_installation) -> false
 let destination (value : Runtime.tool_request_destination) : Capture.destination = {
   installation_id=value.installation_id;package_id=value.package_id;tool=value.tool;
   source_revision=value.source_revision;configuration_revision=value.configuration_revision}

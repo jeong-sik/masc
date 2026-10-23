@@ -67,7 +67,10 @@ type page = Managed of string | Unmanaged of string
 
 type pointer_state = Released | Release_uncertain
 
+type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
+
 type t = { run : runner; now : unit -> float; space_id : int; version : string; capture_directory : string;
+  downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t;
   mutable pointer_state : pointer_state; mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
 let space_id t = t.space_id
@@ -146,12 +149,19 @@ let answer output =
 let asked run ~window_s ~step ~space ~holder ~args body = match run ~window_s (script ~step ~space ~holder ~args body) with
   | Error failure -> Error (Unanswered failure)
   | Ok output -> answer output
-let run_step t ~window_s ~step ~args body = asked t.run ~window_s ~step ~space:(`Int t.space_id) ~holder:Agent_holds ~args body
+(* Every step carries the folder an agent page's downloads are saved in, so
+   the step that arms a page's download wait saves there whichever ego
+   process runs it. *)
+let with_download_root t = function
+  | `Assoc fields -> `Assoc (("downloads", str t.downloads.root) :: fields)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as args -> args
+let run_step t ~window_s ~step ~args body =
+  asked t.run ~window_s ~step ~space:(`Int t.space_id) ~holder:Agent_holds ~args:(with_download_root t args) body
 (* A read has no effect, so however it failed, nothing happened. *)
 let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
 
-let open_space ~run ~now ~space ~version ~capture_directory =
+let open_space ~run ~now ~space ~version ~capture_directory ~downloads =
   let* () = if String.trim space = "" then Error "the ego task space needs a name" else Ok () in
   let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:(str space) ~holder:Either_holds ~args:`Null
       "  emit({ok: true, value: {spaceId: task.spaceId, ownership: task.ownership}});"
@@ -162,7 +172,8 @@ let open_space ~run ~now ~space ~version ~capture_directory =
   match field "spaceId" opened, field "ownership" opened with
   | Some (`Int space_id), Some (`String ownership)
     when String.equal ownership agent_ownership || String.equal ownership delegated_ownership ->
-    Ok {run; now; space_id; version; capture_directory; pointer_state=Released; pages=[]; next_tab=0; captures=0}
+    Ok {run; now; space_id; version; capture_directory; downloads; published = Hashtbl.create 16;
+      pointer_state=Released; pages=[]; next_tab=0; captures=0}
   | Some (`Int _), Some (`String ownership) ->
     Error (Printf.sprintf "ego task space %S belongs to %s, not to an agent" space ownership)
   | _ -> Error "ego answered the task space without its number and owner"
@@ -363,6 +374,45 @@ let snapshot t args =
       @ ["snapshot",str text;"truncated",`Bool truncated;"chars",`Int chars]))
   | _ -> Error "ego answered a snapshot without its page, text or length"
 
+(* The downloads the ego process saw start on one page, as Browser_downloads
+   rows. A row is believed only as this module's own wait writes it: its id
+   is a UUID and a completed file is <downloads>/<id>, nowhere else. *)
+let download_row ~root ~tab json : (Browser_downloads.download, string) result =
+  match field "id" json, field "url" json, field "suggestedFilename" json, field "state" json,
+        field "path" json, field "reason" json with
+  | Some (`String id), Some (`String url), Some (`String name), Some (`String state), Some path, Some reason ->
+    let* () = match Uuidm.of_string id with Some _ -> Ok () | None -> Error "ego answered a download whose id is not a UUID" in
+    let* status = match state, path, reason with
+      | "pending", `Null, `Null -> Ok Browser_downloads.Pending
+      | "completed", `String path, `Null when String.equal path (Filename.concat root id) ->
+        Ok (Browser_downloads.Completed (Browser_downloads.File path))
+      | "completed", `String _, `Null -> Error "ego answered a download saved outside the connection's download folder"
+      | "interrupted", `Null, `String reason -> Ok (Browser_downloads.Interrupted reason)
+      | _ -> Error (Printf.sprintf "ego answered a download in an unreadable state %S" state) in
+    Ok {Browser_downloads.id; context = string_of_int tab; url; filename = Some name; status}
+  | _ -> Error "ego answered a download without its id, URL, name, state, path or reason"
+
+let downloads t args =
+  let* tab = match field "tabId" args with
+    | Some (`Int tab) -> Ok tab
+    | Some _ | None -> Error "downloads are read for one tab; give its tabId" in
+  let* label = target t args in
+  let* value = ask t ~step:"page.downloads" ~args:(obj ["label",label]) (String.concat "\n" [
+      "  const registry = globalThis.mascDownloads;";
+      "  emit({ok: true, value: registry === undefined ? {since: null, rows: []}";
+      "    : {since: registry.since, rows: registry.rows.filter(row => row.label === args.label)}});" ]) in
+  let* since, rows = match field "since" value, field "rows" value with
+    | Some ((`Null | `String _) as since), Some (`List rows) -> Ok (since, rows)
+    | _ -> Error "ego answered downloads without their rows or since when they were watched" in
+  let* rows = List.fold_left (fun collected json ->
+      let* collected = collected in
+      let* row = download_row ~root:t.downloads.root ~tab json in
+      Ok (row :: collected)) (Ok []) rows in
+  let verify = Browser_bidi_downloads.verify_file ~root:t.downloads.root in
+  let records = List.rev_map
+      (Browser_downloads.published_json ~verify ~publish:t.downloads.publish ~published:t.published) rows in
+  Ok (obj ["tabId",`Int tab;"downloads",`List records;"watchingSince",since])
+
 let png_signature = "\137PNG\r\n\026\n"
 let remove path = match Unix.unlink path with
   | () -> Ok ()
@@ -410,16 +460,53 @@ let capture t args =
    marks a tab the operator opened, or one adopted from them, otherwise. The
    page's own row is checked in the same run that acts, before acting. *)
 let not_agent_refused = "was not opened by an agent in the ego task space; this connection moves and closes only the pages its space opened"
+
+(* ego hands a page's download only to a wait armed before the download
+   starts (Page.waitForEvent), so every step that acts on an agent page arms
+   one wait there, once in each ego process, and the wait arms itself again.
+   A download is saved as <downloads>/<id>, the folder the step's arguments
+   carry, and ego's own copy is deleted. The rows live in that ego process:
+   one started again after a stopped command lists what it saw from [since].
+   A wait that fails for any reason, its page closing included, stops, and
+   the next step on that page arms it again. Nothing in it may throw: a
+   rejection no one handles ends ego's Node process. *)
+let download_wait_ms = 2_147_483_647 (* the longest JavaScript timer *)
+let download_watch = String.concat "\n" [
+  "  const watchDownloads = (page, label) => {";
+  "    const registry = globalThis.mascDownloads ??= {since: new Date().toISOString(), rows: [], watched: new Set()};";
+  "    if (registry.watched.has(label)) return;";
+  "    registry.watched.add(label);";
+  "    const root = args.downloads;";
+  "    (async () => {";
+  "      for (;;) {";
+  "        let download;";
+  "        try { download = await page.waitForEvent(\"download\", {timeout: " ^ string_of_int download_wait_ms ^ "}); }";
+  "        catch (error) { break; }";
+  "        try {";
+  "          const row = {id: crypto.randomUUID(), label, url: download.url(), suggestedFilename: download.suggestedFilename(), state: \"pending\", path: null, reason: null};";
+  "          registry.rows.push(row);";
+  "          const path = root + \"/\" + row.id;";
+  "          download.saveAs(path).then(() => download.failure()).then(";
+  "            failure => { if (failure === null) { row.state = \"completed\"; row.path = path; } else { row.state = \"interrupted\"; row.reason = String(failure); } },";
+  "            error => { row.state = \"interrupted\"; row.reason = String(error && error.message || error); })";
+  "            .then(() => download.delete()).catch(() => {});";
+  "        } catch (error) {}";
+  "      }";
+  "      registry.watched.delete(label);";
+  "    })().catch(() => { registry.watched.delete(label); });";
+  "  };" ]
+let watch_agent_page = "    watchDownloads(task.page(args.label), args.label);"
+
 let find_agent_tab = "  const tab = (await task.tabs()).find(item => item.label === args.label);"
 let agent_refusals = [
   "  if (tab === undefined) emit({ok: false, before: true, error: \"browser tab is no longer present\"});";
   "  else if (tab.openedBy !== \"agent\") emit({ok: false, before: true, error: \"tab \" + args.tabId + \" \" + " ^ Yojson.Safe.to_string (str not_agent_refused) ^ "});" ]
-let agent_page = String.concat "\n" (find_agent_tab :: agent_refusals @ ["  else {"])
-let unblocked_agent_page = String.concat "\n" (find_agent_tab
+let agent_page = String.concat "\n" (download_watch :: find_agent_tab :: agent_refusals @ ["  else {"; watch_agent_page])
+let unblocked_agent_page = String.concat "\n" (download_watch :: find_agent_tab
   :: ("  const blocking = tab === undefined || tab.openedBy !== \"agent\" ? null : " ^ open_dialog "task.page(args.label)" ^ ";")
   :: agent_refusals @ [
   "  else if (blocking !== null) emit({ok: false, before: true, error: \"tab \" + args.tabId + \" \" + " ^ Yojson.Safe.to_string (str dialog_blocked) ^ "});";
-  "  else {" ])
+  "  else {"; watch_agent_page ])
 let message = "error => String(error && error.message || error)"
 (* After a step that may have moved the page, its row in the space says where it is. *)
 let row_after = "(await task.tabs()).find(item => item.label === args.label)"
@@ -459,9 +546,11 @@ let open_tab t url =
       "  let page;";
       "  let refused = null;";
       "  try { page = await task.newPage(); } catch (error) { refused = reason(error); }";
+      download_watch;
       "  if (page === undefined) emit({ok: false, before: true, error: refused});";
       "  else {";
       "    args.label = page.label;";
+      watch_agent_page;
       "    let failure = null;";
       "    try { await page.goto(args.url); } catch (error) { failure = reason(error); }";
       "    const tab = " ^ row_after ^ ";";
@@ -1062,5 +1151,6 @@ let dispatch t ~verb args =
   | Page_goto -> goto t args
   | Page_context -> Error (Live.Before_effect "an ego connection does not read inside frames")
   | Page_snapshot -> pre (snapshot t args)
+  | Page_downloads -> pre (downloads t args)
   | Page_act -> act t args
   | Page_interact -> interact t args

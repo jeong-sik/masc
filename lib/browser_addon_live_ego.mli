@@ -37,6 +37,7 @@ val end_session : session -> unit
     caller's work starts once that client is attached. A configured ego that
     cannot start fails this worker's start, as the owned BiDi Firefox does.
     Screenshots pass through a private directory this run creates and
-    removes. *)
-val run : env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t ->
+    removes. Downloads its agent pages start are saved under [downloads],
+    the worker's download folder, and published through [owner]. *)
+val run : env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t -> downloads:string ->
   Browser_configuration.live_ego -> (unit -> unit) -> unit

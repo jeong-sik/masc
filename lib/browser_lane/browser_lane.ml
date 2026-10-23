@@ -443,6 +443,7 @@ type live_capability =
   | Dialog_answer
   | Frame_read
   | Operator_handoff
+  | Download_listing
 [@@deriving enumerate]
 
 let live_capability_to_wire = function
@@ -473,6 +474,7 @@ let live_capability_to_wire = function
   | Tab_creation -> "tab_creation"
   | Dialog_answer -> "dialog_answer"
   | Frame_read -> "frame_read"
+  | Download_listing -> "download_listing"
 ;;
 
 let live_capability_of_wire raw =
@@ -513,7 +515,8 @@ let live_capability = function
   | Page_goto _ -> Some Tab_navigation
   | Page_act (Action.On_tab {interaction = (Action.Accept_dialog _ | Action.Dismiss_dialog); _}) -> Some Dialog_answer
   | Page_context { mode = (`Text _ | `Elements _ | `Frames); _ } -> Some Frame_read
-  | Page_context { mode = `Dialog; _ } | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ -> None
+  | Page_downloads _ -> Some Download_listing
+  | Page_context { mode = `Dialog; _ } | Page_console _ | Page_network _ | Page_cookies _ -> None
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
   | Session_open _ | Session_close | Session_status
@@ -646,9 +649,9 @@ let live_transport_of_string = function
    The ego connection runs fixed scripts in one ego lite task space
    (RFC-browser-live-ego). It reads that space's pages with the same page
    scripts as the other connections, and opens, moves and closes only the
-   pages an agent opened there. It alone hands its space to the operator and
-   takes it back; test_browser_ego_peer holds its column to what
-   Browser_ego_peer does. *)
+   pages an agent opened there. It hands its space to the operator and takes
+   it back, and lists downloads saved into the worker's own folder;
+   test_browser_ego_peer holds its column to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
   | ( (Web_extension | Webdriver_bidi)
@@ -659,16 +662,16 @@ let live_transport_serves transport capability =
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input
-                    | Operator_handoff) -> false
+                    | Operator_handoff | Download_listing) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read) -> true
-  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Operator_handoff) -> false
+  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Operator_handoff | Download_listing) -> false
   | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_answer
-                    | Snapshot_target_input | Operator_handoff) -> true
+                    | Snapshot_target_input | Operator_handoff | Download_listing) -> true
   | Ego_task_space, (Document_source | Touch_input | Browser_zoom | Viewport_resize
                     | Tab_activation | Frame_read) -> false
 ;;

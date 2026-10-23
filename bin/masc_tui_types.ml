@@ -5951,6 +5951,7 @@ module Browser_lane_view = struct
     | Dialog_answer -> "dialog answer"
     | Frame_read -> "frame read"
     | Operator_handoff -> "hand to operator"
+    | Download_listing -> "downloads"
   (* What a live connection of this transport leaves out, read from the lane's
      table, and the transports that serve all of it. *)
   let transport_lacks transport =

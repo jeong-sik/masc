@@ -1,4 +1,5 @@
-(** Completed Gecko downloads copied into the original worker allocation.
+(** Completed downloads of the browsers this worker runs (the owned Gecko and
+    the ego connection), copied into the original worker allocation.
     This broker never reads caller-supplied paths. Blocking operations belong
     in a system thread; no browser or model work is performed here. *)
 type t
@@ -22,6 +23,9 @@ val snapshot_matches : label:string -> path:string -> descriptor -> Unix.stats -
 (** Derive [directory/download-snapshots/<canonical UUID>.bin]. The host must
     independently pin its original allocation and verify the claimed descriptor
     before importing; a worker response never supplies a pathname. *)
+val downloads_directory : directory:string -> string
+(** The folder under the worker's allocation [directory] that browsers save
+    downloads into and [publish] copies them from. *)
 val create : directory:string -> (t, string) result
 (** Pin the canonical private allocation and create a fresh private broker
     root. Existing roots are refused rather than adopted. *)
@@ -36,8 +40,9 @@ val publish : t -> string -> (Yojson.Safe.t, string) result
 val bind : t -> actor:string -> route:Browser_lane.route -> verb:Browser_lane.verb ->
   Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** Bind [Page_downloads] rows to this call, replacing private snapshot markers
-    with fresh opaque grants and removing source paths. Only owned automation
-    downloads are supported. A cached snapshot can be bound by later calls;
+    with fresh opaque grants and removing source paths. Only the owned
+    automation route and a selected live connection of this worker are
+    supported. A cached snapshot can be bound by later calls;
     every grant retains its exact actor, route and verb. *)
 val claim : t -> id:string -> actor:string -> route:Browser_lane.route ->
   verb:Browser_lane.verb -> (claim, string) result

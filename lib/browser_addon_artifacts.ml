@@ -23,9 +23,11 @@ let finalize ~socket ~client ~store ~name ~arguments ~principal ~result =
     let identity_keys=["browserSelection";"browserConnection"] in
     let* binding=Browser_binding.of_json (`Assoc (List.filter (fun (key,_) -> List.mem key identity_keys) fields)) in
     let route=(Browser_binding.selected binding).route in
+    (* The worker that answered owns the grants: it claims only one bound to
+       this exact actor, route and verb (Browser_addon_downloads.claim). *)
     let* ()=match route with
-      | B.Automation_route -> Ok ()
-      | Stagehand_route|Live_route _ -> Error "download artifacts require the owned Gecko connection" in
+      | B.Automation_route|Live_route (Some _) -> Ok ()
+      | Stagehand_route|Live_route None -> Error "download artifacts require the owned Gecko or a selected live connection" in
     let* reply=W.reply_of_json (`Assoc (List.filter (fun (key,_) -> not (List.mem key identity_keys)) fields)) in
     let* payload=match reply with
       | W.Issue_result (Ok (B.Answered (`Assoc payload))) -> Ok payload

@@ -314,8 +314,13 @@ let support backend operation = match backend with
           Unsupported "Only an ego connection takes its task space back from the operator.")
     | Upload_file -> gecko_only backend (invoke ~action:"upload" Act)
         [observed;"Requires an owning Keeper, an observed file input and sandbox-authorized file paths; 16 MiB per file."]
-    | List_downloads -> gecko_only backend (invoke ~mode:"downloads" Read)
-        [observed;"Explicit tabId and a functioning BiDi download connection; reports observed pending/completed/canceled/interrupted state."]
+    | List_downloads -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~mode:"downloads" Read
+          [observed;"Explicit tabId and an explicit ego browser. Lists the downloads the page started from the first step this connection took on it, opening it included, as pending, completed or interrupted. watchingSince says from when: a stopped command restarts ego's process, and with it the list.";
+           "A completed file is saved in the worker's own folder and returned as an artifact. ego's browser touches the operator's download folder while a download runs and leaves nothing there.";ego_pages]
+      | Owned_gecko | Owned_chromium | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable ->
+          gecko_only backend (invoke ~mode:"downloads" Read)
+            [observed;"Explicit tabId and a functioning BiDi download connection; reports observed pending/completed/canceled/interrupted state."])
     | Sentence_action -> (match backend with
       | Owned_chromium -> conditional ~action:"act" Instruct
           [observed;"Model-mediated sentence action; not a substitute for guaranteed native keyboard, double-click or zoom support. observe/extract are separate read actions."]

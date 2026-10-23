@@ -980,13 +980,15 @@ let test_peer_serves_what_the_lane_table_says () =
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
       | Dialog_answer -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Dismiss_dialog})
       | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}
-      | Operator_handoff -> Page_act (Action.Control Action.Hand_off)) in
+      | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
+      | Download_listing -> Page_downloads {tab_id=1}) in
     (* The names the native host forwards (Browser_host.decode_poll). *)
     let peer_verb = function
       | "tabs.list" -> Peer.Tabs_list | "page.read" -> Peer.Page_read | "page.scene" -> Peer.Page_scene
       | "page.elements" -> Peer.Page_elements | "page.capture" -> Peer.Page_capture
       | "page.interact" -> Peer.Page_interact | "page.act" -> Peer.Page_act | "page.goto" -> Peer.Page_goto
       | "page.context" -> Peer.Page_context | "page.snapshot" -> Peer.Page_snapshot
+      | "page.downloads" -> Peer.Page_downloads
       | other -> failf "the lane put a verb on the wire that the host does not forward: %s" other in
     let calls = ref [] in
     let created = ref false in

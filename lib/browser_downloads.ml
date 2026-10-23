@@ -94,7 +94,7 @@ let for_context t requested =
   List.rev t.order |> List.filter_map (fun id ->
     let d = Hashtbl.find t.downloads id in
     if belongs [] d.context then Some d else None)
-let to_json ~verify d =
+let fields ~verify d =
   let status, details = match d.status with
     | Pending -> "pending", []
     | Canceled -> "canceled", []
@@ -104,9 +104,24 @@ let to_json ~verify d =
       "completed", (match verify path with
         | Ok (path, bytes) -> ["file", `String "available"; "path", `String path; "bytes", `Int bytes]
         | Error reason -> ["file", `String "unavailable"; "reason", `String reason]) in
-  `Assoc (["downloadId", `String d.id; "context", `String d.context;
+  ["downloadId", `String d.id; "context", `String d.context;
     "url", `String d.url; "status", `String status;
-    "suggestedFilename", (match d.filename with None -> `Null | Some s -> `String s)] @ details)
+    "suggestedFilename", (match d.filename with None -> `Null | Some s -> `String s)] @ details
+let to_json ~verify d = `Assoc (fields ~verify d)
+let published_json ~verify ~publish ~published d =
+  let fields = fields ~verify d in
+  let artifact = match Hashtbl.find_opt published d.id with
+    | Some value -> Some (Ok value)
+    | None -> (match List.assoc_opt "path" fields with
+      | Some (`String path) ->
+        let result = publish path in
+        Result.iter (Hashtbl.replace published d.id) result;
+        Some result
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) | None -> None) in
+  `Assoc (match artifact with
+    | Some (Ok value) -> ("artifact", value) :: fields
+    | Some (Error reason) -> ("artifactError", `String reason) :: fields
+    | None -> fields)
 type connection = {
   read : context:string -> (Yojson.Safe.t, string) result;
   console : context:string -> (Yojson.Safe.t, string) result;

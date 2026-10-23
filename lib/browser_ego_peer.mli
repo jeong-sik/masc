@@ -1,7 +1,8 @@
 (** One ego lite task space served as a live browser connection
     (RFC-browser-live-ego). Each command runs one fixed script with
     [ego-browser nodejs]: the task space, its pages and their labels last
-    from one run to the next, script variables do not. The connection gives
+    from one run to the next, a script's variables do not, and the download
+    waits a script starts last as long as the ego process. The connection gives
     each page it sees a tab number, by the page's label. It reads only the
     pages the space manages; a tab the operator opened there is listed and
     refused before any read. *)
@@ -38,19 +39,27 @@ val result_marker : string
 
 type t
 
+(** Where an agent page's downloads are saved: [root], a folder under the
+    worker's own download folder that no one else writes. [publish path]
+    hands one completed file to the worker's download broker and answers the
+    marker its row carries as [artifact]. *)
+type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
+
 (** Opens the agent task space called [space], or resumes it when this
     space already exists, and holds it from then on by the number ego gave
     it. A space of the same name that the operator owns is refused by ego.
     [version] is ego lite's version. Screenshots are written under
     [capture_directory], which this process owns, and removed once read.
     [now] is the time in seconds; a command that runs twice gives its
-    second run what is left of its window. *)
+    second run what is left of its window. Downloads that agent pages start
+    are saved and published through [downloads]. *)
 val open_space
   :  run:runner
   -> now:(unit -> float)
   -> space:string
   -> version:string
   -> capture_directory:string
+  -> downloads:downloads
   -> (t, string) result
 
 val space_id : t -> int
@@ -69,7 +78,11 @@ val space_id : t -> int
     acting is [Before_effect], a load that failed
     after it started is a [Partial_failure] with where the tab is now, and a
     run that was stopped or failed where the script cannot say is
-    [Outcome_unknown]. Input finds its target, checks the observed page and
+    [Outcome_unknown]. [page.downloads] lists the downloads an agent page
+    started while this ego process watched it: each step that acts on such
+    a page starts watching it, and a row says pending, completed or
+    interrupted as {!Browser_downloads} does, a completed file once
+    published. Input finds its target, checks the observed page and
     makes its DOM edits with the page scripts the BiDi connection runs, and
     sends mouse and keys through ego. Snapshot target input checks the URL
     again after the native selector wait; this is not an atomic navigation

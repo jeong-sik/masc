@@ -120,11 +120,12 @@ let close_pins snapshots = List.fold_left (fun result snapshot ->
   let closed=close_pin snapshot in
   match result,closed with Error detail,_ | Ok (),Error detail -> Error detail
     | Ok (),Ok () -> Ok ()) (Ok ()) snapshots
+let downloads_directory ~directory = Filename.concat directory "downloads"
 let source_parent = {Requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Clear 0o022;links=Any_count}
 let source_file = {Requirement.kind=Unix.S_REG;owner=Effective_user;mode=Any_mode;links=Exactly_one}
 let owned_directory = {Requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Any_mode;links=Any_count}
 let source_parents t path =
-  let downloads=Filename.concat t.directory "downloads" in
+  let downloads=downloads_directory ~directory:t.directory in
   let rec collect current acc =
     let stat=Unix.lstat current in
     let* ()=Requirement.check ~label:"download source parent" source_parent ~path:current stat in
@@ -199,13 +200,19 @@ let publish t path =
             Hashtbl.add t.snapshots id snapshot;registered:=true;
             if not t.serving then Error "download broker retired during preparation"
             else Ok (`Assoc ["downloadSnapshot",`String id]))))
+(* Only a snapshot this broker published can become a grant, and only the
+   browsers this worker runs publish: the owned Gecko, and the ego
+   connection, whose agent pages save their downloads into the same folder.
+   A grant keeps the exact route, so one live connection cannot claim
+   another's. *)
 let allowed route verb = match route,verb with
-  | B.Automation_route,B.Page_downloads _ -> Ok ()
-  | (B.Live_route _|Stagehand_route),(B.Page_downloads _)
+  | (B.Automation_route|Live_route (Some _)),B.Page_downloads _ -> Ok ()
+  | (B.Live_route None|Stagehand_route),(B.Page_downloads _)
   | (B.Live_route _|Automation_route|Stagehand_route),
     (B.Tabs_list|Page_read _|Page_document _|Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _
-    |Page_context _|Page_instruct _|Page_locate _|Page_extract _) -> Error "download grants require owned automation downloads"
+    |Page_context _|Page_instruct _|Page_locate _|Page_extract _) ->
+      Error "download grants require a download read from a browser this worker runs"
 let bind t ~actor ~route ~verb payload =
   let* ()=allowed route verb in let* payload=Lane_addon_action.canonical payload in
   locked t (fun () -> if not t.serving then Error "download broker is retired" else
@@ -356,7 +363,7 @@ let retire t retirement =
     match failures with
     | _::_ -> Error (String.concat "; " (List.rev failures))
     | [] ->
-        let* ()=empty_downloads (Filename.concat t.directory "downloads") in
+        let* ()=empty_downloads (downloads_directory ~directory:t.directory) in
         if Sys.readdir t.root<>[||] then Error "download root contains unknown or partial files"
         else (Unix.rmdir t.root;Ok ()))) in
     !result))) in

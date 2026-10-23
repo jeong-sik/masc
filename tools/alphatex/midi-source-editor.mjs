@@ -388,7 +388,9 @@ export function sourceCommand(editor,line) {
       return {editor:apply(editor,notes.map(n=>({id:n.id,pitch:n.pitch+semitones})))}
     }
     case 'quantize':{
-      count(1);const grid=units(args[0]);if(!grid)throw new Error('Grid must be positive')
+      count(1)
+      if (!editor.performance) throw new Error('Choose a MIDI pattern before quantizing')
+      const grid=units(args[0]);if(!grid)throw new Error('Grid must be positive')
       const starts = quantizedStarts(editor.performance.notes, notes, grid)
       return {editor:apply(editor,notes.map(n=>({id:n.id,start:starts.get(n.id)})))}
     }

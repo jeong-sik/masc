@@ -56,6 +56,7 @@ test('original MIDI overlap remains supported and a separate SMF2 pattern cannot
   assert.deepEqual(next.performance.notes.map(n => [n.start,n.duration]),[[250,300],[250,300]])
   assert.deepEqual(command(next,'undo').project,editor.project)
   let independent = source([{notes:[[140,200]]},{notes:[[360,300]]}],{format:2})
+  assert.throws(()=>command(independent,'quantize 0.25'),/Choose a MIDI pattern/)
   independent = command(independent,'pattern 1')
   const projected = command(independent,'quantize 0.25')
   assert.equal(projected.performance.notes[0].start,250)

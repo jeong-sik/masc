@@ -9461,7 +9461,7 @@ let test_composable_outputs_satisfy_declared_schema () =
        (* Exercise the recorded branch in both tools. An empty source is
           not_found for get_metrics and a named null observation for fitness. *)
        let now = Unix.gettimeofday () in
-       Masc.Metrics_store_eio.record
+       (match Masc.Metrics_store_eio.record
          config
          { Masc.Metrics_store_eio.id = Masc.Metrics_store_eio.generate_id ()
          ; agent_id = meta.Masc.Keeper_meta_contract.name
@@ -9473,7 +9473,10 @@ let test_composable_outputs_satisfy_declared_schema () =
          ; collaborators = []
          ; handoff_from = None
          ; handoff_to = None
-         };
+         } with
+       | Ok Masc.Metrics_store_eio.Written -> ()
+       | Ok Enqueued -> Masc.Metrics_store_eio.flush_pending ()
+       | Error error -> failwith (Masc.Metrics_store_eio.record_error_to_string error));
        (* Every probe runs, then the failures are reported together.
 
           Aborting at the first one hides the rest: [Execute] leads this list

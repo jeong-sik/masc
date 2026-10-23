@@ -2,9 +2,11 @@
 (** Metrics_store_eio — agent performance metrics with async batched
     file I/O.
 
-    Storage layout: \[.masc/metrics/\{agent\}/YYYY-MM.jsonl\] — one
+    Storage layout: \[.masc/metrics/<SHA256(exact agent)>/YYYY-MM.jsonl\] — one
     {!task_metric} per line, JSON-serialised via
     [\[@@deriving yojson\]].
+    [metrics/store.json] binds the store format;
+    [metrics/<key>/identity.json] retains and validates the exact agent name.
 
     Concurrency model: writers serialise the JSON line and push to a
     bounded {!Eio.Stream}; a single background fiber
@@ -65,9 +67,10 @@ type config = Workspace_utils.config
 
 val agent_metrics_dir : config -> string -> string
 (** [agent_metrics_dir config agent_id] returns
-    \[<masc_dir>/metrics/<agent_id>/\].  Pure path computation — does
-    {b not} create the directory.  Use {!record} or call
-    [Fs_compat.mkdir_p] explicitly if creation is needed. *)
+    \[<masc_dir>/metrics/<SHA256(agent_id)>/\]. Names keep their exact bytes;
+    case, path separators, Unicode and long names are not filename rules.
+    Pure path computation: no directory creation or stored identity proof.
+    {!record} binds the key to an exact identity document. *)
 
 (** {1 ID generation} *)
 
@@ -79,7 +82,17 @@ val generate_id : unit -> string
 
 (** {1 Recording} *)
 
-val record : config -> task_metric -> unit
+type record_receipt = Enqueued | Written
+(** [Enqueued] is queue admission only; [Written] is the direct append's
+    successful return, not an fsync/durability receipt. *)
+
+type record_error =
+  | Invalid_metric_identity of string
+  | Metric_store_failure of { path : string; message : string }
+
+val record_error_to_string : record_error -> string
+
+val record : config -> task_metric -> (record_receipt, record_error) result
 (** [record config metric] persists [metric] to
     \[<agent_metrics_dir>/<YYYY-MM>.jsonl\].
 
@@ -87,11 +100,17 @@ val record : config -> task_metric -> unit
     {!start_flush_fiber}), the metric is serialised and pushed to
     the queue (lock-free).  Otherwise falls back to direct
     {!Fs_compat.append_file} (tests, pre-init).  Always ensures the
-    target directory exists.
-
-    Returns [()] regardless of queue state — backpressure is bounded
-    by the 256-entry stream capacity; overflow drops are not
-    surfaced to the caller. *)
+    target directory and binds its exact identity before queue admission.
+    Root format and per-agent identity documents are strict current contracts;
+    incompatible nonempty stores are refused, never read or rewritten as aliases.
+    Each binding is published whole without replacing a concurrent binding;
+    readers never observe this writer's partially initialized document.
+    Publication failure can leave a complete binding in place. It is not rolled
+    back or a receipt for the metric body.
+    The bounded stream applies backpressure, it does not silently drop overflow.
+    Expected filesystem and identity failures return [Error]; cancellation and
+    unexpected exceptions propagate. Metadata and append are not one transaction.
+    Flush append failure is still logged separately after [Enqueued]. *)
 
 val flush_pending : unit -> unit
 (** [flush_pending ()] drains all pending entries from the write
@@ -168,7 +187,7 @@ val get_recent :
     large month files. [Ok []] means an absent or empty agent directory, or
     no records in the requested window. Malformed records, another agent's
     records and unreadable/disappearing captured files are errors, never an
-    empty or partial successful reading. Names are nonblank exact single path components;
+    empty or partial successful reading. Names are nonblank exact strings;
     [days] must be positive. Cancellation and unexpected exceptions propagate.
     This is a per-query reading, not an atomic snapshot of concurrent writers. *)
 

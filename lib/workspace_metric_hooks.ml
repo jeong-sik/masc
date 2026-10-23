@@ -425,7 +425,11 @@ let install () =
       handoff_from;
       handoff_to;
     } in
-    try let _ = Metrics_store_eio.record config metric in ()
+    try
+      match Metrics_store_eio.record config metric with
+      | Ok (Metrics_store_eio.Enqueued | Written) -> ()
+      | Error error -> Log.Task.error ~keeper_name:task_id "task metric record rejected: %s"
+          (Metrics_store_eio.record_error_to_string error)
     with Eio.Cancel.Cancelled _ as e -> raise e
        | exn -> Log.Task.error ~keeper_name:task_id "Metrics_store_eio.record dynamic hook failed: %s" (Stdlib.Printexc.to_string exn));
 

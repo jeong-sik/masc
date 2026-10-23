@@ -243,7 +243,10 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
              handoff_from = None;
              handoff_to = None;
            } in
-           Metrics_store_eio.record config metric
+           (match Metrics_store_eio.record config metric with
+            | Ok (Metrics_store_eio.Enqueued | Written) -> ()
+            | Error error -> Log.Misc.error "board_post fitness record rejected: %s"
+                (Metrics_store_eio.record_error_to_string error))
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.error "board_post fitness record failed: %s"
              (Stdlib.Printexc.to_string exn));
@@ -311,7 +314,10 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
              handoff_from = None;
              handoff_to = None;
            } in
-           Metrics_store_eio.record config metric
+           (match Metrics_store_eio.record config metric with
+            | Ok (Metrics_store_eio.Enqueued | Written) -> ()
+            | Error error -> Log.Misc.error "board_comment fitness record rejected: %s"
+                (Metrics_store_eio.record_error_to_string error))
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.error "board_comment fitness record failed: %s"
              (Stdlib.Printexc.to_string exn));
@@ -394,7 +400,10 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
              handoff_from = None;
              handoff_to = None;
            } in
-           Metrics_store_eio.record config metric
+           (match Metrics_store_eio.record config metric with
+            | Ok (Metrics_store_eio.Enqueued | Written) -> ()
+            | Error error -> Log.Misc.error "board_vote fitness record rejected: %s"
+                (Metrics_store_eio.record_error_to_string error))
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.error "board_vote fitness record failed: %s"
              (Stdlib.Printexc.to_string exn));

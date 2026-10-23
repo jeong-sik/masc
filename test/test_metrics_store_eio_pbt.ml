@@ -2,7 +2,7 @@
 
     Same root-cause class as #10356 / #10450 / #10463 (telemetry_eio), but for
     a different persistence boundary: per-agent JSONL files at
-    [.masc/metrics/{agent}/YYYY-MM.jsonl]. Files outlive any single MASC
+    [.masc/metrics/<SHA256(exact agent)>/YYYY-MM.jsonl]. Files outlive any single MASC
     process — keeper restarts, agent rotations, and month-boundary rollovers
     all read records previously written by a different version. A producer
     that elides a [None] option key, or a future schema migration that adds

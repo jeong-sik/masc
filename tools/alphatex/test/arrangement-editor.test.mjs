@@ -538,7 +538,7 @@ test('MIDI asset bindings survive prepare and own pause/seek/resume; route chang
     const player=view.observed.players[0];assert.equal(player.options.midiOutput,'42');assert.equal(player.options.output,undefined)
     assert.deepEqual(player.options.midiBindings,[{port:0,destination:'42'}])
     view.key('space');await flush();view.command('seek .5');await flush();view.key('space');await flush()
-    assert.deepEqual(player.commands.slice(0,3),['pause',['seek',.3],'resume'])
+    assert.deepEqual(player.commands.filter(command=>command!=='status'),['pause',['seek',.3],'resume'])
     view.command('midi-output 43');await flush();assert.ok(player.commands.includes('stop'))
   } finally { await closeController(view) }
 })
@@ -562,8 +562,9 @@ test('mixed controller pins paired outputs and owns one player through pause, se
     view.worker.emit('message',{id:job.id,ok:true,result});await flush()
     const player=view.observed.players[0]
     assert.equal(player.options.output,'explicit-audio');assert.equal(player.options.midiOutput,'42');assert.equal(player.options.format,'mixed-arrangement')
+    player.handle.status()
     view.key('space');await flush();view.command('seek .5');await flush();view.key('space');await flush()
-    assert.deepEqual(player.commands.slice(0,3),['pause',['seek',.3],'resume'])
+    assert.deepEqual(player.commands.filter(command=>command!=='status'),['pause',['seek',.3],'resume'])
     view.command('midi-output 43');await flush();assert.ok(player.commands.includes('stop'))
     player.finish();view.key('space');await flush()
     const next=view.observed.requests.filter(job=>job.kind==='prepare-mixed').at(-1)
@@ -646,10 +647,12 @@ test('native UMP child returns only its overlay and creates an independently sel
   const view = await controller()
   try {
     const asset = await primeCapture(view)
+    view.command('tempo 137.1'); await flush()
     view.command('edit-ump'); await flush()
     const job = view.observed.requests.find(job => job.kind === 'prepare-ump')
     view.worker.emit('message', { id: job.id, ok: true, result: { asset, packets: nativeUmpPackets() } }); await flush()
     const child = view.observed.umpEditors[0]
+    assert.equal(child.options.tempo, 137.1)
     const ump = { schemaVersion: 1, midiSha256: asset.parts.midi.sha256, notes: [{ packet: 0, word: 0, pitch: 30976, velocity: 0 }] }
     child.finish({ changed: true, asset: { ...asset, ump } }); await flush()
     const imported = view.observed.requests.find(job => job.kind === 'import-ump')

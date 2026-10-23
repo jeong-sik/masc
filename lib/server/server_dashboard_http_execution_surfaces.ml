@@ -256,6 +256,17 @@ type execution_http_payload =
   ; etag : string
   }
 
+type execution_http_response =
+  | Execution_json of Yojson.Safe.t
+  | Execution_payload of Dashboard_cache.cached_payload
+
+let execution_payload_response (payload : execution_http_payload) =
+  let raw_json, _ = Http_response_payload.select_prepared payload.encoded
+      ~accept_encoding:(Some "identity") in
+  { Dashboard_cache.json = payload.response_json;
+    raw_json; etag = payload.etag; origin = Dashboard_cache.Computed;
+    encoded = Some payload.encoded }
+
 type execution_http_state =
   | Empty
   | Preparing of execution_http_preparation
@@ -873,11 +884,7 @@ let prepared_execution_payload_for_snapshot ~config snapshot =
       when payload.source.snapshot == snapshot
            && execution_http_source_matches ~config payload.source
            && execution_surface_has_fresh_success_unlocked () ->
-      let raw_json, _ = Http_response_payload.select_prepared payload.encoded
-          ~accept_encoding:(Some "identity") in
-      Some { Dashboard_cache.json = payload.response_json;
-             raw_json; etag = payload.etag; origin = Dashboard_cache.Computed;
-             encoded = Some payload.encoded }
+      Some (execution_payload_response payload)
     | Empty | Preparing _ | Ready _ -> None)
 ;;
 
@@ -1406,17 +1413,16 @@ let execution_parameters ~(config : Workspace.config) request =
 type execution_http_request =
   { state : Mcp_server.server_state
   ; config : Workspace.config
-  ; request : Httpun.Request.t
   ; parameters : execution_parameters
   }
 
 let execution_http_request ~state request =
   let config = Mcp_server.workspace_config state in
   let parameters = execution_parameters ~config request in
-  { state; config; request; parameters }
+  { state; config; parameters }
 
-let execution_cached_http_representation ~(config : Workspace.config)
-      ~(parameters : execution_parameters) (request : Httpun.Request.t) =
+let execution_cached_http_response ~observe ~(config : Workspace.config)
+      ~(parameters : execution_parameters) =
   let { fixture = requested_fixture; actor; full_mode; force } = parameters in
   let fixture =
     Dashboard_execution_helpers.execution_fixture_name ?fixture:requested_fixture ()
@@ -1428,31 +1434,41 @@ let execution_cached_http_representation ~(config : Workspace.config)
       | Ready payload
         when execution_surface_has_fresh_success_unlocked ()
              && execution_http_source_matches ~config payload.source ->
-        let body, headers =
-          Http_response_payload.select_prepared payload.encoded
-            ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
-        in
-        Some (payload.response_json, (body, payload.etag, headers))
+        Some payload
       | Empty | Preparing _ | Ready _ -> None) in
     (match selected with
-     | Some (json, representation)
-       when Dashboard_projection_cache.with_current_keeper_observations ~config json = json ->
-       Some representation
-     | Some _ | None -> None)
+     | None -> None
+     | Some payload ->
+       let json = observe ~config payload.response_json in
+       (* Observation performs I/O. A mutation or newer publication while it
+          yields must take the fallback rather than returning detached data.
+          Compare immutable JSON outside the short publication lock. *)
+       let response =
+         if json = payload.response_json
+         then Execution_payload (execution_payload_response payload)
+         else Execution_json json in
+       with_execution_publication_lock (fun () ->
+         if execution_surface_has_fresh_success_unlocked ()
+            && execution_http_source_matches ~config payload.source
+         then Some response
+         else None))
   | _ -> None
 ;;
 
-let dashboard_execution_cached_http_representation context =
-  execution_cached_http_representation
-    ~config:context.config ~parameters:context.parameters context.request
+let dashboard_execution_cached_http_response context =
+  execution_cached_http_response
+    ~observe:Dashboard_projection_cache.with_current_keeper_observations
+    ~config:context.config ~parameters:context.parameters
 ;;
 
 module For_testing = struct
   type nonrec execution_attempt = execution_attempt
 
-  let cached_representation ~config request =
+  let cached_response
+      ?(observe = Dashboard_projection_cache.with_current_keeper_observations)
+      ~config request =
     let parameters = execution_parameters ~config request in
-    execution_cached_http_representation ~config ~parameters request
+    execution_cached_http_response ~observe ~config ~parameters
   let execution_publication_generation = current_execution_publication_generation
   (* An outcome at the given generation, taken as the newest attempt's. *)
   let publish_execution_success_if_current ~generation json =
@@ -1563,10 +1579,6 @@ let start_execution_trust_refresh_loop ~state ~sw ~clock =
             execution_trust_cache
             json))
 ;;
-
-type execution_http_response =
-  | Execution_json of Yojson.Safe.t
-  | Execution_payload of Dashboard_cache.cached_payload
 
 let cached_dashboard_execution_http_response ~sw ~clock context =
   let state = context.state in

@@ -1155,10 +1155,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                 h2_respond_json h2_reqd body ~compress:false ~extra_headers
             in
             let context = execution_http_request ~state httpun_request in
-            match dashboard_execution_cached_http_representation context with
-            | Some (body, etag, headers) -> respond_cached ~body ~etag ~headers
-            | None ->
-              (match dashboard_execution_http_response ~sw ~clock context with
+            let response = match dashboard_execution_cached_http_response context with
+              | Some response -> response
+              | None -> dashboard_execution_http_response ~sw ~clock context in
+              (match response with
                | Execution_json json ->
                  h2_respond_json_value h2_reqd json ~compress:false ~extra_headers:cors
                | Execution_payload payload ->

@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "sourceHead": "9c17b847250dd8c7db6e79a43ccfadf979e2c297",
+  "sourceBase": "f777165d3306d9173235349d4454b0ffacd83212",
+  "documentationHead": "54c64fa3925e3699c65e9e0e10ebeb83621c9f0d",
+  "goalComplete": false,
+  "checks": {
+    "node": {
+      "passed": 112,
+      "failed": 0,
+      "command": "node --test tools/alphatex/test/{ump-time,ump-expression,ump-source,ump-capture,ump-tui,arrangement-editor}.test.mjs"
+    },
+    "focusedNativeDecisions": "PASS",
+    "privateCoreMidi": {
+      "nativeAuthoredTickOracle": "PASS",
+      "actualFullReceiveWords": "PASS",
+      "actualCancelledReceiveCleanup": "PASS",
+      "ownersRetired": true
+    },
+    "sourceTui": {
+      "result": "PASS",
+      "originalPackets": 5,
+      "derivedMessages": 9,
+      "originalAssetRetained": true,
+      "variantPlaced": true,
+      "authoredClockAndRecordedProvenance": true,
+      "reopenedExportSixFilesIdentical": true,
+      "exportSHA256": "a249b0b825a2d14e2a80cc5a263338be729258c62a7003bfe026e67add1394c8",
+      "limits": [
+        "Synthetic capture fixture; no TUI playback requested",
+        "No intermediate undo/redo snapshots in this journey",
+        "No screen wording/layout assertions",
+        "Source viewer only; default installation unchanged"
+      ]
+    }
+  },
+  "reviewRepairs": {
+    "initialHead": "c0931560edd43732337d5d53e6caac335165ddf1",
+    "findings": [
+      "Swift memberwise caller arguments missing",
+      "Inward last-event edit shortened standalone horizon"
+    ],
+    "fixedHead": "9c17b847250dd8c7db6e79a43ccfadf979e2c297",
+    "independentInwardReproductionAndFixVerification": true
+  },
+  "artifacts": {
+    "integrated-tests-fixed.log": {
+      "sha256": "85f3920ce6eaa2fbda699d27986312f847c1963a165e63cc6ff3be9857f5d8af",
+      "bytes": 12847
+    },
+    "native-decisions-fixed.log": {
+      "sha256": "05f94259676e9cbb896804e43c11b15be9e08152551182b5efbf923b20fc3b18",
+      "bytes": 467
+    },
+    "native-wire-time.log": {
+      "sha256": "1e5c066a35cea6f81f8f2a2f806c44676b78c1a64d4b7761d2d556f2584a7a55",
+      "bytes": 1210
+    },
+    "source/journey.json": {
+      "sha256": "0e81954005fd4596f91489fc75c4e2b0d8f0d71061c923b3f0b601bdd586572f",
+      "bytes": 3470
+    },
+    "source/verification.json": {
+      "sha256": "8734860873e23224203061b11083487158e0227ac91e0399cd20d004a0a7e1b0",
+      "bytes": 542
+    },
+    "core-inward-independent-probe.json": {
+      "sha256": "a9d89148d36578d066bccd6c2531c005c75f98f9b4372bfec38f3b8b1ac335b9",
+      "bytes": 1221
+    },
+    "core-inward-repaired-independent-probe.json": {
+      "sha256": "353816e72fa805538d1ed2fb3ac5796d78b080efcf982ac7cbaaf5f61509b63d",
+      "bytes": 1331
+    },
+    "core-span-independent-probe.json": {
+      "sha256": "d47d03209291ba9e0acfee832bca90a4a082df20521a8691e66dddb5e11938d3",
+      "bytes": 407
+    }
+  },
+  "limits": [
+    "No local Dune/full production build or CI dispatch/watch",
+    "Native probe compiles four focused Swift sources and a private harness; not all five other helper suites were rebuilt",
+    "Native exact tick plan oracle and received word stream are distinct; actual receive host timestamps were not measured",
+    "Source TUI uses a synthetic captured fixture; no TUI playback requested; no screen wording/layout assertions",
+    "TUI undo/redo intermediate snapshots were not captured separately",
+    "No default launcher installation, USB instrument, acoustic latency or audio/MIDI sample alignment validation",
+    "Explicit off-ID editing does not infer repeated-note voice ownership or move controls automatically",
+    "Embedded JR/delta-clock retiming, message insertion/removal, raw practice editing and MIDI2 Clip import remain"
+  ],
+  "nativeRevalidation": {
+    "executionHead": "8e32078577458b60fa2681e9b749081e25e6a087",
+    "rebasedSourceHead": "03f47cd982563299beeb4835a91a6bf9108fc811",
+    "sourceFilesIdenticalToExecutedSource": 17,
+    "log": "native-wire-rebased.log",
+    "sha256": "e2e01f931456eb8619afcde103e0af5729cf7f13f6c3f427a96942709d5003b6",
+    "bytes": 1210,
+    "result": "PASS"
+  }
+}

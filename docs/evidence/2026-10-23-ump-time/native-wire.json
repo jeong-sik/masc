@@ -1,0 +1,88 @@
+{
+  "clock": {
+    "denom": 3,
+    "numer": 125,
+    "origin": "10000000000000000000"
+  },
+  "kind": "edited-ump-native-proof",
+  "ownersRetired": true,
+  "protocol": 2,
+  "receivedCancel": {
+    "A": [
+      1124416515,
+      2046820353,
+      1125465343,
+      0,
+      1135951872,
+      4294967295,
+      1133854723,
+      2416015360,
+      1133855491,
+      2416017408,
+      1133856515,
+      2416020992,
+      1133853699,
+      28160,
+      1132807936,
+      0,
+      1132806912,
+      0,
+      1132806144,
+      0,
+      1132805120,
+      0,
+      1135951872,
+      0
+    ],
+    "B": [
+      1234309379,
+      4294934656,
+      1233260800,
+      0
+    ]
+  },
+  "receivedFull": {
+    "A": [
+      1124416515,
+      2046820353,
+      1125465343,
+      0,
+      1135951872,
+      4294967295,
+      1133854723,
+      2416015360,
+      1133855491,
+      2416017408,
+      1133856515,
+      2416020992,
+      1133853699,
+      28160,
+      1130707968,
+      2147483648,
+      1134902272,
+      4294967295,
+      1132806144,
+      305397760,
+      1132806912,
+      305397760,
+      1132807936,
+      305397760,
+      1135951872,
+      0,
+      1132805120,
+      305397760
+    ],
+    "B": [
+      1234309379,
+      4294934656,
+      1233260800,
+      4275830784
+    ]
+  },
+  "scope": "private CoreMIDI destinations",
+  "checks": [
+    "EDITED_UMP_TIME_PLAN_PASS: original UInt64 identity/timebase and exact authored source deltas reach native events",
+    "EDITED_UMP_NATIVE_WIRE_PASS: exact Attribute3 pitch, velocity0/full16, edited per-note32 values, Note Index and original releases on two private native2 destinations",
+    "EDITED_UMP_NATIVE_CANCEL_PASS: real acquired-note/pedal releases observed; source timer, held state, output port and client retired"
+  ]
+}

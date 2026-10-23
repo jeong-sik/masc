@@ -1,0 +1,4 @@
+opam exec -- ocamlfind ocamlopt -thread -w +4+32+69 -warn-error +a -package yojson,re,digestif.ocaml,alcotest,ptime,uuidm,mcp_protocol.eio,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ppx_enumerate -linkpkg string_util.cmx json_kind.cmx shared_types.cmx json_util.cmx safe_identifier.cmx skill_source_config.cmx skill_reference.cmx time_codec.cmx time_compat.cmx ids.cmx types_core.cmx masc_domain.ml workspace_utils_backend_setup.ml workspace_utils_ops.ml workspace_backlog.ml workspace_task_rejection_outbox.mli workspace_task_rejection_outbox.ml outbox_fixture.ml -o outbox_fixture.exe
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif
+
+exit=0

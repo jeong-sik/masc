@@ -59,3 +59,19 @@ No live data, installation or runtime restart was changed in this work.
 No Dune build, full project typecheck, CI dispatch, actual lease takeover,
 concurrent shutdown execution, installed binary or live Keeper behavior is
 claimed. Source manifests and bounded probe logs accompany this directory.
+
+## Reproduce these bounded checks
+
+With the repository OCaml/opam dependencies installed, run:
+
+```sh
+python3 docs/evidence/2026-10-23-completion-rejection-current/reproduce.py .
+```
+
+The command creates and retains a fresh temporary directory, copies actual
+source from this checkout, compiles the selected dependency closure, and runs
+the four actual codec fixtures plus seven actual Outbox cases. The sibling
+`ports/` files and `outbox_fixture.ml` explicitly model only storage, errors
+and deterministic ordering. They do not run the real Keeper queue, consumer,
+filesystem lease or shutdown. The output manifest binds source, verbatim
+fixture definitions and harness bytes. Compile/run logs contain exact argv.

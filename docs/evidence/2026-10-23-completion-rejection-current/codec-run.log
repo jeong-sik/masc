@@ -1,0 +1,13 @@
+/tmp/masc-38059-outbox-20261023-3jbuxifj/reproduction-runs/masc-rejection-validation-mwd6pgue/codec_fixture.exe --color=never
+Testing `canonical rejection relation codec'.
+This run has ID `P57OH5OH'.
+
+  [OK]          actual codec          0   test_backlog_completion_rejection_r...
+  [OK]          actual codec          1   test_backlog_requires_delivered_rej...
+  [OK]          actual codec          2   test_backlog_rejects_conflicting_re...
+  [OK]          actual codec          3   test_backlog_rejects_malformed_deli...
+
+Full test results in `/private/tmp/masc-38059-outbox-20261023-3jbuxifj/reproduction-runs/masc-rejection-validation-mwd6pgue/_build/_tests/canonical rejection relation codec'.
+Test Successful in 0.000s. 4 tests run.
+
+exit=0

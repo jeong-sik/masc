@@ -12,13 +12,15 @@ import { importMidiClip, editMidiClipAttack, midiClipNotes } from '../midi-clip-
 
 const source = { originalSha256: 'a'.repeat(64), documentSha256: 'b'.repeat(64), ppq: 1001 }
 const deferred = () => { let resolve, reject; const promise = new Promise((ok, fail) => { resolve = ok; reject = fail }); return { promise, resolve, reject } }
-function protocol() {
+function protocol({ duration = '2000000000', setup = '500000000' } = {}) {
   const child = new EventEmitter(), commands = [], signals = []
   child.stdout = new PassThrough(); child.stderr = new PassThrough()
   child.stdin = new Writable({ write(bytes, _, done) { commands.push(JSON.parse(bytes)); done() } })
   child.kill = signal => signals.push(signal)
   let program
-  const player = openPlayback({ path: '/private/clip-plan.json', format: 'midi-clip', midiOutput: '-42', midiClipSource: source,
+  const fraction = value => ({ numerator: String(BigInt(value) * 1001n), denominator: '1001' })
+  const plan = { schemaVersion: 1, kind: 'midi-clip-playback', source, destination: '-42', durationNanoseconds: fraction(duration), setupNanoseconds: fraction(setup) }
+  const player = openPlayback({ path: '/private/clip-plan.json', format: 'midi-clip', midiOutput: '-42', midiClipPlan: plan,
     spawnProcess(executable) { program = executable; return child } })
   const event = (kind, values = {}) => child.stdout.write(JSON.stringify({ kind, format: 'midi-clip', loop: false,
     currentTime: 0, duration: 2, currentNanoseconds: '0', durationNanoseconds: '2000000000', setupNanoseconds: '500000000',
@@ -44,7 +46,7 @@ test('pre-ready stop never admits Start, while an empty admitted Clip completes 
   const early = protocol(); early.player.stop(); early.event('ready'); early.event('stopped'); early.close()
   assert.deepEqual(early.commands, [{ kind: 'stop' }]); await early.player.completion
   await assert.rejects(early.player.ready, /before starting/)
-  const empty = protocol(), zero = { duration: 0, durationNanoseconds: '0', setupNanoseconds: '0' }
+  const empty = protocol({ duration: '0', setup: '0' }), zero = { duration: 0, durationNanoseconds: '0', setupNanoseconds: '0' }
   empty.event('ready', zero); empty.event('playing', zero); empty.event('stopped', zero); empty.close()
   assert.equal((await empty.player.ready).duration, 0); assert.equal((await empty.player.completion).duration, 0)
 })
@@ -141,10 +143,22 @@ test('an explicit initial tempo resolves only the session plan; invalid values k
 })
 
 test('the native controller preserves exact seek values beyond binary64 nanosecond precision', async () => {
-  const fixture = protocol(), clock = { durationNanoseconds: '9007199254740995', duration: Number('9007199254740995') / 1e9 }
+  const fixture = protocol({ duration: '9007199254740995' }), clock = { durationNanoseconds: '9007199254740995', duration: Number('9007199254740995') / 1e9 }
   fixture.event('ready', clock); fixture.event('playing', clock); await fixture.player.ready
   fixture.player.seekNanoseconds('9007199254740993')
   assert.deepEqual(fixture.commands.at(-1), { kind: 'seek', nanoseconds: '9007199254740993' })
   for (const bad of ['9007199254740996', '01', '-1', '1.5']) assert.throws(() => fixture.player.seekNanoseconds(bad))
   fixture.player.stop(); fixture.event('stopped', clock); fixture.close(); await fixture.player.completion
+})
+
+test('a different initial-tempo plan cannot supply the first clock or admit Start for the same source identity', async () => {
+  for (const wrong of [
+    { durationNanoseconds: '1000000000', duration: 1 },
+    { setupNanoseconds: '250000000' },
+  ]) {
+    const fixture = protocol(); fixture.event('ready', wrong); fixture.close(1)
+    await assert.rejects(fixture.player.ready, /admitted clock/)
+    await assert.rejects(fixture.player.completion, /admitted clock/)
+    assert.deepEqual(fixture.commands, []); assert.deepEqual(fixture.signals, ['SIGTERM'])
+  }
 })

@@ -40,17 +40,29 @@ export async function midiDestinations({ executable = midiTransportPath, signal,
 
 // One owned child is one transport. Completion means its pipes and process have
 // closed, rather than merely receiving a stopped acknowledgement.
-export function openPlayback({ path, output, midiOutput, midiBindings, midiClipSource, frameRange, loop = false, format = 'wave', onEvent = () => {}, signal,
+export function openPlayback({ path, output, midiOutput, midiBindings, midiClipPlan, frameRange, loop = false, format = 'wave', onEvent = () => {}, signal,
   executable = format === 'midi-clip' ? midiClipTransportPath : ['wave-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'hybrid-arrangement', 'capture-audio-arrangement'].includes(format) ? arrangementTransportPath : midiOutput === undefined ? transportPath : midiTransportPath, spawnProcess = spawn } = {}) {
   signal?.throwIfAborted()
   const hybrid = format === 'hybrid-arrangement'
   const clip = format === 'midi-clip'
+  const midiClipSource = clip ? structuredClone(midiClipPlan?.source) : undefined
   if (clip && (midiOutput === undefined || output !== undefined || midiBindings !== undefined || loop
+      || midiClipPlan?.kind !== 'midi-clip-playback' || midiClipPlan.schemaVersion !== 1 || midiClipPlan.destination !== midiOutput
       || !midiClipSource || !Number.isInteger(midiClipSource.ppq) || midiClipSource.ppq < 1 || midiClipSource.ppq > 65535
       || ![midiClipSource.originalSha256, midiClipSource.documentSha256].every(value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)))) {
     throw new Error('Native Clip playback requires its admitted source and explicit MIDI2 output')
   }
-  if (clip) midiClipSource = structuredClone(midiClipSource)
+  const clipTime = value => {
+    if (!value || typeof value.numerator !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value.numerator)
+        || value.denominator !== String(midiClipSource.ppq)) throw new Error('Native Clip admission requires an exact source-clock fraction')
+    const numerator = BigInt(value.numerator), denominator = BigInt(value.denominator)
+    const rounded = numerator / denominator + (numerator % denominator ? 1n : 0n)
+    if (rounded >= 0xffffffffffffffffn) throw new Error('Native Clip admission exceeds its output clock')
+    return String(rounded)
+  }
+  const clipDuration = clip ? clipTime(midiClipPlan.durationNanoseconds) : null
+  const clipSetup = clip ? clipTime(midiClipPlan.setupNanoseconds) : null
+  if (clip && BigInt(clipSetup) > BigInt(clipDuration)) throw new Error('Native Clip admission ends before its setup phase')
   const captured = ['capture-session', 'capture-arrangement'].includes(format), mixed = format === 'mixed-arrangement' || captured || hybrid
   if (!['wave', 'wave-arrangement', 'midi-arrangement', 'mixed-arrangement', 'capture-session', 'capture-arrangement', 'hybrid-arrangement', 'capture-audio-arrangement', 'midi-clip'].includes(format) || ['wave-arrangement', 'capture-audio-arrangement'].includes(format) && midiOutput !== undefined) throw new Error('Invalid arrangement playback route or loop')
   if ((format === 'midi-arrangement' || mixed) && (midiOutput === undefined || midiBindings === undefined)) throw new Error('MIDI arrangement requires explicit bindings')
@@ -82,7 +94,7 @@ export function openPlayback({ path, output, midiOutput, midiBindings, midiClipS
     ...(frameRange ? ['--offset-frames', String(frameRange.offsetFrames), '--frame-count', String(frameRange.frameCount)] : [])]
   const child = spawnProcess(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   let failure = null, final = null, current = null, firstDevice = null, loopBindings = null, nativeBindings = null, started = false, closed = false, stopping = false, detail = ''
-  let clipPrepared = false, clipDuration = null, clipSetup = null
+  let clipPrepared = false
   let resolveReady, rejectReady, resolveDone, rejectDone
   const epochs = new Map()
   function rejectEpochs(error) { for (const pending of epochs.values()) pending.reject(error); epochs.clear() }
@@ -125,7 +137,6 @@ export function openPlayback({ path, output, midiOutput, midiBindings, midiClipS
             || event.source?.originalSha256 !== midiClipSource.originalSha256 || event.source?.documentSha256 !== midiClipSource.documentSha256
             || event.source?.ppq !== midiClipSource.ppq || clipDuration !== null && clipDuration !== event.durationNanoseconds
             || clipSetup !== null && clipSetup !== event.setupNanoseconds) throw new Error('Native Clip state differs from the admitted clock, source or protocol')
-        clipDuration ??= event.durationNanoseconds; clipSetup ??= event.setupNanoseconds
       }
       if (mixed && (event.format !== format || event.clock?.kind !== 'mach-host-time')) throw new Error('Missing combined arrangement clock')
       if (frameRange && (event.frameRange?.offsetFrames !== frameRange.offsetFrames

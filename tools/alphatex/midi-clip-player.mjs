@@ -48,7 +48,7 @@ export class MidiClipPlayer {
         const path = join(directory, 'plan.json')
         await writeFile(path, JSON.stringify(plan), { flag: 'wx', mode: 0o600, signal: owner.admission.signal })
         owner.admission.signal.throwIfAborted()
-        owner.handle = this.open({ path, format: 'midi-clip', midiOutput: plan.destination, midiClipSource: plan.source,
+        owner.handle = this.open({ path, format: 'midi-clip', midiOutput: plan.destination, midiClipPlan: plan,
           onEvent: event => {
             if (['ready', 'playing', 'paused', 'stopped'].includes(event.kind)) owner.lastEvent = event
             if (this.active !== owner || owner.cancelled) return

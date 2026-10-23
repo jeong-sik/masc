@@ -1754,7 +1754,8 @@ let remove_tree_unix (path : string) : unit =
     | stat when stat.Unix.st_kind = Unix.S_DIR ->
       Sys.readdir path
       |> Array.iter (fun name -> remove (Filename.concat path name));
-      Unix.rmdir path
+      Unix.rmdir path;
+      Mkdir_memo.invalidate path
     | _stat -> Sys.remove path
   in
   remove path

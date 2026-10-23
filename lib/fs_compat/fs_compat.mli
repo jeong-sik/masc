@@ -968,7 +968,9 @@ val unlink_if_exists : string -> bool
     other I/O failures propagate as [Sys_error]. *)
 
 (** Remove a file, symlink, or directory tree without invoking a shell.
-    Missing paths are ignored.  Symlinks are unlinked, not followed. *)
+    Missing paths are ignored. Symlinks are unlinked, not followed.
+    Each removed directory is forgotten by {!mkdir_p_memoized}, so later
+    writers can recreate it. *)
 val remove_tree : string -> unit
 
 (** [subdirectory_names dir] names the entries of [dir] that are directories,

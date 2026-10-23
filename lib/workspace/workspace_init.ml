@@ -99,27 +99,7 @@ let reset config =
   if not (is_initialized config)
   then "MASC not initialized. Nothing to reset."
   else (
-    (* Recursive delete *)
-    let rec rm_rf path =
-      if Sys.is_directory path
-      then (
-        Sys.readdir path
-        |> Array.iter (fun name ->
-          Workspace_query.safe_yield ();
-          rm_rf (Filename.concat path name));
-        Unix.rmdir path;
-        (* A writer that has appended here remembers the directory exists and
-           skips the mkdir on its next append, so the open lands on a path
-           that is gone. Fs_compat names this case: "use when
-           application-owned code removes a directory that a later memoized
-           writer may recreate". The audit log is the one that showed it --
-           an init after a reset raised Sys_error on
-           .masc/audit/YYYY-MM/DD.jsonl -- and every dated store under .masc
-           is written the same way. *)
-        Fs_compat.invalidate_mkdir_memo path)
-      else Sys.remove path
-    in
-    rm_rf (masc_dir config);
+    Fs_compat.remove_tree (masc_dir config);
     invalidate_initialized_cache ();
     Printf.sprintf "MASC workspace reset! (.masc/ deleted at %s)" config.base_path)
 ;;

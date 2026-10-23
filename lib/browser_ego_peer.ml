@@ -77,7 +77,7 @@ let version_of_output output =
    from one run to the next, so a managed page is known by its label alone. *)
 type page = Managed of string | Unmanaged of string
 
-type t = { run : runner; space_id : int; version : string; capture_directory : string;
+type t = { run : runner; now : unit -> float; space_id : int; version : string; capture_directory : string;
   mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
 let space_id t = t.space_id
@@ -134,14 +134,14 @@ let run_step t ~window_s ~step ~args body = asked t.run ~window_s ~step ~space:(
 let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
 
-let open_space ~run ~space ~version ~capture_directory =
+let open_space ~run ~now ~space ~version ~capture_directory =
   let* () = if String.trim space = "" then Error "the ego task space needs a name" else Ok () in
   let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:(str space) ~args:`Null
       "  emit({ok: true, value: {spaceId: task.spaceId, ownership: task.ownership}});"
     |> Result.map_error step_failure_message in
   match field "spaceId" opened, field "ownership" opened with
   | Some (`Int space_id), Some (`String "agent") ->
-    Ok {run; space_id; version; capture_directory; pages=[]; next_tab=0; captures=0}
+    Ok {run; now; space_id; version; capture_directory; pages=[]; next_tab=0; captures=0}
   | Some (`Int _), Some (`String ownership) ->
     Error (Printf.sprintf "ego task space %S belongs to %s, not to an agent" space ownership)
   | _ -> Error "ego answered the task space without its number and owner"
@@ -192,8 +192,10 @@ let target t args = match field "tabId" args with
    expression as source, so it is only ever [page_function] of one of this
    module's own scripts; what a Keeper sends reaches the page as [input],
    through JSON.stringify. *)
+let page_call =
+  "  const pageCall = (fn, input) => \"(function(){ try { return {answer: (\" + fn + \")(\" + JSON.stringify(input) + \")}; } catch (error) { return {pageError: String(error && error.message || error)}; } })()\";"
 let on_page body = String.concat "\n" [
-  "  const pageCall = (fn, input) => \"(function(){ try { return {answer: (\" + fn + \")(\" + JSON.stringify(input) + \")}; } catch (error) { return {pageError: String(error && error.message || error)}; } })()\";";
+  page_call;
   "  const tabs = await task.tabs();";
   "  const tab = args.label === null ? tabs.find(item => item.active) : tabs.find(item => item.label === args.label);";
   "  if (tab === undefined) emit({ok: false, before: true, error: args.label === null ? \"no tab is active in the ego task space\" : \"browser tab is no longer present\"});";
@@ -410,6 +412,175 @@ let close_tab t id =
     t.pages <- List.filter (fun (_, known) -> known <> id) t.pages;
     Ok (obj ["tabId",`Int id;"action",str "close_tab";"closed",`Bool true])
 
+(* Input acts as a move or a close does: on a page an agent opened, checked
+   in the run that acts. The page scripts the BiDi connection runs find the
+   target, check that the document, URL and viewport are the observed ones,
+   and make the DOM edits, so a selector or node means the same on both;
+   ego moves the mouse and presses the keys. *)
+
+(* Finding a target and acting on it are two runs, and the command has one
+   window for both: a later run gets what is left of it. *)
+let command_deadline t verb = t.now () +. window_s verb
+let left t deadline = deadline -. t.now ()
+
+(* Pointer input at one point of the observed viewport. *)
+type motion = Move | Press of { button : Browser_lane.Pointer.button; count : int } | Wheel of { x : int; y : int }
+let button_name = function
+  | Browser_lane.Pointer.Primary -> "left"
+  | Browser_lane.Pointer.Middle -> "middle"
+  | Browser_lane.Pointer.Secondary -> "right"
+let motion_lines = function
+  | Move -> ["        await page.mouse.move(args.x, args.y);"]
+  | Press _ -> ["        await page.mouse.click(args.x, args.y, {button: args.button, clickCount: args.count});"]
+  | Wheel _ -> ["        await page.mouse.move(args.x, args.y);"; "        await page.mouse.wheel(args.dx, args.dy);"]
+let motion_fields = function
+  | Move -> []
+  | Press {button; count} -> ["button",str (button_name button);"count",`Int count]
+  | Wheel {x; y} -> ["dx",`Int x;"dy",`Int y]
+
+(* ego takes a chord as Playwright writes one: the modifiers, then the key,
+   joined by "+". It presses the named keys and printable ASCII, up to "~";
+   ego 0.6.0.16 refused é, ß and € as an unknown key (2026-10-23). Its typing
+   takes any text. *)
+let last_pressable_character = 0x7e
+let press_refused = "an ego connection presses named keys and printable ASCII characters; type other text with type_text"
+type keys = Text of string | Chord of Browser_lane.Keyboard.t
+let keys_lines = function
+  | Text _ -> ["        await page.keyboard.type(args.keys);"]
+  | Chord _ -> ["        await page.keyboard.press(args.keys);"]
+let keys_fields = function
+  | Text text -> ["keys",str text]
+  | Chord chord -> ["keys",str (String.concat "+"
+      (List.map Browser_lane.Keyboard.modifier_name chord.modifiers @ [Browser_lane.Keyboard.key_text chord.key]))]
+
+let receipt_of ~id ~verb = function
+  | `Assoc fields -> Ok (obj (("tabId",`Int id) :: ("action",str verb) :: List.remove_assoc "action" fields))
+  | _ -> Error "the input receipt is not an object"
+
+(* A read: however it fails, nothing happened. *)
+let resolve t ~label ~deadline input =
+  match run_step t ~window_s:(left t deadline) ~step:"page.target"
+          ~args:(obj ["label",str label;"fn",str (page_function Browser_interaction.pointer_target_script);
+            "input",str (Yojson.Safe.to_string input)])
+          (on_page "    const answer = await page.evaluate(pageCall(args.fn, args.input));\n    emit({ok: true, value: answer});") with
+  | Error failure -> Error (Live.Before_effect (step_failure_message failure))
+  | Ok answer -> page_json answer |> Result.map_error (fun detail -> Live.Before_effect detail)
+
+(* One run: the guard script checks that the page is the observed one and
+   refuses before any input if not, the input is sent, and the receipt script
+   reads where the page is. *)
+let guarded_input t ~id ~label ~deadline ~verb ~step ~guard ~input ~lines ~fields =
+  let unknown = Printf.sprintf "read tab %d before another step" id in
+  match run_step t ~window_s:(left t deadline) ~step
+          ~args:(obj (["label",str label;"tabId",`Int id;"guard",str (page_function guard);
+            "input",str (Yojson.Safe.to_string input);
+            "receipt",str (page_function Browser_interaction.pointer_receipt_script)] @ fields))
+          (String.concat "\n" ([
+      page_call;
+      "  const reason = " ^ message ^ ";";
+      agent_page;
+      "    const page = task.page(args.label);";
+      "    const guard = await page.evaluate(pageCall(args.guard, args.input));";
+      "    if (guard.pageError !== undefined) emit({ok: false, before: true, error: guard.pageError});";
+      "    else {";
+      "      let failure = null;";
+      "      try {" ] @ lines @ [
+      "      } catch (error) { failure = reason(error); }";
+      "      const receipt = await page.evaluate(pageCall(args.receipt, \"{}\"));";
+      "      emit({ok: true, value: {guard, receipt, error: failure}});";
+      "    }";
+      "  }" ])) with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value ->
+    let decoded name = page_json (Option.value ~default:`Null (field name value)) in
+    match decoded "guard", field "error" value, decoded "receipt" with
+    | Ok observed, Some `Null, Ok receipt ->
+      (match field "url" observed, receipt with
+       | Some (`String url), `Assoc fields ->
+         receipt_of ~id ~verb (obj (("urlBefore",str url) :: fields))
+         |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown))
+       | _ -> Error (Live.Outcome_unknown ("the input was sent and its guard or receipt lacks the page URL; " ^ unknown)))
+    | (Ok _ | Error _), Some (`String error), (Ok _ | Error _) -> Error (Live.Outcome_unknown (head error ^ "; " ^ unknown))
+    | Error detail, Some `Null, _ | Ok _, Some `Null, Error detail ->
+      Error (Live.Outcome_unknown ("the input was sent and " ^ detail ^ "; " ^ unknown))
+    | (Ok _ | Error _), (None | Some _), (Ok _ | Error _) ->
+      Error (Live.Outcome_unknown ("ego answered the input outside its answer frame; " ^ unknown))
+
+(* The DOM edits the shared script makes. It says itself whether it refused
+   before any effect. *)
+let dom_input t ~id ~label ~deadline ~verb input =
+  let unknown = Printf.sprintf "read tab %d before another step" id in
+  match run_step t ~window_s:(left t deadline) ~step:"page.input"
+          ~args:(obj ["label",str label;"tabId",`Int id;"fn",str (page_function Browser_interaction.script);
+            "input",str (Yojson.Safe.to_string input)])
+          (String.concat "\n" [
+      page_call;
+      agent_page;
+      "    const result = await task.page(args.label).evaluate(pageCall(args.fn, args.input));";
+      "    emit({ok: true, value: result});";
+      "  }" ]) with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value ->
+    match page_json value with
+    | Error detail -> Error (Live.Outcome_unknown (detail ^ "; " ^ unknown))
+    | Ok result ->
+      match field "interactionFailure" result with
+      | None -> receipt_of ~id ~verb result |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown))
+      | Some failure ->
+        let reason = match field "message" failure with Some (`String reason) -> reason | _ -> "the page refused the input" in
+        match field "effectStarted" failure with
+        | Some (`Bool false) -> Error (Live.Before_effect reason)
+        | Some _ | None -> Error (Live.Outcome_unknown (reason ^ "; " ^ unknown))
+
+let interact t args =
+  let before result = Result.map_error (fun detail -> Live.Before_effect detail) result in
+  let* fields = before (match args with `Assoc fields -> Ok fields | _ -> Error "invalid interaction") in
+  let* request = before (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live)) :: fields))) in
+  let* () = match request.frame_path with
+    | [] -> Ok ()
+    | _ :: _ -> Error (Live.Before_effect "an ego connection does not act inside frames") in
+  let id = request.tab_id in
+  let verb = Browser_lane.interaction_verb request.action in
+  let refused = Error (Live.Before_effect (verb ^ " is not served by an ego connection")) in
+  let* label = label_of t id in
+  let deadline = command_deadline t (Browser_lane.Page_interact {tab_id = id; frame_path = []; expected_url = request.expected_url; action = request.action}) in
+  let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url action in
+  let* expected_url, action = match request.action with
+    | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _ | Browser_lane.Double_click _ ->
+      let* resolved = resolve t ~label ~deadline (input ~expected_url:request.expected_url request.action) in
+      let* action = before (Browser_interaction.resolve_pointer_action request.action resolved) in
+      let* url = before (match field "url" resolved with Some (`String url) -> Ok url | _ -> Error "pointer resolution missing url") in
+      Ok (Some url, action)
+    | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Set_zoom _
+    | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
+    | Browser_lane.Scroll _ | Browser_lane.Drag_to _ | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
+    | Browser_lane.Click_at _ | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
+    | Browser_lane.Fill_node _ -> Ok (request.expected_url, request.action) in
+  let pointer (viewport : Browser_lane.Pointer.viewport) point motion =
+    let x, y = Browser_lane.Pointer.viewport_pixels viewport point in
+    guarded_input t ~id ~label ~deadline ~verb ~step:"page.pointer" ~guard:Browser_interaction.pointer_guard_script
+      ~input:(input ~expected_url action) ~lines:(motion_lines motion) ~fields:(["x",`Int x;"y",`Int y] @ motion_fields motion) in
+  let keyboard keys =
+    guarded_input t ~id ~label ~deadline ~verb ~step:"page.keyboard" ~guard:Browser_interaction.keyboard_guard_script
+      ~input:(input ~expected_url action) ~lines:(keys_lines keys) ~fields:(keys_fields keys) in
+  match action with
+  | Browser_lane.Click_at {point; viewport; button} -> pointer viewport point (Press {button; count = 1})
+  | Browser_lane.Double_click_at {point; viewport} -> pointer viewport point (Press {button = Browser_lane.Pointer.Primary; count = 2})
+  | Browser_lane.Hover_at {point; viewport} -> pointer viewport point Move
+  | Browser_lane.Scroll_at {point; viewport; x; y} -> pointer viewport point (Wheel {x; y})
+  | Browser_lane.Type_text {text; _} -> let* () = before (Browser_lane.Keyboard.validate_text text) in keyboard (Text text)
+  | Browser_lane.Press_key {key; _} ->
+    (match key.key with
+     | Browser_lane.Keyboard.Character scalar when Uchar.to_int scalar > last_pressable_character ->
+       Error (Live.Before_effect press_refused)
+     | Browser_lane.Keyboard.Character _ | Browser_lane.Keyboard.Named _ -> keyboard (Chord key))
+  | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Fill_node _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _ ->
+    dom_input t ~id ~label ~deadline ~verb (input ~expected_url action)
+  | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _ | Browser_lane.Double_click _ ->
+    Error (Live.Before_effect "unresolved semantic pointer target")
+  | Browser_lane.Drag_to _ | Browser_lane.Drag _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
+  | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Activate_tab -> refused
+
 let act t args =
   match Browser_lane.Action.parse args with
   | Error detail -> Error (Live.Before_effect detail)
@@ -433,4 +604,4 @@ let dispatch t ~verb args =
   | Page_capture -> pre (capture t args)
   | Page_goto -> goto t args
   | Page_act -> act t args
-  | Page_interact -> Error (Live.Before_effect "page.interact is not served by an ego connection")
+  | Page_interact -> interact t args

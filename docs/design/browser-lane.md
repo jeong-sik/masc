@@ -117,9 +117,11 @@ build their rejection from it.
 | `viewport_capture` | `BrowserRead mode=screenshot` | yes | yes | yes, only the pages the task space manages |
 | `element_inventory` | `BrowserRead mode=elements` | yes | yes | yes, only the pages the task space manages |
 | `document_source` | the `browser_document` Lane Add-on source | yes | yes | no |
-| `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes | no |
-| `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer | no |
-| `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | no | yes | no |
+| `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes | yes, on a page an agent opened |
+| `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer | yes, on a page an agent opened, ego's mouse |
+| `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | no | yes | yes, on a page an agent opened |
+| `trusted_double_click` | `double_click`, `double_click_at` | no | yes | yes, on a page an agent opened |
+| `trusted_keyboard` | `type_text`, `press_key` | no | yes | yes, on a page an agent opened, ego's keyboard |
 | `touch_input` | `tap_at`, `swipe` | no | yes | no |
 | `viewport_resize` | `set_viewport` | no | yes | no |
 | `tab_history` | `back`, `forward`, `reload`, only for a tab the same connection opened | no | yes | no |
@@ -127,10 +129,11 @@ build their rejection from it.
 | `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes | yes, only a page an agent opened in the task space |
 | `tab_creation` | `open_tab` | no | yes | yes |
 | `dialog_answer` | `accept_dialog`, `dismiss_dialog`, only for a tab the same connection opened; the dialog is read from the tab's `list_tabs` row (`dialog`: type, message, defaultValue) | no | yes | no |
-| `point_scroll` | `scroll_at` | yes | yes, a trusted wheel | no |
-| `trusted_hover` | `hover`, `hover_at` | no | yes | no |
+| `point_scroll` | `scroll_at` | yes | yes, a trusted wheel | yes, on a page an agent opened, ego's wheel |
+| `trusted_hover` | `hover`, `hover_at` | no | yes | yes, on a page an agent opened |
 | `trusted_drag` | `drag_to`, `drag` | no | yes | no |
 | `tab_activation` | `activate_tab` | yes | yes, and it also focuses the window | no |
+| `browser_zoom` | `set_zoom` | yes | no | no |
 
 The extension acts through DOM calls inside the page and has no pointer the
 browser treats as the operator's. The BiDi peer sends pointer and wheel input
@@ -147,7 +150,12 @@ keeps for the life of the space. A tab the operator opened in that space is
 listed, and a read of it is refused before any script runs. It opens tabs,
 and moves and closes only the pages an agent opened in the space, its first
 page `p1` included; a load that fails after it started is answered as a
-partial effect with where the tab is now. Input is not served on it.
+partial effect with where the tab is now. Input acts on those pages too, never
+inside a frame. The page scripts the BiDi peer runs find the target, check that
+the observed document, URL and viewport are still there, and make the DOM edits,
+so a selector or node means the same on both; ego's own mouse and keyboard
+input clicks, hovers, scrolls at a point and types. Finding a target and acting
+on it are two runs that share the command's window.
 
 A request its connection does not serve is a selection failure: the server
 queues no command and answers `live_transport_unsupported`. A Keeper tool's

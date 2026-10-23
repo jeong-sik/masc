@@ -521,11 +521,11 @@ let live_transport_serves transport capability =
                     | Tab_closing | Dialog_answer) -> true
   | Webdriver_bidi, Browser_zoom -> false
   | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
-                    | Tab_creation | Tab_navigation | Tab_closing) -> true
-  | Ego_task_space, (Document_source | Dom_interaction | Point_click | Point_scroll | Trusted_hover
-                    | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
-                    | Trusted_keyboard | Browser_zoom | Viewport_resize | Tab_activation | Tab_history
-                    | Dialog_answer) -> false
+                    | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
+                    | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
+                    | Trusted_keyboard) -> true
+  | Ego_task_space, (Document_source | Trusted_drag | Touch_input | Browser_zoom | Viewport_resize
+                    | Tab_activation | Tab_history | Dialog_answer) -> false
 ;;
 
 let live_transports_serving capability =

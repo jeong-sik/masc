@@ -7,6 +7,10 @@ val viewport_of_json : Yojson.Safe.t -> (viewport, string) result
 val point_to_json : point -> Yojson.Safe.t
 val viewport_to_json : viewport -> Yojson.Safe.t
 
+(** The CSS pixel, from the viewport's top left, that [point] names in
+    [viewport]: each fraction times that side, truncated. *)
+val viewport_pixels : viewport -> point -> int * int
+
 (** The mouse button of a click. [Primary] is the one a plain click uses. *)
 type button = Primary | Middle | Secondary
 

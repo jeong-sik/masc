@@ -47,10 +47,17 @@ let read backend invocation constraints = match backend with
   | Connected Browser_lane.Ego_task_space -> Conditional {invocation;constraints=constraints @ [ego_pages]}
   | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
     (match constraints with [] -> Available invocation | _ :: _ -> Conditional {invocation;constraints})
-(* A DOM input every connection serves but ego's. *)
+let ego_agent_pages = "Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect."
+(* An effect an ego connection takes only on the pages its space opened. *)
+let on_agent_pages = function
+  | Available invocation -> Conditional {invocation;constraints=[ego_agent_pages]}
+  | Conditional {invocation;constraints} -> Conditional {invocation;constraints=constraints @ [ego_agent_pages]}
+  | Unsupported _ as unsupported -> unsupported
+(* A DOM input every connection serves, an ego connection on its own pages. *)
 let dom_input backend support = match backend with
   | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium -> support
-  | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing
+  | Connected Browser_lane.Ego_task_space -> on_agent_pages support
+  | Safari_unavailable -> missing
 let gecko_only backend invocation constraints = match backend with
   | Owned_gecko -> Conditional {invocation;constraints}
   | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_chromium ->
@@ -75,8 +82,7 @@ let support backend operation = match backend with
           [observed;"Top-level tab only; the ID is retired after confirmed closure, not a lost or unconfirmed receipt."]
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"close_tab" Act
           [observed;"Only a tab this connection opened with open_tab; a tab the operator opened is refused before any effect. Closes without running the page's unload prompt."]
-      | Connected Browser_lane.Ego_task_space -> conditional ~action:"close_tab" Act
-          [observed;"Only a page an agent opened in the ego task space; a tab the operator opened there is refused before any effect."]
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"close_tab" Act [observed;ego_agent_pages]
       | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
     | Activate_tab -> (match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"activate_tab" Interact
@@ -139,12 +145,15 @@ let support backend operation = match backend with
           [observed;target;"Uses DOM click; trusted pointerdown/mousedown is not provided."]
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium -> conditional ~action:"click" Interact
           [observed;target;"Uses native pointer input; captures/checks the current URL when expectedUrl is omitted."]
-      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"click" Interact
+          [observed;target;"Uses ego's native mouse input at the target; captures/checks the current URL when expectedUrl is omitted.";ego_agent_pages]
+      | Safari_unavailable -> missing)
     | Hover -> (match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium -> conditional ~action:"hover" Interact [observed;target]
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"hover" Interact [observed;target;ego_agent_pages]
       | Connected Browser_lane.Web_extension ->
         Unsupported "WebExtension does not serve trusted hover; the selected tab must not be silently moved to another browser."
-      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+      | Safari_unavailable -> missing)
     | Pointer_drag -> (match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium -> conditional ~action:"drag_to" Interact
         ([observed;target;geometry;"via contains observed viewport fractions. Input receipt does not establish application drop acceptance."]
@@ -168,34 +177,55 @@ let support backend operation = match backend with
            "Pass button \"secondary\" (right) or \"middle\". Only click_at takes a button; selector and node targets do not.";
            "Stagehand's page.click takes the button as a native Chromium mouse event; no real-Chromium run of it has been recorded yet.";
            "A context menu or application behavior must be observed afterward."]
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"click_at" Interact
+          [observed;geometry;
+           "Pass button \"secondary\" (right) or \"middle\". Only click_at takes a button; selector and node targets do not.";
+           "ego's native mouse input at the observed point; a context menu or application behavior must be observed afterward.";
+           ego_agent_pages]
       | Connected Browser_lane.Web_extension -> Unsupported
           "WebExtension clicks through the DOM and cannot press the middle or secondary button; the selected tab must not be silently moved to another browser."
-      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+      | Safari_unavailable -> missing)
     | Scroll_page -> dom_input backend (conditional ~action:"scroll" Interact [observed;"Scrolls the page; use scroll_at for a nested pane."])
     | Scroll_at -> dom_input backend (conditional ~action:"scroll_at" Interact [observed;geometry;"Scrolls the pane at the observed viewport point."])
     | Fill -> dom_input backend (conditional ~action:"fill" Interact
         [observed;target;"Replaces the value of a text input or textarea and emits input/change, or replaces the content of a contenteditable editor with insertText (the editor gets input events); this is not trusted keyboard typing or submission."])
-    | Double_click -> if native backend then conditional ~action:"double_click" Interact
-        [observed;target;"Native double click; application behavior must be observed afterward."] else missing
-    | Type_text -> if native backend then conditional ~action:"type_text" Interact
+    | Double_click -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"double_click" Interact
+          [observed;target;"ego's native double click; application behavior must be observed afterward.";ego_agent_pages]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
+        if native backend then conditional ~action:"double_click" Interact
+          [observed;target;"Native double click; application behavior must be observed afterward."] else missing)
+    | Type_text -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"type_text" Interact
+          [observed;"Requires current documentId and expectedUrl; stale document/URL is refused.";
+           "Requires the current enabled editable focus. Unicode text is literal; C0/DEL controls are refused, use press_key for Tab/Enter.";
+           "ego types with its native keyboard input.";ego_agent_pages]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
+      if native backend then conditional ~action:"type_text" Interact
         [observed;"Requires current documentId and expectedUrl; stale document/URL is refused.";"Requires the current enabled editable focus. Unicode text is literal; C0/DEL controls are refused, use press_key for Tab/Enter.";
          "Gecko/BiDi refuse WebDriver-reserved U+E000–U+E05D text. Chromium supports literal private-use text.";
-         "An uncertain Chromium keyboard release quarantines this owned session: inspect status and explicitly close/reopen; no replay or automatic page closure."] else missing
-    | Press_key | Key_chord -> if native backend then conditional ~action:"press_key" Interact
+         "An uncertain Chromium keyboard release quarantines this owned session: inspect status and explicitly close/reopen; no replay or automatic page closure."] else missing)
+    | Press_key | Key_chord -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"press_key" Interact
+          [observed;"Requires current documentId and expectedUrl; stale document/URL is refused.";
+           "Targets current enabled focus (or body); accepts named keys or one printable ASCII character with Control/Meta/Alt/Shift modifiers. Type other text with type_text.";
+           ego_agent_pages]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
+      if native backend then conditional ~action:"press_key" Interact
         [observed;"Requires current documentId and expectedUrl; stale document/URL is refused.";"Targets current enabled focus (or body); accepts named keys or one Unicode scalar with Control/Meta/Alt/Shift modifiers.";
          "Chromium refuses supplementary press-key scalars; use type_text for supplementary Unicode text.";
-         "An uncertain Chromium keyboard release quarantines the exact session until explicit close/reopen; pages are preserved."] else missing
+         "An uncertain Chromium keyboard release quarantines the exact session until explicit close/reopen; pages are preserved."] else missing)
     | Page_zoom -> (match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"set_zoom" Interact
           [observed;"Requires extension 0.8.0+, exact clientId/tabId, expectedUrl and factor 0.3–5. Uses measured browser zoom, never CSS scaling.";
            "Only automatic zoom mode is supported; per-origin scope may also affect and persist for same-origin tabs. Re-read the scene/screenshot afterward."]
       | Connected (Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
     | Select_option -> (match backend with
-      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium ->
-          conditional ~action:"select_option" Interact
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Owned_chromium ->
+          dom_input backend (conditional ~action:"select_option" Interact
             [observed;"Pass the selector of one single-choice select and the exact value of one enabled option; a multiple select, a missing, repeated or disabled option is refused before any effect.";
-             "Sets the option and emits input and change; this is not a trusted click on the list."]
-      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+             "Sets the option and emits input and change; this is not a trusted click on the list."])
+      | Safari_unavailable -> missing)
     | Read_frames -> gecko_only backend (invoke ~mode:"frames" Read)
         [observed;"Explicit tabId; framePath consists of observed outer-to-inner frame selectors."]
     | Frame_interaction -> (match backend with

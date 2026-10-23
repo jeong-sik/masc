@@ -87,7 +87,11 @@ let test_a_stopped_run_answers_within_the_peers_window () =
       check string "the run" "timed out" (match Ego.runner ~env ~command ~window_s "" with
         | Ok _ -> "answered" | Error failure -> failure_name failure);
       (* Stopping it spends the stop grace inside the window, not after it. *)
-      check bool "within the window" true (Eio.Time.now clock -. started < window_s +. 0.5)))
+      check bool "within the window" true (Eio.Time.now clock -. started < window_s +. 0.5);
+      let started = Eio.Time.now clock in
+      check string "a window no longer than the stop" "unstarted" (match Ego.runner ~env ~command ~window_s:1.5 "" with
+        | Ok _ -> "answered" | Error failure -> failure_name failure);
+      check bool "is refused before the run starts" true (Eio.Time.now clock -. started < 0.5)))
 
 (* ego-browser as the worker runs it: [--version], and [nodejs] with one
    fixed script on stdin, answered by the step its first line names. *)
@@ -128,6 +132,13 @@ elif step=='page.open':
     answer({'label':'p2','error':None,'tab':{'url':args['url'],'title':'Opened','active':True}})
 elif step=='page.goto':
     answer({'error':None,'tab':{'url':args['url'],'title':'Moved'}})
+elif step=='page.target':
+    answer({'answer':json.dumps({'url':'https://fixture.test/','point':{'x':0.25,'y':0.5},
+        'viewport':{'documentId':'d1','width':800,'height':600,'scrollX':0,'scrollY':0}})})
+elif step=='page.pointer':
+    page={'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','scrollX':0,'scrollY':0})}
+    (root/'clicked').write_text(json.dumps([args['x'],args['y'],args['button']]))
+    answer({'guard':page,'receipt':page,'error':None})
 elif step=='space.finish':answer(None)
 else:answer(error='unexpected step '+step)
 |}
@@ -194,8 +205,11 @@ let scenario mode =
           (Yojson.Safe.to_string (answered (issue (B.Page_act (B.Action.Open_tab "https://fixture.test/channel")))));
         check string "a move on it" {|{"ok":true,"data":{"tabId":2,"action":"goto","url":"https://fixture.test/next","title":"Moved"}}|}
           (Yojson.Safe.to_string (answered (issue (B.Page_goto {url="https://fixture.test/next";tab_id=Some 2}))));
+        check string "a click" {|{"ok":true,"data":{"tabId":1,"action":"click","urlBefore":"https://fixture.test/","url":"https://fixture.test/","title":"Fixture","scrollX":0,"scrollY":0}}|}
+          (Yojson.Safe.to_string (answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Click "#send"}))));
+        check string "where ego clicked" {|[200, 300, "left"]|} (read (Filename.concat root "clicked"));
         check bool "an input the table refuses never reaches ego" true
-          (match issue (B.Page_interact {tab_id=1;expected_url=None;frame_path=[];action=B.Click "#send"}) with
+          (match issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Activate_tab}) with
            | W.Issue_result (Error (B.Transport_unsupported _)) -> true
            | W.Issue_result (Ok _ | Error _) | Snapshot_result _ | Model_reply _ | Download_reply _
            | Poll_result _ | Receipt | Service_refusal _ -> false);
@@ -218,7 +232,8 @@ let scenario mode =
     match mode with
     | "normal" ->
       check bool "caller work ran" true !entered;
-      check (list string) "steps" ["space.open"; "tabs.list"; "page.capture"; "page.open"; "page.goto"; "space.finish"] steps;
+      check (list string) "steps"
+        ["space.open"; "tabs.list"; "page.capture"; "page.open"; "page.goto"; "page.target"; "page.pointer"; "space.finish"] steps;
       check bool "the screenshot directory is removed, with what a stopped capture left" false
         (Sys.file_exists (read (Filename.concat root "captures")))
     | "late" ->

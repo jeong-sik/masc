@@ -111,8 +111,9 @@ space = "masc"
 ```
 
 The picker then lists it as `ego lite · ego`. It reads and captures the pages
-of that one task space, and opens, moves and closes the pages an agent opened
-there; it does not click or type
+of that one task space. It opens, moves and closes the pages an agent opened
+there, and clicks, scrolls and types on them; it does not drag, touch or act
+inside a frame
 ([what it serves](../design/browser-lane.md#what-each-live-connection-serves)).
 
 | The host | First row |

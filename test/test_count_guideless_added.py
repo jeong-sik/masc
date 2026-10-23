@@ -6,22 +6,34 @@
 검증자도 CI 결과를 근거로 삼을 수 있다.
 
 실행하는 것:
-- count-guideless-added.py 를 임시 노트 파일과 함께 세 시나리오로 실행한다.
+- count-guideless-added.py 를 임시 노트 파일과 함께 실행한다.
   A: 마커 없음 → guideless 0
-  B: 한국어 마커 2개 → guideless 2
+  B: 한국어 `(대상 문서: ...)` 마커 2개 → guideless 2
   C: 영어 마커 2개 → guideless 2
+  D: 한국어 `(문서 없음)` 마커 → guideless 1
+  R: 저장소 CHANGELOG.md 의 실제 v0.54.0 절 → Added 17, guideless 9
 - 각 시나리오가 --expect-added / --expect-guideless 와 일치하는지
   스크립트가 스스로 판정하게 한다. 불일치면 exit 1이므로 이 테스트도
   실패한다.
 """
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COUNT = os.path.join(REPO, "scripts", "release", "count-guideless-added.py")
+CHANGELOG = os.path.join(REPO, "CHANGELOG.md")
+
+
+def extract_section(text, version):
+    """CHANGELOG.md 에서 ## [version] 절을 발췌한다."""
+    pattern = rf"^## \[{re.escape(version)}\].*?(?=^## \[|\Z)"
+    match = re.search(pattern, text, re.S | re.M)
+    assert match, f"section {version} not found in CHANGELOG.md"
+    return match.group(0)
 
 
 def run_counter(tag, note_text, expect_added, expect_guideless):
@@ -86,10 +98,38 @@ def scenario_c():
     print("scenario C (English markers): PASS")
 
 
+def scenario_d():
+    """한국어 `(문서 없음)` 마커를 센다."""
+    note = (
+        "## [v0.52.0]\n\n### Added\n\n"
+        "- 기능 A. 가이드 없음(문서 없음) (#1)\n"
+        "- 기능 B (#2)\n"
+    )
+    r = run_counter("v0.52.0", note, 2, 1)
+    assert r.returncode == 0, f"scenario D: expected exit 0, got {r.returncode}\n{r.stderr}"
+    print("scenario D (Korean '문서 없음' marker): PASS")
+
+
+def scenario_r():
+    """실제 v0.54.0 노트(저장소 CHANGELOG.md 발췌)에서 Added 17, 가이드 없음 9.
+
+    AC1 — 코드가 바뀌어도 저장소의 CHANGELOG.md를 직접 읽으므로 항상
+    최신 발행 노트를 반영한다.
+    """
+    with open(CHANGELOG, encoding="utf-8") as f:
+        text = f.read()
+    section = extract_section(text, "0.54.0")
+    r = run_counter("v0.54.0", section, 17, 9)
+    assert r.returncode == 0, f"scenario R: expected exit 0, got {r.returncode}\n{r.stderr}"
+    print("scenario R (real v0.54.0 CHANGELOG section): PASS")
+
+
 def main():
     scenario_a()
     scenario_b()
     scenario_c()
+    scenario_d()
+    scenario_r()
     print("test_count_guideless_added: all scenarios PASS")
 
 

@@ -66,6 +66,33 @@ let test_invalid_configuration_and_deselection_are_distinct () =
     (state C.Durable (observe ~route:(fun _ -> Error Lane_addon_exact.No_admitted_slots)
       ~mode:A.Preflight [d]))
 
+let test_real_manifest_parse_error_stays_in_authenticated_diagnostics () =
+  let root=Filename.temp_dir "memory-private-config-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let directory=Filename.concat root "lane-addons" in
+    Fs_compat.mkdir_p directory;
+    let manifest=Filename.concat root "private-package.toml" in
+    let sentinel="PRIVATE_MARKER" in
+    let write path bytes=Out_channel.with_open_bin path (fun channel -> output_string channel bytes) in
+    write manifest (Printf.sprintf
+      "id=\"unrelated\"\nrevision=\"1\"\ntitle=\"Unrelated package\"\ncontributions=[\"observe\"]\nimage=\"fixture\"\ncommand=[\"fixture\"]\n[interface]\nbinding_schema='''%s'''\n" sentinel);
+    write (Filename.concat directory "unrelated.toml") (Printf.sprintf
+      "id=\"unrelated\"\nrun_id=\"unrelated\"\nmanifest_path=%S\n[binding]\nsources=[]\n" manifest);
+    let declarations=Lane_addon_config.load ~directory in
+    check bool "the real parser retains offending input in its operator diagnostic" true
+      (List.exists (fun (issue : Lane_addon_config.issue) ->
+        Astring.String.is_infix ~affix:sentinel issue.message) declarations.issues);
+    let public=A.observe ~setting:Env_config_keeper.KeeperMemoryOs.Enabled ~declarations
+      ~route:(fun _ -> fail "invalid configuration cannot admit routes") ~mode:A.Preflight |> A.to_json in
+    check string "public health still names configuration failure" "degraded" (text "status" public);
+    let bytes=Yojson.Safe.to_string public in
+    check bool "private parser input is not public health" false (Astring.String.is_infix ~affix:sentinel bytes);
+    check bool "private source paths are not public health" false (Astring.String.is_infix ~affix:root bytes);
+    let operation=member "operations" public |> Yojson.Safe.Util.to_list |> List.hd in
+    let issue=member "detail" operation |> Yojson.Safe.Util.to_list |> List.hd in
+    check string "public failure retains the declaration identity" "unrelated" (text "installation_id" issue);
+    check string "public failure is a fixed category" "declaration_unavailable" (text "reason" issue))
+
 let test_starting_failed_and_conflict_are_not_absent () =
   let d=declaration () in
   let unready reason : Lane_addon_unready.t =
@@ -126,6 +153,7 @@ let test_serving_retains_provider_cause_without_leaking_body () =
 let () = run "Keeper Memory execution dependencies"
   ["configuration",[test_case "absent, off, admitted and live are distinct" `Quick test_absent_off_and_unobserved_are_distinct;
     test_case "real package binds admission and durable" `Quick test_actual_package_requires_both_routes;
-    test_case "invalid configuration, deselection and rejected slots stay distinct" `Quick test_invalid_configuration_and_deselection_are_distinct];
+    test_case "invalid configuration, deselection and rejected slots stay distinct" `Quick test_invalid_configuration_and_deselection_are_distinct;
+    test_case "real manifest parse errors do not expose input or paths" `Quick test_real_manifest_parse_error_stays_in_authenticated_diagnostics];
    "runtime",[test_case "unready and conflicts are not absence" `Quick test_starting_failed_and_conflict_are_not_absent;
     test_case "provider observation preserves cause and privacy" `Quick test_serving_retains_provider_cause_without_leaking_body]]

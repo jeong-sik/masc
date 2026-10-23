@@ -36,3 +36,6 @@ val snapshot : config:Workspace.config -> mode:[ `Preflight | `Live ] -> t
     published route registry plus existing live worker cells. No full retained
     Add-on inventory or per-Keeper store traversal. *)
 val to_json : t -> Yojson.Safe.t
+(** Public diagnostic: configuration failures expose only categories and
+    declaration identities. Raw parser messages and source paths remain in
+    authenticated Lane configuration diagnostics. *)

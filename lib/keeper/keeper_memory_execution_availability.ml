@@ -124,7 +124,8 @@ let host_issue_json issue =
 let problem_json = function
   | Configuration_unreadable issues -> "configuration_unreadable",true,
     `List (List.map (fun (issue : Lane_addon_config.issue) ->
-      `Assoc ["path",`String issue.source_path;"message",`String issue.message]) issues)
+      `Assoc ["installation_id",Option.fold ~none:`Null ~some:(fun id -> `String id) issue.id;
+        "reason",`String "declaration_unavailable"]) issues)
   | Addon_unattached -> "addon_unattached",true,`Null
   | Addon_off ids -> "addon_off",false,string_list ids
   | Multiple_installations ids -> "multiple_installations",true,string_list ids

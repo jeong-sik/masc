@@ -35,8 +35,9 @@ Each operation names its tool, output, installation and exact route table.
 | `request_waiting`, `host_cycle_unavailable` | The last host cycle retained a waiting request or could not complete its host boundary. |
 
 `last_cycle_at` timestamps the observation, not a deadline. Pending observations
-retain original request IDs. Provider bodies and host failure details remain in
-the authenticated Lane inventory. `provider_execution` always says
+retain original request IDs. Provider bodies, host failure details, configuration
+parser messages and source paths remain in the authenticated Lane inventory.
+`provider_execution` always says
 `not_proven_by_availability`; inspect the original result and host commit receipt
 to establish completed work. Full health aggregates actionable missing
 dependencies as degraded while intentional Off remains explicit in each row.
@@ -110,6 +111,9 @@ Save with `POST /api/v1/runtime/config/raw`, providing `source_text`,
 `expected_source_revision` and `expected_source_path` from the read. Reread after
 a conflict. The existing publication and declaration reconciliation flows apply
 the configuration and wake their consumers; no manual worker Attach is needed.
+Availability changes also wake persisted Keepers that could not capture a history
+request while the Add-on was absent, even when they have no explicit-memory queue.
+Each existing Memory lane checks its own unread input before doing any work.
 
 ## Verify recovery on the original input
 

@@ -985,6 +985,36 @@ let test_unattached_addon_reports_off_and_keeps_candidates ()=with_fixture (fun 
   check int "no provider call starts without the Add-on" posts (F.post_count fixture.server);
   check int "the explicit candidates stay queued" 2 (io (fun () -> List.length (pending_rows fixture.keepers_dir))))
 
+let test_attach_wakes_persisted_keeper_without_queue_or_original ()=
+  with_fixture ~initial:[] (fun ~sw:_ fixture ->
+  set_enabled fixture false;
+  await_installation_detached fixture;
+  let names=io (fun () -> Keeper_meta_store.persisted_keeper_names_read_only_result fixture.config |> get) in
+  check bool "the history owner exists independently of a queue" true (List.mem keeper_name names);
+  check (list string) "no explicit queue can supply this wake" []
+    (io (fun () -> Queue.list_keeper_ids ~keepers_dir:fixture.keepers_dir |> get));
+  check int "no retained original can supply this wake" 0
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length));
+  let attached,signal=Eio.Promise.create () in
+  let posts=F.post_count fixture.server in
+  Fun.protect ~finally:(fun () ->
+    Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ())) (fun () ->
+    Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name:observed ->
+      check string "wake keeps the served workspace" fixture.base_path base_path;
+      check string "wake keeps the persisted owner" keeper_name observed;
+      match Keeper_librarian_addon.resolve ~config:fixture.config ~reserved:[] Keeper_librarian_addon.Durable with
+      | Ok _ -> ignore (Eio.Promise.try_resolve signal ())
+      | Error (Unattached | Unready _ | Export_conflict _ | Wrong_package _ | Manual_installation) -> ());
+    Eio.Switch.run (fun bridge_switch ->
+      Server_librarian_addon_wake.install ~sw:bridge_switch ~config:fixture.config;
+      set_enabled fixture true;
+      Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () -> Eio.Promise.await attached)));
+  check int "availability discovery sends no provider request" posts (F.post_count fixture.server);
+  check (list string) "availability discovery fabricates no admission queue" []
+    (io (fun () -> Queue.list_keeper_ids ~keepers_dir:fixture.keepers_dir |> get));
+  check int "availability discovery fabricates no original" 0
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length)))
+
 let ()=run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "actual Memory lane, worker, HTTP, domain validation and receipt-backed ACK" `Quick test_actual_happy_path;
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
@@ -1009,4 +1039,5 @@ let ()=run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "acknowledged missing first gate refuses without replacement" `Quick (test_original_gate_root_publication_recovery Acknowledged_then_missing);
   test_case "production refresh quiesces with a new tail while its provider remains pending" `Quick test_production_refresh_new_tail_quiesces_while_provider_pending;
   test_case "a purged pending original cannot block another Keeper in the same shared worker" `Quick test_purged_original_does_not_block_another_keeper;
+  test_case "attachment wakes a persisted history owner without queue or original" `Quick test_attach_wakes_persisted_keeper_without_queue_or_original;
   test_case "no attached Add-on reports explicit admission off and keeps every candidate" `Quick test_unattached_addon_reports_off_and_keeps_candidates]]

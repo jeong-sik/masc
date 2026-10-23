@@ -183,12 +183,15 @@ let checkpoint ~trace_id messages turn_count : Agent_core.Checkpoint.t =
 ;;
 
 let save_checkpoint config ~trace_id messages turn_count =
+  (* Directory preparation owns an Eio mutex; only the checkpoint store's
+     blocking transaction runs on the systhread. *)
   let session_dir = Keeper_fs.keeper_session_dir config trace_id in
+  let saved = checkpoint ~trace_id messages turn_count in
   match
-    Checkpoint.save_agent_core_classified
+    io (fun () -> Checkpoint.save_agent_core_classified
       ~session_dir
       ~history_retained:0
-      (checkpoint ~trace_id messages turn_count)
+      saved)
   with
   | Ok (Checkpoint.Saved _) -> ()
   | Ok (Checkpoint.Stale_noop _) -> fail "fixture checkpoint was stale"
@@ -224,8 +227,9 @@ let prepare_history config kind =
   (match kind with
    | Official -> ()
    | Atoms | Mixed ->
-     io (fun () -> save_checkpoint config ~trace_id first_messages 1;
-       append_boundary config ~turn:1 ~time:(now-.10.) ~history_at_start:Boundary.Fresh_history first_messages);
+     save_checkpoint config ~trace_id first_messages 1;
+     io (fun () -> append_boundary config ~turn:1 ~time:(now-.10.)
+       ~history_at_start:(Boundary.history_at_start_of_messages first_messages) first_messages);
      (match Consumer.consume_one ~config ~keeper_name ~commit:(fun _ -> fail "baseline unexpectedly proposed Memory") with
       | Ok (Consumer.Baseline_advanced _) -> ()
       | Ok (Consumer.Nothing_to_read | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending) ->
@@ -235,13 +239,25 @@ let prepare_history config kind =
    | Atoms -> ()
    | Official -> io (fun () -> official_turn config ~turn:1 ~time:(now-.2.))
    | Mixed -> io (fun () -> official_turn config ~turn:2 ~time:(now-.2.)));
-  match kind with
-  | Official -> ()
-  | Atoms | Mixed ->
-    let turn=match kind with Atoms -> 2 | Mixed -> 3 | Official -> fail "official has no checkpoint turn" in
-    io (fun () -> save_checkpoint config ~trace_id selected_messages turn;
-      append_boundary config ~turn ~time:(now-.1.)
-        ~history_at_start:(Boundary.history_at_start_of_messages first_messages) selected_messages)
+  (match kind with
+   | Official -> ()
+   | Atoms | Mixed ->
+     let turn=match kind with Atoms -> 2 | Mixed -> 3 | Official -> fail "official has no checkpoint turn" in
+     save_checkpoint config ~trace_id selected_messages turn;
+     io (fun () -> append_boundary config ~turn ~time:(now-.1.)
+         ~history_at_start:(Boundary.history_at_start_of_messages first_messages) selected_messages));
+  let item : Keeper_external_attention.item = {
+    event_id=Keeper_external_attention.event_id_of_dedupe_key "original-history-external";
+    dedupe_key="original-history-external";keeper_name;
+    conversation={conversation_id="agent:original-history";surface=Keeper_external_attention.Agent};
+    external_message=None;source_label="agent";
+    actor={actor_id=Some "original-agent";display_name=Some "Original agent";authority=Keeper_chat_store.External};
+    urgency=Keeper_external_attention.Ambient;content_preview="Original admitted external evidence";
+    content_ref=None;received_at=now -. 5.;metadata=[]} in
+  io (fun () -> match Keeper_external_attention.For_testing.record_with_clock
+    ~now:(fun () -> now -. 5.) ~base_path:config.Workspace.base_path item with
+    | `Recorded -> () | `Duplicate _ -> fail "duplicate original external fixture"
+    | `Error detail -> fail detail)
 let progress fixture = io (fun () -> Position.read ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
   ~keeper_id:keeper_name |> Result.map_error Position.read_error_to_string |> get)
 let with_fixture ?(history_kind=Atoms) f =
@@ -539,6 +555,8 @@ let test_real_memory_receipt_then_failed_ack_recovers_while_off () = with_fixtur
      | Ok (Durable_owner.Publication_waiting _) -> ()
      | Ok (Pending _ | Refused _ | Finished _) -> fail "actual post-Memory cursor failure was not retained Pending"
      | Error error -> fail (Durable_owner.error_to_string error));
+    check int "the original has nonempty admitted external evidence to acknowledge" 1
+      (Keeper_librarian_input_sources.external_through (Source.counterparts source));
     check bool "fault ran only after an actual original Memory range receipt" true !injected;
     check (list string) "Pending can retain an actual committed Memory effect"
       ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
@@ -562,6 +580,10 @@ let test_real_memory_receipt_then_failed_ack_recovers_while_off () = with_fixtur
     let finished,restored=only_original fixture in
     check string "Off settlement keeps the original execution identity" record.request_id finished.Owner.request_id;
     check json "Off settlement preserves full immutable request" (Capture.to_json request) (Capture.to_json restored);
+    let settled_cursor=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+    check int "Off recovery actually acknowledges the original external admission" 1
+      (Keeper_external_read_cursor.observation_offset settled_cursor);
     check int "ACK recovery never repeats inference" posts (F.post_count fixture.server)))
 type source_change = Replaced_checkpoint | Restarted_history
 let test_source_replacement_cannot_publish_retained_answer change () = with_fixture (fun ~sw:_ fixture ->
@@ -572,12 +594,12 @@ let test_source_replacement_cannot_publish_retained_answer change () = with_fixt
   let original=Capture.to_json capture and progress_before=progress fixture in
   let replacement=first_messages @ [message "Replacement source question";
     Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Replacement answer"]] in
-  io (fun () -> match change with
-    | Replaced_checkpoint -> save_checkpoint fixture.config ~trace_id replacement 3
-    | Restarted_history ->
-      Boundary.append ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name
-        {Boundary.recorded_at=Time_compat.now ();event=Boundary.History_restarted {trace_id}}
-      |> Result.map_error Boundary.append_error_to_string |> get);
+  (match change with
+   | Replaced_checkpoint -> save_checkpoint fixture.config ~trace_id replacement 3
+   | Restarted_history ->
+     io (fun () -> Boundary.append ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name
+       {Boundary.recorded_at=Time_compat.now ();event=Boundary.History_restarted {trace_id}}
+       |> Result.map_error Boundary.append_error_to_string |> get));
   let posts=F.post_count fixture.server in
   assert_pending (run_worker fixture);
   no_memory fixture;

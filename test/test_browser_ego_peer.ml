@@ -1624,17 +1624,16 @@ let test_the_upload_script_runs_in_node () =
    | other -> failf "an upload that opened a dialog was %s" (failure_kind other));
   check (list string) "no page script after the dialog opened" ["evaluate";"set loc=css:#file 1"] (seen ())
 
-(* ego reads and acts inside frames without a frame path. A frame path is
-   refused before any effect with the way that works on this connection. *)
-let test_a_frame_path_is_refused_with_the_way_that_works () =
+(* Input and upload frame paths reach the peer and are refused before any
+   effect. Frame_read is refused by the live transport gate, so a direct
+   peer call would not prove which message the public tool receives. *)
+let test_input_frame_paths_are_refused_with_the_way_that_works () =
   let peer = opened (fun sent -> match sent.step with
     | "tabs.list" -> answered tabs
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let says label needle result =
     check bool label true (String_util.contains_substring (before_effect label result) needle) in
-  says "a frame read names the snapshot subtree" "snapshotScope subtree with root set to the iframe's ref"
-    (dispatch peer Live.Page_context (obj ["tabId",`Int 1;"framePath",`List [str "#frame"];"mode",str "frames"]));
   says "frame input names target" "acts inside frames through target"
     (dispatch peer Live.Page_interact (interact_args ~frame_path:["#frame"] (Lane.Click "#send")));
   says "an upload into a frame names the top document" "top document"
@@ -1782,5 +1781,5 @@ let () =
       test_case "the upload script runs against a stand-in in node" `Quick test_the_upload_script_runs_in_node;
       test_case "an upload through a file chooser answers what it handed" `Quick test_an_upload_through_a_file_chooser_answers_what_it_handed;
       test_case "the chooser script runs against a stand-in in node" `Quick test_the_chooser_script_runs_in_node;
-      test_case "a frame path is refused with the way that works" `Quick test_a_frame_path_is_refused_with_the_way_that_works;
+      test_case "input frame paths name the supported route" `Quick test_input_frame_paths_are_refused_with_the_way_that_works;
       test_case "the peer serves what the lane table says" `Quick test_the_peer_serves_what_the_lane_table_says ] ]

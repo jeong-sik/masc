@@ -881,10 +881,9 @@ let choose_files ?actor t id ~opener ~paths =
    snapshot holds each iframe's content with refs, a subtree snapshot rooted
    at the iframe's ref reads one frame, a ref from it acts inside that frame,
    and a role or text target is looked for in frames when the top document
-   has none (cross-origin frames included, 0.6.0.16). A frame path is refused
-   with the way that works. *)
-let frame_read_refused =
-  "an ego connection reads frames through BrowserRead snapshot: the viewport snapshot holds each iframe's content with refs, and snapshotScope subtree with root set to the iframe's ref reads that frame"
+   has none (cross-origin frames included, 0.6.0.16). Input frame paths are
+   refused here with the supported route. Frame_read is refused by the live
+   transport gate before this peer; the tool description explains snapshots. *)
 let frame_input_refused =
   "an ego connection acts inside frames through target, with no framePath: a ref from the frame's snapshot, or a role or text target, which ego also finds inside frames"
 let frame_upload_refused = "an ego connection uploads only to a file input or opener of the top document"
@@ -1328,7 +1327,7 @@ let dispatch ?actor t ~verb args =
   | Page_scene -> pre (scene t args)
   | Page_capture -> pre (capture t args)
   | Page_goto -> goto t args
-  | Page_context -> Error (Live.Before_effect frame_read_refused)
+  | Page_context -> Error (Live.Before_effect "framePath reads are not supported on an ego connection")
   | Page_snapshot -> pre (snapshot t args)
   | Page_downloads -> pre (downloads t args)
   | Page_act -> act ?actor t args

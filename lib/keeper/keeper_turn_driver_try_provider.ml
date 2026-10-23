@@ -2568,6 +2568,11 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         ?agent_ref:ctx.agent_ref
         !attempt_agent_ref
     in
+    let execution_observation =
+      match result with
+      | Ok (run_result : Runtime_agent.run_result) -> run_result.runtime_observation
+      | Error _ -> None
+    in
     let result =
       match result with
       | Ok run_result ->
@@ -2601,22 +2606,31 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ~checkpoint:checkpoint_after
           err
     in
-    (match ctx.on_runtime_observation, result with
-     | Some emit, Ok run_result ->
-       Option.iter emit run_result.Runtime_agent.runtime_observation
-     | Some emit, Error err ->
-       let total_duration_ms =
-         (Unix.gettimeofday ()
-          (* NDT-OK: closes the provider-attempt latency telemetry sample above. *)
-          -. run_started_at)
-         *. 1000.0
-       in
-       Runtime_agent.runtime_observation_for_terminal_config
-         ~total_duration_ms
-         ~error:(Agent_core.Error.to_string err)
-         config
-       |> emit
-     | None, _ -> ());
+    let observation =
+      match execution_observation, result with
+      | Some observation, result ->
+        let acceptance = match result with
+          | Ok _ -> Runtime_observation.Accepted
+          | Error error -> Runtime_observation.Rejected (Agent_core.Error.to_string error) in
+        Some (Runtime_observation.record_host_acceptance
+          ~keeper_name:ctx.keeper_name
+          ?turn_id:(Option.bind ctx.runtime_manifest_context (fun context ->
+            context.Keeper_runtime_manifest.manifest_keeper_turn_id))
+          observation acceptance)
+      | None, Ok run_result -> run_result.Runtime_agent.runtime_observation
+      | None, Error err ->
+        Option.map (fun _emit ->
+          let total_duration_ms =
+            (Unix.gettimeofday ()
+             (* NDT-OK: closes this runtime execution's latency sample. *)
+             -. run_started_at) *. 1000.0 in
+          Runtime_agent.runtime_observation_for_terminal_config
+            ~total_duration_ms ~error:(Agent_core.Error.to_string err) config)
+          ctx.on_runtime_observation
+    in
+    Option.iter (fun emit -> Option.iter emit observation) ctx.on_runtime_observation;
+    let result = Result.map (fun (run_result : Runtime_agent.run_result) ->
+      { run_result with runtime_observation = observation }) result in
     result, checkpoint_after, None
 ;;
 

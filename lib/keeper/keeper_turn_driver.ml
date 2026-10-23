@@ -131,16 +131,25 @@ let run_result_answered (run_result : Runtime_agent.run_result) =
    conversations. Configuration/admission errors before that boundary must not
    invent a provider attempt. Failed invocations have no successful run_result
    from which the receipt could otherwise obtain an observation. *)
-let official_client_observation ~runtime_id ~model_id ~prompt_sent_at ~now = function
-  | Ok (result : Runtime_agent.run_result) -> result.runtime_observation
+let official_client_observation ~keeper_name ?turn_id ~runtime_id ~model_id
+    ~prompt_sent_at ~now ~execution_result result =
+  match execution_result with
+  | Ok (execution : Runtime_agent.run_result) ->
+    Option.map (fun observation ->
+      let acceptance = match result with
+        | Ok _ -> Runtime_observation.Accepted
+        | Error error -> Runtime_observation.Rejected (Agent_core.Error.to_string error) in
+      Runtime_observation.record_host_acceptance ~keeper_name ?turn_id
+        observation acceptance) execution.runtime_observation
   | Error error ->
     Option.map (fun started_at ->
-      let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
+      let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates
+        ~runtime_id ~keeper_name ?turn_id () in
       Runtime_observation.record_attempt_terminal capture ~model_id
         ~latency_ms:(Some (int_of_float (max 0.0 (now -. started_at) *. 1000.0)))
         ~error:(Some (Agent_core.Error.to_string error));
       Runtime_observation.runtime_observation_with_metrics
-        ~runtime_id ~selected_model:None ~capture
+        ~selected_model:None ~capture
         ~attempt_details_source:"official_client_terminal_error"
         ~agent_core_internal_runtime_allowed:false ()) prompt_sent_at
 ;;
@@ -2363,12 +2372,17 @@ let run_named
         on_runtime_attempt;
       let error_runtime_id = attempt_runtime_id in
       let official_prompt_sent_at = ref None in
-      let observe_official_result result =
-        Option.iter (fun observe ->
-          official_client_observation ~runtime_id:attempt_runtime_id
-            ~model_id:runtime.model.api_name ~prompt_sent_at:!official_prompt_sent_at
-            ~now:(Time_compat.now ()) result
-          |> Option.iter observe) on_runtime_observation
+      let observe_official_result ~execution_result result =
+        let observation = official_client_observation
+          ~keeper_name
+          ?turn_id:(Option.bind runtime_manifest_context (fun context ->
+            context.Keeper_runtime_manifest.manifest_keeper_turn_id))
+          ~runtime_id:attempt_runtime_id
+          ~model_id:runtime.model.api_name ~prompt_sent_at:!official_prompt_sent_at
+          ~now:(Time_compat.now ()) ~execution_result result in
+        Option.iter (fun observe -> Option.iter observe observation) on_runtime_observation;
+        Result.map (fun (run_result : Runtime_agent.run_result) ->
+          { run_result with runtime_observation = observation }) result
       in
       let official_model_input_observation hooks =
         let attempted = ref None in
@@ -2633,7 +2647,8 @@ let run_named
                 ~terminal_effect_state
                 run_result)
         in
-        observe_official_result codex_result;
+        let codex_result = observe_official_result
+          ~execution_result:codex_attempt.result codex_result in
         ( selected_runtime_result ?official_client_settlement:codex_attempt.settled_session runtime ~lane_attempt_index:idx codex_result
         , None
         , codex_attempt.effect_disposition
@@ -2753,7 +2768,8 @@ let run_named
               ~terminal_effect_state
               run_result)
         in
-        observe_official_result antigravity_result;
+        let antigravity_result = observe_official_result
+          ~execution_result:antigravity_attempt.result antigravity_result in
         ( selected_runtime_result ?official_client_settlement:antigravity_attempt.settled_session runtime ~lane_attempt_index:idx antigravity_result
         , None
         , antigravity_attempt.effect_disposition
@@ -2884,7 +2900,8 @@ let run_named
               ~terminal_effect_state
               run_result)
         in
-        observe_official_result muse_result;
+        let muse_result = observe_official_result
+          ~execution_result:muse_attempt.result muse_result in
         ( selected_runtime_result ?official_client_settlement:muse_attempt.settled_session runtime ~lane_attempt_index:idx muse_result
         , None
         , muse_attempt.effect_disposition
@@ -3022,7 +3039,8 @@ let run_named
               ~terminal_effect_state
               run_result)
         in
-        observe_official_result claude_result;
+        let claude_result = observe_official_result
+          ~execution_result:claude_attempt.result claude_result in
         ( selected_runtime_result ?official_client_settlement:claude_attempt.settled_session runtime ~lane_attempt_index:idx claude_result
         , None
         , claude_attempt.effect_disposition

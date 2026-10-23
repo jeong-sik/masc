@@ -42,7 +42,16 @@ type request_context = {
     its [last] breakdown) carries the request here, and the spend in the
     response usage under [usage_scope]. *)
 
+type host_acceptance =
+  | Accepted
+  | Rejected of string
+(** The host's response contract decision, separate from runtime execution. *)
+
 type runtime_observation = {
+  observation_id : string;
+      (** Producer-owned identity shared by execution and host-acceptance events. *)
+  host_acceptance : host_acceptance option;
+      (** [None] until the host applies its response contract. *)
   runtime_id : string;
   selected_model : string option;
       (** The model the runtime answered with, unredacted. The redacted
@@ -105,9 +114,14 @@ val record_attempt_terminal :
     provider invocation path. *)
 
 val runtime_metrics_for_candidates :
+  runtime_id:string ->
+  ?keeper_name:string ->
+  ?turn_id:int ->
   unit ->
   runtime_metrics_capture * Llm_provider.Metrics.t
-(** Builds the [(capture, metrics)] pair the per-call metrics path consumes.
+(** Builds the [(capture, metrics)] pair and its entropy-backed observation ID.
+    Runtime identity is bound here and cannot be replaced at materialisation.
+    Optional Keeper/turn fields are absent when the caller does not own them.
     Three callbacks write to [capture]: a request start opens an attempt, a
     request end closes it with its latency, an error closes it with the
     message. Two more record the stream's first-chunk and inter-chunk
@@ -116,7 +130,6 @@ val runtime_metrics_for_candidates :
     travels as part of the observation. *)
 
 val runtime_observation_with_metrics :
-  runtime_id:string ->
   selected_model:string option ->
   capture:runtime_metrics_capture ->
   ?attempt_details_source:string ->
@@ -126,8 +139,20 @@ val runtime_observation_with_metrics :
   ?reported_context_window:int ->
   unit ->
   runtime_observation
-(** Materialises a {!runtime_observation} from a finished
-    capture.  [attempts] is flipped into chronological order;
+(** Materialises a {!runtime_observation} with the capture's original identity.
+    This read does not emit new execution events. [attempts] is flipped into chronological order;
     [attempt_details_source] is set to
     ["agent_core_metrics_callbacks"] to flag that the per-call
     metrics path was wired. *)
+
+val record_host_acceptance :
+  ?keeper_name:string ->
+  ?turn_id:int ->
+  runtime_observation ->
+  host_acceptance ->
+  runtime_observation
+(** Emit the host stage under the original observation identity and return an
+    immutable snapshot carrying that decision. Runtime attempts are unchanged:
+    a rejected deliverable is not a fabricated provider failure. *)
+
+val host_acceptance_to_json : host_acceptance option -> Yojson.Safe.t

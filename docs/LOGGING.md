@@ -55,6 +55,29 @@ parse the console summary. Ring JSONL, dashboard export and TUI log decoding
 already preserve this field. This does not add an Ask cohort report or prove a
 runtime speedup. See [the source boundary audit](audits/tui-ask-followup-structured-20261021.md).
 
+## Runtime execution and host acceptance
+
+Runtime observations have a producer-owned `observation_id`. Execution and
+host acceptance are separate stages in `details`, joined by this ID and the
+resolved `runtime_id`:
+
+| Event | Stage | Outcome |
+|---|---|---|
+| `runtime_execution_terminal` | `runtime_execution` | `success` or `failure`, with `attempt_index`, latency and execution error |
+| `runtime_host_acceptance` | `host_acceptance` | `accepted` or `rejected`, with the host's rejection detail |
+
+A runtime can yield successfully and then fail the host's response contract.
+That produces one execution terminal and one host decision, not two runtime
+terminals. The observation snapshot keeps the original attempt facts and adds
+its typed `host_acceptance`; receipts still mark host rejection as failed.
+Execution success is not a Task completion or delivered-result claim. The model
+label retains the existing public redaction policy.
+
+Native agent events pass their payload's agent identity into `keeper_name` and
+use the producer's Keeper scope for `turn_id`. An absent Keeper scope stays null;
+a session-local turn ordinal cannot supply it. Their complete canonical envelope
+also remains in `details`.
+
 ## TUI process storage
 
 The TUI owns a different Log.Ring from its server. Its structured details are

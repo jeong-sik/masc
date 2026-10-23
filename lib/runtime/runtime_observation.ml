@@ -19,7 +19,11 @@ type request_context = {
   output_tokens : int option;
 }
 
+type host_acceptance = Accepted | Rejected of string
+
 type runtime_observation = {
+  observation_id : string;
+  host_acceptance : host_acceptance option;
   runtime_id : string;
   selected_model : string option;
   attempts : runtime_attempt list;
@@ -50,7 +54,7 @@ let public_runtime_model_label =
 (* Observation building                                              *)
 (* ================================================================ *)
 
-let runtime_observation_of_candidates ~runtime_id
+let runtime_observation_of_candidates ~observation_id ~runtime_id
     ~(selected_model : string option)
     ?(attempts = [])
     ?(attempt_details_available = false)
@@ -70,6 +74,8 @@ let runtime_observation_of_candidates ~runtime_id
      JSON emitters write it as null and attempt model ids as
      [public_runtime_model_label]. *)
   {
+    observation_id;
+    host_acceptance = None;
     runtime_id;
     selected_model;
     attempts;
@@ -99,6 +105,10 @@ type streaming_metrics_capture = {
 }
 
 type runtime_metrics_capture = {
+  observation_id : string;
+  runtime_id : string;
+  keeper_name : string option;
+  turn_id : int option;
   mutable next_attempt_index : int;
   mutable attempts_rev : runtime_attempt list;
   streaming : streaming_metrics_capture;
@@ -108,8 +118,10 @@ let update_first_attempt_if ~predicate ~update attempts_rev =
   let rec loop = function
     | [] -> None
     | attempt :: rest ->
-        if predicate attempt then Some (update attempt :: rest)
-        else Option.map (fun rest' -> attempt :: rest') (loop rest)
+        if predicate attempt then
+          let updated = update attempt in
+          Some (updated, updated :: rest)
+        else Option.map (fun (updated, rest') -> updated, attempt :: rest') (loop rest)
   in
   loop attempts_rev
 
@@ -126,39 +138,40 @@ let record_attempt_start (capture : runtime_metrics_capture) ~model_id:_ =
     }
     :: capture.attempts_rev
 
-(** [runtime_attempt_terminal_event_json] builds the structured details payload
-    emitted to system_log when a runtime candidate reaches its terminal state
-    (success: latency_ms set, error none; failure: error set). The shape is the
-    contract for downstream log analysers and external operators looking for
-    "why did the runtime exhaust" signals. Errors are recorded verbatim — no
-    string-based classification at this layer (see #12817 spirit and the
-    project memory rule "no string matching for classification"). *)
-let runtime_attempt_terminal_event_json ~model_id:_ ~model_label:_ ~latency_ms
-    ~error =
-  let outcome = if Option.is_some error then "failure" else "success" in
-  `Assoc
-    [
-      ("event", `String "runtime_attempt_terminal");
-      ("model_id", `String public_runtime_model_label);
-      ("model_label", `Null);
-      ( "latency_ms", Json_util.int_opt_to_json latency_ms );
-      ("outcome", `String outcome);
-      ( "error_message", Json_util.string_opt_to_json error );
-    ]
+type observation_stage = Runtime_execution | Host_acceptance
 
-let log_runtime_attempt_terminal ~model_id ~model_label ~latency_ms ~error =
-  let outcome = if Option.is_some error then "failure" else "success" in
-  let details =
-    runtime_attempt_terminal_event_json ~model_id ~model_label ~latency_ms
-      ~error
-  in
-  let summary =
-    Printf.sprintf
-      "runtime candidate terminal: model=%s outcome=%s latency_ms=%s"
-      public_runtime_model_label outcome
-      (match latency_ms with Some n -> string_of_int n | None -> "n/a")
-  in
-  Log.Telemetry.emit Log.Info ~details summary
+let stage_name = function
+  | Runtime_execution -> "runtime_execution"
+  | Host_acceptance -> "host_acceptance"
+
+let event_name = function
+  | Runtime_execution -> "runtime_execution_terminal"
+  | Host_acceptance -> "runtime_host_acceptance"
+
+let identity_fields stage ~observation_id ~runtime_id =
+  [ "event", `String (event_name stage)
+  ; "stage", `String (stage_name stage)
+  ; "observation_id", `String observation_id
+  ; "runtime_id", `String runtime_id
+  ]
+
+let log_runtime_attempt_terminal (capture : runtime_metrics_capture)
+    (attempt : runtime_attempt) =
+  let outcome = if Option.is_some attempt.error then "failure" else "success" in
+  let details = `Assoc
+    (identity_fields Runtime_execution
+       ~observation_id:capture.observation_id ~runtime_id:capture.runtime_id
+     @ [ "attempt_index", `Int attempt.attempt_index
+       ; "model_id", `String public_runtime_model_label
+       ; "model_label", `Null
+       ; "latency_ms", Json_util.int_opt_to_json attempt.latency_ms
+       ; "outcome", `String outcome
+       ; "error_message", Json_util.string_opt_to_json attempt.error
+       ]) in
+  Log.Telemetry.emit Log.Info ?keeper_name:capture.keeper_name ?turn_id:capture.turn_id
+    ~details
+    (Printf.sprintf "runtime execution terminal: observation=%s attempt=%d outcome=%s"
+       capture.observation_id attempt.attempt_index outcome)
 
 let ensure_terminal_attempt (capture : runtime_metrics_capture)
     ~model_id:_ ~(latency_ms : int option) ~(error : string option) =
@@ -169,22 +182,41 @@ let ensure_terminal_attempt (capture : runtime_metrics_capture)
     && Option.is_none attempt.error
   in
   let update attempt = { attempt with latency_ms; error } in
-  let model_label = None in
-  (match update_first_attempt_if ~predicate:is_open ~update capture.attempts_rev with
-  | Some attempts_rev -> capture.attempts_rev <- attempts_rev
-  | None ->
+  let terminal =
+    match update_first_attempt_if ~predicate:is_open ~update capture.attempts_rev with
+    | Some (terminal, attempts_rev) ->
+      capture.attempts_rev <- attempts_rev;
+      terminal
+    | None ->
       let attempt_index = capture.next_attempt_index in
       capture.next_attempt_index <- capture.next_attempt_index + 1;
-      capture.attempts_rev <-
-        {
-          attempt_index;
-          model_id;
-          model_label;
-          latency_ms;
-          error;
-        }
-        :: capture.attempts_rev);
-  log_runtime_attempt_terminal ~model_id ~model_label ~latency_ms ~error
+      let terminal = { attempt_index; model_id; model_label = None; latency_ms; error } in
+      capture.attempts_rev <- terminal :: capture.attempts_rev;
+      terminal
+  in
+  log_runtime_attempt_terminal capture terminal
+
+let host_acceptance_to_json = function
+  | None -> `Null
+  | Some Accepted -> `Assoc [ "outcome", `String "accepted" ]
+  | Some (Rejected error) ->
+    `Assoc [ "outcome", `String "rejected"; "error_message", `String error ]
+
+let record_host_acceptance ?keeper_name ?turn_id
+    (observation : runtime_observation) acceptance =
+  let outcome, level = match acceptance with
+    | Accepted -> "accepted", Log.Info
+    | Rejected _ -> "rejected", Log.Warn in
+  let error = match acceptance with Accepted -> None | Rejected detail -> Some detail in
+  let details = `Assoc
+    (identity_fields Host_acceptance ~observation_id:observation.observation_id
+       ~runtime_id:observation.runtime_id
+     @ [ "outcome", `String outcome
+       ; "error_message", Json_util.string_opt_to_json error ]) in
+  Log.Telemetry.emit level ?keeper_name ?turn_id ~details
+    (Printf.sprintf "runtime host acceptance: observation=%s outcome=%s"
+       observation.observation_id outcome);
+  { observation with host_acceptance = Some acceptance }
 
 let record_attempt_terminal = ensure_terminal_attempt
 
@@ -199,9 +231,13 @@ let streaming_metrics_of_capture (s : streaming_metrics_capture) =
   in
   (s.ttfrc_ms, s.inter_chunk_count, avg)
 
-let runtime_metrics_for_candidates () =
+let runtime_metrics_for_candidates ~runtime_id ?keeper_name ?turn_id () =
   let capture =
-    { next_attempt_index = 0
+    { observation_id = Agent_core.Event_bus.fresh_id ()
+    ; runtime_id
+    ; keeper_name
+    ; turn_id
+    ; next_attempt_index = 0
     ; attempts_rev = []
     ; streaming = empty_streaming_capture ()
     }
@@ -234,7 +270,7 @@ let runtime_metrics_for_candidates () =
   in
   (capture, metrics)
 
-let runtime_observation_with_metrics ~runtime_id
+let runtime_observation_with_metrics
     ~(selected_model : string option) ~(capture : runtime_metrics_capture)
     ?(attempt_details_source = "agent_core_metrics_callbacks")
     ?(agent_core_internal_runtime_allowed = false)
@@ -245,7 +281,8 @@ let runtime_observation_with_metrics ~runtime_id
   let ttfrc, chunk_count, chunk_avg =
     streaming_metrics_of_capture capture.streaming
   in
-  runtime_observation_of_candidates ~runtime_id ~selected_model
+  runtime_observation_of_candidates ~observation_id:capture.observation_id
+    ~runtime_id:capture.runtime_id ~selected_model
     ~attempts:(List.rev capture.attempts_rev)
     ~attempt_details_available:true
     ~attempt_details_source

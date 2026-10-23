@@ -335,6 +335,8 @@ let runtime_outcome_of_observation
       Keeper_execution_receipt.runtime_outcome = function
   | Some _ when lane_failover_applied ->
     Keeper_execution_receipt.Runtime_passed_to_next_model
+  | Some { host_acceptance = Some (Runtime_observation.Rejected _); _ } ->
+    Keeper_execution_receipt.Runtime_failed
   | Some obs
     when List.exists
            (fun (attempt : Runtime_observation.runtime_attempt) ->

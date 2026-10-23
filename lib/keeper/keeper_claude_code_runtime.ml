@@ -1520,7 +1520,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                     ("Claude Code session settlement failed: " ^ detail))
            in
            let capture, _metrics =
-             Runtime_observation.runtime_metrics_for_candidates ()
+             Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()
            in
            Runtime_observation.record_attempt_terminal
              capture
@@ -1529,7 +1529,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
              ~error:None;
            let runtime_observation =
              Runtime_observation.runtime_observation_with_metrics
-               ~runtime_id
                ~selected_model:(Some turn.model)
                ~capture
                ~attempt_details_source:"claude_code"

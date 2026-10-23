@@ -2323,8 +2323,8 @@ let test_official_failure_observation_reaches_receipt () =
          detail = "successful result response has no deliverable content" }) in
   let observe prompt_sent_at =
     Masc.Keeper_turn_driver.For_testing.official_client_observation
-      ~runtime_id:"antigravity.test" ~model_id:"test-model"
-      ~prompt_sent_at ~now:12.0 (Error error) in
+      ~keeper_name:"test-keeper" ~runtime_id:"antigravity.test" ~model_id:"test-model"
+      ~prompt_sent_at ~now:12.0 ~execution_result:(Error error) (Error error) in
   Alcotest.(check bool) "pre-admission error invents no invocation" true
     (Option.is_none (observe None));
   let observation = observe (Some 10.0) in
@@ -2346,21 +2346,66 @@ let test_official_failure_observation_reaches_receipt () =
 
 let test_official_success_observation_is_preserved () =
   let open Masc in
-  let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
-  let observed = Runtime_observation.runtime_observation_with_metrics
-    ~runtime_id:"official.test" ~selected_model:None ~capture () in
+  let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates ~runtime_id:"official.test" () in
+  let observed = Runtime_observation.runtime_observation_with_metrics ~selected_model:None ~capture () in
   let result = { (run_result ()) with Runtime_agent.runtime_observation = Some observed } in
   let actual = Masc.Keeper_turn_driver.For_testing.official_client_observation
-    ~runtime_id:"official.test" ~model_id:"test-model"
-    ~prompt_sent_at:(Some 10.0) ~now:12.0 (Ok result) in
+    ~keeper_name:"test-keeper" ~runtime_id:"official.test" ~model_id:"test-model"
+    ~prompt_sent_at:(Some 10.0) ~now:12.0 ~execution_result:(Ok result) (Ok result) in
   Alcotest.(check bool) "successful provider observation stays authoritative" true
-    (actual = Some observed)
+    (actual = Some { observed with host_acceptance = Some Runtime_observation.Accepted })
+
+let test_host_rejection_keeps_execution_identity_and_outcome () =
+  let open Masc in
+  Log.set_level Log.Info;
+  let since_seq = (Log.Ring.bounds ()).total - 1 in
+  let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates
+    ~runtime_id:"official.test" ~keeper_name:"test-keeper" ~turn_id:73 () in
+  Runtime_observation.record_attempt_terminal capture ~model_id:"test-model"
+    ~latency_ms:(Some 12) ~error:None;
+  let execution = Runtime_observation.runtime_observation_with_metrics
+    ~selected_model:(Some "test-model") ~capture () in
+  let result = { (run_result ()) with Runtime_agent.runtime_observation = Some execution } in
+  let rejected = Keeper_turn_driver.For_testing.apply_accept
+    ~runtime_id:"official.test" ~accept:(fun _ -> false) result in
+  Alcotest.(check bool) "host refused the deliverable" true (Result.is_error rejected);
+  let observed = Keeper_turn_driver.For_testing.official_client_observation
+    ~keeper_name:"test-keeper" ~turn_id:73 ~runtime_id:"official.test" ~model_id:"test-model"
+    ~prompt_sent_at:(Some 10.0) ~now:12.0 ~execution_result:(Ok result) rejected
+    |> Option.get in
+  Alcotest.(check string) "host stage keeps execution identity"
+    execution.observation_id observed.observation_id;
+  Alcotest.(check bool) "provider success is not rewritten as a provider failure"
+    true (execution.attempts = observed.attempts);
+  let next_capture, _ = Runtime_observation.runtime_metrics_for_candidates
+    ~runtime_id:"official.test" ~keeper_name:"test-keeper" ~turn_id:73 () in
+  let next = Runtime_observation.runtime_observation_with_metrics
+    ~selected_model:(Some "test-model") ~capture:next_capture () in
+  Alcotest.(check bool) "a repeated display turn cannot reuse execution identity"
+    false (String.equal observed.observation_id next.observation_id);
+  Alcotest.(check bool) "receipt observes host rejection separately" true
+    (Keeper_agent_error.runtime_outcome_of_observation ~lane_failover_applied:false
+       (Some observed) = Keeper_execution_receipt.Runtime_failed);
+  let rows = Log.Ring.recent ~since_seq ~module_filter:"Telemetry" ~order:`Oldest_first () in
+  let field key (row : Log.Ring.entry) = Yojson.Safe.Util.member key row.details in
+  Alcotest.(check int) "one execution terminal and one host decision" 2 (List.length rows);
+  Alcotest.(check bool) "stages cannot masquerade as two runtime terminals" true
+    (List.map (field "stage") rows = [`String "runtime_execution"; `String "host_acceptance"]);
+  Alcotest.(check bool) "stage outcomes retain the actual two decisions" true
+    (List.map (field "outcome") rows = [`String "success"; `String "rejected"]);
+  List.iter (fun (row : Log.Ring.entry) ->
+    Alcotest.(check bool) "event joins original execution" true
+      (field "observation_id" row = `String execution.observation_id);
+    Alcotest.(check (option string)) "event keeper" (Some "test-keeper") row.keeper_name;
+    Alcotest.(check (option int)) "event Keeper turn" (Some 73) row.turn_id) rows
 
 let () =
   Alcotest.run "keeper_turn_driver_accept"
     [
       ( "accept"
       , [
+          Alcotest.test_case "host rejection preserves execution evidence and stage identity" `Quick
+            test_host_rejection_keeps_execution_identity_and_outcome;
           Alcotest.test_case "official failure reaches receipt after prompt transmission" `Quick
             test_official_failure_observation_reaches_receipt;
           Alcotest.test_case "official success preserves its observation" `Quick

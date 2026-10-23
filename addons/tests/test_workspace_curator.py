@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import errno
 import json
 import os
 from pathlib import Path
@@ -307,8 +308,9 @@ class CuratorWorker(unittest.TestCase):
         body = "x" * 1_000_000
         one, six = self.finished_store(1, body), self.finished_store(6, body)
         listing_of = lambda worker: worker.host_requests({})
-        # The first inventory reads every record, one body at a time (#45456).
-        self.assertLess(self.peak(six, during=listing_of), 2 * self.peak(one, during=listing_of))
+        # The first inventory reads every record, one body at a time (#45456):
+        # five more finished records add far less than one body to its peak.
+        self.assertLess(self.peak(six, during=listing_of) - self.peak(one, during=listing_of), len(body) // 2)
 
         def later(worker):
             worker.invoke({"kind": "submit", "request": request("original-new")}, {"kind": "operator"})
@@ -317,20 +319,205 @@ class CuratorWorker(unittest.TestCase):
         # After it, submits, listings and observations read no finished body.
         self.assertLess(self.peak(six, before=listing_of, during=later), len(body))
 
-    def test_a_pending_record_changed_outside_the_worker_is_refused(self):
+    def test_a_pending_record_changed_outside_the_worker_stops_it(self):
+        observation = lambda w: w.observe({"binding": {}, "sources": []})["rows"][0]["fields"]
+        finished = lambda record: {**record, "result": {"status": "outcome_unknown"}}
+        for change, finished_after in (("finished", 1), ("removed", 0)):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                worker = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)
+                original = request()
+                worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"})
+                self.assertEqual(worker.host_requests({}), {"requests": [original]})
+                path = worker.store.path(original["request_id"])
+                if change == "finished":
+                    path.write_text(json.dumps(finished(json.loads(path.read_text()))))
+                else:
+                    path.unlink()
+                with self.assertRaises(exact_worker.InvalidInput) as stopped:
+                    worker.host_requests({})
+                # Every later call fails the same way, observations included.
+                for call in (lambda: worker.host_requests({}), lambda: observation(worker),
+                             lambda: worker.invoke({"kind": "submit", "request": request("original-next")},
+                                                   {"kind": "operator"})):
+                    with self.assertRaises(exact_worker.InvalidInput) as again:
+                        call()
+                    self.assertEqual(str(again.exception), str(stopped.exception))
+                reopened = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)
+                self.assertEqual(reopened.host_requests({}), {"requests": []})
+                self.assertEqual((observation(reopened)["pending"], observation(reopened)["finished"]),
+                                 (0, finished_after))
+
+    def test_a_store_directory_replaced_after_the_first_inventory_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)
+            worker.invoke({"kind": "submit", "request": request()}, {"kind": "operator"})
+            observation = {"binding": {}, "sources": []}
+            worker.observe(observation)
+            store = worker.store.directory
+            store.rename(store.with_name(store.name + "-moved"))
+            store.mkdir()
+            with self.assertRaises(exact_worker.InvalidInput):
+                worker.observe(observation)
+
+    def test_a_record_damaged_before_start_stops_the_worker_without_reading_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original = request()
+            exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT).invoke(
+                {"kind": "submit", "request": original}, {"kind": "operator"})
+            worker = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)
+            path = worker.store.path(original["request_id"])
+            path.write_text(path.read_text()[:-2])
+            with self.assertRaises(exact_worker.InvalidInput) as stopped:
+                worker.host_requests({})
+            self.assertIn(path.name, str(stopped.exception))
+            with patch.object(exact_worker.Store, "read_path", side_effect=AssertionError("read again")):
+                for call in (lambda: worker.host_requests({}), lambda: worker.observe({"binding": {}, "sources": []})):
+                    with self.assertRaises(exact_worker.InvalidInput) as again:
+                        call()
+                    self.assertEqual(str(again.exception), str(stopped.exception))
+
+    def assert_stopped_without_store_access(self, worker, reason):
+        with patch.object(exact_worker.Store, "open_directory", side_effect=AssertionError("store reopened")), \
+                patch.object(exact_worker.Store, "check_directory", side_effect=AssertionError("store checked")):
+            for operation in (lambda: worker.host_requests({}),
+                              lambda: worker.observe({"binding": {}, "sources": []}),
+                              lambda: worker.invoke({"kind": "read", "request_id": request()["request_id"]},
+                                                    {"kind": "operator"}),
+                              lambda: worker.invoke({"kind": "submit", "request": request("original-next")},
+                                                    {"kind": "operator"})):
+                with self.assertRaises(exact_worker.InvalidInput) as again:
+                    operation()
+                self.assertEqual(str(again.exception), reason)
+
+    def test_a_pending_record_damaged_after_inventory_stops_the_worker(self):
         with tempfile.TemporaryDirectory() as directory:
             worker = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)
             original = request()
             worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"})
             self.assertEqual(worker.host_requests({}), {"requests": [original]})
             path = worker.store.path(original["request_id"])
-            record = json.loads(path.read_text())
-            path.write_text(json.dumps({**record, "result": {"status": "outcome_unknown"}}))
-            with self.assertRaises(exact_worker.InvalidInput):
+            path.write_text(path.read_text()[:-2])
+            with self.assertRaises(exact_worker.InvalidInput) as stopped:
                 worker.host_requests({})
-            path.unlink()
-            with self.assertRaises(FileNotFoundError):
+            self.assertIn(path.name, str(stopped.exception))
+            self.assert_stopped_without_store_access(worker, str(stopped.exception))
+
+    def test_a_record_removed_during_first_inventory_stops_the_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.module().CONTRACT
+            original = request()
+            exact_worker.Worker(Path(directory), FRAME, contract).invoke(
+                {"kind": "submit", "request": original}, {"kind": "operator"})
+            worker = exact_worker.Worker(Path(directory), FRAME, contract)
+            read_path = worker.store.read_path
+
+            def disappear(name, directory_fd):
+                os.unlink(name, dir_fd=directory_fd)
+                return read_path(name, directory_fd)
+
+            with patch.object(worker.store, "read_path", side_effect=disappear), \
+                    self.assertRaises(exact_worker.InvalidInput) as stopped:
                 worker.host_requests({})
+            self.assertIn(worker.store.path(original["request_id"]).name, str(stopped.exception))
+            self.assert_stopped_without_store_access(worker, str(stopped.exception))
+
+    def test_an_eio_during_first_inventory_can_be_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.module().CONTRACT
+            original = request()
+            exact_worker.Worker(Path(directory), FRAME, contract).invoke(
+                {"kind": "submit", "request": original}, {"kind": "operator"})
+            worker = exact_worker.Worker(Path(directory), FRAME, contract)
+            with patch.object(worker.store, "read_path", side_effect=OSError(errno.EIO, "I/O error")), \
+                    self.assertRaises(OSError) as failure:
+                worker.host_requests({})
+            self.assertEqual(failure.exception.errno, errno.EIO)
+            self.assertEqual(worker.host_requests({}), {"requests": [original]})
+            self.assertEqual(worker.observe({"binding": {}, "sources": []})["rows"][0]["fields"]["pending"], 1)
+
+    def test_an_eio_reading_an_indexed_pending_record_can_be_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)
+            original = request()
+            worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"})
+            self.assertEqual(worker.host_requests({}), {"requests": [original]})
+            with patch.object(worker.store, "read_path", side_effect=OSError(errno.EIO, "I/O error")), \
+                    self.assertRaises(OSError) as failure:
+                worker.host_requests({})
+            self.assertEqual(failure.exception.errno, errno.EIO)
+            self.assertEqual(worker.observe({"binding": {}, "sources": []})["rows"][0]["fields"]["pending"], 1)
+            self.assertEqual(worker.host_requests({}), {"requests": [original]})
+
+    def test_a_directory_record_is_refused_and_its_raw_fd_is_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)
+            path = worker.store.directory / "directory.json"
+            path.mkdir()
+            opened = []
+            real_open = os.open
+
+            def capture_open(name, *args, **kwargs):
+                fd = real_open(name, *args, **kwargs)
+                if name == path.name:
+                    opened.append(fd)
+                return fd
+
+            with patch.object(exact_worker.os, "open", side_effect=capture_open), \
+                    self.assertRaises(exact_worker.InvalidInput) as stopped:
+                worker.host_requests({})
+            self.assertEqual(len(opened), 1)
+            with self.assertRaises(OSError) as closed:
+                os.fstat(opened[0])
+            self.assertEqual(closed.exception.errno, errno.EBADF)
+            self.assert_stopped_without_store_access(worker, str(stopped.exception))
+
+    def test_a_stream_open_failure_closes_the_raw_record_fd(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)
+            original = request()
+            worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"})
+            with patch.object(exact_worker.os, "fdopen", side_effect=OSError(errno.EIO, "stream failed")) as fdopen, \
+                    self.assertRaises(OSError):
+                worker.host_requests({})
+            fd = fdopen.call_args.args[0]
+            with self.assertRaises(OSError) as closed:
+                os.fstat(fd)
+            self.assertEqual(closed.exception.errno, errno.EBADF)
+            self.assertEqual(worker.host_requests({}), {"requests": [original]})
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux byte filenames")
+    def test_a_non_utf8_record_name_returns_a_stable_error_over_stdio(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory) / self.module().CONTRACT.package_id
+            store.mkdir()
+            path = os.fsencode(store) + b"/invalid-\xff.json"
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            os.close(fd)
+            results = self.run_worker(Path(directory), [listing(), listing()])
+            self.assertTrue(all(result["isError"] for result in results))
+            self.assertEqual(results[0], results[1])
+            self.assertIn("\\udcff", results[0]["content"][0]["text"])
+
+    def test_a_result_whose_directory_sync_failed_stops_the_worker_and_survives_a_reopen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)
+            original = request()
+            worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"})
+            worker.host_requests({})
+            synced = os.fsync
+
+            def fsync(fd):
+                if stat.S_ISDIR(os.fstat(fd).st_mode):
+                    raise OSError("directory sync failed")
+                synced(fd)
+            with patch.object(exact_worker.os, "fsync", fsync), self.assertRaises(OSError):
+                worker.host_result({"request_id": original["request_id"], "result": {"status": "outcome_unknown"}})
+            with self.assertRaisesRegex(exact_worker.InvalidInput, "persistence is unconfirmed"):
+                worker.observe({"binding": {}, "sources": []})
+            # The rename happened before the directory sync failed.
+            reopened = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)
+            fields = reopened.observe({"binding": {}, "sources": []})["rows"][0]["fields"]
+            self.assertEqual((fields["pending"], fields["finished"]), (0, 1))
 
     def test_a_reopened_worker_reports_the_same_inventory(self):
         with tempfile.TemporaryDirectory() as directory:

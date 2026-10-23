@@ -3559,33 +3559,30 @@ let add_routes ~sw ~clock router =
   (* ── Eval feed (RFC-MASC-005 Phase 2) ── *)
   |> Http.Router.get "/api/v1/dashboard/eval-feed" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let base_path = (Mcp_server.workspace_config state).base_path in
-         let agent_name = Server_utils.query_param req "agent_name" in
+         let config = Mcp_server.workspace_config state in
+         let base_path = config.base_path in
+         let agent_name = Server_utils.query_param req "agent_name" |> Option.map String.trim in
          let limit =
            Server_utils.int_query_param req "limit" ~default:10
            |> max 1 |> min 100
          in
-         let cache_key =
-           Printf.sprintf "eval_feed:%s:%s:%d"
-             base_path
-             (Option.value ~default:"-" (Option.map String.trim agent_name))
-             limit
-         in
-         respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-           (fun () ->
-         match agent_name with
-           | Some name when String.trim name <> "" ->
+         (* Keep identity beside the selected read: the fleet always reads
+            one snapshot per agent, while an exact agent uses [limit]. *)
+         let scope, compute =
+           match agent_name with
+           | Some name when name <> "" ->
+             (`List [`String "agent"; `String name; `Int limit], fun () ->
                let snapshots =
-                 Dashboard_eval_feed.read_latest ~base_path
-                   ~agent_name:(String.trim name) ~limit
+                 Dashboard_eval_feed.read_latest ~base_path ~agent_name:name ~limit
                in
                `Assoc [
                  ("generated_at", `String (Masc_domain.now_iso ()));
-                 ("agent_name", `String (String.trim name));
+                 ("agent_name", `String name);
                  ("count", `Int (List.length snapshots));
                  ("snapshots", `List (List.map Dashboard_eval_feed.snapshot_to_json snapshots));
-               ]
-           | _ ->
+               ])
+           | Some _ | None ->
+             (`List [`String "all"], fun () ->
                let agents = Dashboard_eval_feed.list_agents ~base_path in
                let per_agent =
                  List.map (fun name ->
@@ -3609,6 +3606,12 @@ let add_routes ~sw ~clock router =
                  ("agent_count", `Int (List.length agents));
                  ("agents", `List per_agent);
                ])
+         in
+         let cache_key =
+           Server_dashboard_http_core_cache.dashboard_cache_key config
+             "eval_feed" (Yojson.Safe.to_string scope)
+         in
+         respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s compute
        ) request reqd)
 
   (* ── Telemetry unified view ── *)

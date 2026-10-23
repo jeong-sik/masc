@@ -1,0 +1,69 @@
+{
+  "before_build": {
+    "binary_commit": "107c58401723313611f7c599bbe15225de5910da",
+    "executable_sha256": "179f2021ecb4d56474f3fa804d332fc5330f745bc4ca66afd73d85d9da421783",
+    "runtime_instance_id": "01a1686c-45de-7000-ac1e-3d8569e594c8",
+    "started_at": "2026-10-23T11:01:28Z"
+  },
+  "after_build": {
+    "binary_commit": "107c58401723313611f7c599bbe15225de5910da",
+    "executable_sha256": "179f2021ecb4d56474f3fa804d332fc5330f745bc4ca66afd73d85d9da421783",
+    "runtime_instance_id": "01a1686c-45de-7000-ac1e-3d8569e594c8",
+    "started_at": "2026-10-23T11:01:28Z"
+  },
+  "requests": [
+    {
+      "query": "limit=47",
+      "status": 200,
+      "wall_ms": 7.042334182187915,
+      "response_keys": [
+        "generated_at",
+        "agent_count",
+        "agents"
+      ],
+      "agent_name": null,
+      "agent_count": 0,
+      "count": null
+    },
+    {
+      "query": "limit=47&agent_name=-",
+      "status": 200,
+      "wall_ms": 2.124292077496648,
+      "response_keys": [
+        "generated_at",
+        "agent_count",
+        "agents"
+      ],
+      "agent_name": null,
+      "agent_count": 0,
+      "count": null
+    },
+    {
+      "query": "limit=48&agent_name=-",
+      "status": 200,
+      "wall_ms": 6.64112507365644,
+      "response_keys": [
+        "generated_at",
+        "agent_name",
+        "count",
+        "snapshots"
+      ],
+      "agent_name": "-",
+      "agent_count": null,
+      "count": 0
+    },
+    {
+      "query": "limit=47",
+      "status": 200,
+      "wall_ms": 3.2183751463890076,
+      "response_keys": [
+        "generated_at",
+        "agent_count",
+        "agents"
+      ],
+      "agent_name": null,
+      "agent_count": 0,
+      "count": null
+    }
+  ]
+}

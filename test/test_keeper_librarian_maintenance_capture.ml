@@ -6,6 +6,7 @@ module L = Keeper_librarian
 module T = Agent_core.Types
 module C = Keeper_librarian_context
 module M = Keeper_librarian_maintenance_capture
+module Memory = Keeper_memory_os_current
 
 let get = function Ok value -> value | Error detail -> fail detail
 

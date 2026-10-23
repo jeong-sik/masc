@@ -236,19 +236,19 @@ let snapshot_ref_of_string raw =
     else "" in
   let decimal = digits <> "" && String.for_all (fun c -> c >= '0' && c <= '9') digits in
   match decimal, int_of_string_opt digits with
-  | true, Some ref -> Ok ref
+  | true, Some node -> Ok node
   | true, None | false, _ -> Error "root must be a ref an ego snapshot printed, such as @12"
 let snapshot_scope_of_wire ~scope ~root = match scope, root with
   | "viewport", None -> Ok Snapshot_viewport
   | "full_page", None -> Ok Snapshot_full_page
-  | "subtree", Some raw -> Result.map (fun ref -> Snapshot_subtree ref) (snapshot_ref_of_string raw)
+  | "subtree", Some raw -> Result.map (fun node -> Snapshot_subtree node) (snapshot_ref_of_string raw)
   | "subtree", None -> Error "a subtree snapshot needs root, a ref an ego snapshot printed such as @12"
   | ("viewport" | "full_page"), Some _ -> Error "root applies only to a subtree snapshot"
   | _, (None | Some _) -> Error "snapshot scope is viewport, full_page or subtree"
 let snapshot_scope_fields = function
   | Snapshot_viewport -> ["scope",`String "viewport"]
   | Snapshot_full_page -> ["scope",`String "full_page"]
-  | Snapshot_subtree ref -> ["scope",`String "subtree";"root",`String ("@" ^ string_of_int ref)]
+  | Snapshot_subtree node -> ["scope",`String "subtree";"root",`String ("@" ^ string_of_int node)]
 let snapshot_args ~tab_id ~max_chars ~scope =
   `Assoc (["tabId",`Int tab_id;"maxChars",`Int max_chars] @ snapshot_scope_fields scope)
 

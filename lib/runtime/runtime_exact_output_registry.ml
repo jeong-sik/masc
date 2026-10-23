@@ -71,6 +71,7 @@ type t =
   ; exact_output_lanes : admitted_lane list
   ; rejected_slots : rejected_slot list
   ; required_lane_ids : string list
+  ; addon_served_lane_ids : string list
   }
 
 let catalog_generation_fingerprint t =
@@ -357,20 +358,35 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
   loop 1 String_set.empty admitted_by_id [] [] lanes
 ;;
 
-let validate_required_lanes required_lane_ids admitted_lanes =
+(* A lane serves a required service when it holds an admitted slot and either
+   is that builtin lane or is an Addon lane whose exact output carries the
+   service's id AND the caller attested that id in [addon_served_lane_ids].
+   A table in [runtime.toml] alone never serves: its name is only a name, and
+   it loads without any installation behind it. The attestation is the
+   caller's claim that dispatch routes the service to that Addon, so a
+   publication never turns a missing builtin judge into a request-time
+   failure. *)
+let serves_required_lane ~addon_served_lane_ids lane_id (lane : admitted_lane) =
+  let has_slot =
+    match lane with
+    | { slots = _ :: _; _ } | { cli_slots = _ :: _; _ } -> true
+    | { slots = []; cli_slots = []; _ } -> false
+  in
+  has_slot
+  &&
+  match lane.owner with
+  | Runtime_schema.Builtin _ -> String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id
+  | Runtime_schema.Addon { output; _ } ->
+    String.equal output lane_id && List.exists (String.equal lane_id) addon_served_lane_ids
+;;
+
+let validate_required_lanes ~addon_served_lane_ids required_lane_ids admitted_lanes =
   let rec loop = function
     | [] -> Ok ()
     | lane_id :: rest ->
-      (match
-         List.find_opt
-           (fun (lane : admitted_lane) ->
-              String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
-           admitted_lanes
-       with
-       | Some { slots = _ :: _; _ }
-       | Some { cli_slots = _ :: _; _ } -> loop rest
-       | Some { slots = []; cli_slots = []; _ } | None ->
-         Error (Required_lane_unavailable { lane_id }))
+      if List.exists (serves_required_lane ~addon_served_lane_ids lane_id) admitted_lanes
+      then loop rest
+      else Error (Required_lane_unavailable { lane_id })
   in
   loop required_lane_ids
 ;;
@@ -392,7 +408,7 @@ let required_less_excused required_lane_ids ~excused_lane_ids =
 
 (* [publish]'s admission, which changes nothing: the lanes a publication would
    admit and the slots it would reject, or the error that refuses it. *)
-let admit_publication ~required_lane_ids ~excused_lane_ids ~lanes resolver_snapshot =
+let admit_publication ~required_lane_ids ~addon_served_lane_ids ~excused_lane_ids ~lanes resolver_snapshot =
   let* () =
     match List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) ->
       not lane.enabled && List.mem (Runtime_schema.exact_lane_key lane.owner) required_lane_ids) lanes with
@@ -404,24 +420,25 @@ let admit_publication ~required_lane_ids ~excused_lane_ids ~lanes resolver_snaps
   in
   let* () =
     validate_required_lanes
+      ~addon_served_lane_ids
       (required_less_excused required_lane_ids ~excused_lane_ids)
       exact_output_lanes
   in
   Ok (exact_output_lanes, rejected_slots)
 ;;
 
-let check_publication ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
-  admit_publication ~required_lane_ids ~excused_lane_ids ~lanes resolver_snapshot
+let check_publication ?(required_lane_ids = []) ?(addon_served_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
+  admit_publication ~required_lane_ids ~addon_served_lane_ids ~excused_lane_ids ~lanes resolver_snapshot
   |> Result.map (fun (_admitted_lanes, _rejected_slots) -> ())
 ;;
 
-let publish ?(runtime_observations = []) ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
+let publish ?(runtime_observations = []) ?(required_lane_ids = []) ?(addon_served_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
   let* registry, subscriptions = with_publication_lock (fun () ->
   match !active_reservation with
   | Some _ -> Error Publication_busy
   | None ->
     let* exact_output_lanes, rejected_slots =
-      admit_publication ~required_lane_ids ~excused_lane_ids ~lanes resolver_snapshot
+      admit_publication ~required_lane_ids ~addon_served_lane_ids ~excused_lane_ids ~lanes resolver_snapshot
     in
     let registry =
       { runtime_observations
@@ -430,6 +447,7 @@ let publish ?(runtime_observations = []) ?(required_lane_ids = []) ?(excused_lan
       ; exact_output_lanes
       ; rejected_slots
       ; required_lane_ids
+      ; addon_served_lane_ids
       }
     in
     let previous = Atomic.get published in
@@ -484,6 +502,7 @@ let prepare_replacement ~runtime_observations ~lanes ~excused_lane_ids ~load_res
     in
     let* exact_output_lanes, rejected_slots =
       admit_publication ~required_lane_ids:previous.required_lane_ids
+        ~addon_served_lane_ids:previous.addon_served_lane_ids
         ~excused_lane_ids ~lanes resolver_snapshot
     in
     Ok
@@ -496,6 +515,7 @@ let prepare_replacement ~runtime_observations ~lanes ~excused_lane_ids ~load_res
             ; exact_output_lanes
             ; rejected_slots
             ; required_lane_ids = previous.required_lane_ids
+            ; addon_served_lane_ids = previous.addon_served_lane_ids
             }
       }
 ;;

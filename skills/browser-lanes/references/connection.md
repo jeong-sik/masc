@@ -21,12 +21,13 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     운영자뿐이라 같은 호출을 되풀이해도 답은 같다. 운영자에게 알린다.
   - `live_transport_unsupported`: 고른 연결(`clientId`, `transport`)이 그 일
     (`capability`)을 못 한다. live 연결은 방식(`transport`)에 따라 할 수 있는 일이
-    다르다. `drag`는 `webdriver_bidi` 연결만 하고, `set_zoom`은
-    `web_extension` 연결만 한다. `activate_tab`은 둘 다 하지만 `webdriver_bidi`는
-    브라우저 창에 포커스도 준다. 읽기(`mode=text`·`elements`·`scene`·`screenshot`)는
-    셋 다 한다. `ego_task_space` 연결은 읽기, `open_tab`, `close_tab`, `BrowserGoto`,
-    그리고 click·`click_at`·`double_click`·hover·`scroll`·`scroll_at`·fill·
-    `select_option`·`follow_link`·`type_text`·`press_key` 를 한다. drag·터치·
+    다르다. `drag`는 `webdriver_bidi`·`ego_task_space` 연결이 하고, `set_zoom`은
+    `web_extension` 연결만 한다. `activate_tab`은 `web_extension`·`webdriver_bidi`
+    둘 다 하지만 `webdriver_bidi`는 브라우저 창에 포커스도 준다. 읽기
+    (`mode=text`·`elements`·`scene`·`screenshot`)는 셋 다 한다. `ego_task_space`
+    연결은 읽기, `open_tab`, `close_tab`, `back`·`forward`·`reload`, `BrowserGoto`,
+    그리고 click·`click_at`·`double_click`·hover·drag·`scroll`·`scroll_at`·fill·
+    `select_option`·`follow_link`·`type_text`·`press_key` 를 한다. 터치·
     `set_zoom`·`set_viewport`·`activate_tab`·frame 안 입력은 하지 않는다. `press_key` 는
     이름 있는 키와 ASCII 문자만 누르고, 다른 글자는 `type_text` 로 친다. 이동·닫기·
     입력은 그 공간에서 에이전트가 연 페이지만 한다(첫 페이지 `p1` 포함). 그 공간에서

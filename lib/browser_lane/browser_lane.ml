@@ -537,9 +537,9 @@ let live_transport_serves transport capability =
   | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
-                    | Trusted_drag | Trusted_keyboard) -> true
+                    | Trusted_drag | Trusted_keyboard | Tab_history) -> true
   | Ego_task_space, (Document_source | Touch_input | Browser_zoom | Viewport_resize
-                    | Tab_activation | Tab_history | Dialog_answer | Frame_read) -> false
+                    | Tab_activation | Dialog_answer | Frame_read) -> false
 ;;
 
 let live_transports_serving capability =

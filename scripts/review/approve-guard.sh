@@ -84,10 +84,12 @@ compute_scope() {
 read_current_pr
 [ "$source_receipt" -eq 0 ] || [ "$review_policy" = source ] || refuse "source receipts cannot admit a release"
 current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || refuse "complete review diff unavailable"
-# Merge admission must establish the policy-specific CI identity before
-# review verdicts are parsed. Release verdicts are bound to this selected run;
-# checking reviews first would leave release_run empty and admit another run.
-if [ "$merge_check" -eq 1 ]; then
+# Merge admission and release review admission must both establish the
+# policy-specific CI identity before review verdicts are parsed. Release
+# verdicts are bound to this selected run; checking reviews first would leave
+# release_run empty and admit another run, or trip `set -u` when a second
+# release reviewer publishes against a head that already has a release run.
+if [ "$merge_check" -eq 1 ] || [ "$review_policy" = release ]; then
   check_current_ci
 fi
 # Read-only candidate admission uses repository review evidence; Actions

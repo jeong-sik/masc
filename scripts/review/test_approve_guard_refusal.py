@@ -30,6 +30,8 @@ case "$path" in
   repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review.json";;
   repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json";;
   repos/*/issues/*/comments*) f="$FAKE_DIR/comments.json";;
+  repos/*/actions/runs/*/jobs*) f="$FAKE_DIR/jobs.json";;
+  repos/*/actions/runs*) f="$FAKE_DIR/runs.json";;
   repos/*/pulls/*) f="$FAKE_DIR/pr.json";;
   *) echo "fake gh: unexpected $path" >&2; exit 9;;
 esac
@@ -40,6 +42,15 @@ exec jq -r "$expr" "$f"
 def footer_line(head=HEAD, diff=DIFF, tail=True):
     line = f"approve-guard: head `{head}` · source review"
     return line + (f" · reviewed base `{BASE}` · diff sha256 `{diff}`" if tail else "")
+
+
+def release_footer(head=HEAD, diff=DIFF):
+    return (f"approve-guard: head `{head}` · release review"
+            f" · reviewed base `{BASE}` · diff sha256 `{diff}`"
+            f" · release run {RELEASE_RUN}")
+
+
+RELEASE_RUN = 5550001111
 
 
 class GuardHarness(unittest.TestCase):
@@ -67,6 +78,17 @@ class GuardHarness(unittest.TestCase):
         (self.data / "status.json").write_text(json.dumps({"statuses": []}))
         (self.data / "reviews.json").write_text("[]")
         (self.data / "comments.json").write_text("[]")
+        # Release policy fixtures: a completed successful RC run and its jobs.
+        self.rc_run_id = 5550001111
+        (self.data / "runs.json").write_text(json.dumps({"workflow_runs": [{
+            "id": self.rc_run_id, "status": "completed", "conclusion": "success",
+            "head_sha": HEAD, "head_branch": "release/v0.62.0",
+            "path": ".github/workflows/release-candidate.yml"}]}))
+        (self.data / "jobs.json").write_text(json.dumps({"jobs": [
+            {"name": "compile / Release checks passed", "status": "completed", "conclusion": "success", "id": 1},
+            {"name": "behavior / test suite", "status": "completed", "conclusion": "success", "id": 2},
+            {"name": "installation / release", "status": "completed", "conclusion": "success", "id": 3},
+            {"name": "Record candidate verification", "status": "completed", "conclusion": "success", "id": 4}]}))
 
     def review(self, footer, *, assoc="COLLABORATOR", first_suffix="", scope=SCOPE):
         scope_line = f"review-scope: {scope}\n" if scope is not None else ""
@@ -198,6 +220,54 @@ class Case(GuardHarness):
         self.assertEqual(r.stderr, "")
         calls = (self.data / "calls.log").read_text().splitlines()
         self.assertFalse(any("/compare/" in path for path in calls))
+
+
+class ReleaseSecondApprover(GuardHarness):
+    """A second release reviewer publishing against a head that already has a
+    release approval previously died with `release_run: unbound variable`
+    because check_verdict read $release_run before check_current_ci ran."""
+
+    def setUp(self):
+        super().setUp()
+        # Release policy engages when the PR base branch is release/v*.
+        (self.data / "pr.json").write_text(json.dumps({
+            "state": "open", "draft": False, "merged": False,
+            "base": {"ref": "release/v0.62.0", "sha": BASE},
+            "head": {"sha": HEAD, "ref": "release/v0.62.0"},
+            "user": {"login": "author-keeper"}}))
+
+    def release_review(self, *, who="reviewer-keeper", run=RELEASE_RUN):
+        body = (f"verdict: PASS head: {HEAD} by: {who}\nrelease notes\n\n---\n"
+                f"review-scope: {SCOPE}\n{release_footer()}")
+        return {"id": 77, "state": "APPROVED", "author_association": "COLLABORATOR",
+                "body": body, "commit_id": HEAD, "user": {"login": who},
+                "submitted_at": "2026-10-22T20:00:00Z"}
+
+    def test_second_release_approver_does_not_hit_unbound_release_run(self):
+        # Publish mode (no --merge-check, no --source-receipt): the guard must
+        # establish release_run via check_current_ci before parsing the verdict.
+        rev = self.release_review()
+        (self.data / "review.json").write_text(json.dumps(rev))
+        (self.data / "reviews.json").write_text(json.dumps([rev]))
+        r = self.run_guard("--check")
+        # The guard runs the RC CI read and either admits or refuses by policy;
+        # it must never die on an unbound release_run variable.
+        self.assertNotIn("release_run: unbound variable", r.stderr)
+        self.assertIn(r.returncode, (0, 2), r.stderr)
+
+    def test_second_release_approver_check_only_admits_with_footer(self):
+        rev = self.release_review()
+        (self.data / "review.json").write_text(json.dumps(rev))
+        (self.data / "reviews.json").write_text(json.dumps([rev]))
+        (self.data / "user.json").write_text(json.dumps({"login": "second-reviewer"}))
+        r = self.run_guard("--check", "--review-base", BASE, "--review-diff", DIFF,
+                           "--body", str(self._body_file()))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def _body_file(self):
+        p = self.tmp / "body.txt"
+        p.write_text(f"verdict: PASS head: {HEAD} by: second-reviewer\nrelease notes")
+        return p
 
 
 class SourceReceiptCase(GuardHarness):

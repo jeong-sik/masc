@@ -104,32 +104,32 @@ session and is not an automatic fallback for a logged-in tab.
 
 ### What each live connection serves
 
-The two live transports reach the browser differently, so each serves a
+The three live transports reach the browser differently, so each serves a
 different part of the live lane's work. `Browser_lane.live_transport_serves`
 is the one table; the server admits live work by it and the Keeper tools
 build their rejection from it.
 
-| Live work | Reached by | WebExtension | BiDi |
-|---|---|---|---|
-| `tab_listing` | `BrowserTabs` | yes | yes |
-| `text_read` | `BrowserRead mode=text` | yes | yes |
-| `scene_read` | `BrowserRead mode=scene`/`regions` | yes | yes |
-| `viewport_capture` | `BrowserRead mode=screenshot` | yes | yes |
-| `element_inventory` | `BrowserRead mode=elements` | yes | yes |
-| `document_source` | the `browser_document` Lane Add-on source | yes | yes |
-| `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes |
-| `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer |
-| `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | no | yes |
-| `touch_input` | `tap_at`, `swipe` | no | yes |
-| `viewport_resize` | `set_viewport` | no | yes |
-| `tab_history` | `back`, `forward`, `reload`, only for a tab the same connection opened | no | yes |
-| `tab_navigation` | `BrowserGoto`, only for a tab the same connection opened | no | yes |
-| `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes |
-| `dialog_answer` | `accept_dialog`, `dismiss_dialog`, only for a tab the same connection opened; the dialog is read from the tab's `list_tabs` row (`dialog`: type, message, defaultValue) | no | yes |
-| `point_scroll` | `scroll_at` | yes | yes, a trusted wheel |
-| `trusted_hover` | `hover`, `hover_at` | no | yes |
-| `trusted_drag` | `drag_to`, `drag` | no | yes |
-| `tab_activation` | `activate_tab` | yes | yes, and it also focuses the window |
+| Live work | Reached by | WebExtension | BiDi | ego |
+|---|---|---|---|---|
+| `tab_listing` | `BrowserTabs` | yes | yes | yes, every tab in the task space |
+| `text_read` | `BrowserRead mode=text` | yes | yes | yes, only the pages the task space manages |
+| `scene_read` | `BrowserRead mode=scene`/`regions` | yes | yes | yes, only the pages the task space manages |
+| `viewport_capture` | `BrowserRead mode=screenshot` | yes | yes | yes, only the pages the task space manages |
+| `element_inventory` | `BrowserRead mode=elements` | yes | yes | yes, only the pages the task space manages |
+| `document_source` | the `browser_document` Lane Add-on source | yes | yes | no |
+| `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes | no |
+| `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer | no |
+| `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | no | yes | no |
+| `touch_input` | `tap_at`, `swipe` | no | yes | no |
+| `viewport_resize` | `set_viewport` | no | yes | no |
+| `tab_history` | `back`, `forward`, `reload`, only for a tab the same connection opened | no | yes | no |
+| `tab_navigation` | `BrowserGoto`, only for a tab the same connection opened | no | yes | no |
+| `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes | no |
+| `dialog_answer` | `accept_dialog`, `dismiss_dialog`, only for a tab the same connection opened; the dialog is read from the tab's `list_tabs` row (`dialog`: type, message, defaultValue) | no | yes | no |
+| `point_scroll` | `scroll_at` | yes | yes, a trusted wheel | no |
+| `trusted_hover` | `hover`, `hover_at` | no | yes | no |
+| `trusted_drag` | `drag_to`, `drag` | no | yes | no |
+| `tab_activation` | `activate_tab` | yes | yes, and it also focuses the window | no |
 
 The extension acts through DOM calls inside the page and has no pointer the
 browser treats as the operator's. The BiDi peer sends pointer and wheel input
@@ -137,6 +137,14 @@ through the browser. Its `activate_tab` uses
 [`browsingContext.activate`](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/browsingContext/activate),
 which also gives the tab's window system focus; the extension's activation
 does not take window focus.
+
+The ego connection runs one fixed script per command in an ego lite task space
+with `ego-browser nodejs` (RFC-browser-live-ego). Its reads run the same page
+scripts as the other connections, so selectors and `within` mean the same
+thing. Its tab IDs follow the page labels ego gives (`p1`, `p2`), which ego
+keeps for the life of the space. A tab the operator opened in that space is
+listed, and a read of it is refused before any script runs. Input and tab
+effects are not served on it.
 
 A request its connection does not serve is a selection failure: the server
 queues no command and answers `live_transport_unsupported`. A Keeper tool's
@@ -222,8 +230,8 @@ browser Add-on that cannot take a host: none declared or one switched off is
 that the server does not run is `invalid`, and one the server cannot read is
 `needs_verification`. A workspace with no launcher installed has no such line.
 
-`transport` is `web_extension` or `webdriver_bidi`. The TUI browser picker
-displays WebExtension or BiDi beside the browser name. When both hosts attach
+`transport` is `web_extension`, `webdriver_bidi` or `ego_task_space`. The TUI
+browser picker displays WebExtension, BiDi or ego beside the browser name. When both hosts attach
 to the same Firefox, select the BiDi client for trusted `hover_at` or `drag`,
 then read its tabs and capture its viewport. Tab IDs do not transfer between
 those connections. [What each live connection serves](#what-each-live-connection-serves)
@@ -252,7 +260,8 @@ Native transport requires `x-lane: live`, the lane token, and the identity
 headers: `x-browser-client-id`, `x-browser-name`, `x-browser-version`, and
 `x-browser-engine-version`. Hosts also declare `x-browser-transport` as
 `web_extension` or `webdriver_bidi`; an omitted transport identifies the
-WebExtension poll contract. Empty or unknown transports, missing required
+WebExtension poll contract. The `ego_task_space` connection runs inside the
+browser Add-on worker and polls there, not over this route. Empty or unknown transports, missing required
 identity headers, and a transport change on an existing client ID are rejected. Each client
 has its own queue and pending response owners. An HTTP result from a different
 client cannot settle another client's command. Native EOF attempts a bounded

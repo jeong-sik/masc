@@ -21,3 +21,10 @@ type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture 
 (** The name a verb goes by on the wire and in the host's record. *)
 val verb_to_wire : verb -> string
 val verb_of_wire : string -> verb option
+
+(** The verb, its arguments and the acting Keeper of one command the server
+    queued for a live connection the browser Add-on worker owns. *)
+val decode : Browser_lane.issued -> (verb * Yojson.Safe.t * string option, string) result
+
+(** The result envelope a live connection delivers for one command. *)
+val payload : (Yojson.Safe.t, failure) result -> Yojson.Safe.t

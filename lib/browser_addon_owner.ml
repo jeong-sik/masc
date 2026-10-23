@@ -10,7 +10,8 @@ type t = {
   mutable clients : B.client_id list;
   mutable automation : cleanup option;
   mutable stagehand : cleanup option;
-  mutable live : cleanup option;
+  (* The live connections this worker runs, one per transport. *)
+  mutable live : (B.live_transport * cleanup) list;
   mutable models : Browser_addon_models.t option;
   mutable uploads : Browser_addon_uploads.t option;
   mutable downloads : Browser_addon_downloads.t option;
@@ -28,7 +29,7 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;live=None;models=None;uploads=None;downloads=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;live=[];models=None;uploads=None;downloads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Serving,B.Lane_name.Automation -> if Option.is_some t.automation then B.Enabled else B.Disabled
@@ -109,14 +110,16 @@ let attach_stagehand t ~models ~execute ~session ~cleanup =
       B.install_server_session_observer B.Server_stagehand (Some session);
       t.stagehand <- Some (owned_cleanup "Stagehand" cleanup);Ok ())
 let attach_live t ~client_id ~cleanup =
-  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.live with
-    | Retired,_ -> Error "browser owner is retired"
-    | Serving,Some _ -> Error "owned live BiDi backend is already attached"
-    | Serving,None ->
-      if not (List.mem client_id t.clients) then Error "live BiDi client was not registered by this owner"
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase with
+    | Retired -> Error "browser owner is retired"
+    | Serving ->
+      if not (List.mem client_id t.clients) then Error "live client was not registered by this owner"
       else match List.find_opt (fun (client:B.client_info) -> client.client_id=client_id) (B.active_clients ()) with
-        | Some {transport=B.Webdriver_bidi;_} -> t.live<-Some (owned_cleanup "live BiDi" cleanup);Ok ()
-        | None | Some {transport=(B.Web_extension | B.Ego_task_space);_} -> Error "owned live client is not an active BiDi connection")
+        | Some {transport=(B.Webdriver_bidi | B.Ego_task_space) as transport;_} ->
+          let name = "live " ^ B.live_transport_to_string transport in
+          if List.mem_assoc transport t.live then Error ("an owned " ^ name ^ " connection is already attached")
+          else (t.live <- (transport, owned_cleanup name cleanup) :: t.live; Ok ())
+        | None | Some {transport=B.Web_extension;_} -> Error "owned live client is not an active connection this worker runs")
 let revoke t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
     match t.phase with
@@ -140,8 +143,13 @@ let cleanup t =
      The lazy values retain the original result rather than replaying teardown. *)
   Eio.Cancel.protect (fun () ->
     let settle = function None -> Ok () | Some cleanup -> Eio.Lazy.force cleanup in
+    let settle_live () =
+      match List.filter_map (fun result -> match result with Ok () -> None | Error detail -> Some detail)
+              (Eio.Fiber.List.map (fun (_, cleanup) -> Eio.Lazy.force cleanup) t.live) with
+      | [] -> Ok ()
+      | errors -> Error (String.concat "; " errors) in
     let live,(automation,stagehand) = Eio.Fiber.pair
-      (fun () -> settle t.live)
+      settle_live
       (fun () -> Eio.Fiber.pair (fun () -> settle t.automation) (fun () -> settle t.stagehand)) in
     let uploads=cleanup_uploads t in
     let downloads=match t.downloads with
@@ -292,3 +300,16 @@ let dispatch t (request : W.request) =
   | W.Issue {route;verb;actor;timeout_sec;only_if_idle} ->
     issue t ~incarnation:request.incarnation ~upload_admission:Ordinary
       ~route ~verb ~actor ~timeout_sec ~only_if_idle
+
+(* A live connection this worker runs asks the owner as a native host asks the
+   server, without leaving the process. *)
+let live t command = dispatch t {W.incarnation=t.incarnation;command}
+let poll_live t ~client ~window_sec = match live t (W.Poll {client;window_sec}) with
+  | W.Poll_result {command;_} -> Ok command
+  | W.Service_refusal {message;_} -> if is_retired t then Ok None else Error message
+  | W.Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> Error "unexpected reply to a live poll"
+let deliver_live t ~client_id ~id ~payload = match live t (W.Deliver {client_id;id;payload}) with
+  | W.Receipt -> Ok ()
+  | W.Service_refusal {message;_} -> Error message
+  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ -> Error "unexpected reply to a live delivery"
+let disconnect_live t client_id = ignore (live t (W.Disconnect client_id))

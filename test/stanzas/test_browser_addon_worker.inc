@@ -71,6 +71,12 @@
   masc.lane_addon_call_context mcp_protocol alcotest eio eio.unix eio_main yojson unix))
 
 (test
+ (name test_browser_addon_live_ego)
+ (modules test_browser_addon_live_ego)
+ (libraries masc masc.browser_lane masc.browser_configuration masc.time_compat
+  masc.fs_compat masc.string_util masc_process alcotest base64 otoml eio eio_main yojson unix))
+
+(test
  (name test_browser_addon_live_bidi)
  (modules test_browser_addon_live_bidi)
  (libraries masc masc.browser_lane masc.browser_configuration masc.time_compat

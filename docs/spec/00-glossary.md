@@ -2245,15 +2245,16 @@ status: reference
 
 **Live Transport (라이브 전송 방식)**
 : MASC 실시간 브라우저 연결(`live client`)이 브라우저와 통신하는 물리적·프로토콜 전송 수단(#41795, #41839).
-  닫힌 두 값 `Web_extension`(`"web_extension"`)과 `Webdriver_bidi`(`"webdriver_bidi"`)이다(`Browser_lane.live_transport`).
+  닫힌 세 값 `Web_extension`(`"web_extension"`), `Webdriver_bidi`(`"webdriver_bidi"`), `Ego_task_space`(`"ego_task_space"`)이다(`Browser_lane.live_transport`).
   각 전송 방식이 제공할 수 있는 작업 역량(`Browser_lane.live_capability`)은 타입 표(`live_transport_serves`)로 엄격히 고정된다.
   - **역량 22종**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Dom_interaction`·`Point_click`·`Point_scroll`·`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Touch_input`·`Trusted_keyboard`·`Browser_zoom`·`Viewport_resize`·`Tab_activation`·`Tab_history`·`Tab_closing`·`Tab_creation`·`Dialog_answer`.
   - **`web_extension`**: 브라우저 확장 프로그램의 페이지 내부 DOM 조작 기반. 탭 활성화(`Tab_activation` / `activate_tab`)와 측정된 확장 줌(`Browser_zoom`)을 제공하지만, 브라우저가 인정하는 신뢰 포인터가 없어 신뢰 포인터·키보드 역량(`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Touch_input`·`Trusted_keyboard`), 뷰포트 크기(`Viewport_resize`), 탭 기록·닫기(`Tab_history`·`Tab_closing`), 기본 탭 생성(`Tab_creation`), JS 대화상자 응답(`Dialog_answer`)은 지원하지 않는다.
   - **`webdriver_bidi`**: W3C WebDriver BiDi 프로토콜 기반의 브라우저 호스트 직접 제어(`masc-browser-host --bidi-url`). 신뢰 포인터·키보드 역량(`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Touch_input`·`Trusted_keyboard`), 뷰포트 크기(`Viewport_resize`), 탭 기록·닫기(`Tab_history`·`Tab_closing`: 이 연결이 연 탭만), 기본 탭 생성(`Tab_creation`), JS 대화상자 수락·거절(`Dialog_answer`: 이 연결이 연 탭만)을 제공하지만, 창 포커스를 함께 빼앗는 특성 때문에 조용한 탭 활성화(`Tab_activation`)와 확장 줌(`Browser_zoom`)은 제공하지 않는다.
-  - **공통 지원(9종)**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Dom_interaction`·`Point_click`·`Point_scroll`. 두 전송 방식의 제공·비제공 조합은 코드가 전부 나열해 고정한다(`Browser_lane.live_transport_serves`).
+  - **`ego_task_space`**: ego lite 작업 공간 하나를 browser Lane Addon worker 가 `ego-browser nodejs` 로 다룬다(RFC-browser-live-ego). 읽기 다섯 종(`Tab_listing`·`Text_read`·`Element_inventory`·`Viewport_capture`·`Scene_read`)만 제공한다. 탭 번호는 ego 가 붙인 페이지 라벨(`p1`, `p2`)을 따르고, 운영자가 그 공간에 연 탭은 목록에만 나오고 읽기는 효과 없이 거절된다.
+  - **공통 지원(9종)**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Dom_interaction`·`Point_click`·`Point_scroll`. `web_extension`과 `webdriver_bidi` 두 전송 방식의 제공·비제공 조합은 코드가 전부 나열해 고정한다(`Browser_lane.live_transport_serves`).
   선택된 연결의 전송 방식이 요청된 역량을 제공하지 못하면 브라우저 Add-on 은 명령을 큐에 넣기 전에 `live_transport_unsupported` 거절 코드로 차단하고, 거절된 연결(`clientId`)과 그 전송 방식(`transport`), 요청된 역량(`capability`)을 함께 돌려준다. 어느 경우에도 브라우저 명령은 발송되지 않는다. 선택한 연결에서 성공한 실시간 브라우저 응답(`BrowserRead` 등)과 탭·연결 목록(`BrowserTabs`)의 각 항목은 `clientId`와 함께 `transport` 필드를 노출하며, 연결 선택 이전의 오류 응답(`No_live_client` 등)과는 구분된다(#41839).
   - **이름 경계**: `transport`는 이 문서에서 여러 축으로 쓰인다. 이 항목은 연결된 브라우저와
-    통신하는 수단(`Browser_lane.live_transport`, `Web_extension`·`Webdriver_bidi`)만 가리킨다.
+    통신하는 수단(`Browser_lane.live_transport`, `Web_extension`·`Webdriver_bidi`·`Ego_task_space`)만 가리킨다.
     서버·MCP 계층의 전송 통로는 `lib/transport.ml`과 `09-server-transport.md`의
     HTTP·WebSocket·gRPC가 다루는 별개 축이고, 악기 재생을 앞으로 진행시키는 운반은
     `tools/alphatex/ARRANGEMENT.md`의 "WAV arrangement transport"·"Expressive MIDI
@@ -2312,6 +2313,12 @@ status: reference
   → [Browser_addon_live_bidi](../../lib/browser_addon_live_bidi.mli) ·
   [Browser_bidi_host_status](../../lib/browser_bidi_host_status.mli) ·
   [Browser Addon lifecycle](../design/browser-addon-lifecycle.md)
+
+**Ego Task Space Connection (ego 작업 공간 연결)**
+: `[browser.live.ego]`의 `command`(ego-browser 절대 경로)와 `space`(작업 공간 이름)로 browser Lane Addon worker 가 여는 live 연결이다. 브라우저 프로세스를 소유하지 않으므로 설정은 정리 기록이 아니라 worker 인자(`--live-ego-command`, `--live-ego-space`)로 간다. 명령마다 고정 스크립트 하나를 `ego-browser nodejs`로 실행하고, detach 때 작업 공간을 끝낸다(`finish({keep: []})`). ego 공간은 운영자 ego 프로필의 쿠키를 같이 쓰므로 로그인된 사이트를 읽을 수 있다.
+  → [Browser_addon_live_ego](../../lib/browser_addon_live_ego.mli) ·
+  [Browser_ego_peer](../../lib/browser_ego_peer.mli) ·
+  [RFC-browser-live-ego](../rfc/RFC-browser-live-ego.md)
 
 **Machine Change Mark (기계 변경 표식)**
 : MSX Lane·DOS Lane 기계의 화면이 바뀌었는지 싸게 묻기 위한 표식. 변경 횟수(`count`)와

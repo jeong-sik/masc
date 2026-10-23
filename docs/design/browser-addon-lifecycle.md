@@ -5,9 +5,22 @@ The Gecko driver starts only with an attached browser Add-on and a configured,
 enabled `[browser.automation]`. Chrome/Stagehand also starts inside that worker,
 with its original native process owner and shared Exact Output broker. The Keeper
 live Firefox also starts inside that worker when `[browser.live.bidi]` is
-configured and `[browser.live]` is enabled. Attaching the Add-on acquires its
-browser resources; detaching it revokes input and joins their cleanup. The
-configured Firefox profile keeps its logins across attachments.
+configured and `[browser.live]` is enabled, and so does an ego lite
+connection when `[browser.live.ego]` is configured. Attaching the Add-on
+acquires its browser resources; detaching it revokes input and joins their
+cleanup. The configured Firefox profile keeps its logins across attachments.
+
+The ego connection owns no browser process. The worker receives its command
+and task space name as arguments (`--live-ego-command`, `--live-ego-space`),
+not through the cleanup descriptor, because nothing of it needs cleanup after
+the worker. It reads `ego-browser --version`, opens or resumes the task space
+by name, and registers one client. Each command runs `ego-browser nodejs`
+once, stopped with its process group if it outlives the read window.
+Screenshots pass through a private directory that run creates and removes.
+Detaching ends the task space, which closes the pages it manages and keeps the
+tabs the operator opened there. An ego that cannot start, or a task space name
+the operator holds, fails the worker's start as a configured live Firefox
+does.
 
 The live Firefox path starts a new browser through the native process owner.
 It checks the original kernel lease and child identity, the configured profile

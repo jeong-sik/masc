@@ -39,9 +39,10 @@ val attach_stagehand : t -> models:bool ->
     exception from either cleanup prevents a successful retirement receipt. *)
 val attach_live : t -> client_id:Browser_lane.client_id ->
   cleanup:(unit -> (unit, string) result) -> (unit, string) result
-(** Bind cleanup of an already registered exact live BiDi client to this owner.
-    Retire revokes its input before joining the original peer and child. Existing
-    extension clients grant no browser-process ownership. *)
+(** Bind cleanup of an already registered exact live client this worker runs,
+    a BiDi or an ego connection, one of each at most. Retire revokes its input
+    before joining its connection: the original BiDi peer and child, or the ego
+    task space. Existing extension clients grant no browser-process ownership. *)
 val revoke : t -> unit
 (** First retire admission, then wake pending work and retire the owner's client
     IDs. Interrupted issued work has an unknown outcome and is never replayed. *)
@@ -55,6 +56,14 @@ val publish_download : t -> string -> (Yojson.Safe.t, string) result
 (** Completed owned download producer. This is independent of LLM consumers. *)
 val cleanup_downloads : t -> (unit, string) result
 (** Invoke only after confirmed owned backend teardown. Retain unresolved bytes. *)
+(** A live connection this worker runs: its next command, or [None] once the
+    window passed or the owner retired; its result for one command; and its
+    end. Each is the request a native host sends, made inside the worker. *)
+val poll_live : t -> client:Browser_lane.client_info -> window_sec:float ->
+  (Browser_lane.issued option, string) result
+val deliver_live : t -> client_id:Browser_lane.client_id -> id:string -> payload:Yojson.Safe.t ->
+  (unit, string) result
+val disconnect_live : t -> Browser_lane.client_id -> unit
 val dispatch_upload : t -> id:string -> actor:string ->
   route:Browser_lane.route -> verb:Browser_lane.verb -> Browser_addon_wire.reply
 (** Mandatory one-use upload admission beneath the optional tool middleware.

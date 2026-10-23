@@ -1,5 +1,8 @@
 # alphaTex in the terminal
 
+For a complete phrase, voicing and three-lane arrangement experiment, see the [eight-bar music laboratory](MUSICAL-LAB.md).
+
+
 The full score view uses the pinned official alphaTab 1.8.4 importer,
 alphaSkia 3.5.147 engraver, MIDI generator and AlphaSynth synthesizer. MASC does not translate
 notation into its own reduced score model. Bravura is loaded explicitly for

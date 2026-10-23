@@ -365,7 +365,9 @@ After `:select-notes START END [LOW HIGH]` or `:select-all`, use
 (halfway points round forward). Lengths and dynamics stay unchanged. The grid
 uses quarter-note beats for phrases/PPQ MIDI or frames for SMPTE MIDI and must
 resolve to whole source ticks. The edit is one undoable transaction; invalid
-new same-key overlaps, source routing changes or document bounds refuse the entire edit.
+new same-key overlaps and source routing changes refuse the entire edit.
+Phrase notes must remain inside the phrase length. Imported MIDI may extend its
+edited performance to retain a moved note's end, as with other source note edits.
 An original MIDI overlap may remain; quantization cannot introduce a new one.
 The selection anchor follows the grid so later copy/paste retains its timing.
 The existing `:quantize` command still addresses the selected track/channel.
@@ -525,6 +527,16 @@ one undo removes the progression, and redo restores it. Save, MIDI/WAV export,
 the harmony timeline and editable arrangement handoff use those ordinary notes.
 This command composes authored phrases; imported original MIDI keeps its
 existing source-editing commands.
+
+Musical command positions and lengths accept decimals or integer fractions:
+`:note C4 8.3 1/3 91` starts at tick 7968 and lasts 320 ticks in a phrase.
+`:select-notes 8.3 9` and `:move-notes -1/3 0` use the same exact units.
+Arrangement beat positions and grids, imported-source positions, and MIDI step
+lengths/rests share this parser. Source PPQ uses its own ticks per quarter;
+SMPTE uses its own ticks per frame. For example, `1/7` fits PPQ1001 exactly,
+while `1/3` does not. Values that need fractional ticks, exceed safe integer
+ticks, or contain hexadecimal/exponent notation are refused rather than rounded.
+Negative values are accepted only by signed operations such as `:move-notes`.
 
 Add a rhythm part with `:drum-track Drums`. It creates and selects the single
 General MIDI percussion track on channel 10; ordinary `:track-add` continues to

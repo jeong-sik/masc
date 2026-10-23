@@ -662,6 +662,38 @@ let test_actual_result_bridge_resumes_original_memory_lane ()=with_fixture (fun 
     check string "a result hint cannot consume another Keeper's pending inputs" unrelated_before
       (io (fun () -> Fs_compat.load_file unrelated_path))))
 
+let test_configuration_wake_keeps_queued_keeper_when_global_inventory_is_invalid ()=
+  with_fixture (fun ~sw:_ fixture ->
+  let queue_path=Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+  let queued_before=io (fun () -> Fs_compat.load_file queue_path) in
+  let invalid_scope=Filename.concat (Store.root fixture.store) "tool-request-owners/unknown-scope" in
+  io (fun () -> Fs_compat.mkdir_p invalid_scope);
+  let require_invalid_inventory ()=match io (fun () -> Owner.discover_all ~store:fixture.store) with
+    | Error _ -> ()
+    | Ok _ -> fail "unknown scope must remain a strict original-inventory refusal" in
+  require_invalid_inventory ();
+  let woke,signal=Eio.Promise.create () and wakes=ref [] in
+  let posts=F.post_count fixture.server in
+  Fun.protect ~finally:(fun () ->
+    Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ())) (fun () ->
+    Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
+      wakes:=(base_path,keeper_name):: !wakes;
+      ignore (Eio.Promise.try_resolve signal ()));
+    Eio.Switch.run (fun bridge_switch ->
+      Server_librarian_addon_wake.install ~sw:bridge_switch ~config:fixture.config;
+      (* The real configuration publisher emits the hint; the bridge, not this
+         test callback, discovers the independently queued Keeper. *)
+      set_enabled fixture false;
+      Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () -> Eio.Promise.await woke));
+    check bool "global inventory corruption cannot discard the actual queued Keeper wake" true
+      (!wakes<>[] && List.for_all (fun name -> name=(fixture.base_path,keeper_name)) !wakes);
+    check string "wake discovery cannot consume or rewrite valid queued input" queued_before
+      (io (fun () -> Fs_compat.load_file queue_path));
+    require_invalid_inventory ();
+    check int "a suspect scope grants no provider dispatch" posts (F.post_count fixture.server);
+    check (list string) "a configuration wake grants no Memory effect" []
+      (io (fun () -> claims fixture.keepers_dir))))
+
 let test_purge_joins_provider_after_memory_unit_returned ()=with_fixture (fun ~sw:_ fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
   fixture.set_response (fun capture ->
@@ -963,6 +995,8 @@ let ()=run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "missing epoch cannot hide or replace a dispatched original" `Quick (test_original_epoch_drift_cannot_remint Missing_epoch);
   test_case "replaced epoch cannot hide or replace a dispatched original" `Quick (test_original_epoch_drift_cannot_remint Replaced_epoch);
   test_case "actual result bridge resumes only the original serialized Memory lane" `Quick test_actual_result_bridge_resumes_original_memory_lane;
+  test_case "configuration wake preserves queued Keepers despite a corrupt global original inventory" `Quick
+    test_configuration_wake_keeps_queued_keeper_when_global_inventory_is_invalid;
   test_case "purge joins the actual provider after the Memory unit returned Pending" `Quick test_purge_joins_provider_after_memory_unit_returned;
   test_case "forged worker Finished cannot commit without original host execution proof" `Quick test_forged_worker_finished_cannot_commit_without_host_proof;
   test_case "mismatched retained final cannot borrow real original host proof" `Quick test_mismatched_retained_judgment_cannot_borrow_host_proof;

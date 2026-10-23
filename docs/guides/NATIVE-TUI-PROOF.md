@@ -17,7 +17,7 @@ characters) and `native-tui-scenario`:
 | `original-tool-result` | TUI, server and the four test executables | `test_keeper_tool_result_source`, `test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`, `test_tui_chat_call_reader` |
 | `code-references` | TUI, server and the five test executables | `test_lsp_workspace_pool`, `test_lsp_questions`, `test_lsp_message_router`, `test_lsp_process_manager`, `test_server_ide_lsp_proxy` |
 | `resource-reading` | TUI, server and the four test executables | `test_tui_published_reports`, `test_tui_resource_document_search`, `test_tui_resource_image_admission`, `test_tui_resource_images` |
-| `addon-lifecycle` | TUI, server and the two test executables | `test_tui_lane_addons`, `test_lane_addon_application` |
+| `addon-lifecycle` | TUI, server, native Addon launcher and the two test executables | `test_tui_lane_addons`, `test_lane_addon_application` |
 | `source-readers` | TUI, server and the seven test executables | The four `original-tool-result` suites plus `test_tui_workspace_entries`, `test_tui_keys`, `test_tui_palette_matching` |
 | `code-drafts` | TUI, server and the five test executables | `test_tui_code_draft`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality`, `test_tui_keys`, `test_tui_palette_matching` |
 

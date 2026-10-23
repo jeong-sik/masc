@@ -316,6 +316,11 @@ let requested_conversation_mode ~(args : Yojson.Safe.t) =
 let voice_agent_capability_fields ~(meta : keeper_meta) =
   let mgr = Keeper_voice_local.get_session_manager () in
   let active_session = Voice_session_manager.get_session mgr ~agent_id:meta.name in
+  let session_active =
+    match active_session with
+    | Some session -> Voice_session_manager.session_is_active session
+    | None -> false
+  in
   let active_mode =
     match active_session with
     | Some session -> Voice_session_manager.session_conversation_mode session
@@ -337,9 +342,9 @@ let voice_agent_capability_fields ~(meta : keeper_meta) =
          @ if realtime_configured then [ `String "realtime_bridge" ] else []) )
   ; ( "voice_loop"
     , Voice_session_manager.voice_loop_json
-        ~session_active:(Option.is_some active_session)
+        ~session_active
         active_mode )
-  ; "session_active", `Bool (Option.is_some active_session)
+  ; "session_active", `Bool session_active
   ; ( "active_session"
     , match active_session with
       | Some session -> Voice_session_manager.session_to_json session

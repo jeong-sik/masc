@@ -21,10 +21,13 @@ type session_status =
 type conversation_mode =
   | Turn_based
   | Realtime_bridge of { endpoint : string }
+  | Realtime_unavailable
 (** Voice loop transport mode. [Realtime_bridge] is only valid when an
     operator-provided realtime bridge endpoint is configured; MASC still owns
     session state and Keeper tool visibility, while the bridge owns live audio
-    frames. *)
+    frames. [Realtime_unavailable] retains realtime intent without a configured
+    endpoint and always produces a suspended session. A configured endpoint
+    or an active local session does not establish audio connection health. *)
 
 type session
 (** An immutable snapshot of one agent's voice session. *)
@@ -38,6 +41,7 @@ type t
 val string_of_conversation_mode : conversation_mode -> string
 val transport_mode_of_conversation_mode : conversation_mode -> string
 val realtime_supported : conversation_mode -> bool
+(** Configured transport capability, not a live connection check. *)
 val realtime_bridge_env : string
 
 val realtime_bridge_endpoint : ?getenv:(string -> string option) -> unit -> string option
@@ -49,6 +53,9 @@ val realtime_bridge_public_json : ?endpoint:string -> unit -> Yojson.Safe.t
     internal-only and is never serialized into this JSON. *)
 
 val session_conversation_mode : session -> conversation_mode
+val session_is_active : session -> bool
+(** Whether the local lifecycle status is [Active]. A registered Idle or
+    Suspended session is retained but inactive; this is not audio health. *)
 
 (** {1 JSON conversion} *)
 
@@ -71,7 +78,8 @@ val start_session :
 (** Re-activates an existing session if one is registered for
     [agent_id]; otherwise creates a fresh session with [voice]
     (defaulting to [Voice_bridge.get_voice_for_agent agent_id]) and
-    persists it to disk. *)
+    persists it to disk. [Realtime_unavailable] suspends both new and existing
+    sessions while preserving realtime intent. *)
 
 val end_session : t -> agent_id:string -> bool
 (** [true] if a session was removed, [false] if [agent_id] had none. *)
@@ -91,6 +99,8 @@ val increment_turn : t -> agent_id:string -> unit
 
 val restore : t -> unit
 (** Loads every [*.json] under the session directory into the
-    in-memory map. Malformed files are silently skipped. *)
+    in-memory map. Malformed files, unknown or missing conversation modes,
+    blank session IDs and agent IDs that differ from their file name are
+    skipped. Valid session ID bytes are preserved. *)
 
 (** {1 Status} *)

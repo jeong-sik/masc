@@ -1,0 +1,47 @@
+{
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/39896648638",
+  "exact_head": "8fcdbca85b55883223c88c0cae4caa3e9ce9dfe0",
+  "conclusion": "success",
+  "suite": "test_keeper_librarian_durable_execution",
+  "tests": 11,
+  "passed": 11,
+  "failed": 0,
+  "suite_seconds": 4.606,
+  "raw_workflow_log_sha256": "4946735f3662d8992aa9157138ab06290f5512a3fa9144d22ffdaae56dcb57cd",
+  "excerpt_file": "history-production-completed-excerpt.txt",
+  "fixture_source_sha256": "31800f85a5e75f7e6144228d58b012f4b471b5faf22236049271f902b52e92b8",
+  "actual_components": [
+    "configured Runtime owner",
+    "persistent Python MCP worker",
+    "common host Exact runner and HTTP",
+    "actual Server_lane_addon_exact authorization",
+    "serialized Keeper Memory lane and purge fence",
+    "source and Memory filesystem locks",
+    "Current Memory and actual atom/official receipts",
+    "external admission ACK and source positions",
+    "durable original/gate/Finished journals"
+  ],
+  "substituted_components": [
+    "resource launch and cleanup (not real Docker)",
+    "loopback provider HTTP endpoint"
+  ],
+  "absorption_model_policy": "disabled; actual captured gate journal and replay still run",
+  "cases": [
+    "checkpoint-only original to Memory and source ACK",
+    "official-only original to Memory and official ACK",
+    "mixed original to both receipts and positions",
+    "production queue Pending suspends following phases",
+    "host result bridge schedules original production queue",
+    "Off before gate intent retains original without new provider",
+    "actual Memory receipt then failed nonempty external ACK recovers locally while Off",
+    "rewritten checkpoint refuses original source publication",
+    "same-trace restart refuses original generation",
+    "purge joins actual provider; replacement worker cannot resubmit unknown original",
+    "destructive Memory epoch reset rejects original"
+  ],
+  "limits": [
+    "Suite duration includes fixture setup and cleanup and is not production latency.",
+    "No paid provider, absorption-model traffic, real Docker, installed binary, visible UI or live Keeper continuity proof.",
+    "Later isolated wake-discovery repair requires its own selected regression; this run only certifies this exact head."
+  ]
+}

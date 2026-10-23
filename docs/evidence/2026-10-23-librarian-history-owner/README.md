@@ -8,6 +8,14 @@ basis comparison. Actual range receipts precede external ACK, both source
 positions, and durable Finished. Uncertain original work never authorizes a
 replacement request or another inference.
 
+Latest completed-history integration: [run39896648638](https://github.com/jeong-sik/masc/actions/runs/39896648638),
+exact `8fcdbca85b55883223c88c0cae4caa3e9ce9dfe0`, **11/11 passed in 4.606 s**.
+[The exact-head receipt](history-production-completed-execution.json) and
+[raw-log excerpt](history-production-completed-excerpt.txt) retain the actual
+component and substitution boundaries. The later review repair isolates a
+malformed global inventory from valid queued Keeper wakes; its regression is a
+separate selection.
+
 ## Recorded execution
 
 - Pending foundation: [run39889133529](https://github.com/jeong-sik/masc/actions/runs/39889133529),

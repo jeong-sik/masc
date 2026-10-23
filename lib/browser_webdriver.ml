@@ -380,10 +380,12 @@ let execute_action t action =
     phase := Started;
     call t session method_ path body in
   let result = match action with
+  | Browser_lane.Action.Control (Browser_lane.Action.Hand_off | Browser_lane.Action.Take_over) ->
+    Error (Protocol Browser_lane.handoff_refused)
   | (Browser_lane.Action.Open_tab url | Browser_lane.Action.Open_window url) as opening ->
     let kind = match opening with
       | Browser_lane.Action.Open_window _ -> "window"
-      | Browser_lane.Action.Open_tab _ | Browser_lane.Action.On_tab _ -> "tab" in
+      | Browser_lane.Action.Open_tab _ | Browser_lane.Action.Control _ | Browser_lane.Action.On_tab _ -> "tab" in
     let* () = absolute_http_url url in
     let* session = session t in
     let* _ = match call t session `GET "/window" None with

@@ -27,7 +27,8 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     (`mode=text`·`elements`·`scene`·`screenshot`)는 셋 다 한다. `mode=snapshot`
     (ego 자신의 접근성 트리와 ref)과 click·fill 의 `target`(그 ref, 또는 role·이름이나
     보이는 글로 고른 대상)은 `ego_task_space` 연결만 한다. `ego_task_space`
-    연결은 읽기, `open_tab`, `close_tab`, `back`·`forward`·`reload`, `accept_dialog`·`dismiss_dialog`, `BrowserGoto`,
+    연결은 읽기, `open_tab`, `close_tab`, `back`·`forward`·`reload`, `accept_dialog`·`dismiss_dialog`,
+    `hand_off`·`take_over`, `BrowserGoto`,
     그리고 click·`click_at`·`double_click`·hover·drag·`scroll`·`scroll_at`·fill·
     `select_option`·`follow_link`·`type_text`·`press_key` 를 한다. 터치·
     `set_zoom`·`set_viewport`·`activate_tab`·frame 안 입력은 하지 않는다. `press_key` 는
@@ -35,6 +36,11 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     입력은 그 공간에서 에이전트가 연 페이지만 한다(첫 페이지 `p1` 포함). 그 공간에서
     운영자가 연 탭은 목록에는 나오지만 읽거나 옮기거나 누르면 거절된다. 로그인이
     필요한 사이트는 `open_tab` 으로 그 주소를 열고 읽는다.
+    로그인 화면이나 캡차처럼 사람이 해야 하는 단계가 나오면 BrowserAct `hand_off` 로
+    공간 전체를 운영자에게 넘기고, 무엇을 해야 하는지 운영자에게 알린다. 넘긴 동안
+    그 공간의 명령은 모두 효과 없이 거절된다. 운영자가 끝났다고 말한 뒤에만
+    `take_over` 로 되찾는다. masc 는 그 말을 확인하지 않으니, 먼저 되찾으면 운영자가
+    쓰던 브라우저를 빼앗게 된다. 되찾은 뒤에는 탭 목록부터 다시 읽는다.
     그 일을 하는 다른 연결이 있으면 그 clientId로 탭 목록과 페이지를 다시
     읽은 뒤 거기서 다시 한다. 탭 ID와 관측은 연결마다 따로다. 그런 연결이 없으면
     운영자에게 알린다.

@@ -141,7 +141,8 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Tab_activation -> interact Activate_tab
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
   | Dialog_answer -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Dismiss_dialog})
-  | Frame_read -> Page_context {tab_id=2;frame_path=["#frame"];mode=`Frames})
+  | Frame_read -> Page_context {tab_id=2;frame_path=["#frame"];mode=`Frames}
+  | Operator_handoff -> Page_act (Action.Control Action.Hand_off))
 
 let capability = testable
   (fun ppf value -> Format.pp_print_string ppf (Lane.live_capability_to_wire value)) ( = )
@@ -150,9 +151,9 @@ let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the extension has no pointer the browser trusts"
-    Lane.[Accessibility_snapshot; Snapshot_target_input; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_answer; Frame_read] (unserved Lane.Web_extension);
-  check (list capability) "the BiDi peer has no ego snapshot or browser zoom"
-    Lane.[Accessibility_snapshot; Snapshot_target_input; Browser_zoom] (unserved Lane.Webdriver_bidi);
+    Lane.[Accessibility_snapshot; Snapshot_target_input; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_answer; Frame_read; Operator_handoff] (unserved Lane.Web_extension);
+  check (list capability) "the BiDi peer has no ego snapshot, browser zoom or hand-off"
+    Lane.[Accessibility_snapshot; Snapshot_target_input; Browser_zoom; Operator_handoff] (unserved Lane.Webdriver_bidi);
   check (list capability) "the ego connection has no document source, touch, zoom, resize, activation or frame reads"
     Lane.[Document_source; Touch_input; Browser_zoom; Viewport_resize; Tab_activation; Frame_read]
     (unserved Lane.Ego_task_space);

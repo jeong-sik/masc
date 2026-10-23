@@ -164,27 +164,28 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       .finally(() => observations.delete(pending))
   }
   function chooseInstrument(choice) {
-    task = task.then(() => {
-      if (!accepting || closed || suspended) return
-      stop()
-      if (choice.kind === 'vst' || choice.kind === 'fluid-selection') {
-        const capture = choice.kind === 'vst' ? captureVstSound(choice.selection, { run: vstSession.run }) : captureFluidSound(choice.path ?? soundfontPath)
-        let cancelled = false
-        const owned = { cancel() { if (!cancelled) { cancelled = true; capture.cancel() } } }
-        pendingSound = owned
-        owned.promise = capture.promise.then(sound => {
-          task = task.then(() => {
-            if (cancelled || pendingSound !== owned || !accepting || closed || suspended) return
-            pendingSound = null
-            adoptSound(sound, choice.preview !== false)
-          }).catch(error => { status = failure(error.message) }).finally(draw)
-          return task
-        }).catch(error => {
-          if (!cancelled && pendingSound === owned && accepting && !closed) status = failure(error.message)
-        }).finally(() => { if (pendingSound === owned) pendingSound = null; nativeRenders.delete(owned); draw() })
-        nativeRenders.add(owned)
-      } else adoptSound(choice)
-    }).catch(error => { status = failure(error.message) }).finally(draw)
+    task = task.then(() => beginInstrumentChoice(choice)).catch(error => { status = failure(error.message) }).finally(draw)
+  }
+  function beginInstrumentChoice(choice) {
+    if (!accepting || closed || suspended) return
+    stop()
+    if (choice.kind === 'vst' || choice.kind === 'fluid-selection') {
+      const capture = choice.kind === 'vst' ? captureVstSound(choice.selection, { run: vstSession.run }) : captureFluidSound(choice.path ?? soundfontPath)
+      let cancelled = false
+      const owned = { cancel() { if (!cancelled) { cancelled = true; capture.cancel() } } }
+      pendingSound = owned
+      owned.promise = capture.promise.then(sound => {
+        task = task.then(() => {
+          if (cancelled || pendingSound !== owned || !accepting || closed || suspended) return
+          pendingSound = null
+          adoptSound(sound, choice.preview !== false)
+        }).catch(error => { status = failure(error.message) }).finally(draw)
+        return task
+      }).catch(error => {
+        if (!cancelled && pendingSound === owned && accepting && !closed) status = failure(error.message)
+      }).finally(() => { if (pendingSound === owned) pendingSound = null; nativeRenders.delete(owned); draw() })
+      nativeRenders.add(owned)
+    } else adoptSound(choice)
   }
   function chooseEffect(value) {
     if (!accepting || closed || suspended) return
@@ -688,7 +689,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         stop(); clearHarmony(); editor = next
         status = notice(`Selected ${projectSoundLabel(audioInstrument())}`); break
       }
-      case 'soundfont-fluid': chooseInstrument({ kind: 'fluid-selection', path: value.path, preview: false }); break
+      case 'soundfont-fluid': beginInstrumentChoice({ kind: 'fluid-selection', path: value.path, preview: false }); break
       case 'step-input':
         if (value.source !== undefined) startStepInput(value.source, value.monitor, value.practice, value.recording)
         else {
@@ -841,6 +842,18 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     task = task.then(async () => {
       // Drain admitted editor decisions even after input admission closes.
       if (closed && analysisKey) return
+      // Transport keys retain their meaning while inspecting harmony.
+      if (!key.ctrl && !key.meta) {
+        if (key.name === 'space') { play(); return }
+        if (key.name === '0') { restart(); return }
+        if (text === '.') { stop(); status = notice('Stopped'); return }
+        if (key.name === 'f' || key.name === 'i') {
+          if (stepInput) throw new Error('Use :step-stop before choosing an instrument')
+          if (key.name === 'f') beginInstrumentChoice({ kind: 'fluid-selection' })
+          else if (accepting && !suspended && !childTask) { stop(); picker.open() }
+          return
+        }
+      }
       if (harmony) {
         if (harmony.kind === 'ready') {
           if (key.name === 'up' || key.name === 'down') harmony.cursor = Math.max(0, Math.min(harmony.result.rows.length - 1, harmony.cursor + (key.name === 'down' ? 1 : -1)))
@@ -865,14 +878,6 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       }
       const eventKind = editor.eventView === 'tempo' ? 'tempo' : editor.eventView === 'meter' ? 'meter' : 'expression'
       switch (key.name) {
-        case 'space': play(); break
-        case '0': restart(); break
-        case 'f':
-          if (stepInput) throw new Error('Use :step-stop before choosing an instrument')
-          chooseInstrument({ kind: 'fluid-selection' }); break
-        case 'i':
-          if (stepInput) throw new Error('Use :step-stop before choosing an instrument')
-          if (accepting && !suspended && !childTask) { stop(); picker.open() }; break
         case 's': await save(); break
         case 'r': await effect({ kind: 'record' }); break
         case 'l': stepInput?.stop(); stopPlayback(); loop = !loop; break
@@ -896,8 +901,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         case 'up': case 'down': editor = editorAction(editor, editor.eventView ? { kind: `${eventKind}-next`, direction: key.name === 'down' ? 1 : -1 }
           : { kind: key.shift ? 'move-note' : 'move', pitches: key.name === 'up' ? 1 : -1 }); break
         default:
-          if (text === '.') { stop(); status = notice('Stopped') }
-          else if (editor.eventView) {
+          if (editor.eventView) {
             if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: `${eventKind}-value`, delta: text === '-' ? -1 : 1 })
           } else if (text === '{' || text === '}') editor = editorAction(editor, { kind: 'locator', side: text === '{' ? 'left' : 'right' })
           else if (text === '<' || text === '>') editor = editorAction(editor, { kind: 'bars', delta: text === '>' ? 1 : -1 })

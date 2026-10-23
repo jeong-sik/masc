@@ -813,3 +813,49 @@ test('direct transport keys seek/resume the owned player, stop preparation and r
     view.key('q'); await view.done; assert.deepEqual(view.observed.saved.at(-1), initial)
   } finally { for (const close of closers) close(); view.signal.abort(); await view.done }
 })
+
+
+test('stop queued directly after FluidSynth selection fences delayed capture and cannot restart preview', async () => {
+  const bytes = Buffer.from('RIFF0000sfbk'), sound = { kind: 'soundfont', engine: { kind: 'fluidsynth', version: 'fixture', controlFrames: 64 },
+    bankStyle: 'mma', font: { name: 'Selected SF2', data: bytes.toString('base64'), sha256: createHash('sha256').update(bytes).digest('hex') } }
+  for (const route of ['shortcut', 'command']) {
+    let complete, cancellations = 0, renders = 0
+    const captured = new Promise(resolve => { complete = resolve })
+    const initial = { ...editor.newEditor().project, sound: { kind: 'soundfont' } }
+    const view = await controller({ initialDocument: initial,
+      fluidCapture() { return { promise: captured, cancel() { cancellations++ } } },
+      fluidRender(_sound, { preparation }) { renders++; return { promise: preparation.promise, cancel() {} } } })
+    try {
+      if (route === 'shortcut') { view.key('f'); view.key(undefined, '.') }
+      else { view.command('soundfont-fluid'); view.command('stop') }
+      await flush(); assert.equal(cancellations, 1)
+      complete(sound); await flush(); await flush()
+      assert.equal(renders, 0); assert.equal(view.observed.workers[0].requests.length, 0)
+      view.key('q'); await view.done
+      assert.deepEqual(view.observed.saved.at(-1), initial)
+    } finally { complete(sound); view.signal.abort(); await view.done }
+  }
+})
+
+
+test('direct stop remains actionable while harmony analysis is visible', async () => {
+  const requests = [], calls = []
+  const initial = { ...editor.editorCommand(editor.newEditor(), 'note C4 0 1').editor.project, sound: { kind: 'soundfont' } }
+  let end
+  const view = await controller({ initialDocument: initial, playback(request) {
+    requests.push(request)
+    return { ready: Promise.resolve(), completion: new Promise(resolve => { end = resolve }), status() {},
+      pause() {}, resume() {}, seek() {}, stop() { calls.push('stop'); end() }, terminate() { end() } }
+  } })
+  try {
+    view.key('space'); await flush()
+    const worker = view.observed.workers[0], play = worker.requests.at(-1)
+    worker.emit('message', { id: play.id, ok: true, result: { path: '/synthetic/phrase.wav', clippedSamples: 0 } }); await flush()
+    requests[0].onEvent({ kind: 'playing', currentTime: 0, duration: 10 })
+    view.command('harmony mix'); await flush(); const harmony = worker.requests.at(-1)
+    assert.equal(harmony.options.format, 'harmony')
+    worker.emit('message', { id: harmony.id, ok: true, result: { kind: 'harmonic-analysis', rows: [] } }); await flush()
+    view.key(undefined, '.'); await flush()
+    assert.ok(calls.includes('stop'), 'advertised direct stop must reach the current player during harmonic analysis')
+  } finally { view.signal.abort(); await view.done }
+})

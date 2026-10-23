@@ -360,6 +360,30 @@ let test_sandbox_log_target_uses_effective_meta () =
       , effective_name ) ->
     Alcotest.(check string) "effective keeper name" name effective_name
 
+(* RFC keeper-volume-filesystem-repair §3.2: the volume sweep starts from the
+   Owner projection, which is durable meta. Its volumes come from the TOML. *)
+let test_volume_sweep_names_volumes_from_effective_meta () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "microvm-volumes" in
+  write_keeper_toml_with_backend ~keepers_dir ~name ~sandbox_profile:"microvm"
+    ~microvm_backend:(Some "apple_container")
+    ~instructions:"Name the image-backed volumes.";
+  let config = Workspace.default_config base in
+  let durable = seed_runtime_meta config name in
+  let expected =
+    match
+      ( Masc.Keeper_sandbox_microvm.work_volume_name ~keeper_name:name
+      , Masc.Keeper_sandbox_microvm.build_volume_name ~keeper_name:name )
+    with
+    | Ok work, Ok build -> [ work; build ]
+    | Error detail, _ | _, Error detail -> Alcotest.failf "volume name refused: %s" detail
+  in
+  match
+    Masc.Keeper_volume_filesystem_watch.volumes_of_durable_meta ~base_path:config.base_path durable
+  with
+  | Ok volumes -> Alcotest.(check (list string)) "work and build volumes" expected volumes
+  | Error detail -> Alcotest.failf "effective meta refused: %s" detail
+
 (* Named once and asserted by both tests below, so a reworded sentence is one
    edit rather than a pair that can drift apart. *)
 let expected_no_local_stream_reason =
@@ -1837,6 +1861,9 @@ let () =
           Alcotest.test_case
             "sandbox logs use the effective TOML profile"
             `Quick test_sandbox_log_target_uses_effective_meta;
+          Alcotest.test_case
+            "volume sweep names volumes from the effective TOML profile"
+            `Quick test_volume_sweep_names_volumes_from_effective_meta;
           Alcotest.test_case
             "remote_ssh sandbox logs answer no local stream"
             `Quick test_sandbox_log_target_reports_no_local_stream_for_remote_ssh;

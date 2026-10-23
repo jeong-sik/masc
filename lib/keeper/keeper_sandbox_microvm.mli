@@ -516,6 +516,10 @@ val apple_volume_list_argv : unit -> string list
 (** [container volume list --format json]: the listing the volume probe and
     the volume removal both read. *)
 
+val apple_volume_inspect_argv : volume_name:string -> string list
+(** [container volume inspect NAME]: the JSON whose [configuration.source]
+    names the volume's host image ({!Keeper_volume_filesystem.image_of_inspect}). *)
+
 val remove_apple_keeper_volumes :
   run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
   -> timeout_sec:float

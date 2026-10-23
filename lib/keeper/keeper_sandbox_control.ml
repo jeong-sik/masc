@@ -1199,6 +1199,23 @@ let live_status_json ?(include_preflight = true)
             preflight
         else `Null );
       ("resource_config", sandbox_resource_config_json meta);
+      (* The server's last superblock read of each image-backed volume
+         (RFC keeper-volume-filesystem-repair §3.2); a status read spawns
+         nothing. *)
+      ( "volume_filesystem"
+      , `List
+          (List.map
+             (fun volume ->
+                match Keeper_volume_filesystem_watch.latest ~volume with
+                | Some observation -> Keeper_volume_filesystem_watch.observation_to_yojson observation
+                | None ->
+                  `Assoc
+                    [ "volume", `String volume
+                    ; "observed_at", `Null
+                    ; "filesystem", `Null
+                    ; "observation_failed", `Null
+                    ])
+             (Keeper_volume_filesystem_watch.volumes_of_meta meta)) );
       ("paths", sandbox_paths_json ~config meta);
       ("container_error", Json_util.string_opt_to_json container_error);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);

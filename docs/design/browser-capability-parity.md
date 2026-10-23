@@ -63,7 +63,7 @@ Chromium 쪽은 DevTools Protocol(`Input`, `Network`, `Runtime`, `Emulation`) �
 표의 칸이 아니라 백엔드 자체를 추가하는 일이다. 이 문서의 1차 범위에 넣지 않는다.
 
 - Chrome(실제 설치본): 열려 있는 PR #44483 이 Add-on 경로에서 증명하고 있다. 겹치지 않게 그 PR 이 먼저 들어온 뒤 다룬다.
-- ego-lite: live 연결 `ego_task_space` 가 읽기·탭·입력을 한다(RFC-browser-live-ego). 드래그·터치·줌·뷰포트·frame 은 하지 않는다.
+- ego-lite: live 연결 `ego_task_space` 가 읽기·탭·입력·대화상자·업로드·다운로드 목록·사람에게 넘기기를 한다(RFC-browser-live-ego). 프레임은 frame 경로 없이 snapshot 의 ref 와 role·글 대상으로 다룬다. 터치·줌·뷰포트·문서 원본은 하지 않는다.
 - Safari: 코드가 "어댑터 없음"이라고 명시하고 있다.
 
 ## 측정 하네스 (먼저 만든다)

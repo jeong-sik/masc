@@ -62,7 +62,9 @@ installed runtime is
 `e55030b649cd1fc9d3fdc59dea54a941635c55db62ef39faa161770377b8afb4`.
 All 119 installer fingerprint inputs match the reviewed music source on main
 `3ca07987a05ee18889caca38b70e874f68d5ddc0`; copied module bytes, the completion
-marker, locked VST environment and launcher reference were checked. The 23 native
+marker, VST lock digest, shared-environment completion marker and launcher
+reference were checked. This is not an independent dependency-environment rebuild.
+The 23 native
 inputs were unchanged from the preceding installation, so the seven native
 helpers were reused only after byte/hash equality checks. No native compilation
 or local Dune build was performed for this installation. The existing OCaml

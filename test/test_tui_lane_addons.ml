@@ -860,7 +860,11 @@ let guided_installation () =
     (Otoml.find_opt document Otoml.get_string ["binding";"topic"] |> Option.get);
   let pending_native = Install.begin_preview ~request_id:30 ~path:"/packages/arbitrary/lane.toml" path |> ok in
   let native,error = Install.receive_preview ~request_id:30 ~path:"/packages/arbitrary/lane.toml"
-    (Ok (preview (`Assoc ["kind",`String "host_process"]))) pending_native |> Option.get in
+    (Ok (match preview (`Assoc ["kind",`String "host_process"]) with
+      | `Assoc fields -> `Assoc (List.map (function
+          | "package", `Assoc package -> "package", `Assoc (package @ ["runtime",`String "host_process"])
+          | field -> field) fields)
+      | json -> json)) pending_native |> Option.get in
   check (option string) "native preview needs no container image" None error;
   let reviewed_native = native |> Install.paste ~text:"native-browser" |> edit "tab"
     |> Install.paste ~text:"browser-run" |> edit "tab"

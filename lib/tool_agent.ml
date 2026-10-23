@@ -26,7 +26,7 @@ let metric_read_failure ~tool_name ~start_time error =
     match error with
     | Metrics_store_eio.Invalid_agent_id _ | Invalid_window _ ->
         Validation_error, "Metric agent_name must be nonblank and days must be positive."
-    | Source_unavailable _ | Invalid_record _ | Conflicting_task_evidence _ ->
+    | Source_unavailable _ | Invalid_record _ ->
         Log.Metrics.error "%s" (Metrics_store_eio.read_error_to_string error);
         Internal_error, "Metric source could not be read completely."
   in

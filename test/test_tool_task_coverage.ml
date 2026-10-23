@@ -3138,6 +3138,12 @@ let () =
     in
     if not (Tool_result.is_success submitted)
     then failwith (Tool_result.message submitted);
+    (* Submission is not completion. The tool's separate Done_action arm must
+       not mint a terminal metric while verification is outstanding. *)
+    (match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:"producer" ~days:1 with
+     | Ok None -> ()
+     | Ok (Some _) -> failwith "submission fabricated a completed Task observation"
+     | Error error -> failwith (Metrics_store_eio.read_error_to_string error));
     let expect_still_awaiting () =
       match (only_task ctx).Masc_domain.task_status with
       | Masc_domain.AwaitingVerification _ -> ()
@@ -3167,17 +3173,11 @@ let () =
         Atomic.set Workspace_hooks.record_task_metric_fn previous_metric)
       (fun () ->
         Atomic.set Workspace_hooks.record_task_metric_fn
-          (fun _config
-               ~agent_id
-               ~task_id:_
-               ~started_at:_
-               ~completed_at:_
-               ~success
-               ~error_message:_
-               ~collaborators
-               ~handoff_from:_
-               ~handoff_to:_ ->
-             metric_events := (agent_id, success, collaborators) :: !metric_events);
+          (fun config ~agent_id ~task_id ~started_at ~completed_at ~success
+               ~error_message ~collaborators ~handoff_from ~handoff_to ->
+             metric_events := (agent_id, success, collaborators) :: !metric_events;
+             previous_metric config ~agent_id ~task_id ~started_at ~completed_at
+               ~success ~error_message ~collaborators ~handoff_from ~handoff_to);
         let approved =
           Workspace.commit_verdict_r
             ctx.config
@@ -3193,7 +3193,14 @@ let () =
         | Error error -> failwith (Masc_domain.masc_error_to_string error));
     (* Credited to the producer with no collaborators: the authority is not an
        agent, so it never enters the collaborator set. *)
-    assert (List.mem ("producer", true, []) !metric_events))
+    assert (List.mem ("producer", true, []) !metric_events);
+    match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:"producer" ~days:1 with
+    | Ok (Some metrics) ->
+        assert (metrics.record_count = 1 && metrics.total_tasks = 1);
+        assert (metrics.completed_tasks = 1 && metrics.successful_tasks = 1);
+        assert (metrics.conflicting_tasks = 0)
+    | Ok None -> failwith "approved Task has no metric observation"
+    | Error error -> failwith (Metrics_store_eio.read_error_to_string error))
 ;;
 
 (* The action list reaches the model twice: as the enum, derived from

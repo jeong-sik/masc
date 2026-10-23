@@ -181,8 +181,22 @@ let test_metric_nullable_outcomes () =
     record_ok ctx.config { completed with success = true };
     List.iter (fun name ->
       let result = dispatch_exn ctx ~name ~args in
-      Alcotest.(check bool) "conflicting evidence is a tool error" false (Tool_result.is_success result))
-      ["masc_get_metrics"; "masc_agent_fitness"])
+      Alcotest.(check bool) "Task contradiction remains observable" true (Tool_result.is_success result))
+      ["masc_get_metrics"; "masc_agent_fitness"];
+    let row = fitness () in
+    let metrics = member "metrics" row in
+    Alcotest.(check int) "conflicting Task is explicit" 1 (member "conflicting_tasks" metrics |> to_int);
+    Alcotest.(check int) "conflict fabricates no completed outcome" 0 (member "completed_tasks" metrics |> to_int);
+    Alcotest.(check bool) "conflict leaves outcome and duration unknown" true
+      (member "reliability" (member "components" row) = `Null && member "avg_completion_time_s" metrics = `Null);
+    let healthy = { completed with agent_id = "Healthy"; task_id = "healthy"; success = true } in
+    record_ok ctx.config healthy;
+    let pool = dispatch_exn ctx ~name:"masc_agent_fitness" ~args:(`Assoc []) in
+    Alcotest.(check bool) "one Task cannot block the agent pool" true (Tool_result.is_success pool);
+    let rows = Yojson.Safe.from_string (Tool_result.message pool) |> member "agents" |> to_list in
+    let healthy_row = List.find (fun row -> member "agent_id" row = `String "Healthy") rows in
+    Alcotest.(check int) "unrelated agent keeps its observed completion" 1
+      (member "completed_tasks" (member "metrics" healthy_row) |> to_int))
 
 let test_metric_source_failure () =
   with_ctx (fun ctx ->

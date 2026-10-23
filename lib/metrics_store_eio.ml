@@ -33,6 +33,7 @@ type agent_metrics = {
   period_end: float;        (* End of measurement period *)
   record_count: int;
   total_tasks: int;
+  conflicting_tasks: int;
   completed_tasks: int;
   successful_tasks: int;
   failed_tasks: int;
@@ -63,7 +64,6 @@ type read_error =
   | Invalid_window of int
   | Source_unavailable of { path : string; message : string }
   | Invalid_record of { path : string; line : int; message : string }
-  | Conflicting_task_evidence of { task_id : string; message : string }
 
 let read_error_to_string = function
   | Invalid_agent_id name -> Printf.sprintf "invalid metric agent identity: %S" name
@@ -71,8 +71,6 @@ let read_error_to_string = function
   | Source_unavailable { path; message } -> Printf.sprintf "%s: %s" path message
   | Invalid_record { path; line; message } ->
       Printf.sprintf "%s:%d: %s" path line message
-  | Conflicting_task_evidence { task_id; message } ->
-      Printf.sprintf "conflicting metric Task %S: %s" task_id message
 
 let ( let* ) = Result.bind
 
@@ -500,41 +498,54 @@ let get_recent config ~agent_id ~days =
 module Task_map = Map.Make (String)
 module Collaborators = Set.Make (String)
 
-type task_outcome = Pending | Completed of { at : float; success : bool }
+type task_outcome =
+  | Pending
+  | Completed of { at : float; success : bool }
+  | Conflicting_terminal of float
+
+type task_start = Consistent_start of float | Conflicting_start
+
 type task_observation = {
-  start : float;
+  start : task_start;
   outcome : task_outcome;
   has_handoff : bool;
   collaborators : Collaborators.t;
 }
 
+(* Completion timestamps order observations, never file order or generated IDs.
+   Equal-time contradictions stay unknown until superseded by a later terminal. *)
+let latest_outcome previous next =
+  match previous, next with
+  | Pending, outcome | outcome, Pending -> outcome
+  | Completed a, Completed b ->
+      if a.at > b.at then previous
+      else if a.at < b.at then next
+      else if a.success = b.success then previous
+      else Conflicting_terminal a.at
+  | Conflicting_terminal a, Conflicting_terminal b -> Conflicting_terminal (Float.max a b)
+  | Conflicting_terminal at, Completed terminal ->
+      if terminal.at > at then next else previous
+  | Completed terminal, Conflicting_terminal at ->
+      if terminal.at > at then previous else next
+
 let observe_tasks metrics =
-  let rec collect tasks = function
-    | [] -> Ok tasks
-    | (metric : task_metric) :: rest ->
-        let outcome = match metric.completed_at with
-          | None -> Pending
-          | Some at -> Completed { at; success = metric.success } in
-        let has_handoff = Option.is_some metric.handoff_from || Option.is_some metric.handoff_to in
-        let collaborators = Collaborators.of_list metric.collaborators in
-        let* observation = match Task_map.find_opt metric.task_id tasks with
-          | None -> Ok { start = metric.started_at; outcome; has_handoff; collaborators }
-          | Some previous ->
-              let conflict message = Error (Conflicting_task_evidence { task_id = metric.task_id; message }) in
-              if previous.start <> metric.started_at then conflict "start times differ"
-              else
-                let* outcome = match previous.outcome, outcome with
-                  | Pending, outcome | outcome, Pending -> Ok outcome
-                  | Completed a, Completed b ->
-                      if a.at = b.at && a.success = b.success then Ok (Completed a)
-                      else conflict "terminal times or outcomes differ" in
-                Ok { start = previous.start; outcome;
-                     has_handoff = previous.has_handoff || has_handoff;
-                     collaborators = Collaborators.union previous.collaborators collaborators }
-        in
-        collect (Task_map.add metric.task_id observation tasks) rest
-  in
-  collect Task_map.empty metrics
+  List.fold_left (fun tasks (metric : task_metric) ->
+    let outcome = match metric.completed_at with
+      | None -> Pending
+      | Some at -> Completed { at; success = metric.success } in
+    let has_handoff = Option.is_some metric.handoff_from || Option.is_some metric.handoff_to in
+    let collaborators = Collaborators.of_list metric.collaborators in
+    let observation = match Task_map.find_opt metric.task_id tasks with
+      | None -> { start = Consistent_start metric.started_at; outcome; has_handoff; collaborators }
+      | Some previous ->
+          let start = match previous.start with
+            | Consistent_start at when at = metric.started_at -> previous.start
+            | Consistent_start _ | Conflicting_start -> Conflicting_start in
+          { start; outcome = latest_outcome previous.outcome outcome;
+            has_handoff = previous.has_handoff || has_handoff;
+            collaborators = Collaborators.union previous.collaborators collaborators }
+    in
+    Task_map.add metric.task_id observation tasks) Task_map.empty metrics
 
 let outcome_ratio numerator denominator =
   if denominator = 0 then None
@@ -546,20 +557,26 @@ let calculate_agent_metrics config ~agent_id ~days =
   match metrics with
   | [] -> Ok None
   | _ :: _ ->
-    let* tasks = observe_tasks metrics in
+    let tasks = observe_tasks metrics in
     let observations = List.map snd (Task_map.bindings tasks) in
-    let completed = List.filter_map (fun task -> match task.outcome with
-      | Pending -> None
-      | Completed outcome -> Some (task, outcome.at, outcome.success)) observations in
+    let conflicting_tasks = List.length (List.filter (fun task ->
+      match task.start, task.outcome with
+      | Conflicting_start, (Pending | Completed _ | Conflicting_terminal _)
+      | Consistent_start _, Conflicting_terminal _ -> true
+      | Consistent_start _, (Pending | Completed _) -> false) observations) in
+    let completed = List.filter_map (fun task -> match task.start, task.outcome with
+      | Conflicting_start, (Pending | Completed _ | Conflicting_terminal _)
+      | Consistent_start _, (Pending | Conflicting_terminal _) -> None
+      | Consistent_start start, Completed outcome -> Some (task, start, outcome.at, outcome.success)) observations in
     let completed_tasks = List.length completed in
-    let successful_tasks = List.length (List.filter (fun (_, _, success) -> success) completed) in
+    let successful_tasks = List.length (List.filter (fun (_, _, _, success) -> success) completed) in
     let handoff_tasks = List.length (List.filter (fun task -> task.has_handoff) observations) in
-    let completed_handoffs = List.filter (fun (task, _, _) -> task.has_handoff) completed in
+    let completed_handoffs = List.filter (fun (task, _, _, _) -> task.has_handoff) completed in
     let completed_handoff_tasks = List.length completed_handoffs in
-    let successful_handoff_tasks = List.length (List.filter (fun (_, _, success) -> success) completed_handoffs) in
+    let successful_handoff_tasks = List.length (List.filter (fun (_, _, _, success) -> success) completed_handoffs) in
     (* Online mean avoids overflowing the sum of individually finite durations. *)
-    let _, avg_completion_time_s = List.fold_left (fun (count, mean) (task, at, _) ->
-      let duration = at -. task.start in
+    let _, avg_completion_time_s = List.fold_left (fun (count, mean) (_, start, at, _) ->
+      let duration = at -. start in
       match mean with
       | None -> 1, Some duration
       | Some mean ->
@@ -574,7 +591,7 @@ let calculate_agent_metrics config ~agent_id ~days =
       period_start = now -. Masc_time_constants.days_to_seconds days;
       period_end = now;
       record_count = List.length metrics;
-      total_tasks; completed_tasks; successful_tasks; failed_tasks;
+      total_tasks; conflicting_tasks; completed_tasks; successful_tasks; failed_tasks;
       avg_completion_time_s;
       task_completion_rate = Float.of_int completed_tasks /. Float.of_int total_tasks;
       task_success_rate = outcome_ratio successful_tasks completed_tasks;

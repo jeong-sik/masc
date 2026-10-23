@@ -1844,7 +1844,7 @@ let agent_metrics_output_properties =
   ; "period_end", metric_number_schema
   ]
   @ List.map (fun name -> name, `Assoc [ "type", `String "integer" ])
-      [ "record_count"; "total_tasks"; "completed_tasks"; "successful_tasks"; "failed_tasks";
+      [ "record_count"; "total_tasks"; "conflicting_tasks"; "completed_tasks"; "successful_tasks"; "failed_tasks";
         "handoff_tasks"; "completed_handoff_tasks"; "successful_handoff_tasks" ]
   @ [ "avg_completion_time_s", nullable_metric_number_schema
     ; "task_completion_rate", metric_number_schema
@@ -1856,6 +1856,7 @@ let agent_metrics_output_properties =
     ]
 ;;
 
+(* Every aggregate property is always emitted; absence uses a nullable value. *)
 let agent_metrics_output_required = List.map fst agent_metrics_output_properties
 ;;
 

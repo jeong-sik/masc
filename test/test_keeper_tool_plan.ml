@@ -870,6 +870,7 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
       ; period_end = 1755500000.0
       ; record_count = 4
       ; total_tasks = 3
+      ; conflicting_tasks = 0
       ; completed_tasks = 2
       ; successful_tasks = 1
       ; failed_tasks = 1

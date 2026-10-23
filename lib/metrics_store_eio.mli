@@ -46,6 +46,7 @@ type agent_metrics = {
   period_end : float;
   record_count : int; (** Raw observations before grouping by exact Task ID. *)
   total_tasks : int;
+  conflicting_tasks : int; (** Tasks whose start or latest terminal evidence disagrees. *)
   completed_tasks : int;
   successful_tasks : int;
   failed_tasks : int;
@@ -182,11 +183,10 @@ type read_error =
   | Invalid_window of int
   | Source_unavailable of { path : string; message : string }
   | Invalid_record of { path : string; line : int; message : string }
-  | Conflicting_task_evidence of { task_id : string; message : string }
 
 val read_error_to_string : read_error -> string
-(** File diagnostics retain the source path and physical line. Conflicts identify
-    the exact Task; messages never include record bodies. *)
+(** File diagnostics retain the source path and physical line; messages never
+    include record bodies. *)
 
 val get_recent :
   config -> agent_id:string -> days:int -> (task_metric list, read_error) result
@@ -215,9 +215,13 @@ val calculate_agent_metrics :
     - [period_start = now -. days * 86400], [period_end = now].
     - [total_tasks] counts distinct exact Task IDs in the observed start window,
       not the workspace backlog. [record_count] retains the raw row count.
-    - Repeated observations must agree on start time and, when present, terminal
-      time/outcome. Conflicts return [Conflicting_task_evidence]. A pending and
-      agreeing terminal observation combine into one completed Task.
+    - Each Task uses the terminal observation with the latest completion timestamp,
+      independent of append/file order. Replays count once; pending observations
+      do not erase a terminal observation. Contradictory outcomes at that latest
+      timestamp or disagreement on the Task start increment [conflicting_tasks].
+      Such Tasks stay in [total_tasks] and relationship unions, but contribute no
+      completed outcome or duration. A later unambiguous terminal supersedes an
+      older contradictory terminal. Source corruption remains an error.
     - [completed_tasks = successful_tasks + failed_tasks]. Completion rate is
       completed / total; success and error rates use completed as denominator.
     - Average duration uses completed Tasks, including genuine zero durations.

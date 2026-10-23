@@ -304,20 +304,39 @@ let test_task_denominators_and_replays () =
 
 let test_conflicting_task_evidence () =
   let check order = with_temp_masc_dir (fun config ->
-    let metric = Metrics_store_eio.create_metric ~agent_id:"conflict" ~task_id:"same" () in
-    let completed = { metric with completed_at = Some metric.started_at; success = true } in
-    let conflicts = [
-      { completed with started_at = completed.started_at -. 1.0 };
-      { completed with success = false };
-      { completed with completed_at = Some (completed.started_at +. 1.0) } ] in
+    let metric = Metrics_store_eio.create_metric ~agent_id:"history" ~task_id:"same" () in
+    let started_at = metric.started_at -. 60.0 in
+    let submitted = { metric with started_at; completed_at = Some (started_at +. 10.0); success = true } in
+    let verified = { submitted with completed_at = Some (started_at +. 30.0) } in
+    List.iter (record_ok config) (order [submitted; verified; verified]);
+    let history = aggregate config "history" in
+    assert (history.record_count = 3 && history.total_tasks = 1 && history.completed_tasks = 1);
+    assert (history.conflicting_tasks = 0 && history.avg_completion_time_s = Some 30.0);
+    (* A subsequent failure is the latest observed outcome, not an append-order vote. *)
+    let failed = { verified with completed_at = Some (started_at +. 40.0); success = false } in
+    List.iter (record_ok config) (order [failed; submitted]);
+    let history = aggregate config "history" in
+    assert (history.successful_tasks = 0 && history.failed_tasks = 1);
+    assert (history.avg_completion_time_s = Some 40.0);
+    let contradictions = [
+      { verified with started_at = started_at -. 1.0 };
+      { verified with success = false } ] in
     List.iteri (fun i conflict ->
       let agent_id = Printf.sprintf "conflict-%d" i in
+      let healthy = { verified with task_id = "healthy" } in
       let rows = List.map (fun (row : Metrics_store_eio.task_metric) -> { row with agent_id })
-        (order [completed; conflict]) in
+        (order [verified; conflict; healthy]) in
       List.iter (record_ok config) rows;
-      match Metrics_store_eio.calculate_agent_metrics config ~agent_id ~days:1 with
-      | Error (Metrics_store_eio.Conflicting_task_evidence { task_id; _ }) -> assert (task_id = "same")
-      | Error _ | Ok _ -> failwith "conflicting Task evidence became successful statistics") conflicts) in
+      let metrics = aggregate config agent_id in
+      assert (metrics.total_tasks = 2 && metrics.conflicting_tasks = 1);
+      assert (metrics.completed_tasks = 1 && metrics.successful_tasks = 1);
+      assert (metrics.avg_completion_time_s = Some 30.0);
+      (* Start disagreement cannot be repaired by a terminal timestamp. Equal-time
+         outcome disagreement can be superseded by a genuinely later observation. *)
+      record_ok config { failed with agent_id };
+      let metrics = aggregate config agent_id in
+      assert (metrics.conflicting_tasks = (if i = 0 then 1 else 0));
+      assert (metrics.completed_tasks = (if i = 0 then 1 else 2))) contradictions) in
   check Fun.id;
   check List.rev
 

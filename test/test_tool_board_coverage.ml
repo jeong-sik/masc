@@ -1680,6 +1680,8 @@ let test_board_activity_does_not_complete_tasks () =
   cleanup ();
   let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
   let config = Mcp_server.workspace_config state in
+  (* Metrics bind beneath an initialized workspace ownership root. *)
+  ignore (Workspace.init config ~agent_name:None);
   let agent_name = "mcp-runtime-curator" in
   let metric = Metrics_store_eio.create_metric ~agent_id:agent_name ~task_id:"actual-task" ()
     |> fun metric -> Metrics_store_eio.complete_metric metric ~success:true () in

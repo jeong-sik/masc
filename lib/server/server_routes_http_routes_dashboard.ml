@@ -3419,16 +3419,18 @@ let add_routes ~sw ~clock router =
               | None -> None)
            | None -> None
          in
+         let sampling = Dashboard_http_tool_quality.select_sampling ~n ?window_hours () in
+         let sampling_key = match sampling with
+           | Dashboard_http_tool_quality.Window_hours hours ->
+             `List [`String "window_hours"; `String (Printf.sprintf "%h" hours)]
+           | Dashboard_http_tool_quality.Recent_n count ->
+             `List [`String "recent_n"; `Int count] in
          let cache_key =
            Server_dashboard_http_core_cache.dashboard_cache_key
              (Mcp_server.workspace_config state) "tool_quality"
-             (Yojson.Safe.to_string (`List [
-               `Int n;
-               Json_util.option_to_yojson
-                 (fun hours -> `String (Printf.sprintf "%h" hours)) window_hours;
-             ]))
+             (Yojson.Safe.to_string sampling_key)
          in
-         (* TTL extended 5s→30s — [aggregate ~n:5000] over a 24h window was
+         (* TTL extended 5s→30s — [aggregate] over a 24h window was
             measured at 30s cache miss (curl --max-time 30 timeout in the
             page→endpoint profile). The window itself is hours-scale so
             6× longer TTL still serves near-live data; under 30s window the
@@ -3444,7 +3446,7 @@ let add_routes ~sw ~clock router =
              Dashboard_cache.get_or_compute_payload cache_key ~ttl:config_cache_ttl_s
                (fun () ->
                   Domain_pool_ref.submit_io_or_inline (fun () ->
-                    match Dashboard_http_tool_quality.aggregate ~n ?window_hours () with
+                    match Dashboard_http_tool_quality.aggregate sampling with
                     | Ok json -> json
                     | Error (Keeper_tool_call_log.Index_unavailable detail) ->
                       raise (Tool_quality_log_unavailable detail)))

@@ -1,0 +1,59 @@
+{
+  "scope": "isolated native HTTP router/cache and tool-call-ledger tests; not installed runtime",
+  "base": "ae3a5ab3f7f937c039a3236baee3b8b117d7a880",
+  "before": {
+    "positive_window_preparations": 2,
+    "scenario": "same workspace, 2 retained settled calls, window_hours=2, n=1 then n=5000"
+  },
+  "after": {
+    "positive_window_preparations": 1,
+    "output_total_each_request": 2
+  },
+  "control_recent_n": {
+    "preparations": 2,
+    "totals": [
+      1,
+      2
+    ]
+  },
+  "control_nan_window": {
+    "preparations": 2,
+    "totals": [
+      1,
+      2
+    ]
+  },
+  "focused_checks": [
+    {
+      "log": "candidate-effective_tool_quality_sampling.log",
+      "tests_passed": 3,
+      "sha256": "ca63a14e6d3eb7206ea407093e5f7d1e419f192e53fe878550beea411dbdccdb"
+    },
+    {
+      "log": "candidate-exact_query_cache_identity.log",
+      "tests_passed": 5,
+      "sha256": "55464e46a395ed519c8332a2fd668b2853da7e861a82684b367fb0fe8509f11e"
+    },
+    {
+      "log": "candidate-direct-aggregate.log",
+      "tests_passed": 13,
+      "sha256": "ba99855eb74262db6539e0bbb366cc3d8bc2264747563bb2e4a7ee57a4b34783"
+    }
+  ],
+  "source_sha256": {
+    "lib/dashboard/dashboard_http_tool_quality.ml": "77084ad7833fcab3c67789b5f3c874462ddfea362a7b02543b77fbfef1f72683",
+    "lib/dashboard/dashboard_http_tool_quality.mli": "9c0351e80c4bde24e6097e81429aa69af388b3482aae2d1bd8a33f2f5af02dc8",
+    "lib/server/server_routes_http_routes_dashboard.ml": "8a7667454a99bb63e17ef23395b4a42af6041fb76337df561aa3895d3d8d5a95",
+    "test/test_dashboard_http_core.ml": "f2b936a14d4fac9a8d0f1531ea7cefe95480469e46f70bc3242c4924f4a58d67",
+    "test/test_keeper_tool_call_log.ml": "17ead225c627ef95cd9a22fe774b6428432f3d990c23ce6b8719267cc3fc5678"
+  },
+  "full_regression": "not run",
+  "ci": "not run",
+  "installed_runtime": "not changed",
+  "ui_performance": "not measured",
+  "baseline_check": {
+    "log": "baseline-http.log",
+    "sha256": "38c1245babcbfa3d11ecc3a0b4de013980fe87a895ca091f7de8f27be16c3bb3",
+    "result": "positive-window preparation assertion failed: expected 1, observed 2; recent and NaN controls passed"
+  }
+}

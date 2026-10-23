@@ -177,6 +177,11 @@ type sampling =
   | Window_hours of float
   | Recent_n of int
 
+let select_sampling ?(n = 5000) ?window_hours () =
+  match window_hours with
+  | Some hours when hours > 0.0 -> Window_hours hours
+  | Some _ | None -> Recent_n n
+
 let sampling_fields = function
   | Window_hours hours ->
     [ ("sampling_mode", `String "window_hours")
@@ -444,15 +449,13 @@ let summarize ~sampling records : Yojson.Safe.t =
     ("hourly_trend", `List hourly);
   ])
 
-let aggregate ?(n = 5000) ?window_hours ()
-  : (Yojson.Safe.t, Keeper_tool_call_log.index_error) result
-  =
-  match window_hours with
-  | Some hours when hours > 0.0 ->
+let aggregate sampling : (Yojson.Safe.t, Keeper_tool_call_log.index_error) result =
+  match sampling with
+  | Window_hours hours ->
     Ok
       (summarize ~sampling:(Window_hours hours)
          (Keeper_tool_call_log.read_window ~window_hours:hours ()))
-  | _ ->
+  | Recent_n n ->
     (match Keeper_tool_call_log.read_recent ~n () with
      | Ok records ->
        Ok (summarize ~sampling:(Recent_n n) records)

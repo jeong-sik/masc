@@ -5225,7 +5225,8 @@ let with_exact_query_router f =
     Dated_jsonl.append store (`Assoc [
       "ts", `Float (Time_compat.now () -. 1.025 *. 3600.);
       "keeper", `String "query-keeper"; "tool", `String "keeper_lane_status";
-      "wire_outcome", `String "ok"; "duration_ms", `Float 1. ]);
+      "record_kind", `String "tool_call"; "disposition", `String "completed";
+      "result_bytes", `Int 0; "wire_outcome", `String "ok"; "duration_ms", `Float 1. ]);
     let router = Server_routes_http_routes_dashboard.add_routes ~sw
       ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ()) in
     let read target =
@@ -5260,6 +5261,48 @@ let test_tool_quality_cached_windows_keep_exact_query () =
     check (float 1e-12) "sampling window is the requested window"
       (float_of_string window) Yojson.Safe.Util.(json |> member "window_hours" |> to_float))
     ["1.001"; "1.004"; "1.0010"]
+
+let with_tool_quality_sampling_rows f =
+  with_exact_query_router @@ fun read ->
+  let store = match Masc.Keeper_tool_call_log.store () with
+    | Some store -> store | None -> fail "sampling fixture unavailable" in
+  Dated_jsonl.append store (`Assoc [
+    "ts", `Float (Time_compat.now ()); "keeper", `String "sampling-keeper";
+    "tool", `String "keeper_lane_status"; "record_kind", `String "tool_call";
+    "disposition", `String "completed"; "result_bytes", `Int 0;
+    "wire_outcome", `String "ok"; "duration_ms", `Float 1. ]);
+  f read
+
+let test_tool_quality_window_reuses_irrelevant_limit () =
+  with_tool_quality_sampling_rows @@ fun read ->
+  let prepared = ref 0 in
+  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
+    List.iter (fun n ->
+      let _, json = read ("/api/v1/dashboard/tool-quality?window_hours=2&n=" ^ n) in
+      check string "positive window sampling" "window_hours"
+        Yojson.Safe.Util.(json |> member "sampling_mode" |> to_string);
+      check bool "recent count does not limit a window" true
+        (Yojson.Safe.Util.member "sample_limit" json = `Null);
+      check int "the whole window retains both calls" 2
+        Yojson.Safe.Util.(json |> member "total" |> to_int)) ["1"; "5000"]);
+  check int "irrelevant n does not prepare the same window twice" 1 !prepared
+
+let check_tool_quality_recent_limits suffix =
+  with_tool_quality_sampling_rows @@ fun read ->
+  let prepared = ref 0 in
+  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
+    List.iter (fun (n, total) ->
+      let _, json = read ("/api/v1/dashboard/tool-quality?n=" ^ string_of_int n ^ suffix) in
+      check string "recent sampling is retained" "recent_n"
+        Yojson.Safe.Util.(json |> member "sampling_mode" |> to_string);
+      check int "effective recent count remains visible" n
+        Yojson.Safe.Util.(json |> member "sample_limit" |> to_int);
+      check int "recent count selects different retained rows" total
+        Yojson.Safe.Util.(json |> member "total" |> to_int)) [1, 1; 5000, 2]);
+  check int "different effective recent counts prepare distinct payloads" 2 !prepared
+
+let test_tool_quality_recent_limits_remain_distinct () = check_tool_quality_recent_limits ""
+let test_tool_quality_nan_preserves_recent_limits () = check_tool_quality_recent_limits "&window_hours=nan"
 
 let test_telemetry_cached_queries_keep_exact_boundaries () =
   with_exact_query_router @@ fun read ->
@@ -8333,6 +8376,11 @@ let test_skill_evidence_joins_activation_and_composition () =
 let () =
   run "dashboard_http_core"
     [
+      ("effective_tool_quality_sampling", [
+        test_case "window ignores the recent-count option" `Quick test_tool_quality_window_reuses_irrelevant_limit;
+        test_case "recent counts remain separate" `Quick test_tool_quality_recent_limits_remain_distinct;
+        test_case "NaN keeps recent counts separate" `Quick test_tool_quality_nan_preserves_recent_limits;
+      ]);
       ("exact_query_cache_identity", [
         test_case "Keeper windows retain distinct responses" `Quick test_keeper_cached_windows_keep_exact_query;
         test_case "tool quality windows retain distinct responses" `Quick test_tool_quality_cached_windows_keep_exact_query;

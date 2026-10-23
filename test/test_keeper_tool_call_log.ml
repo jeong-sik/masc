@@ -17,7 +17,8 @@ let read_recent_rows ~n () =
   | Error (Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
 
 let aggregate ?n ?window_hours () =
-  match Dashboard_http_tool_quality.aggregate ?n ?window_hours () with
+  let sampling = Dashboard_http_tool_quality.select_sampling ?n ?window_hours () in
+  match Dashboard_http_tool_quality.aggregate sampling with
   | Ok summary -> summary
   | Error (Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
 
@@ -1869,18 +1870,17 @@ let test_dashboard_aggregate_window_hours () =
          ; ("wire_outcome", `String "error")
          ; ("duration_ms", `Float 5.0)
          ]);
-    let summary = aggregate ~n:10 ~window_hours:24.0 () in
-    Alcotest.(check (option string)) "window sampling mode"
-      (Some "window_hours")
-      (Safe_ops.json_string_opt "sampling_mode" summary);
-    Alcotest.(check int) "window total" 1
-      (Safe_ops.json_int ~default:0 "total" summary);
-    Alcotest.(check (option int)) "sample limit omitted"
-      None
-      (Safe_ops.json_int_opt "sample_limit" summary);
-    Alcotest.(check (option (float 0.0001))) "window echoed"
-      (Some 24.0)
-      (Safe_ops.json_float_opt "window_hours" summary))
+    List.iter (fun (window_hours, total) ->
+      let summary = aggregate ~n:1 ~window_hours () in
+      Alcotest.(check (option string)) "window sampling mode"
+        (Some "window_hours") (Safe_ops.json_string_opt "sampling_mode" summary);
+      Alcotest.(check int) "window retains the matching rows without a recent cap" total
+        (Safe_ops.json_int ~default:0 "total" summary);
+      Alcotest.(check (option int)) "sample limit omitted" None
+        (Safe_ops.json_int_opt "sample_limit" summary);
+      Alcotest.(check (option (float 0.0001))) "direct windows are not route-clamped"
+        (Some window_hours) (Safe_ops.json_float_opt "window_hours" summary))
+      [0.01, 0; 24., 1; 200., 2])
 
 let test_dashboard_aggregate_drops_rows_without_result_bytes () =
   with_tmp_log_dir (fun dir ->

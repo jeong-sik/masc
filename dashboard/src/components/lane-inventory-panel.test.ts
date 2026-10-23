@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseLaneInventory } from '../api/lane-inventory'
 import fixture from '../api/fixtures/lane-inventory.json'
 import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
+import { replaceRoute, route } from '../router'
 const api = vi.hoisted(() => ({ fetchLaneInventory: vi.fn() }))
 vi.mock('../api/lane-inventory', async original => ({ ...await original<typeof import('../api/lane-inventory')>(), ...api }))
 import { LaneInventoryPanel } from './lane-inventory-panel'
@@ -16,6 +17,34 @@ function workspace(root: string) {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 beforeEach(() => { invalidateExecutionSnapshotGeneration(epoch, 0); generation = 0; workspace('/fixture/default') })
 describe('operator Lane inventory', () => {
+  it('preserves the selected declaration target while its category changes or is filtered out', async () => {
+    const row = { id: 'declaration//fixture/neutral.toml', label: 'Neutral', purpose: 'fixture',
+      selection: { kind: 'declaration', source_path: '/fixture/neutral.toml' },
+      state: { kind: 'package', instances: [], declaration: { kind: 'valid', enabled: false,
+        installation_id: 'neutral', run_id: 'run', package_id: 'arbitrary', title: 'Neutral',
+        source_revision: 'file', desired_revision: 'inputs', exact_outputs: [], ui_category: 'browser',
+        application: { kind: 'inactive' } } } }
+    api.fetchLaneInventory.mockResolvedValueOnce(parseLaneInventory({ ...fixture, rows: [...fixture.rows, row] }))
+      .mockResolvedValue(parseLaneInventory({ ...fixture, rows: [...fixture.rows,
+        { ...row, state: { ...row.state, declaration: { ...row.state.declaration, ui_category: 'analysis' } } }] }))
+    const screen = render(html`<${LaneInventoryPanel} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect Neutral' }))
+    const targetLink = () => within(screen.getByRole('region', { name: 'Details for Neutral' }))
+      .getByRole('link', { name: 'Manage package declarations and retained observations' }).getAttribute('href')
+    const original = targetLink()
+    fireEvent.change(screen.getByLabelText('Lane 역할 필터'), { target: { value: 'voice_media' } })
+    expect(targetLink()).toBe(original)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Lanes' }))
+    await waitFor(() => expect(api.fetchLaneInventory).toHaveBeenCalledTimes(2))
+    fireEvent.change(screen.getByLabelText('Lane 역할 필터'), { target: { value: 'analysis' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect Neutral' }))
+    expect(targetLink()).toBe(original)
+    fireEvent.click(within(screen.getByRole('region', { name: 'Details for Neutral' }))
+      .getByRole('link', { name: 'Manage package declarations and retained observations' }))
+    expect(JSON.parse(route.value.params.lane_target!)).toMatchObject({
+      kind: 'declaration', path: '/fixture/neutral.toml', installation: 'neutral', workspace: '/fixture/default' })
+    replaceRoute('overview', {})
+  })
   it('shows original installation model routes while the package is off and no worker is present', async () => {
     const row = {
       id: 'declaration//fixture/curator.toml', label: 'Curator installation', purpose: 'Curator',

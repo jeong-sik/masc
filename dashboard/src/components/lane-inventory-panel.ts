@@ -11,6 +11,8 @@ import { browserLaneObservationRevision } from '../lib/browser-lane-observation'
 import { MachineLaneActivityPanel } from './machine-lane-activity-panel'
 import { machineLaneObservationRevision } from '../lib/machine-lane-observation'
 import { laneTargetFor, laneTargetParams } from '../lib/lane-navigation'
+import { categoryGroup, categoryLabel, groupAddonCategories, inventoryCategory, type AddonCategoryFilter } from '../lib/lane-addon-category'
+import { LaneAddonCategoryFilter } from './lane-addon-category-filter'
 
 const button = 'rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50'
 const browserActivityText = { on: 'New requests enabled', off: 'Off · configuration and sessions retained',
@@ -101,6 +103,10 @@ function LaneDetails({ row, snapshot, authority }: { row: LaneInventoryRow; snap
     ? snapshot.exact_snapshot.lanes.find(lane => lane.laneId === selection.lane_id) : undefined
   return html`<section aria-label=${`Details for ${row.label}`} class="rounded border border-[var(--color-border-default)] p-4 space-y-3">
     <h3 class="font-semibold">${row.label}</h3><p>${row.purpose}</p><code class="break-all">${row.id}</code>
+    ${row.state.kind === 'package' && html`<p>역할: ${categoryLabel(inventoryCategory(row))}
+      ${row.state.declaration === null ? ' · 실행 당시 패키지' : ' · 현재 선언'}</p>
+      ${row.state.instances.map(instance => html`<p key=${instance.instance_id}>실행 당시 역할:
+        ${categoryLabel(categoryGroup(instance.ui_category))} · ${instance.instance_id}</p>`)}`}
     ${stateLines(row, snapshot).map(line => html`<p>${line}</p>`)}
     ${row.state.kind === 'package' && row.state.declaration?.kind === 'valid'
       ? html`<${AddonModelRoutes} installation=${row.state.declaration.installation_id} outputs=${row.state.declaration.exact_outputs} />` : null}
@@ -135,6 +141,7 @@ export function LaneInventoryPanel() {
   const [received, setReceived] = useState<{ authority: ExecutionWorkspaceAuthority; value: LaneInventory } | null>(null)
   const [verifying, setVerifying] = useState(false)
   const [query, setQuery] = useState('')
+  const [category, setCategory] = useState<AddonCategoryFilter>('all')
   const [selected, setSelected] = useState<string | null>(null)
   const request = useRef<AbortController | null>(null)
   const mounted = useRef(true)
@@ -170,7 +177,7 @@ export function LaneInventoryPanel() {
     }
   }
   useEffect(() => {
-    setSelected(null); setQuery(''); setError(null); setReading(false)
+    setSelected(null); setQuery(''); setCategory('all'); setError(null); setReading(false)
   }, [authority])
   useEffect(() => {
     request.current?.abort()
@@ -179,6 +186,7 @@ export function LaneInventoryPanel() {
   }, [authority, observationRevision, browserRevision, machineRevision])
   const search = query.trim().toLocaleLowerCase()
   const rows = snapshot?.rows.filter(row => [row.id, row.label, row.purpose].some(value => value.toLocaleLowerCase().includes(search))) ?? []
+  const groups = groupAddonCategories(rows, inventoryCategory, category)
   const detail = snapshot?.rows.find(row => row.id === selected)
   useEffect(() => { if (selected !== null) details.current?.focus() }, [selected])
   return html`<section aria-label="All Lanes" class="space-y-4">
@@ -197,15 +205,19 @@ export function LaneInventoryPanel() {
     </div>` : null}
     <label class="block">Find a Lane<input class="block w-full rounded border bg-transparent p-2" type="search" value=${query}
       onInput=${(event: Event) => setQuery((event.currentTarget as HTMLInputElement).value)} /></label>
+    <${LaneAddonCategoryFilter} label="Lane 역할 필터" value=${category} onChange=${setCategory} />
     ${snapshot && detail && authority ? html`<div ref=${details} tabIndex=${-1}><${LaneDetails} row=${detail} snapshot=${snapshot} authority=${authority} /></div>`
       : selected && snapshot ? html`<p role="status">The selected Lane is absent from this reading.</p>` : null}
-    ${snapshot && !rows.length ? html`<p>No Lanes match this search.</p>` : null}
-    <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-      ${snapshot && rows.map(row => html`<article key=${row.id} class="min-w-0 rounded border border-[var(--color-border-default)] p-4 space-y-2">
+    ${snapshot && !groups.length ? html`<p>No Lanes match this search and role.</p>` : null}
+    ${snapshot && groups.map(group => html`<section key=${group.category} class="space-y-3" aria-label=${`Lanes · ${categoryLabel(group.category)}`}>
+      <h3 class="font-semibold">${categoryLabel(group.category)}</h3>
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+      ${group.items.map(row => html`<article key=${row.id} class="min-w-0 rounded border border-[var(--color-border-default)] p-4 space-y-2">
         <h3 class="font-semibold">${row.label}</h3><p class="break-all">${row.id}</p><p>${row.purpose}</p>
         ${stateLines(row, snapshot).map(line => html`<p class="break-all">${line}</p>`)}
         <button class=${button} aria-pressed=${selected === row.id} onClick=${() => setSelected(row.id)}>Inspect ${row.label}</button>
       </article>`)}
-    </div>
+      </div>
+    </section>`)}
   </section>`
 }

@@ -1,16 +1,17 @@
 import { Schema } from 'effect'
 import { get } from './core'
+import { optionalLaneAddonCategory } from './lane-addon-category'
 
 const text = Schema.NonEmptyString
 const entry = Schema.Union(
   Schema.Struct({ kind: Schema.Literal('folder'), path: text }),
   Schema.Struct({ kind: Schema.Literal('issue'), path: text, message: text }),
   Schema.Struct({ kind: Schema.Literal('package'), manifest_path: text, title: text,
-    revision: text, description: Schema.NullOr(Schema.String) }),
+    revision: text, description: Schema.NullOr(Schema.String), ui_category: optionalLaneAddonCategory }),
 )
 const catalog = Schema.Struct({ directory: text, parent: Schema.NullOr(text), entries: Schema.Array(entry) })
 const preview = Schema.Struct({ manifest_path: text,
-  package: Schema.Struct({ title: text, revision: text, binding_schema: Schema.Unknown }),
+  package: Schema.Struct({ title: text, revision: text, binding_schema: Schema.Unknown, ui_category: optionalLaneAddonCategory }),
   execution: Schema.Union(
     Schema.Struct({ kind: Schema.Literal('host_process') }),
     Schema.Struct({ kind: Schema.Literal('container'), image_name: text,

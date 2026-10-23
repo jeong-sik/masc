@@ -1,0 +1,9 @@
+import { html } from 'htm/preact'
+import { render } from 'preact'
+import './src/styles/global.css'
+import { LaneInventoryPanel } from './src/components/lane-inventory-panel'
+import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from './src/store'
+invalidateExecutionSnapshotGeneration('isolated-addon-ui-20261023', 0)
+hydrateExecutionSnapshot({ execution_publication_epoch: 'isolated-addon-ui-20261023', execution_publication_generation: 1,
+ status: { project: 'Isolated fixture', workspace_root: '/fixture/addon-ui' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
+render(html`<main class="mx-auto max-w-7xl p-6 space-y-6"><aside class="border rounded p-3">실제 Dashboard 컴포넌트 · 격리된 API fixture · 설치된 런타임 상태가 아닙니다.</aside><${LaneInventoryPanel}/></main>`, document.getElementById('app')!)

@@ -2,6 +2,19 @@ module AR = Masc.Task.Anti_rationalization
 module V = Masc.Verifier_review_original
 module O = Masc.Verifier_review_owner
 
+let string_of_retain_error = function
+  | O.Original_invalid detail -> "Original_invalid: " ^ detail
+  | O.Identity_mismatch detail -> "Identity_mismatch: " ^ detail
+  | O.Retain_store_unavailable detail -> "Retain_store_unavailable: " ^ detail
+  | O.Already_retained request_id -> "Already_retained: " ^ request_id
+;;
+
+let string_of_load_error = function
+  | O.Load_store_unavailable detail -> "Load_store_unavailable: " ^ detail
+  | O.Not_found -> "Not_found"
+  | O.Corrupt_original detail -> "Corrupt_original: " ^ detail
+;;
+
 let sample_image : AR.evidence_image =
   { image_reference = "artifact:evidence/shot.png"
   ; image_sha256 = "def456"
@@ -57,7 +70,7 @@ let test_round_trip () =
   let original = make_original ~verification_id:"vrf-x" ~attempt:0 in
   (match O.retain ~store ~verification_id:"vrf-x" ~attempt:0 ~installation_id:"masc.verifier" ~package_id:"masc.verifier.review" original with
    | Ok () -> ()
-   | Error _ -> failwith "retain failed");
+   | Error err -> failwith ("retain failed: " ^ string_of_retain_error err));
   match O.load ~store ~verification_id:"vrf-x" ~attempt:0 with
   | Ok loaded ->
     assert (V.verification_id loaded = "vrf-x");
@@ -69,7 +82,7 @@ let test_round_trip () =
     (match req.evidence_images with
      | [ img ] -> assert (img.image_sha256 = "def456")
      | _ -> failwith "evidence image not preserved")
-  | Error _ -> failwith "load failed after retain"
+  | Error err -> failwith ("load failed after retain: " ^ string_of_load_error err)
 
 let test_retain_is_idempotent () =
   with_workspace @@ fun base_path ->
@@ -100,7 +113,7 @@ let test_different_original_at_same_key_rejected () =
   in
   (match O.retain ~store ~verification_id:"vrf-z" ~attempt:0 ~installation_id:"i" ~package_id:"p" first with
    | Ok () -> ()
-   | Error _ -> failwith "first retain failed");
+   | Error err -> failwith ("first retain failed: " ^ string_of_retain_error err));
   match O.retain ~store ~verification_id:"vrf-z" ~attempt:0 ~installation_id:"i" ~package_id:"p" different with
   | Ok () -> failwith "different original at same key must be rejected"
   | Error (O.Already_retained _) -> ()
@@ -113,19 +126,19 @@ let test_retry_is_new_attempt () =
   let first = make_original ~verification_id:"vrf-r" ~attempt:0 in
   (match O.retain ~store ~verification_id:"vrf-r" ~attempt:0 ~installation_id:"i" ~package_id:"p" first with
    | Ok () -> ()
-   | Error _ -> failwith "retain attempt 0 failed");
+   | Error err -> failwith ("retain attempt 0 failed: " ^ string_of_retain_error err));
   (* attempt 1 is a different key, so it stores independently *)
   let retried = make_original ~verification_id:"vrf-r" ~attempt:1 in
   (match O.retain ~store ~verification_id:"vrf-r" ~attempt:1 ~installation_id:"i" ~package_id:"p" retried with
    | Ok () -> ()
-   | Error _ -> failwith "retain attempt 1 failed");
+   | Error err -> failwith ("retain attempt 1 failed: " ^ string_of_retain_error err));
   (* both are readable independently *)
   (match O.load ~store ~verification_id:"vrf-r" ~attempt:0 with
    | Ok v -> assert (V.attempt v = 0)
-   | Error _ -> failwith "attempt 0 lost");
+   | Error err -> failwith ("attempt 0 lost: " ^ string_of_load_error err));
   (match O.load ~store ~verification_id:"vrf-r" ~attempt:1 with
    | Ok v -> assert (V.attempt v = 1)
-   | Error _ -> failwith "attempt 1 lost")
+   | Error err -> failwith ("attempt 1 lost: " ^ string_of_load_error err))
 
 let test_load_not_found () =
   with_workspace @@ fun base_path ->
@@ -144,7 +157,7 @@ let test_different_destination_rejected () =
   let original = make_original ~verification_id:"vrf-d" ~attempt:0 in
   (match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"masc.verifier" ~package_id:"masc.verifier.review" original with
    | Ok () -> ()
-   | Error _ -> failwith "first retain failed");
+   | Error err -> failwith ("first retain failed: " ^ string_of_retain_error err));
   match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"other.install" ~package_id:"masc.verifier.review" original with
   | Ok () -> failwith "same original under a different installation must not pass"
   | Error (O.Already_retained _) -> ()

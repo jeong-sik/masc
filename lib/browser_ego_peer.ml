@@ -580,6 +580,7 @@ let act t args =
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Close_tab}) -> close_tab t tab_id
   | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Upload _
       | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
+      | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
       | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog
       | Browser_lane.Action.Back | Browser_lane.Action.Forward | Browser_lane.Action.Reload); _}) ->
     Error (Live.Before_effect "an ego connection's page.act serves open_tab and close_tab only")

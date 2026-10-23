@@ -9,7 +9,7 @@ type operation =
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
   | Read_clipboard | Write_clipboard | Read_network | Intercept_network
-  | Read_console | Read_storage | Write_storage | Sentence_action
+  | Read_console | Read_storage | Write_storage | Emulate_environment | Sentence_action
 type tool = Tabs | Read | Interact | Act | Session | Goto | Instruct
 type invocation = { tool : tool; action : string option; mode : string option }
 type support = Available of invocation
@@ -28,7 +28,7 @@ let operations = [List_tabs;Open_tab;Close_tab;Activate_tab;List_windows;Create_
   Fill;Type_text;Press_key;Key_chord;Select_option;Read_frames;Frame_interaction;
   Read_dialog;Accept_dialog;Dismiss_dialog;Upload_file;List_downloads;Page_zoom;
   Resize_viewport;Touch;Read_clipboard;Write_clipboard;Read_network;Intercept_network;
-  Read_console;Read_storage;Write_storage;Sentence_action]
+  Read_console;Read_storage;Write_storage;Emulate_environment;Sentence_action]
 let invoke ?action ?mode tool = {tool;action;mode}
 let available ?action ?mode tool = Available (invoke ?action ?mode tool)
 let conditional ?action ?mode tool constraints =
@@ -300,6 +300,9 @@ let support backend operation = match backend with
     | Read_storage -> gecko_only backend (invoke ~mode:"cookies" Read)
         [observed;"The cookies the tab's page can see, at most 200, with the total. Name, domain, path, secure, httpOnly, sameSite and expiry; the value is never returned.";
          "The reply also lists the page origin's localStorage and sessionStorage key names and its IndexedDB database names (at most 100 each, names cut at 200 characters) under storage, with counts. Storage values are never read."]
+    | Emulate_environment -> gecko_only backend (invoke ~action:"set_emulation" Act)
+        [observed;"Sets the tab's reported location (latitude and longitude together, optional accuracyMeters up to 10000), language tag (locale) and IANA time zone, any of the three. A location also grants the page its geolocation permission; clear_emulation restores overrides only and leaves permissions unchanged. Geolocation grants remain until this owned browser session closes.";
+         "Only on an automation browser the Keeper owns. A page that already read its location, language or time zone keeps what it read: reload it afterwards."]
     | Write_storage -> gecko_only backend (invoke ~action:"set_cookie" Act)
         [observed;"Sets one cookie for the tab's current page host (the domain is never a parameter): cookieName, cookieValue, optional cookiePath, cookieSecure, cookieHttpOnly, cookieSameSite and cookieMaxAgeSec. A cookie lives at most 7 days, with no lifetime it is a session cookie, and a value is at most 4096 bytes. delete_cookie removes one by name.";
          "Only on an automation browser the Keeper owns. The value is never returned. Web storage cannot be written."]
@@ -321,7 +324,7 @@ let operation_name = function
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"
   | Touch -> "touch" | Read_clipboard -> "read_clipboard" | Write_clipboard -> "write_clipboard"
   | Read_network -> "read_network" | Intercept_network -> "intercept_network" | Read_console -> "read_console"
-  | Read_storage -> "read_storage" | Write_storage -> "write_storage" | Sentence_action -> "sentence_action"
+  | Read_storage -> "read_storage" | Write_storage -> "write_storage" | Emulate_environment -> "emulate_environment" | Sentence_action -> "sentence_action"
 let operation_of_wire name = List.find_opt (fun operation -> String.equal (operation_name operation) name) operations
 let parse_required_actions = function
   | `List values ->

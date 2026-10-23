@@ -8,7 +8,7 @@ let start_downloads ~session_id:_ ~websocket_url:_ =
   Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
     console=(fun ~context:_ -> Ok (`Assoc ["entries",`List [];"dropped",`Int 0]));
     network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
-    check=(fun () -> Ok ());close=(fun () -> ())}
+    check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture");close=(fun () -> ())}
 
 let test_session_lifecycle () =
   Eio_main.run (fun _ ->
@@ -515,6 +515,109 @@ let test_cookies_are_set_for_the_page_host_and_never_echoed () =
     let round = Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Set_cookie cookie} in
     check bool "a cookie survives the wire" true (Lane.Action.parse (Lane.Action.to_json round) = Ok round))
 
+let test_emulation_goes_over_bidi_and_clears_to_the_original_values () =
+  Eio_main.run (fun _ ->
+    let commands = ref [] in
+    let origin = ref "https://example.org" in
+    let permissions = ref ["https://example.org", "prompt"; "https://other.example", "denied"] in
+    let origin_reads = ref 0 in
+    let start_downloads ~session_id:_ ~websocket_url:_ =
+      Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
+        console=(fun ~context:_ -> Ok (`Assoc ["entries",`List [];"dropped",`Int 0]));
+        network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
+        check=(fun () -> Ok ());
+        command=(fun method_ params ->
+          commands := (method_, params) :: !commands;
+          if method_ = "permissions.setPermission" then begin
+            let target = Yojson.Safe.Util.(member "origin" params |> to_string) in
+            let state = Yojson.Safe.Util.(member "state" params |> to_string) in
+            permissions := (target,state) :: List.remove_assoc target !permissions
+          end;
+          Ok `Null);
+        close=(fun () -> ())} in
+    let contains script needle = try ignore (Str.search_forward (Str.regexp_string needle) script 0); true with Not_found -> false in
+    let request ~method_ ~path ~body = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET, "/session/owned/window" -> Ok (`String "tab")
+      | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/execute/sync" ->
+        let script = Yojson.Safe.Util.(Option.get body |> member "script" |> to_string) in
+        if contains script "location.origin" then (incr origin_reads; Ok (`String !origin))
+        else if contains script "navigator.language" then Ok (`Assoc ["locale",`String "en-US";"timezone",`String "UTC"])
+        else Ok (`Assoc ["url",`String !origin;"title",`String "Fixture"])
+      | _ -> fail ("unexpected request " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    let act interaction = Driver.execute driver (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})) in
+    let sent () = let all = List.rev !commands in commands := []; all in
+    let method_names all = List.map fst all in
+    ignore (sent ());
+    let emulation : Lane.Action.emulation = {geolocation=Some {latitude=37.5;longitude=127.;accuracy_m=25.};
+      locale=Some "ko-KR"; timezone=Some "Asia/Seoul"} in
+    (match act (Lane.Action.Set_emulation emulation) with
+     | Lane.Answered _ -> ()
+     | _ -> fail "emulation must be set");
+    let first = sent () in
+    check (list string) "permission, location, locale, time zone, in that order"
+      ["permissions.setPermission";"emulation.setGeolocationOverride";"emulation.setLocaleOverride";"emulation.setTimezoneOverride"]
+      (method_names first);
+    check bool "every command targets the tab's own context" true
+      (List.for_all (fun (m, params) -> m = "permissions.setPermission"
+        || Yojson.Safe.Util.member "contexts" params = `List [`String "tab"]) first);
+    check bool "the permission is granted for the page origin" true
+      (match List.assoc_opt "permissions.setPermission" first with
+       | Some params -> Yojson.Safe.Util.member "state" params = `String "granted"
+                        && Yojson.Safe.Util.member "origin" params = `String "https://example.org"
+       | None -> false);
+    (* The page can navigate between setting and clearing its overrides. *)
+    origin := "https://other.example";
+    (match act Lane.Action.Clear_emulation with
+     | Lane.Answered value -> check bool "clearing reports unchanged permissions" true
+         (Yojson.Safe.Util.(value |> member "data" |> member "result" |> member "permissionsUnchanged") = `Bool true)
+     | _ -> fail "emulation must clear");
+    let cleared = sent () in
+    check (list string) "only location, locale and time zone overrides are restored"
+      ["emulation.setGeolocationOverride";"emulation.setLocaleOverride";"emulation.setTimezoneOverride"]
+      (method_names cleared);
+    check bool "the original locale and time zone are set back" true
+      (match List.assoc_opt "emulation.setLocaleOverride" cleared, List.assoc_opt "emulation.setTimezoneOverride" cleared with
+       | Some l, Some z -> Yojson.Safe.Util.member "locale" l = `String "en-US" && Yojson.Safe.Util.member "timezone" z = `String "UTC"
+       | _ -> false);
+    check bool "the location override is cleared with null" true
+      (match List.assoc_opt "emulation.setGeolocationOverride" cleared with
+       | Some params -> Yojson.Safe.Util.member "coordinates" params = `Null | None -> false);
+    (match act Lane.Action.Clear_emulation with Lane.Answered _ -> () | _ -> fail "clearing twice is allowed");
+    check (list string) "a second clear has no locale or time zone left to restore"
+      ["emulation.setGeolocationOverride"] (method_names (sent ()));
+    check (option string) "the earlier origin keeps the documented session grant" (Some "granted")
+      (List.assoc_opt "https://example.org" !permissions);
+    check (option string) "the navigated origin keeps its existing denial" (Some "denied")
+      (List.assoc_opt "https://other.example" !permissions);
+    let prior_permissions = !permissions in
+    let locale_only : Lane.Action.emulation = {geolocation=None;locale=Some "fr-FR";timezone=None} in
+    (match act (Lane.Action.Set_emulation locale_only) with Lane.Answered _ -> () | _ -> fail "locale must set");
+    (match act Lane.Action.Clear_emulation with Lane.Answered _ -> () | _ -> fail "locale must clear");
+    check bool "locale-only set and clear never change permissions" true
+      (List.for_all (fun (method_,_) -> method_ <> "permissions.setPermission") (sent ()));
+    check (list (pair string string)) "both origins keep their permissions" prior_permissions !permissions;
+    check int "only setting geolocation reads the permission origin" 1 !origin_reads;
+    let parse fields = Lane.Action.parse (`Assoc (["action",`String "set_emulation";"tabId",`Int 1] @ fields)) in
+    check bool "a locale alone parses" true (Result.is_ok (parse ["locale",`String "ko-KR"]));
+    List.iter (fun (label, fields) -> check bool label true (Result.is_error (parse fields)))
+      [ "nothing to set", []
+      ; "latitude without longitude", ["latitude",`Float 1.]
+      ; "latitude out of range", ["latitude",`Float 91.;"longitude",`Float 0.]
+      ; "longitude out of range", ["latitude",`Float 0.;"longitude",`Float 181.]
+      ; "accuracy without a location", ["accuracyMeters",`Float 5.;"locale",`String "ko"]
+      ; "accuracy above the cap", ["latitude",`Float 0.;"longitude",`Float 0.;"accuracyMeters",`Float 10001.]
+      ; "a locale with spaces", ["locale",`String "not a locale"]
+      ; "a timezone with a quote", ["timezone",`String "Asia/\"Seoul"] ];
+    let round = Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Set_emulation emulation} in
+    check bool "emulation survives the wire" true (Lane.Action.parse (Lane.Action.to_json round) = Ok round))
+
 let test_open_window_asks_for_a_window () =
   Eio_main.run (fun _ ->
     let kinds = ref [] and navigations = ref [] in
@@ -745,7 +848,7 @@ let test_console_read_uses_the_tabs_context () =
         console=(fun ~context -> asked := context :: !asked;
           Ok (`Assoc ["entries",`List [`Assoc ["text",`String "hello"]];"dropped",`Int 0]));
         network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
-        check=(fun () -> Ok ());close=(fun () -> ())} in
+        check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture");close=(fun () -> ())} in
     let driver = Driver.create ~start_downloads ~request () in
     (match Driver.execute driver (Lane.Page_console {tab_id=1}) with
      | Lane.Refused _ -> () | _ -> fail "a closed session must refuse a console read");
@@ -991,6 +1094,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "semantic clicks use native input" `Quick test_semantic_click_uses_native_pointer_input;
   test_case "set_viewport resizes the window" `Quick test_set_viewport_resizes_the_window;
   test_case "cookies are set for the page host and never echoed" `Quick test_cookies_are_set_for_the_page_host_and_never_echoed;
+  test_case "emulation goes over BiDi and clears to the original values" `Quick test_emulation_goes_over_bidi_and_clears_to_the_original_values;
   test_case "open_window asks the driver for a window" `Quick test_open_window_asks_for_a_window;
   test_case "framed interaction enters the frame first" `Quick test_interact_enters_frames;
   test_case "pointer release failure recovery" `Quick test_pointer_release_recovery;

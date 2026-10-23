@@ -69,6 +69,15 @@ checking rendered application state, and gathering evidence across tabs.
 
 ## Browser controls
 
+On automation Firefox, `set_emulation` overrides the selected tab's reported
+location, locale or time zone. Setting a location grants geolocation permission
+to the current page origin in the owned browser session. `clear_emulation`
+clears the location override and restores the tab's original locale and time
+zone; it leaves page permissions unchanged, including after navigation to a
+different origin. Geolocation grants persist until the owned browser session
+closes. Setting or clearing only a locale or time zone does not change any
+geolocation permission.
+
 `BrowserInteract` requires an observed `tabId` and accepts these closed actions:
 
 | Action | Observed target | Source |

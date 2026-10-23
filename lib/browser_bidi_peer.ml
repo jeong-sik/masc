@@ -420,7 +420,8 @@ let tab_action t ~tab_id interaction =
     | Browser_lane.Action.Close_tab | Browser_lane.Action.Back | Browser_lane.Action.Forward
     | Browser_lane.Action.Reload
     | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog
-    | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _ -> Ok () in
+    | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
+    | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation -> Ok () in
   let* context,id = Result.map_error (fun e -> Before_effect e) (resolve t (obj ["tabId",`Int tab_id])) in
   (* The dialog is read before it is answered: the answer closes it, and the receipt says which one was
      answered. *)
@@ -448,7 +449,8 @@ let tab_action t ~tab_id interaction =
     Ok (obj ["tabId",`Int id;"action",str "close_tab";"closed",`Bool true])
   | Browser_lane.Action.Accept_dialog text -> answer_dialog ~accept:true text
   | Browser_lane.Action.Dismiss_dialog -> answer_dialog ~accept:false None
-  | Browser_lane.Action.Upload _ | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _ ->
+  | Browser_lane.Action.Upload _ | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
+  | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation ->
     Error (Before_effect "live BiDi page.act supports open_tab, back, forward, reload, close_tab, accept_dialog and dismiss_dialog only")
 
 (* A URL navigation follows the rule of the history steps above: only a tab

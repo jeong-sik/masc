@@ -6,10 +6,16 @@ let max_cookie_age_sec = 7 * 24 * 60 * 60
 let max_cookie_value_bytes = 4096
 let max_cookie_name_bytes = 256
 let same_site_wire = function Strict -> "Strict" | Lax -> "Lax" | Same_site_none -> "None"
+type geolocation = { latitude : float; longitude : float; accuracy_m : float }
+type emulation = { geolocation : geolocation option; locale : string option; timezone : string option }
+let default_accuracy_m = 10.
+let max_accuracy_m = 10_000.
 type interaction =
   | Upload of { selector : string; paths : string list }
   | Set_cookie of cookie
   | Delete_cookie of string
+  | Set_emulation of emulation
+  | Clear_emulation
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
 type t = Open_tab of string | Open_window of string | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
@@ -72,6 +78,47 @@ let parse_cookie fields =
     | Some (`Int n) when n >= 1 && n <= max_cookie_age_sec -> Ok (Some n)
     | Some _ -> Error (Printf.sprintf "cookieMaxAgeSec must be an integer from 1 to %d" max_cookie_age_sec) in
   Ok {name; value; path; secure; http_only; same_site; max_age_sec}
+(* Locale and time zone names are checked for shape only; Firefox is the
+   authority on which ones exist and refuses the rest before any change. *)
+let is_locale text =
+  let parts = String.split_on_char '-' text in
+  String.length text <= 35 && parts <> []
+  && List.for_all (fun part -> part <> "" && String.length part <= 8
+       && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) part) parts
+  && String.length (List.hd parts) >= 2
+let is_timezone text =
+  String.length text <= 64 && text <> ""
+  && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+       || c = '/' || c = '_' || c = '-' || c = '+') text
+let parse_emulation fields =
+  let number key = match List.assoc_opt key fields with
+    | None -> Ok None
+    | Some (`Int n) -> Ok (Some (float_of_int n))
+    | Some (`Float f) when Float.is_finite f -> Ok (Some f)
+    | Some _ -> Error (key ^ " must be a number") in
+  let* latitude = number "latitude" in
+  let* longitude = number "longitude" in
+  let* accuracy = number "accuracyMeters" in
+  let* geolocation = match latitude, longitude with
+    | None, None -> if accuracy = None then Ok None else Error "accuracyMeters needs latitude and longitude"
+    | Some latitude, Some longitude ->
+      if latitude < -90. || latitude > 90. then Error "latitude must be between -90 and 90"
+      else if longitude < -180. || longitude > 180. then Error "longitude must be between -180 and 180"
+      else
+        let accuracy_m = Option.value accuracy ~default:default_accuracy_m in
+        if accuracy_m <= 0. || accuracy_m > max_accuracy_m
+        then Error (Printf.sprintf "accuracyMeters must be above 0 and at most %.0f" max_accuracy_m)
+        else Ok (Some {latitude; longitude; accuracy_m})
+    | Some _, None | None, Some _ -> Error "latitude and longitude are given together" in
+  let text key ok message = match List.assoc_opt key fields with
+    | None -> Ok None
+    | Some (`String value) when ok value -> Ok (Some value)
+    | Some _ -> Error message in
+  let* locale = text "locale" is_locale "locale must be a language tag such as ko-KR" in
+  let* timezone = text "timezone" is_timezone "timezone must be an IANA name such as Asia/Seoul" in
+  if geolocation = None && locale = None && timezone = None
+  then Error "set_emulation needs a location, a locale or a timezone"
+  else Ok {geolocation; locale; timezone}
 let parse = function
   | `Assoc fields ->
     let string key = match List.assoc_opt key fields with
@@ -89,8 +136,8 @@ let parse = function
       let* () = exact ("tabId" :: "framePath" :: allowed) in
       let* frame_path = parse_frame_path (`Assoc fields) in
       let* () = match interaction, frame_path with
-        | (Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _), _ :: _ -> Error "this action operates on the top-level tab"
-        | ((Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _), [])
+        | (Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation), _ :: _ -> Error "this action operates on the top-level tab"
+        | ((Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation), [])
         | Upload _, _ -> Ok () in
       let* tab_id = integer "tabId" in
       if tab_id < 0 then Error "tabId must be nonnegative"
@@ -114,6 +161,10 @@ let parse = function
      | "set_cookie" ->
        let* cookie = parse_cookie fields in
        on_tab ["cookieName";"cookieValue";"cookiePath";"cookieSecure";"cookieHttpOnly";"cookieSameSite";"cookieMaxAgeSec"] (Set_cookie cookie)
+     | "set_emulation" ->
+       let* emulation = parse_emulation fields in
+       on_tab ["latitude";"longitude";"accuracyMeters";"locale";"timezone"] (Set_emulation emulation)
+     | "clear_emulation" -> on_tab [] Clear_emulation
      | "delete_cookie" ->
        let* name = cookie_name fields in
        on_tab ["cookieName"] (Delete_cookie name)
@@ -131,6 +182,15 @@ let to_json = function
       | Accept_dialog text -> "accept_dialog", Option.to_list (Option.map (fun s -> "text",`String s) text)
       | Dismiss_dialog -> "dismiss_dialog", []
       | Delete_cookie name -> "delete_cookie", ["cookieName",`String name]
+      | Clear_emulation -> "clear_emulation", []
+      | Set_emulation {geolocation;locale;timezone} ->
+        "set_emulation",
+        (match geolocation with
+         | Some {latitude;longitude;accuracy_m} ->
+           ["latitude",`Float latitude;"longitude",`Float longitude;"accuracyMeters",`Float accuracy_m]
+         | None -> [])
+        @ Option.to_list (Option.map (fun l -> "locale",`String l) locale)
+        @ Option.to_list (Option.map (fun z -> "timezone",`String z) timezone)
       | Set_cookie {name;value;path;secure;http_only;same_site;max_age_sec} ->
         "set_cookie", ["cookieName",`String name;"cookieValue",`String value;"cookiePath",`String path;
           "cookieSecure",`Bool secure;"cookieHttpOnly",`Bool http_only]

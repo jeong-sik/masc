@@ -312,6 +312,52 @@ type accepted =
       (** Original admitted observations bound to their selected current targets. *)
   }
 
+(** Original completed-history [Memory_pass None] preparation. This is separate
+    from explicit-candidate admission and grants no publication authority. *)
+type durable_policy = {
+  facts_max_bytes : int;
+  category_cap : int;
+  facts_per_category_cap : int;
+}
+type durable_preparation = {
+  source_input : Keeper_librarian.input;
+  parsing_now : float;
+  policy : durable_policy;
+  rule_prompt : Prompt_registry.prompt_resolution;
+  prompt : Prompt_registry.prompt_resolution;
+  variables : (string * string) list;
+  rendered_prompt : string;
+  output_schema : Yojson.Safe.t;
+}
+val prepare_durable : now:float -> Keeper_librarian.input ->
+  (durable_preparation, string) result
+(** Resolve the original policy and both prompt assets once, on the caller
+    fiber. The synchronous Memory pass consumes this same preparation. *)
+val validate_durable_preparation : durable_preparation -> (unit, string) result
+(** Pure restoration check of the complete captured input, policy, resolutions,
+    substitutions, rendered prompt and schema. No environment/prompt lookup. *)
+type durable_absorption = {
+  observations : Yojson.Safe.t list;
+  facts : Keeper_memory_os_types.fact list;
+  new_claims : Keeper_memory_os_types.fact list;
+  superseding : string list;
+  absorbed : Keeper_memory_os_types.absorbed_statement list;
+}
+type durable_proposal = private {
+  accepted : accepted;
+  absorption : durable_absorption;
+}
+type durable_proposal_error =
+  | Preparation_invalid of string
+  | Proposal_invalid of Keeper_librarian.parse_error
+val validate_durable_proposal : durable_preparation -> Yojson.Safe.t ->
+  (durable_proposal, durable_proposal_error) result
+(** Check the restored original preparation, parse the complete raw Memory
+    answer against its original input/time, and prepare the ordinary absorption
+    inputs. No provider, gate judgment, locked disposition or source ACK is
+    performed. [accepted] retains the normal Memory-only answer, including its
+    independent working-context result; explicit-candidate fields stay empty. *)
+
 (** Shared original explicit-candidate preparation and complete validation.
     These ports perform no provider call or Memory/queue mutation. *)
 type admission_policy = {

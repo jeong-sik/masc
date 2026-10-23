@@ -302,10 +302,6 @@ let librarian_prompt_variables ?continuity input =
   with_working_contexts_rule (prompt_variables_of_pass pass (input_for_pass pass input))
 ;;
 
-let render_librarian_prompt input =
-  Result.bind (librarian_prompt_variables input) (render_prompt Prompt_names.librarian)
-;;
-
 let resolve_librarian_prompt pass input =
   let input = input_for_pass pass input in
   let variables = prompt_variables_of_pass pass input in
@@ -325,6 +321,21 @@ let resolve_librarian_prompt pass input =
            variables) )
 ;;
 
+type durable_policy = {
+  facts_max_bytes : int;
+  category_cap : int;
+  facts_per_category_cap : int;
+}
+type durable_preparation = {
+  source_input : Keeper_librarian.input;
+  parsing_now : float;
+  policy : durable_policy;
+  rule_prompt : Prompt_registry.prompt_resolution;
+  prompt : Prompt_registry.prompt_resolution;
+  variables : (string * string) list;
+  rendered_prompt : string;
+  output_schema : Yojson.Safe.t;
+}
 type admission_policy = {
   facts_max_bytes : int;
   category_cap : int;
@@ -352,6 +363,50 @@ let validate_resolution (resolution : Prompt_registry.prompt_resolution) =
     && resolution.file_exists=Option.is_some resolution.file_value
     && resolution.has_override=Option.is_some resolution.override_value
   then Ok () else Error "Original Librarian prompt resolution is inconsistent"
+let validate_durable_preparation (preparation : durable_preparation) =
+  let open Result.Syntax in
+  let policy=preparation.policy in
+  let* ()=if Float.is_finite preparation.parsing_now && preparation.parsing_now>=0.
+    then Ok () else Error "Original history Memory parsing time is invalid" in
+  let* ()=if policy.facts_max_bytes>0 && policy.category_cap>0 && policy.facts_per_category_cap>0
+    then Ok () else Error "Original history Memory advisory limits are invalid" in
+  let* ()=validate_resolution preparation.rule_prompt in
+  let* ()=validate_resolution preparation.prompt in
+  let* rule=Prompt_registry.render_resolved_prompt_template
+    Prompt_names.librarian_working_contexts_rule preparation.rule_prompt [] in
+  let variables=(working_contexts_rule_variable,String.trim rule)
+    ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
+      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap
+      preparation.source_input in
+  let* ()=if preparation.variables=variables then Ok ()
+    else Error "Original history Memory substitutions differ from captured input" in
+  let* rendered=Prompt_registry.render_resolved_prompt_template
+    Prompt_names.librarian preparation.prompt variables in
+  let* actual_schema=Lane_addon_action.canonical preparation.output_schema in
+  let* expected_schema=Lane_addon_action.canonical
+    Keeper_structured_output_schema.librarian_current_output_schema in
+  if String.trim rule<>"" && String.trim rendered<>""
+    && preparation.rendered_prompt=rendered && Yojson.Safe.equal actual_schema expected_schema
+  then Ok () else Error "Original history Memory prompt/schema differs from captured templates and input"
+let prepare_durable ~now source_input =
+  let open Result.Syntax in
+  let policy : durable_policy = {
+    facts_max_bytes=Env_config.KeeperMemoryOs.facts_max_bytes ();
+    category_cap=Env_config.KeeperMemoryOs.category_cap ();
+    facts_per_category_cap=Env_config.KeeperMemoryOs.facts_per_category_cap ()} in
+  let* rule_prompt,rule=Prompt_registry.resolve_and_render_prompt_template
+    Prompt_names.librarian_working_contexts_rule [] in
+  let variables=(working_contexts_rule_variable,String.trim rule)
+    ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
+      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap source_input in
+  let* prompt,rendered_prompt=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
+  let preparation : durable_preparation = {source_input;parsing_now=now;policy;rule_prompt;prompt;
+    variables;rendered_prompt;output_schema=Keeper_structured_output_schema.librarian_current_output_schema} in
+  let* ()=validate_durable_preparation preparation in
+  Ok preparation
+let render_librarian_prompt input =
+  prepare_durable ~now:(Time_compat.now ()) input
+  |> Result.map (fun (preparation : durable_preparation) -> preparation.rendered_prompt)
 let validate_admission_preparation ~batch ~retirement ~input preparation =
   let open Result.Syntax in
   let policy=preparation.policy in
@@ -743,6 +798,34 @@ let validate_selection ?now ?continuity selected_input output =
     let+ working_state = Keeper_librarian.continuity_working_state_of_json_result output in
     { selection; continuity_answer = Continuity { prepared; working_state }; required_memory_ids = []; explicit_candidate_ids = []; admission_support = []; admission_recall_bindings = [] }
 ;;
+
+type durable_absorption = {
+  observations : Yojson.Safe.t list;
+  facts : Keeper_memory_os_types.fact list;
+  new_claims : Keeper_memory_os_types.fact list;
+  superseding : string list;
+  absorbed : Keeper_memory_os_types.absorbed_statement list;
+}
+type durable_proposal = {accepted : accepted;absorption : durable_absorption}
+type durable_proposal_error =
+  | Preparation_invalid of string
+  | Proposal_invalid of Keeper_librarian.parse_error
+let absorption_input (input : Keeper_librarian.input) (selection : Keeper_librarian.selection)
+    : durable_absorption =
+  {observations=Keeper_librarian.observations_for_absorption input;
+   facts=(match input.current with None -> [] | Some current -> current.facts);
+   new_claims=selection.new_claims;
+   superseding=List.map (fun (revision : Keeper_librarian.revision) -> revision.superseded_by)
+     selection.revisions;
+   absorbed=selection.absorbed}
+let parse_durable_proposal (preparation : durable_preparation) output =
+  let open Result.Syntax in
+  let+ accepted=validate_selection ~now:preparation.parsing_now preparation.source_input output in
+  {accepted;absorption=absorption_input preparation.source_input accepted.selection}
+let validate_durable_proposal preparation output =
+  let open Result.Syntax in
+  let* ()=validate_durable_preparation preparation |> Result.map_error (fun detail -> Preparation_invalid detail) in
+  parse_durable_proposal preparation output |> Result.map_error (fun error -> Proposal_invalid error)
 
 (* The accepted answer of each pass. A context-only answer carries no
    selection, so nothing downstream can reach a Memory field it never asked
@@ -1402,8 +1485,19 @@ let run_pass
           | None, Context_only, None -> Working_context_pass
         in
         let prompt_input = input_for_pass pass inp in
+        let durable_preparation = match admission with
+          | Some _ -> None
+          | None -> match pass with
+            | Memory_pass None -> Some (prepare_durable ~now:(Time_compat.now ()) prompt_input)
+            | Memory_pass (Some _) | Continuity_state_pass _ | Volatile_state_pass _
+            | Volatile_memory_pass _ | Working_context_pass -> None in
         let prompt_variables, prompt_material = match admission with
-          | None -> resolve_librarian_prompt pass prompt_input
+          | None ->
+            (match durable_preparation with
+             | None -> resolve_librarian_prompt pass prompt_input
+             | Some (Ok prepared) -> prepared.variables,
+               Ok {resolution=prepared.prompt;rendered=prepared.rendered_prompt}
+             | Some (Error detail) -> [],Error detail)
           | Some batch ->
             let prepared =
               let open Result.Syntax in
@@ -1419,12 +1513,23 @@ let run_pass
             (match prepared with
              | Ok prepared -> prepared.variables,Ok {resolution=prepared.prompt;rendered=prepared.rendered_prompt}
              | Error detail -> [],Error detail) in
-        let parsing_now=Time_compat.now () in
+        let parsing_now=match durable_preparation with
+          | Some (Ok prepared) -> prepared.parsing_now
+          | None | Some (Error _) -> Time_compat.now () in
         let validate = match admission with
-          | None -> validate_answer pass prompt_input
+          | None ->
+            (match durable_preparation with
+             | Some (Ok prepared) -> (fun output ->
+               parse_durable_proposal prepared output
+               |> Result.map (fun proposal -> Memory_answer (proposal.accepted,Commit_memory)))
+             | None | Some (Error _) -> validate_answer pass prompt_input)
           | Some batch -> validate_admission_answer ~now:parsing_now batch prompt_input in
         let requirement = match admission with
-          | None -> output_requirement_of_pass pass
+          | None ->
+            (match durable_preparation with
+             | Some (Ok prepared) -> Exact_output.make_output_requirement ~schema:prepared.output_schema
+               ~minimum_guarantee:Exact_output.Json_syntax
+             | None | Some (Error _) -> output_requirement_of_pass pass)
           | Some _ -> Exact_output.make_output_requirement ~schema:(admission_schema ())
               ~minimum_guarantee:Exact_output.Json_syntax in
         Exact_lane_run_registry.register_running
@@ -1831,9 +1936,10 @@ let run_pass
                 On a completed judgment, a new claim that absorbed nothing
                 and only repeats its current sources is a copy and is not
                 applied (RFC-0463 section 2.8). *)
+             let absorption=absorption_input prompt_input selection in
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
-                 ~new_observations:(Keeper_librarian.observations_for_absorption prompt_input
+                 ~new_observations:(absorption.observations
                    @ (match admission with
                       | None -> []
                       | Some batch -> List.map (fun (row : Keeper_memory_admission_queue.candidate) ->
@@ -1849,15 +1955,10 @@ let run_pass
                  ~on_evaluation_aborted:abort_absorb_evaluation
                  ~clock
                  ~keeper_id
-                 ~facts:(match prompt_input.current with
-                   | None -> []
-                   | Some current -> current.facts)
-                 ~new_claims:selection.new_claims
-                 ~superseding:
-                   (List.map
-                      (fun (revision : Keeper_librarian.revision) -> revision.superseded_by)
-                      selection.revisions)
-                 ~absorbed:selection.absorbed
+                 ~facts:absorption.facts
+                 ~new_claims:absorption.new_claims
+                 ~superseding:absorption.superseding
+                 ~absorbed:absorption.absorbed
                  ()
              in
              (* A failed judgment has no complete decision for this Memory

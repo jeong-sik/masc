@@ -744,11 +744,15 @@ type trail_item =
    updating. Blank stretches are dropped here so the pane never budgets a row
    for an empty heading. *)
 let project_trail ?(response_boundary = fun acc -> acc) t ~thinking ~text ~media ~tools ~skills ~superseded =
-  let call_of local_id =
-    List.find_opt
-      (fun (call : live_tool_call) -> call.local_id = local_id)
-      t.reversed_tool_calls
-  in
+  (* Resolve each trail node against this projection's current call records.
+     Searching the complete list for every node made a long turn quadratic.
+     The index is local: late results and superseded attempts are read anew
+     on the next projection, with no second mutable store to keep in sync. *)
+  let calls = Hashtbl.create (List.length t.reversed_tool_calls) in
+  List.iter
+    (fun (call : live_tool_call) -> Hashtbl.add calls call.local_id call)
+    t.reversed_tool_calls;
+  let call_of local_id = Hashtbl.find_opt calls local_id in
   (* Consecutive skill calls are one block, as consecutive generic calls
      are: a turn that runs a composition seven times over is one stretch of
      skill work, drawn as one row that counts them. *)

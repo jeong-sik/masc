@@ -28,16 +28,12 @@ let request ~pool ~clock ~endpoint ~method_ ~path ~body =
     ?body:(Option.map Yojson.Safe.to_string body) () with
   | Error detail -> Error (Browser_webdriver.Transport detail)
   | Ok response -> Browser_webdriver.decode_response ~status:response.status response.body
-let close ~env ~endpoint ~uncertain driver =
+let close ~env ~endpoint driver =
   let result,finished=Eio.Promise.create () in
   Eio.Fiber.first (fun () -> Eio.Switch.run (fun sw ->
     let pool=Masc_http_client.Pool.create ~sw ~env () in
     Eio.Promise.resolve finished (Browser_webdriver.close driver
-      ~request:(fun ~method_ ~path ~body ->
-        let outcome=request ~pool ~clock:(Eio.Stdenv.clock env) ~endpoint ~method_ ~path ~body in
-        (match outcome with Error (Browser_webdriver.Remote {code=Invalid_session_id;_}) -> uncertain:=true
-         | Ok _ | Error (Transport _|Protocol _|Remote {code=No_such_window|No_such_alert|Unexpected_alert_open|Other _;_}) -> ());
-        outcome));
+      ~request:(request ~pool ~clock:(Eio.Stdenv.clock env) ~endpoint));
     Eio.Fiber.await_cancel ())) (fun () -> Eio.Promise.await result)
 let port () =
   let socket=Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -72,7 +68,12 @@ let run ~env ~owner ~directory work =
     | Ok value -> value | Error detail -> invalid_arg detail in
   let locate=match Browser_addon_locate.for_owner owner with
     | Ok locate -> locate | Error detail -> invalid_arg detail in
-  let clean=ref true and uncertain=ref false in
+  (* Session authority lost while serving is never regained: the worker ends,
+     so its group ends and the host sweep reaches any browser it left. *)
+  let lost,lost_u=Eio.Promise.create () in
+  let lose () = ignore (Eio.Promise.try_resolve lost_u ()) in
+  let authority_lost () = Eio.Promise.is_resolved lost in
+  let ending = "owned browser session authority was lost; this worker is ending" in
   let ready_p,ready_u=Eio.Promise.create () in
   let stopping,stop=Eio.Promise.create () in
   let stopped,settle=Eio.Promise.create () in
@@ -89,20 +90,6 @@ let run ~env ~owner ~directory work =
       let endpoint=Printf.sprintf "http://%s:%d" Masc_network_defaults.masc_http_loopback_peer port in
       let clock=Eio.Stdenv.clock env in
       let pool=Masc_http_client.Pool.create ~sw ~env () in
-      let transport ~method_ ~path ~body =
-        let creating=method_=`POST && path="/session" in
-        (* Set before issuance, so cancellation between remote creation and its
-           receipt cannot be rewritten into a clean [close None]. *)
-        let was_uncertain = !uncertain in
-        if creating then (clean:=false;uncertain:=true);
-        match request ~pool ~clock ~endpoint ~method_ ~path ~body with
-        | Ok value ->
-          if creating then (match value with
-            | `Assoc fields when (match List.assoc_opt "sessionId" fields with Some (`String id) -> id<>"" | None|Some _ -> false) -> uncertain:=was_uncertain
-            | _ -> ());
-          Ok value
-        | Error ((Browser_webdriver.Remote {code=Invalid_session_id;_}) as error) -> uncertain:=true;Error error
-        | Error ((Transport _|Protocol _|Remote {code=No_such_window|No_such_alert|Unexpected_alert_open|Other _;_}) as error) -> Error error in
       let profiles={Browser_webdriver.fresh=(fun () -> Eio_unix.run_in_systhread (fun () ->
           Browser_gecko_profile.create ~instance:configuration.profiles));
         (* A session ended by cancellation, such as a command timeout, still
@@ -113,32 +100,34 @@ let run ~env ~owner ~directory work =
           | Ok Browser_gecko_profile.In_use ->
             Printf.eprintf "Gecko profile %s is still in use; the host removes it after this instance ends\n%!" path
           | Error detail -> Printf.eprintf "Gecko profile %s was kept: %s\n%!" path detail)} in
-      let driver=Browser_webdriver.create ?binary:configuration.binary ?locate ~profiles ~request:transport
+      let driver=Browser_webdriver.create ?binary:configuration.binary ?locate ~profiles ~lost:lose
+        ~request:(request ~pool ~clock ~endpoint)
         ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root:(Filename.concat directory "downloads")
           ~publish:(fun path -> Eio_unix.run_in_systhread (fun () -> Browser_addon_owner.publish_download owner path))) () in
       let close_original=Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
         Browser_addon_owner.revoke owner;
-        match close ~env ~endpoint ~uncertain driver with
-        | Ok () -> clean:=true;Ok ()
-        | Error error -> Error (Browser_webdriver.error_message error)) in
+        Result.map_error Browser_webdriver.error_message (close ~env ~endpoint driver)) in
       Eio.Switch.on_release sw (fun () ->
         match Eio.Lazy.force close_original with
         | Ok () -> ()
         | Error detail -> Printf.eprintf "browser session cleanup unconfirmed: %s\n%!" detail);
       ready ~clock ~pool ~endpoint ~process;
-      let execute verb = if !uncertain then
-          Browser_lane.Rejected_before_effect "owned browser session authority is unknown; detach and inspect cleanup"
+      let execute verb = if authority_lost () then Browser_lane.Rejected_before_effect ending
         else Browser_webdriver.execute driver verb in
       let cleanup () =
         ignore (Eio.Promise.try_resolve stop ());
         Eio.Promise.await stopped in
       (match Browser_addon_owner.attach_automation owner ~locate:(Option.is_some locate) ~execute
-        ~session:(fun () -> if !uncertain then Browser_lane.Browser_unknown else Browser_webdriver.session_observation driver)
-        ~document:(fun ~tab_id -> if !uncertain then Browser_lane.Rejected_before_effect "owned session authority is unknown"
+        ~session:(fun () -> if authority_lost () then Browser_lane.Browser_unknown
+          else Browser_webdriver.session_observation driver)
+        ~document:(fun ~tab_id -> if authority_lost () then Browser_lane.Rejected_before_effect ending
           else Browser_webdriver.observe_document_if_idle driver ~tab_id) ~cleanup with
        | Ok () -> () | Error detail -> invalid_arg detail);
       Eio.Promise.resolve ready_u (Ok ());
-      Eio.Promise.await stopping;
+      (* A driver that exits while the worker serves leaves no session it can
+         address. *)
+      Eio.Fiber.first (fun () -> Eio.Promise.await stopping)
+        (fun () -> ignore (Eio.Process.await process); lose (); Eio.Fiber.await_cancel ());
       (* BiDi's reader is a regular child of this switch. Close the original
          session before switch join so its stop signal can settle that reader;
          the release hook observes the same once-only cleanup on cancellation. *)
@@ -164,8 +153,7 @@ let run ~env ~owner ~directory work =
     ignore (Eio.Promise.try_resolve ready_u outcome);
     let outcome=match outcome with
       | Error _ -> outcome
-      | Ok () -> if !clean && not !uncertain then Ok ()
-        else Error "owned browser cleanup is unconfirmed" in
+      | Ok () -> if authority_lost () then Error "owned browser cleanup is unconfirmed" else Ok () in
     ignore (Eio.Promise.try_resolve settle outcome));
     (match Eio.Promise.await ready_p with
      | Error detail -> invalid_arg detail
@@ -174,5 +162,11 @@ let run ~env ~owner ~directory work =
            Browser_addon_owner.revoke owner;
            ignore (Eio.Promise.try_resolve stop ());
            ignore (Eio.Promise.await stopped));
-         work ())))
-
+         Eio.Fiber.first work (fun () ->
+           Eio.Promise.await lost;
+           (* A loss during the worker's own stop, such as a creation that
+              retirement cancelled, leaves its cleanup unconfirmed; the stop
+              goes on. *)
+           if Browser_addon_owner.is_retired owner then Eio.Fiber.await_cancel ()
+           else (Browser_addon_owner.revoke owner;
+             raise (Sys_error "owned Gecko session authority was lost; this worker ends so the host replaces it"))))))

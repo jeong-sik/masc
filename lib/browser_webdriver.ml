@@ -9,7 +9,7 @@ type located_node = { node_id : string; description : string }
 type locate = scene:Browser_scene.t -> instruction:string option -> (located_node list, string) result
 type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable window_sizes : (string * (int * int)) list; mutable emulated : (string * (string * string)) list; mutable blocks : (string * string) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result; profile : string option }
 type profiles = { fresh : unit -> (string, string) result; ended : string -> unit }
-type t = { start_downloads : Browser_downloads.start; binary : string option; locate : locate option; profiles : profiles option; request : request; mutex : Eio.Mutex.t; active : int Atomic.t; mutable session : session option; mutable next_tab : int; observed_session : Browser_lane.session_observation Atomic.t }
+type t = { start_downloads : Browser_downloads.start; binary : string option; locate : locate option; profiles : profiles option; lost : unit -> unit; request : request; mutex : Eio.Mutex.t; active : int Atomic.t; mutable session : session option; mutable next_tab : int; observed_session : Browser_lane.session_observation Atomic.t }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string_field key json = match field key json with
@@ -49,7 +49,7 @@ let decode_response ~status body =
         | Some (`String message) -> Ok message
         | _ -> Error (Protocol "missing string field: message") in
       Error (Remote { code = remote_error_of_code code; message })
-let create ?binary ?locate ?profiles ~start_downloads ~request () = { start_downloads; binary; locate; profiles; request; mutex = Eio.Mutex.create (); active = Atomic.make 0; session = None; next_tab = 1; observed_session = Atomic.make Browser_lane.Browser_closed }
+let create ?binary ?locate ?profiles ?(lost = ignore) ~start_downloads ~request () = { start_downloads; binary; locate; profiles; lost; request; mutex = Eio.Mutex.create (); active = Atomic.make 0; session = None; next_tab = 1; observed_session = Atomic.make Browser_lane.Browser_closed }
 let session_observation t = Atomic.get t.observed_session
 let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
 let profile_ended t = function
@@ -66,7 +66,8 @@ let call t session method_ suffix body =
      (* A release hook may call again with a session already released. *)
      (match t.session with
       | Some current when current == session ->
-        t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources t session
+        t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources t session;
+        t.lost ()
       | Some _ | None -> ())
    | Error (Transport _ | Protocol _) -> Atomic.set t.observed_session Browser_lane.Browser_unknown
    | Ok _ -> (match session.downloads with Ok _ -> Atomic.set t.observed_session Browser_lane.Browser_open | Error _ -> ())
@@ -95,7 +96,10 @@ let close_unlocked ?request t = match t.session with
       | result -> result
       | exception exn -> Atomic.set t.observed_session Browser_lane.Browser_unknown; raise exn in
     match result with
-    | Ok _ | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources t session; Ok ()
+    | Ok _ -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources t session; Ok ()
+    | Error (Remote { code = Invalid_session_id; _ }) ->
+      t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources t session;
+      t.lost (); Ok ()
     | Error ((Transport _ | Protocol _
              | Remote { code = No_such_window | No_such_alert | Unexpected_alert_open | Other _; _ }) as error) ->
       Atomic.set t.observed_session Browser_lane.Browser_unknown; Error error
@@ -482,14 +486,15 @@ let rec execute_unlocked t = function
        Atomic.set t.observed_session Browser_lane.Browser_changing;
        let* result = match t.request ~method_:`POST ~path:"/session" ~body:(Some caps) with
          | Ok result -> Atomic.set t.observed_session Browser_lane.Browser_unknown;Ok result
-         | Error error ->
-           Atomic.set t.observed_session (match error with Remote _ -> Browser_lane.Browser_closed
-             | Transport _ | Protocol _ -> Browser_lane.Browser_unknown);
-           profile_ended t profile;Error error
-         | exception exn -> Atomic.set t.observed_session Browser_lane.Browser_unknown;profile_ended t profile;raise exn in
+         | Error (Remote _ as error) ->
+           Atomic.set t.observed_session Browser_lane.Browser_closed;profile_ended t profile;Error error
+         | Error ((Transport _ | Protocol _) as error) ->
+           Atomic.set t.observed_session Browser_lane.Browser_unknown;profile_ended t profile;t.lost ();Error error
+         | exception exn ->
+           Atomic.set t.observed_session Browser_lane.Browser_unknown;profile_ended t profile;t.lost ();raise exn in
        let* id = match string_field "sessionId" result with
          | Ok _ as id -> id
-         | Error _ as missing -> profile_ended t profile;missing in
+         | Error _ as missing -> profile_ended t profile;t.lost ();missing in
        let owned = { pointer_state = Released; id; handles = []; window_sizes = []; emulated = []; blocks = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying"; profile } in
        t.session <- Some owned;
        Eio.Switch.run (fun setup_sw ->

@@ -20,11 +20,16 @@ type profiles = { fresh : unit -> (string, string) result; ended : string -> uni
     Firefox runs it through [-profile], and a session whose browser reports
     another [moz:profile] is closed and refused. [ended] receives the path once
     that session has ended or failed to start. *)
-val create : ?binary:string -> ?locate:locate -> ?profiles:profiles ->
+val create : ?binary:string -> ?locate:locate -> ?profiles:profiles -> ?lost:(unit -> unit) ->
   start_downloads:Browser_downloads.start -> request:request -> unit -> t
 (** [binary] is forwarded verbatim to moz:firefoxOptions.binary. Missing means
     geckodriver discovers its default Firefox; an invalid explicit path fails.
-    Without [profiles], geckodriver makes and deletes a temporary profile. *)
+    Without [profiles], geckodriver makes and deletes a temporary profile.
+    [lost] is called when the driver may hold a browser this client can no
+    longer address: a session creation that raised, failed in transport or
+    protocol, or answered without a session id, and an [invalid session id]
+    reply about the current session. A creation the driver refused with a
+    WebDriver error started no session and is not a loss. *)
 val execute : t -> Browser_lane.verb -> Browser_lane.answer
 val observe_document_if_idle : t -> tab_id:int -> Browser_lane.answer
 (** Observe the already selected document only when no owned command is active.

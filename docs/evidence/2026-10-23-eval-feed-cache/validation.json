@@ -1,0 +1,61 @@
+{
+  "scope": "isolated actual HTTP router/cache with two agents and two snapshots each",
+  "parent": "da0cd9d016c89988153c0b90585f840058bb54a3",
+  "source_sha256": {
+    "lib/server/server_routes_http_routes_dashboard.ml": "65a08f621313279b32c994cb293a17591a173f256ed1563e404c91bf23c176ba",
+    "test/test_dashboard_http_core.ml": "a829b1a6139339891238c8d5419cc64e0ece9637ece2a2d612a441aaee302e66"
+  },
+  "log_sha256": {
+    "baseline-http.log": "3318e4fba3ce4e182ce9b42c7021006e0298608fd2d0d2c10cd26b5a4495ebd0",
+    "baseline-case-0.log": "af24727d5bab80e7adfbc8991940bdc8c5519f865f78e6a505d4b7a9a229ed5b",
+    "baseline-case-1.log": "becc40aeaedd5697b5ff4ab5619af93dea8c981b4b79f8282ec4fd9f2893bd23",
+    "eval_feed_cache_selection.log": "98b139efed8070b340169006eca64b8319d866cb476f7a3cb92784306e5602e7",
+    "effective_tool_quality_sampling.log": "bf3651a622bab1cee9216681fee2e1f1b503eacf8df6b078b73ce2718ae89540",
+    "exact_query_cache_identity.log": "7c91998e47662c1c33ac6a41acbd7b3cd170fa0880f32de5156a7230e4b3f8af"
+  },
+  "checks": [
+    {
+      "command": "_build/default/test/test_dashboard_http_core.exe test eval_feed_cache_selection",
+      "log": "eval_feed_cache_selection.log",
+      "exit_code": 0,
+      "tests": 3
+    },
+    {
+      "command": "_build/default/test/test_dashboard_http_core.exe test effective_tool_quality_sampling",
+      "log": "effective_tool_quality_sampling.log",
+      "exit_code": 0,
+      "tests": 3
+    },
+    {
+      "command": "_build/default/test/test_dashboard_http_core.exe test exact_query_cache_identity",
+      "log": "exact_query_cache_identity.log",
+      "exit_code": 0,
+      "tests": 5
+    }
+  ],
+  "before": {
+    "fleet_requests": 5,
+    "fleet_payload_preparations": 5,
+    "schema_case": "expected agent_name Some(-), received None"
+  },
+  "after": {
+    "fleet_requests": 5,
+    "fleet_payload_preparations": 1,
+    "schema_case": "correct fleet/agent shape in both warmup orders"
+  },
+  "build_commands": [
+    {
+      "command": "opam exec --switch=5.5.1 -- dune build test/test_dashboard_http_core.exe",
+      "exit_code": 0
+    },
+    {
+      "command": "opam exec --switch=5.5.1 -- dune build test/test_dashboard_http_core.exe",
+      "exit_code": 0
+    }
+  ],
+  "full_regression": "not run; latest full regression run identity not inspected",
+  "ci": "not run",
+  "installation": "candidate not installed",
+  "latency": "no candidate endpoint latency or UI speedup measured",
+  "raw_log_whitespace": "Two original baseline-case logs retain EOF blank lines; diff --check warns on those verbatim output files."
+}

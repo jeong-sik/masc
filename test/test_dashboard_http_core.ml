@@ -5201,7 +5201,7 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
 
 (* Exact parsed queries must own distinct cached responses. Exercise the real
    router and response cache, including the echoed query and retained rows. *)
-let with_exact_query_router f =
+let with_exact_query_router ?(prepare = fun _ -> ()) f =
   with_test_env @@ fun ~env ~sw ~config ->
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect ~finally:(fun () ->
@@ -5218,6 +5218,7 @@ let with_exact_query_router f =
     let token = match Auth.create_token config.base_path ~agent_name:"query-reader" ~role:Types.Admin with
       | Ok (token, _) -> token
       | Error error -> fail (Types.masc_error_to_string error) in
+    prepare config;
     Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
     let store = match Masc.Keeper_tool_call_log.store () with
       | Some store -> store | None -> fail "tool-call fixture unavailable" in
@@ -5235,6 +5236,78 @@ let with_exact_query_router f =
       check int (target ^ " status") 200 status;
       headers, Yojson.Safe.from_string body in
     f read))
+
+let prepare_eval_feed_rows (config : Workspace.config) =
+  List.iter (fun name ->
+    let dir = Filename.concat (Filename.concat (Filename.concat config.base_path ".agent_core") "eval") name in
+    Fs_compat.mkdir_p dir;
+    List.iter (fun index ->
+      let snapshot : Dashboard_eval_feed.eval_snapshot = {
+        agent_name = name; session_id = None;
+        worker_run_id = name ^ "-run-" ^ string_of_int index;
+        timestamp = float_of_int index; baseline_status = None;
+        verdict = { schema_version = 1; all_passed = true; coverage = 1.; layer_results = [] };
+      } in
+      Yojson.Safe.to_file (Filename.concat dir (string_of_int index ^ ".json"))
+        (Dashboard_eval_feed.snapshot_to_json snapshot)) [1; 2]) ["-"; "eval-other"]
+
+let check_eval_fleet json =
+  let open Yojson.Safe.Util in
+  check (option int) "both retained agents remain visible" (Some 2)
+    (Safe_ops.json_int_opt "agent_count" json);
+  check bool "fleet has no per-agent selector" true (member "agent_name" json = `Null);
+  let agents = json |> member "agents" |> to_list in
+  check (list string) "fleet preserves sorted agents" ["-"; "eval-other"]
+    (List.map (fun row -> row |> member "agent_name" |> to_string) agents);
+  List.iter (fun row ->
+    let name = row |> member "agent_name" |> to_string in
+    check string "fleet keeps the latest retained snapshot" (name ^ "-run-2")
+      (row |> member "latest" |> member "worker_run_id" |> to_string)) agents
+
+let check_eval_agent ~name ~count:expected json =
+  let open Yojson.Safe.Util in
+  check (option string) "exact agent selector survives cache" (Some name)
+    (Safe_ops.json_string_opt "agent_name" json);
+  check int "count follows the effective limit" expected (json |> member "count" |> to_int);
+  check bool "agent result has no fleet rows" true (member "agents" json = `Null);
+  let snapshots = json |> member "snapshots" |> to_list in
+  check (list string) "requested snapshots retain their original order"
+    (if expected = 1 then [name ^ "-run-2"] else [name ^ "-run-2"; name ^ "-run-1"])
+    (List.map (fun row -> row |> member "worker_run_id" |> to_string) snapshots)
+
+let test_eval_feed_separates_fleet_from_dash_agent () =
+  with_exact_query_router ~prepare:prepare_eval_feed_rows @@ fun read ->
+  List.iter (fun agent_first ->
+    Dashboard_cache.invalidate_all ();
+    let fleet () = let _, json = read "/api/v1/dashboard/eval-feed?limit=1" in check_eval_fleet json in
+    let agent () = let _, json = read "/api/v1/dashboard/eval-feed?agent_name=-&limit=1" in
+      check_eval_agent ~name:"-" ~count:1 json in
+    if agent_first then (agent (); fleet (); agent ()) else (fleet (); agent (); fleet ())) [false; true]
+
+let test_eval_feed_fleet_reuses_effective_selection () =
+  with_exact_query_router ~prepare:prepare_eval_feed_rows @@ fun read ->
+  let prepared = ref 0 in
+  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
+    List.iter (fun query -> let _, json = read ("/api/v1/dashboard/eval-feed" ^ query) in
+      check_eval_fleet json)
+      [""; "?limit=1"; "?limit=100"; "?agent_name=&limit=2"; "?agent_name=%20%20&limit=100"]);
+  check int "unused limit and empty selector share one fleet preparation" 1 !prepared
+
+let test_eval_feed_agent_limits_remain_distinct () =
+  with_exact_query_router ~prepare:prepare_eval_feed_rows @@ fun read ->
+  let prepared = ref 0 in
+  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
+    List.iter (fun (query, name, count) ->
+      let _, json = read ("/api/v1/dashboard/eval-feed?" ^ query) in
+      check_eval_agent ~name ~count json)
+      ["agent_name=-&limit=1", "-", 1;
+       "agent_name=-&limit=2", "-", 2;
+       "agent_name=%20-%20&limit=2", "-", 2;
+       "agent_name=eval-other&limit=1", "eval-other", 1;
+       "agent_name=-&limit=0", "-", 1;
+       "agent_name=-", "-", 2;
+       "agent_name=-&limit=invalid", "-", 2]);
+  check int "different effective selectors and limits stay distinct" 4 !prepared
 
 let test_keeper_cached_windows_keep_exact_query () =
   with_exact_query_router @@ fun read ->
@@ -8376,6 +8449,11 @@ let test_skill_evidence_joins_activation_and_composition () =
 let () =
   run "dashboard_http_core"
     [
+      ("eval_feed_cache_selection", [
+        test_case "fleet and literal dash agent keep distinct results" `Quick test_eval_feed_separates_fleet_from_dash_agent;
+        test_case "fleet ignores limit and normalizes empty selectors" `Quick test_eval_feed_fleet_reuses_effective_selection;
+        test_case "agent counts, limits and aliases keep their meaning" `Quick test_eval_feed_agent_limits_remain_distinct;
+      ]);
       ("effective_tool_quality_sampling", [
         test_case "window ignores the recent-count option" `Quick test_tool_quality_window_reuses_irrelevant_limit;
         test_case "recent counts remain separate" `Quick test_tool_quality_recent_limits_remain_distinct;

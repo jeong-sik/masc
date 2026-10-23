@@ -54,10 +54,12 @@ another browser to conceal missing support. Reobserve the same client/tab after
 an uncertain effect before deciding how to continue.
 
 For ego, use one task space throughout a goal, including errors and recovery;
-reuse its page aliases. The current parity goal owns space **54**, name
-`masc browser parity 20261023`, page `p1`. Do not finish it until this whole goal
-ends. A separate goal uses a separate owned space. Never take over another
-goal's or a person's space to obtain a cleaner result.
+reuse its page aliases. Record its observed identity with the run evidence rather
+than hardcoding a local space number into the general guide. If the original
+space disappears, preserve the failed lookup and ask the operator before creating
+a successor; record that authorized exception and the new identity. Do not finish
+the space until this whole goal ends. A separate goal uses a separate owned space.
+Never take over another goal's or a person's space to obtain a cleaner result.
 
 ## Record cost, success and recovery
 

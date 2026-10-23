@@ -1,0 +1,1 @@
+{"type":"object","properties":{"context_summary":{"type":"string"},"key_questions":{"type":"array","items":{"type":"string"}},"judgment":{"type":"string","enum":["approve","deny","require_human"]},"rationale":{"type":"string"}},"required":["context_summary","key_questions","judgment","rationale"],"additionalProperties":false}

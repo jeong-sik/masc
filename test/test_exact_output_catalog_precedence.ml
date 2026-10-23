@@ -703,6 +703,38 @@ let test_addon_lanes_publish_beside_builtin_lanes () =
     | Ok _ | Error _ -> Alcotest.fail "an output with no table must resolve to Exact_lane_unconfigured"
 ;;
 
+(* A required service is met by an Addon lane whose exact output carries the
+   service's id, only while that lane holds an admitted slot. *)
+let test_addon_lane_serves_required_service () =
+  let snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement
+         { source = "addon-serves-required-service"; contents = replacement_catalog })
+  in
+  let required = "hitl_auto_judge_exact" in
+  let addon output =
+    match Runtime_schema.addon_lane ~declaration_id:"judge-addon" ~output with
+    | Ok lane -> Runtime_schema.Addon lane
+    | Error detail -> Alcotest.fail detail
+  in
+  let lane owner slot_ids : Runtime_schema.exact_output_lane_decl =
+    { owner; enabled = true; slot_ids; cli_slot_ids = []; max_output_tokens = Some 4_096; thinking = None }
+  in
+  let admission lanes = Registry.check_publication ~required_lane_ids:[ required ] ~lanes snapshot in
+  let refused label = function
+    | Error (Registry.Required_lane_unavailable { lane_id }) ->
+      Alcotest.(check string) label required lane_id
+    | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
+    | Ok () -> Alcotest.fail (label ^ " must not satisfy the required service")
+  in
+  (match admission [ lane (addon required) [ replacement_target ] ] with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Registry.publication_error_to_string error));
+  refused "an Addon lane with no admitted slot" (admission [ lane (addon required) [ "not-in-frozen-catalog" ] ]);
+  refused "an Addon lane of another output" (admission [ lane (addon "unrelated_exact") [ replacement_target ] ]);
+  refused "no lane at all" (admission [])
+;;
+
 let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
   let snapshot =
     load_control_snapshot
@@ -1323,6 +1355,10 @@ let () =
             "unknown slots degrade locally while required lanes stay atomic"
             `Quick
             test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity
+        ; Alcotest.test_case
+            "an Addon lane serves a required service only with an admitted slot"
+            `Quick
+            test_addon_lane_serves_required_service
         ; Alcotest.test_case
             "closed registry transaction publishes final generation and lane"
             `Quick

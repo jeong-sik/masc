@@ -147,7 +147,11 @@ val publish
     not suppress admitted siblings. Blank or duplicate ids (including across
     [slots] and [cli_slots]) and malformed target
     refs remain fatal. A required lane must retain at least one admitted slot,
-    unless it is in [excused_lane_ids] (a lane rule 3 emptied): that lane is
+    or be served by an Addon lane that holds one: an Addon lane whose exact
+    output is named by the required lane's id (for example
+    [hitl_auto_judge_exact]) counts as availability only. Which of the two
+    runs a request is decided where the request is dispatched, never by
+    publication. A required lane is excused only by [excused_lane_ids] (a lane rule 3 emptied): that lane is
     unavailable alone. The registry keeps [required_lane_ids] whole, so a
     replacement requires an excused lane again unless it excuses it too.
     Disabled declarations retain their candidates and may be empty. Blank

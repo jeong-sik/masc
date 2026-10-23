@@ -357,20 +357,31 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
   loop 1 String_set.empty admitted_by_id [] [] lanes
 ;;
 
+(* A lane serves a required service when it holds an admitted slot and either
+   is that builtin lane or is an Addon lane whose exact output carries the
+   service's id. The Addon form is an availability fact only: the lanes come
+   from the operator's own [runtime.toml], and what runs a request is decided
+   where the request is dispatched, never here. *)
+let serves_required_lane lane_id (lane : admitted_lane) =
+  let has_slot =
+    match lane with
+    | { slots = _ :: _; _ } | { cli_slots = _ :: _; _ } -> true
+    | { slots = []; cli_slots = []; _ } -> false
+  in
+  has_slot
+  &&
+  match lane.owner with
+  | Runtime_schema.Builtin _ -> String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id
+  | Runtime_schema.Addon { output; _ } -> String.equal output lane_id
+;;
+
 let validate_required_lanes required_lane_ids admitted_lanes =
   let rec loop = function
     | [] -> Ok ()
     | lane_id :: rest ->
-      (match
-         List.find_opt
-           (fun (lane : admitted_lane) ->
-              String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
-           admitted_lanes
-       with
-       | Some { slots = _ :: _; _ }
-       | Some { cli_slots = _ :: _; _ } -> loop rest
-       | Some { slots = []; cli_slots = []; _ } | None ->
-         Error (Required_lane_unavailable { lane_id }))
+      if List.exists (serves_required_lane lane_id) admitted_lanes
+      then loop rest
+      else Error (Required_lane_unavailable { lane_id })
   in
   loop required_lane_ids
 ;;

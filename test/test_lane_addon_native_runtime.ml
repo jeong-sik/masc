@@ -172,7 +172,7 @@ let interrupted_reservation () = native_installation_with_slot (fun directory ->
   write (Filename.concat directory "intent.json") "") ()
 (* The operator takes over an instance whose cleanup was not confirmed. Only
    the operator may, only for that failure, and a refusal leaves the record as
-   it was. A browser allocation whose Gecko receipt is missing stays where it
+   it was. A browser allocation that holds an unsettled download stays where it
    is, and no later recovery reports it released. *)
 let operator_retain () = with_fixture (fun clock root config ->
   let manifest = write_native_manifest root in
@@ -202,7 +202,7 @@ let operator_retain () = with_fixture (fun clock root config ->
         "phase",Lane_addon_types.phase_to_json (Lane_addon_lifecycle.project state);
         "lifecycle",Lane_addon_lifecycle.state_to_json state]
         @ List.filter (fun (name,_) -> not (List.mem name replaced)) captured))) in
-  let unconfirmed = Lane_addon_lifecycle.Cleanup_unconfirmed "missing automation-closed.json" in
+  let unconfirmed = Lane_addon_lifecycle.Cleanup_unconfirmed "an unsettled download remains in the allocation" in
   let retain ?(access=Lane_addon_sources.Operator_configuration) id =
     R.dispatch ~caller:"retain-tester" ~access ~config ~operation:R.Retain (`Assoc ["instance_id",`String id]) in
   let still_failed id = match lifecycle id with
@@ -220,8 +220,8 @@ let operator_retain () = with_fixture (fun clock root config ->
   ignore (dispatch config R.Retain ["instance_id",`String id]);
   check string "an instance with no allocation left is found released" "native_released" (release_kind id);
   check bool "a detached instance is not retained again" true (Result.is_error (retain id));
-  (* A browser allocation admitted under the record's own installation slot:
-     the worker never wrote its Gecko receipt and a download was left behind. *)
+  (* A browser allocation admitted under the record's own installation slot,
+     holding a download no worker settled. *)
   let browser_instance () =
     let instance_id = Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
     let slot = Filename.concat (Filename.concat (Lane_addon_store.root store) "native-claims")
@@ -244,7 +244,7 @@ let operator_retain () = with_fixture (fun clock root config ->
       ~operation:R.Detach (`Assoc ["instance_id",`String id])) in
   let first, _, _, left = browser_instance () in
   Fun.protect ~finally:(fun () -> remove (Filename.dirname (Filename.dirname left))) (fun () ->
-    check bool "recovery cannot release an allocation without its receipt" true (cleanup_refused first && still_failed first);
+    check bool "recovery cannot release an allocation that holds an unsettled download" true (cleanup_refused first && still_failed first);
     ignore (dispatch config R.Retain ["instance_id",`String first]);
     check string "the operator's retention is recorded" "native_retained" (release_kind first);
     check bool "the left download stays in place" true (Sys.file_exists left));

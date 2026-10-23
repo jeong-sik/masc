@@ -5638,6 +5638,11 @@
  (libraries alcotest unix masc.private_browser_profile))
 
 (test
+ (name test_browser_gecko_sweep)
+ (modules test_browser_gecko_sweep)
+ (libraries alcotest unix uuidm masc))
+
+(test
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
  (libraries alcotest unix yojson eio eio_main masc.server masc.fs_compat))

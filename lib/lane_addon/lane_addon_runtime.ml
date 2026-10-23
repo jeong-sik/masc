@@ -233,7 +233,8 @@ type manager = { store : Lane_addon_store.t; base_path : string; artifact_store 
   mutable configuration_visibility : (string * visibility) list;
   mutable swept : runtime list;
   sweep_retries : (runtime, sweep_retry list) Hashtbl.t;
-  sweep_warned : (runtime, (string * string option * Lifecycle.failure) list) Hashtbl.t }
+  sweep_warned : (runtime, (string * string option * Lifecycle.failure) list) Hashtbl.t;
+  gecko_sweep : Browser_gecko_sweep.t }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let installation_id (e : entry) = Lane_addon_tool_request_owner.installation_id (match e.configuration with
   | Some owner -> Lane_addon_tool_request_owner.Configuration owner.id
@@ -1789,7 +1790,8 @@ let manager config =
                      fleet_journals=Hashtbl.create 8;
                      fleet_operations=Hashtbl.create 8; fleet_recipients=Hashtbl.create 16; fleet_nudge=(fun () -> ());
                      configuration_status = None; configuration_nudge = (fun () -> ()); configuration_visibility=[];
-                     swept = []; sweep_retries = Hashtbl.create 2; sweep_warned = Hashtbl.create 2 } in
+                     swept = []; sweep_retries = Hashtbl.create 2; sweep_warned = Hashtbl.create 2;
+                     gecko_sweep = Browser_gecko_sweep.create () } in
       Hashtbl.add managers root m; m
 let reading_exports (reading : live_reading) =
   reading.ready |> List.concat_map (fun ((e : entry), connection) ->
@@ -4103,6 +4105,17 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Some publish ->
          (match publish ~config exports with
           | Ok () -> () | Error message -> add_issue directory message));
+    (* Gecko browsers that outlived their automation instance. The pass runs
+       on the owner domain without yielding, so the live instances it reads
+       cannot change during it; it is a few file and signal calls. *)
+    List.iter (fun (outcome : Browser_gecko_sweep.outcome) ->
+        let text = Browser_gecko_sweep.outcome_to_string outcome in
+        match outcome with
+        | Removed _ -> Log.Misc.info "Lane Add-on %s" text
+        | Terminated _ | Killed _ | Kept _ -> Log.Misc.warn "Lane Add-on %s" text)
+      (Browser_gecko_sweep.pass m.gecko_sweep
+         ~root:(Browser_gecko_profile.root ~lane_addon_root:(Lane_addon_store.root m.store))
+         ~live:(Hashtbl.mem m.entries));
     let reading={directory;snapshot;issues=List.rev !issues} in
     let changed=configuration_event_packages m m.configuration_status reading in
     m.configuration_status <- Some reading;

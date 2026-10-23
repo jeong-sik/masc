@@ -46,6 +46,8 @@ type removal =
   | Removed
   | In_use
 
+let remove_locked path = Profile.remove ~label ~last:lock_name path
+
 let remove_if_free path =
   let* lock_file = Profile.open_lock ~profile:path ~name:lock_name in
   Fun.protect ~finally:(fun () -> Profile.close_lock lock_file) (fun () ->
@@ -58,5 +60,5 @@ let remove_if_free path =
       match taken with
       | Profile.Held_elsewhere -> Ok In_use
       | Profile.Locked ->
-        let* () = Profile.remove ~label ~last:lock_name path in
+        let* () = remove_locked path in
         Ok Removed)

@@ -184,8 +184,10 @@ receipts remain distinct from successful contract validation.
    Gecko automation now runs inside the native browser worker. Its driver and
    optional binary are snapshotted by the host at attachment and retained in the
    original immutable cleanup descriptor. The host writes the worker spec inside
-   its per-incarnation allocation. Profiles and staged downloads belong to that
-   allocation; this unit accepts no shared or operator profile. Only a ready
+   its per-incarnation allocation, and staged downloads belong to that
+   allocation. Each session runs on its own profile, which the worker creates
+   in `<lane-addons>/gecko-profiles/<instance>/` and passes with `-profile`;
+   this unit accepts no shared or operator profile. Only a ready
    driver publishes an executor, session observer and document observer. Typed
    worker inventory carries registration and the actual open/closed/unknown
    session separately, so automatic browser selection can choose this backend.
@@ -193,19 +195,22 @@ receipts remain distinct from successful contract validation.
 
    Normal detach sends private `Retire` before native termination: admission is
    revoked, the session is closed through an independent HTTP pool, and the
-   exact driver child is reaped before an incarnation-bound cleanup receipt is
-   persisted. Retirement waits for this completion rather than the quick
+   exact driver child is reaped. Retirement waits for this completion rather than the quick
    control timeout or the native worker's short abort grace. Stdin EOF and
    termination signals also join backend cleanup. Interrupted session creation
    and lost session authority remain sticky; later success cannot erase them.
    The host additionally requires native group settlement, the original
-   allocation inode, its unchanged spec and empty profile/download directory
-   trees. It removes only known regular files, the socket and empty directories.
-   Missing receipts, changed identity or downloaded bytes retain the allocation
-   and refuse replacement. It does not infer escaped-descendant absence from
-   a process-group check or force-delete profiles after a crash. Mozilla also
-   documents interrupted-session profile retention in
-   [geckodriver profiles](https://firefox-source-docs.mozilla.org/testing/geckodriver/Profiles.html).
+   allocation inode, its unchanged spec and empty download directory trees. It
+   removes only known regular files, the socket and empty directories. Changed
+   identity or downloaded bytes retain the allocation and refuse replacement.
+   A session's profile is removed under its own lock when the session ends.
+   geckodriver never removes a profile it was given
+   ([geckodriver profiles](https://firefox-source-docs.mozilla.org/testing/geckodriver/Profiles.html)),
+   and a browser can leave the worker's process group, for example to apply a
+   staged update, and recreate its profile path. So on each configuration pass
+   the host looks at the profiles of instances it no longer owns: it removes a
+   profile nobody holds under its own lock, sends SIGTERM to the process that
+   holds one, and SIGKILL on the next pass if the same process still holds it.
    Downloads are staged privately but publication/upload and shared persistent
    profiles still require their host brokers. Chrome now has the owned controller
    described below, including dedicated persistent-profile admission. Gecko

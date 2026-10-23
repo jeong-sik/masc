@@ -88,36 +88,26 @@ let owned_backend_cleanup () =
       let file=Filename.concat (Filename.concat downloads "session") "partial" in
       Out_channel.with_open_bin file (fun out -> output_string out "preserve");
       lease (Lease.retire admission);
-      check "missing worker receipt retains allocation" true (Result.is_error (Socket.cleanup ~admission ~directory));
-      let receipt=Filename.concat root "automation-closed.json" in
-      let write id=Out_channel.with_open_bin receipt (fun out ->
-        output_string out (Yojson.Safe.to_string (`Assoc ["incarnation",`String id]))) in
-      write "another-worker";
-      check "other worker receipt is refused" true (Result.is_error (Socket.cleanup ~admission ~directory));
-      write (Lease.instance_id admission);
-      check "receipt alone cannot discard download contents" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      check "download content is retained" true (Result.is_error (Socket.cleanup ~admission ~directory));
       check "unconfirmed download content remains" true (Sys.file_exists file);
       Unix.unlink file;
       released (Socket.cleanup ~admission ~directory);
-      check "receipt and empty trees release allocation" false (Sys.file_exists root))
+      check "a settled worker and empty trees release the allocation" false (Sys.file_exists root))
 let interrupted_owned_cleanup () =
   with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
-      let receipt=Filename.concat root "automation-closed.json" in
-      Out_channel.with_open_bin receipt (fun out -> output_string out
-        (Yojson.Safe.to_string (`Assoc ["incarnation",`String (Lease.instance_id admission)])));
-      (* A known leaf cannot be removed: commit cleanup evidence, then fail
-         during deletion. Resume after some earlier leaves already disappeared. *)
+      (* A known leaf cannot be removed: fail during deletion, then resume
+         after some earlier leaves already disappeared. *)
       let obstruction=Filename.concat root "webdriver.log" in
       Unix.mkdir obstruction 0o700;
       lease (Lease.retire admission);
       check "interrupted deletion is reported" true (Result.is_error (Socket.cleanup ~admission ~directory));
       List.iter (fun name -> let path=Filename.concat root name in
-        if Sys.file_exists path then Unix.unlink path) ["automation.json";"automation-closed.json"];
+        if Sys.file_exists path then Unix.unlink path) ["automation.json"];
       Unix.rmdir obstruction;
       released (Socket.cleanup ~admission ~directory);
-      check "durable cleanup evidence resumes after receipt deletion" false (Sys.file_exists root))
+      check "cleanup resumes after a partial deletion" false (Sys.file_exists root))
 let acquisition_state directory =
   match List.filter (fun name -> String.starts_with ~prefix:"browser-" name) (Array.to_list (Sys.readdir directory)) with
   | [name] -> (match Yojson.Safe.from_file (Filename.concat directory name) with
@@ -136,7 +126,7 @@ let operator_retains_unconfirmed_allocation () =
       refused "a launchable reservation cannot be retained" (Socket.retain ~admission ~directory);
       check "a refused retain keeps the acquisition" true (acquisition_state directory = "acquired");
       lease (Lease.retire admission);
-      check "missing worker receipt retains allocation" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      check "unsettled download content retains the allocation" true (Result.is_error (Socket.cleanup ~admission ~directory));
       check "the operator retains the allocation" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained);
       check "the acquisition record names the operator's retention" true (acquisition_state directory = "retained");
       check "retained download content remains" true (Sys.file_exists file);
@@ -157,10 +147,8 @@ let retain_refuses_replaced_directory () =
       check "the refused retain keeps the acquisition" true (acquisition_state directory = "acquired"))
 let retain_reports_a_released_allocation () =
   with_claim ~automation:(Some {Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})
-    (fun admission directory root ->
+    (fun admission directory _root ->
       ignore (ok (Socket.acquire ~admission ~directory));
-      Out_channel.with_open_bin (Filename.concat root "automation-closed.json") (fun out ->
-        output_string out (Yojson.Safe.to_string (`Assoc ["incarnation",`String (Lease.instance_id admission)])));
       lease (Lease.retire admission);
       released (Socket.cleanup ~admission ~directory);
       check "a released allocation is reported released" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_released);
@@ -264,7 +252,7 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "unconfirmed socket is retained" `Quick unknown_resources;
   Alcotest.test_case "replacement identity is retained" `Quick replaced_directory;
   Alcotest.test_case "model bootstrap cleanup preserves separate receipts" `Quick model_configuration_cleanup;
-  Alcotest.test_case "owned backend requires receipt and empty resource trees" `Quick owned_backend_cleanup;
+  Alcotest.test_case "owned backend requires a settled worker and empty resource trees" `Quick owned_backend_cleanup;
   Alcotest.test_case "owned cleanup resumes after interrupted file deletion" `Quick interrupted_owned_cleanup;
   Alcotest.test_case "the operator retains an unconfirmed allocation in place" `Quick operator_retains_unconfirmed_allocation;
   Alcotest.test_case "retain refuses a replaced allocation directory" `Quick retain_refuses_replaced_directory;

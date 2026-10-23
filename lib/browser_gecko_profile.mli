@@ -33,6 +33,10 @@ type removal =
   | Removed
   | In_use  (** A process holds the profile's lock; the profile is kept. *)
 
+val remove_locked : string -> (unit, string) result
+(** Removes a profile whose lock this process holds through an open
+    [Private_browser_profile.lock_file], keeping the lock file until last. *)
+
 val remove_if_free : string -> (removal, string) result
 (** Takes the profile's lock and removes the profile under it. A profile
     another process holds is kept and reported as [In_use]; this never signals

@@ -6587,6 +6587,12 @@
  (libraries alcotest masc_test_deps masc agent_core))
 
 (test
+ (name test_keeper_librarian_maintenance_capture)
+ (modules test_keeper_librarian_maintenance_capture)
+ (deps ../config/prompts/librarian.md)
+ (libraries alcotest masc_test_deps masc agent_core))
+
+(test
  (name test_keeper_librarian_durable_execution)
  (modules test_keeper_librarian_durable_execution)
  (deps ../config/prompts/librarian.md

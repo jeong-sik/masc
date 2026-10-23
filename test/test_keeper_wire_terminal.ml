@@ -414,7 +414,7 @@ let test_interrupted_owner_without_subscriber_replays_failure () =
     Eio.Promise.resolve signal_started ();
     Eio.Promise.await parked;
     Owner.Operation_succeeded { outcome_ref = "unreachable-before-interrupt" } in
-  let on_execution_settled ~keeper_name ~operations ~claimed_operation_id ~execution =
+  let on_execution_settled ~keeper_name ~claimed_operation_id ~operations ~execution =
     Stream.For_testing.on_operation_execution_settled
       ~base_path ~keeper_name ~claimed_operation_id ~operations ~execution;
     Eio.Promise.resolve signal_settled execution in
@@ -501,12 +501,12 @@ let test_registry_shutdown_projects_every_claimed_batch_member () =
           thread_id="keeper:" ^ keeper_name}) |> Result.get_ok) ids;
     Eio.Promise.resolve signal_started claimed;
     Eio.Fiber.await_cancel () in
-  let on_execution_settled ~keeper_name ~operations ~claimed_operation_id ~execution =
+  let on_execution_settled ~keeper_name ~claimed_operation_id ~operations ~execution =
     (* This hook is inside Owner settlement. Its immutable arguments are the
        only Owner facts consumed here; it must not call the actor again. *)
     observed_settlement := Some (operations, execution);
     Stream.For_testing.on_operation_execution_settled ~base_path ~keeper_name
-      ~operations ~claimed_operation_id ~execution in
+      ~claimed_operation_id ~operations ~execution in
   Registry.install_from_store ~sw
     ~operation_runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true);
       execute; on_execution_settled}) ~on_turn_slot_released:None config

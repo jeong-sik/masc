@@ -363,7 +363,7 @@ is-default = true
     Owner.Operation_succeeded {outcome_ref="real-ingress-native-recovered"}
   in
   let runner : Owner.operation_runner = {ready=(fun ~keeper_name:_ -> true);execute;
-    on_execution_settled=(fun ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution ->
+    on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution ->
       Eio.Promise.resolve resolve_completed execution)} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner) ~on_turn_slot_released:None config
     |> require "install real Owner" |> ignore;

@@ -191,7 +191,7 @@ let runner ~ready execute =
   Owner.
     { ready = (fun ~keeper_name:_ -> !ready)
     ; execute
-    ; on_execution_settled = (fun ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution:_ -> ())
+    ; on_execution_settled = (fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ -> ())
     }
 ;;
 

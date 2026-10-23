@@ -171,7 +171,7 @@ let prepare_operation_store_path pool keeper_name =
    process may stop after either append, so every start retries the same facts,
    not just failures whose cause happens to be Interrupted_by_restart. *)
 let record_failed_operations pool ~keeper_name owner =
-  List.iter (fun operation ->
+  List.iter (fun (operation : Keeper_chat_operation.t) ->
     let log_pending error =
       Log.Keeper.warn ~keeper_name
         "failed operation projection pending operation=%s: %s"

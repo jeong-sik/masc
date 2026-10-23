@@ -125,7 +125,7 @@ let owner_ok = function
   | Error error -> fail (Owner.error_to_string error)
 ;;
 
-let noop_execution_settled ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution:_ =
+let noop_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ =
   ()
 ;;
 
@@ -861,7 +861,7 @@ let test_stopping_cancels_and_joins_active_child () =
   let never, _resolve_never = Eio.Promise.create () in
   let settled = ref None in
   let original_turn = Ids.Turn_ref.make ~trace_id:"stopping-active-original" ~absolute_turn:1 in
-  let record_settled ~keeper_name ~operations:_ ~claimed_operation_id ~execution =
+  let record_settled ~keeper_name ~claimed_operation_id ~operations:_ ~execution =
     settled := Some (keeper_name, claimed_operation_id, execution)
   in
   let operation_executor ~sw:child_sw ~keeper_name:_ ~claim =
@@ -1481,7 +1481,7 @@ let test_gate_wait_releases_owner_without_repeated_children () =
       Owner.resume_direct_gate owner ~operation_id ~waiting ~resolution |> owner_ok;
       Owner.discharge_direct_gate owner ~operation_id ~obligation |> owner_ok;
       Owner.Operation_succeeded {outcome_ref="original-gate-complete"} in
-  let on_execution_settled ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution =
+  let on_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution =
     match execution with
     | Owner.Operation_deferred -> Eio.Promise.resolve resolve_waiting ()
     | Owner.Operation_succeeded _ -> Eio.Promise.resolve resolve_finished ()
@@ -1871,7 +1871,7 @@ let test_runtime_deferred_child_keeps_same_operation_and_drains () =
       owner_ok (Owner.resume_direct_runtime_retry owner ~operation_id:operation.operation_id ~observed);
       Owner.Operation_succeeded {outcome_ref="alternate-runtime-completed"}
   in
-  let on_execution_settled ~keeper_name:_ ~operations:_ ~claimed_operation_id:_ ~execution =
+  let on_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution =
     match execution with
     | Owner.Operation_deferred -> ()
     | Owner.Operation_succeeded _ -> Eio.Promise.resolve resolve_settled ()
@@ -2722,7 +2722,7 @@ let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
     Owner.
       { ready = (fun ~keeper_name:_ -> true)
       ; execute = operation_executor
-      ; on_execution_settled = (fun ~keeper_name:_ ~operations ~claimed_operation_id:_ ~execution:_ ->
+      ; on_execution_settled = (fun ~keeper_name:_ ~claimed_operation_id:_ ~operations ~execution:_ ->
           Eio.Promise.resolve mark_settling operations;
           Eio.Promise.await release)
       }

@@ -43,3 +43,19 @@ test('original unclosed overlaps remain supported, distinct routes and SMF2 patt
   const originalTracks=new JZZ.MIDI.SMF(projectMidi(editor.project)),tracks=new JZZ.MIDI.SMF(projectMidi(next.project))
   assert.equal(tracks[1].dump(),originalTracks[1].dump())
 })
+
+test('actual end-tick ordering rejects a new raw overlap, including an already diagnosed endpoint attack',()=>{
+  for(const masked of [false,true])for(const rawFirst of [false,true])for(const selected of [false,true]) {
+    const file=new JZZ.MIDI.SMF(1,1000),paired=new JZZ.MIDI.SMF.MTrk()
+      .add(140,JZZ.MIDI.noteOn(0,60,80)).add(440,JZZ.MIDI.noteOff(0,60,45)).add(2000,JZZ.MIDI.smfEndOfTrack())
+    const raw=new JZZ.MIDI.SMF.MTrk()
+    if(masked)raw.add(300,JZZ.MIDI.noteOn(0,60,70))
+    raw.add(550,JZZ.MIDI.noteOn(0,60,77)).add(2000,JZZ.MIDI.smfEndOfTrack())
+    file.push(rawFirst?raw:paired);file.push(rawFirst?paired:raw)
+    let editor=newEditor(importMidiSource(file.toUint8Array()))
+    if(selected)editor=command(editor,'select-all')
+    const before=structuredClone(editor),line=`${selected?'quantize-notes':'quantize'} 0.25`
+    if(rawFirst) {assert.throws(()=>command(editor,line),/overlapping/);assert.deepEqual(editor,before)}
+    else {const next=command(editor,line);assert.deepEqual(next.performance.notes.map(n=>[n.start,n.duration]),[[250,300]])}
+  }
+})

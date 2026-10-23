@@ -1,5 +1,5 @@
 import { quantizeTick, quantizedStarts } from './note-quantize.mjs'
-import { midiTimingEvidence } from './note-overlap.mjs'
+import { midiTimingEvidence, assertMidiTimingOrder } from './note-overlap.mjs'
 import { pitch, editProject } from './sequencer-project.mjs'
 import { editMidiSourceNotes } from './midi-source.mjs'
 import { sourceEditor } from './midi-source-editor.mjs'
@@ -108,6 +108,7 @@ export function noteSelectionCommand(editor, command, args) {
       const starts = quantizedStarts(source(editor) ? midiTimingEvidence(editor.performance) : track(editor).notes, notes, grid)
       const next = apply(editor, notes.map(note => ({ kind: source(editor) ? 'change' : 'change-note',
         id: note.id, start: starts.get(note.id) })))
+      if (source(editor)) assertMidiTimingOrder(editor.performance,next.performance)
       return { ...next, noteSelection: { ...next.noteSelection, origin: quantizeTick(editor.noteSelection.origin, grid) } }
     }
     case 'velocity-notes': case 'velocity-add-notes': {

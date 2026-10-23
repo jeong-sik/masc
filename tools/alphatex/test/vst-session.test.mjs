@@ -7,6 +7,21 @@ import { fileURLToPath } from 'node:url'
 import { openVstSession } from '../vst-session.mjs'
 
 const fixture = fileURLToPath(new URL('./fixtures/vst-serve.mjs', import.meta.url))
+const replyBytes = 16 * 1024 * 1024
+function controlledSession() {
+  const children = []
+  const owner = openVstSession({ spawnProcess() {
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+      kills: [], kill(signal) { this.kills.push(signal) },
+    })
+    children.push(child)
+    return child
+  } })
+  return { owner, children }
+}
+const completion = job => job.promise.then(value => ({ value }), error => ({ error }))
+const reply = (id, result) => JSON.stringify({ id, ok: true, result }) + '\n'
 function session() {
   const children = []
   const owner = openVstSession({ command: process.execPath, args: [fixture], spawnProcess(...args) {
@@ -112,4 +127,108 @@ test('closing while a failed host is still dying keeps its failure and waits for
   children[0].emit('close', null, 'SIGKILL')
   await rejected
   await closing
+})
+
+test('a failed host cannot turn a late completion into success or affect its successor', async () => {
+  const { owner, children } = controlledSession()
+  const first = completion(owner.run({ operation: 'echo' }))
+  children[0].stdout.write('not json\n')
+  const second = completion(owner.run({ operation: 'echo' }))
+  children[0].stdout.write(reply(1, { late: true }))
+  children[0].emit('close', null, 'SIGKILL')
+  children[1].stdout.write(reply(2, { successor: true }))
+  children[1].emit('close', 0, null)
+  await owner.close()
+  assert.match((await first).error?.message ?? '', /invalid reply/)
+  assert.deepEqual((await second).value, { successor: true })
+})
+
+test('malformed envelopes and unknown job identities retire the host and reject all its jobs', async () => {
+  for (const response of [null, [], {}, 42,
+    { id: '1', ok: true, result: {} }, { id: 3, ok: true, result: {} },
+    { id: 1, ok: true, result: [] }, { id: 1, ok: true, result: null },
+    { id: 1, ok: 1, result: {} }, { id: 1, ok: false },
+    { id: 1, ok: false, error: {} }, { id: 1, ok: false, cancelled: false },
+    { id: 1, ok: false, cancelled: true, error: 'ambiguous' }]) {
+    const { owner, children } = controlledSession()
+    const first = completion(owner.run({ operation: 'echo' }))
+    const second = completion(owner.run({ operation: 'echo' }))
+    children[0].stdout.write(JSON.stringify(response) + '\n')
+    children[0].emit('close', 0, null)
+    await owner.close()
+    assert.deepEqual(children[0].kills, ['SIGKILL'], JSON.stringify(response))
+    assert.match((await first).error?.message ?? '', /invalid reply/)
+    assert.match((await second).error?.message ?? '', /invalid reply/)
+  }
+})
+
+test('a cancelled job may reply once, but a duplicate completion retires the host', async () => {
+  const { owner, children } = controlledSession()
+  const cancelled = owner.run({ operation: 'hold' }), first = completion(cancelled)
+  cancelled.cancel()
+  children[0].stdout.write(JSON.stringify({ id: 1, ok: false, cancelled: true }) + '\n')
+  const second = completion(owner.run({ operation: 'echo' }))
+  assert.equal(children.length, 1)
+  children[0].stdout.write(reply(1, { duplicate: true }))
+  children[0].stdout.write(reply(2, { late: true }))
+  children[0].emit('close', null, 'SIGKILL')
+  await owner.close()
+  assert.equal((await first).error.code, 'ABORT_ERR')
+  assert.deepEqual(children[0].kills, ['SIGKILL'])
+  assert.match((await second).error?.message ?? '', /invalid reply/)
+})
+
+test('the response byte bound includes complete lines and incomplete fragments', async () => {
+  const payload = reply(1, { data: 'x'.repeat(replyBytes) })
+  for (const chunks of [[payload], [payload.slice(0, replyBytes), payload.slice(replyBytes)], ['x'.repeat(replyBytes + 1)]]) {
+    const { owner, children } = controlledSession()
+    const result = completion(owner.run({ operation: 'snapshot' }))
+    for (const chunk of chunks) children[0].stdout.write(chunk)
+    children[0].emit('close', null, 'SIGKILL')
+    await owner.close()
+    assert.match((await result).error?.message ?? '', /protocol memory bound/)
+  }
+})
+
+test('a complete response exactly at the byte bound is accepted', async () => {
+  const { owner, children } = controlledSession()
+  const result = completion(owner.run({ operation: 'snapshot' }))
+  const data = 'x'.repeat(replyBytes - Buffer.byteLength(reply(1, { data: '' })))
+  const line = reply(1, { data })
+  assert.equal(Buffer.byteLength(line), replyBytes)
+  children[0].stdout.write(line)
+  children[0].emit('close', 0, null)
+  await owner.close()
+  assert.equal((await result).value?.data.length, data.length)
+})
+
+test('several bounded replies in one chunk are not treated as one oversized response', async () => {
+  const { owner, children } = controlledSession()
+  const first = completion(owner.run({ operation: 'snapshot' }))
+  const second = completion(owner.run({ operation: 'snapshot' }))
+  const data = 'x'.repeat(replyBytes / 2)
+  children[0].stdout.write(reply(1, { data }) + reply(2, { data }))
+  children[0].emit('close', 0, null)
+  await owner.close()
+  assert.equal((await first).value?.data.length, data.length)
+  assert.equal((await second).value?.data.length, data.length)
+})
+
+test('UTF-8 characters split across chunks retain their original value', async () => {
+  const { owner, children } = controlledSession()
+  const result = completion(owner.run({ operation: 'echo' }))
+  const line = Buffer.from(reply(1, { data: '한🎹' })), start = line.indexOf(Buffer.from('한'))
+  for (const part of [line.subarray(0, start + 1), line.subarray(start + 1, start + 5), line.subarray(start + 5)]) children[0].stdout.write(part)
+  children[0].emit('close', 0, null)
+  await owner.close()
+  assert.deepEqual((await result).value, { data: '한🎹' })
+})
+
+test('a real child response is bounded by UTF-8 bytes, not decoded string length', async () => {
+  const script = "process.stdin.once('data',()=>process.stdout.write(JSON.stringify({id:1,ok:true,result:{data:'한'.repeat(6*1024*1024)}})+'\\n'));process.stdin.on('end',()=>process.exit(0))"
+  const owner = openVstSession({ command: process.execPath, args: ['-e', script, '--'] })
+  try {
+    const result = await completion(owner.run({ operation: 'snapshot' }))
+    assert.match(result.error?.message ?? '', /protocol memory bound/)
+  } finally { await owner.close() }
 })

@@ -1,0 +1,12 @@
+{"mode":"calling-domain-systhread","bytes":1048576,"round":1,"elapsed_ms":4.380941390991211,"max_tick_gap_ms":4.364013671875,"ticks":1,"digest":"5b7cd509aa66b29564c1c10ba4af4dc261ea4adb74f9809679d8575edc6a7b62"}
+{"mode":"cpu-worker-systhread","bytes":1048576,"round":1,"elapsed_ms":5.493879318237305,"max_tick_gap_ms":3.063201904296875,"ticks":3,"digest":"5b7cd509aa66b29564c1c10ba4af4dc261ea4adb74f9809679d8575edc6a7b62"}
+{"mode":"cpu-worker-systhread","bytes":1048576,"round":2,"elapsed_ms":5.263090133666992,"max_tick_gap_ms":1.8110275268554688,"ticks":4,"digest":"5b7cd509aa66b29564c1c10ba4af4dc261ea4adb74f9809679d8575edc6a7b62"}
+{"mode":"calling-domain-systhread","bytes":1048576,"round":2,"elapsed_ms":4.256010055541992,"max_tick_gap_ms":4.248857498168945,"ticks":1,"digest":"5b7cd509aa66b29564c1c10ba4af4dc261ea4adb74f9809679d8575edc6a7b62"}
+{"mode":"calling-domain-systhread","bytes":1048576,"round":3,"elapsed_ms":4.023075103759766,"max_tick_gap_ms":4.0149688720703125,"ticks":1,"digest":"5b7cd509aa66b29564c1c10ba4af4dc261ea4adb74f9809679d8575edc6a7b62"}
+{"mode":"cpu-worker-systhread","bytes":1048576,"round":3,"elapsed_ms":5.355119705200195,"max_tick_gap_ms":1.9009113311767578,"ticks":4,"digest":"5b7cd509aa66b29564c1c10ba4af4dc261ea4adb74f9809679d8575edc6a7b62"}
+{"mode":"calling-domain-systhread","bytes":8388608,"round":1,"elapsed_ms":34.15799140930176,"max_tick_gap_ms":32.965898513793945,"ticks":2,"digest":"39d557caea7f125f2b8bc6e7e1086af70263a17931bb637ec3d9626fcf565950"}
+{"mode":"cpu-worker-systhread","bytes":8388608,"round":1,"elapsed_ms":33.83302688598633,"max_tick_gap_ms":1.2068748474121094,"ticks":30,"digest":"39d557caea7f125f2b8bc6e7e1086af70263a17931bb637ec3d9626fcf565950"}
+{"mode":"cpu-worker-systhread","bytes":8388608,"round":2,"elapsed_ms":33.904075622558594,"max_tick_gap_ms":2.0990371704101562,"ticks":29,"digest":"39d557caea7f125f2b8bc6e7e1086af70263a17931bb637ec3d9626fcf565950"}
+{"mode":"calling-domain-systhread","bytes":8388608,"round":2,"elapsed_ms":32.92584419250488,"max_tick_gap_ms":31.738996505737305,"ticks":2,"digest":"39d557caea7f125f2b8bc6e7e1086af70263a17931bb637ec3d9626fcf565950"}
+{"mode":"calling-domain-systhread","bytes":8388608,"round":3,"elapsed_ms":31.426191329956055,"max_tick_gap_ms":31.41617774963379,"ticks":1,"digest":"39d557caea7f125f2b8bc6e7e1086af70263a17931bb637ec3d9626fcf565950"}
+{"mode":"cpu-worker-systhread","bytes":8388608,"round":3,"elapsed_ms":31.800031661987305,"max_tick_gap_ms":1.1830329895019531,"ticks":28,"digest":"39d557caea7f125f2b8bc6e7e1086af70263a17931bb637ec3d9626fcf565950"}

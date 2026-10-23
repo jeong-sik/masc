@@ -25,14 +25,17 @@ val schema : string
 (** The wire schema name carried by {!to_json}. *)
 
 val system_prompt
-  :  question:Task.Anti_rationalization.verdict_question
+  :  lookup_schemas:string list
+  -> question:Task.Anti_rationalization.verdict_question
   -> lookup_root:Task.Anti_rationalization.lookup_root
   -> Task.Anti_rationalization.review_request
   -> (string, string) result
 (** The review system prompt as {!Task.Anti_rationalization} renders it for the
-    fixed question, lookup root and review request. A template that does not
-    render is an error, not a fallback, because a silent fallback would let a
-    re-rendered prompt drift from the one the original fixed. {!prepare}
+    fixed question, lookup root and review request. [lookup_schemas] are the
+    tool names the reviewer held; the lookup section names them but the dispatch
+    is never consulted, so rendering authorises no read. A template that does
+    not render is an error, not a fallback, because a silent fallback would let
+    a re-rendered prompt drift from the one the original fixed. {!prepare}
     captures the result so the value carries the exact text. *)
 
 val canonical_output_contract : unit -> string
@@ -58,6 +61,8 @@ val review_request : t -> Task.Anti_rationalization.review_request
 val question : t -> Task.Anti_rationalization.verdict_question
 val lookup_root : t -> Task.Anti_rationalization.lookup_root
 val lookup_schemas : t -> string list
+val system_prompt_text : t -> string
+val output_contract : t -> string
 
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result

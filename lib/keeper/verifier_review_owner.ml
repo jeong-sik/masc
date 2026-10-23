@@ -27,10 +27,38 @@ let summary_of (original : V.t) : (Yojson.Safe.t, string) result =
       ; "original_digest", `String digest
       ])
 
+type retain_error =
+  | Original_invalid of string
+  | Identity_mismatch of string
+  | Store_unavailable of string
+  | Already_retained of string
+
+type load_error =
+  | Store_unavailable of string
+  | Not_found
+  | Corrupt_original of string
+
 let retain ~store ~verification_id ~attempt ~installation_id ~package_id original =
   let* request_id =
     attempt_request_id ~verification_id ~attempt
-    |> Result.map_error (fun detail -> Identity_invalid detail)
+    |> Result.map_error (fun detail -> Identity_mismatch detail)
+  in
+  (* The original's internal identity must match the key it is stored under,
+     so a value prepared for one verification cannot be applied to a different
+     attempt's slot. *)
+  let* () =
+    if String.equal (V.verification_id original) verification_id
+       && V.attempt original = attempt
+    then Ok ()
+    else
+      Error
+        (Identity_mismatch
+           (Printf.sprintf
+              "original identity %s:%d does not match key %s:%d"
+              (V.verification_id original)
+              (V.attempt original)
+              verification_id
+              attempt))
   in
   let* request_json =
     (match V.to_json original with
@@ -41,37 +69,45 @@ let retain ~store ~verification_id ~attempt ~installation_id ~package_id origina
   let* summary =
     summary_of original |> Result.map_error (fun detail -> Original_invalid detail)
   in
-  (* Reuse the durable owner's idempotence: retaining the identical original
-     at the same key is a no-op; retaining a different one is a conflict we
-     surface as Already_retained rather than overwrite. The caller chooses a
-     fresh attempt key for a retry. *)
-  let* existing = Owner.load ~store ~scope ~request_id in
-  (match existing with
-   | Some existing ->
-     if Yojson.Safe.equal existing.Owner.request request_json
-     then Ok ()
-     else Error (Already_retained request_id)
-   | None ->
-     Owner.retain
-       ~store
-       ~scope
-       ~request_id
-       ~installation_id
-       ~package_id
-       ~tool:tool_name
-       ~summary
-       ~request:request_json
-     |> Result.map_error (fun err ->
-       match err with
-       | Owner.Binding_conflict -> Already_retained request_id
-       | Owner.Store_unavailable detail -> Store_unavailable detail
-       | Owner.Invalid_identity detail -> Identity_invalid detail
-       | Owner.Invalid_request detail -> Original_invalid detail))
-
-type load_error =
-  | Store_unavailable of string
-  | Not_found
-  | Corrupt_original of string
+  let* existing =
+    Owner.load ~store ~scope ~request_id
+    |> Result.map_error (function
+      | Owner.Store_unavailable detail -> Store_unavailable detail
+      | Owner.Binding_conflict -> Already_retained request_id
+      | Owner.Invalid_identity detail -> Identity_mismatch detail
+      | Owner.Invalid_request detail -> Original_invalid detail)
+  in
+  match existing with
+  | Some record ->
+    (* The durable owner names the request by its digest. Compare digests so
+       we do not depend on [retained.request] field access, and so a re-read
+       through the verified store is what decides identity. *)
+    let* stored_digest =
+      Owner.request_digest record.Owner.request
+      |> Result.map_error (fun detail -> Store_unavailable detail)
+    in
+    let* incoming_digest =
+      Owner.request_digest request_json
+      |> Result.map_error (fun detail -> Original_invalid detail)
+    in
+    if String.equal stored_digest incoming_digest
+    then Ok ()
+    else Error (Already_retained request_id)
+  | None ->
+    Owner.retain
+      ~store
+      ~scope
+      ~request_id
+      ~installation_id
+      ~package_id
+      ~tool:tool_name
+      ~summary
+      ~request:request_json
+    |> Result.map_error (function
+      | Owner.Binding_conflict -> Already_retained request_id
+      | Owner.Store_unavailable detail -> Store_unavailable detail
+      | Owner.Invalid_identity detail -> Identity_mismatch detail
+      | Owner.Invalid_request detail -> Original_invalid detail)
 
 let load ~store ~verification_id ~attempt =
   let* request_id =
@@ -80,10 +116,11 @@ let load ~store ~verification_id ~attempt =
   in
   let* existing =
     Owner.load ~store ~scope ~request_id
-    |> Result.map_error (fun err ->
-      match err with
+    |> Result.map_error (function
       | Owner.Store_unavailable detail -> Store_unavailable detail
-      | _ -> Store_unavailable "verifier review owner record unavailable")
+      | Owner.Binding_conflict -> Store_unavailable "verifier review owner binding conflict"
+      | Owner.Invalid_identity detail -> Store_unavailable detail
+      | Owner.Invalid_request detail -> Store_unavailable detail)
   in
   match existing with
   | None -> Error Not_found
@@ -94,11 +131,12 @@ let load ~store ~verification_id ~attempt =
           && V.attempt original = attempt
        then Ok original
        else
-         Corrupt_original
-           (Printf.sprintf
-              "stored original identity %s:%d does not match key %s:%d"
-              (V.verification_id original)
-              (V.attempt original)
-              verification_id
-              attempt)
-     | Error detail -> Corrupt_original detail)
+         Error
+           (Corrupt_original
+              (Printf.sprintf
+                 "stored original identity %s:%d does not match key %s:%d"
+                 (V.verification_id original)
+                 (V.attempt original)
+                 verification_id
+                 attempt))
+     | Error detail -> Error (Corrupt_original detail))

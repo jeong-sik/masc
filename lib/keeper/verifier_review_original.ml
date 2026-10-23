@@ -6,6 +6,32 @@ let ( let* ) = Result.bind
 
 let schema = "verifier_review_original/v1"
 
+(* Strict JSON decoding helpers. A decoder that reads a required key with a
+   bare [List.assoc] leaks [Not_found] out of the [result] on a missing key,
+   and one that ignores unknown or duplicate fields is not the strict inverse
+   the interface documents. [require_fields] rejects both; [field] then reads a
+   key that is known to be present exactly once. *)
+
+let require_fields ~what ~expected fields =
+  let seen = List.map fst fields in
+  let has_dup = List.length seen <> List.length (List.sort_uniq String.compare seen) in
+  if has_dup
+  then Error (Printf.sprintf "%s has duplicate fields" what)
+  else (
+    let seen_sorted = List.sort String.compare seen in
+    let expected_sorted = List.sort String.compare expected in
+    if seen_sorted <> expected_sorted
+    then
+      Error
+        (Printf.sprintf "%s has an unexpected field set (want [%s])" what
+           (String.concat "; " expected_sorted))
+    else Ok ())
+
+let field key fields : (Yojson.Safe.t, string) result =
+  match List.assoc_opt key fields with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "missing field %s" key)
+
 (* The output contract is a single sentence naming the verdict tool and the
    exact verdict vocabulary the review accepts, so a worker that reads the
    contract from this module and one that reads it from the prompt see the
@@ -101,17 +127,24 @@ let evidence_image_to_json (image : AR.evidence_image) : Yojson.Safe.t =
 
 let evidence_image_of_json (json : Yojson.Safe.t) : (AR.evidence_image, string) result =
   let text key fields =
-    match List.assoc key fields with
+    let* value = field key fields in
+    match value with
     | `String value when String.trim value <> "" -> Ok value
     | _ -> Error (Printf.sprintf "evidence_image %s must be non-blank text" key)
   in
   let int key fields =
-    match List.assoc key fields with
+    let* value = field key fields in
+    match value with
     | `Int value when value >= 0 -> Ok value
     | _ -> Error (Printf.sprintf "evidence_image %s must be a non-negative integer" key)
   in
   match json with
   | `Assoc fields ->
+    let* () =
+      require_fields ~what:"evidence_image"
+        ~expected:[ "image_reference"; "image_sha256"; "image_bytes"; "image_media_type"; "image_body_base64" ]
+        fields
+    in
     let* image_reference = text "image_reference" fields in
     let* image_sha256 = text "image_sha256" fields in
     let* image_bytes = int "image_bytes" fields in
@@ -135,12 +168,14 @@ let review_request_to_json (req : AR.review_request) : Yojson.Safe.t =
 
 let review_request_of_json (json : Yojson.Safe.t) : (AR.review_request, string) result =
   let text key fields =
-    match List.assoc key fields with
+    let* value = field key fields in
+    match value with
     | `String value when String.trim value <> "" -> Ok value
     | _ -> Error (Printf.sprintf "review_request %s must be non-blank text" key)
   in
   let string_list key fields =
-    match List.assoc key fields with
+    let* value = field key fields in
+    match value with
     | `List values ->
       let rec go acc = function
         | [] -> Ok (List.rev acc)
@@ -151,7 +186,8 @@ let review_request_of_json (json : Yojson.Safe.t) : (AR.review_request, string) 
     | _ -> Error (Printf.sprintf "review_request %s must be a list" key)
   in
   let image_list key fields =
-    match List.assoc key fields with
+    let* value = field key fields in
+    match value with
     | `List values ->
       let rec go acc = function
         | [] -> Ok (List.rev acc)
@@ -165,6 +201,11 @@ let review_request_of_json (json : Yojson.Safe.t) : (AR.review_request, string) 
   in
   match json with
   | `Assoc fields ->
+    let* () =
+      require_fields ~what:"review_request"
+        ~expected:[ "task_title"; "task_description"; "completion_notes"; "agent_name"; "task_id"; "evidence_refs"; "evidence_images" ]
+        fields
+    in
     let* task_title = text "task_title" fields in
     let* task_description = text "task_description" fields in
     let* completion_notes = text "completion_notes" fields in
@@ -205,7 +246,8 @@ let verdict_question_to_json (question : AR.verdict_question) : Yojson.Safe.t =
 
 let verdict_question_of_json (json : Yojson.Safe.t) : (AR.verdict_question, string) result =
   let string_list key fields =
-    match List.assoc key fields with
+    let* value = field key fields in
+    match value with
     | `List values ->
       let rec go acc = function
         | [] -> Ok (List.rev acc)
@@ -217,22 +259,26 @@ let verdict_question_of_json (json : Yojson.Safe.t) : (AR.verdict_question, stri
   in
   match json with
   | `Assoc fields ->
+    let* () =
+      require_fields ~what:"verdict_question"
+        ~expected:[ "completion_contract"; "required_evidence"; "evidence_posture"; "few_shot_block" ]
+        fields
+    in
     let* completion_contract =
-      match List.assoc "completion_contract" fields with
+      let* value = field "completion_contract" fields in
+      match value with
       | `Null -> Ok None
-      | `List _ as json ->
-        string_list "completion_contract" [ ("completion_contract", json) ]
-        |> Result.map (fun lines -> Some lines)
+      | `List _ -> string_list "completion_contract" [ ("completion_contract", value) ] |> Result.map Option.some
       | _ -> Error "verdict_question completion_contract must be null or a list of strings"
     in
     let* required_evidence = string_list "required_evidence" fields in
     let* evidence_posture =
-      match List.assoc "evidence_posture" fields with
-      | json -> evidence_posture_of_json json
-      | exception Not_found -> Error "verdict_question evidence_posture is required"
+      let* value = field "evidence_posture" fields in
+      evidence_posture_of_json value
     in
     let* few_shot_block =
-      match List.assoc "few_shot_block" fields with
+      let* value = field "few_shot_block" fields in
+      match value with
       | `String value -> Ok value
       | _ -> Error "verdict_question few_shot_block must be text"
     in
@@ -248,7 +294,8 @@ let lookup_root_to_json (root : AR.lookup_root) : Yojson.Safe.t =
 
 let lookup_root_of_json (json : Yojson.Safe.t) : (AR.lookup_root, string) result =
   let string_list key fields =
-    match List.assoc key fields with
+    let* value = field key fields in
+    match value with
     | `List values ->
       let rec go acc = function
         | [] -> Ok (List.rev acc)
@@ -260,15 +307,27 @@ let lookup_root_of_json (json : Yojson.Safe.t) : (AR.lookup_root, string) result
   in
   match json with
   | `Assoc fields ->
-    (match List.assoc_opt "producer_tree" fields with
-     | Some json ->
-       string_list "producer_tree" [ ("producer_tree", json) ]
-       |> Result.map (fun paths -> AR.Producer_tree paths)
-     | None ->
-       (match List.assoc_opt "producer_root_absent" fields with
-        | Some (`String root) when String.trim root <> "" -> Ok (AR.Producer_root_absent { root })
-        | Some _ -> Error "lookup_root producer_root_absent must be non-blank text"
-        | None -> Error "lookup_root must be producer_tree or producer_root_absent"))
+    let has_tree = List.mem_assoc "producer_tree" fields in
+    let has_absent = List.mem_assoc "producer_root_absent" fields in
+    if has_tree && has_absent
+    then Error "lookup_root must not carry both producer_tree and producer_root_absent"
+    else if not has_tree && not has_absent
+    then Error "lookup_root must be producer_tree or producer_root_absent"
+    else (
+      let* () =
+        require_fields ~what:"lookup_root"
+          ~expected:(if has_tree then [ "producer_tree" ] else [ "producer_root_absent" ])
+          fields
+      in
+      if has_tree
+      then (
+        let* paths = string_list "producer_tree" fields in
+        Ok (AR.Producer_tree paths))
+      else (
+        let* value = field "producer_root_absent" fields in
+        match value with
+        | `String root when String.trim root <> "" -> Ok (AR.Producer_root_absent { root })
+        | _ -> Error "lookup_root producer_root_absent must be non-blank text"))
   | _ -> Error "lookup_root must be an object"
 ;;
 
@@ -318,12 +377,17 @@ let to_json t =
 let of_json json =
   match json with
   | `Assoc fields ->
-    let names = List.sort String.compare (List.map fst fields) in
-    if names <> field_names
+    let names = List.map fst fields in
+    let has_dup = List.length names <> List.length (List.sort_uniq String.compare names) in
+    let names_sorted = List.sort String.compare names in
+    if has_dup
+    then Error "verifier review original has duplicate fields"
+    else if names_sorted <> field_names
     then Error "verifier review original has an unexpected field set"
     else (
       let text key =
-        match List.assoc key fields with
+        let* value = field key fields in
+        match value with
         | `String value when String.trim value <> "" -> Ok value
         | _ -> Error (Printf.sprintf "verifier review original %s must be non-blank text" key)
       in
@@ -337,14 +401,19 @@ let of_json json =
       let* system_prompt = text "system_prompt" in
       let* output_contract = text "output_contract" in
       let* attempt =
-        match List.assoc "attempt" fields with
+        let* value = field "attempt" fields in
+        match value with
         | `Int value when value >= 0 -> Ok value
         | _ -> Error "verifier review original attempt must be a non-negative integer"
       in
-      let* review_request = review_request_of_json (List.assoc "review_request" fields) in
-      let* question = verdict_question_of_json (List.assoc "question" fields) in
-      let* lookup_root = lookup_root_of_json (List.assoc "lookup_root" fields) in
-      let* lookup_schemas = lookup_schemas_of_json (List.assoc "lookup_schemas" fields) in
+      let* review_request_json = field "review_request" fields in
+      let* question_json = field "question" fields in
+      let* lookup_root_json = field "lookup_root" fields in
+      let* lookup_schemas_json = field "lookup_schemas" fields in
+      let* review_request = review_request_of_json review_request_json in
+      let* question = verdict_question_of_json question_json in
+      let* lookup_root = lookup_root_of_json lookup_root_json in
+      let* lookup_schemas = lookup_schemas_of_json lookup_schemas_json in
       if lookup_schemas = []
       then Error "verifier review original lookup_schemas must not be empty"
       else
@@ -365,5 +434,3 @@ let digest t =
   let* canonical = Lane_addon_action.canonical (to_json t) in
   Ok (Lane_addon_store.digest (Yojson.Safe.to_string canonical))
 ;;
-
-let ( let* ) = Result.bind

@@ -23,7 +23,8 @@ type store = Lane_addon_store.t
 type retain_error =
   | Original_invalid of string
       (** The original could not be serialised for storage. *)
-  | Identity_invalid of string
+  | Identity_mismatch of string
+      (** The key does not name the original's own verification_id and attempt. *)
   | Store_unavailable of string
   | Already_retained of string
       (** A different original already sits at this attempt key. *)

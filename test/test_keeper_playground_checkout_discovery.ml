@@ -187,20 +187,25 @@ let test_symlinked_git_entry_is_rejected () =
     check_paths "a symlinked .git is not a checkout" [] (C.discover ~root))
 ;;
 
-(* A .git symlink is still a checkout boundary even though it is not trusted
-   as a checkout. If the scan descends into it, a linked worktree with many
-   files exhausts the entry budget and surfaces Entry_budget_exhausted. *)
+(* A symlinked .git excludes the whole child tree, even a recognizable nested
+   checkout. A visible sibling proves the scan itself still runs. This checks the
+   boundary decision directly, without relying on exhausting the entry budget. *)
 let test_symlinked_git_entry_does_not_descend () =
   with_temp_root (fun root ->
     let dir = Filename.concat root "repos/x" in
-    mkdir_p dir;
-    Unix.symlink (Filename.concat root "elsewhere") (Filename.concat dir ".git");
-    for i = 1 to 200 do
-      write_file (Filename.concat dir (Printf.sprintf "f%03d.ml" i)) "x"
-    done;
-    match C.discover ~root with
-    | Ok (C.Complete []) -> ()
-    | other -> fail ("expected Complete [], got " ^ String.concat "," (paths_of other)))
+    make_checkout root "repos/x/nested/repo";
+    make_checkout root "repos/visible";
+    check_paths "a nested checkout without a boundary is discoverable"
+      [ "repos/visible"; "repos/x/nested/repo" ] (C.discover ~root);
+    let git_entry = Filename.concat dir ".git" in
+    Unix.symlink (Filename.concat root "elsewhere") git_entry;
+    Fun.protect ~finally:(fun () -> Unix.unlink git_entry) (fun () ->
+      match C.discover ~root with
+      | Ok (C.Complete checkouts) ->
+        check (list string) "a symlinked .git prunes nested checkouts but keeps siblings"
+          [ "repos/visible" ]
+          (List.map (fun (checkout : C.checkout) -> checkout.relative_path) checkouts)
+      | Ok (C.Partial _) | Error _ -> fail "expected a complete scan within checkout boundaries"))
 ;;
 
 (* ------------------------------------------------------------------ *)

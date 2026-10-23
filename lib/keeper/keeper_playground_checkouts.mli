@@ -18,7 +18,11 @@
     layout rule this module exists to remove (a checkout placed one level too
     deep would silently vanish).
 
-    Symlinks are not followed, so the traversal cannot cycle. *)
+    Symlinks are not followed, so the traversal cannot cycle. Child directories
+    whose [.git] entry is a symlink are also pruned boundaries: neither they nor
+    nested checkouts below them are reported. [Complete] covers the traversal
+    under these boundary rules; it does not include pruned subtrees. This pruning
+    does not change the entry budget for ordinary directories. *)
 
 type git_link =
   | Git_directory (** [<dir>/.git] is a directory: a primary checkout. *)
@@ -54,7 +58,7 @@ type limit =
           whole listing. *)
 
 (** A scan that produced no list at all. Distinct from [Complete []], which
-    says the root exists and holds no checkout. *)
+    says the root exists and holds no checkout within the traversal boundaries. *)
 type scan_error =
   | Root_missing of { root : string }
   | Root_not_directory of

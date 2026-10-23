@@ -1,0 +1,19 @@
+--- baseline/test_dashboard_http_core.ml
++++ candidate/test_dashboard_http_core.ml
+@@ -5206,6 +5206,7 @@
+     let token = match Auth.create_token config.base_path ~agent_name:"query-reader" ~role:Types.Admin with
+       | Ok (token, _) -> token
+       | Error error -> fail (Types.masc_error_to_string error) in
++    Fun.protect ~finally:(fun () -> cleanup config) (fun () ->
+     prepare config;
+     Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+     let store = match Masc.Keeper_tool_call_log.store () with
+@@ -5223,7 +5224,7 @@
+         ~headers:["authorization", "Bearer " ^ token; "accept-encoding", "identity"] target in
+       check int (target ^ " status") 200 status;
+       headers, Yojson.Safe.from_string body in
+-    Fun.protect ~finally:(fun () -> cleanup config) (fun () -> f read)))
++    f read)))
+ 
+ let prepare_eval_feed_rows (config : Workspace.config) =
+   List.iter (fun name ->

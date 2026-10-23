@@ -1,0 +1,48 @@
+Testing `Dashboard_eval_feed'.
+This run has ID `KTASPS0D'.
+
+> [FAIL]        owned_boundary           0   parent component cannot select s...
+  [FAIL]        owned_boundary           1   linked agent is neither read nor...
+  [FAIL]        owned_boundary           2   linked JSON cannot supply a snap...
+  [FAIL]        owned_boundary           3   linked eval root is refused.
+  [FAIL]        owned_boundary           4   linked agent-core ancestor is re...
+  [OK]          owned_boundary           5   dash and Unicode names remain li...
+  [OK]          owned_boundary           6   relative workspace roots preserv...
+  [OK]          owned_boundary           7   fresh-boot absence remains quiet.
+  [SKIP]        verdict_parsing          0   valid verdict.
+  [SKIP]        verdict_parsing          1   wrong schema_version.
+  [SKIP]        verdict_parsing          2   missing schema_version.
+  [SKIP]        verdict_parsing          3   empty layer_results.
+  [SKIP]        verdict_parsing          4   missing required field.
+  [SKIP]        verdict_parsing          5   wrong-typed required field.
+  [SKIP]        verdict_parsing          6   layer missing name.
+  [SKIP]        read_latest              0   list_agents nonexistent directory.
+  [SKIP]        read_latest              1   list_agents with dirs.
+  [SKIP]        read_latest              2   empty directory.
+  [SKIP]        read_latest              3   nonexistent directory.
+  [SKIP]        read_latest              4   with files.
+  [SKIP]        read_latest              5   with limit.
+  [SKIP]        serialization            0   snapshot roundtrip.
+  [SKIP]        serialization            1   verdict_to_json.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        owned_boundary           0   parent component cannot selec...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT foreign snapshots are not read
+File "fun.ml", line 34, character 8:
+FAIL foreign snapshots are not read
+
+   Expected: `0'
+   Received: `1'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `/private/tmp/masc-eval-feed-cache-selection-20261023/_build/_tests/Dashboard_eval_feed/owned_boundary.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/private/tmp/masc-eval-feed-cache-selection-20261023/_build/_tests/Dashboard_eval_feed'.
+5 failures! in 0.011s. 8 tests run.

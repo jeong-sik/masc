@@ -5189,7 +5189,7 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
 
 (* Exact parsed queries must own distinct cached responses. Exercise the real
    router and response cache, including the echoed query and retained rows. *)
-let with_exact_query_router ?(prepare = fun _ -> ()) f =
+let with_exact_query_router ?(prepare = fun _ -> ()) ?(cleanup = fun _ -> ()) f =
   with_test_env @@ fun ~env ~sw ~config ->
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect ~finally:(fun () ->
@@ -5206,6 +5206,7 @@ let with_exact_query_router ?(prepare = fun _ -> ()) f =
     let token = match Auth.create_token config.base_path ~agent_name:"query-reader" ~role:Types.Admin with
       | Ok (token, _) -> token
       | Error error -> fail (Types.masc_error_to_string error) in
+    Fun.protect ~finally:(fun () -> cleanup config) (fun () ->
     prepare config;
     Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
     let store = match Masc.Keeper_tool_call_log.store () with
@@ -5223,7 +5224,7 @@ let with_exact_query_router ?(prepare = fun _ -> ()) f =
         ~headers:["authorization", "Bearer " ^ token; "accept-encoding", "identity"] target in
       check int (target ^ " status") 200 status;
       headers, Yojson.Safe.from_string body in
-    f read))
+    f read)))
 
 let prepare_eval_feed_rows (config : Workspace.config) =
   List.iter (fun name ->
@@ -5296,6 +5297,47 @@ let test_eval_feed_agent_limits_remain_distinct () =
        "agent_name=-", "-", 2;
        "agent_name=-&limit=invalid", "-", 2]);
   check int "different effective selectors and limits stay distinct" 4 !prepared
+
+let prepare_eval_boundary_rows (config : Workspace.config) =
+  prepare_eval_feed_rows config;
+  let core = Filename.concat config.base_path ".agent_core" in
+  let root = Filename.concat core "eval" in
+  let outside = Filename.concat core "outside" in
+  Fs_compat.mkdir_p outside;
+  let foreign = Filename.concat outside "999.json" in
+  Yojson.Safe.to_file foreign
+    (Yojson.Safe.from_file (Filename.concat (Filename.concat root "-") "1.json"));
+  Unix.symlink outside (Filename.concat root "linked");
+  Unix.symlink foreign (Filename.concat (Filename.concat root "-") "999.json")
+
+let with_eval_boundary_router f =
+  with_exact_query_router ~prepare:prepare_eval_boundary_rows
+    ~cleanup:(fun (config : Workspace.config) ->
+      Fs_compat.remove_tree (Filename.concat config.base_path ".agent_core")) f
+
+let test_eval_http_rejects_parent_agent () =
+  with_eval_boundary_router @@ fun read ->
+  let _, json = read "/api/v1/dashboard/eval-feed?agent_name=..%2Foutside" in
+  check int "parent selector cannot read sibling snapshots" 0
+    Yojson.Safe.Util.(json |> member "count" |> to_int)
+
+let test_eval_http_excludes_linked_agent () =
+  with_eval_boundary_router @@ fun read ->
+  let _, fleet = read "/api/v1/dashboard/eval-feed" in check_eval_fleet fleet;
+  let _, exact = read "/api/v1/dashboard/eval-feed?agent_name=linked" in
+  check int "linked agent cannot return foreign rows" 0
+    Yojson.Safe.Util.(exact |> member "count" |> to_int)
+
+let test_eval_http_ignores_linked_json () =
+  with_eval_boundary_router @@ fun read ->
+  let _, json = read "/api/v1/dashboard/eval-feed?agent_name=-&limit=1" in
+  check_eval_agent ~name:"-" ~count:1 json
+
+let test_eval_http_ignores_nul_agent () =
+  with_eval_boundary_router @@ fun read ->
+  let _, json = read "/api/v1/dashboard/eval-feed?agent_name=-%00suffix" in
+  check int "invalid filesystem spelling cannot select an existing agent" 0
+    Yojson.Safe.Util.(json |> member "count" |> to_int)
 
 let test_keeper_cached_windows_keep_exact_query () =
   with_exact_query_router @@ fun read ->
@@ -8437,6 +8479,12 @@ let test_skill_evidence_joins_activation_and_composition () =
 let () =
   run "dashboard_http_core"
     [
+      ("eval_feed_owned_boundary", [
+        test_case "parent agent cannot read outside eval root" `Quick test_eval_http_rejects_parent_agent;
+        test_case "linked agent is excluded from fleet and exact reads" `Quick test_eval_http_excludes_linked_agent;
+        test_case "linked JSON cannot replace the latest snapshot" `Quick test_eval_http_ignores_linked_json;
+        test_case "NUL selector cannot alias a real directory" `Quick test_eval_http_ignores_nul_agent;
+      ]);
       ("eval_feed_cache_selection", [
         test_case "fleet and literal dash agent keep distinct results" `Quick test_eval_feed_separates_fleet_from_dash_agent;
         test_case "fleet ignores limit and normalizes empty selectors" `Quick test_eval_feed_fleet_reuses_effective_selection;

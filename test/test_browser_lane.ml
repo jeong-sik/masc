@@ -150,9 +150,9 @@ let test_transport_table () =
     Lane.[Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_answer] (unserved Lane.Web_extension);
   check (list capability) "the BiDi peer has no browser zoom"
     Lane.[Browser_zoom] (unserved Lane.Webdriver_bidi);
-  check (list capability) "the ego connection reads, captures, and opens, moves and closes its own pages"
-    Lane.[Tab_listing; Text_read; Element_inventory; Viewport_capture; Scene_read; Tab_navigation; Tab_closing; Tab_creation]
-    (List.filter (Lane.live_transport_serves Lane.Ego_task_space) Lane.all_of_live_capability);
+  check (list capability) "the ego connection has no document source, drag, touch, zoom, resize, activation, history or dialog"
+    Lane.[Document_source; Trusted_drag; Touch_input; Browser_zoom; Viewport_resize; Tab_activation; Tab_history; Dialog_answer]
+    (unserved Lane.Ego_task_space);
   List.iter (fun capability ->
     check bool (Lane.live_capability_to_wire capability ^ " is reachable on some connection") true
       (Lane.live_transports_serving capability <> []);
@@ -264,9 +264,9 @@ let test_answers_state_their_connection () = with_clients (fun sw connect ->
 
 let test_unsupported_message_names_the_serving_transport () =
   let client_id = (info Lane.Firefox).client_id in
-  check string "hover on the extension points at BiDi"
+  check string "hover on the extension points at BiDi and ego"
     "live_transport_unsupported: this browser is connected over web_extension, which does not serve \
-     trusted_hover; a webdriver_bidi connection does"
+     trusted_hover; a webdriver_bidi or ego_task_space connection does"
     (Lane.selection_error_message (Lane.Transport_unsupported
        {client_id; transport=Web_extension; capability=Trusted_hover}));
   check string "browser zoom on BiDi points at the extension"

@@ -40,10 +40,14 @@ let () = at_exit (fun () -> List.iter (fun directory ->
   Array.iter (fun name -> Sys.remove (Filename.concat directory name)) (Sys.readdir directory);
   Sys.rmdir directory) !created)
 
+(* The peer's clock: a runner moves it to stand for the time a run took. *)
+let clock = ref 0.
+let now () = !clock
+
 let opened ?(capture_directory=capture_directory ()) run =
   let run ~window_s script = let sent = sent_of ~window_s script in
     if sent.step = "space.open" then answered (obj ["spaceId",`Int 51;"ownership",str "agent"]) else run sent in
-  match Peer.open_space ~run ~space:"masc" ~version:"0.6.0.16" ~capture_directory with
+  match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory with
   | Ok peer -> peer
   | Error detail -> failf "the space did not open: %s" detail
 
@@ -79,7 +83,7 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
     | "tabs.list" -> answered (`List [])
     | "space.finish" -> answered `Null
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~run ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   check int "space number" 51 (Peer.space_id peer);
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -87,10 +91,10 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
   check (list string) "opened by name, then held by number"
     [ "space.open \"masc\""; "tabs.list 51"; "space.finish 51" ]
     (List.rev_map (fun (step, space) -> step ^ " " ^ Yojson.Safe.to_string space) !spaces);
-  let user = Peer.open_space ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
+  let user = Peer.open_space ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
       ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 7;"ownership",str "user"])) in
   check bool "a space the operator owns is refused" true (Result.is_error user);
-  let in_use = Peer.open_space ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
+  let in_use = Peer.open_space ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
       ~run:(fun ~window_s:_ _ -> failed "EGO_TASK_SPACE_NAME_IN_USE: masc") in
   check (result reject string) "ego's own refusal is kept" (Error "EGO_TASK_SPACE_NAME_IN_USE: masc") (Result.map ignore in_use)
 
@@ -283,8 +287,6 @@ let test_effects_answer_what_happened () =
     (failure_kind (dispatch peer Live.Page_goto (obj ["url",str "https://slack.com/"])));
   check string "back is not served" "before effect"
     (failure_kind (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back}))));
-  check string "input is not served" "before effect"
-    (failure_kind (dispatch peer Live.Page_interact (obj ["tabId",`Int 1;"action",str "click";"selector",str "a"])));
   check int "none of those ran a script" before (runs ());
   reply := (fun _ -> refused "tab 3 was not opened by an agent in the ego task space");
   check string "a page the space adopted" "before effect"
@@ -319,6 +321,123 @@ let test_effects_answer_what_happened () =
     (before_effect "a closed tab" (dispatch peer Live.Page_read (obj ["tabId",`Int 3])));
   check int "and its read ran no script" before (runs ())
 
+let viewport : Lane.Pointer.viewport = {document_id="d1"; width=800.; height=600.; scroll_x=0.; scroll_y=0.}
+let observed_url = "https://app.slack.com/"
+let interact_args ?(tab_id=1) ?(frame_path=[]) action =
+  Yojson.Safe.Util.member "args"
+    (Lane.verb_json (Lane.Page_interact {tab_id;frame_path;expected_url=Some observed_url;action}))
+(* What the guard and the receipt scripts read: the page, its title and scroll. *)
+let page_summary = in_page (obj ["url",str observed_url;"title",str "Slack";"scrollX",`Int 0;"scrollY",`Int 0])
+let input_answer ?(error=`Null) () = answered (obj ["guard",page_summary;"receipt",page_summary;"error",error])
+(* The pointer target script's answer: the URL, a point and the viewport it is in. *)
+let resolved = in_page (obj ["url",str observed_url;"point",Lane.Pointer.point_to_json {x=0.25;y=0.5};
+  "viewport",Lane.Pointer.viewport_to_json viewport])
+let to_int = Yojson.Safe.Util.to_int
+
+(* Input finds its target and checks the page with the page scripts the BiDi
+   connection runs; then ego moves the mouse or presses the keys. *)
+let test_input_acts_through_the_shared_page_scripts () =
+  let asked = ref [] in
+  let reply = ref (fun (_ : sent) -> fail "no reply set") in
+  let peer = opened (fun sent ->
+    asked := sent :: !asked;
+    match sent.step with "tabs.list" -> answered tabs | _ -> !reply sent) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let runs () = List.length !asked in
+  let steps_since before =
+    List.rev_map (fun (sent : sent) -> sent.step) (List.filteri (fun index _ -> index < runs () - before) !asked) in
+  let last () = List.hd !asked in
+  let interact action = dispatch peer Live.Page_interact (interact_args action) in
+  let by_step answers = reply := (fun sent -> match List.assoc_opt sent.step answers with
+    | Some answer -> answer sent
+    | None -> failf "unexpected step %s" sent.step) in
+  (* A click: its target is found, and the run that finds it takes five seconds. *)
+  by_step ["page.target",(fun _ -> clock := !clock +. 5.; answered resolved); "page.pointer",(fun _ -> input_answer ())];
+  let before = runs () in
+  (match interact (Lane.Click "#send") with
+   | Ok receipt -> check string "the click"
+       {|{"tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","scrollX":0,"scrollY":0}|}
+       (Yojson.Safe.to_string receipt)
+   | other -> failf "the click was %s" (failure_kind other));
+  check (list string) "found, then clicked" ["page.target";"page.pointer"] (steps_since before);
+  let pointer = last () and target = List.nth !asked 1 in
+  check (pair int int) "at the target's point, in CSS pixels" (200, 300) (to_int (field "x" pointer.args), to_int (field "y" pointer.args));
+  check string "with the primary button" "left" (text (field "button" pointer.args));
+  check int "once" 1 (to_int (field "count" pointer.args));
+  check string "on the page by its label" "p1" (text (field "label" pointer.args));
+  check string "the guard checks the point that was found" "click_at"
+    (text (field "action" (Yojson.Safe.from_string (text (field "input" pointer.args)))));
+  check bool "within input's window" true (target.window_s < Lane.default_timeout_sec);
+  check (float 1e-9) "the click's two runs share that window" (target.window_s -. 5.) pointer.window_s;
+  (* Refused before any input. *)
+  by_step ["page.target",(fun _ -> answered (in_page (obj ["interactionFailure",obj ["message",str "element_not_found"]])))];
+  let before = runs () in
+  check string "a target the page does not have" "element_not_found" (before_effect "a missing target" (interact (Lane.Click "#gone")));
+  check (list string) "sends no input" ["page.target"] (steps_since before);
+  by_step ["page.target",(fun _ -> answered resolved);"page.pointer",(fun _ -> refused "observed_viewport_changed")];
+  check string "a page that moved since it was observed" "observed_viewport_changed"
+    (before_effect "a moved page" (interact (Lane.Click "#send")));
+  (* After the input was sent. *)
+  by_step ["page.target",(fun _ -> answered resolved);"page.pointer",(fun _ -> input_answer ~error:(str "Target closed") ())];
+  (match interact (Lane.Click "#send") with
+   | Error (Live.Outcome_unknown detail) -> check bool "says to read the tab" true (String_util.contains_substring detail "read tab 1")
+   | other -> failf "a failed click was %s" (failure_kind other));
+  by_step ["page.target",(fun _ -> answered resolved);"page.pointer",(fun _ -> Error Peer.Timed_out)];
+  check string "a stopped click" "unknown" (failure_kind (interact (Lane.Click "#send")));
+  (* The other pointer gestures. *)
+  by_step ["page.target",(fun _ -> answered resolved);"page.pointer",(fun _ -> input_answer ())];
+  let gesture name action =
+    (match interact action with Ok _ -> () | other -> failf "%s was %s" name (failure_kind other));
+    (last ()).args in
+  check bool "a hover presses nothing" true (field "button" (gesture "a hover" (Lane.Hover (Lane.Selector "#menu"))) = `Null);
+  check int "a double click clicks twice" 2 (to_int (field "count" (gesture "a double click" (Lane.Double_click (Lane.Selector "#row")))));
+  let point = {Lane.Pointer.x=0.5;y=0.25} in
+  let before = runs () in
+  let right = gesture "a right click" (Lane.Click_at {point;viewport;button=Lane.Pointer.Secondary}) in
+  check (list string) "a point needs no target" ["page.pointer"] (steps_since before);
+  check string "with the secondary button" "right" (text (field "button" right));
+  check (pair int int) "at that point" (400, 150) (to_int (field "x" right), to_int (field "y" right));
+  let wheel = gesture "a wheel" (Lane.Scroll_at {point;viewport;x=0;y=120}) in
+  check (pair int int) "the wheel's delta" (0, 120) (to_int (field "dx" wheel), to_int (field "dy" wheel));
+  (* Keys. *)
+  by_step ["page.keyboard",(fun _ -> input_answer ())];
+  let keys action = text (field "keys" (gesture "keys" action)) in
+  let chord ~key ~modifiers = match Lane.Keyboard.of_wire ~key ~modifiers with Ok chord -> chord | Error detail -> fail detail in
+  check string "text is typed as it is" "héllo" (keys (Lane.Type_text {document_id="d1";text="héllo"}));
+  check string "a chord in ego's spelling" "Control+Shift+a"
+    (keys (Lane.Press_key {document_id="d1";key=chord ~key:"a" ~modifiers:["Control";"Shift"]}));
+  check string "a named key" "Enter" (keys (Lane.Press_key {document_id="d1";key=chord ~key:"Enter" ~modifiers:[]}));
+  (* The DOM edits. *)
+  by_step ["page.input",(fun _ -> answered (in_page (obj ["action",str "fill";"url",str observed_url;"title",str "Slack"])))];
+  let fill = Lane.Fill {selector="#message";text="hi"} in
+  (match interact fill with
+   | Ok receipt -> check string "the fill" {|{"tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack"}|}
+       (Yojson.Safe.to_string receipt)
+   | other -> failf "the fill was %s" (failure_kind other));
+  let refusal ~started = answered (in_page (obj ["interactionFailure",obj ["message",str "element_not_found";"effectStarted",`Bool started]])) in
+  by_step ["page.input",(fun _ -> refusal ~started:false)];
+  check string "a refusal the script made first" "element_not_found" (before_effect "a refused fill" (interact fill));
+  by_step ["page.input",(fun _ -> refusal ~started:true)];
+  check string "a failure after the edit started" "unknown" (failure_kind (interact fill));
+  (* Refused before any run. *)
+  let before = runs () in
+  check string "inside a frame" "before effect"
+    (failure_kind (dispatch peer Live.Page_interact (interact_args ~frame_path:["iframe"] (Lane.Click "#send"))));
+  check string "the operator's tab" "before effect"
+    (failure_kind (dispatch peer Live.Page_interact (interact_args ~tab_id:2 (Lane.Click "#send"))));
+  check string "control characters" "before effect" (failure_kind (interact (Lane.Type_text {document_id="d1";text="a\nb"})));
+  check string "a key ego cannot press" "before effect"
+    (failure_kind (interact (Lane.Press_key {document_id="d1";key=chord ~key:"é" ~modifiers:["Control"]})));
+  let elsewhere = {Lane.Pointer.x=0.75;y=0.25} in
+  List.iter (fun action ->
+    check bool (Lane.interaction_verb action ^ " is not served") true
+      (String_util.contains_substring (before_effect "an input ego does not serve" (interact action)) "not served by an ego connection"))
+    [Lane.Drag {from=point;to_=elsewhere;viewport;via=[];duration_ms=0};
+     Lane.Drag_to {source=Lane.Selector "#a";destination=Lane.Selector "#b";via=[];duration_ms=0};
+     Lane.Tap_at {point;viewport}; Lane.Swipe {from=point;to_=elsewhere;viewport;via=[];duration_ms=0};
+     Lane.Set_zoom {factor=1.5}; Lane.Set_viewport Lane.Browser_default; Lane.Activate_tab];
+  check int "none of those ran a script" before (runs ())
+
 let png = "\137PNG\r\n\026\nfixture"
 let state ~url ~width = in_page (obj ["url",str url;"title",str "Slack";
   "viewport",obj ["width",`Int width;"height",`Int 600]])
@@ -338,11 +457,14 @@ let test_the_scripts_parse_as_modules () =
       Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel png);
       answered (obj ["label",str "p1";"path",str path;"before",state ~url:"u" ~width:1;"after",state ~url:"u" ~width:1])
     | "space.finish" -> answered `Null
+    | "page.target" -> answered resolved
+    | "page.pointer" | "page.keyboard" -> input_answer ()
+    | "page.input" -> answered (in_page (obj ["action",str "fill"]))
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "New";"active",`Bool true]])
     | "page.goto" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
-  let peer = match Peer.open_space ~run ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
+  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   List.iter (fun (verb, args) -> ignore (dispatch peer verb args))
@@ -352,11 +474,17 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_capture, obj ["tabId",`Int 1];
       Live.Page_act, act_args (Lane.Action.Open_tab "https://example.test/");
       Live.Page_goto, obj ["tabId",`Int 1;"url",str "https://example.test/"];
+      Live.Page_interact, interact_args (Lane.Click "#send");
+      Live.Page_interact, interact_args (Lane.Hover_at {point={x=0.5;y=0.5};viewport});
+      Live.Page_interact, interact_args (Lane.Scroll_at {point={x=0.5;y=0.5};viewport;x=0;y=120});
+      Live.Page_interact, interact_args (Lane.Type_text {document_id="d1";text="hi"});
+      Live.Page_interact, interact_args (Lane.Fill {selector="#message";text="hi"});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.capture";
-     "page.open";"page.goto";"page.close";"space.finish"]
+     "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";
+     "page.close";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
     let file = Filename.concat directory (step ^ ".mjs") in
@@ -413,6 +541,9 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/new";"title",str "New";"active",`Bool true]])
     | "page.goto" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
+    | "page.target" -> answered resolved
+    | "page.pointer" | "page.keyboard" -> input_answer ()
+    | "page.input" -> answered (in_page (obj ["action",str "fill"]))
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let viewport : Lane.Pointer.viewport = {document_id="observed"; width=800.; height=600.; scroll_x=0.; scroll_y=0.} in
@@ -474,4 +605,5 @@ let () =
       test_case "an answer past the limit is refused" `Quick test_an_answer_past_the_limit_is_refused;
       test_case "a capture reads and removes its file" `Quick test_capture_reads_and_removes_the_file;
       test_case "effects answer what happened" `Quick test_effects_answer_what_happened;
+      test_case "input acts through the shared page scripts" `Quick test_input_acts_through_the_shared_page_scripts;
       test_case "the peer serves what the lane table says" `Quick test_the_peer_serves_what_the_lane_table_says ] ]

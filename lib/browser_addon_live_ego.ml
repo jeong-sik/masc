@@ -53,7 +53,11 @@ let run_command ~env ~timeout_s ~stdin ~command arguments =
 (* Stopping a run spends the stop grace, so it is taken out of the window
    the peer gives. *)
 let runner ~env ~command : Peer.runner = fun ~window_s script ->
-  run_command ~env ~timeout_s:(window_s -. stop_grace_s) ~stdin:script ~command ["nodejs"]
+  let timeout_s = window_s -. stop_grace_s in
+  if timeout_s <= 0. then
+    Error (Peer.Unstarted (Printf.sprintf "%.1f s were left of the command's window, and stopping a run takes %.0f s"
+      window_s stop_grace_s))
+  else run_command ~env ~timeout_s ~stdin:script ~command ["nodejs"]
 
 let version ~env ~command =
   let* output = run_command ~env ~timeout_s:version_timeout_s ~stdin:"" ~command ["--version"]
@@ -91,6 +95,7 @@ let run ~env ~owner (configuration : Browser_configuration.live_ego) work =
   and stopped, finish = Eio.Promise.create () in
   let serve_space directory ~version ~engine_version =
     let* peer = Peer.open_space ~space:configuration.space ~version ~capture_directory:directory
+        ~now:(fun () -> Eio.Time.now (Eio.Stdenv.clock env))
         ~run:(runner ~env ~command) in
     let client_id = Uuidm.v4_gen (Random.State.make_self_init ()) () in
     let client = {B.client_id; browser = B.Ego_lite; version; engine_version; transport = B.Ego_task_space} in

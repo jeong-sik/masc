@@ -21,13 +21,17 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     운영자뿐이라 같은 호출을 되풀이해도 답은 같다. 운영자에게 알린다.
   - `live_transport_unsupported`: 고른 연결(`clientId`, `transport`)이 그 일
     (`capability`)을 못 한다. live 연결은 방식(`transport`)에 따라 할 수 있는 일이
-    다르다. `hover_at`과 `drag`는 `webdriver_bidi` 연결만 하고, `set_zoom`은
+    다르다. `drag`는 `webdriver_bidi` 연결만 하고, `set_zoom`은
     `web_extension` 연결만 한다. `activate_tab`은 둘 다 하지만 `webdriver_bidi`는
     브라우저 창에 포커스도 준다. 읽기(`mode=text`·`elements`·`scene`·`screenshot`)는
-    셋 다 한다. `ego_task_space` 연결은 읽기, `open_tab`, `close_tab`, `BrowserGoto` 를
-    한다. 클릭·입력은 하지 않는다. 이동과 닫기는 그 공간에서 에이전트가 연 페이지만
-    한다(첫 페이지 `p1` 포함). 그 공간에서 운영자가 연 탭은 목록에는 나오지만 읽거나
-    옮기면 거절된다. 로그인이 필요한 사이트는 `open_tab` 으로 그 주소를 열고 읽는다.
+    셋 다 한다. `ego_task_space` 연결은 읽기, `open_tab`, `close_tab`, `BrowserGoto`,
+    그리고 click·`click_at`·`double_click`·hover·`scroll`·`scroll_at`·fill·
+    `select_option`·`follow_link`·`type_text`·`press_key` 를 한다. drag·터치·
+    `set_zoom`·`set_viewport`·`activate_tab`·frame 안 입력은 하지 않는다. `press_key` 는
+    이름 있는 키와 ASCII 문자만 누르고, 다른 글자는 `type_text` 로 친다. 이동·닫기·
+    입력은 그 공간에서 에이전트가 연 페이지만 한다(첫 페이지 `p1` 포함). 그 공간에서
+    운영자가 연 탭은 목록에는 나오지만 읽거나 옮기거나 누르면 거절된다. 로그인이
+    필요한 사이트는 `open_tab` 으로 그 주소를 열고 읽는다.
     그 일을 하는 다른 연결이 있으면 그 clientId로 탭 목록과 페이지를 다시
     읽은 뒤 거기서 다시 한다. 탭 ID와 관측은 연결마다 따로다. 그런 연결이 없으면
     운영자에게 알린다.

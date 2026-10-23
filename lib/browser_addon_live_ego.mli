@@ -16,7 +16,8 @@ val run_command : env:Eio_unix.Stdenv.base -> timeout_s:float -> stdin:string ->
   string list -> (string, Browser_ego_peer.run_failure) result
 
 (** Runs one script as [command nodejs] and answers within the window the
-    peer gives, stop included. *)
+    peer gives, stop included. A window no longer than the stop is refused
+    before the run starts. *)
 val runner : env:Eio_unix.Stdenv.base -> command:string -> Browser_ego_peer.runner
 
 (** Read ego lite's version, open the task space, register one client and

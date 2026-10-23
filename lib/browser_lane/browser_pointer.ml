@@ -28,6 +28,10 @@ let viewport_to_json viewport = `Assoc ["documentId",`String viewport.document_i
   "width",`Float viewport.width;"height",`Float viewport.height;
   "scrollX",`Float viewport.scroll_x;"scrollY",`Float viewport.scroll_y]
 
+(* The CSS pixel a point names in its viewport, the one native input takes. *)
+let viewport_pixels viewport point =
+  int_of_float (point.x *. viewport.width), int_of_float (point.y *. viewport.height)
+
 type button = Primary | Middle | Secondary
 
 let button_to_string = function
@@ -58,8 +62,8 @@ type gesture =
 
 let input_sources ~pointer_id ~wheel_id ~viewport ~start gesture =
   let coords (point : point) =
-    [ "x", `Int (int_of_float (point.x *. viewport.width))
-    ; "y", `Int (int_of_float (point.y *. viewport.height)) ] in
+    let x, y = viewport_pixels viewport point in
+    [ "x", `Int x; "y", `Int y ] in
   let move ~duration_ms point = `Assoc
     ([ "type", `String "pointerMove"; "origin", `String "viewport"
      ; "duration", `Int duration_ms ] @ coords point) in

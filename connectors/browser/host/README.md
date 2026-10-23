@@ -38,6 +38,23 @@ edited. The table goes into the `runtime.toml` the server reads, which
 `MASC_CONFIG_DIR` overrides. Give `--mode` twice to connect both routes. An option
 the chosen modes do not use is refused.
 
+`--mode ego` connects an ego lite task space, on macOS where ego lite runs. It
+writes `[browser.live.ego]` into the `runtime.toml` the server reads and installs
+no host, extension or manifest; the attached browser Add-on runs `ego-browser`
+for each command (`docs/rfc/RFC-browser-live-ego.md`):
+
+```sh
+masc browser-lane-setup --mode ego --base-path "$HOME/masc-workspace"
+```
+
+It names the first `ego-browser` that answers `--version`, on `PATH` and then in
+`~/.local/bin` where ego lite's onboarding links it, unless `--ego-command` names
+one, and the task space `masc` unless `--ego-space` names another. The
+`ego-browser` it writes must answer with ego lite's and Chromium's versions, as one
+whose onboarding is finished does: a configured ego that cannot start stops the
+browser Add-on, and with it the other routes it serves. A table that is already
+there keeps its values unless they are named.
+
 `--mode host` installs the host and the launcher and nothing else: no extension,
 no manifest, no `runtime.toml` (the workspace needs none yet). It connects no
 browser. It is for a browser you attach by hand, and for bringing an installed

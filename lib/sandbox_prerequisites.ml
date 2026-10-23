@@ -8,7 +8,7 @@ type searxng_container =
   | Searxng_unusable of string
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
   | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
-  | Geckodriver | Firefox | Searxng of { config_dir : string }
+  | Geckodriver | Firefox | Ego_browser | Searxng of { config_dir : string }
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
@@ -60,6 +60,7 @@ let geckodriver_source = "https://github.com/mozilla/geckodriver/releases"
 let searxng_docker_source = "https://docs.searxng.org/admin/installation-docker.html"
 let firefox_cask_source = "https://formulae.brew.sh/cask/firefox"
 let firefox_linux_source = "https://support.mozilla.org/en-US/kb/install-firefox-linux"
+let ego_lite_source = "https://lite.ego.app/"
 
 (* The model masc asks whisper for by default. Measured 2026-09-12: this file
    is 1,624,555,275 bytes, and on an M3 Max it transcribed a Korean sentence in
@@ -316,6 +317,13 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked)
     [open_ ~id:"firefox_install_instructions" ~label:"Open Firefox installation instructions"
        ~detail:"Install Firefox the way this distribution packages it, then refresh detection."
        ~source_url:firefox_linux_source firefox_linux_source]
+  (* ego lite installs as a macOS app, and its onboarding puts ego-browser on
+     PATH; there is no package to run. It has no Linux build. *)
+  | Ego_browser, Macos _ ->
+    [open_ ~id:"ego_lite_download" ~label:"Open the ego lite download page"
+       ~detail:"Install ego lite and finish its first-run onboarding in the app, which links ego-browser into ~/.local/bin, then refresh detection."
+       ~source_url:ego_lite_source ego_lite_source]
+  | Ego_browser, Linux _ -> []
  (* SearXNG is the one search provider that needs no key. Both hosts run it
      the same way, in a container the operator's Docker already provides; a
      host without Docker gets the start action and a failure that names the

@@ -144,6 +144,21 @@ let test_browser_tools_use_the_selected_package_manager () =
       (List.length (P.catalog ~host:S.Unsupported ~distribution:P.Other dependency)))
     [P.Geckodriver; P.Firefox]
 
+(* ego lite installs as a macOS app whose onboarding puts ego-browser on PATH,
+   so a mac gets its download page and nothing to run; it has no Linux build. *)
+let test_ego_lite_is_a_download_page_on_a_mac_only () =
+  (match P.catalog ~host:(mac S.Arm64 26) ~distribution:P.Other P.Ego_browser with
+   | [action] ->
+     check string "the download page" "ego_lite_download" action.id;
+     check bool "opening a page needs no administrator" false action.requires_admin;
+     (match action.action_effect with
+      | P.Open_official_installer {url; _} -> check string "ego lite's own site" "https://lite.ego.app/" url
+      | _ -> fail "a mac opens ego lite's page")
+   | actions -> failf "a mac offers %d actions for ego-browser" (List.length actions));
+  List.iter (fun host ->
+    check int "nothing elsewhere" 0 (List.length (P.catalog ~host ~distribution:P.Ubuntu P.Ego_browser)))
+    [S.Linux S.X64; S.Unsupported]
+
 (* An install action for these never writes runtime.toml: naming the executable
    there needs the path the install leaves behind. *)
 let test_browser_tool_actions_write_no_file () =
@@ -153,7 +168,7 @@ let test_browser_tool_actions_write_no_file () =
         check (option string) "no file is left behind" None action.writes)
         (P.catalog ~host ~distribution:P.Ubuntu dependency))
       [mac S.Arm64 26; S.Linux S.X64])
-    [P.Geckodriver; P.Firefox]
+    [P.Geckodriver; P.Firefox; P.Ego_browser]
 
 module B = Masc.Browser_runtime_dependencies
 
@@ -329,7 +344,14 @@ let test_firefox_bundle_locations_follow_an_absolute_home () =
         (List.for_all (fun c -> String.equal c "firefox" || not (Filename.is_relative c))
            (B.candidates B.Firefox))))
     [""; "relative/home"];
-  check (list string) "geckodriver is a bare name" ["geckodriver"] (B.candidates B.Geckodriver)
+  check (list string) "geckodriver is a bare name" ["geckodriver"] (B.candidates B.Geckodriver);
+  with_env "HOME" "/Users/fixture" (fun () ->
+    check (list string) "ego-browser on PATH, then where ego lite's onboarding links it"
+      ["ego-browser"; "/Users/fixture/.local/bin/ego-browser"] (B.candidates B.Ego_browser));
+  List.iter (fun home ->
+    with_env "HOME" home (fun () ->
+      check (list string) "no relative place for ego-browser" ["ego-browser"] (B.candidates B.Ego_browser)))
+    [""; "relative/home"]
 
 (* Same words as the PDF and presentation checks, because one reader walks all
    three. *)
@@ -986,6 +1008,8 @@ let () = run "prerequisite actions" ["user-selected plans",[
     test_the_first_program_that_answers_ends_the_walk;
   test_case "Firefox bundle locations follow an absolute HOME" `Quick
     test_firefox_bundle_locations_follow_an_absolute_home;
+  test_case "ego lite is a download page on a mac only" `Quick
+    test_ego_lite_is_a_download_page_on_a_mac_only;
   test_case "the readiness JSON uses the shared status words" `Quick
     test_the_readiness_json_uses_the_shared_status_words;
   test_case "effects are not readiness" `Quick test_completion_never_means_ready;

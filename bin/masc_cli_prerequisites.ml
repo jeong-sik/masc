@@ -38,6 +38,7 @@ let dependency ~base_path = function
   | "whisper" -> Some Prerequisites.Whisper_cli
   | "geckodriver" -> Some Prerequisites.Geckodriver
   | "firefox" -> Some Prerequisites.Firefox
+  | "ego-browser" -> Some Prerequisites.Ego_browser
   | "searxng" ->
     Some (Prerequisites.Searxng { config_dir = searxng_config_dir ~base_path () })
   | name -> Option.map (fun backend -> Prerequisites.Sandbox backend) (Sandbox.backend_of_id name)
@@ -77,7 +78,7 @@ let apple_builder host dependency =
     | Prerequisites.Codex_cli | Prerequisites.Claude_cli | Prerequisites.Antigravity_cli
     | Prerequisites.Muse_cli | Prerequisites.Pdf_tools | Prerequisites.Presentation_tools _
     | Prerequisites.Whisper_cli | Prerequisites.Geckodriver | Prerequisites.Firefox
-    | Prerequisites.Searxng _ )
+    | Prerequisites.Ego_browser | Prerequisites.Searxng _ )
     -> Prerequisites.Builder_unchecked
 let rec wait pid =
   match Unix.waitpid [] pid with
@@ -122,7 +123,7 @@ let actions ?searxng_container host dependency =
     | (Prerequisites.Sandbox _ | Prerequisites.Codex_cli | Prerequisites.Claude_cli
       | Prerequisites.Antigravity_cli | Prerequisites.Muse_cli | Prerequisites.Pdf_tools
       | Prerequisites.Presentation_tools _ | Prerequisites.Whisper_cli | Prerequisites.Geckodriver
-      | Prerequisites.Firefox), _ -> Prerequisites.Searxng_absent in
+      | Prerequisites.Firefox | Prerequisites.Ego_browser), _ -> Prerequisites.Searxng_absent in
   let standard =
     Prerequisites.catalog ?model_dir:(model_dir ()) ~apple_builder ~searxng_container ~host ~distribution dependency
     |> List.map (fun action -> Standard action)
@@ -135,9 +136,9 @@ let actions ?searxng_container host dependency =
   | Sandbox.Macos _, Prerequisites.Sandbox Docker ->
     Verified_docker_install :: Verified_docker_launch :: standard
   | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, Prerequisites.Sandbox (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh)))
-  | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Geckodriver | Prerequisites.Firefox)))))))
+  | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Geckodriver | Prerequisites.Firefox | Prerequisites.Ego_browser)))))))
   | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, Prerequisites.Sandbox (Sandbox.Apple_container | (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh))))
-  | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Geckodriver | Prerequisites.Firefox)))))))
+  | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Geckodriver | Prerequisites.Firefox | Prerequisites.Ego_browser)))))))
   | ((Sandbox.Unsupported | Sandbox.Linux _), _)
   | (Sandbox.Macos _, Prerequisites.Searxng _)
   | (Macos {architecture=Arm64; _ }, Sandbox Apple_container) -> standard
@@ -253,7 +254,7 @@ let run ~base_path ~dependency:name ~action =
       | (Prerequisites.Searxng _ | Prerequisites.Sandbox _ | Prerequisites.Codex_cli
         | Prerequisites.Claude_cli | Prerequisites.Antigravity_cli | Prerequisites.Muse_cli
         | Prerequisites.Pdf_tools | Prerequisites.Presentation_tools _ | Prerequisites.Whisper_cli
-        | Prerequisites.Geckodriver | Prerequisites.Firefox), _ -> None in
+        | Prerequisites.Geckodriver | Prerequisites.Firefox | Prerequisites.Ego_browser), _ -> None in
     let actions =
       actions ?searxng_container:(Option.map (fun (check : Masc.Searxng_runtime_dependency.check) -> check.container) searxng_check)
         host dependency in
@@ -271,13 +272,16 @@ let run ~base_path ~dependency:name ~action =
         | Prerequisites.Firefox, `Assoc fields ->
           `Assoc (("dependency_readiness",
                    browser_readiness Masc.Browser_runtime_dependencies.Firefox) :: fields)
+        | Prerequisites.Ego_browser, `Assoc fields ->
+          `Assoc (("dependency_readiness",
+                   browser_readiness Masc.Browser_runtime_dependencies.Ego_browser) :: fields)
         | Prerequisites.Searxng _, `Assoc fields ->
           let check = match searxng_check with
             | Some check -> check
             | None -> Masc.Searxng_runtime_dependency.observe () in
           `Assoc (("dependency_readiness", Masc.Searxng_runtime_dependency.to_json check) :: fields)
         | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli | Muse_cli | Whisper_cli), _ -> catalog
-        | (Pdf_tools | Presentation_tools _ | Geckodriver | Firefox | Searxng _), _ ->
+        | (Pdf_tools | Presentation_tools _ | Geckodriver | Firefox | Ego_browser | Searxng _), _ ->
           invalid_arg "prerequisite catalog encoder must return an object" in
       print_endline (Yojson.Safe.to_string catalog); 0
     | Some requested ->
@@ -332,6 +336,8 @@ let run ~base_path ~dependency:name ~action =
              browser_receipt Masc.Browser_runtime_dependencies.Geckodriver receipt
            | Prerequisites.Firefox, Prerequisites.Commands_completed_recheck_required ->
              browser_receipt Masc.Browser_runtime_dependencies.Firefox receipt
+           | Prerequisites.Ego_browser, Prerequisites.Commands_completed_recheck_required ->
+             browser_receipt Masc.Browser_runtime_dependencies.Ego_browser receipt
            | Prerequisites.Searxng _, Prerequisites.Commands_completed_recheck_required ->
              searxng_receipt receipt
            | (Prerequisites.Sandbox _, Prerequisites.Failed _)
@@ -343,6 +349,7 @@ let run ~base_path ~dependency:name ~action =
            | (Prerequisites.Whisper_cli, Prerequisites.Failed _)
            | (Prerequisites.Geckodriver, Prerequisites.Failed _)
            | (Prerequisites.Firefox, Prerequisites.Failed _)
+           | (Prerequisites.Ego_browser, Prerequisites.Failed _)
            | (Prerequisites.Searxng _, Prerequisites.Failed _) -> receipt, 1
            | (Prerequisites.Sandbox _, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Codex_cli, (External_step_pending | Commands_completed_recheck_required))
@@ -353,6 +360,7 @@ let run ~base_path ~dependency:name ~action =
            | (Prerequisites.Whisper_cli, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Geckodriver, External_step_pending)
            | (Prerequisites.Firefox, External_step_pending)
+           | (Prerequisites.Ego_browser, External_step_pending)
            | (Prerequisites.Searxng _, External_step_pending) -> receipt, 0 in
          print_endline (Yojson.Safe.to_string receipt);
          code)

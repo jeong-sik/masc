@@ -2,7 +2,7 @@
     connecting or a page being read: it says a program answers, not that
     runtime.toml names it or that the server has restarted since. *)
 
-type program = Geckodriver | Firefox
+type program = Geckodriver | Firefox | Ego_browser
 
 val name : program -> string
 (** The name the program carries in the readiness JSON and in
@@ -11,8 +11,9 @@ val name : program -> string
 val candidates : program -> string list
 (** Executables tried in order. A bare name is looked up on [PATH]; a path is
     used as written. Firefox on macOS lives inside its application bundle and
-    is on no [PATH], so its bundle locations are listed. A [HOME] that is not an
-    absolute path contributes no bundle location. *)
+    is on no [PATH], so its bundle locations are listed. ego lite's onboarding
+    links [ego-browser] into [~/.local/bin], which is listed after [PATH]. A
+    [HOME] that is not an absolute path contributes no location. *)
 
 type check =
   | Missing of string

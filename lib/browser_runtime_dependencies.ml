@@ -1,21 +1,34 @@
-type program = Geckodriver | Firefox
+type program = Geckodriver | Firefox | Ego_browser
 
 let name = function
   | Geckodriver -> "geckodriver"
   | Firefox -> "firefox"
+  | Ego_browser -> "ego-browser"
 
 let firefox_bundle_executable = "Firefox.app/Contents/MacOS/firefox"
 
+(* A relative HOME would name a place relative to wherever this runs, and the
+   lane takes absolute paths only. *)
+let absolute_home () =
+  match Sys.getenv_opt "HOME" with
+  | Some home when (not (String.equal home "")) && not (Filename.is_relative home) -> Some home
+  | Some _ | None -> None
+
 let candidates = function
   | Geckodriver -> [ "geckodriver" ]
+  | Ego_browser ->
+    (* ego lite's onboarding links ego-browser into ~/.local/bin, which a
+       shell started before it, or a service, may not have on PATH. *)
+    "ego-browser"
+    :: (match absolute_home () with
+        | Some home -> [ Filename.concat (Filename.concat (Filename.concat home ".local") "bin") "ego-browser" ]
+        | None -> [])
   | Firefox ->
-    (* A relative HOME would name a bundle relative to wherever this runs, and
-       the lane takes absolute paths only. *)
     let user_applications =
-      match Sys.getenv_opt "HOME" with
-      | Some home when (not (String.equal home "")) && not (Filename.is_relative home) ->
+      match absolute_home () with
+      | Some home ->
         [ Filename.concat (Filename.concat home "Applications") firefox_bundle_executable ]
-      | Some _ | None -> []
+      | None -> []
     in
     [ "firefox"
     ; Filename.concat "/Applications" firefox_bundle_executable

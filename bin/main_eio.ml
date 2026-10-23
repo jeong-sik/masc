@@ -2275,7 +2275,9 @@ let browser_lane_setup_cmd =
              host installs the host and its launcher only, for a browser you attach \
              yourself or to bring an installed lane's host up to date; automation writes \
              the geckodriver the server starts for the lane that opens a fresh profile \
-             per session and keeps no login. Give it more than once for more than one. \
+             per session and keeps no login; ego writes the [browser.live.ego] table so \
+             the browser Add-on serves an ego lite task space. Give it more than once for \
+             more than one. \
              Without a mode nothing is written and the current state is printed.")
   in
   let binary =
@@ -2383,6 +2385,30 @@ let browser_lane_setup_cmd =
              binary key), an absolute path. Written only when named: geckodriver finds \
              Firefox itself.")
   in
+  let ego_command =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "ego-command" ]
+          ~docv:"FILE"
+          ~doc:
+            "With --mode ego, the ego-browser executable, an absolute path. By default \
+             the first ego-browser that answers --version, on PATH or in ~/.local/bin. It \
+             must answer with ego lite's and Chromium's versions. A table that is already \
+             there keeps its value unless this is given.")
+  in
+  let ego_space =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "ego-space" ]
+          ~docv:"NAME"
+          ~doc:
+            "With --mode ego, the ego lite task space the Add-on serves. By default masc. \
+             A table that is already there keeps its value unless this is given.")
+  in
   let no_addon =
     Arg.(
       value
@@ -2425,10 +2451,15 @@ let browser_lane_setup_cmd =
               its comments or other tables. A table that is already there keeps its \
               values, because its profile holds the logins; a value changes only when it \
               is named. The server reads the table when it starts."
+         ; `P
+             "--mode ego writes [browser.live.ego]: the ego-browser the browser Add-on runs \
+              and the ego lite task space it serves, after checking that ego-browser \
+              answers --version. It installs no host. An existing table keeps its values \
+              unless they are named. The server reads the table when it starts."
          ])
     Term.(
       const (fun base_path modes no_addon binary token_file manifest_dir host_name firefox
-                  profile port geckodriver browser ->
+                  profile port geckodriver browser ego_command ego_space ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
         Masc_cli_browser_lane_setup.run
           ~base_path
@@ -2436,7 +2467,7 @@ let browser_lane_setup_cmd =
              which the helper the other setup commands use does not. *)
           ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
           ~modes ~no_addon ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile
-          ~port ~geckodriver ~browser)
+          ~port ~geckodriver ~browser ~ego_command ~ego_space)
       $ base_path
       $ modes
       $ no_addon
@@ -2448,7 +2479,9 @@ let browser_lane_setup_cmd =
       $ profile
       $ port
       $ geckodriver
-      $ browser)
+      $ browser
+      $ ego_command
+      $ ego_space)
 
 let voice_local_setup_cmd =
   let voice =
@@ -4623,7 +4656,7 @@ let prerequisite_actions_cmd =
   let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
   let action = Arg.(value & opt (some string) None & info ["execute"]
     ~doc:"Execute this explicitly selected action from the current host catalog.") in
-  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, pdf-tools, presentation-tools, geckodriver, firefox, or searxng.")
+  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, pdf-tools, presentation-tools, geckodriver, firefox, ego-browser, or searxng.")
     (* Resolved on demand: only presentation-tools and searxng are scoped to a workspace, and
        an operator installing Codex or Docker has not made one yet. Taking the
        resolving [base_path] term here refused every dependency with "MASC_BASE_PATH

@@ -244,6 +244,9 @@ val stats : t -> stats
     config defaults) without requiring piaf integration. Do not call
     from production code. *)
 module For_testing : sig
+  (** The same ownership handoff used by buffered and streaming requests. *)
+  module Lease : module type of Pool_client_lease
+
   val request_body : string -> Piaf.Body.t
   (** The same finite request body used by buffered and streaming calls. *)
   (** The request window [request] arms, on its own: a result the work
@@ -280,12 +283,6 @@ module For_testing : sig
     val to_string : t -> string
     val compare : t -> t -> int
   end
-
-  (** Exposed for cleanup contract tests: close an unreleased client exactly
-      once in a cancel-protected finalizer and swallow release exceptions so
-      [Fun.protect] does not mask the original request/body exception. *)
-  val close_unreleased_client :
-    bool ref -> (close_only:bool -> unit) -> unit
 
   (** Exposed so unit tests can drive idle-timeout logic against a
       mock [Piaf.Body.t] built from [Piaf_stream.create], without

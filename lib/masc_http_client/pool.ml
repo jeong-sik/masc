@@ -643,54 +643,39 @@ let create_fresh t key uri =
       Error (Printf.sprintf "%s: %s"
         (connect_failure_to_string err) (Host_key.to_string key))
 
-(* Count idle entries (host_map -> int). For [max_total_idle]. *)
-let count_idle t =
-  with_mu t (fun () ->
-    Host_map.fold (fun _ entries acc -> List.length entries + acc) t.idle 0)
-
-(* Park a client back into the pool, or close it if the pool is full
-   or marked stopped.  [close_only] forces close (used when the
-   request errored mid-flight and the connection is suspect). *)
-let release t key client ~close_only =
-  let now =
-    try Eio.Time.now (Eio.Stdenv.clock t.env)
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> 0.0
-    (* If the clock effect raises a non-Cancel exception we are in a
-       teardown/shutdown shape and 0.0 is a safe fallback — the only
-       use of [now] below is for the [last_used] field on a parked
-       entry which will get evicted on the next tick.  But Cancelled
-       must propagate per RFC-0106 so the surrounding fiber unwinds
-       instead of parking a client during a structured cancellation. *)
-  in
-  let should_park =
-    not close_only
-    && not (Atomic.get t.stop)
-    && client_is_live client
-    && count_idle t < t.config.max_total_idle
-  in
-  if should_park then begin
-    let parked = ref false in
-    with_mu t (fun () ->
-      let existing = Host_map.find_opt key t.idle |> Option.value ~default:[] in
-      if not (Atomic.get t.stop)
-         && client_is_live client
-         && List.length existing < t.config.max_idle_per_host then begin
-        let entry = { client; last_used_ts = now } in
-        t.idle <- Host_map.add key (entry :: existing) t.idle;
-        parked := true
-      end);
-    if not !parked then begin
-      (* Signal only. A raise here skipped the count below, and on the
-         success tail ([close_only:false] after a fully read body) it would
-         have reached [Watched_work.run] as a lost race and reported a
-         finished request as a timeout. *)
-      request_close_client client;
+(* Parking and its ownership transfer share the protected queue mutation.
+   A cancellation while acquiring [mu] still leaves the request responsible
+   for closing its client; after publication the idle queue owns it. *)
+let release t key client ownership ~close_only =
+  let close () = Pool_client_lease.close ownership ~signal:client.request_close in
+  if close_only then close ()
+  else
+    let now = Eio.Time.now (Eio.Stdenv.clock t.env) in
+    let disposition =
+      with_mu t (fun () ->
+        let existing = Host_map.find_opt key t.idle |> Option.value ~default:[] in
+        let total_idle =
+          Host_map.fold (fun _ entries acc -> List.length entries + acc) t.idle 0
+        in
+        if not (Atomic.get t.stop)
+           && client_is_live client
+           && total_idle < t.config.max_total_idle
+        then
+          if List.length existing < t.config.max_idle_per_host then begin
+            let entry = { client; last_used_ts = now } in
+            Pool_client_lease.park ownership ~publish:(fun () ->
+              t.idle <- Host_map.add key (entry :: existing) t.idle);
+            `Parked
+          end else `Evict
+        else `Close)
+    in
+    match disposition with
+    | `Parked -> ()
+    | `Close -> close ()
+    | `Evict ->
+      close ();
       with_mu t (fun () ->
         t.counters.evict_count_total <- t.counters.evict_count_total + 1)
-    end
-  end else request_close_client client
 
 (* ── Public request API ────────────────────────────────────────── *)
 
@@ -709,17 +694,6 @@ let method_to_piaf : http_method -> Piaf.Method.t = function
   | `DELETE -> `DELETE
   | `HEAD   -> `HEAD
   | `PATCH  -> `Other "PATCH"
-
-let close_unreleased_client released release_once =
-  Eio.Cancel.protect (fun () ->
-    if not !released
-    then
-      try release_once ~close_only:true with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Log.Misc.debug
-          "masc_http_client pool ignored close-only release failure: %s"
-          (exn_message exn))
 
 let path_and_query uri =
   let p = Uri.path uri in
@@ -836,28 +810,12 @@ let do_request t ?headers ?body ?max_body_bytes ~method_ uri : (response, string
   match acquired with
   | Error e -> Error e
   | Ok client ->
-    (* Mirror [do_request_with_idle_timeout]: guarantee the client is released
-       on EVERY exit. [Pool.request] wraps this call in [with_optional_timeout]'s
-       [Watched_work.run]; when the timeout wins it cancels this fiber, and the
-       cancel can land inside [Piaf.Body.to_string] — past the explicit releases
-       below. Without the finally the Piaf client/socket is neither parked nor
-       closed and the FD leaks (#21547). [Eio.Cancel.protect] lets the blocking
-       shutdown complete under cancellation; exceptions are swallowed so the
-       finalizer cannot mask the original via [Fun.Finally_raised] (CLAUDE.md
-       OCaml cleanup rule). *)
-    let released = ref false in
-    let release_once ~close_only =
-      if not !released then begin
-        released := true;
-        release t key client ~close_only
-      end
-    in
-    let path = path_and_query uri in
-    let body_piaf = Option.map request_body body in
-    Fun.protect
-      ~finally:(fun () ->
-        close_unreleased_client released release_once)
-      (fun () ->
+    Pool_client_lease.with_client
+      ~release:(release t key client)
+      ~close:client.request_close
+      (fun ~release:release_once ->
+        let path = path_and_query uri in
+        let body_piaf = Option.map request_body body in
         t.counters.inflight <- t.counters.inflight + 1;
         let result =
           Fun.protect
@@ -1057,18 +1015,12 @@ let do_request_streaming
   match acquired with
   | Error e -> Error e
   | Ok client ->
-    let released = ref false in
-    let release_once ~close_only =
-      if not !released then begin
-        released := true;
-        release t key client ~close_only
-      end
-    in
-    let path = path_and_query uri in
-    let body_piaf = Option.map request_body body in
-    Fun.protect
-      ~finally:(fun () -> close_unreleased_client released release_once)
-      (fun () ->
+    Pool_client_lease.with_client
+      ~release:(release t key client)
+      ~close:client.request_close
+      (fun ~release:release_once ->
+        let path = path_and_query uri in
+        let body_piaf = Option.map request_body body in
         t.counters.inflight <- t.counters.inflight + 1;
         let result =
           Fun.protect
@@ -1172,6 +1124,8 @@ let stats t : stats =
 (* ── Test-only ─────────────────────────────────────────────────── *)
 
 module For_testing = struct
+  module Lease = Pool_client_lease
+
   let request_body = request_body
   let with_request_timeout ~clock ~timeout_seconds f =
     with_optional_timeout ~clock ~timeout_seconds f
@@ -1183,7 +1137,6 @@ module For_testing = struct
     with_mu t (fun () -> Host_map.cardinal t.connect_failures)
   let evict_expired_entries = evict_expired_entries
   module Host_key = Host_key
-  let close_unreleased_client = close_unreleased_client
   let read_body_with_idle = read_body_with_idle
   let take_live ~now ~ttl entries = take_live ~now ~ttl entries
   let ensure_host_header = ensure_host_header

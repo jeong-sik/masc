@@ -1,0 +1,12 @@
+{"at": 1792748054.112004, "keys": ":features\ro", "capture": "04-nonempty-plugins", "settle_ms": 1200, "show": false}
+{"at": 1792748075.398001, "keys": "j\r", "capture": "05-original-statistics-selected", "settle_ms": 700, "show": false}
+{"at": 1792748091.8380768, "keys": "r", "capture": "07-original-selected-after-off", "settle_ms": 1000, "show": false}
+{"at": 1792748123.3659232, "keys": "r", "capture": "11-original-selected-after-reconnect", "settle_ms": 1000, "show": false}
+{"at": 1792748153.580659, "keys": "D", "capture": "12-original-raw-details", "settle_ms": 500, "show": false}
+{"at": 1792748172.9929652, "keys": "D\u001b", "capture": "13-return-current-installations", "settle_ms": 500, "show": false}
+{"at": 1792748182.943172, "keys": "j\r", "capture": "14-current-replacement-selected", "settle_ms": 600, "show": false}
+{"at": 1792748197.546114, "keys": "\u001bj\r", "capture": "15-new-statistics-result", "settle_ms": 700, "show": false}
+{"at": 1792748206.480892, "keys": "\u001bh\r", "capture": "16-original-history-reopened", "settle_ms": 700, "show": false}
+{"at": 1792748256.822158, "keys": "\u001bh\r", "capture": "17-current-selection-restored", "settle_ms": 600, "show": false}
+{"at": 1792748311.0538611, "keys": "r", "capture": "20-new-result-after-final-off", "settle_ms": 700, "show": false}
+{"at": 1792748360.193111, "stop": true}

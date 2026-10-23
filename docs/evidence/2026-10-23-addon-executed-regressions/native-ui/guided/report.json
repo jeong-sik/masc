@@ -1,0 +1,124 @@
+{
+  "verdict": "OBSERVED PASS within isolated native lifecycle and PTY scope",
+  "source": "a6fba325404c963061b7b95c4c564e35f5ea5e2e",
+  "selected_native_run": 39928840589,
+  "selected_linux_run": 39928835869,
+  "workflow_source": "9bf443caaeaf8c54db442c64cfb90d87d6b7cf26",
+  "observed_from_utc": "2026-10-23T09:21:29Z",
+  "recorded_at": "2026-10-23T09:30:29.025897+00:00",
+  "evidence_directory": "/tmp/masc-addon-actual-review-20261023/evidence",
+  "session": "/tmp/masc-addon-actual-review-20261023/session.json",
+  "identity_verification": {
+    "server_sha256": "c0c96aefea1a1bbfe23f693fbbdb823228710565d04b7050c54359d5765a3e22",
+    "tui_sha256": "1b85a7130be2331e9cfdef09129d44dbdbd172f7a9724102e51e637f05c35f98",
+    "embedded_server_commit": "a6fba325404c963061b7b95c4c564e35f5ea5e2e",
+    "tui_embedded_commit": "a6fba325404c963061b7b95c4c564e35f5ea5e2e",
+    "key_reference_sha256": "ff7801c80c97cb5c4aed57139da799c706da0675253018a8bd6f7b5d23eaebdf"
+  },
+  "workspace": "/tmp/masc-addon-actual-review-20261023/workspace",
+  "port": 52645,
+  "server_runtime_instance": "01a16810-badb-7000-94e8-9cba16cf6f03",
+  "worker_source": [
+    {
+      "source": "addons/protocol.py",
+      "sha256": "a8a614c64ae672c799201395d24571bbc7c79f3b5c4682fdd3130a7d72bc79fa"
+    },
+    {
+      "source": "addons/output-statistics/server.py",
+      "sha256": "0a59df06e0ad6fe356a51fc56591dc877833a1a16e9e3698c667b10e5a55e1f0"
+    },
+    {
+      "source": "addons/output-statistics/lane.toml",
+      "sha256": "5e96a46e448e3d5bf464faa08ef9959ec25e018a6d12c4eb31aa3903c441e773"
+    }
+  ],
+  "fixture_adaptation": "Declared host_process, omit container-only resources; second role-only package uses identical actual first-party statistics worker. No HTTP/model mocks.",
+  "launcher": {
+    "path": "/tmp/masc-addon-actual-review-20261023/bin/masc-native-addon-launcher",
+    "copied_from": "/Users/dancer/.local/bin/masc-native-addon-launcher",
+    "sha256": "4284f99bce1842f002f2cec0067dc731cc02e5f74c85dff9366909a1aeb96570",
+    "build_source_unverified": true
+  },
+  "installation": {
+    "id": "native-statistics",
+    "manifest_path": "/private/tmp/masc-addon-actual-review-20261023/workspace/packages/browser-role/lane.toml",
+    "run_id": "actual-review",
+    "original_instance": "01a16812-b06a-7000-ad4b-4d590ec6ee25",
+    "replacement_instance": "01a16814-72b5-7000-a94e-29142454bdec",
+    "original_observation_seq": 1,
+    "replacement_observation_seq_after_explicit_observe": 2,
+    "output_rows": 0,
+    "source_coverage": "No upstream supplied; explicitly partial, no count known.",
+    "final_configuration": {
+      "id": "native-statistics",
+      "source_path": "/tmp/masc-addon-actual-review-20261023/workspace/.masc/config/lane-addons/native-statistics.toml",
+      "enabled": false,
+      "source_revision": "e32d48a8a137fb788516779d99883126c447b563699e252a97561bcf01f5dcdb",
+      "desired_revision": "a328a1fa0efd5be5553a11ff814dd9044700afb45c258f52cd3b742fe82b5e58",
+      "applied_revision": null,
+      "instance_id": null,
+      "application": {
+        "kind": "inactive"
+      },
+      "ui_category": "browser"
+    },
+    "final_retained_release_receipts": [
+      {
+        "kind": "detached",
+        "release": {
+          "kind": "native_released",
+          "installation_id": "native-statistics",
+          "instance_id": "01a16812-b06a-7000-ad4b-4d590ec6ee25"
+        }
+      },
+      {
+        "kind": "detached",
+        "release": {
+          "kind": "native_released",
+          "installation_id": "native-statistics",
+          "instance_id": "01a16814-72b5-7000-a94e-29142454bdec"
+        }
+      }
+    ]
+  },
+  "observations": [
+    "Actual PTY Features navigation and Plugins separation; role-grouped Browser/Analysis catalog.",
+    "Browser role and MCP-tools service shown separately, native host-process execution shown explicitly.",
+    "Guided install Enter produced local draft, and actual API still had zero declarations until explicit s.",
+    "Save created durable declaration and actual native worker via first-party Python MCP, applied revision equals desired.",
+    "Off draft alone retained enabled=true in actual API; saving Off confirmed native_released and original process exit.",
+    "On recreated a distinct instance/incarnation under same installation/manifest/config revision; old instance remained independently readable in history.",
+    "Explicit observe API response was pending, later read showed same new instance sequence2 with pending=false; actual PTY displayed same cursor/coverage.",
+    "Final Off confirmed both original/replacement release records, both claim histories consumed, no live workers.",
+    "Owned server/TUI/worker PIDs all absent after cleanup, port bind available; live workspace/installed programs untouched."
+  ],
+  "failures_or_limits": [
+    "No P0-P2 blocker observed in exercised path; this is not broad source or release approval.",
+    "No Dashboard, real model/provider, browser backend/transport, physical terminal window, server-restart restoration, real domain inputs, exported-tool use or whole54 verification.",
+    "Worker emits no rows for empty sources; only actual protocol/observations and explicit missing-upstream coverage exercised.",
+    "Installed launcher was copied privately and hash recorded; its source version was not verified. Artifact alone does not package that dependency.",
+    "PNG images are offline rasterizations of actual captured PTY cells, with renderer-supplied default colors; no OS screen or physical paint/latency claim.",
+    "No screen text/layout/order assertions or new tests. No local Dune/build/type/test execution, no push/public PR/approval.",
+    "Initial API reads were 401 until isolated admin login. Manual API logging helper initially used wrong urllib attribute on a read and was corrected; this was capture tooling, not a product failure."
+  ],
+  "cleanup": {
+    "33211": {
+      "ps_exit": 1,
+      "process": ""
+    },
+    "33229": {
+      "ps_exit": 1,
+      "process": ""
+    },
+    "44581": {
+      "ps_exit": 1,
+      "process": ""
+    },
+    "53233": {
+      "ps_exit": 1,
+      "process": ""
+    },
+    "port_bind_available": true
+  },
+  "evidence_manifest": "/tmp/masc-addon-actual-review-20261023/evidence/evidence-manifest.json"
+}

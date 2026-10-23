@@ -1,0 +1,283 @@
+{
+  "at": 1792748043.064853,
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/lane-addons",
+    "body": null,
+    "authorization": "private isolated admin bearer omitted"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name",
+      "access-control-expose-headers": "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining",
+      "vary": "Origin",
+      "etag": "W/\"8dc038f39e53\"",
+      "cache-control": "no-cache",
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "4773"
+    },
+    "body": {
+      "configuration": {
+        "directory": "/tmp/masc-addon-nonempty-review-20261023/workspace/.masc/config/lane-addons",
+        "complete": true,
+        "issues": [],
+        "declarations": [
+          {
+            "id": "phrase-source",
+            "source_path": "/tmp/masc-addon-nonempty-review-20261023/workspace/.masc/config/lane-addons/phrase-source.toml",
+            "enabled": true,
+            "source_revision": "f83beb43d0304834d36443ffef98d5dddcc9f102d437d382d8fbf7d4d15dab93",
+            "desired_revision": "1c0863ca6287e269fb2eafc34435786039f81ad318c5d2732b6ab005c0a7168b",
+            "applied_revision": "1c0863ca6287e269fb2eafc34435786039f81ad318c5d2732b6ab005c0a7168b",
+            "instance_id": "01a1681c-35b8-7000-b89c-4aa711972d7e",
+            "application": {
+              "kind": "applied",
+              "instance_id": "01a1681c-35b8-7000-b89c-4aa711972d7e"
+            },
+            "ui_category": "voice_media"
+          }
+        ]
+      },
+      "instances": [
+        {
+          "runtime_presence": "live",
+          "host_requests": {
+            "cycles": 0,
+            "waiting": [],
+            "issue": null
+          },
+          "instance_id": "01a1681c-35b8-7000-b89c-4aa711972d7e",
+          "incarnation": "01a1681c-35b8-7000-b89c-4aa711972d7e",
+          "action_schema": null,
+          "run_id": "nonempty-review",
+          "addon_id": "vst-phrase",
+          "title": "Native MIDI phrase playback",
+          "revision": "0.1.0",
+          "phase": {
+            "kind": "attached"
+          },
+          "lifecycle": {
+            "kind": "attached"
+          },
+          "execution_authority": {
+            "kind": "host_process",
+            "installation_id": "phrase-source"
+          },
+          "resolved_image": null,
+          "observation_seq": 1,
+          "rows_count": 1,
+          "observation_pending": false,
+          "coalesced_wakes": 0,
+          "unchanged_source_refreshes": 0,
+          "binding": {
+            "sources": [
+              {
+                "path": "/tmp/masc-addon-nonempty-review-20261023/workspace/inputs/phrase.json",
+                "source_id": "vst-phrase",
+                "kind": "snapshot_file"
+              }
+            ]
+          },
+          "source_access": {
+            "kind": "operator_configuration"
+          },
+          "package": {
+            "runtime": "host_process",
+            "ui_category": "voice_media",
+            "id": "vst-phrase",
+            "revision": "0.1.0",
+            "title": "Native MIDI phrase playback",
+            "contributions": [
+              "observe"
+            ],
+            "command": [
+              "python3",
+              "server.py"
+            ],
+            "directory": "/private/tmp/masc-addon-nonempty-review-20261023/workspace/packages/vst-phrase",
+            "action_tool": null,
+            "state_storage": "ephemeral",
+            "tool_invocation": "direct",
+            "exported_tools": [],
+            "outputs": {
+              "phrase": {
+                "lanes": [
+                  "phrase"
+                ]
+              }
+            },
+            "refresh_policy": "every_hint",
+            "model_access": "disabled",
+            "binding_schema": {
+              "type": "object",
+              "properties": {
+                "sources": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "source_id": {
+                        "type": "string",
+                        "const": "vst-phrase"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "snapshot_file"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Native score companion snapshot.json on this host"
+                      }
+                    },
+                    "required": [
+                      "source_id",
+                      "kind",
+                      "path"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "sources"
+              ],
+              "additionalProperties": false
+            },
+            "presentation": {
+              "description": "Latest native phrase render and local player process state",
+              "readings": [
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "state"
+                  ],
+                  "label": "State",
+                  "unit": null,
+                  "format": "text"
+                },
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "selection",
+                    "name"
+                  ],
+                  "label": "Instrument",
+                  "unit": null,
+                  "format": "text"
+                },
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "selection",
+                    "preset_path"
+                  ],
+                  "label": "Preset",
+                  "unit": null,
+                  "format": "text"
+                },
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "render",
+                    "midi_sha256"
+                  ],
+                  "label": "MIDI SHA-256",
+                  "unit": null,
+                  "format": "text"
+                },
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "render",
+                    "duration_ms"
+                  ],
+                  "label": "Rendered audio",
+                  "unit": "ms",
+                  "format": "number"
+                },
+                {
+                  "lane_id": "phrase",
+                  "path": [
+                    "error"
+                  ],
+                  "label": "Failure",
+                  "unit": null,
+                  "format": "text"
+                }
+              ]
+            },
+            "skills_directory": null,
+            "resources": {
+              "max_reply_bytes": 4194304
+            }
+          },
+          "visibility": {
+            "kind": "shared"
+          },
+          "configuration": {
+            "id": "phrase-source",
+            "source_path": "/tmp/masc-addon-nonempty-review-20261023/workspace/.masc/config/lane-addons/phrase-source.toml",
+            "revision": "1c0863ca6287e269fb2eafc34435786039f81ad318c5d2732b6ab005c0a7168b"
+          },
+          "resource": {
+            "kind": "host_process",
+            "pid": 30244,
+            "started": "darwin:1792748041.661419"
+          }
+        }
+      ],
+      "rows": [
+        {
+          "id": "01a1681c-35b8-7000-b89c-4aa711972d7e/1/2751812fcf9d44eda5d3c6bc6f749ee0c6f06bd6bc2c4c8a8700242f2a7222d8",
+          "lane_id": "01a1681c-35b8-7000-b89c-4aa711972d7e/phrase",
+          "kind": "value",
+          "title": "SoundFont: failed",
+          "observed_at": 1792748021.066765,
+          "subject_id": "declared-local-fixture:1",
+          "clock": null,
+          "actor": null,
+          "fields": {
+            "source_id": "vst-phrase",
+            "incarnation": "declared-local-fixture",
+            "source_event_id": "declared-local-fixture:1",
+            "state": "failed",
+            "selection": null,
+            "render": null,
+            "error": "Declared input v1: render unavailable",
+            "scope": "latest_local_phrase_state",
+            "playback_evidence": "local player process events; device audibility is not measured",
+            "action_receipt": false
+          },
+          "evidence": [
+            {
+              "uri": "lane-evidence:7e5627747b742448d438699ddba1fcb2944d3e12e5d2f753bb6c602532ca9ae2",
+              "sha256": "7e5627747b742448d438699ddba1fcb2944d3e12e5d2f753bb6c602532ca9ae2"
+            }
+          ],
+          "related_ids": []
+        }
+      ],
+      "coverage": [
+        {
+          "source_id": "01a1681c-35b8-7000-b89c-4aa711972d7e",
+          "incarnation": "01a1681c-35b8-7000-b89c-4aa711972d7e",
+          "cursor": "1",
+          "complete": true,
+          "detail": null
+        },
+        {
+          "source_id": "vst-phrase",
+          "incarnation": "declared-local-fixture",
+          "cursor": "1",
+          "complete": true,
+          "detail": "Explicit local input fixture; not real rendering or playback"
+        }
+      ]
+    }
+  }
+}

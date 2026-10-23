@@ -62,7 +62,7 @@ let parse = function
         | Some (`String "select_option") -> keys
         | _ -> "value" :: "values" :: keys in
       let keys = match List.assoc_opt "action" fields with
-        | Some (`String ("click" | "fill")) -> keys
+        | Some (`String ("click" | "fill" | "hover" | "double_click")) -> keys
         | _ -> "target" :: keys in
       if List.exists (fun key -> List.mem_assoc key fields) keys
       then Error "arguments do not match the selected interaction action" else Ok () in
@@ -146,15 +146,19 @@ let parse = function
       | Some (`String "double_click") ->
         let* () = excludes ["text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "double_click requires expectedUrl" in
-        let* target = pointer_target (List.filter (fun (key,_) ->
+        let* snapshot = snapshot_target () in
+        (match snapshot with Some target -> Ok (Browser_lane.Double_click_target target)
+        | None -> let* target = pointer_target (List.filter (fun (key,_) ->
           List.mem key ["selector";"documentId";"nodeId"]) fields) in
-        Ok (Browser_lane.Double_click target)
+        Ok (Browser_lane.Double_click target))
       | Some (`String "hover") ->
         let* () = excludes ["text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "hover requires expectedUrl" in
-        let* target = pointer_target (List.filter (fun (key,_) ->
+        let* snapshot = snapshot_target () in
+        (match snapshot with Some target -> Ok (Browser_lane.Hover_target target)
+        | None -> let* target = pointer_target (List.filter (fun (key,_) ->
           List.mem key ["selector";"documentId";"nodeId"]) fields) in
-        Ok (Browser_lane.Hover target)
+        Ok (Browser_lane.Hover target))
       | Some (`String "drag_to") ->
         let* () = excludes ["selector";"documentId";"nodeId";"text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "drag_to requires expectedUrl" in
@@ -280,7 +284,8 @@ let parse = function
         | Browser_lane.Press_key _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Scroll_at _
         | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _
         | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _
-        | Browser_lane.Click_target _ | Browser_lane.Fill_target _) ->
+        | Browser_lane.Click_target _ | Browser_lane.Fill_target _
+        | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _) ->
         Error "framePath applies only to click, fill, select_option and scroll with a selector" in
     Ok { route = base.route; tab_id; frame_path; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
@@ -700,7 +705,7 @@ let needs_pointer_resolution = function
   | Browser_lane.Activate_tab | Fill _ | Select_option _ | Set_zoom _ | Set_viewport _
   | Double_click_at _ | Type_text _ | Press_key _ | Scroll _ | Hover_at _ | Tap_at _
   | Swipe _ | Click_at _ | Scroll_at _ | Drag _ | Follow_link _ | Fill_node _
-  | Click_target _ | Fill_target _ -> false
+  | Click_target _ | Fill_target _ | Hover_target _ | Double_click_target _ -> false
 
 let resolve_pointer_input action = function
   | `Assoc fields ->
@@ -726,7 +731,8 @@ let resolve_pointer_input action = function
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
      | Browser_lane.Tap_at _ | Browser_lane.Swipe _
      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
-     | Browser_lane.Fill_node _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _ ->
+     | Browser_lane.Fill_node _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _
+     | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ ->
        Error "semantic pointer action required" in
     let* url = required "url" in
     (match url with

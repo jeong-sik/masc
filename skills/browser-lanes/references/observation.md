@@ -89,6 +89,11 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 
 ## 이미지와 큰 응답
 
+ego 연결에서 `mode=snapshot`으로 관측한 AX `target`은 click·fill뿐 아니라 hover·double_click에도 쓴다.
+프레임 내부 ref도 ego가 해석한다. `expectedUrl`은 관측한 최상위 탭의 URL이며 `framePath`를 섞지 않는다.
+같은 이름이 바깥 문서에도 있으면 role/text보다 관측한 ref로 대상을 구분한다. 이 경로가 다른 연결의
+AX 지원이나 ego의 명시적 `framePath` 읽기·조작을 뜻하지는 않는다. 입력 뒤 실제 앱 결과를 다시 확인한다.
+
 `click_at`·`scroll_at`은 현재 screenshot의 `viewport`와 정규화된 `point`를 쓴다.
 `click_at`은 `button`(`primary` 기본, `middle`, `secondary`)으로 가운데·오른쪽 클릭도 한다.
 `webdriver_bidi` 연결, automation, Stagehand가 눌러 주고, 확장은 입력을 보내기 전에 거절한다.

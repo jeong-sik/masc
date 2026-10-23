@@ -564,6 +564,8 @@ let test_capability_table_sharing_is_listed () =
     ; [ "click"; "frame_interaction" ] (* click with framePath *)
     ; [ "click"; "click_snapshot_target" ] (* click with target on an ego connection *)
     ; [ "fill"; "fill_snapshot_target" ] (* fill with target on an ego connection *)
+    ; [ "hover"; "hover_snapshot_target" ] (* hover with target on an ego connection *)
+    ; [ "double_click"; "double_click_snapshot_target" ] (* double-click with target on an ego connection *)
     ]
   in
   let invocation = function

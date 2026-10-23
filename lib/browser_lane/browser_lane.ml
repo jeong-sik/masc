@@ -68,11 +68,12 @@ type interaction = Activate_tab | Click of string | Fill of { selector : string;
   | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport; via : Pointer.point list; duration_ms : int }
   | Follow_link of node_ref | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
   | Click_target of snapshot_target | Fill_target of { target : snapshot_target; text : string }
+  | Hover_target of snapshot_target | Double_click_target of snapshot_target
 
 (* Whether an interaction acts on an ego snapshot target, which only an ego
    connection serves. *)
 let acts_on_snapshot_target = function
-  | Click_target _ | Fill_target _ -> true
+  | Click_target _ | Fill_target _ | Hover_target _ | Double_click_target _ -> true
   | Activate_tab | Click _ | Fill _ | Select_option _ | Set_zoom _ | Set_viewport _ | Double_click _
   | Double_click_at _ | Type_text _ | Press_key _ | Scroll _ | Hover _ | Drag_to _ | Hover_at _ | Tap_at _
   | Swipe _ | Click_at _ | Scroll_at _ | Drag _ | Follow_link _ | Click_node _ | Fill_node _ -> false
@@ -170,12 +171,12 @@ let interaction_verb = function
   | Set_zoom _ -> "set_zoom"
   | Set_viewport _ -> "set_viewport"
   | Select_option _ -> "select_option"
-  | Double_click _ -> "double_click"
+  | Double_click _ | Double_click_target _ -> "double_click"
   | Double_click_at _ -> "double_click_at"
   | Type_text _ -> "type_text"
   | Press_key _ -> "press_key"
   | Scroll_at _ -> "scroll_at"
-  | Hover _ -> "hover"
+  | Hover _ | Hover_target _ -> "hover"
   | Drag_to _ -> "drag_to"
   | Hover_at _ -> "hover_at"
   | Tap_at _ -> "tap_at"
@@ -275,7 +276,7 @@ let interaction_args ~tab_id ~frame_path ~expected_url action =
     | Follow_link target -> verb :: node_fields target
     | Click_node target -> verb :: node_fields target
     | Fill_node {target;text} -> verb :: ("text",`String text) :: node_fields target
-    | Click_target target -> [verb;"target",snapshot_target_to_json target]
+    | Click_target target | Hover_target target | Double_click_target target -> [verb;"target",snapshot_target_to_json target]
     | Fill_target {target;text} -> [verb;"target",snapshot_target_to_json target;"text",`String text]
     | Scroll {x; y} -> [verb; "x", `Int x; "y", `Int y] in
   `Assoc (("tabId", `Int tab_id) :: fields @
@@ -475,7 +476,7 @@ let live_capability_of_interaction = function
   | Double_click _ | Double_click_at _ -> Trusted_double_click
   | Type_text _ | Press_key _ -> Trusted_keyboard
   | Click _ | Fill _ | Select_option _ | Scroll _ | Follow_link _ | Click_node _ | Fill_node _ -> Dom_interaction
-  | Click_target _ | Fill_target _ -> Snapshot_target_input
+  | Click_target _ | Fill_target _ | Hover_target _ | Double_click_target _ -> Snapshot_target_input
   | Click_at {button = Pointer.Primary; _} -> Point_click
   | Click_at {button = Pointer.Middle | Pointer.Secondary; _} -> Trusted_button_click
   | Scroll_at _ -> Point_scroll

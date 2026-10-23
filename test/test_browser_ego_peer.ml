@@ -819,13 +819,15 @@ const page = {
   waitForSelector: async (target, options) => { seen.push("wait " + target + " " + options.state); %s },
   click: async target => { seen.push("click " + target); %s },
   fill: async (target, text) => { seen.push("fill " + target + " " + text); %s },
+  hover: async target => { seen.push("hover " + target); %s },
+  dblclick: async target => { seen.push("double_click " + target); %s },
 };
 const taskSpace = async () => ({
   ownership: "agent",
   tabs: async () => [{label: "p1", openedBy: "agent", url: currentUrl, title: "Slack"}],
   page: () => page,
 });
-|js} (Yojson.Safe.to_string (`String url)) blocked find act act
+|js} (Yojson.Safe.to_string (`String url)) blocked find act act act act
 
 let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   let url = ref observed_url and blocked = ref false and find = ref "return true;" and act = ref "return {};" in
@@ -867,6 +869,12 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   check bool "an exact text is ego's quoted text" true (contains (seen ()) {|click text=\"Send now\"|});
   ignore (answer "fill" (on (Lane.Fill_target {target=Lane.Target_ref 5;text="Ada"})));
   check string "a fill gives ego its text" {|["info","url","wait @5 attached","url","fill @5 Ada"]|} (seen ());
+  ignore (answer "hover" (on (Lane.Hover_target (Lane.Target_ref 12))));
+  check string "hover uses ego's element resolver and native input"
+    {|["info","url","wait @12 attached","url","hover @12"]|} (seen ());
+  ignore (answer "double-click" (on (Lane.Double_click_target (Lane.Target_ref 12))));
+  check string "double-click uses ego's element resolver and native input"
+    {|["info","url","wait @12 attached","url","double_click @12"]|} (seen ());
   act := {|return {popups: [{label: "p7", targetId: "T7"}]};|};
   check bool "an opened page is answered with its tab number" true
     (contains (answer "popup" (click (Lane.Target_ref 4))) {|"popups":[{"tabId":4,"label":"p7"}]|});
@@ -903,13 +911,14 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     check bool "the new page receives no click or fill" false
       (contains (seen ()) "click" || contains (seen ()) "fill"))
     [Lane.Click_target (Lane.Target_ref 12);
-     Lane.Fill_target {target=Lane.Target_ref 12;text="Ada"}];
+     Lane.Fill_target {target=Lane.Target_ref 12;text="Ada"};
+     Lane.Hover_target (Lane.Target_ref 12); Lane.Double_click_target (Lane.Target_ref 12)];
   find := "return true;";
   act := {|throw new Error("Target closed");|};
   (match click (Lane.Target_ref 12) with
    | Error (Live.Outcome_unknown detail) -> check bool "a failed click is unknown and asks for a read" true (contains detail "read tab 1")
    | other -> failf "a failed click was %s" (failure_kind other));
-  check int "each of them was one run" (runs + 6) (List.length !asked);
+  check int "each of them was one run" (runs + 8) (List.length !asked);
   let before = List.length !asked in
   check bool "an operator tab is refused without a run" true
     (match dispatch peer Live.Page_interact (interact_args ~tab_id:2 (Lane.Click_target (Lane.Target_ref 1))) with

@@ -217,7 +217,7 @@ let test_ego_table () =
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
   check (list string) "reads, capture, the tab list, its own tabs, their history, input and dialogs on them, and the space handed to the operator and back"
     ["list_tabs";"open_tab";"close_tab";"navigate";"follow_link";"back";"forward";"reload";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"click_snapshot_target";"fill_snapshot_target";
-     "click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
+     "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
      "fill";"type_text";"press_key";"key_chord";"select_option";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with
@@ -235,7 +235,8 @@ let test_snapshot_table () =
       check bool (label ^ (if claimed then " claims " else " does not claim ") ^ Cap.operation_name operation) claimed
         (match Cap.support backend operation with
          | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false))
-      [Cap.Read_snapshot; Cap.Click_snapshot_target; Cap.Fill_snapshot_target])
+      [Cap.Read_snapshot; Cap.Click_snapshot_target; Cap.Fill_snapshot_target;
+       Cap.Hover_snapshot_target; Cap.Double_click_snapshot_target])
     [Cap.Connected Lane.Ego_task_space, "ego", true;
      Cap.Connected Lane.Webdriver_bidi, "BiDi", false;
      Cap.Connected Lane.Web_extension, "the extension", false;

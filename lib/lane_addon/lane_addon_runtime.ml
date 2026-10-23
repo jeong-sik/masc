@@ -2189,7 +2189,7 @@ let call_captured_tool_request ~config ~access ~reserved ~export ~installation_i
         let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
         let* ()=offload (fun () -> Lane_addon_tool_request_owner.retain ~store
           ~scope:original.scope ~request_id:original.request_id ~installation_id ~package_id ~tool
-          ~request:original.request) |> Result.map_error (fun error ->
+          ~summary:original.summary ~request:original.request) |> Result.map_error (fun error ->
             Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
         Ok ())
       ~use:(fun () -> call_exported_tool_on_owner ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())

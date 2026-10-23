@@ -65,7 +65,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | None ->
-      Mcp_tool_runtime_board.dispatch ~config ~agent_name ~arguments ~state ~name ~start_time:start
+      Mcp_tool_runtime_board.dispatch ~config ~agent_name ~arguments ~state ~name
 
 (* ================================================================ *)
 (* Tool_spec registration (RFC-0182 §3.2)                           *)

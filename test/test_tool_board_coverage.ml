@@ -792,30 +792,43 @@ let test_activity_projection_failure_preserves_primary_effect () =
       ~tool_name:"masc_board_post"
       ~start_time:(Tool_timing.start ())
       ~data:(`Assoc [ ("id", `String "post-1") ])
+      ~metadata:(`Assoc ["primary_observation", `String "retained"])
       ()
   in
   let result =
     Mcp_tool_runtime_board.For_testing.result_after_activity_projection
-      ~tool_name:"masc_board_post"
-      ~start_time:(Tool_timing.start ())
       ~primary_result
-      ~operation:"posted"
+      ~operation:Event_kind.Board.Posted
       (fun () -> Error "activity graph unavailable")
   in
-  Alcotest.(check bool) "projection failure is not success" false
+  Alcotest.(check bool) "committed Board operation stays completed" true
     (Tool_result.is_success result);
-  Alcotest.(check (option string)) "projection failure is runtime failure"
-    (Some "runtime_failure")
+  Alcotest.(check (option string)) "projection failure does not become a tool failure"
+    None
     (Tool_result.failure_class result
      |> Option.map Tool_result.tool_failure_class_to_string);
-  let data = Tool_result.data result in
-  Alcotest.(check string) "committed primary effect is explicit"
-    "proven_post_effect"
-    Yojson.Safe.Util.(data |> member "effect_disposition" |> to_string);
-  Alcotest.(check string) "operation is explicit" "posted"
-    Yojson.Safe.Util.(data |> member "projection" |> to_string);
+  let metadata = Option.get (Tool_result.metadata result) in
+  Alcotest.(check string) "primary metadata is retained" "retained"
+    Yojson.Safe.Util.(metadata |> member "primary_observation" |> to_string);
+  let projection = Yojson.Safe.Util.member "activity_projection" metadata in
+  Alcotest.(check string) "projection failed separately" "failed"
+    Yojson.Safe.Util.(projection |> member "status" |> to_string);
+  Alcotest.(check string) "operation is explicit" (Event_kind.Board.to_string Posted)
+    Yojson.Safe.Util.(projection |> member "operation" |> to_string);
+  Alcotest.(check string) "projection failure remains visible" "activity graph unavailable"
+    Yojson.Safe.Util.(projection |> member "error" |> to_string);
   Alcotest.(check string) "primary result is preserved" "post-1"
-    Yojson.Safe.Util.(data |> member "primary_result" |> member "id" |> to_string)
+    Yojson.Safe.Util.(Tool_result.data result |> member "id" |> to_string);
+  let not_completed =
+    [ Tool_result.make_err ~tool_name:"masc_board_post" ~start_time:(Tool_timing.start ())
+        ~class_:Tool_result.Workflow_rejection "not committed"
+    ; Tool_result.make_deferred ~tool_name:"masc_board_post" ~start_time:(Tool_timing.start ()) () ] in
+  List.iter (fun primary_result ->
+    let result = Mcp_tool_runtime_board.For_testing.result_after_activity_projection
+      ~primary_result ~operation:Event_kind.Board.Posted
+      (fun () -> Alcotest.fail "uncommitted operation attempted activity projection") in
+    Alcotest.(check bool) "uncommitted disposition is unchanged" true (result = primary_result))
+    not_completed
 
 let test_post_create_judgment_roundtrip () =
   with_eio @@ fun env ->
@@ -1598,7 +1611,6 @@ let mcp_runtime_board_dispatch name args =
   let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
   Mcp_tool_runtime_board.dispatch ~config:(Mcp_server.workspace_config state)
     ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~name
-    ~start_time:(Tool_timing.start ())
 
 let require_mcp_runtime_result name args =
   match mcp_runtime_board_dispatch name args with
@@ -1627,7 +1639,7 @@ let test_board_activity_does_not_complete_tasks () =
   in
   let runtime name args =
     let result = match Mcp_tool_runtime_board.dispatch ~config ~agent_name ~arguments:args
-      ~state ~name ~start_time:(Tool_timing.start ()) with
+      ~state ~name with
       | Some result -> result
       | None -> Alcotest.failf "%s was not routed" name in
     Alcotest.(check bool) name true (Tool_result.is_success result);

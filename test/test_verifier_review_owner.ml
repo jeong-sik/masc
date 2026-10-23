@@ -49,12 +49,18 @@ let tmp_store () =
   Unix.mkdir dir 0o700;
   Masc.Lane_addon_store.create ~root:dir
 
+let string_of_retain_error = function
+  | O.Original_invalid d -> "Original_invalid: " ^ d
+  | O.Identity_mismatch d -> "Identity_mismatch: " ^ d
+  | O.Retain_store_unavailable d -> "Retain_store_unavailable: " ^ d
+  | O.Already_retained d -> "Already_retained: " ^ d
+
 let test_round_trip () =
   let store = tmp_store () in
   let original = make_original ~verification_id:"vrf-x" ~attempt:0 in
   (match O.retain ~store ~verification_id:"vrf-x" ~attempt:0 ~installation_id:"masc.verifier" ~package_id:"masc.verifier.review" original with
    | Ok () -> ()
-   | Error _ -> failwith "retain failed");
+   | Error e -> failwith ("retain failed: " ^ string_of_retain_error e));
   match O.load ~store ~verification_id:"vrf-x" ~attempt:0 with
   | Ok loaded ->
     assert (V.verification_id loaded = "vrf-x");

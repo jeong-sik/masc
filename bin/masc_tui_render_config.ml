@@ -377,20 +377,16 @@ let prompts_detail_lines (state : state) ~cols =
                else []
              in
              let authoring =
-               match row.pr_authoring_issues with
-               | None -> wrap "작성 진단: 서버가 보고하지 않았습니다"
-               | Some [] -> []
-               | Some issues ->
-                   List.concat_map
-                     (function
-                       | Tui_decode.Invalid_operator_surface {value; source_file} ->
-                           List.concat_map wrap
-                             ["△ 작성 오류 · invalid_operator_surface";
-                              field "원문 값" (Printf.sprintf "operator_surface = %S" value);
-                              field "원본 파일" source_file;
-                              "원본 마크다운의 operator_surface를 primary 또는 fragment로 고친 뒤 다시 등록하고 r로 새로 읽으세요";
-                              "본문 오버라이드 저장·해제는 이 작성 오류를 고치지 않습니다"])
-                     issues
+               List.concat_map
+                 (function
+                   | Tui_decode.Invalid_operator_surface {value; source_file} ->
+                       List.concat_map wrap
+                         ["△ 작성 오류 · invalid_operator_surface";
+                          field "원문 값" (Printf.sprintf "operator_surface = %S" value);
+                          field "원본 파일" source_file;
+                          "원본 마크다운의 operator_surface를 primary 또는 fragment로 고친 뒤 다시 등록하고 r로 새로 읽으세요";
+                          "본문 오버라이드 저장·해제는 이 작성 오류를 고치지 않습니다"])
+                 row.pr_authoring_issues
              in
              let actual_input =
                if not (String.equal row.pr_category "librarian") then []
@@ -554,8 +550,8 @@ let render_prompt_registry (state : state) =
           | false, Tui_decode.Prompt_missing -> (Theme.bad ()) ^ glyph ^ Ansi.reset
         in
         let authoring_mark, authoring_cells = match row.pr_authoring_issues with
-          | None | Some [] -> "", 0
-          | Some (_ :: _) ->
+          | [] -> "", 0
+          | _ :: _ ->
               let mark = "△ " in
               Theme.warn () ^ mark ^ Ansi.reset, Message_layout.display_width mark
         in

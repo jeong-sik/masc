@@ -154,7 +154,10 @@ let cycles config = match member "cycles" (host_requests config) with `Int n -> 
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 
-let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
+let permit : Exact.execution_authority = fun ~store:_ ~declaration_id:_ ~package:_ _ ->
+  Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard; validate_output=(fun _ -> Ok ())}
+
+let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(authorize_request = permit) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let config_root = Filename.concat root ".masc/config" in
@@ -178,11 +181,7 @@ let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup
                 Board_dispatch.reset_for_test ();
                 Board_dispatch.init_jsonl ();
                 let state = { mode = ref mode; resolutions = ref 0 } in
-                Runtime.register_exact_runner
-                  ~authorize_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ ->
-                    Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
-                        validate_output=(fun _ -> Ok ())})
-                  (make_runner state);
+                Runtime.register_exact_runner ~authorize_request (make_runner state);
                 let config = Workspace.default_config root in
                 Runtime.For_testing.with_backend (backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?before_stop ?exported_tool worker) (fun () ->
                   let unsubscribe=match owner_setup with None -> (fun () -> ()) | Some setup -> setup clock config in
@@ -402,6 +401,23 @@ let test_a_started_worker_gets_its_final_result_once () =
     check int "the runner was asked once" 1 !(state.resolutions);
     check bool "the cycle settled" true (member "issue" (host_requests config) = `Null);
     await clock (fun () -> !(worker.observations) >= 1))
+
+(* A request no original host request owns ends as not_allowed, and the rest
+   of the listing still runs in the same cycle (#45223). *)
+let test_an_unowned_request_ends_and_the_cycle_goes_on () =
+  let authorize_request ~store ~declaration_id ~package (request : Exact.request) =
+    if String.equal request.request_id "unowned" then Error (Exact.Unowned {reason="no original host request owns it"})
+    else permit ~store ~declaration_id ~package request in
+  with_installation ~authorize_request ~listing:[ exact "unowned"; exact "owned" ] (fun clock config worker state _root ->
+    await clock (fun () -> List.length !(worker.delivered) >= 2);
+    let status request_id = match List.find_opt (fun arguments -> text "request_id" arguments = request_id) !(worker.delivered) with
+      | Some arguments -> delivered_status arguments
+      | None -> failf "%s was not delivered" request_id in
+    check string "the unowned request ends as not_allowed" "not_allowed" (status "unowned");
+    check string "the request listed after it is still answered" "answered" (status "owned");
+    check int "only the owned request reaches the runner" 1 !(state.resolutions);
+    check bool "the cycle settled" true (member "issue" (host_requests config) = `Null);
+    check int "both requests leave the listing" 0 (List.length !(worker.listing)))
 
 let test_an_exported_reply_starts_its_pending_host_work ~is_error () =
   let tool = Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
@@ -1408,6 +1424,7 @@ let () =
   run "lane add-on host request cycle"
     [ ( "cycle"
       , [ test_case "a started worker gets its final result once" `Quick test_a_started_worker_gets_its_final_result_once
+        ; test_case "an unowned request ends and the cycle goes on" `Quick test_an_unowned_request_ends_and_the_cycle_goes_on
         ; test_case "an exported reply starts its pending host work" `Quick
             (test_an_exported_reply_starts_its_pending_host_work ~is_error:false)
         ; test_case "an exported worker error can retain pending host work" `Quick

@@ -544,8 +544,11 @@ let test_curator_authority_is_required_before_dispatch_and_replay () =
     let request=get (Curator.request capture) in
     let server=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response good)) in
     publish ~lane_id:"quiz/classification" ~base_path [{F.id="only";base_url=server.base_url}];
-    check bool "a package name cannot grant missing host authority" true
-      (Result.is_error (run_curator ~base_path ~store request));
+    let unowned,_,_=classification_capture ~base_path in
+    check bool "a package name cannot grant a request the host has no original for" true
+      (match run_curator ~base_path ~store (get (Curator.request unowned)) with
+       | Ok (Exact.Final (Exact.Not_allowed _)) -> true
+       | Ok (Exact.Final _ | Exact.Not_final _) | Error _ -> false);
     check int "missing capture sends nothing" 0 (F.post_count server);
     retain_capture ~store capture;
     let changed=Exact.request_to_json request |> function
@@ -685,7 +688,8 @@ let test_worker_names_do_not_grant_background () =
     let original=request "named-like-librarian" in
     let authorization=match Server_lane_addon_exact.authorize_request ~base_path ~store
         ~declaration_id:"librarian" ~package:{package with id="librarian"} original with
-      | Ok authorization -> authorization | Error detail -> fail detail in
+      | Ok authorization -> authorization
+      | Error (Exact.Unowned {reason=detail} | Exact.Undecided {detail}) -> fail detail in
     check bool "worker package and installation names are no Background grant" true
       (authorization.admission_class=Agent_core.Llm_provider.Admission_class.Standard))
 

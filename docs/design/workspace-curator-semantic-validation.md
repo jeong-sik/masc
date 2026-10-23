@@ -23,8 +23,12 @@ retained installation identity.
 
 Every Exact request checks the original Curator namespace. An existing capture
 cannot escape validation by relabeling its package. A missing capture is allowed
-for another package, whose existing package/request baseline still applies, but
-is refused for `workspace-curator`. Read failure remains an error. This adds one
+for another package, whose existing package/request baseline still applies. For
+`workspace-curator` the request is unowned: it ends as `not_allowed`, so a
+worker that still lists a request whose original is gone does not stop the host
+cycle at it (#45223). A read failure, a failed restore and a request that does
+not match the original owning its ID remain errors, and nothing is written
+under that ID, which the original may still need. This adds one
 strict namespace lookup to other packages too, including the name-enumeration
 cost described in [original request discovery](addon-original-request-discovery.md).
 Corrupt Curator authority can consequently stop other Exact requests rather
@@ -41,8 +45,10 @@ rejected within the original request, without resetting candidate order or
 retaining it as an answered terminal.
 
 Every replay resolves host authority again and revalidates an answered terminal.
-Missing/conflicting authority returns an error without changing the original
-terminal. A previously retained schema-only answer that fails domain validation
+Unreadable or conflicting authority returns an error without changing the
+original terminal. A missing original delivers `not_allowed` and records that
+refusal beside the terminal, which stays as it was. A previously retained
+schema-only answer that fails domain validation
 is delivered as `Invalid_output`; it is neither committed nor sent again.
 Started-attempt uncertainty and immutable request digest fences remain intact.
 

@@ -17,15 +17,19 @@ val check_frame : max_reply_bytes:int -> Workspace_memory_execution_capture.t ->
     declared frame. *)
 val authorize : base_path:string -> store:Lane_addon_store.t -> declaration_id:string ->
   package:Lane_addon_types.package -> Lane_addon_exact.request ->
-  (Lane_addon_exact.output_validator, string) result
+  (Lane_addon_exact.output_validator, Lane_addon_exact.authority_refusal) result
 (** Requests without a Curator capture keep other packages' baseline validation.
     All requests strictly read the original Curator namespace so relabeling a
-    package cannot bypass a retained binding. An unreadable namespace refuses
-    resolution rather than becoming absence. The Curator package must
+    package cannot bypass a retained binding. The Curator package must
     have a strict original capture at this exact installation/tool and physical
     workspace. A child additionally needs the strictly loaded acknowledged
     predecessor chain and exact whole-batch derivation, including direct Exact
     calls and retained delivery. Its complete common Exact request must equal
-    the captured one.
-    Missing/unreadable/conflicting authority refuses before route resolution,
-    including retained-answer delivery. No current prompt override replaces it. *)
+    the captured one. Every refusal comes before route resolution, including
+    retained-answer delivery. No current prompt override replaces it.
+    - [Unowned]: the Curator package has no original with this ID.
+    - [Undecided]: the namespace, workspace or an ancestor could not be read,
+      the original fails its strict restore, or it belongs to another
+      installation/package/tool or captured another request. Unreadable or
+      malformed ownership is not absence, and a request that does not match
+      the original owning its ID does not end that ID. *)

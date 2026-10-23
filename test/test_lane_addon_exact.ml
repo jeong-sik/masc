@@ -766,7 +766,7 @@ let test_retained_delivery_rechecks_host_authority () =
       if !permitted then
         Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
             validate_output=(fun _ -> Ok ())}
-      else Error "original host authority is unavailable" in
+      else Error (Exact.Undecided {detail="original host authority is unavailable"}) in
     let runner,sends,_=counting_runner store (ref [Answer question]) in
     let execute store = Exact.run ~store ~declaration_id ~package ~authorize_request ~runner original in
     check bool "original answers" true (answered_with question (require (execute store)));
@@ -788,12 +788,50 @@ let test_authority_refusal_does_not_start_a_request () =
   with_root (fun root ->
     let store=Store.create ~root in
     let original=request "host-refused-before-start" in
-    let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ = Error "original binding refused" in
+    let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
+      Error (Exact.Undecided {detail="original binding is unreadable"}) in
     let runner ~admission_class:_ ~lane_key:_ ~schema:_ _ = fail "refused original reached the runner" in
     check bool "new request preserves host refusal" true
       (Result.is_error (Exact.run ~store ~declaration_id ~package ~authorize_request ~runner original));
     check bool "no admission or started record was published" true
       (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)=None))
+
+let owned_authority owned ~store:_ ~declaration_id:_ ~package:_ _ =
+  if !owned then Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
+                     validate_output=(fun _ -> Ok ())}
+  else Error (Exact.Unowned {reason="no original host request owns it"})
+
+let test_an_unowned_request_ends_as_not_allowed () =
+  with_root (fun root ->
+    let owned=ref false in
+    let runner,sends,_=counting_runner (Store.create ~root) (ref []) in
+    let execute store = require (Exact.run ~store ~declaration_id ~package
+        ~authorize_request:(owned_authority owned) ~runner (request "unowned")) in
+    check bool "an unowned request ends as not_allowed with the owner's reason" true
+      (match execute (Store.create ~root) with
+       | Exact.Final (Exact.Not_allowed {reason}) -> reason="no original host request owns it"
+       | Exact.Final _ | Exact.Not_final _ -> false);
+    owned:=true;
+    check bool "the refusal is retained across a restart and a later grant" true
+      (match execute (Store.create ~root) with
+       | Exact.Final (Exact.Not_allowed _) -> true | Exact.Final _ | Exact.Not_final _ -> false);
+    check int "without a send" 0 !sends)
+
+let test_an_unowned_retained_answer_is_refused_and_kept () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let owned=ref true in
+    let runner,sends,_=counting_runner store (ref [Answer question]) in
+    let execute () = require (Exact.run ~store ~declaration_id ~package
+        ~authorize_request:(owned_authority owned) ~runner (request "kept-answer")) in
+    check bool "the owned request answers" true (answered_with question (execute ()));
+    owned:=false;
+    check bool "once unowned the answer is refused" true
+      (match execute () with Exact.Final (Exact.Not_allowed _) -> true | Exact.Final _ | Exact.Not_final _ -> false);
+    check int "the refusal is recorded beside the original answer" 2 (List.length (attempts store "kept-answer"));
+    owned:=true;
+    check bool "the original answer is delivered once it is owned again" true (answered_with question (execute ()));
+    check int "one provider call across the refusal" 1 !sends)
 
 let test_worker_cannot_select_admission_policy () =
   let original=request "untrusted-policy" in
@@ -851,4 +889,6 @@ let () =
             (test_host_admission_class_is_forwarded Agent_core.Llm_provider.Admission_class.Standard)
         ; test_case "retained delivery rechecks authority without replacing original" `Quick test_retained_delivery_rechecks_host_authority
         ; test_case "host refusal prevents a new admission and dispatch" `Quick test_authority_refusal_does_not_start_a_request
+        ; test_case "an unowned request ends as not_allowed" `Quick test_an_unowned_request_ends_as_not_allowed
+        ; test_case "an unowned retained answer is refused and kept" `Quick test_an_unowned_retained_answer_is_refused_and_kept
         ; test_case "worker wire cannot select admission policy" `Quick test_worker_cannot_select_admission_policy ] ) ]

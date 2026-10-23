@@ -170,18 +170,28 @@ type request_authorization = {
   admission_class : Agent_core.Llm_provider.Admission_class.t;
   validate_output : output_validator;
 }
+(** Why the host consumer grants no authority for a request. *)
+type authority_refusal =
+  | Unowned of { reason : string }
+      (** The host has no original request with this ID, so none can grant
+          it later. The request ends as [Not_allowed]. *)
+  | Undecided of { detail : string }
+      (** The owner cannot decide now: its record could not be read, or it
+          does not match the request. Nothing is written under the ID, which
+          its original may still own, and the request stays listed. *)
 type execution_authority =
   store:Lane_addon_store.t -> declaration_id:string -> package:Lane_addon_types.package ->
-  request -> (request_authorization, string) result
+  request -> (request_authorization, authority_refusal) result
 (** Trusted host binding to an original consumer's pure domain validator and
     execution admission policy. Resolution may read host-owned state; the
     returned validator must perform no effects. Both fields belong to the same
     verified original request. Worker package/lane names are not policy grants.
     A worker cannot supply this port or disable it through Hooks.
-    [Error] refuses both dispatch and delivery without replacing the original
-    result. Authority is resolved again on every [run], including replay;
-    delivering a retained result never invokes the runner. The authorization is
-    not serialized into the worker request or a durable admission-class audit. *)
+    Either refusal refuses both dispatch and delivery without replacing the
+    original result. Authority is resolved again on every [run], including
+    replay; delivering a retained result never invokes the runner. The
+    authorization is not serialized into the worker request or a durable
+    admission-class audit. *)
 
 val check_retained_record : Yojson.Safe.t -> (unit, string) result
 (** Decode one retained record of the Exact store with the reads {!run}
@@ -243,13 +253,16 @@ val run :
     Request identity is checked before output selection. A refused output
     cannot reuse a retained id with another body. New refusals are retained;
     refusing delivery of an existing final records the refusal without
-    replacing the original final. A started attempt without an outcome or
+    replacing the original final. An [Unowned] authority refusal is one of
+    these refusals: the worker receives [Not_allowed] and the request leaves
+    its listing. A started attempt without an outcome or
     confirmed execution proof is retained as [Outcome_unknown] before selection is checked, so disabling an
     output cannot erase that uncertainty. Cancellation is checked after the started
     record is written and immediately before entering the provider call.
 
-    [Error] when [declaration_id] cannot own an add-on lane, or when the
-    record cannot be read or written. Nothing is delivered then. A returned
+    [Error] when [declaration_id] cannot own an add-on lane, when the
+    record cannot be read or written, or when the authority is
+    [Undecided]. Nothing is delivered then. A returned
     call's original host proof is saved and strictly confirmed before outcome
     publication. Confirmed proof plus its original started marker permits
     publication-only recovery without resolving or invoking a runner. Missing

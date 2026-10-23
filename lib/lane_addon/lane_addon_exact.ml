@@ -583,9 +583,12 @@ type request_authorization = {
   admission_class : Agent_core.Llm_provider.Admission_class.t;
   validate_output : output_validator;
 }
+type authority_refusal =
+  | Unowned of { reason : string }
+  | Undecided of { detail : string }
 type execution_authority =
   store:Lane_addon_store.t -> declaration_id:string -> package:Lane_addon_types.package ->
-  request -> (request_authorization, string) result
+  request -> (request_authorization, authority_refusal) result
 
 let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~authorize_request request =
   let request_id = request.request_id in
@@ -659,7 +662,10 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
         match schema_for_request ~output:declared request with
         | Error reason -> deny reason
         | Ok schema ->
-        let* authorization = authorize_request ~store ~declaration_id ~package request in
+        match authorize_request ~store ~declaration_id ~package request with
+        | Error (Unowned {reason}) -> deny reason
+        | Error (Undecided {detail}) -> Error detail
+        | Ok authorization ->
         let* lane = Runtime_schema.addon_lane ~declaration_id ~output:request.output in
         let lane_key = Runtime_schema.exact_lane_key (Runtime_schema.Addon lane) in
         let validate answer =

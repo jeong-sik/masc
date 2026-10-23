@@ -59,15 +59,16 @@ let with_fixture f =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     Masc_test_deps.with_process_env Env_config_core.base_path_env_key
       (Some base_path) (fun () ->
-        let config = Workspace.config () in
         let keeper_name = "maintenance-owner" in
+        let config = Workspace.default_config base_path in
+        ignore (Workspace.init config ~agent_name:(Some keeper_name));
         Masc_test_deps.declare_fixture_keeper ~sandbox_image:"base"
-          ~base_path:config.Workspace.base_path
+          ~base_path
           ~sandbox_profile:(Some Keeper_types_profile.Docker) keeper_name;
         Keeper_types_profile.invalidate_keeper_profile_snapshots ();
         let owner =
-          M.observe_owner ~base_path:config.Workspace.base_path
-            ~keepers_dir:(Workspace.keepers_runtime_dir config)
+          M.observe_owner ~base_path
+            ~keepers_dir:(Common.keepers_runtime_dir_of_base ~base_path)
             ~keeper_id:keeper_name
           |> get in
         let destination : M.destination =

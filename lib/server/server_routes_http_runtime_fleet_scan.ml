@@ -731,6 +731,7 @@ type non_keeper_active_task_owner = {
   agent_name : string;
   task_id : string;
   task_status : string;
+  valid_next_actions : Masc_domain.task_action list;
 }
 
 (* A keeper the boot path skips, holding work. Not a fault: the exclusion is
@@ -849,6 +850,9 @@ let excluded_keeper_active_task_owner_json row =
     ]
 
 let non_keeper_active_task_owner_json row =
+  let schema =
+    Masc_task_handlers.Tool_task_schemas.schema_for Tool_name.Task_name.Transition
+  in
   `Assoc
     [
       ("agent_name", `String row.agent_name);
@@ -856,6 +860,21 @@ let non_keeper_active_task_owner_json row =
       ("task_status", `String row.task_status);
       ("owner_kind", `String "non_keeper_client");
       ("fleet_blocking", `Bool false);
+      ("valid_next_actions",
+       `List (List.map (fun action ->
+           `String (Masc_domain.task_action_to_string action)) row.valid_next_actions));
+      ("completion_submission", `Assoc
+         [ ("tool", `String schema.name)
+         ; ("task_id", `String row.task_id)
+         ; ("action", `String
+              (Masc_domain.task_action_to_string Masc_domain.Submit_for_verification))
+         ; ("authenticated_agent", `String row.agent_name)
+         ; ("guidance", `String
+              "The current owner submits actual completion evidence through this public \
+               tool, following its input schema for notes and handoff_context. \
+               Authenticate as that owner; another actor cannot submit on their behalf. \
+               The server rechecks the current task state when called.")
+         ]);
     ]
 
 (* Who the boot path expects to be running, and who it skips with a reason.
@@ -1024,6 +1043,9 @@ let active_task_owner_fiber_scan reading ~executable_names =
                            agent_name = assignee;
                            task_id = task.id;
                            task_status;
+                           valid_next_actions =
+                             Workspace_task_lifecycle.valid_next_actions
+                               ~same_agent:true ~task_status:task.task_status;
                          }
                          :: non_keeper_rows
                        , excluded_rows )

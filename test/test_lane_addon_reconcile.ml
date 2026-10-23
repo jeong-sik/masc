@@ -326,9 +326,10 @@ let with_fixture f =
                   Runtime.For_testing.with_backend backend (fun () ->
                     f env sw config directory packages state))))))))
 
-(* A worker process that ends while nothing asked it to stop is stopped by
-   the runtime and its release confirmed, so the declaration starts a new
-   instance instead of keeping a dead one as its applied worker. *)
+(* A worker process that ends while nothing asked it to stop turns its entry
+   failed. The next configuration pass retires it, as it retires a failed
+   start, and the declaration then starts a new instance instead of keeping
+   the dead one as its applied worker. *)
 let test_a_worker_that_ends_on_its_own_is_replaced () =
   with_fixture (fun env _ config directory packages state ->
     let clock = Eio.Stdenv.clock env in
@@ -338,15 +339,21 @@ let test_a_worker_that_ends_on_its_own_is_replaced () =
     let first = text "instance_id" (declared_instance config "observer") in
     await_ready clock config first;
     Eio.Promise.resolve (Hashtbl.find state.ends first) ();
+    await clock (fun () -> phase (instance config first) = "failed");
+    check string "the end is recorded as a worker failure" "worker_failed"
+      (failed_record (instance config first) |> member "cause" |> text "kind");
+    check (list string) "nothing replaces it before the configuration pass" [first] (starts state);
+    ignore (reconcile config directory);
     await_detached clock config first;
-    check (list string) "the ended worker was stopped" [first] (stops state);
+    check (list string) "the pass stopped the ended worker" [first] (stops state);
     check string "its release is confirmed" "released"
       (instance config first |> lifecycle |> member "release" |> text "kind");
     ignore (reconcile config directory);
     let second = text "instance_id" (declared_instance config "observer") in
     check bool "a new instance replaces it" true (second <> first);
     await_ready clock config second;
-    check (list string) "the declaration started twice" [second; first] (starts state))
+    check (list string) "the declaration started twice" [second; first] (starts state);
+    detach clock config second)
 
 let test_install_idempotence_rename_and_public_detach () =
   with_fixture (fun env _ config directory packages state ->

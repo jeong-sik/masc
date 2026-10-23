@@ -1248,8 +1248,10 @@ let run ~sw ~read_browser_document backend m e =
             notify_exports m e;
             (* Every stop this runtime asks for marks the entry stopping before
                the worker is told. A process that ends without that request
-               cannot serve again: record why and start its cleanup, so the
-               declaration starts a new instance once the release is confirmed. *)
+               cannot serve again, so the entry turns failed and stopping. Its
+               owner retires it as it retires a failed start: a declaration on
+               the next configuration pass, which then starts a new instance,
+               and an instance attached without one on the operator's Detach. *)
             fork_isolated ~sw:worker_sw (fun () ->
               let ended = c.await_exit () in
               if not e.stopping then (
@@ -1260,8 +1262,7 @@ let run ~sw ~read_browser_document backend m e =
                 e.state <- fail_state e cause;
                 notify_exports m e;
                 (match persist m e with Ok () -> () | Error detail ->
-                  Log.Misc.error "Lane Add-on instance %s exit state persistence: %s" e.instance_id detail);
-                stop_entry ~sw ~backend m e));
+                  Log.Misc.error "Lane Add-on instance %s exit state persistence: %s" e.instance_id detail)));
             Option.iter (fun port -> Option.iter
               (run_host_watch ~sw:worker_sw ~cleanup_sw:sw ~backend m e port) port.await_change) c.host;
             (match c.host, e.configuration with

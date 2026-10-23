@@ -68,7 +68,9 @@ val observe :
 val stop : t -> (unit, error) result
 
 (** Waits until this worker's MCP process has ended. It does not stop, close
-    or remove anything. *)
+    or remove anything. Call it on a worker that [start] returned: a worker
+    seen only through [on_created] may never connect, and then this never
+    returns. *)
 val await_exit : t -> Eio.Process.exit_status
 
 (** Explicit detach after a host restart. [Some id] verifies that exact

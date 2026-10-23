@@ -131,7 +131,7 @@ type transient_release_record =
 
 type context_delivery =
   | Prepared_start_context
-  | Canonical_source_guard
+  | Canonical_source_guard of { snapshot_sha256 : string }
   | Held_by_vendor_session
 
 type carried_context =
@@ -149,8 +149,7 @@ type held_context =
   }
 
 type context_frontier =
-  { snapshot_sha256 : string
-  ; message_count : int
+  { message_count : int
   ; delivery : context_delivery
   ; acknowledged_turn : settlement option
   ; held_context : held_context list
@@ -447,7 +446,11 @@ let validate binding =
     | None -> Ok ()
     | Some frontier ->
       let held_contexts = List.map (fun held -> held.context) frontier.held_context in
-      if frontier.message_count < 0 || not (valid_sha256 frontier.snapshot_sha256)
+      let* () = match frontier.delivery with
+        | Canonical_source_guard { snapshot_sha256 } when not (valid_sha256 snapshot_sha256) ->
+          Error "invalid canonical context frontier"
+        | Canonical_source_guard _ | Prepared_start_context | Held_by_vendor_session -> Ok () in
+      if frontier.message_count < 0
       then Error "invalid canonical context frontier"
       else if List.exists (fun held -> not (valid_sha256 held.sha256)) frontier.held_context
       then Error "invalid held context digest"
@@ -788,36 +791,44 @@ let held_context_of_yojson = function
 
 let context_frontier_to_yojson = function
   | None -> `Null
-  | Some frontier -> `Assoc
-      [ "snapshot_sha256", `String frontier.snapshot_sha256
-      ; "message_count", `Int frontier.message_count
-      ; "delivery", `String (match frontier.delivery with
-          | Prepared_start_context -> "prepared_start_context"
-          | Canonical_source_guard -> "canonical_source_guard"
-          | Held_by_vendor_session -> "held_by_vendor_session")
+  | Some frontier ->
+    let delivery = match frontier.delivery with
+      | Prepared_start_context -> [ "delivery", `String "prepared_start_context" ]
+      | Canonical_source_guard { snapshot_sha256 } ->
+        [ "delivery", `String "canonical_source_guard"
+        ; "snapshot_sha256", `String snapshot_sha256 ]
+      | Held_by_vendor_session -> [ "delivery", `String "held_by_vendor_session" ] in
+    `Assoc (delivery @
+      [ "message_count", `Int frontier.message_count
       ; "acknowledged_turn", settlement_opt_to_yojson frontier.acknowledged_turn
-      ; "held_context", `List (List.map held_context_to_yojson frontier.held_context) ]
+      ; "held_context", `List (List.map held_context_to_yojson frontier.held_context) ])
 
-let context_frontier_of_yojson = function
+let context_frontier_of_yojson json =
+  let decode delivery message_count acknowledged held_items =
+    let* held_context =
+      List.fold_right (fun item acc ->
+        let* held = held_context_of_yojson item in
+        let* rest = acc in
+        Ok (held :: rest)) held_items (Ok []) in
+    let* acknowledged_turn = settlement_opt_of_yojson acknowledged in
+    Ok (Some {message_count; delivery; acknowledged_turn; held_context}) in
+  match json with
   | `Null -> Ok None
   | `Assoc fields ->
     (match List.sort compare fields with
-     | ["acknowledged_turn", acknowledged; "delivery", `String delivery;
+     | ["acknowledged_turn", acknowledged; "delivery", `String "canonical_source_guard";
         "held_context", `List held_items;
         "message_count", `Int message_count; "snapshot_sha256", `String snapshot_sha256]
        when message_count >= 0 && valid_sha256 snapshot_sha256 ->
+       decode (Canonical_source_guard {snapshot_sha256}) message_count acknowledged held_items
+     | ["acknowledged_turn", acknowledged; "delivery", `String delivery;
+        "held_context", `List held_items; "message_count", `Int message_count]
+       when message_count >= 0 ->
        let* delivery = match delivery with
          | "prepared_start_context" -> Ok Prepared_start_context
-         | "canonical_source_guard" -> Ok Canonical_source_guard
          | "held_by_vendor_session" -> Ok Held_by_vendor_session
          | _ -> Error "invalid context frontier delivery" in
-       let* held_context =
-         List.fold_right (fun item acc ->
-           let* held = held_context_of_yojson item in
-           let* rest = acc in
-           Ok (held :: rest)) held_items (Ok []) in
-       let* acknowledged_turn = settlement_opt_of_yojson acknowledged in
-       Ok (Some {snapshot_sha256; message_count; delivery; acknowledged_turn; held_context})
+       decode delivery message_count acknowledged held_items
      | _ -> Error "invalid context frontier fields")
   | _ -> Error "invalid context frontier"
 
@@ -1401,9 +1412,11 @@ let validate_completed_continuation
 
 let validate_unchanged_context ~expected ~snapshot_sha256 =
   match expected with
-  | Some {phase=Settled settled; context_frontier=Some ({acknowledged_turn=Some receipt; _} as frontier); _}
+  | Some {phase=Settled settled; context_frontier=Some {
+      delivery=Canonical_source_guard {snapshot_sha256=acknowledged_sha256};
+      acknowledged_turn=Some receipt; _}; _}
       when settled = receipt ->
-    if String.equal frontier.snapshot_sha256 snapshot_sha256 then Ok ()
+    if String.equal acknowledged_sha256 snapshot_sha256 then Ok ()
     else Error Canonical_context_changed
   | Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ } | None -> Error Context_frontier_missing
 
@@ -1446,7 +1459,7 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
   in
   let plan = reconcile_tool_surface plan ~tool_surface_sha256 in
   let plan = match context_frontier with
-    | Some {delivery=Canonical_source_guard; snapshot_sha256; _} ->
+    | Some {delivery=Canonical_source_guard {snapshot_sha256}; _} ->
       reconcile_context plan ~expected ~snapshot_sha256
     | Some {delivery=(Prepared_start_context | Held_by_vendor_session); _}
     | None -> plan
@@ -1721,11 +1734,11 @@ let restored_phase previous_settlement =
    opens a fresh conversation. The claim's frontier carries the digest
    [previous_settlement] was acknowledged with: under [Canonical_source_guard]
    a claim keeps a previous settlement only when [reconcile_context] found the
-   prepared snapshot equal to the acknowledged one, and every other claim
-   plans [previous_settlement = None]. *)
+   prepared snapshot equal to the acknowledged one. A guarded claim with
+   changed or unproven source plans [previous_settlement = None]. *)
 let frontier_restored_to previous_settlement frontier =
   match frontier.delivery with
-  | Canonical_source_guard ->
+  | Canonical_source_guard _ ->
     (* The canonical snapshot was already held, but this claim's context
        blocks may never have reached the client. Only a settled delivery can
        certify those digests; the retry must be allowed to send them again. *)

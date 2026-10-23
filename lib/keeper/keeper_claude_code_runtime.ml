@@ -816,9 +816,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let snapshot_messages =
       List.filter (fun message -> not (Host.is_composed_system_context message))
         prepared.messages in
-    let snapshot = `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages) in
-    let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
-      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
     (* Claude Code resumes with the system prompt it recorded at the session's
        first launch ([--system-prompt-snapshot on], pinned by
        [Runtime_claude_code.command]): every later
@@ -854,7 +851,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         delivery.prompt, delivery.held_context
     in
     let context_frontier : Session_store.context_frontier =
-      {snapshot_sha256; message_count=List.length snapshot_messages;
+      {message_count=List.length snapshot_messages;
        delivery=(match session_mode with
          | Start -> Prepared_start_context
          | Resume _ -> Held_by_vendor_session);

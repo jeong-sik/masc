@@ -183,13 +183,13 @@ let test_summary_fallback_and_resume () =
     Config_dir_resolver.reset ();
     Fs_compat.remove_tree base_path);
   let module Store=Masc.Keeper_official_client_session_store in
-  let snapshot_sha256=Digestif.SHA256.(digest_string "native canonical context" |> to_hex) in
-  let frontier : Store.context_frontier={snapshot_sha256;message_count=List.length composed.sent;
+  let tool_surface_sha256=Digestif.SHA256.(digest_string "native tool surface" |> to_hex) in
+  let frontier : Store.context_frontier={message_count=List.length composed.sent;
     delivery=Store.Prepared_start_context;acknowledged_turn=None;held_context=[]} in
   let keeper_name="frozen-fixture" and session_id="native-session" and turn_id="native-turn" in
   let claimed=Store.claim_with_context_frontier ~context_frontier:(Some frontier)
     ~base_path ~keeper_name ~expected:None ~client_kind:Store.Codex ~owner_epoch:(Store.process_epoch ())
-    ~runtime_id:"fixture.native" ~tool_surface_sha256:snapshot_sha256 ~updated_at:1. |> require in
+    ~runtime_id:"fixture.native" ~tool_surface_sha256 ~updated_at:1. |> require in
   let active=Store.mark_active ~base_path ~keeper_name ~expected:claimed ~session_id ~updated_at:2. |> require in
   let starting=Store.mark_turn_starting ~base_path ~keeper_name ~expected:active ~session_id ~updated_at:2.5 |> require in
   let inflight=Store.mark_turn_started ~base_path ~keeper_name ~expected:starting ~session_id ~turn_id

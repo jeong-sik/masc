@@ -7555,13 +7555,8 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        check string "resume sends the current instructions and no conversation"
          ("UPDATED_SYSTEM_PROMPT\n\n" ^ posture_note)
          resume_instructions;
-       let expected_digest =
-         `List (List.map Keeper_official_client_context_codec.to_json native_history)
-         |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
        (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" with
         | Ok (Some {context_frontier=Some frontier; _}) ->
-          check string "durable frontier names the canonical history MASC held"
-            expected_digest frontier.snapshot_sha256;
           check int "frontier records all canonical messages" 4 frontier.message_count;
           check bool "frontier records that the thread holds the conversation" true
             (frontier.delivery = Keeper_official_client_session_store.Held_by_vendor_session);

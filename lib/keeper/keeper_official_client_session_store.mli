@@ -137,12 +137,14 @@ type transient_release_record =
     the canonical snapshot: the vendor session holds the conversation and the
     system prompt it recorded at its first launch, and MASC sent in front of
     the user prompt only the composed per-turn context the session did not
-    already hold ({!Keeper_official_client_host.resume_prompt}). Its snapshot hash names the
-    canonical history MASC held at that turn, not bytes the model read. No
-    receipt asserts that the model understood its contents. *)
+    already hold ({!Keeper_official_client_host.resume_prompt}). Only
+    [Canonical_source_guard] carries a canonical snapshot digest: the other
+    deliveries record a message count and held-context receipts, without
+    encoding or hashing the whole canonical history. No receipt asserts that
+    the model understood its contents. *)
 type context_delivery =
   | Prepared_start_context
-  | Canonical_source_guard
+  | Canonical_source_guard of { snapshot_sha256 : string }
   | Held_by_vendor_session
 
 (** One piece of per-turn context a resume carries in front of its prompt,
@@ -173,9 +175,13 @@ type held_context =
   ; sha256 : string
   }
 
+(** In the persisted [masc.keeper.official-client-session.v2] object, every
+    frontier has [message_count], [delivery], [acknowledged_turn] and
+    [held_context]. Only [canonical_source_guard] also has [snapshot_sha256].
+    Fields are exact: a non-guard frontier containing that digest is refused,
+    as is a guard without it. *)
 type context_frontier =
-  { snapshot_sha256 : string
-  ; message_count : int
+  { message_count : int
   ; delivery : context_delivery
   ; acknowledged_turn : settlement option
     (** None during claim/inflight. Only exact vendor settlement records Some. *)
@@ -362,6 +368,8 @@ val validate_completed_continuation :
 
 val validate_unchanged_context : expected:t option -> snapshot_sha256:string ->
   (unit, context_admission_error) result
+(** Compare only a [Canonical_source_guard] acknowledged by the exact settled
+    turn. Other delivery provenance cannot prove unchanged canonical source. *)
 val context_admission_error_to_string : context_admission_error -> string
 
 val held_context_for_resume : claim_plan -> expected:t option -> held_context list

@@ -1023,9 +1023,11 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
        carried messages stay out of them and the compacted thread never holds a
        stale copy of what the prompt carries.
 
-       History can contain large tool results. Projecting, encoding and hashing
-       it is CPU work over immutable messages; keeping it on the owner domain
-       stalls HTTP, SSE and every other Keeper sharing that scheduler. *)
+       History can contain large tool results. Projecting and encoding it for
+       a new session is CPU work over immutable messages; keeping it on the
+       owner domain stalls HTTP, SSE and every other Keeper sharing that
+       scheduler. Vendor-session frontier provenance needs only its message
+       count, not an encoding or digest of the canonical conversation. *)
     let* history, context_frontier, composed_developer_instructions =
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         let* developer_messages, history =
@@ -1048,11 +1050,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         let snapshot_messages =
           List.filter (fun message -> not (Host.is_composed_system_context message))
             prepared.messages in
-        let snapshot_sha256 =
-          `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)
-          |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
         let context_frontier : Keeper_official_client_session_store.context_frontier =
-          { snapshot_sha256; message_count = List.length snapshot_messages;
+          { message_count = List.length snapshot_messages;
             delivery = (match thread_mode with
               | Runtime_codex_app_server.Start -> Prepared_start_context
               | Runtime_codex_app_server.Resume _ -> Held_by_vendor_session);

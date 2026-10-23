@@ -1,0 +1,50 @@
+{
+  "kind": "cursor-audition-evidence",
+  "runtimeFingerprint": "33a21e2f619ec8ed3404ec3c22967e320f29be8f9f19bf26150b6212b888542f",
+  "sourceFiles": {
+    "sequencer-editor.mjs": "0102191889efb4506c86690bc15f60ee20631851d09f9a91016c56a6e6b4b36c",
+    "midi-source-editor.mjs": "e8ec5d7b852d907df69bab9ca65f41d53cfea39752ab48f18e5a4f7fa0b36b35",
+    "sequencer-tui.mjs": "c1557462afca20b6b81b8da79d87d89701019db3a0912b744c0ca7bd03fa37d6"
+  },
+  "focusedChecks": {
+    "files": [
+      "cursor-audition.test.mjs",
+      "sequencer-close.test.mjs",
+      "source-loop.test.mjs"
+    ],
+    "passed": 62,
+    "failed": 0,
+    "scope": "Worker outputs, controller decisions and native PCM decoder; no terminal wording/layout assertions"
+  },
+  "actualPrivateTui": {
+    "exitCode": 0,
+    "commands": [
+      ":cursor 9.5 C3",
+      "p",
+      "Space",
+      "0",
+      ".",
+      "q"
+    ],
+    "preparedPCM": {
+      "frames": 2394630,
+      "sampleRate": 44100,
+      "channels": 2,
+      "seconds": 54.3,
+      "allFinite": true,
+      "peak": 0.08267092704772949,
+      "sha256": "1acea67ab0d182e886f807b695204f0f95da0e47996efdb77e9bb20fb43c679c"
+    },
+    "privateProjectByteIdentical": true,
+    "userProjectByteIdentical": true,
+    "output": "BlackHole virtual audio output",
+    "nativeChildObserved": true,
+    "nativeChildGoneAfterStop": true
+  },
+  "limits": [
+    "No received PCM or acoustic measurement",
+    "No physical MIDI endpoint audition",
+    "No user Ghostty session observation",
+    "No Dune/full build or full regression run; ordinary source review scope"
+  ]
+}

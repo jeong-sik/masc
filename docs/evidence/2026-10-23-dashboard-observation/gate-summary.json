@@ -1,0 +1,90 @@
+[
+  {
+    "mode": "off",
+    "clock_step_s": 0,
+    "before": {
+      "p50_ms": 1.29125,
+      "p95_ms": 1.98225,
+      "total_ms": 273.87107700000007,
+      "allocated_words": 31830721.0,
+      "response_bytes": 624835,
+      "reused": 200,
+      "encoded": 0
+    },
+    "after": {
+      "p50_ms": 1.06475,
+      "p95_ms": 1.478625,
+      "total_ms": 226.3478300000001,
+      "allocated_words": 30516080.0,
+      "response_bytes": 624835,
+      "reused": 200,
+      "encoded": 0
+    }
+  },
+  {
+    "mode": "off",
+    "clock_step_s": 2,
+    "before": {
+      "p50_ms": 4.541625,
+      "p95_ms": 7.533833,
+      "total_ms": 945.7173710000003,
+      "allocated_words": 117498622.0,
+      "response_bytes": 624837,
+      "reused": 0,
+      "encoded": 200
+    },
+    "after": {
+      "p50_ms": 1.063875,
+      "p95_ms": 1.453041,
+      "total_ms": 223.97895999999997,
+      "allocated_words": 30516080.0,
+      "response_bytes": 624835,
+      "reused": 200,
+      "encoded": 0
+    }
+  },
+  {
+    "mode": "decay",
+    "clock_step_s": 0,
+    "before": {
+      "p50_ms": 1.173791,
+      "p95_ms": 1.586334,
+      "total_ms": 246.62462699999995,
+      "allocated_words": 31833908.0,
+      "response_bytes": 624835,
+      "reused": 200,
+      "encoded": 0
+    },
+    "after": {
+      "p50_ms": 1.117292,
+      "p95_ms": 2.09975,
+      "total_ms": 251.59758899999989,
+      "allocated_words": 30517306.0,
+      "response_bytes": 624835,
+      "reused": 200,
+      "encoded": 0
+    }
+  },
+  {
+    "mode": "decay",
+    "clock_step_s": 2,
+    "before": {
+      "p50_ms": 4.11675,
+      "p95_ms": 5.514167,
+      "total_ms": 830.4045850000001,
+      "allocated_words": 117646437.0,
+      "response_bytes": 624838,
+      "reused": 0,
+      "encoded": 200
+    },
+    "after": {
+      "p50_ms": 3.894125,
+      "p95_ms": 4.792334,
+      "total_ms": 755.6267430000003,
+      "allocated_words": 116383227.0,
+      "response_bytes": 624838,
+      "reused": 0,
+      "encoded": 200
+    }
+  }
+]

@@ -15,6 +15,10 @@ val with_current_keeper_observations :
     Call after outer HTTP caches as well as the metadata snapshot cache.
     [candle_observation_sequence] orders the combined fresh observations,
     including address changes, independently of cached metadata generations.
+    Consecutive non-overlapping reads with identical inserted observations
+    retain that identity; internal ledger replay timestamps do not invalidate
+    prepared responses. Every request still rereads authority, so clock-driven
+    balance changes and changed account revisions advance the identity.
     Board addresses are reread from effective metadata
     once per Keeper per response, including on encoded-cache hits.
     Consumers reject an older observation in the same

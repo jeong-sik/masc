@@ -14,6 +14,7 @@ export type KeeperChatDeliveryKey =
     }
   | { readonly kind: 'fusion_run'; readonly request_id: string }
   | { readonly kind: 'workspace_message'; readonly request_id: string }
+  | { readonly kind: 'connector_message'; readonly event_id: string }
   | { readonly kind: 'approval_lifecycle'; readonly approval_id: string }
   | {
       readonly kind: 'goal_notification'
@@ -83,6 +84,8 @@ export function sameDeliveryKey(left: KeeperChatDeliveryKey, right: KeeperChatDe
       return right.kind === 'fusion_run' && left.request_id === right.request_id
     case 'workspace_message':
       return right.kind === 'workspace_message' && left.request_id === right.request_id
+    case 'connector_message':
+      return right.kind === 'connector_message' && left.event_id === right.event_id
     case 'approval_lifecycle':
       return right.kind === 'approval_lifecycle' && left.approval_id === right.approval_id
     case 'goal_notification':
@@ -193,6 +196,9 @@ function decodeDeliveryKey(raw: unknown): KeeperChatDeliveryKey | null {
     case 'workspace_message':
       return hasExactKeys(raw, ['kind', 'request_id']) && keeperRequestId(raw.request_id)
         ? { kind: raw.kind, request_id: raw.request_id } : null
+    case 'connector_message':
+      return hasExactKeys(raw, ['kind', 'event_id']) && keeperRequestId(raw.event_id)
+        ? { kind: 'connector_message', event_id: raw.event_id } : null
     case 'approval_lifecycle':
       return hasExactKeys(raw, ['kind', 'approval_id']) && keeperRequestId(raw.approval_id)
         ? { kind: 'approval_lifecycle', approval_id: raw.approval_id } : null

@@ -36,6 +36,7 @@ type delivery_key =
   | Operation_native of { operation_id : Request_id.t; continuation_id : Request_id.t }
   | Fusion_run of Request_id.t
   | Workspace_message of Request_id.t
+  | Connector_message of Request_id.t
   | Approval_lifecycle of Request_id.t
 
 type transcript_slot =
@@ -113,6 +114,9 @@ let delivery_key_to_yojson = function
       [ "kind", `String "workspace_message"
       ; "request_id", `String (Request_id.to_string request_id)
       ]
+  | Connector_message event_id ->
+    `Assoc [ "kind", `String "connector_message";
+      "event_id", `String (Request_id.to_string event_id) ]
   | Approval_lifecycle approval_id ->
     `Assoc
       [ "kind", `String "approval_lifecycle"
@@ -175,6 +179,12 @@ let delivery_key_of_yojson = function
        let* request_id = string_field "request_id" fields in
        let* request_id = Request_id.of_string request_id in
        Ok (Workspace_message request_id)
+     | "connector_message" ->
+       let* () = validate_fields ~context:"connector message delivery identity"
+         ~expected:["kind"; "event_id"] fields in
+       let* event_id = string_field "event_id" fields in
+       let* event_id = Request_id.of_string event_id in
+       Ok (Connector_message event_id)
      | "approval_lifecycle" ->
        let* () =
          validate_fields
@@ -200,9 +210,10 @@ let delivery_key_equal left right =
     && Request_id.equal left.continuation_id right.continuation_id
   | Fusion_run left, Fusion_run right -> Request_id.equal left right
   | Workspace_message left, Workspace_message right -> Request_id.equal left right
+  | Connector_message left, Connector_message right -> Request_id.equal left right
   | Approval_lifecycle left, Approval_lifecycle right -> Request_id.equal left right
-  | (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _),
-    (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _) ->
+  | (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Connector_message _ | Approval_lifecycle _),
+    (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Connector_message _ | Approval_lifecycle _) ->
     false
 ;;
 

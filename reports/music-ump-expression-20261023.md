@@ -18,7 +18,8 @@ The same source hash and original packet/message identity bind both note and
 expression patches. Address words, note indices, controller indices, message
 order, source/group/channel, original host ticks and timestamp-origin flags stay
 fixed. A message is not reassigned to an inferred NoteOn owner. Management,
-SysEx, other message classes and malformed/reserved targets are not edited.
+SysEx and other message classes stay unchanged. Invalid note or reserved address
+bits refuse an expression target.
 
 Notes and expressions retain each other's changes, share undo/redo and use the
 same arrangement import, standalone/native playback preparation, portable save

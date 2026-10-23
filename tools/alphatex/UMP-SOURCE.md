@@ -57,7 +57,9 @@ These edits keep the first address word, source/group/channel, note index,
 controller index, original message order, packet boundaries, integer host ticks
 and timestamp-origin flags. They do not infer a unique attack owner, move a
 controller to another note, or rewrite detach/reset management messages. A
-malformed/reserved target is refused; opaque source messages remain unchanged.
+target with invalid note or reserved address bits is refused; opaque source
+messages remain unchanged. Controller numbers retain their original raw
+addresses without assuming a device-specific meaning.
 `:reset-expression` removes only that selected expression edit. Note edits and
 expression edits retain each other, share undo/redo, and travel together through
 the existing native playback, arrangement variant, portable save and raw export.

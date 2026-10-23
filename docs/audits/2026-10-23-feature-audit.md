@@ -165,6 +165,9 @@ CSV의 `mutable_markers`, `ref_markers` 등은 주석·문자열까지 포함하
 | 독립 적대적 소스 리뷰 | 네 코드 작업 단위 모두 PASS | 검토한 source/diff 범위. GitHub 승인·병합·배포를 대신하지 않는다. |
 | 전체 linked OCaml 테스트 / 전체 CI / 설치 / live runtime / browser screenshot | **미실행** | 성공으로 표시하지 않는다. |
 
+
+공개 시점에 관련 OCaml 6개 스위트를 `minimal=true`로 [원격 실행 요청](https://github.com/jeong-sik/masc/actions/runs/39942599904)했다. API를 한 번 읽어 대상 head가 `ed476e2a76f21bd48330da9db38f7b651effef83`, 상태가 `in_progress`임을 확인했다. 대상은 `test_workspace`, `test_dashboard_keeper_metrics_10286`, `test_keeper_effective_meta_overlay`, `test_server_discord_trigger_policy`, `test_server_slack_trigger_policy`, `test_channel_gate_discord_state`다. 이 접수·진행 상태를 성공이나 전체 회귀 결과로 세지 않는다. CI 대기·반복 조회는 하지 않았다.
+
 [실측 출력](2026-10-23-feature-audit/observations.txt). 감사 스크립트는 매 PR의 CI gate나 새 테스트 스위트에 연결하지 않았다. 이 스냅샷을 다시 확인하는 수동 재현 도구다.
 
 ```sh

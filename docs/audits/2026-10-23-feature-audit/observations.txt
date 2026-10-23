@@ -22,3 +22,8 @@ vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 --cach
 tsc --noEmit: exit 0.
 
 No local Dune build, complete linked OCaml suite, live gateway, installed server, or rendered browser verification is asserted.
+
+HOSTED TARGETED CHECK REQUEST:
+https://github.com/jeong-sik/masc/actions/runs/39942599904
+head_sha=ed476e2a76f21bd48330da9db38f7b651effef83
+Publication-time single read: status=in_progress, conclusion=null. Not counted as PASS.

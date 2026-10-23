@@ -46,7 +46,6 @@ for enabled in [False, True]:
             "HOME": tmp,
             "DUNE_SOURCEROOT": str(repo),
             "MASC_KEEPER_AUTONOMOUS_ENABLED": "false",
-            "MASC_ORCHESTRATOR_ENABLED": "0",
             "MASC_CONFIG_BOOTSTRAP": "skip",
         }
         with open(base / "stderr.log", "wb") as err:

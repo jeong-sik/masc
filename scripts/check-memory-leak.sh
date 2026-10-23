@@ -198,7 +198,6 @@ echo "[memory-leak] base_path=${BASE_PATH}" >&2
 (
   export MASC_BASE_PATH="${BASE_PATH}"
   export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
-  export MASC_ORCHESTRATOR_ENABLED="0"
   export MASC_KEEPER_AUTONOMOUS_ENABLED="false"
   export MASC_TRANSPORT_AUTOSTART="0"
   exec "${VALGRIND_BIN}" \

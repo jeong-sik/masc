@@ -99,7 +99,7 @@ def run(args):
     # Explicit loopback-only provider fixture, with no credentials from the host.
     fixture = (repo / 'scripts/fixtures/release-evidence/runtime.toml').read_text()
     env = {'PATH': os.environ['PATH'], 'LANG': 'C.UTF-8',
-           'MASC_KEEPER_AUTONOMOUS_ENABLED': 'false', 'MASC_ORCHESTRATOR_ENABLED': 'false',
+           'MASC_KEEPER_AUTONOMOUS_ENABLED': 'false',
            'MASC_GRPC_ENABLED': '0', 'MASC_WS_ENABLED': '0', 'MASC_CONFIG_BOOTSTRAP': 'skip',
            'MASC_RUNTIME_EVENTS': 'true'}
     processes = []

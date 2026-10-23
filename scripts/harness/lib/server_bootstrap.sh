@@ -214,7 +214,6 @@ harness_start_server() {
     # Base-path isolation does not cover these unprefixed env reads.
     unset SLACK_BOT_TOKEN SLACK_APP_TOKEN DISCORD_BOT_TOKEN
     export MASC_KEEPER_AUTONOMOUS_ENABLED="${MASC_HARNESS_KEEPER_AUTONOMOUS_ENABLED:-0}"
-    export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_OTEL_ENABLED="0"
     exec "$server_exe" --port "$port" --base-path "$base_path"
   ) >"$log_file" 2>&1 &

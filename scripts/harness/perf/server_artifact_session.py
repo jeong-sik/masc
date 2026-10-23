@@ -78,7 +78,7 @@ def run(args):
             env = {"PATH": os.environ["PATH"], "LANG": "C.UTF-8",
                    "MASC_BASE_PATH": str(base), "MASC_CONFIG_DIR": str(config),
                    "MASC_CONFIG_BOOTSTRAP": "skip", "MASC_KEEPER_AUTONOMOUS_ENABLED": "false",
-                   "MASC_ORCHESTRATOR_ENABLED": "false", "MASC_GRPC_ENABLED": "0", "MASC_WS_ENABLED": "0"}
+                   "MASC_GRPC_ENABLED": "0", "MASC_WS_ENABLED": "0"}
             write_json(out / "identity.json", {
                 **identity, "port": port, "base": str(base), "model_endpoint": endpoint,
                 "environment_keys": sorted(env), "tasks": args.tasks, "cycles": args.cycles,

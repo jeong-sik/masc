@@ -3,8 +3,9 @@
 This records the original E03 extraction contract and its current implementation.
 The explicit-candidate production caller now uses the configured Librarian Addon
 for the raw proposal and the original host for absorption, Memory and ACK. This
-candidate has source/parser evidence only; its selected compiled behavior checks
-have not yet run. Checkpoint, official-client, continuity and history purposes
+candidate has source/parser evidence; selected checks on earlier heads failed
+and their failure logs and repairs are recorded in the worklist. The restored,
+corrected combination has no successful execution receipt yet. Checkpoint, official-client, continuity and history purposes
 remain on their original host path. E03 is incomplete until its original memory
 lineage, pending-work and actual Keeper-continuity criteria are verified.
 
@@ -353,8 +354,10 @@ receipts and queue ACK. Its resource-launch edge is substituted; it does not
 prove Docker, paid-provider execution, installed native binaries, either visible
 UI, other Librarian purposes or the original E03 continuity requirement. The
 server wake case substitutes only the final queue-refresh scheduling callback
-with the same Memory-lane/public-worker consumer. Tests are authored, not yet
-executed; earlier parent execution receipts are not evidence for this candidate.
+with the same Memory-lane/public-worker consumer. Earlier selected runs failed
+on declaration, lifecycle or typing defects; their corrections have not yet
+established successful execution of this combination. Earlier parent execution
+receipts are not evidence for this candidate.
 
 ## Complete original input data before durable-source extraction
 

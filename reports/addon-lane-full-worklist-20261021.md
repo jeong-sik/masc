@@ -14,7 +14,7 @@
 | 원래 범위 | 영속 Task | 이어서 구현·검증할 실제 경계 |
 | --- | --- | --- |
 | E04–E05 | task-2523 | Required Judge/Board 서비스 의무·승계, 원래 per-attempt callback과 durable 후보를 유지하는 worker 실행 |
-| E06 | task-2524 | Native Stack #45472의 Task worker/endpoint 및 원본·dispatch·판정·host commit 복구 #45573 구현 중. exact8d4e run39940095424는 fixture Verification alias와 owner warning4로 aggregate compile 실패, 선택5 suite 모두 미실행. 두 차단 오류를 수리한 adff97c4 독립 SOURCE PASS; 선택5 suite run39942467140 요청, 실행 결과 미확인. Goal proof는 기존 경로이며 전체 E06 완료 아님. |
+| E06 | task-2524 | Task/Goal의 도구·이미지·lookup·원본 증거와 report-verdict 프로토콜을 유지하는 Verifier; 최종 전이·확인은 host 소유 |
 | E03 후속 | task-2525 | history 용량·실패 descent, continuity/working-context/maintenance 목적과 실제 Keeper 기억 연속성 |
 | E09 | task-2526 | Realtime 세션 보존·실제 Keeper 활동 응답5파일 수리 #45448 main 병합. 최초 P2 FAIL·수리 뒤 독립 SOURCE PASS·parser5 보존. 선택 실행은 compile 실패로 미실행. TTS/STT/player/device의 Addon 추출·실제 입출력/해제 기준은 그대로 남음 |
 | E10–E11 | task-2527 | Connector polling/socket/cursor와 Search fallback/cache/cancel의 실제 실행; host credential·송신 권한 보존 |

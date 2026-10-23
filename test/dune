@@ -5633,6 +5633,11 @@
  (libraries alcotest unix masc.owner_process_identity masc.server masc.fs_compat))
 
 (test
+ (name test_private_browser_profile)
+ (modules test_private_browser_profile)
+ (libraries alcotest unix masc.private_browser_profile))
+
+(test
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
  (libraries alcotest unix yojson eio eio_main masc.server masc.fs_compat))

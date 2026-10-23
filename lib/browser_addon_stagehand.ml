@@ -83,25 +83,6 @@ let settle c ~incarnation ~directory = Browser_addon_child_claim.settle (child c
 let check_settled c ~incarnation ~directory =
   Browser_addon_child_claim.check_settled (child c ~incarnation ~directory)
 
-(* The host has already checked the original allocation inode and worker
-   settlement. Never follow a profile symlink, and retain unexpected resources.
-   A configured operator profile never enters this private tree. *)
-let rec remove_profile path =
-  let info=Unix.lstat path in
-  if info.Unix.st_uid<>Unix.geteuid () then
-    Error (Printf.sprintf "Chrome profile entry %s must be owned by uid %d; it is owned by uid %d"
-      path (Unix.geteuid ()) info.st_uid)
-  else match info.st_kind with
-  | Unix.S_DIR ->
-    let* ()=Array.fold_left (fun result name -> let* ()=result in
-      remove_profile (Filename.concat path name)) (Ok ()) (Sys.readdir path) in
-    Unix.rmdir path;Ok ()
-  | Unix.S_LNK -> Unix.unlink path;Ok ()
-  | Unix.S_REG when info.st_nlink=1 -> Unix.unlink path;Ok ()
-  | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK as kind ->
-    Error (Printf.sprintf
-      "Chrome profile entry %s must be a directory, a symbolic link or a regular file with exactly one link; it is a %s with %d links"
-      path (Requirement.kind_name kind) info.st_nlink)
 let profiles directory = Filename.concat directory "chromium-profiles"
 let profiles_label = "Chrome private profiles directory"
 let cleanup c ~incarnation ~directory = protect (fun () ->
@@ -115,7 +96,10 @@ let cleanup c ~incarnation ~directory = protect (fun () ->
       else Ok () in
     let* ()=Array.fold_left (fun result name -> let* ()=result in
       match Uuidm.of_string name with
-      | Some uuid when Uuidm.to_string uuid=name -> remove_profile (Filename.concat (profiles directory) name)
+      (* The host has already checked the original allocation inode and worker
+         settlement. A configured operator profile never enters this private tree. *)
+      | Some uuid when Uuidm.to_string uuid=name ->
+        Private_browser_profile.remove ~label:"Chrome profile" (Filename.concat (profiles directory) name)
       | None | Some _ -> Error "Chrome profile directory contains an unknown allocation") (Ok ()) names in
     Unix.rmdir (profiles directory);Ok ()
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ())

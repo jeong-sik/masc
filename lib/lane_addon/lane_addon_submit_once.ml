@@ -207,7 +207,7 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
   | Progress.Dispatch_pending _ ->
     let* retained = observe_host original in
     (match retained with
-     | Exact.Retained_terminal result -> finish original (Exact.delivered result)
+     | Exact.Retained_terminal result -> finish original result
      | Exact.Retained_absent | Exact.Retained_open ->
        match invoke read with
        | Ok (state, evidence) -> received original ~submission:false state evidence

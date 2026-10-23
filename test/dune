@@ -5520,7 +5520,7 @@
 (test
  (name test_workspace_memory_request)
  (modules test_workspace_memory_request)
- (libraries alcotest digestif yojson masc))
+ (libraries alcotest digestif yojson masc masc.masc_core eio eio_main))
 
 (test
  (name test_workspace_memory_capture)

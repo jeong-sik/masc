@@ -116,10 +116,13 @@ let classify_new ~config ~originals ~new_work =
      facts the next one may hold. *)
   let size=Capture.classification_size
       (List.map (fun (original : Consumer.original) -> original.capture,phase original) originals) in
-  let* batch=io (fun () -> Request.prepare ~neighbor_limit:(max 0 (List.length (Context.keepers context)-1))
+  (* Preparation owns its CPU-pool boundary. A raw system thread here would
+     remove the Eio handler and make the index's nested CPU submits inline
+     on this domain instead. Only captured inputs cross the boundary. *)
+  let* batch=Request.prepare ~neighbor_limit:(max 0 (List.length (Context.keepers context)-1))
     ~render ~ledger:change.ledger ~current:change.current_facts ~pending ~size
     ~frame:destination.max_reply_bytes ~measure:(Binding.classification_submit_bytes ~request_id)
-    |> Result.map_error Request.error_to_string) in
+    |> Result.map_error Request.error_to_string in
   match batch with
   | None -> Ok false
   | Some batch ->

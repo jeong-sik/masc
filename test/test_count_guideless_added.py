@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""task-2321 — count-guideless-added.py 와 run-guideless-check.sh 를
-실행으로 고정한다.
+"""task-2321 — count-guideless-added.py 를 실행으로 고정한다.
 
 검증자가 지적한 것처럼 스크립트를 검증하는 CI가 없으면 독립 영수증을 만들
 수 없다. 이 테스트를 dune runtest에 포함해 CI가 자동으로 실행하게 하면
 검증자도 CI 결과를 근거로 삼을 수 있다.
 
 실행하는 것:
-- run-guideless-check.sh 의 시나리오 A(영어 마커 0), B(한국어 마커 1),
-  C(영어 마커 2)를 임시 노트 파일로 실행한다.
+- count-guideless-added.py 를 임시 노트 파일과 함께 세 시나리오로 실행한다.
+  A: 마커 없음 → guideless 0
+  B: 한국어 마커 2개 → guideless 2
+  C: 영어 마커 2개 → guideless 2
 - 각 시나리오가 --expect-added / --expect-guideless 와 일치하는지
   스크립트가 스스로 판정하게 한다. 불일치면 exit 1이므로 이 테스트도
   실패한다.

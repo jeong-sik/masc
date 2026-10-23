@@ -137,7 +137,10 @@ let choose_candidates ~verb ~bound ~snapshot preference =
     | Lane.Tabs_list | Lane.Page_read _ | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_console _ | Lane.Page_network _ | Lane.Page_cookies _
     | Lane.Page_capture _ | Lane.Page_scene _ | Lane.Page_interact _ | Lane.Page_elements _
     | Lane.Page_act _ | Lane.Page_context _ | Lane.Page_instruct _ | Lane.Page_locate _ | Lane.Page_extract _ ->
-      match connected Lane.Webdriver_bidi with
+      (* Both carry a login: the Keeper's own Firefox over BiDi, and the
+         operator's ego profile, whose cookies every task space shares. With
+         one of each connected the choice is the caller's. *)
+      match connected Lane.Webdriver_bidi @ connected Lane.Ego_task_space with
       | _::_ as browsers -> one Existing_login browsers
       | [] -> match owned with
         | _::_ -> one Existing_work_session owned

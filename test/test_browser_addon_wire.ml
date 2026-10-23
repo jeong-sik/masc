@@ -22,6 +22,15 @@ let roundtrips () =
   List.iter (fun verb ->
     let request = {W.incarnation;command=W.Issue {route;verb;actor=Some "keeper";timeout_sec=3.;only_if_idle=false}} in
     check bool (B.verb_to_string verb) true (ok (W.of_json (W.to_json request))=request)) verbs
+(* A native host may poll as the extension or a BiDi host; the ego
+   connection polls only from inside the worker. *)
+let a_native_host_cannot_poll_as_ego () =
+  let poll transport =
+    let client = {B.client_id=id;browser=B.Ego_lite;version="0.6.0.16";engine_version="154.0.8037.44";transport} in
+    W.of_json (W.to_json {W.incarnation;command=W.Poll {client;window_sec=1.}}) in
+  check bool "ego_task_space is refused" true (Result.is_error (poll B.Ego_task_space));
+  check bool "a BiDi host still polls" true (Result.is_ok (poll B.Webdriver_bidi))
+
 let rejections () =
   check bool "nested action route cannot override selected browser" true
     (Result.is_error (decode "page.act" ["action",`String "open_tab";"url",`String "https://example.org";"lane",`String "automation"]));
@@ -68,6 +77,7 @@ let model_ports () =
 let () = run "browser addon wire" ["boundary",[
   test_case "closed verbs roundtrip" `Quick roundtrips;
   test_case "guards and competing identities" `Quick rejections;
+  test_case "a native host cannot poll as ego" `Quick a_native_host_cannot_poll_as_ego;
   test_case "partial effects and receipts" `Quick results;
   test_case "private retirement retains incarnation" `Quick retirement;
   test_case "private model ports preserve incarnation" `Quick model_ports]]

@@ -76,6 +76,23 @@ let test_list_windows_table () =
     ["the extension",Cap.Connected Lane.Web_extension;"the owned Firefox",Cap.Owned_gecko;
      "Stagehand",Cap.Owned_chromium;"Safari",Cap.Safari_unavailable]
 
+(* The catalog claims on an ego connection only what its peer reads
+   (Browser_lane.live_transport_serves Ego_task_space), and every page read
+   says that the operator's tabs in the space are refused. *)
+let test_ego_table () =
+  let backend = Cap.Connected Lane.Ego_task_space in
+  let reachable = List.filter (fun operation -> match Cap.support backend operation with
+    | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
+  check (list string) "reads, capture and the tab list"
+    ["list_tabs";"read_text";"read_elements";"read_scene";"read_regions";"screenshot"]
+    (List.map Cap.operation_name reachable);
+  List.iter (fun operation -> match Cap.support backend operation with
+    | Cap.Conditional {constraints;_} ->
+      check bool (Cap.operation_name operation ^ " names the operator's tabs") true
+        (List.exists (fun constraint_ -> String_util.contains_substring constraint_ "operator opened") constraints)
+    | Cap.Available _ | Cap.Unsupported _ -> failf "%s is not a conditional read on ego" (Cap.operation_name operation))
+    (List.filter (fun operation -> operation <> Cap.List_tabs) reachable)
+
 let () = run "task-aware browser choice" ["scenarios",[
   test_case "a bound request is not reselected by required actions" `Quick test_bound_request_keeps_its_browser;
   test_case "right and middle click are claimed only where a button is pressed" `Quick test_button_click_table;
@@ -83,4 +100,5 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "history and close are claimed on every backend that acts on tabs" `Quick test_tab_history_and_close_table;
   test_case "touch is claimed only where a touch pointer is sent" `Quick test_touch_table;
   test_case "select_option is claimed where the shared script runs" `Quick test_select_option_table;
-  test_case "window listing is claimed only where tabs name their window" `Quick test_list_windows_table]]
+  test_case "window listing is claimed only where tabs name their window" `Quick test_list_windows_table;
+  test_case "an ego connection is claimed only for what its peer reads" `Quick test_ego_table]]

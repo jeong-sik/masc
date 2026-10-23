@@ -6,6 +6,16 @@
 let text =
   "const text=document.body?.innerText ?? ''; const chars=Array.from(text); return {url:location.href,title:document.title,text:chars.slice(0,arguments[0]).join(''),chars:chars.length,truncated:chars.length>arguments[0]};"
 
+(* A read that answers for the whole document. A connection that does not
+   wait for the parser runs its body through this, so a document still being
+   parsed is refused instead of answered with the part that exists so far. *)
+let parsed body = "if (document.readyState === 'loading') return {documentLoading:true};\n" ^ body
+let document_loading_refused = "the document is still loading; read it again"
+
+(* The document identity and viewport a capture compares before and after
+   the screenshot. It reads no page text. Needs the scene runtime. *)
+let capture_state = "return {url:location.href,title:document.title,viewport:browserScene({mode:'viewport'})};"
+
 (* What a text read returns when it names no cap, and the most it returns. *)
 let default_text_chars = 50_000
 let max_text_chars = 100_000

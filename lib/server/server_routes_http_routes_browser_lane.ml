@@ -76,6 +76,10 @@ let client_of_request request =
   let* transport = match header "x-browser-transport" with
     | None -> Ok Browser_lane.Web_extension
     | Some transport -> Browser_lane.live_transport_of_string transport in
+  (* The ego connection polls from inside the browser Add-on worker; no native host speaks for it. *)
+  let* () = match transport with
+    | Browser_lane.Ego_task_space -> Error "unsupported_browser_transport"
+    | Browser_lane.Web_extension | Browser_lane.Webdriver_bidi -> Ok () in
   let version name =
     let* value = required name in
     if String.length value <= 64 && String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) value

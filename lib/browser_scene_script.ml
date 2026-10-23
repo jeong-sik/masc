@@ -444,3 +444,8 @@ let runtime = {js|function browserScene(args) {
 (* The call a read runs after the runtime, with the scene arguments. *)
 let read_call = "return browserScene(arguments[0]);"
 let read = runtime ^ "\n" ^ read_call
+let page_function ~answer_limit_units body =
+  "function(args) { " ^ runtime
+  ^ "\nconst answer = JSON.stringify((function(){" ^ body ^ "}).call(null,args));"
+  ^ Printf.sprintf "\nreturn typeof answer === 'string' && answer.length > %d ? answer.length : answer; }"
+      answer_limit_units

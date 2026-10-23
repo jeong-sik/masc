@@ -482,6 +482,7 @@ let test_capability_table_names_advertised_values () =
   let backends =
     [ Cap.Connected Browser_lane.Web_extension
     ; Cap.Connected Browser_lane.Webdriver_bidi
+    ; Cap.Connected Browser_lane.Ego_task_space
     ; Cap.Owned_gecko
     ; Cap.Owned_chromium
     ; Cap.Safari_unavailable
@@ -511,6 +512,7 @@ let test_capability_table_names_advertised_values () =
                        (match backend with
                         | Cap.Connected Browser_lane.Web_extension -> "extension"
                         | Cap.Connected Browser_lane.Webdriver_bidi -> "live BiDi"
+                        | Cap.Connected Browser_lane.Ego_task_space -> "ego"
                         | Cap.Owned_gecko -> "owned Gecko"
                         | Cap.Owned_chromium -> "Stagehand"
                         | Cap.Safari_unavailable -> "Safari")
@@ -592,6 +594,7 @@ let test_capability_table_sharing_is_listed () =
          by_call)
     [ Cap.Connected Browser_lane.Web_extension
     ; Cap.Connected Browser_lane.Webdriver_bidi
+    ; Cap.Connected Browser_lane.Ego_task_space
     ; Cap.Owned_gecko
     ; Cap.Owned_chromium
     ; Cap.Safari_unavailable

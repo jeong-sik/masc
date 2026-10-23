@@ -612,7 +612,7 @@ let test_operation_is_refresh () =
    rather than screen copy or layout. *)
 let automatic_answer ?(listed=[firefox;zen]) browse work =
   let row (client : client) = `Assoc ["clientId",`String client.client_id;
-    "browser",`String (match client.browser with Firefox->"firefox" | Zen->"zen");
+    "browser",`String (Browser_lane.browser_name client.browser);
     "transport",`String (Browser_lane.live_transport_to_string client.transport);"interactions",`List []] in
   `Assoc ["ok",`Bool true;"data",`Assoc ["clients",`List (List.map row listed);
     "automatic",`Assoc ["browse",browse;"work",work]]]

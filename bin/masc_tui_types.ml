@@ -5646,7 +5646,7 @@ type palette_mode =
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
   type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
-  type browser = Firefox | Zen
+  type browser = Browser_lane.browser = Firefox | Zen | Ego_lite
   type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport;
     interactions : Browser_lane.interaction_activity list }
   type discovery = Read_after_discovery | Choose_client
@@ -5807,7 +5807,7 @@ module Browser_lane_view = struct
   }
 
   let source_name = Browser_lane.Lane_name.to_wire
-  let browser_name = function Firefox -> "Firefox" | Zen -> "Zen"
+  let browser_name = function Firefox -> "Firefox" | Zen -> "Zen" | Ego_lite -> "ego lite"
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
     | Live, None | Automation, _ | Stagehand, _ -> None
@@ -5918,6 +5918,7 @@ module Browser_lane_view = struct
   let transport_label = function
     | Browser_lane.Web_extension -> "WebExtension"
     | Browser_lane.Webdriver_bidi -> "BiDi"
+    | Browser_lane.Ego_task_space -> "ego"
   let transport_names transports = String.concat " or " (List.map transport_label transports)
   (* The operator's word for a piece of live work. They are short because a
      connection's whole list has to fit one 80-column row beside its name. *)
@@ -6571,7 +6572,7 @@ module Browser_lane_view = struct
   let parse_client json =
     let* client_id = get string "clientId" json in
     let* browser = get (function
-      | `String "firefox" -> Ok Firefox | `String "zen" -> Ok Zen
+      | `String raw -> Browser_lane.browser_of_string raw |> Result.map_error (fun _ -> "unknown native browser")
       | _ -> Error "unknown native browser") "browser" json in
     let* transport = get string "transport" json in
     let* transport = Browser_lane.live_transport_of_string transport in

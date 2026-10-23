@@ -199,7 +199,12 @@ let of_json value =
     | "model_wait" -> let* () = exact ["after"] in
         let* raw=required fields "after" in let* after=optional text raw in Ok (Model_wait {after})
     | "poll" -> let* () = exact ["client";"window_sec"] in let* raw = required fields "client" in
-        let* client = client_of_json raw in let* raw = required fields "window_sec" in let* window_sec = positive raw in Ok (Poll {client;window_sec})
+        let* client = client_of_json raw in
+        (* The ego connection polls from inside the worker; no native host speaks for it. *)
+        let* () = match client.transport with
+          | B.Ego_task_space -> Error "an ego_task_space connection is run by the browser Add-on worker, not by a native host"
+          | B.Web_extension | B.Webdriver_bidi -> Ok () in
+        let* raw = required fields "window_sec" in let* window_sec = positive raw in Ok (Poll {client;window_sec})
     | "deliver" -> let* () = exact ["clientId";"id";"payload"] in let* client_id = client_id () in
         let* id = text_field fields "id" in let* payload = required fields "payload" in Ok (Deliver {client_id;id;payload})
     | "disconnect" -> let* () = exact ["clientId"] in let* id = client_id () in Ok (Disconnect id)

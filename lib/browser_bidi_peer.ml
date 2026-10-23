@@ -5,8 +5,9 @@ let string name json = match field name json with
 let obj xs = `Assoc xs
 let str s = `String s
 let required name json = match field name json with Some v -> Ok v | None -> Error ("missing " ^ name)
-type partial_failure = { tab_id : int; message : string; receipt : Yojson.Safe.t }
-type failure = Before_effect of string | Partial_failure of partial_failure | Outcome_unknown of string
+type partial_failure = Browser_live_peer.partial_failure = { tab_id : int; message : string; receipt : Yojson.Safe.t }
+type failure = Browser_live_peer.failure =
+  | Before_effect of string | Partial_failure of partial_failure | Outcome_unknown of string
 (* The error codes Firefox answers that this host acts on, read once where
    the answer arrives; any other code is kept as Firefox wrote it.
    "session not created": Firefox will not serve a [session.new]. It takes
@@ -34,18 +35,11 @@ type refusal = Rejected of error_code | Unanswered of string | Unsent of string
 let refusal_message = function
   | Rejected code -> "BiDi command rejected: " ^ error_code_to_wire code
   | Unanswered why | Unsent why -> why
-type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
+type verb = Browser_live_peer.verb =
+  | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
   | Page_goto
-let verb_to_wire = function
-  | Browser_info -> "browser.info" | Tabs_list -> "tabs.list" | Page_read -> "page.read"
-  | Page_scene -> "page.scene" | Page_elements -> "page.elements" | Page_capture -> "page.capture"
-  | Page_interact -> "page.interact" | Page_act -> "page.act" | Page_goto -> "page.goto"
-let verb_of_wire = function
-  | "browser.info" -> Some Browser_info | "tabs.list" -> Some Tabs_list | "page.read" -> Some Page_read
-  | "page.scene" -> Some Page_scene | "page.elements" -> Some Page_elements
-  | "page.capture" -> Some Page_capture | "page.interact" -> Some Page_interact | "page.act" -> Some Page_act
-  | "page.goto" -> Some Page_goto
-  | _ -> None
+let verb_to_wire = Browser_live_peer.verb_to_wire
+let verb_of_wire = Browser_live_peer.verb_of_wire
 type session_end_failure = Connection_gone of string | Not_confirmed of string
 let session_end_failure_message = function Connection_gone why | Not_confirmed why -> why
 type session_failure = Session_refused of string | Session_failed of string
@@ -162,10 +156,7 @@ let answer_too_large units =
     units script_answer_limit_units
 type evaluation_failure = Rpc_failed of refusal | Page_failed of string
 let evaluate_typed t context body args =
-  let declaration = "function(args) { " ^ Browser_scene_script.runtime
-    ^ "\nconst answer = JSON.stringify((function(){" ^ body ^ "}).call(null,args));"
-    ^ Printf.sprintf "\nreturn typeof answer === 'string' && answer.length > %d ? answer.length : answer; }"
-        script_answer_limit_units in
+  let declaration = Browser_scene_script.page_function ~answer_limit_units:script_answer_limit_units body in
   let* result = Result.map_error (fun reason -> Rpc_failed reason) (t.ask "script.callFunction" (obj [
     "functionDeclaration",str declaration;"target",obj ["context",str context];
     "awaitPromise",`Bool false;"arguments",`List [obj ["type",str "string";"value",str (Yojson.Safe.to_string args)]]])) in
@@ -228,17 +219,13 @@ let tab_metadata t context = script t context
   "return {url:location.href,title:document.title,active:document.visibilityState==='visible'};" (obj [])
 (* Capture guards need document identity and geometry, never page text. Read
    the URL and viewport in the same script on each side of the screenshot. *)
-let capture_state t context = script t context
-  "return {url:location.href,title:document.title,viewport:browserScene({mode:'viewport'})};" (obj [])
-(* A read that answers for the whole document. The extension runs its reads
-   once the parser is done; nothing waits for the parser here, so a document
-   still being parsed is refused instead of answered with the part that
-   exists so far. *)
+let capture_state t context = script t context Browser_page_script.capture_state (obj [])
+(* The extension runs its reads once the parser is done; nothing waits for
+   the parser here. *)
 let parsed_document t context body args =
-  let* answer = script t context
-    ("if (document.readyState === 'loading') return {documentLoading:true};\n" ^ body) args in
+  let* answer = script t context (Browser_page_script.parsed body) args in
   if Option.is_some (field "documentLoading" answer)
-  then Error "the document is still loading; read it again"
+  then Error Browser_page_script.document_loading_refused
   else Ok answer
 let remember_context t context =
   match List.assoc_opt context t.contexts with

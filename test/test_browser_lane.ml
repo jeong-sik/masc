@@ -150,6 +150,9 @@ let test_transport_table () =
     Lane.[Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_answer] (unserved Lane.Web_extension);
   check (list capability) "the BiDi peer has no browser zoom"
     Lane.[Browser_zoom] (unserved Lane.Webdriver_bidi);
+  check (list capability) "the ego connection reads and captures"
+    Lane.[Tab_listing; Text_read; Element_inventory; Viewport_capture; Scene_read]
+    (List.filter (Lane.live_transport_serves Lane.Ego_task_space) Lane.all_of_live_capability);
   List.iter (fun capability ->
     check bool (Lane.live_capability_to_wire capability ^ " is reachable on some connection") true
       (Lane.live_transports_serving capability <> []);
@@ -164,6 +167,9 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
   let bidi = { (info Lane.Firefox) with transport=Lane.Webdriver_bidi } in
   ignore (Lane.take_command ~client_info:bidi ~window_sec:0.001);
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:bidi.client_id));
+  let ego = { (info Lane.Ego_lite) with transport=Lane.Ego_task_space } in
+  ignore (Lane.take_command ~client_info:ego ~window_sec:0.001);
+  Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:ego.client_id));
   List.iter (fun (info : Lane.client_info) ->
     let selected = target info.client_id in
     let client = match selected with Lane.Live_client client -> client
@@ -186,9 +192,9 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
         check int (name ^ " left no waiter") 0 (Hashtbl.length client.waiters);
         check int (name ^ " queued no command") 0 (Eio.Stream.length client.commands)
       end) Lane.all_of_live_capability)
-    [extension; bidi];
-  (* The optional document read asks the same table. Both transports serve
-     it, so on BiDi it reaches that connection's queue. *)
+    [extension; bidi; ego];
+  (* The optional document read asks the same table. The extension and BiDi
+     serve it, so on BiDi it reaches that connection's queue. *)
   let bidi_target = target bidi.client_id in
   let document = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_document_if_idle ~target:bidi_target ~tab_id:2 ~timeout_sec:1.) in

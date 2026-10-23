@@ -116,7 +116,7 @@ let attach_live t ~client_id ~cleanup =
       if not (List.mem client_id t.clients) then Error "live BiDi client was not registered by this owner"
       else match List.find_opt (fun (client:B.client_info) -> client.client_id=client_id) (B.active_clients ()) with
         | Some {transport=B.Webdriver_bidi;_} -> t.live<-Some (owned_cleanup "live BiDi" cleanup);Ok ()
-        | None | Some {transport=B.Web_extension;_} -> Error "owned live client is not an active BiDi connection")
+        | None | Some {transport=(B.Web_extension | B.Ego_task_space);_} -> Error "owned live client is not an active BiDi connection")
 let revoke t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
     match t.phase with

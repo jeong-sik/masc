@@ -479,6 +479,8 @@ export function editMidiSourceNotes(source, edits, { pattern } = {}) {
 
 function sourcePatch(source) {
   const next = structuredClone(source), used = new Set(next.insertions.map(event => event.id))
+  const changes = new Map(next.changes.map(event => [event.id,event]))
+  const insertions = new Map(next.insertions.map(event => [event.id,event]))
   let number = 1
   const detach = id => {
     if (!next.orders) return
@@ -492,7 +494,7 @@ function sourcePatch(source) {
   const add = (track, tick, payload) => {
     while (used.has(`new:${number}`)) number++
     const id = `new:${number++}`; used.add(id)
-    next.insertions.push({ id, track, tick, ...payload }); append(id, track, tick); return id
+    insertions.set(id,{ id, track, tick, ...payload }); append(id, track, tick); return id
   }
   const insert = (track, tick, bytes) => add(track, tick, { bytes })
   const insertMeta = (track, tick, type, data) => add(track, tick, { kind: 'meta', type, data })
@@ -501,17 +503,18 @@ function sourcePatch(source) {
       detach(event.id)
       if (!value.removed) append(event.id, event.track, value.tick)
     }
-    const added = next.insertions.findIndex(item => item.id === event.id)
-    if (added >= 0) {
-      if (value.removed) next.insertions.splice(added, 1)
-      else next.insertions[added] = { id: event.id, track: event.track,
-        ...(event.kind === 'meta' ? { kind: 'meta', type: event.type } : {}), ...value }
+    if (insertions.has(event.id)) {
+      if (value.removed) insertions.delete(event.id)
+      else insertions.set(event.id,{ id: event.id, track: event.track,
+        ...(event.kind === 'meta' ? { kind: 'meta', type: event.type } : {}), ...value })
     } else {
-      next.changes = next.changes.filter(item => item.id !== event.id)
-      next.changes.push({ id: event.id, ...value })
+      changes.delete(event.id)
+      changes.set(event.id,{ id: event.id, ...value })
     }
   }
   const finish = () => {
+    next.changes = [...changes.values()]
+    next.insertions = [...insertions.values()]
     if (!next.orders) return
     // Retimed/inserted notes and metadata retain their natural mutual order.
     // Expressions keep the explicit slots in the reconciled permutation.

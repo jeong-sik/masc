@@ -11,13 +11,11 @@
 type event =
   { surface : string
   ; section : string option
-  ; redirected_from : string option
   }
 
 (** [parse_event_json json] parses the request body. Returns [Error msg]
     for any of: malformed JSON shape, missing [surface], unknown
-    [surface], unknown [(surface, section)] pair, malformed
-    [redirected_from], or [redirected_from] referring to an unknown pair. *)
+    [surface], or unknown [(surface, section)] pair. *)
 val parse_event_json : Yojson.Safe.t -> (event, string) result
 
 (** [record event] increments the relevant Otel_metric_store counters.

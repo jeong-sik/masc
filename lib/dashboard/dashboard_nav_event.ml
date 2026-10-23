@@ -3,13 +3,11 @@
 type event =
   { surface : string
   ; section : string option
-  ; redirected_from : string option
   }
 
 (* Mirror of dashboard/src/types/sse.ts:VALID_TABS. *)
 let valid_surfaces =
-  [ "cockpit"
-  ; "overview"
+  [ "overview"
   ; "monitoring"
   ; "keepers"
   ; "registry"
@@ -29,8 +27,7 @@ let valid_surfaces =
 
 (* Mirror of dashboard/src/config/navigation.ts:DASHBOARD_SECTION_ITEMS.
    Hidden support sections remain directly reachable and continue to fire
-   telemetry. Retired sections are accepted only in redirected_from, not as
-   resolved targets. *)
+   telemetry. *)
 let valid_sections =
   [ ( "monitoring"
     , [ "observatory"
@@ -40,6 +37,7 @@ let valid_sections =
       ; "fleet-health"
       ; "lanes"
       ; "lane-addons"
+      ; "lane-inventory"
       ; "transport-health"
       ; "journey"
       ; "skills"
@@ -47,13 +45,19 @@ let valid_sections =
   ; "command", [ "operations" ]
   ; "connectors", [ "connector-status" ]
   ; ( "workspace"
-    , [ "board"; "sub-boards"; "planning"; "repositories"; "verification"; "work" ] )
-  ; ( "lab"
-    , [ "tools"; "harness"; "performance"; "keeper-memory-health" ]
-    )
+    , [ "board"
+      ; "sub-boards"
+      ; "planning"
+      ; "repositories"
+      ; "verification"
+      ; "work"
+      ; "artifacts"
+      ] )
+  ; "lab", [ "tools"; "harness"; "keeper-memory-health" ]
   ; "code", [ "ide-shell" ]
   ; ( "settings"
-    , [ "runtime"
+    , [ "account"
+      ; "runtime"
       ; "routing"
       ; "runtimes"
       ; "paths"
@@ -89,31 +93,8 @@ let () =
 let () =
   Otel_metric_store.register_counter
     ~name:counter_section
-    ~help:
-      "Section-level opens within a dashboard surface (RFC-0049). redirected_from \
-       carries the original surface:section key when the route arrived through \
-       CROSS_SURFACE_SECTION_REDIRECTS, otherwise \"none\". Aggregate, no PII."
+    ~help:"Section-level opens within a dashboard surface. Aggregate, no PII."
     ()
-;;
-
-let parse_redirected_from ~target_surface ~target_section raw =
-  match String.index_opt raw ':' with
-  | None -> Error (Printf.sprintf "redirected_from missing ':' separator: %s" raw)
-  | Some idx ->
-    let from_surface = String.sub raw 0 idx in
-    let from_section = String.sub raw (idx + 1) (String.length raw - idx - 1) in
-    if not (is_valid_surface from_surface)
-    then
-      Error (Printf.sprintf "redirected_from references unknown surface: %s" from_surface)
-    else if from_surface = target_surface && Some from_section = target_section
-    then Error "redirected_from must differ from the resolved (surface, section)"
-    else if not (is_valid_section ~surface:from_surface from_section)
-    then
-      (* The original section may have been deleted but the redirect
-           survives; we still require the surface to be known. Allowlist
-           is "known surfaces", not "known sections" for the *from* side. *)
-      Ok raw
-    else Ok raw
 ;;
 
 let parse_event_json json =
@@ -145,38 +126,17 @@ let parse_event_json json =
       in
       match section_ok with
       | Error e -> Error e
-      | Ok () ->
-        let redirected_from_result =
-          match m "redirected_from" with
-          | `Null -> Ok None
-          | `String "" -> Ok None
-          | `String "none" -> Ok None
-          | `String raw ->
-            (match
-               parse_redirected_from ~target_surface:surface ~target_section:section raw
-             with
-             | Ok v -> Ok (Some v)
-             | Error e -> Error e)
-          | _ -> Error "redirected_from must be string or null"
-        in
-        (match redirected_from_result with
-         | Error e -> Error e
-         | Ok redirected_from -> Ok { surface; section; redirected_from }))
+      | Ok () -> Ok { surface; section })
   with
   | Yojson.Safe.Util.Type_error (msg, _) -> Error msg
   | Yojson.Json_error msg -> Error msg
 ;;
 
-let record { surface; section; redirected_from } =
+let record { surface; section } =
   Otel_metric_store.inc_counter counter_surface ~labels:[ "surface", surface ] ~delta:1.0 ();
   match section with
   | None -> ()
   | Some s ->
-    let labels =
-      [ "surface", surface
-      ; "section", s
-      ; "redirected_from", Option.value ~default:"none" redirected_from
-      ]
-    in
+    let labels = [ "surface", surface; "section", s ] in
     Otel_metric_store.inc_counter counter_section ~labels ~delta:1.0 ()
 ;;

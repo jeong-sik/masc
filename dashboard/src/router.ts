@@ -4,35 +4,13 @@
 import { signal } from '@preact/signals'
 import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
-import { normalizeRouteParams, sectionItemsForTab, SECTION_REDIRECTS } from './config/navigation'
+import { normalizeRouteParams, sectionItemsForTab } from './config/navigation'
 import { cockpitTargetForParams, normalizeCockpitMode } from './cockpit-entrypoints'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
 const VALID_COMMAND_SECTIONS = new Set(
   sectionItemsForTab('command').map(item => item.params.section),
 )
-
-interface CrossSurfaceRedirect {
-  tab: TabId
-  section: string
-  view?: string
-  params?: Record<string, string>
-}
-
-type TabSectionKey = `${TabId}:${string}`
-
-// Exported for RFC-0048 PR-A redirect-ledger contract test. Pure data —
-// not part of the runtime API.
-export const CROSS_SURFACE_SECTION_REDIRECTS: Record<TabSectionKey, CrossSurfaceRedirect> = {
-  'command:connectors': {
-    tab: 'connectors',
-    section: 'connector-status',
-  },
-  'monitoring:git-graph': {
-    tab: 'workspace',
-    section: 'repositories',
-  },
-}
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
@@ -72,47 +50,8 @@ function shouldApplyCockpitModeRoute(segments: string[], params: Record<string, 
   return false
 }
 
-// Internal-only param key recording the original `<tab>:<section>` key
-// when a redirect resolved the route. RFC-0049 §4.5 — never written to URL.
-export const REDIRECTED_FROM_PARAM = '__redirected_from'
-
-function applyCrossSurfaceRedirect(
-  tab: TabId,
-  params: Record<string, string>,
-): { tab: TabId; params: Record<string, string> } | null {
-  const section = params.section
-  if (!section) return null
-  const redirect = CROSS_SURFACE_SECTION_REDIRECTS[`${tab}:${section}` as TabSectionKey]
-  if (!redirect) return null
-
-  const nextParams = { ...params, ...(redirect.params ?? {}) }
-  nextParams.section = redirect.section
-  if (redirect.view && !nextParams.view) nextParams.view = redirect.view
-  nextParams[REDIRECTED_FROM_PARAM] = `${tab}:${section}`
-  return { tab: redirect.tab, params: nextParams }
-}
-
 function canonicalRoute(tab: TabId, params: Record<string, string>): RouteState {
-  const rawCrossSurface = applyCrossSurfaceRedirect(tab, params)
-  if (rawCrossSurface) {
-    return {
-      tab: rawCrossSurface.tab,
-      params: normalizeRouteParams(rawCrossSurface.tab, rawCrossSurface.params),
-      postId: null,
-    }
-  }
-
-  const normalizedParams = normalizeRouteParams(tab, params)
-  const normalizedCrossSurface = applyCrossSurfaceRedirect(tab, normalizedParams)
-  if (normalizedCrossSurface) {
-    return {
-      tab: normalizedCrossSurface.tab,
-      params: normalizeRouteParams(normalizedCrossSurface.tab, normalizedCrossSurface.params),
-      postId: null,
-    }
-  }
-
-  return { tab, params: normalizedParams, postId: null }
+  return { tab, params: normalizeRouteParams(tab, params), postId: null }
 }
 
 function normalizeSegments(pathPart: string): string[] {
@@ -134,12 +73,7 @@ function parseSegments(
   if (segments[0] === 'command' && segments[1]) {
     const nextParams = { ...params }
     const second = segments[1]
-    if (
-      `command:${second}` in CROSS_SURFACE_SECTION_REDIRECTS
-      || `command:${second}` in SECTION_REDIRECTS
-    ) {
-      nextParams.section = second
-    } else if (!VALID_COMMAND_SECTIONS.has(second)) {
+    if (!VALID_COMMAND_SECTIONS.has(second)) {
       console.warn('[router] unknown command section, falling back to operations', second)
       nextParams.section = 'operations'
     } else {
@@ -238,7 +172,6 @@ function toHash(r: RouteState): string {
   const path = r.tab
   const paramEntries = Object.entries(r.params).filter(([key, value]) => {
     if (key === 'tab' && value === r.tab) return false
-    if (key === REDIRECTED_FROM_PARAM) return false
     return true
   })
   if (paramEntries.length === 0) return `#${path}`

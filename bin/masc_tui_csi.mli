@@ -24,17 +24,20 @@
 
 val name : parameters:string -> final:char -> string option
 (** The key for one CSI sequence, or [None] when this vocabulary has none.
+    Malformed or unsupported modifiers are unclaimed; they never lose their
+    modifiers and become an unmodified action. Caps/Num Lock are incidental.
 
     Named keys are lower-case and modifiers prefix them in a fixed order —
-    ["ctrl-shift-up"], never ["shift-ctrl-up"]. CSI-u Ctrl+letter sequences
-    instead return the same one-byte C0 string as legacy terminals. Thus a
+    ["ctrl-shift-up"], never ["shift-ctrl-up"]. CSI-u Enter, Tab, Backspace and Ctrl+ASCII sequences
+    instead return the same bytes as legacy terminals. Escape stays ["esc"].
+    Ctrl+Shift+6 and Ctrl+^ both name the legacy Ctrl-^ byte. Thus a
     binding receives one value regardless of which encoding the terminal
     uses. *)
 
 val enable_kitty_keyboard : string
-(** The escape that asks the terminal to report modifiers on every key.
-    Terminals that do not know it ignore it, which is why this is written
-    unconditionally rather than behind a capability query. *)
+(** Push the disambiguation flag for modified and ambiguous keys. Ordinary
+    text remains UTF-8. The caller applies its terminal profile before
+    enabling this mode; terminals that do not support it ignore it. *)
 
 val disable_kitty_keyboard : string
 (** Pops what {!enable_kitty_keyboard} pushed. Written on the way out: the

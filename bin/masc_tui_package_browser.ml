@@ -29,7 +29,7 @@ let handle ~key t =
   | "k" | "up" -> Ok (Updated {t with cursor=max 0 (t.cursor-1)})
   | "home" -> Ok (Updated {t with cursor=0})
   | "end" -> Ok (Updated {t with cursor=max 0 (List.length (entries t)-1)})
-  | "h" | "left" | "backspace" ->
+  | "h" | "left" | "backspace" | "\127" | "\b" ->
       (* A folder that was never read has no known parent: a remembered folder
          may since have been removed or belong to another worktree. The
          workspace root does not depend on that folder. *)

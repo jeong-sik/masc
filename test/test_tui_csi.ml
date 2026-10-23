@@ -93,11 +93,24 @@ let test_csi_u_lowers_the_letter () =
 ;;
 
 let test_csi_u_named_keys () =
-  check_name "tab" "tab" "9;1" 'u';
-  check_name "enter" "enter" "13;1" 'u';
+  check_name "tab" "\t" "9;1" 'u';
+  check_name "enter" "\r" "13;1" 'u';
   check_name "shift-enter" "shift-enter" "13;2" 'u';
-  check_name "backspace" "backspace" "127;1" 'u';
+  check_name "backspace" "\127" "127;1" 'u';
   check_name "ctrl-enter" "ctrl-enter" "13;5" 'u'
+;;
+
+(* These chords reach global reference/browser navigation, as well as every
+   composer and form, through the same decoder as the C0 terminal encoding. *)
+let test_csi_u_control_punctuation_matches_legacy () =
+  List.iter (fun (parameters, expected) ->
+      check_name "legacy control binding" expected parameters 'u')
+    [ "91;5", "esc"; "92;5", "\028"; "93;5", "\029"
+    ; "94;5", "\030"; "54;6", "\030"; "95;5", "\031"
+    ; "64;5", "\000"; "32;5", "\000" ];
+  check_name "shift Tab retains reverse navigation" "shift-tab" "9;2" 'u';
+  check_name "shift Enter retains newline" "shift-enter" "13;2" 'u';
+  check_name "Alt Backspace retains word deletion" "alt-backspace" "127;3" 'u'
 ;;
 
 (* One order for every chord. Two spellings would be two bindings, and the one
@@ -114,12 +127,15 @@ let test_backtab_is_not_double_named () =
   check_name "with a mask" "shift-tab" "1;2" 'Z'
 ;;
 
-(* A press whose mask does not parse is still that press. Dropping the key
-   because the mask was odd would lose a keystroke to a detail nobody bound. *)
-let test_unreadable_mask_reads_as_no_modifier () =
-  check_name "empty" "up" "1;" 'A';
-  check_name "not a number" "up" "1;x" 'A';
-  check_name "below one" "up" "1;0" 'A'
+let test_unclaimed_modifiers_cannot_invoke_bindings () =
+  check_name "omitted modifiers" "up" "1;" 'A';
+  check_name "lock state keeps Ctrl-D" "\004" "100;197" 'u';
+  List.iter (fun parameters ->
+      check (option string) "unsupported/malformed chord stays unclaimed" None
+        (named ~parameters ~final:'u'))
+    [ "113;9"; "100;13"; "113;17"; "113;33"; "113;257"; "97;x"; "97;0" ];
+  check (option string) "malformed arrow cannot navigate" None
+    (named ~parameters:"1;x" ~final:'A')
 ;;
 
 (* The mask is read through the name rather than directly: the name is what a
@@ -189,7 +205,7 @@ let () =
       , [ test_case "modified arrows" `Quick test_modified_arrows
         ; test_case "order is fixed" `Quick test_modifier_order_is_fixed
         ; test_case "bits" `Quick test_modifier_bits
-        ; test_case "unreadable mask" `Quick test_unreadable_mask_reads_as_no_modifier
+        ; test_case "unclaimed modifiers" `Quick test_unclaimed_modifiers_cannot_invoke_bindings
         ] )
     ; ( "csi-u"
       , [ test_case "letters" `Quick test_csi_u_letters
@@ -197,6 +213,8 @@ let () =
             test_csi_u_control_letters_match_legacy_bytes
         ; test_case "upper case is lowered" `Quick test_csi_u_lowers_the_letter
         ; test_case "named keys" `Quick test_csi_u_named_keys
+        ; test_case "control punctuation matches legacy" `Quick
+            test_csi_u_control_punctuation_matches_legacy
         ] )
     ; ( "boundaries"
       , [ test_case "SS3 finals are named without parameters" `Quick

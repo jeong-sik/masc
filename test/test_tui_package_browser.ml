@@ -63,7 +63,10 @@ let navigation () =
   let state=move "j" state in
   (match Browser.handle ~key:"enter" state |> ok with Preview path -> check string "fresh preview of selected manifest" "/workspace/packages/p/lane.toml" path | _ -> fail "missing preview");
   (match Browser.handle ~key:"right" state |> ok with Browse (Some path) -> check string "package directory remains navigable" "/workspace/packages/p" path | _ -> fail "missing package directory");
-  (match Browser.handle ~key:"left" state |> ok with Browse (Some path) -> check string "parent" "/workspace" path | _ -> fail "missing parent");
+  List.iter (fun key ->
+    match Browser.handle ~key state |> ok with
+    | Browse (Some path) -> check string "parent" "/workspace" path
+    | _ -> fail "missing parent") ["left"; "backspace"; "\127"; "\b"];
   let reordered={snapshot with entries=List.rev snapshot.entries} in
   let state=Browser.receive (Catalog.to_json reordered) state |> ok in
   check (option string) "refresh preserves exact selected manifest" (Some "/workspace/packages/p/lane.toml") (Browser.selected_manifest state);

@@ -117,19 +117,12 @@ let nullable parse = function `Null -> Ok None | value -> Result.map Option.some
 let boolean = function `Bool value -> Ok value | _ -> Error "expected boolean"
 let optional name parse json = get (nullable parse) name json
 module Category = Masc.Lane_addon_category
-(* Wire values are the shared contract's six. Absent or null is unclassified;
-   an explicit unknown value is a decode error, never a silent default. *)
-let ui_category_value = function
-  | `String "memory_judgment" -> Ok Category.Memory_and_judgment
-  | `String "browser" -> Ok Category.Browser
-  | `String "external_communications" -> Ok Category.External_communications
-  | `String "voice_media" -> Ok Category.Voice_and_media
-  | `String "execution_environment" -> Ok Category.Execution_environment
-  | `String "analysis" -> Ok Category.Analysis
-  | _ -> Error "unknown ui_category"
+(* Only an omitted key is unclassified. Explicit null, blank or unknown values
+   are rejected by the shared parser rather than defaulted. *)
 let ui_category_of fields = match List.assoc_opt "ui_category" fields with
-  | None | Some `Null -> Ok None
-  | Some value -> Result.map Option.some (ui_category_value value)
+  | None -> Ok None
+  | Some (`String wire) -> Result.map Option.some (Category.of_wire wire)
+  | Some _ -> Error "ui_category must be a string"
 let output_ports = function
   | `Assoc fields ->
       List.fold_right (fun (id, value) acc ->
@@ -372,7 +365,7 @@ let retained (instance : instance) = match instance.phase with
   | Row.Detached -> true
   | Row.Attached | Row.Observing | Row.Failed _ | Row.Detaching -> false
 let history_group (instance : instance) = instance.source_path, instance.run_id, instance.addon_id
-let overview_entries ?(mode=Current_installations) snapshot =
+let overview_entries_raw ?(mode=Current_installations) snapshot =
   let instances = match mode with
     | Current_installations -> List.filter (fun item -> not (retained item)) snapshot.instances
     | Retained_runs -> List.filter retained snapshot.instances
@@ -391,6 +384,47 @@ let overview_entries ?(mode=Current_installations) snapshot =
                     instance.id=id && instance.source_path=Some declaration.source_path) instances)
                   declaration.instance_id in
                 if has_worker then None else Some (`Declaration (index, declaration))))
+let category_label = function
+  | Category.Memory_and_judgment -> "Memory & judgment"
+  | Category.Browser -> "Browser"
+  | Category.External_communications -> "External communications"
+  | Category.Voice_and_media -> "Voice & media"
+  | Category.Execution_environment -> "Execution environment"
+  | Category.Analysis -> "Analysis"
+let category_order = [Category.Memory_and_judgment; Category.Browser; Category.External_communications;
+  Category.Voice_and_media; Category.Execution_environment; Category.Analysis]
+type current_category = Classified of Category.t | Unclassified | Unverified
+(* The current group comes from the declaration whose installation id and
+   source path both match. A worker's own start-time category is never
+   borrowed when that declaration was not read. *)
+let current_category snapshot = function
+  | `Declaration (_, (d : declaration)) -> (match d.ui_category with Some c -> Classified c | None -> Unclassified)
+  | `Instance (i : instance) ->
+      match snapshot.configuration, i.installation_id, i.source_path with
+      | Some config, Some id, Some path ->
+          (match List.find_opt (fun (d : declaration) -> d.installation_id=Some id && d.source_path=path) config.declarations with
+           | Some {ui_category=Some c;_} -> Classified c
+           | Some {ui_category=None;_} -> Unclassified
+           | None -> Unverified)
+      | _ -> Unverified
+let category_rank = function
+  | Classified c -> Option.value ~default:0 (List.find_index (fun x -> x=c) category_order)
+  | Unclassified -> List.length category_order
+  | Unverified -> List.length category_order + 1
+let category_heading = function
+  | Classified c -> category_label c
+  | Unclassified -> "Unclassified"
+  | Unverified -> "Unclassified (declaration not read)"
+(* Current installations are grouped by role; within a group the order is the
+   raw order, so identity-based cursor anchors stay stable. Retained runs keep
+   their run grouping. *)
+let overview_entries ?(mode=Current_installations) snapshot =
+  let entries = overview_entries_raw ~mode snapshot in
+  match mode with
+  | Retained_runs -> entries
+  | Current_installations ->
+      List.stable_sort (fun a b ->
+        Int.compare (category_rank (current_category snapshot a)) (category_rank (current_category snapshot b))) entries
 let overview_count ?(mode=Current_installations) snapshot = List.length (overview_entries ~mode snapshot)
 let selectable_overview_entries view snapshot =
   let entries = overview_entries ~mode:view.overview_mode snapshot in
@@ -1451,6 +1485,14 @@ let overview_lines ~width view =
          ""] @ empty)
         @ List.concat_map (fun (index,item) ->
             let marker = if index=view.instance_cursor then "> " else "  " in
+            let role_header = match view.overview_mode with
+              | Retained_runs -> []
+              | Current_installations ->
+                  let here = current_category snapshot item in
+                  let previous = if index=0 then None else List.nth_opt entries (index-1) in
+                  if index<>window && Option.fold ~none:false ~some:(fun p -> current_category snapshot p=here) previous
+                  then [] else texts ["── " ^ category_heading here ^ " ──"] in
+            role_header @
             match item with
             | `Declaration (_, declaration) ->
                 let name = Option.value ~default:"unresolved installation" declaration.installation_id in
@@ -1501,6 +1543,13 @@ let overview_lines ~width view =
                    | Current_installations, None | Retained_runs, _ -> [])
                 @ (match view.overview_mode with Current_installations -> []
                    | Retained_runs -> ["    Instance " ^ item.id])
+                @ (match view.overview_mode, current_category snapshot (`Instance item), item.ui_category with
+                   | Retained_runs, _, _ | _, Unverified, _ -> []
+                   | Current_installations, Classified now, Some started when now=started -> []
+                   | Current_installations, now, started ->
+                       let word = function Some c -> category_label c | None -> "unclassified" in
+                       [Printf.sprintf "    role: worker started as %s · declaration now %s" (word started)
+                          (match now with Classified c -> category_label c | Unclassified | Unverified -> "unclassified")])
                 @ (if index=view.instance_cursor then
                      Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
                    else [])

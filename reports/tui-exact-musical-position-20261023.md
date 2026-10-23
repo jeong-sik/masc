@@ -1,6 +1,7 @@
 # Exact authored musical timing
 
 Base: `dbd543dd6e1e8d395b915875a34a2a6d6c8e2f20`.
+Native Stack #45266: #45264 → #45265.
 
 An actual source-TUI composition exercise exposed a command-boundary defect:
 `note C4 8.3 1 91` rejected a valid 7968-tick position because Number('8.3')
@@ -21,6 +22,13 @@ PPQ1001/SMPTE80 source input, controller and release preservation through real
 SMF export/reimport, undo, selection movement, arrangement cursor/grid and
 transactional refusal. The regression includes a 1/3-beat phrase and a 1/7-beat
 PPQ1001 source; nonintegral source positions are still refused.
+
+The real source auxiliary TUI was also opened with a new empty phrase. Typed
+commands inserted `C4 8.3 1/3 91`, selected it with `8.3 9`, moved it by `-1/3`,
+and compared Undo/Redo before save and MIDI export. Independent file reads
+confirmed the saved note and actual SMF both start at 7648, with length320 and
+attack91. This is direct source-terminal execution, not an installed parent.
+Local command/result evidence is under `masc-music-exact-position-evidence-20261023`.
 
 No full regression, local Dune, installed OCaml-parent integration, audio-device
 latency, physical MIDI or audible-output result is claimed. This fixes authored

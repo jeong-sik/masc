@@ -927,7 +927,7 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
     }
   in
   let outcome =
-    Keeper_muse_runtime.run
+    Keeper_muse_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = keeper_name })
       ?argument_source ?librarian_front
       ?composed_context
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
@@ -1342,12 +1342,12 @@ default = "reloaded.reloaded"
             system_prompt_override = Some "MUSE_ROUTED_EFFECTIVE_SYSTEM_PROMPT" }
       | _ -> fail "expected before_turn_params hook event") } in
   let run () = Eio.Switch.run (fun sw ->
-    match Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
+    match Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = keeper_name }) ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
       ~runtime_id ~keeper_name ~base_path ~goal:"Call masc_probe once"
       ~system_prompt:"" ~hooks
       ~tools:[tool] ~agent_core_tools:[tool]
-      ~initial_messages:[user_message "MUSE_OLD_COMPLETED_QUESTION";
-        { (user_message "MUSE_OLD_COMPLETED_ANSWER") with role=Assistant };
+      ~initial_messages:[user_message "MUSE_EARLIER_QUESTION";
+        { (user_message "MUSE_EARLIER_ANSWER") with role=Assistant };
         user_message "MUSE_ROUTED_NEWEST_ATOM"]
       ~context:(Agent_core.Context.create ()) ~sw ~net:(Eio.Stdenv.net env) () with
     | Ok selected -> selected.Keeper_turn_driver.run_result
@@ -1364,12 +1364,13 @@ default = "reloaded.reloaded"
     (String_util.contains_substring prompt "MUSE_ROUTED_EFFECTIVE_SYSTEM_PROMPT");
   check bool "native coordinate survives the hook override" true
     (String_util.contains_substring prompt "Muse native tools use host workspace");
-  check bool "no-trace start retains the newest checkpoint atom" true
+  check bool "owned history retains the newest atom" true
     (String_util.contains_substring prompt "MUSE_ROUTED_NEWEST_ATOM");
-  List.iter (fun stale ->
-    check bool "no-trace start excludes completed checkpoint history" false
-      (String_util.contains_substring prompt stale))
-    ["MUSE_OLD_COMPLETED_QUESTION"; "MUSE_OLD_COMPLETED_ANSWER"];
+  (* No durable completed-turn boundary retires the earlier atoms. *)
+  List.iter (fun earlier ->
+    check bool "owned history without a completed boundary preserves earlier atoms" true
+      (String_util.contains_substring prompt earlier))
+    ["MUSE_EARLIER_QUESTION"; "MUSE_EARLIER_ANSWER"];
   Runtime.For_testing.restore frozen_registry;
   let second = run () in
   check (option bool) "routed resume" (Some true) second.session_resumed;

@@ -1774,7 +1774,7 @@ let run_named
     ~goal
     ?goal_blocks
     ?(goal_metadata = [])
-    ?session_id
+    ~input_source
     (* Required, not defaulted to "". Three of the runtimes this dispatches to
        -- Codex, Claude Code, Antigravity -- refuse a blank composition in
        [Keeper_official_client_host.prepare_turn], because a blank one runs the
@@ -1851,6 +1851,7 @@ let run_named
     ?net
     ()
   : (named_run_result, Agent_core.Error.t) result =
+  let session_id = Keeper_request_source.trace_id input_source in
   let tool_requirement = match output_contract with
     | Tool_verdict -> Keeper_required_tools.Required
     | Provider_default -> tool_requirement in
@@ -1900,9 +1901,9 @@ let run_named
         official_client_turn_start ~session_id
           ~read_boundary:(fun () -> Eio.Lazy.force turn_boundary)) in
       let continuity = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
-        match session_id with
-        | None -> None
-        | Some trace_id ->
+        match input_source with
+        | Keeper_request_source.Completion_review -> Keeper_turn_driver_try_provider.Completion_review
+        | Keeper_request_source.Keeper_history { trace_id } ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
             let continuity, notes =
               Keeper_turn_driver_try_provider.read_keeper_continuity
@@ -1912,7 +1913,7 @@ let run_named
             List.iter
               (Keeper_turn_driver_try_provider.log_continuity_note ~keeper_name)
               notes;
-            Some continuity))
+            Keeper_turn_driver_try_provider.Keeper_history { trace_id; continuity }))
       in
 	  let refused_carried_front = ref None in
 	  (* The same front the Agent Core branch reads, for the official-client
@@ -1961,8 +1962,9 @@ let run_named
 	     way the checkpoint stores it (#37812). *)
 	  let official_client_librarian_front ~attempt_messages messages =
 	    match Eio.Lazy.force continuity with
-	    | None -> Ok Keeper_turn_driver_try_provider.no_librarian_position
-	    | Some chosen ->
+	    | Keeper_turn_driver_try_provider.Completion_review ->
+	      Ok Keeper_turn_driver_try_provider.no_librarian_position
+	    | Keeper_turn_driver_try_provider.Keeper_history { continuity = chosen; _ } ->
 	      Domain_pool_ref.submit_cpu_or_inline (fun () ->
 	        Keeper_turn_driver_try_provider.librarian_position
 	          ~messages
@@ -1989,7 +1991,9 @@ let run_named
 	        ; runtime_id
 	        ; input =
 	            Keeper_official_client_host.continuity_observation_input
-	              ~trace_id ~continuity:(Eio.Lazy.force continuity) front
+	              ~trace_id ~continuity:(match Eio.Lazy.force continuity with
+                | Keeper_turn_driver_try_provider.Completion_review -> None
+                | Keeper_turn_driver_try_provider.Keeper_history { continuity; _ } -> Some continuity) front
 	        ; request_bytes = transmitted_bytes
 	        }
 	  in
@@ -2394,18 +2398,24 @@ let run_named
         | Runtime_execution.Antigravity_cli _
         | Runtime_execution.Muse_serve _ -> tools <> [], true
         | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
-      let verifier_ready = match output_contract with
-        | Provider_default -> Ok ()
-        | Tool_verdict ->
-          let admission = Result.bind (Runtime.verifier_runtime_admission runtime) (fun () ->
-            match Runtime_agent.decide_modality_reroute_for_runtime_candidates
-              ~assigned:runtime ~candidates:[] ~checkpoint_messages ~initial_messages
-              current_goal_blocks with
-            | Runtime_agent.No_reroute_needed -> Ok ()
-            | Runtime_agent.Reroute _ | Runtime_agent.No_capable_runtime _ ->
-              Error "The admitted verifier slot cannot consume the submitted media; use another admitted slot") in
-          admission |> Result.map_error (fun detail -> Agent_core.Error.Config
-            (Agent_core.Error.InvalidConfig { field = "verifier.runtime"; detail })) in
+      let complete_media () =
+        match Runtime_agent.decide_modality_reroute_for_runtime_candidates
+          ~assigned:runtime ~candidates:[] ~checkpoint_messages ~initial_messages
+          current_goal_blocks with
+        | Runtime_agent.No_reroute_needed -> Ok ()
+        | Runtime_agent.Reroute _ | Runtime_agent.No_capable_runtime _ ->
+          Error "The admitted verifier slot cannot consume the submitted media; use another admitted slot"
+      in
+      let verifier_ready =
+        let admission = match input_source, output_contract with
+          | Keeper_request_source.Keeper_history _, Provider_default -> Ok ()
+          | Keeper_request_source.Completion_review, Provider_default -> complete_media ()
+          | (Keeper_request_source.Keeper_history _ | Keeper_request_source.Completion_review), Tool_verdict ->
+            Result.bind (Runtime.verifier_runtime_admission runtime) complete_media
+        in
+        admission |> Result.map_error (fun detail -> Agent_core.Error.Config
+          (Agent_core.Error.InvalidConfig { field = "verifier.runtime"; detail }))
+      in
       (match Result.bind verifier_ready (fun () -> Result.bind source_reader_ready (fun () ->
           Keeper_required_tools.check_surface tool_requirement
             ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools
@@ -2594,7 +2604,7 @@ let run_named
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
-          Keeper_codex_runtime.run ?on_native_tool_completion ?on_native_tool_progress
+          Keeper_codex_runtime.run ~input_source ?on_native_tool_completion ?on_native_tool_progress
             ?argument_source:official_argument_source
             ?on_memory_capacity_refusal
             ?on_tool_execution
@@ -2755,7 +2765,7 @@ let run_named
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
-          Keeper_antigravity_runtime.run ?on_native_tool_completion
+          Keeper_antigravity_runtime.run ~input_source ?on_native_tool_completion
             ?argument_source:official_argument_source
             ?on_tool_execution
             ?composed_context:official_client_composed_context
@@ -2883,7 +2893,7 @@ let run_named
             ; settled_session = None
             ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
           | Ok (workspace_root, native_context) ->
-          Keeper_muse_runtime.run
+          Keeper_muse_runtime.run ~input_source
             ?on_native_tool_completion
             ?argument_source:official_argument_source
             ?on_tool_execution
@@ -3009,7 +3019,7 @@ let run_named
           in
           let native_attempt : Runtime_native_tasks.attempt =
             { routing_run_id; runtime_id = attempt_runtime_id; lane_attempt_index = idx } in
-          Keeper_claude_code_runtime.run ?on_native_tool_progress ?on_native_tool_completion
+          Keeper_claude_code_runtime.run ~input_source ?on_native_tool_progress ?on_native_tool_completion
             ?argument_source:official_argument_source
             ?on_provider_retry:(Option.map
               (fun observe retry -> observe ~attempt:native_attempt retry)
@@ -3131,11 +3141,13 @@ let run_named
       | Runtime_execution.Agent_core runtime_provider_config ->
        (* Held to this candidate's own rendering of the history, for the
           reason [official_client_librarian_front] states. *)
-       let continuity =
-         Option.map
-           (Keeper_turn_driver_try_provider.continuity_for_attempt
-              ~messages:initial_messages)
-           (Eio.Lazy.force continuity)
+       let request_input = match Eio.Lazy.force continuity with
+         | Keeper_turn_driver_try_provider.Completion_review ->
+           Keeper_turn_driver_try_provider.Completion_review
+         | Keeper_turn_driver_try_provider.Keeper_history { trace_id; continuity } ->
+           Keeper_turn_driver_try_provider.Keeper_history
+             { trace_id; continuity = Keeper_turn_driver_try_provider.continuity_for_attempt
+                 ~messages:initial_messages continuity }
        in
        (match
           match provider_config_transform with
@@ -3174,14 +3186,7 @@ let run_named
            , Keeper_provider_attempt_effect.No_effect_observed
            , Keeper_attempt_dispatch.Rejected_before_dispatch )
          | Ok () ->
-          (* The marks the carried range is judged against, as the binding
-             declares them (RFC keeper-context-window-in-tokens §10.2); a binding
-             that declares none leaves eviction to a refusal. Their agreement
-             with the model's max-context was checked at load
-             ([Runtime_config_validation.validate_runtime_context_marks]). *)
-          (let context_marks =
-             Runtime.context_marks_of_runtime_id attempt_runtime_id
-           in
+          (
             let candidate = Runtime_candidate.of_provider_config provider_config in
             (* Cached provider health is observation only. Every eligible runtime
                reaches the real provider boundary; only the resulting typed error
@@ -3199,12 +3204,11 @@ let run_named
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
-            ; context_marks
             ; input_policy
             ; turn_boundary = Eio.Lazy.force turn_boundary
             ; argument_demotion_seed
             ; argument_replay_prefix = replay_prefix_projection
-            ; continuity
+            ; request_input
             ; (* The range the newest response-observed turn record on this
                  history measured, whichever runtime ran it. Without a
                  Librarian point it is read only when the process holds no
@@ -3229,7 +3233,6 @@ let run_named
             ; goal
             ; goal_blocks
             ; goal_metadata
-            ; session_id
             ; system_prompt
             ; (* Only this lane can widen a running turn, so only this lane
                  is handed the listing. The official-client branches above

@@ -17,6 +17,7 @@ type attempt_outcome =
     support accepting a tool-only terminal. *)
 
 val run :
+  input_source:Keeper_request_source.t ->
   ?argument_source:Keeper_official_client_host.argument_source ->
   ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?official_task_reference:Keeper_official_task_reference.t ->
@@ -148,7 +149,8 @@ module For_testing : sig
     Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
 
   val carried_projection
-    :  capacity_bytes:int
+    :  input_source:Keeper_request_source.t ->
+    capacity_bytes:int
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
     -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
     -> ?on_carried_front:

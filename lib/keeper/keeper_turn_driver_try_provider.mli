@@ -320,21 +320,23 @@ val project_range_start :
     bytes as [measure_message_bytes] counts them. A snapshot's working state
     ({!working_state_text}) rides ahead of the atoms it does not cover. *)
 
+type request_input =
+  | Keeper_history of { trace_id : string; continuity : continuity }
+  | Completion_review
+(** A prepared Keeper input always contains its checked continuity. A
+    program-owned review carries original evidence, without a fabricated trace
+    or snapshot and without history eviction or result-marker retries. *)
+
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
-  ; context_marks : Runtime_schema.context_marks option
-        (** The marks the carried range is judged against once per candidate
-            turn, before its first composition (RFC
-            keeper-context-window-in-tokens §10.5), as the binding declares
-            them; [None] leaves eviction to a refusal. *)
   ; carried_front_seed : unit -> Keeper_carried_front.seed_read
         (** The durable seed: with no Librarian point, read only when
             neither the pair's ledger nor a refusal in this turn supplies the
             front; with one, the accepted start {!choose_range_start} weighs
             against the point, read unless a refusal in this turn supplies
             it. *)
-  ; continuity : continuity option
+  ; request_input : request_input
   ; input_policy : Keeper_input_policy.t
   ; turn_boundary : Keeper_carried_front.turn_start
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
@@ -353,7 +355,6 @@ type try_provider_ctx =
   ; goal : string
   ; goal_blocks : Agent_core.Types.content_block list option
   ; goal_metadata : Agent_core.Types.metadata
-  ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
   ; initial_messages : Agent_core.Types.message list
@@ -573,7 +574,7 @@ val context_overflow_shrink_sequence :
 (** Provider-oracle retry policy of the official-client runtimes, whose
     seed history is cut against a declared prompt byte cap; the capacity is
     in bytes. The Agent Core lane answers the same refusal by moving its
-    carried front ({!run_try_provider_with_carried_range_eviction}).
+    carried front ({!run_try_provider_with_history_recovery}).
     After a typed window or request-body refusal and same-run effect
     authorization, memory
     reprojection is offered first. [Reprojected] retries at the same history
@@ -721,7 +722,7 @@ val memory_capacity_retry_sequence :
     retry. Receipt failure calls [on_projection_failure] so enclosing history
     recovery cannot bypass it. Unchanged memory returns the original refusal. *)
 
-val run_try_provider_with_carried_range_eviction :
+val run_try_provider_with_history_recovery :
   ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
@@ -729,15 +730,9 @@ val run_try_provider_with_carried_range_eviction :
   (Runtime_agent.run_result, Agent_core.Error.t) result
   * Agent_core.Checkpoint.t option
   * (string * Obj.t) option
-(** {!run_try_provider} under {!carried_range_eviction_sequence}, after the
-    marks are judged against the pair's ledger once for the turn: the
-    eviction moves the pair's ledger front, the halving holds a seed for the
-    rest of this attempt, and each retry is recorded on the runtime
-    manifest. A turn with a continuity choice, with or without a Librarian
-    point, runs under {!turn_boundary_resend_sequence} instead. Whatever the continuity, a size refusal left after that is
-    answered by {!current_turn_demotion_sequence} on the same candidate,
-    when the Keeper is offered the artifact reader the markers name. A
-    recovery view runs one attempt. *)
+(** A completion review runs once with its original evidence. A Keeper input
+    retains memory reprojection, verified boundary resend and current-tool
+    demotion under the existing checkpoint/effect retry authority. *)
 
 val run_try_provider_with_truncation_recovery :
   ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->

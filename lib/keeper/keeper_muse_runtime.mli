@@ -44,6 +44,7 @@ type attempt_outcome =
     before user/tool code can run. *)
 
 val run :
+  input_source:Keeper_request_source.t ->
   ?argument_source:Keeper_official_client_host.argument_source ->
   ?official_task_reference:Keeper_official_task_reference.t ->
   ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->

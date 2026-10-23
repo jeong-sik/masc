@@ -127,7 +127,7 @@ provider_call_deadline_sec = %g
         env#clock
         (declared_deadline_s +. Exact_output_fixture.fixture_wait_seconds)
         (fun () ->
-           Keeper_turn_driver.run_named ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+           Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = "queue-cap-proof" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
              ~system_prompt:"Queue cap proof."
              ~runtime_id:"busy.sample"
              ~keeper_name:"queue-cap-proof"

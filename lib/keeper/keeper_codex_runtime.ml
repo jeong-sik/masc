@@ -165,7 +165,7 @@ let record_next_shrink_capacity
    ladder's capacity cuts inside the range and names a front of its own; the
    later front wins, so the ladder keeps narrowing instead of being widened
    back by the seed. *)
-let carried_model_input_projection
+let carried_model_input_projection ~input_source
     ?argument_projection
     ~thread_mode
     ~measure_message_bytes
@@ -180,7 +180,9 @@ let carried_model_input_projection
     ~runtime_id
     source_projection
     messages =
-  let* frozen = Host.read_librarian_front librarian_front messages in
+  let* frozen = match input_source with
+    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
+    | Keeper_request_source.Keeper_history _ -> Host.read_librarian_front librarian_front messages in
   let finish sent =
     (match thread_mode with
      | Runtime_codex_app_server.Start ->
@@ -205,6 +207,7 @@ let carried_model_input_projection
   in
   let* sent =
     Host.start_range_projection
+      ~input_source
       ?argument_projection
       ~measure_message_bytes
       ~capacity_bytes
@@ -1791,7 +1794,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1842,7 +1845,10 @@ let run ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?c
          start, which a continuation forbids. Its overflow ends the turn on the
          typed error instead ([recovery_failure_of_attempt]). *)
       ~same_run_retry_authorized:(fun () ->
-        Option.is_none official_client_continuation
+        (match input_source with
+         | Keeper_request_source.Completion_review -> false
+         | Keeper_request_source.Keeper_history _ -> true)
+        && Option.is_none official_client_continuation
         && Keeper_provider_attempt_effect.allows_same_turn_retry
              (Atomic.get effect_disposition))
       ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
@@ -1902,7 +1908,7 @@ let run ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?c
               | Runtime_codex_app_server.Start -> callback
               | Runtime_codex_app_server.Resume _ -> None
             in
-            carried_model_input_projection
+            carried_model_input_projection ~input_source
               ?argument_projection
               ~thread_mode
               ~measure_message_bytes
@@ -1968,10 +1974,10 @@ module For_testing = struct
   let codex_error_to_core_error = codex_error_to_core_error
   let recovery_failure_of_client_error = recovery_failure_of_client_error
   let recovery_failure_of_attempt = recovery_failure_of_attempt
-  let carried_projection ~capacity_bytes ?carried_front_seed ?librarian_front
+  let carried_projection ~input_source ~capacity_bytes ?carried_front_seed ?librarian_front
         ?on_carried_front ~turn_start ?on_model_input_window_observation
         ~keeper_name ~runtime_id messages =
-    carried_model_input_projection
+    carried_model_input_projection ~input_source
       ~thread_mode:Runtime_codex_app_server.Start
       ~measure_message_bytes:measure_model_input_message_bytes
       ~capacity_bytes

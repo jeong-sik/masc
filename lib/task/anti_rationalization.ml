@@ -660,11 +660,9 @@ let run
          ; model_absent_runtimes = []
          }
      | Ok prompt ->
-       (* The rendered prompt rides as the first block; attached evidence
-          images follow. One list serves every slot: a text-only candidate
-          strips the media it cannot take in [Keeper_turn_driver], which
-          leaves the prompt text — and the reference-plus-hash lines inside
-          it — intact (RFC-0436 §4.4). *)
+       (* The rendered prompt and attached evidence are immutable inputs for
+          every slot. Candidate admission must preserve the attachments; later
+          slots additionally receive the actual earlier lookup observations. *)
        let goal_blocks =
          Option.map
            (fun blocks -> Agent_core.Types.text_block prompt :: blocks)
@@ -692,7 +690,63 @@ let run
           message text: a retired or unknown model is permanent for the
           unchanged request, so it names the deferral's permanent set and can
           never arm its retry. *)
+       (* Capture the actual model-facing bridge view once, at lookup return.
+          This preserves failure envelopes and artifact-manifest refusals as
+          well as the inline ceiling. Later slots do not reformat raw results
+          under a possibly changed prompt policy or expose host-only metadata. *)
+       let lookup_observations = ref [] in
+       let capture_lookup evaluator_slot name arguments result =
+         let refusal = ref None in
+         let projected = Tool_bridge.to_agent_core_typed_result
+           ~base_path
+           ~model_projection:(Tool_output.Inline_up_to
+             { maximum_bytes = Tool_shard_limits.verification_evidence_max_bytes })
+           ~on_externalization_error:(fun error -> refusal := Some error)
+           result in
+         let fields, media = match !refusal with
+           | Some { Tool_bridge.kind = Inline_budget_exceeded; message } ->
+             [ "projection_refusal", `Assoc
+                 [ "kind", `String "inline_budget_exceeded"
+                 ; "message", `String message ] ], []
+           | Some { Tool_bridge.kind = Artifact_storage_failure; message } ->
+             [ "projection_refusal", `Assoc
+                 [ "kind", `String "artifact_storage_failure"
+                 ; "message", `String message ] ], []
+           | None ->
+             (match projected with
+              | Ok output ->
+                [ "result", `Assoc
+                    [ "content", `String output.Agent_core.Types.content
+                    ; "is_error", `Bool false ] ],
+                Option.value output.content_blocks ~default:[]
+              | Error error ->
+                [ "result", `Assoc
+                    [ "content", `String error.Agent_core.Types.message
+                    ; "is_error", `Bool true
+                    ; "recoverable", `Bool error.recoverable
+                    ; "error_class", (match error.error_class with
+                        | None -> `Null
+                        | Some class_ -> Agent_core.Types.tool_error_class_to_yojson class_) ] ], [])
+         in
+         let data = `Assoc
+           [ "prior_review_lookup", `Assoc
+               ([ "evaluator_slot", `String evaluator_slot
+                ; "tool_name", `String name
+                ; "arguments", arguments
+                ; "disposition", `String (Tool_result.string_of_disposition result) ] @ fields) ] in
+         Agent_core.Types.Text (Yojson.Safe.to_string data) :: media
+       in
        let run_attempt (slot, candidate_kind) =
+         let prior_evidence = List.concat (List.rev !lookup_observations) in
+         let goal_blocks = match prior_evidence, goal_blocks with
+           | [], original -> original
+           | _ :: _, None -> Some (Agent_core.Types.Text prompt :: prior_evidence)
+           | _ :: _, Some original -> Some (original @ prior_evidence)
+         in
+         let lookup = { lookup with dispatch = (fun ~name ~args ->
+           let result = lookup.dispatch ~name ~args in
+           lookup_observations := capture_lookup slot name args result :: !lookup_observations;
+           result) } in
          let attempt_failures = ref [] in
          let result =
            try

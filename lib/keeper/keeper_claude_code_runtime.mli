@@ -34,7 +34,8 @@ module For_testing : sig
       before Claude emits its terminal result-frame turn id. *)
 
   val start_seed_projection
-    :  capacity_bytes:int
+    :  input_source:Keeper_request_source.t ->
+    capacity_bytes:int
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
     -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
     -> ?on_carried_front:
@@ -73,6 +74,7 @@ module For_testing : sig
 end
 
 val run :
+  input_source:Keeper_request_source.t ->
   ?argument_source:Keeper_official_client_host.argument_source ->
   ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?official_task_reference:Keeper_official_task_reference.t ->

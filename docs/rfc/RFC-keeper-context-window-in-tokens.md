@@ -3,7 +3,7 @@ rfc: "keeper-context-window-in-tokens"
 title: "Carry the Keeper window from where the Librarian absorbed; the provider judges request size"
 status: Active
 created: 2026-09-15
-updated: 2026-10-06
+updated: 2026-10-23
 author: vincent
 related: ["memory-os-bounded-context-and-librarian-curator", "tool-results-age-out-of-context", "runtime-two-layers"]
 ---
@@ -19,11 +19,12 @@ related: ["memory-os-bounded-context-and-librarian-curator", "tool-results-age-o
 이 RFC 의 결정은 이 절에만 적는다. 다른 절은 근거와 설계다.
 
 1. 창 크기를 숫자로 정하지 않는다. 요청은 Librarian 이 마지막으로 흡수한 지점부터 지금까지를 싣는다. Librarian 이 대화 이력까지 정리하므로, 그 앞은 다시 보내지 않는다. 흡수한 지점이 마지막으로 받아들여진 요청의 시작점보다 앞이면 그 시작점부터 싣는 규칙은 아직 구현 전이다(Librarian RFC §4.10). `context-high-water-tokens`·`context-low-water-tokens`·`max-prompt-bytes` 는 두지 않는다(§13.2, §13.6). Librarian 자신의 입력은 여기서 제외한다. Librarian 은 `keeper_librarian_runtime` 의 `prompt_max_messages` 로 자기 입력을 메시지 수로 자른다. 흡수 지점을 옮기는 쪽이 자기 흡수 지점에 묶이면, 한 번 못 도는 크기가 된 뒤로 영영 못 돈다.
-2. 요청이 너무 큰지는 공급자가 판정한다. masc 는 바이트 상한을 선언하지도, 요청을 보내기 전에 재지도 않는다. 거절은 오류로 올리고, 범위를 반씩 좁혀 다시 보내지 않는다. 크기 거절 뒤 같은 후보에 한 번 더 보내는 길은 두 단계뿐이고 순서가 정해져 있다. 먼저 레인이 범위의 시작점으로 답한다. 씨앗에서 시작했으면 턴 경계부터 한 번 보낸다(`Keeper_carried_front.Turn_start_after_seed_refusal`, #38046). Librarian 지점에서 시작했으면 턴 경계부터 한 번 보낸다(Librarian RFC §4.10, 구현 전). 그래도 크기로 거절되면 이번 턴의 도구 결과를 마커로 바꿔 한 번 더 보낸다(§10.4, #28845). 시작할 자리를 모를 때 이력 전체를 보내지 않는다(§13.3, §13.4).
+2. 요청이 너무 큰지는 공급자가 판정한다. masc 는 바이트 상한을 선언하지도, 요청을 보내기 전에 재지도 않는다. 거절은 오류로 올리고, 범위를 반씩 좁혀 다시 보내지 않는다. 크기 거절 뒤 같은 후보에 한 번 더 보내는 길은 두 단계뿐이고 순서가 정해져 있다. 먼저 레인이 범위의 시작점으로 답한다. 씨앗에서 시작했으면 턴 경계부터 한 번 보낸다(`Keeper_carried_front.Turn_start_after_seed_refusal`, #38046). Librarian 지점에서 시작했으면 턴 경계부터 한 번 보낸다(Librarian RFC §4.10, 구현 전). 그래도 크기로 거절되면 이번 턴의 도구 결과를 마커로 바꿔 한 번 더 보낸다(§10.4, #28845). 시작할 자리를 모를 때 이력 전체를 보내지 않는다(§13.3, §13.4). 이 항의 범위 이동·마커 재전송은 지속 Keeper 이력에 적용한다. 프로그램 소유 완료 검토는 원래 증거를 유지하는 7번·§13.10을 따른다.
 3. masc 에는 컴팩션(LLM 요약)이 없다. librarian 이 수시로 기억을 정리하고, 창은 최근 원문만 담는다. 그래서 librarian 이 창 밖으로 밀려난 것 중 무엇이 살아남을지를 결정한다.
 4. 입력할 자료 자체가 많은 경우를 빼면, 턴마다 보내는 컨텍스트는 가능한 한 줄인다. 컨텍스트가 커질수록 효율이 급격히 떨어진다고 본다. 근거는 §6.2~6.4 에 있다. 증거가 받쳐 주는 형태는 "관련 없는 것은 빼고, 필요한 것은 넣는다"이다. 모든 과제에 맞는 길이 기준은 증거에 없다.
 5. 한 사실은 한 곳에만 적는다. 같은 사실이 두 곳 이상에 있으면 두 번째부터 지운다(§13.0). 모델의 창 상한은 카탈로그에 적고, 배포 바인딩의 `max-context` 는 그보다 좁은 선택만 적는다. 둘의 로드 규칙은 `RFC-runtime-two-layers` 규칙 4 한 곳이 정한다. `agent-core-models-overlay.toml` 은 두 값을 복제하지 않는다(§13.8).
 6. 1·2 를 코드에 넣기 시작하는 때는 Librarian 생명주기 RFC(`RFC-librarian-lifecycle.md`) §7 (라)가 정하고, 그 전에 밀림 표시(같은 RFC 의 I4)가 화면에 떠 있어야 한다(§13.7).
+7. 프로그램이 소유한 완료 검토는 제출 증거 전체를 판정한다. 이 입력은 지속 Keeper 이력과 닫힌 출처 타입으로 구분한다. 크기 거절을 받았다는 이유로 검토 증거의 앞부분·첨부·도구 결과를 빼거나 마커로 바꾸지 않는다. 실제 효과 authority가 허용하는 다음 선언 후보에 같은 검토 대상을 전달하고, 모두 거절하면 판정 불가를 보존한다(§13.10). 이 검토에 가짜 Librarian 위치를 만들지 않는다. 6번은 지속 Keeper 이력의 전역 marks·거절 사다리 제거 조건으로 남으며, 이 입력 종류의 분리가 그 조건의 완료를 뜻하지 않는다.
 
 ## 2. 사고와 측정
 
@@ -561,7 +562,7 @@ let halve ~first_atom ~atom_count =
 
 탐색 비용도 비대칭이다. 한 번 틀릴 때마다 22.7 MB 를 올려 보내고 거절을 받는다.
 
-`halve`, `Halved_after_refusal`, `Refused_range` 를 없앤다. 거절은 오류로 올린다. #28845 의 현재 턴 강등(§10.4 마지막 줄)은 이 판정 밖이다. 범위를 좁히지 않고, 거절된 요청에 실린 이번 턴의 도구 결과만 마커로 바꿔 한 번 다시 보낸다.
+`halve`, `Halved_after_refusal`, `Refused_range` 를 없앤다. 거절은 오류로 올린다. #28845 의 현재 턴 강등(§10.4 마지막 줄)은 이 판정 밖이다. 범위를 좁히지 않고, 거절된 요청에 실린 이번 턴의 도구 결과만 마커로 바꿔 한 번 다시 보낸다. 이 허용은 지속 Keeper 이력의 계약이며 프로그램 소유 완료 검토에는 적용하지 않는다(§13.10).
 
 ### 13.4 앞머리가 없으면 이번 턴만 싣는다
 
@@ -626,5 +627,53 @@ let halve ~first_atom ~atom_count =
 
 - 이력을 빼고 남는 부분(`pinned` 메시지: 매 턴 새로 붙는 system·facts·브리핑 블록)이 혼자 provider 한도를 넘는 경우. 13.2 가 바이트 창을 없애면 이것을 알려 주는 것은 provider 의 typed 거절뿐이다. 턴은 그 오류로 끝나고(13.6), 다음 사이클도 같은 요청으로 같은 거절을 받는다. §1 에는 그 반복을 멈추는 장치가 없다. 줄일 것은 이력이 아니라 그 부분이고, facts 는 Librarian 의 `absorbs`·`dropped` 가 줄인다(Librarian RFC §6).
   - `critic` 의 30턴(13.2)은 이 경우가 아니었다. 거절한 쪽은 provider 가 아니라 `antigravity_subscription.gemini-3-8-flash-high` 레인의 masc 바이트 창(`max-prompt-bytes` 131,072)이었고, 그 모델의 `max-context` 는 1,048,576 토큰이다(`<base-path>/.masc/config/runtime.toml` 의 `[models.gemini-3-8-flash-high]`). 그 레인은 지금 이력을 자르지 않고 넘긴다(§4 의 5번).
-- 끝나지 못한 턴의 도구 결과가 창을 넘는 경우는 닫혔다. 큰 창의 런타임에서 도구를 돈 턴이 작은 창의 런타임으로 넘어가면, 그 턴 자신의 도구 결과가 한도를 넘는다. 실패한 턴은 끝 줄을 남기지 않고(`record_turn_boundary` 는 finalize 에서만 돈다) Librarian 은 끝난 턴만 읽는다. 그래서 다음 턴도 같은 범위와 그 턴의 atom 을 싣고, 사이클마다 같은 거절을 받았다. Agent Core 턴은 늘 연속성이 있어서(`Summarized`·`Absorbed`·`Without_snapshot`) 연속성 없는 경로의 사다리도 타지 않았다. 이제 §10.4 의 현재 턴 강등이 어느 연속성에서든 그 결과를 마커로 바꿔 같은 후보에 한 번 다시 보낸다. 받아들여지면 턴이 끝나고 끝 줄이 생기므로 다음 턴의 경계가 그 뒤로 간다. 도구 결과가 아닌 부분이 넘친 것이면 바꿀 것이 없어 거절이 그대로 돌아오고, 위 첫 줄의 경우가 된다.
+- 끝나지 못한 턴의 도구 결과가 창을 넘는 경우는 닫혔다. 큰 창의 런타임에서 도구를 돈 턴이 작은 창의 런타임으로 넘어가면, 그 턴 자신의 도구 결과가 한도를 넘는다. 실패한 턴은 끝 줄을 남기지 않고(`record_turn_boundary` 는 finalize 에서만 돈다) Librarian 은 끝난 턴만 읽는다. 그래서 다음 턴도 같은 범위와 그 턴의 atom 을 싣고, 사이클마다 같은 거절을 받았다. Agent Core 턴은 늘 연속성이 있어서(`Summarized`·`Absorbed`·`Without_snapshot`) 연속성 없는 경로의 사다리도 타지 않았다. 이제 §10.4 의 현재 턴 강등이 지속 Keeper 이력의 어느 연속성에서든 그 결과를 마커로 바꿔 같은 후보에 한 번 다시 보낸다. 받아들여지면 턴이 끝나고 끝 줄이 생기므로 다음 턴의 경계가 그 뒤로 간다. 도구 결과가 아닌 부분이 넘친 것이면 바꿀 것이 없어 거절이 그대로 돌아오고, 위 첫 줄의 경우가 된다. 프로그램 소유 완료 검토는 현재 lookup 결과의 원문을 유지하며 이 강등을 적용하지 않는다(§13.10).
 - Librarian 이 서 있을 때. 창이 보는 위치가 움직이지 않는 동안 이력은 자란다. 범위를 반씩 좁혀 다시 보내지는 않는다(13.3). 지금은 요청이 끝내 provider 한도에서 거절되고 턴마다 오류로 끝난다. Librarian RFC §4.10 이 구현되면, provider 가 그 범위를 크기로 거절할 때 마지막으로 끝난 턴의 경계부터 한 번 다시 보내고 건너뛴 구간을 요청과 화면에 적는다. 규칙과 이유는 Librarian RFC §4.10 이 소유한다. 시간 상한은 두지 않는다. 실패한 Librarian 은 타이머 재시도 없이 다음 신호를 기다리고, 원인별로 푸는 방법은 Librarian RFC §4.3·§4.10 이 소유한다. 밀림 표시를 먼저 띄우는 조건은 §1 의 6 과 §13.7 에 있다.
+
+
+### 13.10 프로그램 소유 완료 검토의 증거는 줄이지 않는다
+
+#38062의 적용 범위를 나눈다. `workspace_metric_hooks`의 완료 검토는 임시 작업공간과 이름으로
+`run_named_with_masc_tools`를 호출하며 지속 Keeper의 trace를 전달하지 않는다. 이 입력을
+이전 대화의 기억을 보존하는 창과 같은 것으로 다루지 않는다. 아래 계약은 닫힌 입력 출처와
+완료 검토의 공급자 입력 경계에 적용한다. 구현·실행 증거와 남은 범위는
+[완료 검토 증거 보존 기록](../evidence/2026-10-23-completion-review-evidence/README.md)에 구분한다.
+
+- 출처는 일반 Keeper 이력과 완료 검토의 닫힌 합타입으로 받는다. optional session ID의
+  부재나 별도 `skip_shrink` bool 조합으로 정책을 추론하지 않는다. Keeper 이력은 실제
+  trace에서 선택한 검증된 continuity를 사용하고, 완료 검토는 trace·완료 boundary·snapshot을
+  꾸며 만들지 않는다.
+- 완료 주장, 제출 증거, 실제 lookup 결과, 첨부 identity와 tool call/result 관계를 유지한다.
+  provider dialect별 wire bytes가 같아야 한다는 뜻은 아니다. typed size/body 거절 뒤
+  marks·block eviction·halve·현재 도구 결과 marker 강등으로 다른 검토 질문을 만들지 않는다.
+  기존 inline evidence ceiling 위반도 원래의 명시적 실패로 남긴다. 실제 lookup 반환 시
+  전체 tool bridge의 모델용 변환 결과를 한 번 보관한다. 큰 실패 metadata·Explicit_data나
+  잘못된 artifact manifest가 거절됐으면 다음 후보에도 그 거절을 전달하며, raw 결과나
+  host 전용 metadata를 프롬프트에 덧붙여 거절을 우회하지 않는다.
+- `ContextOverflow`와 typed `Request_body_refused_by_provider`는 원래 분류로 올린다.
+  기존 dispatch/effect authority가 후보 이동을 허용할 때 다음 선언 후보가 같은 검토 대상을
+  받는다. 실행된 효과·결과 불확실·취소를 크기 거절로 바꾸어 재실행하지 않는다.
+- 모든 후보가 거절하면 `Approve`도 `Reject`도 만들지 않는다. 기존 `verdict=None`과
+  `Evaluator_unavailable`, 원래 Task 제출 및 verification identity를 유지한다.
+  structured verdict tool 호출과 Task 판정의 durable commit도 구분한다.
+- 후보별 실패 근거를 유지한다. 실제 transient 실패나 provider가 명시한 유효 rest가 없는
+  size/body 거절만 있으면 기존 `Producer_must_act` 의미를 유지한다. 앞선 transient 또는
+  provider가 명시한 rest 후보의 `retryable_runtimes`를
+  마지막 size 오류 하나로 지우지 않는다. 임의 시간·토큰·횟수 cap이나 새 타이머를 두지 않는다.
+
+지금은 축소 덕분에 답하던 검토가 원본을 유지하면 판정 불가로 남을 수 있다. 이는 원래
+검토 대상을 보존하는 선택이며 가용성 개선으로 보고하지 않는다. 증거 분할·전체 coverage를
+결합하는 검토가 필요하면 누락·모순·최종 판정의 coverage를 별도 계약으로 정한다.
+한 부분의 통과를 전체 제출의 승인으로 바꾸지 않는다.
+
+반대 사례는 앞 atom의 중요한 반증, 큰 현재 lookup 원문, 단일 큰 첨부, 모든 후보의 size 거절,
+transient 뒤 size 거절, 이미 실행한 효과와 취소다. 실제 wrapper → driver → provider peer 및
+공식 adapter 경계를 확인하고 원래 증거 identity, typed 오류, 후보 순서, 최종 제출 상태를
+실행 receipt에 결속한다. 순수 callback fixture나 고정 점수만으로 이 검증을 대신하지 않는다.
+일반 Keeper의 snapshot/read-position/accepted front/unread 선택과 밀림 가시성은 별도로 검증한다.
+
+§13.7과 Librarian §7(라)의 의미 연속성·운영 연결 조건은 그대로다. 전체 marks 제거,
+codec·validator·템플릿·화면 정리는 실제 production reader가 사라지는 최종 변경에서 함께
+처리한다. unknown key를 거절하는 설정 로더와 운영 TOML은 유효한 조합으로 staging·검증한 뒤
+전환한다. 여기서는 현재 운영 값이나 설치 identity를 확인하지 않았으므로 과거 값이나
+"binary 먼저" 같은 순서를 안전한 현재 절차로 선언하지 않는다.

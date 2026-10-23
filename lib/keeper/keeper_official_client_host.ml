@@ -916,11 +916,14 @@ type selected_start_range =
    Muse Code use the same composition with unbounded capacity. Codex/Claude
    Resume may compose per-turn context here, but send no history and must
    omit [argument_projection]. *)
-let start_range_projection ?argument_projection
+let start_range_projection ~input_source ?argument_projection
     ~measure_message_bytes ~capacity_bytes ~unbounded_capacity_bytes
     ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed
     ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id
     messages =
+  match input_source with
+  | Keeper_request_source.Completion_review -> Ok messages
+  | Keeper_request_source.Keeper_history _ ->
   let* librarian_front = read_librarian_front librarian_front messages in
   let plan = plan_arguments argument_projection ~measure_message_bytes messages in
   let attach messages = Keeper_librarian_request_unread.attach ~include_empty:true

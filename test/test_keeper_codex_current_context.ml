@@ -157,7 +157,7 @@ default = "codex.context"
           (Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks)) prompt_blocks;
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world;tool_choice}
       | _ -> Agent_core.Hooks.Continue) } in
-    Keeper_codex_runtime.run
+    Keeper_codex_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = "context-fixture" })
       ?argument_source
       ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
       ~composed_context:(fun () -> !composed_context)
@@ -844,7 +844,7 @@ let native_unread_messages
 let carried ?carried_front_seed ?librarian_front
     ?(unread = unavailable_native_unread) ?(capacity_bytes = Keeper_codex_runtime.For_testing.unbounded_capacity_bytes) turn_start =
   match
-    Keeper_codex_runtime.For_testing.carried_projection
+    Keeper_codex_runtime.For_testing.carried_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "context-fixture" })
       ~capacity_bytes ?carried_front_seed ?librarian_front ~turn_start
       ~keeper_name:"context-fixture" ~runtime_id:"codex.context" large_history
   with
@@ -1048,25 +1048,24 @@ let test_an_unknown_turn_start_carries_the_newest_atom () =
 
 let turn_start_to_string = Keeper_carried_front.turn_start_to_string
 
-let test_a_turn_without_a_session_trace_opens_on_the_newest_atom () =
-  (* A turn with no session trace cannot read where the last completed turn
-     ended. [Turn_boundary { end_atom = 0 }] would claim a history with no
-     completed turn and send all of it. *)
-  let read = Keeper_carried_front.Turn_boundary { end_atom = 60 } in
-  let start ~session_id =
-    Keeper_turn_driver.For_testing.official_client_turn_start ~session_id
-      ~read_boundary:(fun () -> read)
+let test_completion_evidence_without_a_keeper_boundary_keeps_every_atom () =
+  let seed_reads = ref 0 and librarian_reads = ref 0 in
+  let sent = Keeper_codex_runtime.For_testing.carried_projection
+      ~input_source:Keeper_request_source.Completion_review ~capacity_bytes:1
+      ~carried_front_seed:(fun () -> incr seed_reads; (seed_at 60) ())
+      ~librarian_front:(fun _ -> incr librarian_reads;
+        Error (Agent_core.Error.Internal "completion evidence has no Keeper continuity"))
+      ~turn_start:(Keeper_carried_front.Turn_boundary_unknown { reason = "program-owned completion evidence" })
+      ~keeper_name:"completion-review-fixture" ~runtime_id:"codex.context" large_history
+    |> Result.map_error Agent_core.Error.to_string
+    |> function Ok messages -> messages | Error error -> fail error
   in
-  let unknown = function
-    | Keeper_carried_front.Turn_boundary_unknown _ -> true
-    | Keeper_carried_front.Turn_boundary _ -> false
-  in
-  check string "a session trace reads the boundary" (turn_start_to_string read)
-    (turn_start_to_string (start ~session_id:(Some "trace-1")));
-  check bool "no session trace: unknown" true
-    (unknown (start ~session_id:None));
-  check (list int) "and a Codex Start without a trace carries the newest atom" [ 63 ]
-    (carried (start ~session_id:None))
+  check bool "Codex receives the exact full evidence, despite a tiny capacity" true
+    (List.map Agent_core.Checkpoint.message_to_json sent
+     = List.map Agent_core.Checkpoint.message_to_json large_history);
+  check int "the native completion review does not read a Keeper seed" 0 !seed_reads;
+  check int "the native completion review does not query the Librarian" 0 !librarian_reads
+
 let test_resume_sends_no_history () =
   (* The thread already holds the conversation. Neither the instructions nor
      the turn input carry any of it. *)
@@ -1237,7 +1236,7 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "a ceiling cuts inside the range" `Quick test_a_ceiling_cuts_inside_the_range;
   test_case "an overflow floor never restores the last atom" `Quick test_the_overflow_floor_does_not_restore_the_newest_atom;
   test_case "an unknown turn start carries the newest atom" `Quick test_an_unknown_turn_start_carries_the_newest_atom;
-  test_case "a turn without a session trace opens on the newest atom" `Quick test_a_turn_without_a_session_trace_opens_on_the_newest_atom;
+  test_case "completion evidence without a Keeper boundary keeps every atom" `Quick test_completion_evidence_without_a_keeper_boundary_keeps_every_atom;
   test_case "a Resume sends none of the history" `Quick test_resume_sends_no_history;
   test_case "a continuation's resume overflow ends on a full thread" `Quick test_continuation_resume_overflow_ends_on_a_full_thread;
   test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;

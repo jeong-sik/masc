@@ -160,10 +160,22 @@ val run
     [~render_prompt] is called after the slots resolve, so a render failure is
     still reported against the slot that would have run.
 
-    [~goal_blocks], when present, carries attached media (RFC-0436 §4.3): the
-    reviewer runs on these blocks with the rendered prompt as the leading
-    [Text] block. A text-only candidate strips the media it cannot take, which
-    leaves the prompt text intact (§4.4).
+    [~goal_blocks], when present, carries attached media with the rendered
+    prompt as the leading [Text] block. Completion-review admission rejects
+    candidates that cannot consume that evidence; it does not replace an
+    attachment with an unreadable reference.
+
+    Actual lookup observations from earlier declared slots are retained for
+    this invocation and attached, with their slot/name/arguments/disposition
+    relation and admitted model content/media, to each later slot's input.
+    The full tool bridge projects each observation once when the lookup returns,
+    using the completion-review inline policy. Its typed projection refusals
+    survive instead of raw rejected data; host-only metadata is not added to
+    model input. These are evidence data, not synthetic provider ToolUse
+    receipts or a completion verdict.
+    A later fresh lookup may observe changed source; the earlier observation
+    remains explicit rather than being silently replaced. No cross-review
+    cache or new execution/retry permission is introduced.
 
     Task completion review is {!review}. Goal proof review renders its own
     template and calls this directly: the two lanes judge different things and

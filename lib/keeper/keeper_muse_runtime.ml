@@ -449,16 +449,19 @@ let prompt_section_separator = Antigravity_input_frame.section_separator
    The range goes out as composed, as on Claude Code's first attempt, and
    the host compacts its own input. The observation maps back to the durable
    history, as on the Antigravity lane. *)
-let carried_history_projection
+let carried_history_projection ~input_source
     ?argument_projection
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ~keeper_name ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun history_messages ->
-  let* frozen = Host.read_librarian_front librarian_front history_messages in
+  let* frozen = match input_source with
+    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
+    | Keeper_request_source.Keeper_history _ -> Host.read_librarian_front librarian_front history_messages in
   let window = ref None and front = ref None in
   let* sent = Host.start_range_projection
+      ~input_source
     ?argument_projection
     ~measure_message_bytes:Host.measure_message_bytes
     ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
@@ -831,7 +834,7 @@ let phase_name : Session_store.phase -> string = function
   | Session_store.Settled _ -> "Settled"
 ;;
 
-let run_without_lifecycle ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled
+let run_without_lifecycle ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
@@ -1077,7 +1080,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
         Ok { prepared with messages }
       else
         let project =
-          carried_history_projection
+          carried_history_projection ~input_source
             ?argument_projection:(Option.bind argument_source (fun source ->
               Host.argument_projection source ~tools:prepared.tools
                 ~history_prefix:(Option.to_list historical_task_message)))
@@ -1798,7 +1801,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
                  recovery_detail)))
 ;;
 
-let run ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
+let run ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
     ?official_client_continuation ~runtime_id ~configured_reasoning_effort
     ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
@@ -1829,7 +1832,7 @@ let run ?argument_source ?official_task_reference ?composed_context ~accepts_ima
   in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle
+      run_without_lifecycle ~input_source
         ~argument_source
         ~official_task_reference
         ~composed_context

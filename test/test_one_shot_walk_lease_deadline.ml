@@ -174,7 +174,7 @@ tools-support = true
   let attempt_errors = ref [] in
   let started = Unix.gettimeofday () in
   let result =
-    Keeper_turn_driver_wrappers.run_named_with_masc_tools
+    Keeper_turn_driver_wrappers.run_named_with_masc_tools ~input_source:Keeper_request_source.Completion_review
       ~raw_trace:None
       ~walk_owner:Keeper_turn_driver.One_shot_walk
       ~runtime_id:"fixture.sample"

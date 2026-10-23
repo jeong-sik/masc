@@ -9,6 +9,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ sys.path.insert(0, str(ADDONS))
 import exact_worker
 
 SERVER = ADDONS / "workspace-curator" / "server.py"
+FRAME = tomllib.loads((SERVER.parent / "lane.toml").read_text(encoding="utf-8"))["resources"]["max_reply_bytes"]
 
 
 def request(request_id="original-classification", output="classification"):
@@ -190,6 +192,94 @@ class CuratorWorker(unittest.TestCase):
             result = self.run_worker(Path(directory), [read(original["request_id"]), listing()])
             self.assertEqual(self.output(result[0])["result"], {"status": "outcome_unknown"})
             self.assertEqual(self.output(result[1])["requests"], [])
+
+    def test_a_request_no_listing_can_carry_is_kept_as_a_typed_refusal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.module().CONTRACT
+            small, large = request("original-small"), {**request("original-large"), "system": "x" * 4096}
+            envelope = {"jsonrpc": "2.0", "id": 2 ** 53,
+                        "result": exact_worker.tool_result({"requests": [contract.host_request(small)]})}
+            frame = len((exact_worker.encode_output(envelope) + "\n").encode("utf-8"))
+            worker = exact_worker.Worker(Path(directory), frame, contract)
+            refused = {"request_id": large["request_id"], "state": "finished",
+                       "result": exact_worker.REQUEST_BODY_REFUSED}
+            self.assertEqual(worker.invoke({"kind": "submit", "request": large}, {"kind": "operator"}), refused)
+            self.assertEqual(worker.host_requests({}), {"requests": []})
+            kept = worker.store.path(large["request_id"])
+            self.assertEqual(set(json.loads(kept.read_text())), {"version", "request_id", "digest", "result"})
+            self.assertLess(kept.stat().st_size, len(large["system"]))
+            # Another worker on the same store, as after a lost reply.
+            reopened = exact_worker.Worker(Path(directory), frame, contract)
+            self.assertEqual(reopened.invoke({"kind": "read", "request_id": large["request_id"]},
+                                             {"kind": "operator"}), refused)
+            self.assertEqual(reopened.invoke({"kind": "submit", "request": large}, {"kind": "operator"}), refused)
+            with self.assertRaises(exact_worker.InvalidInput):
+                reopened.invoke({"kind": "submit", "request": {**large, "system": "y" * 4096}}, {"kind": "operator"})
+            with self.assertRaises(exact_worker.InvalidInput):
+                reopened.host_result({"request_id": large["request_id"], "result": {"status": "outcome_unknown"}})
+            self.assertEqual(reopened.host_result({"request_id": large["request_id"],
+                                                   "result": exact_worker.REQUEST_BODY_REFUSED}), {"accepted": True})
+            fields = reopened.observe({"binding": {}, "sources": []})["rows"][0]["fields"]
+            self.assertEqual((fields["pending"], fields["finished"], fields["requests"]),
+                             (0, 1, [large["request_id"]]))
+            # The refusal holds no capacity: a request that fits is admitted.
+            admitted = reopened.invoke({"kind": "submit", "request": small}, {"kind": "operator"})
+            self.assertEqual(admitted["state"], "pending")
+            self.assertEqual(reopened.host_requests({}), {"requests": [contract.host_request(small)]})
+
+    def test_an_admitted_request_keeps_its_answer_after_the_frame_shrinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.module().CONTRACT
+            original = request()
+            exact_worker.Worker(Path(directory), FRAME, contract).invoke(
+                {"kind": "submit", "request": original}, {"kind": "operator"})
+            # A frame that now holds no listing at all.
+            narrowed = exact_worker.Worker(Path(directory), 1, contract)
+            pending = {"request_id": original["request_id"], "state": "pending"}
+            self.assertEqual(narrowed.invoke({"kind": "submit", "request": original}, {"kind": "operator"}), pending)
+            self.assertEqual(narrowed.invoke({"kind": "read", "request_id": original["request_id"]},
+                                             {"kind": "operator"}), pending)
+
+    def test_a_changed_or_misplaced_refusal_record_is_never_read_or_listed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            contract = self.module().CONTRACT
+            small, large = request("original-small"), {**request("original-large"), "system": "x" * 4096}
+            envelope = {"jsonrpc": "2.0", "id": 2 ** 53,
+                        "result": exact_worker.tool_result({"requests": [contract.host_request(small)]})}
+            frame = len((exact_worker.encode_output(envelope) + "\n").encode("utf-8"))
+            worker = exact_worker.Worker(Path(directory), frame, contract)
+            worker.invoke({"kind": "submit", "request": large}, {"kind": "operator"})
+            kept = worker.store.path(large["request_id"])
+            original = kept.read_text()
+            record = json.loads(original)
+            changes = {"digest in capitals": {**record, "digest": record["digest"].upper()},
+                       "another result": {**record, "result": {"status": "outcome_unknown"}},
+                       "an extra field": {**record, "extra": True},
+                       "no digest": {key: value for key, value in record.items() if key != "digest"}}
+            for name, changed in changes.items():
+                with self.subTest(change=name):
+                    kept.write_text(json.dumps(changed))
+                    reopened = exact_worker.Worker(Path(directory), frame, contract)
+                    with self.assertRaises(exact_worker.InvalidInput):
+                        reopened.invoke({"kind": "read", "request_id": large["request_id"]}, {"kind": "operator"})
+                    with self.assertRaises(exact_worker.InvalidInput):
+                        reopened.host_requests({})
+                    kept.write_text(original)
+            # The same refusal stored under another request's name.
+            misplaced = worker.store.path("original-other")
+            misplaced.write_text(original)
+            with self.assertRaises(exact_worker.InvalidInput):
+                exact_worker.Worker(Path(directory), frame, contract).host_requests({})
+
+    def test_a_submit_over_one_frame_gets_the_typed_refusal_through_the_real_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            large = {**request("original-large"), "system": "x" * FRAME}
+            replies = self.run_worker(state, [submit(large), read(large["request_id"]), listing()])
+            refused = {"request_id": large["request_id"], "state": "finished",
+                       "result": exact_worker.REQUEST_BODY_REFUSED}
+            self.assertEqual([self.output(reply) for reply in replies[:2]], [refused, refused])
+            self.assertEqual(self.output(replies[2])["requests"], [])
 
     def test_shared_import_works_in_the_packaged_mount_layout(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -191,10 +191,10 @@ let original_record store capture =
 let advance store record event=match Owner.advance ~store ~expected:record ~event
     |> Result.map_error Owner.update_error_to_string |> get with
   | Owner.Stored record -> record | Already_stored _ | Unconfirmed _ -> fail "fixture needs a freshly recorded original fact"
-let seed_size_refusal store capture =
+let seed_size_refusal ?(kind=Lane_addon_exact.Input_capacity) store capture =
   let record=advance store (original_record store capture) Progress.Dispatch_intended in
   advance store record (Progress.Refused {stage=Progress.Execution;
-    evidence=Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final (Input_refused Input_capacity))})
+    evidence=Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final (Input_refused kind))})
 type provider_mode = Answer | Refuse_fact of string | Count_capacity
 let with_fixture ?(on_response_error=(fun _ _ -> ()))
     ?(off=false) ?(routes=true) ?(start_owner=true) ?(invalid_first=false)
@@ -419,6 +419,23 @@ let test_the_next_root_takes_the_size_its_last_answer_supports ()=
        last one may take four and finds one. *)
     check (list (pair size int)) "classifications in mint order"
       [Request.Fill_frame,5;Request.Fill_frame,2;Request.Up_to 2,2;Request.Up_to 4,1] classifications)
+let test_the_owner_narrows_a_batch_its_worker_could_not_list ()=
+  let claims=["Frame-refused original source a";"Frame-refused original source b"] in
+  with_fixture ~start_owner:false ~claims
+    (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server:_ ~urls:_ ~mode:_ ~delivery:_ ->
+    await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
+    (* The typed result the worker gives a request its listing cannot carry. *)
+    let parent=seed_size_refusal ~kind:Lane_addon_exact.Request_body_refused store (capture_classification config) in
+    Curator.start ~sw ~config;
+    await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=2
+      && Curator.For_testing.is_idle ~base_path);
+    let current=match owned (Owner.load ~store ~scope:Capture.scope ~request_id:parent.Owner.request_id) with
+      | Some current -> current | None -> fail "the refused original disappeared" in
+    check bool "the refused root was narrowed, not left fencing its facts" true
+      (match Progress.phase current.progress with
+       | Progress.Subdivided _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ -> false))
 let test_capture_refuses_a_batch_over_the_destination_frame ()=
   with_fixture ~start_owner:false
     (fun ~sw:_ ~clock ~base_path:_ ~config ~store ~source:_ ~declaration:_ ~server:_ ~urls:_ ~mode:_ ~delivery:_ ->
@@ -897,6 +914,8 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "accepted retained host terminal commits Off without another provider" `Quick test_accepted_host_terminal_commits_off_without_worker;
   test_case "the next root takes the size its last answer supports" `Quick
     test_the_next_root_takes_the_size_its_last_answer_supports;
+  test_case "the owner narrows a batch its worker could not list" `Quick
+    test_the_owner_narrows_a_batch_its_worker_could_not_list;
   test_case "capture refuses a classification over the destination frame" `Quick
     test_capture_refuses_a_batch_over_the_destination_frame;
   test_case "idle subscription observes queued and already completed wakes" `Quick test_idle_barrier_has_no_lost_wake;

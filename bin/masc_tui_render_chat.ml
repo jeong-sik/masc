@@ -630,7 +630,7 @@ let render_chat_row ~theme ~origin buf cols (row : Message_layout.row) =
         if context.ambient_background && origin = Message_layout.Origin_bare then
           box_line buf cols
             (margin ^ context.opening ^ "  " ^ dress rest ^ Ansi.reset)
-        else if context.ambient_background && not is_tool then
+        else if context.ambient_background then
           box_line_styled buf cols ~style:context.opening
             (Printf.sprintf "%s  %s" margin (dress rest))
         else

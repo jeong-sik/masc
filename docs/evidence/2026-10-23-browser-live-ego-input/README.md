@@ -51,6 +51,11 @@ Run directly with `ego-browser nodejs`, not through the worker:
   `"Control+é"` as `Unknown key`. `page.keyboard.type` typed `é€ß 한글 ok` into
   the text input as written. So this connection refuses `press_key` with a
   character past `~` before the run, and types any text.
+- [keys_probe.js](keys_probe.js) pressed every name MASC sends: the eleven
+  named keys (`Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, the four
+  arrows, `Home`, `End`) and `Control`, `Meta`, `Alt` and `Shift` with a
+  letter or a named key. ego took all of them, and the page logged each as a
+  trusted `keydown` with the same key name ([keys_probe.out](keys_probe.out)).
 
 ## What it does not show
 

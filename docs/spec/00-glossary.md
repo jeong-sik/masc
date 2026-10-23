@@ -1705,7 +1705,11 @@ status: reference
   MASC 쪽은 Agent-Core가 하지 않는 검사를 더한다. 선언 안 된 필드(`additionalProperties: false`),
   `oneOf` 분기 선택, 범위·길이 한계다. `oneOf`는 루트 스키마에서만 검사한다.
   스키마 위반은 도구 실행이 아니라 사전 거절(`pre-dispatch refusal`)이다.
+  Lane Add-on은 같은 순수 계약(`Tool_input_contract`)으로 중첩 `oneOf`의 일치 수를 판단한다.
+  후보 갈래의 불일치는 호출 거절이 아니므로 검증 로그·통계·span event를 남기지 않는다.
+  최종 검증 오류는 호출자에게 반환하며, 도구 dispatch 경계의 관측은 별도로 유지한다.
   → [Tool_input_validation (MASC)](../../lib/tool_input_validation.mli),
+  [Lane Add-on schema validation](../../lib/lane_addon/lane_addon_action.mli),
   [Tool_input_validation (Agent-Core)](../../packages/agent_core/lib/tool_input_validation.mli)
 
 **Deferred Tool Loading (도구 스키마 지연 로딩)**

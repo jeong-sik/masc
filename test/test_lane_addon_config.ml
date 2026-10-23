@@ -630,6 +630,75 @@ let assembled_fusion_declarations () =
     check bool "the shipped installation has an enforceable binding schema" true
       (Option.is_some loaded.package.binding_schema)) ["panel-a";"panel-b";"judge";"report"]
 
+let alternative_probes_do_not_observe_tool_calls () =
+  let object_schema fields = `Assoc ["type",`String "object";
+    "properties",`Assoc fields;"required",`List (List.map (fun (key,_) -> `String key) fields);
+    "additionalProperties",`Bool false] in
+  let branch operation = object_schema [
+    "operation",`Assoc ["type",`String "string";"const",`String operation];
+    "count",`Assoc ["type",`String "integer";"minimum",`Int 1;"maximum",`Int 2]] in
+  let read=branch "read" and submit=branch "submit" in
+  let schema branches = object_schema ["payload",`Assoc ["type",`String "array";
+    "items",`Assoc ["type",`String "object";"oneOf",`List branches]]] in
+  let input operation count = `Assoc ["payload",`List [`Assoc [
+    "operation",`String operation;"count",count]]] in
+  let tool="__addon_validation_observation_boundary" in
+  let contract=schema [read;submit] in
+  let hooks schema =
+    let definition=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
+      "name",`String tool;"inputSchema",schema;"outputSchema",schema]) |> unwrap in
+    Lane_addon_tool_hooks.prepare ~hooks:[Validate_input;Validate_output] definition |> unwrap in
+  let reply value = {(Mcp_protocol.Mcp_types.tool_result_of_text "worker result") with
+    is_error=Some false;structured_content=Some value} in
+  let events=ref [] in
+  Otel_spans.with_test_event_emitter ~enabled:true
+    ~emit_event:(fun ~name ~attrs -> events := (name,attrs)::!events) (fun () ->
+      let metric=Otel_metric_store.metric_tool_input_validation in
+      let before=Otel_metric_store.metric_total metric in
+      let log_before=(Log.Ring.bounds ()).total in
+      let selected=hooks contract in
+      List.iter (fun value ->
+        ignore (unwrap (Lane_addon_action.validate_input ~schema:contract ~name:tool value));
+        unwrap (Lane_addon_tool_hooks.before_call selected value);
+        unwrap (Lane_addon_tool_hooks.after_call selected (reply value)))
+        [input "read" (`Int 1);input "submit" (`Int 2)];
+      List.iter (fun (label,value) ->
+        check bool (label ^ " remains an input refusal") true
+          (Result.is_error (Lane_addon_tool_hooks.before_call selected value));
+        check bool (label ^ " remains an output refusal") true
+          (Result.is_error (Lane_addon_tool_hooks.after_call selected (reply value))))
+        ["zero matching alternatives",input "other" (`Int 1);
+         "nested type",input "submit" (`String "1");
+         "nested range",input "submit" (`Int 3);
+         "closed nested object",`Assoc ["payload",`List [`Assoc [
+           "operation",`String "submit";"count",`Int 1;"extra",`Bool true]]]];
+      let overlapping=hooks (schema [read;submit;submit]) in
+      let value=input "submit" (`Int 1) in
+      check bool "two matching alternatives remain an input refusal" true
+        (Result.is_error (Lane_addon_tool_hooks.before_call overlapping value));
+      check bool "two matching alternatives remain an output refusal" true
+        (Result.is_error (Lane_addon_tool_hooks.after_call overlapping (reply value)));
+      check (float 0.) "schema probes emit no tool-validation counters" before
+        (Otel_metric_store.metric_total metric);
+      check int "schema probes emit no tool-validation events" 0 (List.length !events);
+      check int "schema probes emit no rejection logs" log_before (Log.Ring.bounds ()).total;
+      (* Real tool admission still owns one observation per validation, whether
+         it accepts or refuses. It is not part of candidate branch matching. *)
+      check bool "host boundary still accepts" true
+        (Result.is_ok (Tool_input_validation.validate_args ~schema:contract ~name:tool
+          ~args:(input "submit" (`Int 1)) ()));
+      check bool "host boundary still refuses wrong types" true
+        (Result.is_error (Tool_input_validation.validate_args ~schema:contract ~name:tool
+          ~args:(`Assoc ["payload",`String "wrong type"]) ()));
+      check (float 0.) "host boundary records two actual validations" (before +. 2.)
+        (Otel_metric_store.metric_total metric);
+      check (list (option string)) "only actual validations publish their outcome"
+        [Some "pass";Some "fail"]
+        (List.rev !events |> List.map (fun (_,attrs) ->
+          match List.assoc_opt "tool.param.validation.result" attrs with
+          | Some (`String value) -> Some value
+          | _ -> None)))
+
 let judge_source_schema_is_enforced () =
   let loaded = unwrap (Config.load_file ~path:(repo_file
     "docs/examples/lane-addons/fusion-compute/judge.toml")) in
@@ -891,6 +960,7 @@ let () = run "Lane Add-on declarative composition"
       test_case "runtime resources name only enforceable limits" `Quick runtime_selects_enforceable_resources;
      test_case "persistent state is explicit and revisioned" `Quick persistent_state_is_explicit_and_revisioned;
      test_case "tool exports are explicit and revisioned" `Quick tool_exports_are_explicit_and_revisioned;
+     test_case "alternative probes do not observe tool calls" `Quick alternative_probes_do_not_observe_tool_calls;
      test_case "judge source schema is enforced before worker start" `Quick judge_source_schema_is_enforced;
      test_case "assembled Fusion declarations load with explicit model boundaries" `Quick assembled_fusion_declarations;
      test_case "model access is explicit and changes configuration identity" `Quick model_access_is_explicit_and_revisioned;

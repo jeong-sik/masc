@@ -5852,7 +5852,7 @@
        (glob_files ../addons/operator-quiz/*.py) ../addons/operator-quiz/lane.toml
        (glob_files ../addons/operator-quiz/schemas/*.json)
        (glob_files ../addons/operator-quiz/prompts/*.md))
- (libraries alcotest masc yojson unix))
+ (libraries alcotest masc masc.masc_log masc.otel_spans mcp_protocol yojson unix))
 
 (test
  (name test_lane_addon_declaration)

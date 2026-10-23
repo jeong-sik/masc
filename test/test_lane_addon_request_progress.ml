@@ -323,7 +323,34 @@ let test_observer_malformed_receipts_and_order_never_become_valid_history () = w
          | Owner.State_conflict | Owner.Invalid_transition _)
      | Ok _ -> Alcotest.fail "malformed original observer evidence was overwritten")) histories)
 
+let test_typed_receipt_sharing_and_strict_replay () =
+  let start=receipt 1. (`Assoc ["z",`List [`String "quoted \"input\"";`Float 2.];"a",request]) in
+  let registered=get (Progress.append Progress.captured
+    (Progress.Observer (Receipt.Intended (Receipt.Registration,start)))) in
+  (match (Progress.observer registered).registration with
+   | Receipt.Pending original ->
+     Alcotest.(check bool) "retain the already validated immutable receipt" true (original==start)
+   | Receipt.Unobserved | Receipt.Acknowledged _ -> Alcotest.fail "registration not pending");
+  let events=[Progress.Observer (Receipt.Recorded (Receipt.Registration,start.digest));
+    Progress.Dispatch_intended;Progress.Judgment_retained judgment;
+    Progress.Commit_intended {before;after};Progress.Commit_observed after] in
+  let completed=get (List.fold_left (fun state event ->
+    Result.bind state (fun state -> Progress.append state event)) (Ok registered) events) in
+  let encoded=Progress.to_json completed in
+  let restored=get (Progress.of_json encoded) in
+  Alcotest.check json "strict replay preserves canonical history" encoded (Progress.to_json restored);
+  Alcotest.(check bool) "strict replay preserves original commit" true
+    (Progress.phase restored=Progress.phase completed);
+  let malformed=[`Assoc ["duplicate",`Int 1;"duplicate",`Int 2];`Float nan] in
+  List.iter (fun evidence ->
+    match Progress.append Progress.captured (Progress.Refused {stage=Progress.Before_dispatch;evidence}) with
+    | Error _ -> () | Ok _ -> Alcotest.fail "public event bypassed payload validation") malformed;
+  match Progress.append registered (Progress.Observer (Receipt.Recorded (Receipt.Registration," "))) with
+  | Error _ -> () | Ok _ -> Alcotest.fail "blank acknowledgement bypassed validation"
+
 let () = Alcotest.run "Original Add-on request progress" ["owner",[
+  Alcotest.test_case "opaque receipt reuse and strict replay" `Quick
+    test_typed_receipt_sharing_and_strict_replay;
   Alcotest.test_case "restart keeps unknown and late original result" `Quick test_restart_preserves_unknown_and_late_original_result;
   Alcotest.test_case "whole expected history and exact acknowledgement" `Quick test_expected_history_and_exact_uncertain_ack_are_distinct;
   Alcotest.test_case "commit resumes original before after and judgment" `Quick test_commit_recovery_uses_original_before_after_and_judgment;

@@ -154,8 +154,9 @@ let step phase = function
         else Error "successor acknowledgement differs from its original intent"
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
       | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdivided _ -> invalid ())
-let append t event =
-  let* event = event_of_json (event_to_json event) in
+(* Private fold boundary. Callers below have either decoded the wire event or
+   validated a public event; repeating its wire codec here rehashes receipts. *)
+let append_validated t event =
   let* phase = step t.phase event in
   let* observer = match event with
     | Observer event -> Lane_addon_request_receipt.append t.observer event
@@ -163,9 +164,19 @@ let append t event =
     | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
     | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ -> Ok t.observer in
   Ok {events_rev=event :: t.events_rev;phase;observer}
+let append t event =
+  let* event = match event with
+    (* Receipt construction is opaque. Its append checks ACK text and ordering;
+       the complete public payload codecs remain necessary for other events. *)
+    | Observer _ -> Ok event
+    | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+    | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
+    | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ ->
+      event_of_json (event_to_json event) in
+  append_validated t event
 let to_json t = `List (List.map event_to_json (events t))
 let of_json = function
   | `List events -> List.fold_left (fun state json ->
       let* state = state in let* event = event_of_json json in
-      append state event) (Ok captured) events
+      append_validated state event) (Ok captured) events
   | _ -> Error "request progress must be an ordered event array"

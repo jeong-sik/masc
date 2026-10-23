@@ -415,7 +415,12 @@ let reload t id =
    page's CDP session: it reads the tab's history, refuses before acting when
    there is no entry that way, moves to the entry, and waits until the tab's
    current entry is that one and its document has loaded. The entry's index
-   says the move happened even when the page at it has the same URL. *)
+   says the move happened even when the page at it has the same URL. A read
+   while waiting can fail as the page changes renderer (ego lite 0.6.0.16
+   answered "Not attached to an active page" once on a move back to
+   chrome://new-tab-page/, and the next read was on the entry); such a
+   failure says nothing about the move, so the wait goes on, within the
+   run's window. *)
 let history_poll_ms = 50
 let traverse t id ~action ~delta ~side interaction =
   let* label = label_of t id in
@@ -436,7 +441,8 @@ let traverse t id ~action ~delta ~side interaction =
       "      let failure = null;";
       "      try {";
       "        await page.cdp(\"Page.navigateToHistoryEntry\", {entryId: entry.id});";
-      "        while ((await page.cdp(\"Page.getNavigationHistory\", {})).currentIndex !== target) await page.waitForTimeout(args.pollMs);";
+      "        const landed = async () => { try { return (await page.cdp(\"Page.getNavigationHistory\", {})).currentIndex === target; } catch (error) { return false; } };";
+      "        while (!(await landed())) await page.waitForTimeout(args.pollMs);";
       "        await page.waitForLoadState();";
       "      } catch (error) { failure = reason(error); }";
       moved_page_answer;

@@ -648,32 +648,38 @@ let test_the_peer_serves_what_the_lane_table_says () =
 
 (* The history scripts run in node against a stand-in for ego: one agent page
    whose history holds a.test then b.test. A move to an entry lands a little
-   after the CDP call returns, as a navigation commits later. The stand-in
-   prints the CDP calls and waits the script made. *)
-let stand_in ~current ~navigation = Printf.sprintf {js|
-const entries = [{id: 11, url: "https://a.test/", title: "A"}, {id: 12, url: "https://b.test/", title: "B"}];
+   after the CDP call returns, as a navigation commits later; with [detaches]
+   the first history read after it fails, as ego's did while the page changed
+   renderer. With [same_url] both entries have one URL, as a pushState to the
+   same address makes; [load] is what the load wait does after it notes the
+   call. The stand-in prints the CDP calls and waits the script made. *)
+let stand_in ~current ~navigation ~detaches ~same_url ~load = Printf.sprintf {js|
+const entries = [{id: 11, url: "https://a.test/", title: "A"}, {id: 12, url: "%s", title: "B"}];
 let current = %d;
+let detached = false;
 const seen = [];
 process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
 const page = {
   cdp: async (method, params) => {
     seen.push(method);
+    if (method === "Page.getNavigationHistory" && detached) { detached = false; seen.push("detached"); throw new Error("Not attached to an active page"); }
     if (method === "Page.getNavigationHistory") return {currentIndex: current, entries};
     if (method !== "Page.navigateToHistoryEntry") throw new Error("unexpected " + method);
     %s
     const index = entries.findIndex(entry => entry.id === params.entryId);
     setTimeout(() => { current = index; }, 20);
+    detached = %b;
     return {};
   },
   reload: async () => { seen.push("reload"); },
   waitForTimeout: ms => new Promise(resolve => setTimeout(resolve, ms)),
-  waitForLoadState: async () => { seen.push("load at " + current); },
+  waitForLoadState: async () => { seen.push("load at " + current); %s },
 };
 const taskSpace = async () => ({
   tabs: async () => [{label: "p1", openedBy: "agent", url: entries[current].url, title: entries[current].title}],
   page: () => page,
 });
-|js} current navigation
+|js} (if same_url then "https://a.test/" else "https://b.test/") current navigation detaches load
 
 let in_node script =
   let directory = capture_directory () in
@@ -687,7 +693,8 @@ let in_node script =
   | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> fail "node did not run the step"
 
 let test_history_moves_one_entry () =
-  let current = ref 1 and navigation = ref "" and output = ref "" and steps = ref [] in
+  let current = ref 1 and navigation = ref "" and detaches = ref false and same_url = ref false and load = ref "" in
+  let output = ref "" and steps = ref [] in
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
@@ -697,7 +704,8 @@ let test_history_moves_one_entry () =
         obj ["label",`Null;"targetId",str "T9";"title",str "Mail";"url",str "https://mail.example/";"active",`Bool false]])
     | "page.history" | "page.reload" ->
       steps := sent :: !steps;
-      output := in_node (stand_in ~current:!current ~navigation:!navigation ^ script);
+      output := in_node (stand_in ~current:!current ~navigation:!navigation ~detaches:!detaches
+        ~same_url:!same_url ~load:!load ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
   let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
@@ -728,6 +736,25 @@ let test_history_moves_one_entry () =
    | Ok receipt -> check string "reload" {|{"tabId":1,"action":"reload","url":"https://b.test/","title":"B"}|} (Yojson.Safe.to_string receipt)
    | other -> failf "reload was %s" (failure_kind other));
   check (list string) "a reload is ego's own" ["reload"] (seen ());
+  detaches := true;
+  (match on_tab Lane.Action.Back with
+   | Ok receipt -> check string "back past a failed read" {|{"tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt)
+   | other -> failf "a move with a failed read while waiting was %s" (failure_kind other));
+  check bool "a read failed while it waited" true (List.mem "detached" (seen ()));
+  detaches := false;
+  same_url := true;
+  (match on_tab Lane.Action.Back with
+   | Ok receipt -> check string "back to an entry with the same URL" {|{"tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt)
+   | other -> failf "a move to the same URL was %s" (failure_kind other));
+  check string "it waited for the entry, not the URL" "load at 0" (List.hd (List.rev (seen ())));
+  same_url := false;
+  load := {|throw new Error("Timeout 30000ms exceeded");|};
+  (match on_tab Lane.Action.Back with
+   | Error (Live.Partial_failure {receipt; message; _}) ->
+     check string "a load wait that failed answers where the tab is" {|{"tabId":1,"action":"back","url":"https://a.test/","title":"A"}|} (Yojson.Safe.to_string receipt);
+     check string "and what failed" "Timeout 30000ms exceeded" message
+   | other -> failf "a failed load wait was %s" (failure_kind other));
+  load := "";
   navigation := {|throw new Error("net::ERR_ABORTED");|};
   (match on_tab Lane.Action.Back with
    | Error (Live.Partial_failure {tab_id; receipt; message}) ->

@@ -73,49 +73,15 @@ let verify_browser ~admission ~receipt cdp =
 let context c ~incarnation ~directory = `Assoc ["kind",`String "browser_addon_chrome";
   "incarnation",`String incarnation;"directory",`String directory;
   "profile",Profile.to_json c.profile]
-let original c ~incarnation ~directory = protect (fun () ->
-  match Unix.lstat c.claim_directory with
-  | _ ->
-    let* preparation=lease (Lease.recover_preparation ~directory:c.claim_directory) in
-    (match preparation with
-     | Lease.Unpublished -> Ok None
-     | Current claim ->
-       let* known=lease (Lease.cleanup_context claim) in
-       if known=Some (context c ~incarnation ~directory) then Ok (Some claim)
-       else Error "Chrome child claim belongs to a different browser allocation")
-  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None)
-(* [original]'s reads without the gate or [recover_preparation]'s fence: the
-   child slot decoded by [Lease.inspect] and its descriptor compared with the
-   one this allocation recomputes. *)
+let child c ~incarnation ~directory = {Browser_addon_child_claim.name="Chrome child claim";
+  claim_directory=c.claim_directory;context=context c ~incarnation ~directory}
+let original c ~incarnation ~directory = Browser_addon_child_claim.original (child c ~incarnation ~directory)
 let check_retained_child c ~incarnation ~directory =
-  match Unix.lstat c.claim_directory with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
-  | exception Unix.Unix_error (code, _, _) -> Error (c.claim_directory ^ ": " ^ Unix.error_message code)
-  | _ ->
-    (match Lease.inspect ~directory:c.claim_directory with
-     | Error (refused : Lease.inspection_error) -> Error refused.refusal
-     | Ok None -> Ok ()
-     | Ok (Some recorded) ->
-       if recorded.context = Some (context c ~incarnation ~directory) then Ok ()
-       else Error (c.claim_directory ^ ": Chrome child claim belongs to a different browser allocation"))
-let settled claim =
-  let* status=lease (Lease.status claim) in
-  match status with
-  | Lease.Settled -> Ok ()
-  | Awaiting_exec | Live _ | Cleanup_pending _ -> Error "Chrome child claim has not settled"
-let settle c ~incarnation ~directory =
-  let* claim=original c ~incarnation ~directory in
-  match claim with
-  | None -> Ok ()
-  | Some claim -> let* ()=lease (Lease.request_termination claim) in settled claim
-let check_settled c ~incarnation ~directory = protect (fun () ->
-  match Unix.lstat c.claim_directory with
-  | _ ->
-    let* claim=lease (Lease.current ~directories:[c.claim_directory]) in
-    let* known=lease (Lease.cleanup_context claim) in
-    if known=Some (context c ~incarnation ~directory) then settled claim
-    else Error "Chrome child claim belongs to a different browser allocation"
-  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ())
+  Browser_addon_child_claim.check_retained (child c ~incarnation ~directory)
+let settled claim = Browser_addon_child_claim.settled ~name:"Chrome child claim" claim
+let settle c ~incarnation ~directory = Browser_addon_child_claim.settle (child c ~incarnation ~directory)
+let check_settled c ~incarnation ~directory =
+  Browser_addon_child_claim.check_settled (child c ~incarnation ~directory)
 
 (* The host has already checked the original allocation inode and worker
    settlement. Never follow a profile symlink, and retain unexpected resources.

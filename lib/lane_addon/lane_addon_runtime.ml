@@ -1397,7 +1397,9 @@ let native_recover ~store ~installation_id ~instance_id =
    gone), each browser child claim is already Settled, and the allocation keeps
    its recorded identity. Nothing here retires a claim or signals a process. *)
 let native_retain ~store ~installation_id ~instance_id =
-  let lease result = Result.map_error Native_addon_lease.error_to_string result in
+  let refused detail = Error (Browser_addon_socket.Retain_refused detail) in
+  let lease result = Result.map_error (fun error ->
+    Browser_addon_socket.Retain_refused (Native_addon_lease.error_to_string error)) result in
   let* claim = offload (fun () -> Native_addon_lease.reopen
     ~directories:(native_directories store installation_id) ~instance_id) |> lease in
   let* status = offload (fun () -> Native_addon_lease.status claim) |> lease in
@@ -1405,9 +1407,9 @@ let native_retain ~store ~installation_id ~instance_id =
   | Native_addon_lease.Settled, directory::_ ->
       let* settlement = offload (fun () -> Browser_addon_socket.retain ~admission:claim ~directory) in
       Ok (native_release ~installation_id ~instance_id settlement)
-  | Native_addon_lease.Settled, [] -> Error "native claim has no host slot"
+  | Native_addon_lease.Settled, [] -> refused "native claim has no host slot"
   | (Native_addon_lease.Awaiting_exec | Live _ | Cleanup_pending _), _ ->
-      Error "native claim has not settled; its process or process group may still run"
+      refused "native claim has not settled; its process or process group may still run"
 let native_claim_root_requirement =
   {Resource_requirement.kind=Unix.S_DIR;owner=Effective_user;mode=Clear 0o077;links=Any_count}
 let prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_live_instance =
@@ -2489,17 +2491,26 @@ let retain_unconfirmed m args =
     let expected = match configuration with Some owner -> owner.id | None -> id in
     let* () = if installation_id = expected then Ok ()
       else Error (Runtime_failed "native installation authority mismatch") in
+    (* Checked before anything is written: [native_retain] answers with this
+       exact installation and incarnation. *)
+    let* (_ : Lifecycle.release) =
+      check_release ~instance_id:id ~authority ~resource (Lifecycle.Native_retained {installation_id;instance_id=id})
+      |> Result.map_error (fun failure -> Request_rejected (Lifecycle.failure_detail failure)) in
     let restore () = match previous with
       | None -> Hashtbl.remove m.recovering id
       | Some recovery -> Hashtbl.replace m.recovering id recovery in
     Hashtbl.replace m.recovering id (Cleaning fields);
     let retained = try native_retain ~store:m.store ~installation_id ~instance_id:id with
       | Eio.Cancel.Cancelled _ as exn -> restore (); raise exn
-      | exn -> Error (Printexc.to_string exn) in
-    match Result.bind retained (fun release ->
-        check_release ~instance_id:id ~authority ~resource release
-        |> Result.map_error Lifecycle.failure_detail) with
-    | Error detail -> restore (); refused ("the host could not confirm what it observes: " ^ detail)
+      | exn -> Error (Browser_addon_socket.Retained_record_unconfirmed (Printexc.to_string exn)) in
+    match retained with
+    | Error (Browser_addon_socket.Retain_refused detail) ->
+        restore (); refused ("the host could not confirm what it observes: " ^ detail)
+    | Error (Browser_addon_socket.Retained_record_unconfirmed detail) ->
+        (* The binding still says Failed, so the next cleanup pass reads the
+           acquisition record and records whatever it finds. *)
+        restore ();
+        Error (Runtime_failed ("the retained record was not confirmed written; the allocation may already be retained, and the next cleanup pass records this instance from what it finds: " ^ detail))
     | Ok release ->
         let state = Lifecycle.Detached release in
         let terminal = replace_state fields state in

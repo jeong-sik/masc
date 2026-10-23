@@ -254,7 +254,9 @@ let operator_retain () = with_fixture (fun clock root config ->
   let second, admission, slot, left = browser_instance () in
   Fun.protect ~finally:(fun () -> remove (Filename.dirname (Filename.dirname left))) (fun () ->
     check bool "the allocation is retained" true
-      (require (Browser_addon_socket.retain ~admission ~directory:slot) = Browser_addon_socket.Allocation_retained);
+      (match Browser_addon_socket.retain ~admission ~directory:slot with
+       | Ok settlement -> settlement = Browser_addon_socket.Allocation_retained
+       | Error (Browser_addon_socket.Retain_refused detail | Retained_record_unconfirmed detail) -> fail detail);
     ignore (dispatch config R.Detach ["instance_id",`String second]);
     check string "recovery of a retained allocation is not a release" "native_retained" (release_kind second);
     check bool "the left profile stays in place" true (Sys.file_exists left)))

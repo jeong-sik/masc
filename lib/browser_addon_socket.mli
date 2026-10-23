@@ -35,7 +35,13 @@ val cleanup : admission:Native_addon_lease.t -> directory:string -> (settlement,
     are never reused and unknown contents are never recursively deleted. A
     missing acquisition record with an existing socket is unconfirmed. A
     retained allocation is reported as [Allocation_retained] and not touched. *)
-val retain : admission:Native_addon_lease.t -> directory:string -> (settlement, string) result
+type retain_error =
+  | Retain_refused of string
+      (** Nothing was written. *)
+  | Retained_record_unconfirmed of string
+      (** The [retained] record write did not confirm. The record may already
+          be replaced, and a later {!cleanup} reports what it finds. *)
+val retain : admission:Native_addon_lease.t -> directory:string -> (settlement, retain_error) result
 (** The operator takes over an allocation whose release could not be confirmed.
     The claim must be Settled and each Chrome and live BiDi child claim must
     already be Settled; unlike {!cleanup}, nothing is retired or signalled.
@@ -44,3 +50,8 @@ val retain : admission:Native_addon_lease.t -> directory:string -> (settlement, 
     record, the identity of the private directory found at this instance's own
     path. An allocation already released is reported as [Allocation_released]
     and left as it is. *)
+module For_testing : sig
+  val retain : save:(string -> string -> (unit, string) result) ->
+    admission:Native_addon_lease.t -> directory:string -> (settlement, retain_error) result
+  (** {!retain} with the record write supplied by the test. *)
+end

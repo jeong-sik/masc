@@ -141,65 +141,8 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~task_id
       ~action_s
   | Some task_before ->
-  (* Release and submit act on work the caller holds. A caller that is not the
-     holder is refused here with the holder named, so the lifecycle's generic
-     [Invalid_transition] never has to stand in for an ownership problem. Only
-     [task_assignee_of_status] states (Claimed, InProgress, AwaitingVerification)
-     have a holder; a Todo or terminal Task goes to the lifecycle, whose message
-     and valid_next_actions hint stay as they were. The holder may resubmit its
-     own AwaitingVerification Task: that supersede is the lifecycle's to allow.
-
-     The holder test here ([Workspace.same_task_actor]) and the lifecycle's
-     [same_agent] are the same function. If one is ever redefined, redefine
-     the other with it, or the tool refuses what the lifecycle would accept. *)
-  let owner_requirement =
-    match action with
-    | Masc_domain.Release ->
-      Some ("task_release_requires_current_owner", "release")
-    | Masc_domain.Submit_for_verification ->
-      Some ("task_submit_requires_current_owner", "submit")
-    | Masc_domain.Claim
-    | Masc_domain.Start
-    | Masc_domain.Done_action
-    | Masc_domain.Cancel -> None
-  in
-  let owner_mismatch_rejection =
-    match owner_requirement, task_opt with
-    | Some (rule_id, verb), Some task ->
-      (match Workspace.task_assignee_of_status task.task_status with
-       | Some assignee
-         when not (Workspace.same_task_actor ctx.config assignee ctx.agent_name) ->
-         let status = Masc_domain.task_status_to_string task.task_status in
-         let message =
-           Printf.sprintf
-             "Task %s is %s and owned by %s; %s cannot %s it."
-             task_id
-             status
-             assignee
-             ctx.agent_name
-             verb
-         in
-         Some
-           (workflow_rejection_result
-              ~tool_name
-              ~start_time
-              ~rule_id
-              ~extra_fields:
-                [ "task_id", `String task_id
-                ; "task_status", `String status
-                ; "current_assignee", `String assignee
-                ; "requested_agent", `String ctx.agent_name
-                ]
-              message)
-       | Some _ | None -> None)
-    | Some _, None | None, (Some _ | None) -> None
-  in
-  (* The terminal-verdict no-op branch is gone with the verdict actions: an agent
-     can no longer request approve/reject here, so there is no verdict-on-terminal
-     case to absorb. *)
-  match owner_mismatch_rejection with
-  | Some result -> result
-  | None ->
+  (* The lifecycle checks ownership under the backlog lock. [task_before]
+     supplies observation/metrics only; it cannot admit or refuse submission. *)
   let completion_state_error =
     if (=) action Masc_domain.Done_action then
       completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt

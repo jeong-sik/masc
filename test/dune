@@ -6593,4 +6593,4 @@
  (name test_keeper_addon_deferred_runtime)
  (modules test_keeper_addon_deferred_runtime)
  (deps (source_tree ../addons/candle-appraiser) ../addons/protocol.py ../addons/exact_worker.py)
- (libraries masc_test_deps masc_candle masc_candle_runtime mcp_protocol))
+ (libraries masc_test_deps masc_candle masc_candle_runtime mcp_protocol masc.skill_config))

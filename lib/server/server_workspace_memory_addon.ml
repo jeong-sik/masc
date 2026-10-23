@@ -416,89 +416,105 @@ let settle ~config ~request_id =
   settle_with ~store ~base_path ~request_id ~briefing_contract ~save:(save_domain ~base_path)
 type successor_result = Indivisible of Owner.retained | Successor_waiting of Owner.retained
   | Successor_ready of {parent:Owner.retained;child:Owner.retained}
-let narrow_with ~admit ~store ~base_path ~request_id =
-  let read ~request_id = Eio_unix.run_in_systhread (fun () ->
-    Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
-  let* parent = read ~request_id in
+let read_original ~store ~request_id = Eio_unix.run_in_systhread (fun () ->
+  Owner.load ~store ~scope:Capture.scope ~request_id) |> owned
+(* The parent read again, with the workspace it is restored in and its
+   restored capture. *)
+let restore_parent ~store ~base_path ~request_id =
+  let* parent = read_original ~store ~request_id in
   let* parent = match parent with Some parent -> Ok parent
     | None -> Error (Unavailable "Original Curator size refusal is absent") in
   let* workspace = Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
   let* original = restore ~store ~workspace parent in
-  let publish parent event = Eio_unix.run_in_systhread (fun () -> advance ~store parent event) in
-  let derive refusal child_id =
-    let* final = match refusal.Progress.stage with
-      | Progress.Execution -> rejected (Exact.final_of_json ~schema:(Capture.output_schema original) refusal.evidence)
-      | Progress.Before_dispatch -> Error (Rejected "A pre-dispatch refusal cannot create a Curator successor") in
-    rejected (Capture.narrow ~request_id:child_id ~final original) in
+  Ok (parent,workspace,original)
+let derive_successor original (refusal : Progress.refusal) child_id =
+  let* final = match refusal.stage with
+    | Progress.Execution -> rejected (Exact.final_of_json ~schema:(Capture.output_schema original) refusal.evidence)
+    | Progress.Before_dispatch -> Error (Rejected "A pre-dispatch refusal cannot create a Curator successor") in
+  rejected (Capture.narrow ~request_id:child_id ~final original)
+(* Complete the successor intent [parent]'s record holds: retain the child
+   derived again from the parent, read it back and acknowledge it. Returns
+   the acknowledged parent and the child. *)
+let complete_with ~store ~workspace ~original (parent : Owner.retained) =
   let validate_intent refusal (intent : Progress.successor) =
     let* id = rejected (Capture.Request_id.of_string intent.request_id) in
-    let* child = derive refusal id in
+    let* child = derive_successor original refusal id in
     let* child = match child with Some child -> Ok child
       | None -> Error (Rejected "An indivisible original batch cannot have a successor") in
     let* digest = rejected (Owner.request_digest (Capture.to_json child)) in
     let* () = if String.equal digest intent.request_digest then Ok ()
       else Error (Rejected "Stored successor differs from the original whole-batch reduction") in
     Ok child in
-  let confirm parent child =
-    let* _ = restore ~store ~workspace child in
-    Ok (Successor_ready {parent;child}) in
-  let finish parent intent =
-    let* child = read ~request_id:intent.Progress.request_id in
+  let finish parent (intent : Progress.successor) =
+    let* child = read_original ~store ~request_id:intent.request_id in
     let* child = match child with Some child -> Ok child
       | None -> Error (Unavailable "The original child capture is absent; acknowledged work cannot be recreated") in
-    let* () = if String.equal child.request_digest intent.request_digest then Ok ()
+    let* () = if String.equal child.Owner.request_digest intent.request_digest then Ok ()
       else Error (Rejected "Retained child differs from its original parent intent") in
-    confirm parent child in
-  let retain_child parent refusal intent =
+    let* _ = restore ~store ~workspace child in
+    Ok (parent,child) in
+  match Progress.phase parent.progress with
+  | Progress.Subdividing (refusal,intent) ->
     (* The intent names the child by digest; the child retained is the one
        derived again from the parent, which [validate_intent] matched to it. *)
     let* child = validate_intent refusal intent in
     let* summary = rejected (Capture.summary child) in
     let destination = Capture.destination child in
     let* () = Eio_unix.run_in_systhread (fun () ->
-      Owner.retain ~store ~scope:Capture.scope ~request_id:intent.Progress.request_id
+      Owner.retain ~store ~scope:Capture.scope ~request_id:intent.request_id
         ~installation_id:destination.installation_id ~package_id:destination.package_id
         ~tool:destination.tool ~summary:(Capture.Summary.to_json summary) ~request:(Capture.to_json child))
       |> owned in
     (* This strict read and the equal request digest establish only that the
        intended child is durable. Ordinary restore still rejects it until ACK. *)
-    let* retained = read ~request_id:intent.request_id in
+    let* retained = read_original ~store ~request_id:intent.request_id in
     let* retained = match retained with Some retained -> Ok retained
       | None -> Error (Uncertain "Child publication has no confirmed original capture") in
     let* () = if String.equal retained.request_digest intent.request_digest
         && retained.installation_id=destination.installation_id
         && retained.package_id=destination.package_id && retained.tool=destination.tool then Ok ()
       else Error (Rejected "Another child binding cannot acknowledge the original successor") in
-    let* published = publish parent (Progress.Successor_observed intent.request_id) in
-    finish (record published) intent in
-  match Progress.phase parent.progress with
-  | Progress.Subdividing (refusal,intent) -> retain_child parent refusal intent
+    let* published = Eio_unix.run_in_systhread (fun () ->
+      advance ~store parent (Progress.Successor_observed intent.request_id)) in
+    finish (record published) intent
   | Progress.Subdivided (refusal,intent) ->
     let* _ = validate_intent refusal intent in finish parent intent
+  | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
+  | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _
+  | Progress.Rejected _ -> Error (Rejected "The original holds no successor intent to complete")
+let narrow_with ~admit ~store ~base_path ~request_id =
+  let* parent,workspace,original = restore_parent ~store ~base_path ~request_id in
+  let complete parent = complete_with ~store ~workspace ~original parent
+    |> Result.map (fun (parent,child) -> Successor_ready {parent;child}) in
+  match Progress.phase parent.progress with
+  | Progress.Subdividing _ | Progress.Subdivided _ -> complete parent
   | Progress.Rejected refusal ->
     let child_id = Capture.Request_id.fresh () in
-    let* child = derive refusal child_id in
+    let* child = derive_successor original refusal child_id in
     (match child with
      | None -> Ok (Indivisible parent)
      | Some child ->
        let* request_digest = rejected (Owner.request_digest (Capture.to_json child)) in
        let intent : Progress.successor = {request_id=Capture.Request_id.to_string child_id;request_digest} in
        admit original (fun () ->
-         let* published = publish parent (Progress.Successor_intended intent) in
+         let* published = Eio_unix.run_in_systhread (fun () ->
+           advance ~store parent (Progress.Successor_intended intent)) in
          match published with
          | Acknowledged parent -> Ok (Successor_waiting parent)
-         | New parent -> retain_child parent refusal intent))
+         | New parent -> complete parent))
   | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
   | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _ ->
     Error (Rejected "Only an original execution size refusal can create a Curator successor")
 let local_admission _ publish = publish ()
 let narrow_local ~store ~base_path ~request_id = narrow_with ~admit:local_admission ~store ~base_path ~request_id
-(* Discovery recovery completes the intent a parent's record already holds. A
-   parent that holds none when read again must not get a new child here. *)
-let recovery_admission _ _ = Error (Rejected "Original successor intent changed during recovery")
+(* Discovery recovery completes the intent a parent's record already holds.
+   It never derives or publishes a new one: a parent that holds none when
+   read again is refused. *)
 let recover_successor ~store ~base_path ~request_id =
-  narrow_with ~admit:recovery_admission ~store ~base_path ~request_id
+  let* parent,workspace,original = restore_parent ~store ~base_path ~request_id in
+  let* _ = complete_with ~store ~workspace ~original parent in
+  Ok ()
 let narrow ~config ~request_id =
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   let admit original publish =
@@ -521,6 +537,7 @@ type original = {id:Capture.Request_id.t;record:Owner.Record.t;summary:Capture.S
    is restored here. The pass restores only the originals it acts on. *)
 let discover_observed_with ~store ~base_path ~after_inventory =
   let scan () = Eio_unix.run_in_systhread (fun () ->
+    let* workspace = Capture.observe_workspace ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
     let inventory = Owner.discover ~store ~scope:Capture.scope in
     after_inventory ();
     let* records = inventory |> owned in
@@ -530,18 +547,15 @@ let discover_observed_with ~store ~base_path ~after_inventory =
         let* id = Capture.Request_id.of_string (Owner.Record.request_id record) |> rejected in
         let* summary = Capture.Summary.of_json (Owner.Record.summary record) |> rejected in
         summarize ({id;record;summary}::originals) rest in
-    summarize [] records) in
-  let links = List.map (fun original -> original.record,original.summary) in
-  let* originals = scan () in
-  let* pending = Capture.recoverable_successors (links originals) |> rejected in
+    let* originals = summarize [] records in
+    let* pending = Capture.recoverable_successors ~workspace
+        (List.map (fun original -> original.record,original.summary) originals) |> rejected in
+    Ok (originals,pending)) in
+  let* originals,pending = scan () in
   let rec recover = function
     | [] -> Ok ()
     | request_id::rest ->
-      let* result = recover_successor ~store ~base_path ~request_id in
-      let* () = match result with
-        | Successor_ready _ -> Ok ()
-        | Successor_waiting _ -> Error (Uncertain "Original successor recovery requires a fresh journal read")
-        | Indivisible _ -> Error (Rejected "An existing successor intent cannot become indivisible") in
+      let* () = recover_successor ~store ~base_path ~request_id in
       recover rest in
   match pending with
   | [] ->
@@ -550,8 +564,7 @@ let discover_observed_with ~store ~base_path ~after_inventory =
     Ok originals
   | _::_ ->
     let* () = recover pending in
-    let* originals = scan () in
-    let* pending = Capture.recoverable_successors (links originals) |> rejected in
+    let* originals,pending = scan () in
     (match pending with
      | [] -> Ok originals
      | _::_ -> Error (Uncertain "Original successor discovery changed during recovery"))

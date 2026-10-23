@@ -1080,7 +1080,16 @@ let test_discovery_rejects_dangling_parent ()=with_workspace (fun base_path stor
   let before=bytes (child_record_path store retained) in
   check bool "an orphan cannot become an independent root" true (Result.is_error (discover base_path store));
   check string "orphan evidence remains unchanged" before (bytes (child_record_path store retained)))
+(* The same store read in another physical place, as when the workspace is
+   copied or restored from a backup. *)
 let test_discovery_rejects_foreign_workspace ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Workspace-bound original"] in
+  ignore (retain_capture store capture);
+  check int "the workspace that captured an original discovers it" 1 (List.length (accepted (discover base_path store)));
+  let copy=Filename.concat base_path "copied-workspace" in
+  Unix.mkdir copy 0o700;
+  check bool "another physical workspace refuses the whole inventory" true (Result.is_error (discover copy store)))
+let test_restore_refuses_a_capture_naming_another_workspace ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Workspace-bound original"] in
   let request=match Capture.to_json capture with
     | `Assoc fields -> `Assoc (List.map (fun (name,value) ->
@@ -1091,8 +1100,9 @@ let test_discovery_rejects_foreign_workspace ()=with_workspace (fun base_path st
         else name,value) fields)
     | _ -> fail "expected capture" in
   retain_bad_capture store capture request;
-  check int "discovery reads the record of a foreign workspace capture" 1 (List.length (accepted (discover base_path store)));
-  check bool "a foreign physical workspace is refused when restored" true
+  check int "discovery reads the record, whose summary names this workspace" 1
+    (List.length (accepted (discover base_path store)));
+  check bool "a capture naming another workspace is refused when restored" true
     (Result.is_error (restore_capture base_path store (original store capture))))
 let test_discovery_rejects_duplicate_inventory_id ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["One original request identity"] in
@@ -1100,7 +1110,8 @@ let test_discovery_rejects_duplicate_inventory_id ()=with_workspace (fun base_pa
   let links=owned (Owner.discover ~store ~scope:Capture.scope) |> List.map (fun record ->
     record,get (Capture.Summary.of_json (Owner.Record.summary record))) in
   check bool "duplicate rows are not a valid complete forest" true
-    (Result.is_error (Capture.recoverable_successors (links @ links))))
+    (Result.is_error (Capture.recoverable_successors ~workspace:(get (Capture.observe_workspace ~base_path))
+       (links @ links))))
 let test_live_briefing_contract_on_recovery after_saved ()=with_workspace (fun base_path store ->
   Eio.Switch.run @@ fun sw ->
   let prompts=Filename.concat base_path "guarded-prompts" in
@@ -1220,6 +1231,7 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "discovery recovers nested original chain" `Quick test_discovery_nested_existing_intents;
   test_case "discovery refuses a missing original predecessor" `Quick test_discovery_rejects_dangling_parent;
   test_case "discovery refuses another physical workspace" `Quick test_discovery_rejects_foreign_workspace;
+  test_case "restore refuses a capture naming another workspace" `Quick test_restore_refuses_a_capture_naming_another_workspace;
   test_case "discovery refuses duplicate original IDs" `Quick test_discovery_rejects_duplicate_inventory_id;
   test_case "Briefing recovery reads the changed live contract on its original fiber" `Quick
     (test_live_briefing_contract_on_recovery false);

@@ -167,10 +167,11 @@ module Summary = struct
   type batch =
     | Classification of { up_to : Request.size; selected : Ledger.fact_ref list }
     | Briefing of { selected_count : int; prepared_state : string }
-  type t = { predecessor : Request_id.t option; batch : batch }
+  type t = { predecessor : Request_id.t option; workspace : workspace; batch : batch }
   let output_schema t = match t.batch with
     | Classification _ -> Decision.output_schema | Briefing _ -> Brief.output_schema
-  let to_json t = `Assoc (("predecessor", optional (Option.map Request_id.to_string t.predecessor)) ::
+  let to_json t = `Assoc (("predecessor", optional (Option.map Request_id.to_string t.predecessor))
+    :: ("workspace", workspace_json t.workspace) ::
     match t.batch with
     | Classification {up_to; selected} -> ["kind",`String "classification";"up_to",Request.size_to_json up_to;
         "selected",`List (List.map Ledger.fact_ref_to_json selected)]
@@ -184,25 +185,27 @@ module Summary = struct
       | _ -> Error "a Curator summary predecessor must be a request ID or null" in
     match kind with
     | Some (`String "classification") ->
-      let* f = fields ["predecessor";"kind";"up_to";"selected"] json in
+      let* f = fields ["predecessor";"workspace";"kind";"up_to";"selected"] json in
       let* predecessor = predecessor f in
+      let* workspace = workspace_of_json (List.assoc "workspace" f) in
       let* up_to = Request.size_of_json (List.assoc "up_to" f) in
       let* selected = match List.assoc "selected" f with
         | `List (_ :: _ as refs) -> List.fold_right (fun json selected ->
             let* selected = selected in
             let* fact = Ledger.fact_ref_of_json json in Ok (fact :: selected)) refs (Ok [])
         | _ -> Error "a Curator classification summary selects at least one fact" in
-      Ok {predecessor; batch=Classification {up_to; selected}}
+      Ok {predecessor; workspace; batch=Classification {up_to; selected}}
     | Some (`String "briefing") ->
-      let* f = fields ["predecessor";"kind";"selected_count";"prepared_state_sha256"] json in
+      let* f = fields ["predecessor";"workspace";"kind";"selected_count";"prepared_state_sha256"] json in
       let* predecessor = predecessor f in
+      let* workspace = workspace_of_json (List.assoc "workspace" f) in
       let* selected_count = match List.assoc "selected_count" f with
         | `Int count when count >= 1 -> Ok count
         | _ -> Error "a Curator Briefing summary selects at least one entry" in
       let* prepared_state = match List.assoc "prepared_state_sha256" f with
         | `String digest when String_util.is_lowercase_sha256_hex digest -> Ok digest
         | _ -> Error "a Curator Briefing summary names its prepared state by SHA-256" in
-      Ok {predecessor; batch=Briefing {selected_count; prepared_state}}
+      Ok {predecessor; workspace; batch=Briefing {selected_count; prepared_state}}
     | _ -> Error "unknown Curator summary kind"
 end
 let briefing_state_sha256 state =
@@ -215,7 +218,7 @@ let summary t =
     | Briefing batch ->
       let* prepared_state = briefing_state_sha256 (Brief.prepared_state batch) in
       Ok (Summary.Briefing {selected_count=Brief.selected_count batch; prepared_state}) in
-  Ok {Summary.predecessor=t.predecessor; batch}
+  Ok {Summary.predecessor=t.predecessor; workspace=t.workspace; batch}
 let restore_record ~workspace (retained : Owner.retained) =
   let* f = fields ["schema";"request_id";"predecessor";"workspace";"destination";"prompt";"work";
                    "rendered_prompt_sha256";"output_schema"] retained.request in
@@ -331,13 +334,15 @@ let restore_with ~pending ~workspace ~load retained =
 let restore ~workspace ~load retained = restore_with ~pending:false ~workspace ~load retained
 module Originals = Map.Make (String)
 (* Records and summaries only. A restore of an original walks its chain and
-   checks every derivation; this checks the links between records. *)
-let recoverable_successors originals =
+   checks every derivation; this checks the links between records and that
+   every original was captured in this physical workspace. *)
+let recoverable_successors ~workspace originals =
   let rec index records = function
     | [] -> Ok records
-    | ((record, _) as original : Owner.Record.t * Summary.t)::rest ->
+    | ((record, summary) as original : Owner.Record.t * Summary.t)::rest ->
       let id = Owner.Record.request_id record in
       if Originals.mem id records then Error "duplicate original Curator request ID"
+      else if summary.Summary.workspace <> workspace then Error "Curator request belongs to another physical workspace"
       else index (Originals.add id original records) rest in
   let* records = index Originals.empty originals in
   let rec ancestry seen ((record, summary) : Owner.Record.t * Summary.t) =

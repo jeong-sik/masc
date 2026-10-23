@@ -51,8 +51,9 @@ val load : store:Lane_addon_store.t -> scope:string -> request_id:string ->
     owns workspace authority. *)
 val discover : store:Lane_addon_store.t -> scope:string -> (Record.t list, error) result
 (** Read and strictly validate every published record in this scope, including
-    its exact hashed filename, summary and complete progress history, without
-    reading any request body; {!load} reads and checks the body. Any
+    its exact hashed filename, canonical summary and complete progress
+    history, without reading any request body; {!load} reads and checks the
+    body. Any
     malformed, misnamed, vanished or unreadable published record rejects the
     inventory; no partial list is returned as complete. No directories,
     requests or dispatches are created. Results are observations; load/advance

@@ -74,7 +74,11 @@ let decode ~scope ~request_id json =
   let* request_digest = text "request_digest" in
   let* () = if String_util.is_lowercase_sha256_hex request_digest then Ok ()
     else Error "original request digest is not a SHA-256 digest" in
-  let* summary = Lane_addon_action.canonical (List.assoc "summary" fields) in
+  (* Like the body, the summary must already be the canonical form retain wrote. *)
+  let stored_summary = List.assoc "summary" fields in
+  let* summary = Lane_addon_action.canonical stored_summary in
+  let* () = if String.equal (Yojson.Safe.to_string summary) (Yojson.Safe.to_string stored_summary) then Ok ()
+    else Error "original request summary is not canonical" in
   let* progress = Lane_addon_request_progress.of_json (List.assoc "progress" fields) in
   Ok ({Record.scope; request_id; installation_id; package_id; tool; request_digest; summary; progress} : Record.t)
 (* The body a record names: present, its bytes named by that digest, and the

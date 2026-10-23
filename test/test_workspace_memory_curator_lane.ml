@@ -202,7 +202,7 @@ let seed_size_refusal ?(kind=Lane_addon_exact.Input_capacity) store capture =
   let record=advance store (original_record store capture) Progress.Dispatch_intended in
   advance store record (Progress.Refused {stage=Progress.Execution;
     evidence=Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final (Input_refused kind))})
-type provider_mode = Answer | Refuse_fact of string | Count_capacity
+type provider_mode = Answer | Refuse_fact of string | Refuse_briefing | Count_capacity
 let with_fixture ?(on_response_error=(fun _ _ -> ()))
     ?(off=false) ?(routes=true) ?(start_owner=true) ?(invalid_first=false)
     ?(claims=["An original production source"]) f =
@@ -247,15 +247,17 @@ let with_fixture ?(on_response_error=(fun _ _ -> ()))
         try
         match !mode with
         | Count_capacity -> `OK,Yojson.Safe.to_string (`Assoc ["input_tokens",`Int 8192])
-        | Answer | Refuse_fact _ ->
+        | Answer | Refuse_fact _ | Refuse_briefing ->
         let original=original_for body in
         let output=match Capture.work original with
           | Capture.Classification {batch;_} ->
-            let refuse=bad || match !mode with Answer | Count_capacity -> false | Refuse_fact claim ->
+            let refuse=bad || match !mode with Answer | Refuse_briefing | Count_capacity -> false | Refuse_fact claim ->
               List.exists (fun (fact:Ledger.pending_fact) -> fact.claim=claim) batch.selected in
             `Assoc ["decisions",`List (if refuse then [] else List.map (fun (id,(fact:Ledger.pending_fact)) ->
               `Assoc ["fact_id",`String id;"kind",`String "create_claim";"value",`String fact.claim]) (Request.selected_ids batch))]
-          | Capture.Briefing _ -> `Assoc ["briefing",`String (if bad then " " else "The original selected workspace evidence was synthesized.")] in
+          | Capture.Briefing _ ->
+            let refuse=bad || match !mode with Refuse_briefing -> true | Answer | Refuse_fact _ | Count_capacity -> false in
+            `Assoc ["briefing",`String (if refuse then " " else "The original selected workspace evidence was synthesized.")] in
         `OK,F.openai_response output
         with
         | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
@@ -920,6 +922,35 @@ let test_briefing_successor_observes_live_contract ()=
     check json "frontier observation preserves original prepared state" (Briefing.to_json prepared)
       (Briefing.to_json (get (Briefing.load ~directory:(Ledger.directory ~base_path))));
     check int "frontier observation dispatches no provider" 0 (F.post_count server))
+(* A Briefing refused for a reason other than size keeps its prepared pass. A
+   wake does not prepare and send that pass again; a changed contract starts
+   a new one. *)
+let test_a_refused_briefing_waits_for_its_pass_to_change ()=
+  with_fixture ~start_owner:false (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode ~delivery:_ ->
+    mode:=Refuse_briefing;
+    Curator.start ~sw ~config;
+    let discovered ()=owned (Owner.discover ~store ~scope:Capture.scope) in
+    let refused_briefing record=
+      match (get (Capture.Summary.of_json (Owner.Record.summary record))).Capture.Summary.batch,
+            Progress.phase (Owner.Record.progress record) with
+      | Capture.Summary.Briefing _, Progress.Rejected _ -> true
+      | Capture.Summary.Briefing _, (Progress.Captured | Admission_wait _ | Dispatch_pending _ | Judged _
+          | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Subdividing _ | Subdivided _)
+      | Capture.Summary.Classification _, _ -> false in
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path
+      && List.exists refused_briefing (discovered ())
+      && List.for_all (fun record -> observer_acknowledged (Owner.Record.progress record)) (discovered ()));
+    let calls=F.post_count server and originals=List.length (discovered ()) in
+    ignore (Curator.request ~base_path);
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
+    check int "a wake sends the refused pass to no provider" calls (F.post_count server);
+    check int "and captures no other original" originals (List.length (discovered ()));
+    mode:=Answer;
+    get (Prompt_registry.set_override Prompt_names.workspace_memory_briefing
+      "Changed current contract {{workspace_memory_briefing}}");
+    ignore (Curator.request ~base_path);
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path && ready_summary base_path);
+    check int "a changed contract prepares and sends one new pass" (calls+1) (F.post_count server))
 let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "public owner uses real worker, semantic candidates and original terminal" `Quick test_actual_production_pipeline;
   test_case "actual Addon On wakes sources parked while Off" `Quick test_off_then_actual_metadata_on;
@@ -954,4 +985,5 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "idle subscription observes queued and already completed wakes" `Quick test_idle_barrier_has_no_lost_wake;
   test_case "idle subscription cancellation and owner stop preserve other waiters" `Quick test_idle_barrier_cancel_and_stop;
   test_case "Briefing successor observes the guarded live contract without publication" `Quick
-    test_briefing_successor_observes_live_contract]]
+    test_briefing_successor_observes_live_contract;
+  test_case "a refused Briefing waits for its pass to change" `Quick test_a_refused_briefing_waits_for_its_pass_to_change]]

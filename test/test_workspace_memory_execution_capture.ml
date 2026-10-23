@@ -227,6 +227,9 @@ let test_a_restore_refuses_a_summary_other_than_its_capture () = with_workspace 
   rejected (restores_with "classification-root" (replace "predecessor" (`String (C.Request_id.to_string id))
     (summary_of classified)) classified);
   rejected (restores_with "classification-no-summary" `Null classified);
+  rejected (restores_with "classification-other-workspace"
+    (replace "workspace" (`Assoc ["path",`String (Filename.dirname root);"device",`Int 0;"inode",`Int 0])
+      (summary_of classified)) classified);
   let source id : B.source = {id;kind=B.Claim;text="Kept evidence " ^ id} in
   let p = prompt "Original briefing: {{workspace_memory_briefing}}" in
   let render = render Prompt_names.workspace_memory_briefing "workspace_memory_briefing" p in

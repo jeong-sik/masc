@@ -417,11 +417,14 @@ identity, the request digest, the consumer's summary of the request and the
 progress. The request body is written once, before any record names it, beside
 the scope's records at `tool-request-bodies/<scope digest>/<request digest>.json`.
 Progress rewrites only the record, and retain and progress compare the request
-by its digest, so a progress event reads and writes a record whose size does
-not depend on the request; it still holds the commit's before and after domain
-states. Discovery reads the scope's records only. Loading one original reads
-the body its record names, and a body that is missing, changed or not
-canonical JSON is an error, not absence. A retain interrupted between the two
+by its digest, so a progress event reads and writes the record, not the
+request. The record still grows with the request through the summary, one
+fact reference per selected fact of a classification, and it holds the
+commit's before and after domain states. Discovery reads the scope's records
+only. Loading one original reads the body its record names, and a body that
+is missing, changed or not canonical JSON is an error, not absence. A body is
+checked when its original is loaded, so the body of an original no pass acts
+on is not checked again. A retain interrupted between the two
 writes leaves a body no record names: retaining the same request again writes
 it again, and nothing else reads or removes it. A record and the body it names
 move together; a record moved without its body fails every load of that
@@ -430,11 +433,14 @@ path, as it reads records. Candle Appraiser keeps its originals in the same
 store with a null summary, because it reads them by ID only.
 
 The Curator summary is an index of the capture, computed from it when the
-original is retained: the predecessor, and for classification the size the
-batch was prepared for and the selected fact references, for Briefing the
-selected count and the SHA-256 of the prepared state. A restore computes the
-summary again and refuses a record whose summary differs, so the capture stays
-the authority. From summaries alone a pass knows each original's domain,
+original is retained: the predecessor, the physical workspace that captured
+it, and for classification the size the batch was prepared for and the
+selected fact references, for Briefing the selected count and the SHA-256 of
+the prepared state. A restore computes the summary again and refuses a record
+whose summary differs, so the capture stays the authority. A summary that is
+not in canonical form is refused when its record is read. From summaries
+alone a pass knows whether every original belongs to this workspace, each
+original's domain,
 whether it can be halved, which facts a Rejected classification holds back,
 whether a Briefing original still holds its pass and how large the next batch
 starts.
@@ -538,12 +544,14 @@ initial prepared-state/capture reconciliation and installed UI remain pending.
 
 `Server_workspace_memory_addon.discover` provides the local recovery boundary
 for the production owner. It reads every original record and its summary,
-without a request body, and validates the forest links from them: no repeated
-ID, every predecessor present, no cycle, each child named by its parent's
+without a request body, and validates the forest from them: every original
+captured in the physical workspace it observes once per scan, no repeated ID,
+every predecessor present, no cycle, each child named by its parent's
 successor intent with the same request digest and a summary naming that
-parent, and the child of every Subdivided parent present. It never treats a
-malformed unrelated record or summary as an empty or partial successful
-inventory.
+parent, and the child of every Subdivided parent present. A workspace copied
+or restored to another place therefore refuses its whole inventory. It never
+treats a malformed unrelated record or summary as an empty or partial
+successful inventory.
 
 A legitimate interrupted publication has a Subdividing parent and either no
 child yet or its exact initial Captured child before the parent ACK. Ordinary

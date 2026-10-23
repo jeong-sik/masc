@@ -405,13 +405,18 @@ let test_lane_addon_tool_request_owners () = with_lane_store (fun base root ->
     | json -> json in
   put (path "v2") (carrying_request ~request_id:"v2" ~schema:"lane.addon.tool-request-owner.v2");
   put (path "v1") (carrying_request ~request_id:"v1" ~schema:"lane.addon.tool-request-owner.v1");
+  (* A record that names its body but keeps no summary is refused too. *)
+  put (path "v3") (match tool_request_owner ~scope:"scope" ~request_id:"v3"
+      ~schema:"lane.addon.tool-request-owner.v3" ~request_digest with
+    | `Assoc fields -> `Assoc (List.remove_assoc "summary" fields)
+    | json -> json);
   (* Discovery fails the whole scope on an entry it does not know. *)
   let stray = Filename.concat (Filename.dirname (path "current")) "notes.txt" in
   write stray "operator notes";
   ignore (unchanged root (fun () ->
-    expect_refusals P.Store.Tool_request_owners ~base_path:base ~rows:5
+    expect_refusals P.Store.Tool_request_owners ~base_path:base ~rows:6
       [path "without-body", P.Tool_request_owner; path "v2", P.Tool_request_owner;
-       path "v1", P.Tool_request_owner; stray, P.Tool_request_inventory])))
+       path "v1", P.Tool_request_owner; path "v3", P.Tool_request_owner; stray, P.Tool_request_inventory])))
 
 
 (* The deploy gate itself: a refused Lane Add-on record stops validate-stores. *)

@@ -53,15 +53,16 @@ val rendered_prompt : t -> string
 val output_schema : t -> Yojson.Safe.t
 val to_json : t -> Yojson.Safe.t
 (** What a pass reads about an original without restoring it: its
-    predecessor, and for classification the size it was prepared for and the
-    facts it selected, for Briefing how many entries it selected and the
-    SHA-256 of the state it prepared. The owner record keeps it; every
-    restore refuses a capture whose summary differs. *)
+    predecessor, the physical workspace that captured it, and for
+    classification the size it was prepared for and the facts it selected,
+    for Briefing how many entries it selected and the SHA-256 of the state it
+    prepared. The owner record keeps it; every restore refuses a capture
+    whose summary differs. *)
 module Summary : sig
   type batch =
     | Classification of { up_to : Workspace_memory_request.size; selected : Workspace_memory_ledger.fact_ref list }
     | Briefing of { selected_count : int; prepared_state : string }
-  type t = private { predecessor : Request_id.t option; batch : batch }
+  type t = private { predecessor : Request_id.t option; workspace : workspace; batch : batch }
   val output_schema : t -> Yojson.Safe.t
   (** The domain output schema of the original's kind. *)
   val to_json : t -> Yojson.Safe.t
@@ -109,14 +110,15 @@ val restore : workspace:workspace ->
     missing, conflicting, unreadable or cyclic ancestry. A retained
     child whose parent is still Subdividing cannot execute. This is neither
     restart enumeration nor a commit journal. *)
-val recoverable_successors :
+val recoverable_successors : workspace:workspace ->
   (Lane_addon_tool_request_owner.Record.t * Summary.t) list -> (string list, string) result
 (** Validate the links of the freshly discovered original forest before
-    recovery, from records and summaries only: every predecessor is present
-    and names its child by request ID and digest, an acknowledged child
-    exists, and a Subdividing parent has no child yet or exactly its initial
-    child with no events. Duplicate, dangling, cyclic or conflicting links
-    reject the whole inventory. Captures, the physical workspace and each
+    recovery, from records and summaries only: every original was captured in
+    [workspace], every predecessor is present and names its child by request
+    ID and digest, an acknowledged child exists, and a Subdividing parent has
+    no child yet or exactly its initial child with no events. An original of
+    another physical workspace, or a duplicate, dangling, cyclic or
+    conflicting link, rejects the whole inventory. Captures and each
     whole-batch derivation are checked when an original is restored, not
     here.
     Return only parent IDs with already durable successor intentions. No new

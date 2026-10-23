@@ -86,7 +86,15 @@ let test_bad_record_or_unknown_name_never_returns_a_partial_inventory () = with_
     `Assoc (List.map (fun (key,value) -> key,if key="scope" then `String "other-owner" else value) fields)
     | _ -> Alcotest.fail "original owner object" in
   save (path root "damaged") (Yojson.Safe.to_string bad_scope);
-  fail_inventory (Owner.discover ~store ~scope))
+  fail_inventory (Owner.discover ~store ~scope);
+  (* The same summary with its keys out of canonical order is refused, not
+     normalized on read. *)
+  let unordered = match parsed with `Assoc fields ->
+    `Assoc (List.map (fun (key,value) -> key,if key="summary" then `Assoc ["z",`Int 1;"a",`Int 2] else value) fields)
+    | _ -> Alcotest.fail "original owner object" in
+  save (path root "damaged") (Yojson.Safe.to_string unordered);
+  fail_inventory (Owner.discover ~store ~scope);
+  fail_load (load store "damaged"))
 
 let test_listed_disappearance_and_same_name_directory_replacement_are_errors () =
   with_store (fun root store -> retain store "original";

@@ -105,15 +105,18 @@ type original = private {
 }
 val discover : config:Workspace.config -> (original list, error) Stdlib.result
 (** Read every original record and its summary, without reading a request body
-    or restoring a capture. Strict link validation of the forest precedes
+    or restoring a capture. Strict link validation of the forest, including
+    that every original was captured in this physical workspace, precedes
     every recovery write. Recover only already durable Subdividing intentions,
     including child-retained-before-parent-ACK. Without a recoverable intention,
     return the inventory this pass already validated; after any recovery, read
-    the records again. A missing acknowledged child, a malformed record or
-    summary, or incomplete publication rejects the inventory; no partial list
-    is complete. A capture is restored, and its derivation, workspace and
-    summary are checked, when the pass acts on it.
-    Works locally while Off, minting no ID or new successor intention. It does
+    the records again. A missing acknowledged child, an original of another
+    workspace, a malformed record or summary, or incomplete publication rejects
+    the inventory; no partial list is complete. A capture is restored, and its
+    derivation and summary are checked, when the pass acts on it. A body is
+    checked when its original is loaded, so an original no pass acts on is not
+    checked again.
+    Works locally while Off, publishing no new ID or successor intention. It does
     not dispatch, settle domains, prepare observers or schedule new roots.
     Caller holds the workspace process lease and serializes the entire pass;
     the result is an observation, not a grant to bypass fresh effect checks. *)
@@ -173,10 +176,10 @@ module For_testing : sig
   (** Same actual strict parent/child journal and ancestry; no substituted
       publication edge or worker. *)
   val recover_successor : store:Lane_addon_store.t -> base_path:string -> request_id:string ->
-    (successor_result, error) Stdlib.result
+    (unit, error) Stdlib.result
   (** The step {!discover} runs for each recoverable parent: it completes the
-      successor intent the parent's record holds and refuses to publish a new
-      one for a parent that holds none. *)
+      successor intent the parent's record holds. A parent that holds none is
+      refused; no child is derived or published for it. *)
   val discover : store:Lane_addon_store.t -> base_path:string ->
     (original list, error) Stdlib.result
   (** Same record and summary discovery, forest link validation and existing

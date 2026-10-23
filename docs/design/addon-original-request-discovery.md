@@ -2,8 +2,10 @@
 
 `Lane_addon_tool_request_owner.discover` reuses the original owner namespace;
 there is no Curator registry or second journal. It strictly decodes every
-published record, including the immutable request/destination and complete
-progress history, and checks the filename against the exact request ID hash.
+published record: the identity, the digest naming its request body, the
+consumer's summary and the complete progress history. It checks the filename
+against the exact request ID hash. It reads no request body; a load reads the
+body one record names and checks it against that digest.
 Another scope, a misnamed record, malformed JSON/history or an unknown namespace
 entry rejects the inventory. Canonical atomic staging names are unpublished and
 excluded using the existing shared filename grammar; they are never read,

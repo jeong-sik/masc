@@ -1747,6 +1747,81 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     | Error detail -> fail detail)
 ;;
 
+let test_context_frontier_wire_keeps_digest_authority_with_the_guard () =
+  with_workspace "masc-frontier-wire-" (fun base_path ->
+    let snapshot_sha256 = String.make 64 'a' in
+    List.iter (fun (keeper_name, delivery) ->
+      let frontier = { message_count=2; delivery; acknowledged_turn=None; held_context=[] } in
+      let claim ~expected ~at =
+        claim_with_context_frontier ~context_frontier:(Some frontier) ~base_path
+          ~keeper_name ~expected ~client_kind:Codex ~owner_epoch
+          ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:at in
+      let claimed = claim ~expected:None ~at:1. |> Result.get_ok in
+      let active = mark_active ~base_path ~keeper_name ~expected:claimed
+        ~session_id:"session" ~updated_at:2. |> Result.get_ok in
+      let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+        ~session_id:"session" ~updated_at:3. |> Result.get_ok in
+      let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+        ~session_id:"session" ~turn_id:"turn" ~turn_count:starting.turn_count
+        ~updated_at:4. |> Result.get_ok in
+      let settled = settle ~base_path ~keeper_name ~expected:started
+        ~session_id:"session" ~turn_id:"turn" ~updated_at:5. |> Result.get_ok in
+      check bool "typed frontier and exact acknowledgement survive persisted reread" true
+        (load ~base_path ~keeper_name = Ok (Some settled));
+      let expected_proof = match delivery with
+        | Canonical_source_guard _ -> Ok ()
+        | Prepared_start_context | Held_by_vendor_session -> Error Context_frontier_missing in
+      check bool "only guarded provenance proves unchanged canonical source" true
+        (validate_unchanged_context ~expected:(Some settled) ~snapshot_sha256 = expected_proof);
+      let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+      let binding_fields, frontier_fields = match Yojson.Safe.from_file state_path with
+        | `Assoc fields ->
+          (match List.assoc "context_frontier" fields with
+           | `Assoc frontier_fields -> fields, frontier_fields
+           | _ -> fail "frontier is not an object")
+        | _ -> fail "binding is not an object" in
+      let expected_digest = match delivery with
+        | Canonical_source_guard {snapshot_sha256} -> Some (`String snapshot_sha256)
+        | Prepared_start_context | Held_by_vendor_session -> None in
+      check bool "wire stores a whole-history digest only for the guard" true
+        (List.assoc_opt "snapshot_sha256" frontier_fields = expected_digest);
+      let common = List.remove_assoc "delivery"
+          (List.remove_assoc "snapshot_sha256" frontier_fields) in
+      let original = `Assoc binding_fields in
+      let malformed =
+        [ "prepared digest", ["delivery", `String "prepared_start_context";
+                               "snapshot_sha256", `String snapshot_sha256]
+        ; "held digest", ["delivery", `String "held_by_vendor_session";
+                           "snapshot_sha256", `String snapshot_sha256]
+        ; "guard without digest", ["delivery", `String "canonical_source_guard"]
+        ; "guard invalid digest", ["delivery", `String "canonical_source_guard";
+                                    "snapshot_sha256", `String "invalid"]
+        ; "guard null digest", ["delivery", `String "canonical_source_guard";
+                                 "snapshot_sha256", `Null]
+        ; "guard duplicate digest", ["delivery", `String "canonical_source_guard";
+             "snapshot_sha256", `String snapshot_sha256;
+             "snapshot_sha256", `String snapshot_sha256]
+        ; "unknown delivery", ["delivery", `String "unknown"] ] in
+      List.iter (fun (label, fields) ->
+        let changed = `Assoc (("context_frontier", `Assoc (fields @ common)) ::
+          List.remove_assoc "context_frontier" binding_fields) in
+        Yojson.Safe.to_file state_path changed;
+        check bool ("strict wire refuses " ^ label) true
+          (Result.is_error (load ~base_path ~keeper_name))) malformed;
+      Yojson.Safe.to_file state_path original;
+      check bool "stale owner cannot overwrite the settled frontier" true
+        (Result.is_error (mark_active ~base_path ~keeper_name ~expected:claimed
+          ~session_id:"session" ~updated_at:6.));
+      check bool "failed CAS preserves the exact persisted settlement" true
+        (load ~base_path ~keeper_name = Ok (Some settled));
+      match claim ~expected:(Some settled) ~at:7. |> Result.get_ok with
+      | {phase=Start {previous_settlement=Some {session_id="session"; turn_id="turn"}; _}; _} -> ()
+      | _ -> fail "persisted frontier did not resume its acknowledged session")
+      [ "prepared", Prepared_start_context
+      ; "guarded", Canonical_source_guard {snapshot_sha256}
+      ; "held", Held_by_vendor_session ])
+;;
+
 (* A changed canonical source (a new system prompt at boot) used to refuse
    every later claim, so the keeper failed each cycle forever. The claim now
    starts a fresh vendor session; an unchanged source still resumes. *)
@@ -2308,6 +2383,8 @@ let () =
     "official client session store"
     [ ( "durable owner"
       , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
+        ; test_case "context frontier wire keeps digest authority with the guard" `Quick
+            test_context_frontier_wire_keeps_digest_authority_with_the_guard
         ; test_case "held context from the acknowledged frontier" `Quick
             test_held_context_is_read_only_from_the_acknowledged_frontier
         ; test_case "held section rows are named by their own digest" `Quick

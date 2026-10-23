@@ -829,6 +829,13 @@ status: reference
   Librarian Working State)은 resume 사용자 프롬프트 앞에 붙여 보내고, 대화 기록은
   보내지 않는다. 그래서 resume 턴의 세션 기록 `context_frontier.delivery`는
   `held_by_vendor_session`이고, 세션을 처음 여는 턴은 `prepared_start_context`다.
+  이 두 전달 방식의 프런티어에는 canonical 대화 전체의 해시를 만들거나 저장하지
+  않는다. `snapshot_sha256`은 Muse·Antigravity의 `canonical_source_guard`만 가지며,
+  정확히 정산된 턴이 인정한 원본과 다음 원본을 비교하는 권위다. 메시지 수와
+  전달한 맥락 조각의 해시(`held_context`)는 각 전달 방식에 그대로 기록한다.
+  세션 저장 schema `masc.keeper.official-client-session.v2`의 필드는 전달 방식별로
+  엄격하다. `prepared_start_context`·`held_by_vendor_session`에 `snapshot_sha256`이
+  있거나 `canonical_source_guard`에 그 필드가 없으면 읽기를 거절한다.
   → [Keeper_official_client_host.resume_prompt](../../lib/keeper/keeper_official_client_host.mli)
   경계: 여기의 "role"은 Message의 role(`System`·`User`·`Assistant`·`Tool`)도, Board
   Interest 판정의 `keeper_role {name, board_interests}`도, Fusion 심판의 `judge_role`

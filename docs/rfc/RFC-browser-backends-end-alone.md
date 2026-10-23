@@ -231,8 +231,8 @@ type phase = Serving_backends of backends | Retired
 
 ### 4.5 #44023 에 넘기는 것: 요청이 프로필 종류를 요구하기
 
-- live 가 없으면 자동 선택(Automatic)이 Chrome·Gecko 로 일을 보내요. 로그인이 필요한 일은 그쪽에서 실패해요.
-- 요청이 "운영자 로그인 프로필"을 요구할 수 있게 해요(예: `profile = Operator_signed_in | Any`). 자동 선택은 이 요구를 비공개 프로필로 채우지 않아요. 이 요구가 B5 의 다시 띄우기를 일으켜요.
+- live 가 없으면 자동 선택(Automatic)이 Chrome·Gecko 로 일을 보내요. Gecko 는 늘 비공개 프로필이고, Chrome 은 설정에 따라 비공개 프로필이거나 운영자 영속 프로필이에요. 로그인이 필요한 일은 비공개 프로필에서 실패해요.
+- 요청이 "운영자 로그인 프로필"을 요구할 수 있게 해요(예: `profile = Operator_signed_in | Any`). 자동 선택은 이 요구를 비공개 프로필로 채우지 않아요. 운영자 영속 프로필을 쓰는 Chrome 은 채울 수 있어요. 채울 backend 가 없으면 이 요구가 B5 의 다시 띄우기를 일으켜요.
 - backend 는 자기가 채우는 요구만 밝히면 돼요. 새 backend 도 같아요.
 - 브라우저 선택 규칙 전체를 정리하는 #44023 에서 함께 정해요. 이 RFC 의 단계에는 넣지 않아요.
 

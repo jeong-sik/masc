@@ -1,0 +1,55 @@
+# Task history latency, 2026-10-23
+
+## Observed failure
+
+The installed server (`dd72436925365a0028981c8bbb5b9a1e52ef1877`)
+returned Task `task-2497`'s seven history observations in 10.930158 seconds
+with limit 50, and 12.943751 seconds with the TUI's limit 59 and original
+workspace preconditions. Both replies exhausted the observed prefix.
+The installed TUI logged a 10.002-second timeout for the same limit-59 read.
+The adjacent full-health observation returned in 0.002502 seconds; its
+60-second scheduler window reported no stalls. These are separate samples,
+not a general server-load diagnosis.
+
+## Reader probe
+
+The exact reader functions from baseline
+`c56363ce9813fc563f3bf051ab612bcbc39e897d` and candidate source commit
+`928c13231cf7812255c121d4feaae9ff445e05bc` were compiled into a standalone
+native probe using OCaml 5.5.1, Yojson and `digestif.c`. Each processed the
+same captured byte ceilings from 38 live dated source files. The probe
+parsed each nonblank JSON row and hashed every row with its physical offset.
+
+| Reader | Bytes | Rows | Range reads | Elapsed seconds | CPU seconds |
+|---|---:|---:|---:|---:|---:|
+| Baseline | 254722443 | 467554 | 62208 | 5.942795 | 5.872638 |
+| Candidate | 254722443 | 467554 | 3905 | 3.244220 | 3.236958 |
+
+Both produced SHA-256
+`89db7face3f6deb78ae962fdff9a270e8aa621433842221aa1e722ca83e0bfde`.
+The probe used POSIX open/seek/read/close as the range adapter. It did not
+execute production ownership checks, canonical event validation, the Eio
+pool, HTTP transport, or TUI rendering. Baseline ran before candidate in one
+pair; these timings demonstrate this reader probe, not deployed API latency.
+The source still scans unrelated rows for sparse histories; this change
+does not introduce an index or claim asymptotically faster lookup.
+
+The same probe passed independent physical-row/byte-offset expectations for
+empty input, blank rows, newline on a block boundary, a row spanning more
+than three blocks, UTF-8, forward continuation anchors and changed anchors.
+
+## Validation scope
+
+- Both changed production modules passed focused `ocamlfind ocamlc -c`
+  typechecks against existing compiled dependency interfaces. This is not
+  a clean repository build.
+- Changed OCaml sources/interfaces and the extended integration test passed
+  compiler parsing; `git diff --check` passed.
+- The added `test_h2_journal` scenario exercises actual history pages for
+  cross-block rows, physical offsets, anchors, append exclusion, ordered
+  corruption failures and unfinished captured tails. It has not been run
+  locally; no local Dune build was performed.
+- Independent source review found no P0/P1/P2 issues in either layer. It is
+  separate from GitHub approval, CI, merge and installed-runtime verification.
+- The live server/TUI were not replaced. Candidate server, live API and
+  visible TUI timings remain unverified.

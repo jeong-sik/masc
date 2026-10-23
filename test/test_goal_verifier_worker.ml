@@ -121,7 +121,7 @@ let test_unknown_and_cancellation_never_redispatch () =
         ~attempt_continuation ~on_runtime_attempt_error () ->
       incr calls;
       let error = Agent_core.Error.Api (Agent_core.Error.Retry.NetworkError
-        {message="Goal reply lost"; kind=Llm_provider.Http_failure.Connection_failure}) in
+        {message="Goal reply lost"; kind=Llm_provider.Http_client.Connection_reset}) in
       Alcotest.(check bool) "actual inner continuation must resolve its original" true
         (attempt_continuation ~dispatch:Runtime_attempt_dispatch.Dispatched error = Runtime_attempt_dispatch.Original_must_resolve);
       on_runtime_attempt_error ~runtime_id:"goal-reviewer" ~attempt:0 ~dispatch:Runtime_attempt_dispatch.Dispatched error;

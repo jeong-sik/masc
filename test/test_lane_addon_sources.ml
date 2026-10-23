@@ -23,7 +23,7 @@ let with_store f =
       f dir (Store.create ~root:(Filename.concat dir "retained"))))
 let package dir max_bytes : Types.package = {
   id="source-test";revision="1";title="Source capture fixture";
-  contributions=[Types.Observe];command=["unused"];
+  ui_category=None;contributions=[Types.Observe];command=["unused"];
   directory=dir;skills_directory=None;action_tool=None;state_storage=Types.Ephemeral;tool_invocation=Types.Direct;exported_tools=[];outputs=[];refresh_policy=Types.Every_hint;
   model_access=Types.Model_disabled;exact_outputs=[];tool_hooks=[];operator_asks=false; worker_service=Types.Mcp_tools;
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;

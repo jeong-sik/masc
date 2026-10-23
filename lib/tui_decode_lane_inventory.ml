@@ -22,6 +22,7 @@ type declaration =
   | Valid of {
       installation_id : string; enabled : bool; run_id : string; package_id : string;
       title : string; desired_revision : string; source_revision : string;
+      ui_category : Lane_addon_category.t option;
       application : Lane_addon_application.t;
       exact_outputs : exact_output list;
     }
@@ -34,6 +35,7 @@ type presence = Live | Retained
 type instance = {
   instance_id : string; incarnation : string; run_id : string;
   package_id : string; title : string; package_revision : string;
+  ui_category : Lane_addon_category.t option;
   presence : presence; phase : phase; applied_revision : string option;
 }
 type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
@@ -80,6 +82,14 @@ let rec unique_keys = function
 let fields names = function
   | `Assoc values when List.sort String.compare (List.map fst values) = List.sort String.compare names -> Ok values
   | `Assoc _ -> error ("expected exactly " ^ String.concat ", " names)
+  | _ -> error "expected object"
+let fields_with_category names = function
+  | `Assoc values ->
+      let* ui_category = match List.assoc_opt "ui_category" values with
+        | None -> Ok None
+        | Some value -> Lane_addon_category.of_json value |> Result.map Option.some in
+      let* rest = fields names (`Assoc (List.remove_assoc "ui_category" values)) in
+      Ok (ui_category, rest)
   | _ -> error "expected object"
 let get decode name values =
   match List.assoc_opt name values with None -> error ("missing " ^ name) | Some value -> decode value
@@ -176,7 +186,7 @@ let declaration json =
   let* tag = kind json in
   match tag with
   | "valid" ->
-      let* f = fields ["kind";"enabled";"installation_id";"run_id";"package_id";"title";"desired_revision";"source_revision";"application";"exact_outputs"] json in
+      let* ui_category,f = fields_with_category ["kind";"enabled";"installation_id";"run_id";"package_id";"title";"desired_revision";"source_revision";"application";"exact_outputs"] json in
       let* enabled = get bool "enabled" f in
       let* installation_id = get nonblank "installation_id" f in let* run_id = get nonblank "run_id" f in
       let* package_id = get nonblank "package_id" f in let* title = get nonblank "title" f in
@@ -189,7 +199,7 @@ let declaration json =
         | Inactive -> if enabled then error "enabled declaration cannot have an inactive application" else Ok ()
         | Cleaning_workers | Failed _ | Unknown _ -> Ok () in
       let* exact_outputs = get exact_outputs "exact_outputs" f in
-      Ok (Valid {installation_id;enabled;run_id;package_id;title;desired_revision;source_revision;application;exact_outputs})
+      Ok (Valid {installation_id;enabled;run_id;package_id;title;desired_revision;source_revision;ui_category;application;exact_outputs})
   | "invalid" -> let* f = fields ["kind";"messages"] json in
       let* messages = get (list string) "messages" f in
       if messages = [] then error "invalid declaration has no diagnostics" else Ok (Invalid messages)
@@ -198,14 +208,14 @@ let declaration json =
   | other -> error ("unknown declaration state " ^ other)
 
 let instance json =
-  let* f = fields ["instance_id";"incarnation";"run_id";"package_id";"title";"package_revision";"presence";"phase";"applied_revision"] json in
+  let* ui_category,f = fields_with_category ["instance_id";"incarnation";"run_id";"package_id";"title";"package_revision";"presence";"phase";"applied_revision"] json in
   let* instance_id = get nonblank "instance_id" f in let* incarnation = get nonblank "incarnation" f in
   let* run_id = get nonblank "run_id" f in let* package_id = get nonblank "package_id" f in
   let* title = get nonblank "title" f in let* package_revision = get nonblank "package_revision" f in
   let* presence = get (function `String "live" -> Ok Live | `String "retained" -> Ok Retained | _ -> error "unknown instance presence") "presence" f in
   let* phase = get Lane_addon_types.phase_of_json "phase" f in
   let* applied_revision = get (nullable nonblank) "applied_revision" f in
-  Ok {instance_id;incarnation;run_id;package_id;title;package_revision;presence;phase;applied_revision}
+  Ok {instance_id;incarnation;run_id;package_id;title;package_revision;ui_category;presence;phase;applied_revision}
 
 let browser_activity = function
   | `String "on" -> Ok Browser_enabled

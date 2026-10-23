@@ -207,19 +207,23 @@ let exact_output_json {output;source;configuration} = `Assoc ["output",str outpu
   "source",str (match source with Declared -> "declared" | Table_only -> "table_only");
   "configuration",configuration_json configuration]
 let declaration_json = function
-  | Valid {declaration=d;exact_outputs;application} -> `Assoc ["kind",str "valid";"enabled",`Bool d.enabled;"installation_id",str d.id;
+  | Valid {declaration=d;exact_outputs;application} -> `Assoc (["kind",str "valid";"enabled",`Bool d.enabled;"installation_id",str d.id;
       "run_id",str d.run_id;"package_id",str d.package.id;"title",str d.package.title;"desired_revision",str d.revision;
       "source_revision",str d.source_revision;"application",Lane_addon_application.to_json application;
       "exact_outputs",`List (List.map exact_output_json exact_outputs)]
+      @ (match d.package.ui_category with None -> []
+         | Some category -> ["ui_category",Lane_addon_category.to_json category]))
   | Invalid messages -> `Assoc ["kind",str "invalid";"messages",strings messages]
   | Absent -> `Assoc ["kind",str "absent"]
   | Unobserved -> `Assoc ["kind",str "unobserved"]
-let instance_json (i : Addon.inventory_instance) = `Assoc [
+let instance_json (i : Addon.inventory_instance) = `Assoc ([
   "instance_id",str i.instance_id;"incarnation",str i.incarnation;"run_id",str i.run_id;
   "package_id",str i.package_id;"title",str i.title;"package_revision",str i.package_revision;
   "presence",str (match i.presence with Addon.Live -> "live" | Addon.Retained -> "retained");
   "phase",Lane_addon_types.phase_to_json i.phase;
   "applied_revision",optional (fun (o : Addon.configuration_owner) -> str o.revision) i.configuration]
+  @ (match i.ui_category with None -> []
+     | Some category -> ["ui_category",Lane_addon_category.to_json category]))
 let browser_activity_json = function
   | Browser_lane.Enabled -> str "on"
   | Disabled -> str "off"

@@ -1,6 +1,13 @@
 (** One level of local workspace packages; discovery never starts a worker.
     Filesystem operations are blocking: call from a system thread in Eio. *)
-type metadata = { title : string; revision : string; description : string option }
+type metadata = {
+  title : string;
+  revision : string;
+  description : string option;
+  ui_category : Lane_addon_category.t option;
+}
+(** Current manifest metadata, including its optional primary navigation
+    category. Unknown declared categories remain package issues. *)
 type entry =
   | Folder of string
   | Package of { manifest_path : string; metadata : metadata }

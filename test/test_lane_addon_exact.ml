@@ -47,7 +47,7 @@ let schema =
 
 let package : Types.package =
   { id = "operator-quiz"; revision = "1"; title = "Exact fixture"
-  ; contributions = [ Types.Observe ]; command = [ "unused" ]
+  ; ui_category = None; contributions = [ Types.Observe ]; command = [ "unused" ]
   ; directory = "/nonexistent"; skills_directory = None; action_tool = None
   ; state_storage = Types.Ephemeral; tool_invocation = Types.Direct; tool_hooks = []; worker_service = Types.Mcp_tools; exported_tools = []; outputs = []
   ; refresh_policy = Types.Every_hint; model_access = Types.Model_disabled

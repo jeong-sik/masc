@@ -219,7 +219,12 @@ val register_skill_export_handler :
 
 (** Reconcile a complete TOML declaration inventory with owned observers.
     Returned declaration metadata includes the exact [source_revision] and a
-    typed [application] observation. Operator Inspect recomputes this observation
+    typed [application] observation, plus the optional current [ui_category].
+    Category-only manifest edits preserve worker identity and authority. Each
+    worker's package and retained history preserve its original category;
+    current-installation grouping reads the matching current declaration,
+    never an older worker when the declaration is unavailable.
+    Operator Inspect recomputes this observation
     from live and retained owners without triggering reconciliation or cleanup.
     Non-operator callers receive an Unknown application observation; new worker
     identity/error details are operator-only.
@@ -234,6 +239,9 @@ type inventory_presence = Live | Retained
 type inventory_instance = {
   instance_id : string; incarnation : string; run_id : string;
   package_id : string; title : string; package_revision : string;
+  ui_category : Lane_addon_category.t option;
+  (** The original worker package's navigation category, not the current
+      declaration's category and never an execution decision. *)
   configuration : configuration_owner option;
   presence : inventory_presence; phase : Lane_addon_types.phase;
 }

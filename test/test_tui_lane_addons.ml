@@ -781,7 +781,7 @@ let guided_installation () =
   let module Catalog = Masc.Lane_addon_catalog in
   let catalog=Catalog.{directory="/packages";parent=None;
     entries=[Package {manifest_path="/packages/arbitrary/lane.toml";
-      metadata={title="Previously listed title";revision="older-revision";description=None}}]} in
+      metadata={title="Previously listed title";revision="older-revision";description=None;ui_category=None}}]} in
   let browser=Install.browse () in
   let pending_catalog=Install.begin_catalog ~request_id:20 ~directory:None browser |> ok in
   check bool "canceled catalog response cannot reopen installer" true

@@ -37,6 +37,7 @@ let package root =
   write path {|id = "observer"
 revision = "1"
 title = "Observation package"
+ui_category = "analysis"
 image = "fixture/observer"
 command = ["observer"]
 contributions = ["observe"]
@@ -70,6 +71,8 @@ let before_reconcile () = with_fixture (fun _env _sw config root directory ->
   let good_row = List.find (fun row -> member "source_path" (member "selection" row)=`String good) rows in
   check string "unreconciled file is not applied by reading it" "unknown"
     (text "kind" (member "application" (member "declaration" (member "state" good_row))));
+  check string "read-only inventory carries the current parsed category" "analysis"
+    (text "ui_category" (member "declaration" (member "state" good_row)));
   check bool "reading did not create a runtime manager" false
     (member "owner_present" (member "package_read" json) |> Yojson.Safe.Util.to_bool);
   check bool "no file bytes changed" true (before=files root);
@@ -207,7 +210,7 @@ let retained_metadata () = with_fixture (fun _env _sw config root directory ->
 let detached_history () =
   let path = "/fixture/completed.toml" in
   let detached : Addon.inventory_instance = {instance_id="old";incarnation="old";run_id="world";
-    package_id="observer";title="Old observer";package_revision="1";
+    package_id="observer";title="Old observer";package_revision="1";ui_category=None;
     configuration=Some {id="completed";source_path=path;revision="1"};
     presence=Retained;phase=Detached} in
   let manual = {detached with instance_id="manual-old";incarnation="manual-old";configuration=None} in

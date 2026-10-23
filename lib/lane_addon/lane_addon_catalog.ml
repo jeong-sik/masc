@@ -1,4 +1,7 @@
-type metadata = { title : string; revision : string; description : string option }
+type metadata = {
+  title : string; revision : string; description : string option;
+  ui_category : Lane_addon_category.t option;
+}
 type entry =
   | Folder of string
   | Package of { manifest_path : string; metadata : metadata }
@@ -72,9 +75,11 @@ let to_json snapshot =
   let entry = function
     | Folder path -> `Assoc ["kind",`String "folder"; "path",`String path]
     | Issue {path;message} -> `Assoc ["kind",`String "issue"; "path",`String path; "message",`String message]
-    | Package {manifest_path;metadata} -> `Assoc ["kind",`String "package";
+    | Package {manifest_path;metadata} -> `Assoc (["kind",`String "package";
         "manifest_path",`String manifest_path; "title",`String metadata.title;
-        "revision",`String metadata.revision; "description",nullable metadata.description] in
+        "revision",`String metadata.revision; "description",nullable metadata.description]
+        @ (match metadata.ui_category with None -> []
+           | Some category -> ["ui_category", Lane_addon_category.to_json category])) in
   `Assoc ["directory",`String snapshot.directory; "parent",nullable snapshot.parent;
           "entries",`List (List.map entry snapshot.entries)]
 
@@ -94,7 +99,13 @@ let of_json json =
     | "package" -> let* manifest_path = text "manifest_path" json in
         let* title = text "title" json in let* revision = text "revision" json in
         let* description = optional "description" json in
-        Ok (Package {manifest_path;metadata={title;revision;description}})
+        let* ui_category = match json with
+          | `Assoc fields -> (match List.filter (fun (name,_) -> name="ui_category") fields with
+              | [] -> Ok None
+              | [_,value] -> Lane_addon_category.of_json value |> Result.map Option.some
+              | _::_::_ -> Error "duplicate ui_category")
+          | _ -> Error "expected catalog object" in
+        Ok (Package {manifest_path;metadata={title;revision;description;ui_category}})
     | _ -> Error "unknown catalog entry kind" in
   let* directory = text "directory" json in
   let* parent = optional "parent" json in

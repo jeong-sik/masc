@@ -12,7 +12,7 @@ type t = { package : Types.package; instance_id : string; store : Store.t;
   observation : observation ref;
   handler : Agent_core.Mcp.sampling_handler }
 let for_worker t ~package ~instance_id =
-  if t.package = package && String.equal t.instance_id instance_id then Ok t.handler
+  if Types.same_execution_package t.package package && String.equal t.instance_id instance_id then Ok t.handler
   else Error "host sampling broker belongs to another package or installation"
 
 let with_observation t ~binding ~sources ~on_error run =

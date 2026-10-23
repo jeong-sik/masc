@@ -272,11 +272,11 @@ let standing_reads_what_the_row_says () =
   let row_of state = { Decode.id = "row"; label = "row"; purpose = "fixture purpose";
     selection = Decode.Declaration "/config/lane-addons/browser-work.toml"; state } in
   let worker ?(presence = Decode.Live) phase = { Decode.instance_id = "worker"; incarnation = "worker"; run_id = "browser-work";
-    package_id = "browser"; title = "Browser connections"; package_revision = "0.1.0";
+    package_id = "browser"; title = "Browser connections"; package_revision = "0.1.0"; ui_category = None;
     presence; phase; applied_revision = None } in
   let declared ?(enabled = true) application = Decode.Valid { installation_id = "browser-work"; enabled;
     run_id = "browser-work"; package_id = "browser"; title = "Browser connections";
-    desired_revision = "1"; source_revision = "1"; application; exact_outputs = [] } in
+    desired_revision = "1"; source_revision = "1"; ui_category = None; application; exact_outputs = [] } in
   let package declaration instances = Decode.Package_state { declaration; instances } in
   let check name expected state = Alcotest.check standing name expected (Display.row_standing (row_of state)) in
   check "a declared worker that runs is ready" S.Ready
@@ -345,7 +345,41 @@ let exact_standing_reads_the_run_observation () =
   Alcotest.check standing "a lane switched off that still finishes runs is changing" S.Changing
     (Display.row_standing_in (with_status Tui_decode.Standalone_off 1) row)
 
+let categories_are_strict_metadata () =
+  let declared_category value = object_ ["kind",str "valid";"enabled",`Bool true;
+    "installation_id",str "custom";"run_id",str "run";"package_id",str "arbitrary-id";
+    "title",str "Unrelated display title";"desired_revision",str "desired";
+    "source_revision",str "source";"application",object_ ["kind",str "starting"];
+    "exact_outputs",`List [];"ui_category",value] in
+  let payload value = snapshot [declared ~instances:[set "ui_category" (str "analysis") (instance "worker")]
+      (declared_category value)] in
+  let decoded = ok (Decode.decode (payload (str "browser"))) in
+  let row = find "declaration//config/broken.toml" decoded in
+  (match row.state with
+   | Decode.Package_state {declaration=Some (Decode.Valid declaration);instances=[instance]} ->
+       Alcotest.(check bool) "current declared category is independent from worker category" true
+         (declaration.ui_category=Some Lane_addon_category.Browser
+           && instance.ui_category=Some Lane_addon_category.Analysis)
+   | Decode.Package_state {declaration=Some (Decode.Valid _);instances=([]|_::_::_)}
+   | Decode.Package_state {declaration=(None|Some (Decode.Invalid _|Absent|Unobserved));instances=_}
+   | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ ->
+       Alcotest.fail "category metadata lost its owners");
+  List.iter (fun value -> rejects "unsupported declared category is not a fallback" (payload value))
+    [str "unknown";str "";`Null;`Bool true;`List [str "browser"]];
+  let invalid_worker value = snapshot [declared ~instances:[set "ui_category" value (instance "worker")]
+      (declared_category (str "browser"))] in
+  List.iter (fun value -> rejects "unsupported original worker category is not a fallback" (invalid_worker value))
+    [str "unknown";`Null;`Int 1];
+  let original = ok (Decode.decode (snapshot [manual])) in
+  match (find "instance/manual" original).state with
+  | Decode.Package_state {instances=[instance];_} ->
+      Alcotest.(check bool) "omission alone remains unclassified" true (instance.ui_category=None)
+  | Decode.Package_state {instances=([]|_::_::_);_}
+  | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ ->
+      Alcotest.fail "unclassified original worker was removed"
+
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
+  Alcotest.test_case "category metadata is strict and preserves both owners" `Quick categories_are_strict_metadata;
   Alcotest.test_case "machine activity and publication remain independent" `Quick machine_activity_and_publication_are_independent;
   Alcotest.test_case "standing reads what the row says" `Quick standing_reads_what_the_row_says;
   Alcotest.test_case "exact standing reads the run observation" `Quick exact_standing_reads_the_run_observation;

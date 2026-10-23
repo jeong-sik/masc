@@ -162,7 +162,7 @@ let package_catalog_payload state fields =
         Lane_addon_manifest.load ~path
         |> Result.map_error Lane_addon_manifest.error_to_string
         |> Result.map (fun (package : Lane_addon_types.package) -> Lane_addon_catalog.{title=package.title;
-          revision=package.revision; description=package.presentation.description})))
+          revision=package.revision; description=package.presentation.description; ui_category=package.ui_category})))
   |> Result.map Lane_addon_catalog.to_json
 
 let package_preview_payload state fields =

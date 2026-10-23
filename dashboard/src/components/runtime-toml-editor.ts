@@ -1,4 +1,3 @@
-import { isImeComposing } from '../lib/keyboard'
 import { ModelSetupResumeControl } from './model-setup-resume-control'
 import { isImeComposing } from '../lib/keyboard'
 import { html } from 'htm/preact'

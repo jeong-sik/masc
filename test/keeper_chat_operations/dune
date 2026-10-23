@@ -1,4 +1,9 @@
 ; Assertion failures deliberately use catch-all patterns for unexpected variants.
+(executable
+ (name keeper_claimable_membership_bench)
+ (modules keeper_claimable_membership_bench)
+ (libraries masc.keeper_chat_operations masc.keeper_checkpoint_ref masc.keeper_registry mtime mtime.clock unix yojson))
+
 ; Keep the production warning policy strict; use the test-directory convention.
 (env
  (_ (flags (:standard -w -4-69))))

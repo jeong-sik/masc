@@ -2,6 +2,7 @@ module Operation = Keeper_chat_operation
 module Reducer = Keeper_chat_operation_reducer
 module Id = Operation.Operation_id
 module Semantic = Keeper_semantic_execution
+module Scope_set = Set.Make (Keeper_execution_scope_id)
 
 let semantic_is_running = function
   | Semantic.Running | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ -> true
@@ -1704,7 +1705,9 @@ let blocked_queued_scopes db ~now =
         | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
         | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
             | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _} -> None)) executions in
-  Ok blocked
+  (* Keep complete semantic validation above. Only membership uses this local
+     index; it never selects queue order or survives the observation's [now]. *)
+  Ok (Scope_set.of_list blocked)
 ;;
 
 let claimable_queued_with_db db ~now =
@@ -1717,8 +1720,8 @@ let claimable_queued_with_db db ~now =
         if rc = Sqlite3.Rc.DONE then Ok None
         else if rc = Sqlite3.Rc.ROW then
           let* operation = decode_operation statement in
-          if List.exists (Keeper_execution_scope_id.equal
-              (Keeper_execution_scope_id.direct_operation operation.operation_id)) blocked
+          if Scope_set.mem
+              (Keeper_execution_scope_id.direct_operation operation.operation_id) blocked
           then read () else Ok (Some operation)
         else Error (Store_unavailable (sqlite_error db "read claimable original operations" rc)) in
       read ())
@@ -2084,8 +2087,8 @@ let move_queued_to_front store ~now ~operation_id =
       | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _
       | Operation.Cancelled _ -> Error (Not_queued operation_id) in
     let* blocked = blocked_queued_scopes store.db ~now in
-    let* () = if List.exists (Keeper_execution_scope_id.equal
-        (Keeper_execution_scope_id.direct_operation operation_id)) blocked then
+    let* () = if Scope_set.mem
+        (Keeper_execution_scope_id.direct_operation operation_id) blocked then
       Error (Invalid_input "message is waiting for input, approval, reconciliation, or provider retry; priority cannot make it runnable")
       else Ok () in
     let* queued = with_statement store.db ~operation:"read queue order"
@@ -2137,9 +2140,8 @@ let move_queued_priority_cohort_to_front store ~now ~operation_id ~predecessors 
       | Operation.Cancelled _ -> Error (Not_queued operation_id) in
     let* blocked = blocked_queued_scopes store.db ~now in
     let* () =
-      if List.exists
-           (Keeper_execution_scope_id.equal
-              (Keeper_execution_scope_id.direct_operation operation_id))
+      if Scope_set.mem
+           (Keeper_execution_scope_id.direct_operation operation_id)
            blocked
       then Error (Invalid_input
         "message is waiting for input, approval, reconciliation, or provider retry; priority cannot make it runnable")
@@ -2171,9 +2173,8 @@ let move_queued_priority_cohort_to_front store ~now ~operation_id ~predecessors 
          | None -> cohort reversed rest
          | Some row when row.source <> target.source ->
            Error (Invalid_input "priority predecessor has a different source")
-         | Some row when List.exists
-             (Keeper_execution_scope_id.equal
-                (Keeper_execution_scope_id.direct_operation row.operation_id))
+         | Some row when Scope_set.mem
+             (Keeper_execution_scope_id.direct_operation row.operation_id)
              blocked -> cohort reversed rest
          | Some row when List.exists (fun (held : Operation.t) ->
              Id.equal held.operation_id row.operation_id) reversed ->

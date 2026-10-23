@@ -464,6 +464,9 @@ val semantic_prepare :
     whose provider-throttle [not_before] lies after [now] is likewise not
     claimable; the scheduled wake re-offers it once the backoff passes. *)
 val has_claimable_queued : t -> now:float -> (bool, error) result
+(** Validate all semantic records before testing queue readiness. The blocked
+    identities are indexed only for this observation; queue selection retains
+    sequence order and evaluates retry deadlines at [now]. *)
 
 (** True only if a still-queued original chat was inserted after the named
     running operation. Queued direct continuations are excluded even when a

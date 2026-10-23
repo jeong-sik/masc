@@ -2390,7 +2390,63 @@ let parse_transcript_rows ~path ~redaction rows =
   |> List.filter_map (parse_transcript_row_permissive ~path ~redaction)
 ;;
 
-let parse_transcript_rows_result ~path ~redaction rows =
+type captured_row = { raw_line : string; projected_line : string; captured_message : chat_message }
+
+let captured_row_message row = row.captured_message
+let captured_row_to_json row =
+  `Assoc ["raw_line", `String row.raw_line; "projected_line", `String row.projected_line]
+
+let redacted_row_fields = ["content"; "attachments"; "blocks"; "audio"; "approval_lifecycle"]
+
+let projected_row_line raw_line (message : chat_message) =
+  let encoded = encode_line ~role:message.role ~content:message.content ~ts:message.ts
+      ~message_id:message.id ?attachments:message.attachments ?tool_call_id:message.tool_call_id
+      ?execution_id:message.execution_id ?tool_call_name:message.tool_call_name
+      ?surface:message.surface ?conversation_id:message.conversation_id
+      ?external_message_id:message.external_message_id ?workspace_id:message.workspace_id
+      ?speaker:message.speaker ?audio:message.audio ?blocks:message.blocks
+      ~mentions:message.mentions ?turn_ref:message.turn_ref
+      ?stream_lifecycle:message.stream_lifecycle ?approval_lifecycle:message.approval_lifecycle
+      ?provenance:message.delivery_provenance () |> Yojson.Safe.from_string in
+  match Yojson.Safe.from_string raw_line, encoded with
+  | `Assoc raw, `Assoc fields ->
+    `Assoc (List.map (fun (key, value) ->
+      key, if List.mem key redacted_row_fields then
+        (match List.assoc_opt key fields with Some redacted -> redacted | None -> value)
+      else value) raw) |> Yojson.Safe.to_string
+  | _ -> raw_line
+;;
+
+let captured_row_of_json = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = ["projected_line";"raw_line"] ->
+    (match List.assoc "raw_line" fields, List.assoc "projected_line" fields with
+     | `String raw_line, `String projected_line ->
+       let decode line =
+         try
+           let value = Yojson.Safe.from_string line in
+           match value with
+           | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) ->
+             (match parse_transcript_row_strict ~path:"captured chat row"
+                ~redaction:Keeper_secret_redaction.empty ~position:(Line_number 1) line with
+              | `Message message when Float.is_finite message.ts -> Ok (fields, message)
+              | `Message _ -> Error "captured chat timestamp is not finite"
+              | `Blank -> Error "blank captured chat row"
+              | `Unreadable error -> Error (strict_decode_error_to_string error))
+           | _ -> Error "invalid or duplicate captured chat row fields"
+         with Yojson.Json_error detail -> Error detail in
+       let ( let* ) = Result.bind in
+       let* raw_fields, _ = decode raw_line in
+       let* projected_fields, captured_message = decode projected_line in
+       let immutable fields = List.filter (fun (key, _) -> not (List.mem key redacted_row_fields)) fields in
+       if not (Yojson.Safe.equal (`Assoc (immutable raw_fields)) (`Assoc (immutable projected_fields)))
+          || List.sort String.compare (List.map fst raw_fields) <> List.sort String.compare (List.map fst projected_fields)
+       then Error "captured chat projection changed original identity or field presence"
+       else Ok {raw_line; projected_line; captured_message}
+     | _ -> Error "captured chat rows must contain original strings")
+  | _ -> Error "unexpected captured chat row fields"
+;;
+
+let parse_transcript_captures_result ~select ~path ~redaction rows =
   rows
   |> String.split_on_char '\n'
   |> List.fold_left
@@ -2400,10 +2456,35 @@ let parse_transcript_rows_result ~path ~redaction rows =
           let line_no = line_no + 1 in
           match parse_transcript_row_strict ~path ~redaction ~position:(Line_number line_no) line with
           | `Blank -> Ok (messages_rev, line_no)
-          | `Message message -> Ok (message :: messages_rev, line_no)
+          | `Message message when not (Float.is_finite message.ts) ->
+            Error {location=Printf.sprintf "%s:%d" path line_no;
+              cause=Invalid_row_contract "captured chat timestamp is not finite"}
+          | `Message message when not (select message) -> Ok (messages_rev, line_no)
+          | `Message message ->
+            let projected_line = projected_row_line line message in
+            let row = {raw_line=line;projected_line;captured_message=message} in
+            (match captured_row_of_json (captured_row_to_json row) with
+             | Ok restored when restored.captured_message = message -> Ok (row :: messages_rev, line_no)
+             | Ok _ -> Error {location=Printf.sprintf "%s:%d" path line_no;
+                 cause=Invalid_row_contract "captured chat projection cannot preserve its complete typed row"}
+             | Error detail -> Error {location=Printf.sprintf "%s:%d" path line_no;
+                 cause=Invalid_row_contract detail})
           | `Unreadable err -> Error err)
        (Ok ([], 0))
   |> Result.map (fun (messages_rev, _line_no) -> List.rev messages_rev)
+;;
+
+let parse_transcript_rows_result ~path ~redaction rows =
+  rows |> String.split_on_char '\n'
+  |> List.fold_left (fun state line ->
+    let ( let* ) = Result.bind in
+    let* messages_rev, line_no = state in
+    let line_no = line_no + 1 in
+    match parse_transcript_row_strict ~path ~redaction ~position:(Line_number line_no) line with
+    | `Blank -> Ok (messages_rev, line_no)
+    | `Message message -> Ok (message :: messages_rev, line_no)
+    | `Unreadable error -> Error error) (Ok ([], 0))
+  |> Result.map (fun (messages_rev, _) -> List.rev messages_rev)
 ;;
 
 let load_transcript_fully ~path ~redaction =
@@ -2486,8 +2567,7 @@ let load_all ~base_dir ~keeper_name : chat_message list =
        | Private_file_failed _ | Private_file_failed_with_cleanup_failure _ ->
          load_transcript_fully ~path ~redaction)
 
-let load_all_result ~base_dir ~keeper_name :
-  (chat_message list, strict_decode_error) result =
+let load_all_using ~base_dir ~keeper_name ~parse_rows =
   let path = chat_path ~base_dir ~keeper_name in
   let redaction = redaction_for ~base_dir ~keeper_name in
   (* The [load_all] cache is permissive: malformed rows are omitted. A strict
@@ -2515,7 +2595,7 @@ let load_all_result ~base_dir ~keeper_name :
                  rows_end
                  end_offset)
         }
-    else parse_transcript_rows_result ~path ~redaction rows
+    else parse_rows ~path ~redaction rows
   | Private_file_failed error
   | Private_file_failed_with_cleanup_failure { error; cleanup_failure = _ } ->
     Error
@@ -2523,6 +2603,12 @@ let load_all_result ~base_dir ~keeper_name :
       ; cause =
           Unreadable_file (Fs_compat.Private_jsonl_rows.error_to_string error)
       }
+
+let load_captured_result ~select ~base_dir ~keeper_name =
+  load_all_using ~base_dir ~keeper_name ~parse_rows:(parse_transcript_captures_result ~select)
+
+let load_all_result ~base_dir ~keeper_name =
+  load_all_using ~base_dir ~keeper_name ~parse_rows:parse_transcript_rows_result
 
 type history_page =
   { history_messages : chat_message list

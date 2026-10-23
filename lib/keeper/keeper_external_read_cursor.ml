@@ -13,10 +13,9 @@ let optional f = function None -> `Null | Some value -> f value
 let json state = `Assoc ["after",`Int state.after; "pending",optional (fun p ->
   `Assoc ["through",`Int p.through; "atom",optional M.durable_range_id_to_json p.atom;
           "official",optional M.official_range_id_to_json p.official]) state.pending]
-let decode raw =
+let decode_value (value : Yojson.Safe.t) =
   let open Yojson.Safe.Util in
   try
-    let value = Yojson.Safe.from_string raw in
     let keys expected = function
       | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare expected -> ()
       | value -> raise (Type_error ("unexpected external cursor fields",value)) in
@@ -43,14 +42,32 @@ let decode raw =
         let* atom = identity M.durable_range_id_of_json atom in
         let* official = identity M.official_range_id_of_json official in
         Ok {after;pending=Some {through;atom;official}}
+  with Yojson.Safe.Util.Type_error (detail,_) -> Error detail
+let decode raw =
+  try decode_value (Yojson.Safe.from_string raw)
   with Yojson.Json_error detail -> Error detail
-     | Yojson.Safe.Util.Type_error (detail,_) -> Error detail
 let load ~runtime_keepers_dir ~keeper_name =
   try match Fs_compat.load_file_opt (path ~runtime_keepers_dir ~keeper_name) with
     | None -> Ok {after=0;pending=None}
     | Some raw -> decode raw
   with Sys_error detail -> Error detail
      | Unix.Unix_error (e,f,a) -> Error (Printf.sprintf "%s(%s): %s" f a (Unix.error_message e))
+type observation = Observed of state
+let observe ~runtime_keepers_dir ~keeper_name =
+  load ~runtime_keepers_dir ~keeper_name |> Result.map (fun state -> Observed state)
+let observation_to_json (Observed state) = json state
+let observation_of_json value =
+  decode_value value |> Result.map (fun state -> Observed state)
+let observation_offset (Observed state) = state.after
+let observation_matches_preparation (Observed state) ~after ~through ~atom ~official =
+  let same encode left right = Yojson.Safe.equal (optional encode left) (optional encode right) in
+  state.after = after && through >= after &&
+  match state.pending with
+  | None -> through = after
+  | Some pending -> through > after && pending.through = through
+    && same M.durable_range_id_to_json atom pending.atom
+    && same M.official_range_id_to_json official pending.official
+
 let save ~runtime_keepers_dir ~keeper_name state =
   let file = path ~runtime_keepers_dir ~keeper_name in
   try

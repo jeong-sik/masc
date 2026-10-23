@@ -3,17 +3,6 @@ const overlaps = (a, b) => a.duration === 0
   : b.duration === 0 ? a.start <= b.start && b.start < a.start + a.duration
     : a.start < b.start + b.duration && b.start < a.start + a.duration
 
-// An unclosed attack has no paired note interval. Its onset is conflict
-// evidence, not a guessed performance duration or a note added to the project.
-// Callers still validate the actual paired releases and source ports on edit.
-export function midiTimingEvidence(performance) {
-  const events = new Map(performance.events.map(event => [event.id,event]))
-  return [...performance.notes,...performance.diagnostics.filter(value => value.kind === 'unclosed-note').map(value => {
-    const event = events.get(value.event)
-    return { id:event.id,port:event.port,channel:event.bytes[0]&15,pitch:event.bytes[1],start:event.tick,duration:0 }
-  })]
-}
-
 // Tick intervals alone cannot decide an attack/release boundary shared by
 // tracks. The actual source sweep is ordered by tick, track and event order.
 // Compare every actual attack's relation to the same paired on/off IDs;

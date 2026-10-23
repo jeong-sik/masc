@@ -25,8 +25,8 @@ function source(tracks, { format = 1, smpte = false } = {}) {
   return newEditor(importMidiSource(file.toUint8Array()))
 }
 
-test('whole-track MIDI quantize refuses newly overlapping held or point notes without publishing history', () => {
-  for (const notes of [[[140,100],[360,300]],[[140,0],[160,0]]]) {
+test('whole-track MIDI quantize refuses newly overlapping held notes without publishing history', () => {
+  for (const notes of [[[140,100],[360,300]]]) {
     const editor = source([{notes}]), before = structuredClone(editor)
     assert.throws(() => command(editor,'quantize 0.25'), /overlapping/)
     assert.deepEqual(editor,before)
@@ -123,4 +123,20 @@ test('native-tick half-up rounding is exact at safe-integer limits and rejects a
   assert.equal(quantizeTick(125,250),250)
   assert.throws(()=>quantizeTick(9007199254740991,2))
   for (const [tick,grid] of [[-1,1],[1,0],[1,1.5],[NaN,1],[1,Infinity]]) assert.throws(()=>quantizeTick(tick,grid))
+})
+
+
+test('source point notes snapped to the same tick keep sequential on/off order without creating an overlap',()=>{
+  for(const selected of [false,true]) {
+    let editor=source([{notes:[[140,0],[160,0]]}])
+    if(selected)editor=command(editor,'select-all')
+    const next=command(editor,`${selected?'quantize-notes':'quantize'} 0.25`)
+    assert.deepEqual(next.performance.notes.map(n=>[n.start,n.duration]),[[250,0],[250,0]])
+    assert.deepEqual(next.performance.notes.map(n=>[n.id,n.off]),editor.performance.notes.map(n=>[n.id,n.off]))
+    assert.deepEqual(next.performance.diagnostics,[])
+    const exported=midiSourcePattern(importMidiSource(projectMidi(next.project)))
+    assert.deepEqual(exported.notes.map(n=>[n.start,n.duration]),[[250,0],[250,0]])
+    assert.deepEqual(exported.diagnostics,[])
+    assert.deepEqual(command(next,'undo').project,editor.project)
+  }
 })

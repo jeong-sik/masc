@@ -104,6 +104,20 @@ describe('CommandPalette', () => {
     vi.clearAllMocks()
   })
 
+  it.each([{ isComposing: true }, { keyCode: 229 }])('leaves composition Enter to the IME (%o)', async (composition) => {
+    render(html`<${CommandPalette} openOnMount=${true} />`, container)
+    const input = container.querySelector('input') as HTMLInputElement
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...composition })
+    fireEvent(input, event)
+    expect(toggleCopilotDock).not.toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+
+    // A subsequent committed Enter still executes the selected action once.
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(toggleCopilotDock).toHaveBeenCalledTimes(1)
+  })
+
   it('renders nothing until opened, then shows the design cmdk surface with base groups', async () => {
     render(html`<${CommandPalette} />`, container)
     expect(container.querySelector('.cmdk')).toBeNull()

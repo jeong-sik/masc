@@ -14,6 +14,7 @@ import {
 import { route } from '../router'
 import { keepers } from '../store'
 import { globalShortcutManager } from '../lib/global-shortcut-manager'
+import { useKeyboardShortcutHost } from '../../design-system/headless-preact/use-keyboard-shortcut'
 
 describe('CopilotDock', () => {
   let container: HTMLDivElement
@@ -42,6 +43,7 @@ describe('CopilotDock', () => {
   })
 
   function DockHarness({ dock }: { dock: ReturnType<typeof useCopilotDock> }) {
+    useKeyboardShortcutHost(globalShortcutManager)
     useCopilotDockShortcuts(dock)
     return h(CopilotDock, { dock })
   }
@@ -51,6 +53,48 @@ describe('CopilotDock', () => {
     render(h(DockHarness, { dock }), container)
     return dock
   }
+
+  it.each([false, true])('lets an unrelated modal receive Escape with dock open=%s', async (open) => {
+    const dock = renderDock()
+    if (open) dock.open()
+    await waitFor(() => expect(globalShortcutManager.getById('copilot-dock.toggle')).toBeDefined())
+    const button = document.createElement('button')
+    document.body.appendChild(button)
+    const closeModal = vi.fn()
+    window.addEventListener('keydown', closeModal)
+    try {
+      const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      fireEvent(button, event)
+      expect(closeModal).toHaveBeenCalledTimes(1)
+      expect(event.defaultPrevented).toBe(false)
+      expect(dock.state.value.open).toBe(open)
+    } finally {
+      window.removeEventListener('keydown', closeModal)
+      button.remove()
+    }
+  })
+
+  it('closes the focused dock through the real shortcut host', async () => {
+    const dock = renderDock()
+    dock.open()
+    await waitFor(() => expect(globalShortcutManager.getById('copilot-dock.close')).toBeDefined())
+    const button = container.querySelector('[data-testid="copilot-dock"] button') as HTMLButtonElement
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    fireEvent(button, event)
+    expect(dock.state.value.open).toBe(false)
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it.each([{ isComposing: true }, { keyCode: 229 }, { defaultPrevented: true }])('keeps an owned or composing Escape out of the dock shortcut (%o)', async (flags) => {
+    const dock = renderDock()
+    dock.open()
+    await waitFor(() => expect(globalShortcutManager.getById('copilot-dock.close')).toBeDefined())
+    const button = container.querySelector('[data-testid="copilot-dock"] button') as HTMLButtonElement
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...flags })
+    if ('defaultPrevented' in flags) event.preventDefault()
+    fireEvent(button, event)
+    expect(dock.state.value.open).toBe(true)
+  })
 
   it('renders closed by default and opens via top bar button', async () => {
     const dock = useCopilotDock()

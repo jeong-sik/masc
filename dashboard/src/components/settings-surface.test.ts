@@ -2155,6 +2155,10 @@ describe('SettingsSurface', () => {
     await fireEvent.click(q('runtime-lane-coding-rename')!)
     const renameInput = q('runtime-lane-coding-rename-input') as HTMLInputElement
     await fireEvent.input(renameInput, { target: { value: ' builder ' } })
+    for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+      await fireEvent.keyDown(renameInput, { key: 'Enter', ...composition })
+      expect(apiMock.patchRuntimeLane).not.toHaveBeenCalled()
+    }
     // The refresh after the rename resolves the lane under its new name; a lane
     // the projection does not report is read-only.
     stubRuntimeResolved(makeRuntimeResolved({

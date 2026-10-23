@@ -52,6 +52,7 @@ function chordKey(chord: Chord): string {
 export function useKeyboardShortcutHost(manager: KeyboardShortcutManager): void {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       const adapted: ShortcutKeyEvent = {
         key: event.key,
         code: event.code,

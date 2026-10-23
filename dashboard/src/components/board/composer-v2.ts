@@ -1,3 +1,4 @@
+import { isImeComposing } from '../../lib/keyboard'
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { AtSign, Megaphone, Mic, Paperclip, Send, Square, UserRound, X } from 'lucide-preact'
@@ -536,6 +537,7 @@ export function ComposerV2({
             setDraft((event.target as HTMLTextAreaElement).value)
           }}
           onKeyDown=${(event: KeyboardEvent) => {
+            if (isImeComposing(event)) return
             if (mode === 'dm' && mentionListOpen && mentionMatches.length > 0) {
               if (event.key === 'ArrowDown') {
                 event.preventDefault()

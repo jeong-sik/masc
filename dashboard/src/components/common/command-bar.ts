@@ -1,3 +1,4 @@
+import { isImeComposing } from '../../lib/keyboard'
 // CommandBar — inline fuzzy-search command input molecule.
 //
 // MASC dashboard sec09 Phase 1 reference: fuzzy search, windowing,
@@ -75,7 +76,7 @@ export function CommandBar({
   }
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (!open) return
+    if (!open || isImeComposing(e)) return
     switch (e.key) {
       case 'ArrowDown': {
         e.preventDefault()

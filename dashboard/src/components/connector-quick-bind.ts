@@ -17,6 +17,7 @@ import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { SurfaceCard } from './common/card'
 import { bindConnector } from './connector-status'
+import { isSubmitEnter } from '../lib/keyboard'
 
 interface FormEntry {
   channelId: string
@@ -121,7 +122,7 @@ export function QuickBindForm({ connectorId, keepers, listing }: {
           onKeyDown=${(ev: KeyboardEvent) => {
             // Enter submits from either input; Shift+Enter falls through
             // in case we ever swap this field for a multi-line input.
-            if (ev.key === 'Enter' && !ev.shiftKey) {
+            if (isSubmitEnter(ev) && !ev.shiftKey) {
               ev.preventDefault()
               void submit(connectorId, getEntry(connectorId, keepers))
             }

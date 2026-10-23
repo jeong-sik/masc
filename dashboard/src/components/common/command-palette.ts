@@ -32,6 +32,7 @@ import { surfaceLabel } from '../v2/nav-rail-v2'
 import { V2_PRIMARY_SURFACE_IDS } from '../../config/navigation'
 import { toggleCopilotDock } from '../copilot-dock'
 import { globalShortcutManager } from '../../lib/global-shortcut-manager'
+import { isImeComposing } from '../../lib/keyboard'
 import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS } from '../connector-status'
 import type { GoalTreeNode, GoalTreeTask, TabId } from '../../types'
 
@@ -306,6 +307,7 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
   }
 
   const onKeyDown = (e: KeyboardEvent) => {
+    if (isImeComposing(e)) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       sel.value = Math.min(items.value.length - 1, sel.value + 1)

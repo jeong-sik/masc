@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { waitFor } from '@testing-library/preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
 
 vi.mock('../store', () => ({
   shellAuthSummary: { value: null },
@@ -41,6 +41,8 @@ vi.mock('./common/toast', () => ({ showToast: vi.fn() }))
 
 import { AuthStatus, __resetForTests } from './auth-status'
 import { shellAuthSummary } from '../store'
+import { setStoredToken } from '../api/core'
+import { syncDashboardActorName } from '../lib/dashboard-actor'
 
 // Macrotask turns with the microtask queue drained between them, rather than a
 // fixed window. A render scheduled from an effect scheduled from a render has
@@ -80,6 +82,26 @@ describe('AuthStatus popover behavior (Iter 2)', () => {
     render(null, container)
     document.body.innerHTML = ''
     __resetForTests()
+  })
+
+  it.each(['Dashboard actor', 'Bearer token'])('does not apply %s until composition Enter is committed', async (label) => {
+    shellAuthSummary.value = null
+    render(html`<${AuthStatus} />`, container)
+    fireEvent.click(container.querySelector('button[aria-haspopup]')!)
+    await flushUi()
+    const input = container.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement
+    fireEvent.input(input, { target: { value: 'draft-value' } })
+    vi.mocked(setStoredToken).mockClear()
+    vi.mocked(syncDashboardActorName).mockClear()
+    for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+      fireEvent.keyDown(input, { key: 'Enter', ...composition })
+      expect(setStoredToken).not.toHaveBeenCalled()
+      expect(syncDashboardActorName).not.toHaveBeenCalled()
+    }
+    fireEvent.keyDown(input, { key: 'Enter' })
+    if (label === 'Dashboard actor') expect(syncDashboardActorName).toHaveBeenCalledExactlyOnceWith('draft-value', { rewriteQuery: false })
+    else expect(setStoredToken).toHaveBeenCalledExactlyOnceWith('draft-value', { source: 'manual' })
+    await flushUi()
   })
 
   it('renders the trigger collapsed (popover closed) by default', () => {

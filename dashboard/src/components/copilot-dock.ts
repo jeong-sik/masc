@@ -341,16 +341,6 @@ export function useCopilotDockShortcuts(dock: CopilotDockApi): void {
         action: () => { dock.toggle() },
       }),
     )
-    disposers.push(
-      globalShortcutManager.register({
-        id: 'copilot-dock.close',
-        chord: { key: 'Escape', modifiers: [] },
-        description: 'Close Chat Dock',
-        scope: 'global',
-        preserveInInputs: false,
-        action: () => { dock.close() },
-      }),
-    )
     return () => {
       for (const dispose of disposers) dispose()
     }
@@ -426,6 +416,15 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
   const threadRef = useRef<HTMLDivElement | null>(null)
   const rootRef = useRef<HTMLElement | null>(null)
   const isMobile = useIsMobile()
+
+  useEffect(() => globalShortcutManager.register({
+    id: 'copilot-dock.close',
+    chord: { key: 'Escape', modifiers: [] },
+    description: 'Close Chat Dock',
+    scope: { within: () => dock.state.value.open ? rootRef.current : null },
+    preserveInInputs: true,
+    action: () => { dock.close() },
+  }), [dock])
 
   useEffect(() => {
     const el = threadRef.current

@@ -988,12 +988,14 @@ export function IdeShell() {
     description: 'Find in the current file',
     scope: 'global',
     preserveInInputs: true,
-    action: (event) => {
+    when: (event) => {
       const shell = shellRef.current
       const target = event.target
       const inside = shell !== null && target instanceof Node
         && (shell.contains(target) || target === shell.ownerDocument.body)
-      if (!inside) return
+      return inside
+    },
+    action: (event) => {
       event.preventDefault()
       if (!findOpenRef.current) {
         handleFindOpenRef.current()

@@ -1,3 +1,4 @@
+import { isSubmitEnter } from '../lib/keyboard'
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
@@ -323,7 +324,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
               disabled=${actorOverrideLocked}
               onInput=${(e: Event) => { actorInput.value = (e.target as HTMLInputElement).value }}
               onKeyDown=${(e: KeyboardEvent) => {
-                if (!actorOverrideLocked && e.key === 'Enter') void handleApplyActor()
+                if (!actorOverrideLocked && isSubmitEnter(e)) void handleApplyActor()
               }}
             />
             <button type="button"
@@ -354,7 +355,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
                 class="w-full !py-1.5 !px-2 !text-xs"
                 value=${tokenInput.value}
                 onInput=${(e: Event) => { tokenInput.value = (e.target as HTMLInputElement).value }}
-                onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void handleSetToken() }}
+                onKeyDown=${(e: KeyboardEvent) => { if (isSubmitEnter(e)) void handleSetToken() }}
               />
               <button type="button"
                 class="w-full py-1.5 px-3 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors ${AUTH_FOCUS_RING} v2-shell-action"

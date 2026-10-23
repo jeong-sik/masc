@@ -3036,57 +3036,98 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
         ~fs:(Eio.Stdenv.fs env)
         ~registry_root:(Workspace.masc_dir config)
       @@ fun publication_recovery_registry ->
+      let target_wait, resolve_target_wait = Eio.Promise.create () in
+      let release_target, resolve_release_target = Eio.Promise.create () in
+      (* The actual target lane is held at its clock wait. No elapsed duration
+         decides whether the calling turn joined that lane. *)
+      let module Target_clock = struct
+        type t = unit
+        type time = float
+        let now () = Eio.Time.now clock
+        let sleep_until () deadline =
+          match Eio.Promise.peek release_target with
+          | Some () -> Eio.Time.sleep_until clock deadline
+          | None ->
+            let entry =
+              match R.get ~base_path:config.base_path target_name with
+              | Some entry when Lane.crossed_start_boundary entry.lane -> entry
+              | Some _ | None -> fail "controlled clock wait preceded target lane start"
+            in
+            ignore (Eio.Promise.try_resolve resolve_target_wait entry : bool);
+            Eio.Promise.await release_target
+      end in
+      let target_clock = Eio.Resource.T ((), Eio.Time.Pi.clock (module Target_clock)) in
+      let caller_switch = ref None in
+      let caller_promise = ref None in
       let stop_target () =
-        ignore
-          (Masc.Keeper_keepalive.stop_keepalive_and_await
-             ~base_path:config.base_path
-             target_name
-            : Masc.Keeper_keepalive.joined_stop_result)
+        Eio.Cancel.protect (fun () ->
+          (* Release before joining either scope, including when an assertion
+             or cancellation interrupts the fixture. Settle the caller before
+             looking up its target so no later registration escapes teardown. *)
+          ignore (Eio.Promise.try_resolve resolve_release_target () : bool);
+          (match !caller_promise with
+           | None -> ()
+           | Some pending ->
+             (match Eio.Promise.peek pending, !caller_switch with
+              | None, Some sw -> Eio.Switch.fail sw Cancel_direct_keepalive_parent
+              | Some _, (Some _ | None) | None, None -> ());
+             ignore (Eio.Promise.await pending));
+          ignore
+            (Masc.Keeper_keepalive.stop_keepalive_and_await
+               ~base_path:config.base_path
+               target_name
+              : Masc.Keeper_keepalive.joined_stop_result))
       in
       Fun.protect
         ~finally:stop_target
         (fun () ->
-          let result =
+          let caller = Eio.Fiber.fork_promise ~sw:root_sw (fun () ->
             Eio.Switch.run @@ fun turn_sw ->
+            caller_switch := Some turn_sw;
             Eio_context.with_turn_switch turn_sw @@ fun () ->
             let ctx : _ Masc.Keeper_tool_surface.context =
               { config
               ; agent_name = "beta"
               ; sw = turn_sw
-              ; clock
+              ; clock = target_clock
               ; proc_mgr = None
               ; net = None
               ; publication_recovery_provider =
-                  Masc_test_deps.publication_recovery_provider
-                    publication_recovery_registry
+                  Masc_test_deps.publication_recovery_provider publication_recovery_registry
               }
             in
-            Masc.Keeper_tool_surface.dispatch
-              ctx
-              ~name:"masc_keeper_up"
-              ~args:
-                (`Assoc
-                   [ "name", `String target_name
-                   ; "activation_mode", `String "manual"
-                   ])
-          in
-          let result =
-            match result with
-            | Some result -> result
-            | None -> fail "masc_keeper_up dispatch was missing"
-          in
-          if not (Keeper_types_profile.tool_result_success result)
-          then
-            fail
-              ("cross-keeper up failed: "
-               ^ Yojson.Safe.to_string (Tool_result.data result));
+            let result =
+              match Masc.Keeper_tool_surface.dispatch ctx ~name:"masc_keeper_up"
+                ~args:(`Assoc
+                  [ "name", `String target_name; "activation_mode", `String "manual" ]) with
+              | Some result -> result
+              | None -> fail "masc_keeper_up dispatch was missing"
+            in
+            if not (Keeper_types_profile.tool_result_success result) then
+              fail ("cross-keeper up failed: " ^ Yojson.Safe.to_string (Tool_result.data result));
+            let entry = match R.get ~base_path:config.base_path target_name with
+              | Some entry -> entry
+              | None -> fail "target Keeper lane was not registered" in
+            Eio.Fiber.first
+              (fun () -> Eio.Promise.await target_wait)
+              (fun () ->
+                ignore (Lane.await_exit entry.lane : Lane.exit);
+                fail "target lane exited before reaching its controlled wait")) in
+          caller_promise := Some caller;
+          (* This promise resolves after [turn_sw] has joined, while the target
+             still waits for our release. A broken parent relationship may
+             deadlock; the existing suite watchdog reports harness TIMEOUT,
+             which is not reclassified as proof that the caller joined a lane. *)
+          let entry = Eio.Promise.await_exn caller in
+          check bool "target barrier has not been released" true
+            (Option.is_none (Eio.Promise.peek release_target));
+          check bool "target lane remains alive after the calling turn closes" false
+            (R.lane_has_exited entry);
           match R.get ~base_path:config.base_path target_name with
-          | None -> fail "target Keeper lane was not registered"
-          | Some entry ->
-            check bool
-              "target lane remains alive after the calling turn closes"
-              false
-              (R.lane_has_exited entry)))
+          | Some current ->
+            check bool "the observed target still owns its registry entry" true
+              (Lane.Id.equal (Lane.id entry.lane) (Lane.id current.lane))
+          | None -> fail "the live target disappeared from its registry"))
 ;;
 
 let test_keeper_shutdown_store_isolates_corrupt_owner () =

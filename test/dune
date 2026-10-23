@@ -5517,6 +5517,11 @@
  (libraries alcotest digestif yojson masc masc.fs_compat masc.prompt_registry))
 
 (test
+ (name test_workspace_memory_revision)
+ (modules test_workspace_memory_revision)
+ (libraries alcotest digestif yojson unix masc))
+
+(test
  (name test_keeper_memory_search_index)
  (modules test_keeper_memory_search_index)
  (libraries alcotest masc masc_core eio eio_main))

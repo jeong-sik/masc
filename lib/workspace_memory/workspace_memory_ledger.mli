@@ -49,6 +49,11 @@ val dispositions : t -> (fact_ref * disposition) list
 (** In Keeper, store, path and hash order. *)
 
 val to_json : t -> Yojson.Safe.t
+
+val sha256 : t -> string
+(** The SHA-256 of [Yojson.Safe.to_string (to_json t)], the bytes {!save}
+    writes. It names the ledger's revision. *)
+
 val of_json : Yojson.Safe.t -> (t, string) result
 (** Refuses another [schema], unknown, missing or repeated fields, a value of
     the wrong JSON type, a blank string, a hash that is not 64 lowercase hex

@@ -86,8 +86,8 @@ Briefing 원본도 모양이 같다. 원장 대신 Briefing 상태가 들어간�
 
 ### 3.1 판본은 이미 있는 digest 를 쓴다
 
-- 원장 판본(revision)은 `ledger_sha256` 이다. 타입 있는 원장을 `Ledger.to_json` 으로 쓴 바이트의 SHA-256 이다. 정규화를 새로 만들지 않는다.
-- Briefing 상태 판본은 `briefing_state_sha256` 이다. 키를 정렬한 `Brief.to_json` 바이트의 SHA-256 이다.
+- 원장 판본(revision)은 `ledger_sha256` 이다. 타입 있는 원장을 `Ledger.to_json` 으로 쓴 바이트의 SHA-256 이다(`Workspace_memory_ledger.sha256`). 정규화를 새로 만들지 않는다.
+- Briefing 상태 판본은 키를 정렬한 `Brief.to_json` 바이트의 SHA-256 이다(`Workspace_memory_revision.of_briefing`). Briefing 요약의 `prepared_state_sha256` 이 이미 쓰는 값이다.
 - 판본은 늘 타입 있는 값에서 구한다. 게시된 파일(`ledger.json`, `briefing.json`)을 해시하지 않는다.
   - 같은 원장을 들여쓰기만 다르게 쓴 파일도 판본이 같다.
   - `briefing.json` 은 키 순서가 달라서 파일 해시가 판본과 다르다. commit 관찰은 파일을 파싱한 뒤 판본을 구한다. 지금 `server_workspace_memory_curator.ml:93-94` 가 하는 방식이다.

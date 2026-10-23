@@ -8,9 +8,7 @@ let ( let* ) = Result.bind
    descriptor. An atomic writer may replace the file between these reads. *)
 let load_observed ~load ~base_path ~ledger_sha256 =
   let* ledger = load ~base_path in
-  let loaded_sha256 = Digestif.SHA256.(digest_string
-    (Yojson.Safe.to_string (Ledger.to_json ledger)) |> to_hex) in
-  if loaded_sha256 <> ledger_sha256
+  if Ledger.sha256 ledger <> ledger_sha256
   then Error "workspace ledger changed during the read"
   else Ok ledger
 

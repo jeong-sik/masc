@@ -206,7 +206,8 @@ let test_a_restore_refuses_a_changed_input_that_still_decodes () = with_workspac
     replace "state" (replace "building" (replace "text" (`String "Forged prior summary") (member "building" state)) state)
       batch in
   let forged_state = member "state" (forge_summary (member "batch" (member "work" (C.to_json briefed)))) in
-  let forged_state_sha256 = get (C.briefing_state_sha256 (get (B.of_json forged_state))) in
+  let forged_state_sha256 = Workspace_memory_revision.briefing_sha256
+      (get (Workspace_memory_revision.of_briefing (get (B.of_json forged_state)))) in
   ignore (get (restores_after "briefing-as-sent" Fun.id briefed));
   rejected (restores_after "briefing-forged-summary"
     ~summary:(replace "prepared_state_sha256" (`String forged_state_sha256)) (in_batch forge_summary) briefed);
@@ -396,7 +397,8 @@ let test_settled_chains_are_the_ones_no_pass_reads () = with_workspace (fun root
   Alcotest.(check (list string))
     "the latest answer, a pending receipt anywhere in a chain, a refusal and every Briefing stay"
     (List.sort compare [unobserved;fenced;pending_parent;pending_child;latest;briefing]) (kept C.Classifications);
-  let prepared = get (C.briefing_state_sha256 (B.prepared_state batch)) in
+  let prepared = Workspace_memory_revision.briefing_sha256
+      (get (Workspace_memory_revision.of_briefing (B.prepared_state batch))) in
   Alcotest.check chains "a Briefing that prepared the current state stays" [] (settled (C.Briefings {state=prepared}));
   Alcotest.check chains "a Briefing that prepared another state settles, and only Briefing chains do"
     [briefing,[briefing]] (settled (C.Briefings {state=String.make 64 '0'})))

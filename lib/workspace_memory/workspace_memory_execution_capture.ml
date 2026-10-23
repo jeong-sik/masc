@@ -219,15 +219,14 @@ module Summary = struct
       Ok {predecessor; workspace; batch=Briefing {selected_count; prepared_state}}
     | _ -> Error "unknown Curator summary kind"
 end
-let briefing_state_sha256 state =
-  Result.map (fun json -> sha256 (Yojson.Safe.to_string json)) (Lane_addon_action.canonical (Brief.to_json state))
 let summary t =
   let* batch = match t.work with
     | Classification {batch;_} ->
       Ok (Summary.Classification {up_to=batch.size;
         selected=List.map (fun (fact : Ledger.pending_fact) -> fact.fact) batch.selected})
     | Briefing batch ->
-      let* prepared_state = briefing_state_sha256 (Brief.prepared_state batch) in
+      let* prepared_state = Workspace_memory_revision.of_briefing (Brief.prepared_state batch)
+        |> Result.map Workspace_memory_revision.briefing_sha256 in
       Ok (Summary.Briefing {selected_count=Brief.selected_count batch; prepared_state}) in
   Ok {Summary.predecessor=t.predecessor; workspace=t.workspace; batch}
 let restore_record ~workspace (retained : Owner.retained) =

@@ -35,8 +35,8 @@ browser Add-on worker 하나가 브라우저 연결 출처 다섯을 한 프로�
   - browser worker 의 export 는 host 만 불러요. Keeper 는 지금도 있는 host 도구(`masc_browser_*`)를 써요.
 - **H. 고르는 일은 host 가 해요.** host 가 요청할 때 각 worker 에 이미 있는 `Snapshot` 을 물어서 골라요. `Snapshot` 은 읽기라서, 실패해도 worker 를 failed 로 만들지 않아요.
 - **G. masc 가 Gecko 브라우저를 끝까지 가져요.**
-  - Gecko 프로필은 masc 가 workspace 아래에 만들어요. 인스턴스 할당 밖이에요.
-  - server 가 설정 패스마다 끝난 인스턴스의 프로필을 쓸어요. `.parentlock` 을 쥔 프로세스가 있으면 TERM 을 보내고, 다음 패스에도 남아 있으면 KILL 을 보내요. 지우는 동안에는 masc 가 그 잠금을 쥐어요.
+  - Gecko 프로필은 masc 가 Lane Add-on store 아래(`<lane-addons>/gecko-profiles/`)에 만들어요. 인스턴스 할당 밖이에요.
+  - server 가 설정 패스마다 끝난 인스턴스의 프로필을 쓸어요. `.parentlock` 을 쥔 프로세스가 있으면 TERM 을 보내고, 같은 프로세스가 70 초 뒤에도 쥐고 있으면 KILL 을 보내요. 지우는 동안에는 masc 가 그 잠금을 쥐어요.
   - 세션 권한을 잃은 automation worker 는 스스로 끝나요.
   - 확인할 수 없는 영수증 `automation-closed.json` 은 지워요.
 - **D. 켜고 끄는 스위치는 선언의 `enabled` 하나예요.** runtime.toml 의 `[browser.*] enabled` 는 지워요. runtime.toml 에는 어떻게 띄울지만 남아요.
@@ -79,13 +79,20 @@ Chrome 과 Gecko 에는 문제가 없었어요. 잡히지 않은 예외 하나�
 | 다른 프로세스가 그 프로필의 `.parentlock` 에 쓰기 잠금을 쥔 채로 같은 프로필로 headless Zen 시작 | `A copy of Zen is already open. Only one copy of Zen can be open at a time.` 를 내고 바로 끝났어요. 남은 프로세스는 없었어요 |
 | 상위 폴더까지 없는 경로를 `-profile` 로 넘기고 headless Zen 시작 | Zen 이 상위 폴더까지 새로 만들고 계속 떠 있었어요 |
 | headless Zen 본체에 SIGKILL | 자식 `plugin-container` 10개가 5초 안에 모두 끝났어요 |
+| headless Zen 본체에 SIGTERM | 바로 끝났어요(종료 코드 143). 그 프로필로 남은 프로세스는 없었어요 |
+| Zen 이 상위 폴더까지 없는 `-profile` 경로를 만들 때의 권한 | 두 단계 모두 0700 이었어요 |
+| `-profile` 만 주고 `--marionette-port` 없이 geckodriver 로 두 세션을 차례로 엶 | geckodriver 가 프로필 `user.js` 에 `marionette.port = 0` 을 썼어요. 두 브라우저가 각자 포트(64662, 64685)를 골라 프로필의 `MarionetteActivePort` 에 적었고, 두 세션 모두 1.5 초 안에 열렸어요. `moz:profile` 은 넘긴 경로와 글자까지 같았어요 |
+| `-profile` 과 `--marionette-port M` 을 함께 줌 | geckodriver 가 `user.js` 에 `marionette.port = M` 을 썼어요. 다시 뜬 브라우저도 M 을 잡는다는 뜻이에요 |
+| 없는 경로를 geckodriver 에 `-profile` 로 줌 | `session not created: Failed to set preferences` 로 거절했어요 |
 
 geckodriver 문서도 같은 걸 말해요([Profiles](https://firefox-source-docs.mozilla.org/testing/geckodriver/Profiles.html)).
 - `-profile` 로 넘긴 프로필은 그 자리에서 써요. 올바르게 동작하는 데 필요한 설정은 geckodriver 가 직접 써 넣어요.
 - 지워지는 건 geckodriver 가 만든 임시 프로필뿐이에요.
-- 직접 넘긴 프로필에서는 Marionette 포트를 `--marionette-port` 로 넘겨야 해요.
+- 알려진 버그 때문에 직접 넘긴 프로필에서는 `--marionette-port` 로 포트를 정하라고 해요. 하지만 0.37.1 은 위 표처럼 포트를 정하지 않아도 세션마다 다른 포트를 썼어요. masc 는 실측을 따라 포트를 정하지 않아요.
 
-뒤의 두 줄은 4.3 의 설계를 정해요. 프로필을 지워도, 다시 뜬 브라우저는 그 경로를 새로 만들어요. 그래서 masc 는 인스턴스가 끝난 뒤에도 그 경로를 계속 봐야 해요. 반대로 잠금 주인 하나만 끝내면 그 브라우저의 자식까지 끝나요.
+Marionette 포트에 관한 두 줄(`--marionette-port` 있음·없음)은 2026-10-23 에 geckodriver 0.37.1 로 한 번씩 본 결과예요. 문서가 말하는 버그가 남은 판에서는 다를 수 있어요(8절 남는 한계).
+
+표의 결과가 4.3 의 설계를 정해요. 프로필을 지워도, 다시 뜬 브라우저는 그 경로를 새로 만들어요. 그래서 masc 는 인스턴스가 끝난 뒤에도 그 경로를 계속 봐야 해요. 반대로 잠금 주인 하나만 끝내면 그 브라우저의 자식까지 끝나요.
 
 ## 2. 지금 구조
 
@@ -315,41 +322,43 @@ geckodriver 문서도 같은 걸 말해요([Profiles](https://firefox-source-doc
 
 native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 revoke 하고, 그 그룹을 끝내고 거둬요(`lane_addon_native_worker.mli:1-4`, `40`). geckodriver 와 그 브라우저는 이 그룹에 있어요(1.3, `browser_addon_automation.ml:82`). 그래서 DELETE 가 실패해서 남은 브라우저도 worker 를 멈출 때 같이 끝나요. 남는 건 그룹 밖으로 빠져나간 브라우저뿐이에요. 같은 mli 도 "Descendants leaving the group are outside its release receipt and need their package's explicit resource cleanup." 라고 적어요. G 가 그 정리예요.
 
-빠져나간 브라우저는 인스턴스가 끝난 뒤에 다시 뜰 수 있어요. 지워진 프로필 경로도 새로 만들어요(1.3). 그래서 G 는 그 브라우저를 인스턴스 할당이 아니라 workspace 범위에서 봐요.
+빠져나간 브라우저는 인스턴스가 끝난 뒤에 다시 뜰 수 있어요. 지워진 프로필 경로도 새로 만들어요(1.3). 그래서 G 는 그 브라우저를 인스턴스 할당이 아니라 Lane Add-on store 범위에서 봐요.
 
-**G1. 프로필은 masc 가 workspace 아래에 만들어요.**
-- 프로필 root 는 `<masc>/browser-lane/gecko-profiles/` 이고 0700 이에요. 세션을 열 때마다 worker 가 `<instance_id>/<uuid>` 를 0700 으로 만들어요.
+**G1. 프로필은 masc 가 Lane Add-on store 아래에 만들어요.**
+- 프로필 root 는 `<lane-addons>/gecko-profiles/` 이고 0700 이에요(`Browser_gecko_profile.root`). host 가 인스턴스를 띄우기 전에 `<instance_id>/` 를 0700 으로 만들어요. root 가 symlink 이면 따라가지 않고 거절해요. 세션을 열 때마다 worker 가 `<instance_id>/<uuid>` 를 0700 으로 만들어요.
 - 그 경로를 `moz:firefoxOptions.args` 의 `-profile` 로 넘기고, `--profile-root` 는 쓰지 않아요. geckodriver 는 넘겨받은 프로필을 지우지 않아요. 필요한 설정은 geckodriver 가 직접 써 넣어요(1.3). masc 는 `user.js` 를 쓰지 않아요.
-- Marionette 포트는 worker 가 driver 포트를 고를 때처럼 빈 loopback 포트를 골라요(`browser_addon_automation.ml:39-44`). geckodriver 의 `--marionette-port` 로 넘겨요. driver 가 사는 동안 그 포트 하나를 써요.
-- 세션이 열리면 `moz:profile` 이 masc 가 만든 그 경로인지 확인하고, 아니면 그 세션을 닫고 거절해요. 이전 세션의 브라우저가 같은 Marionette 포트에 남아 있으면 geckodriver 가 그쪽에 붙을 수 있어서예요. live Firefox 는 이미 이렇게 확인해요(`browser_addon_live_bidi.ml:218`, `runs_profile`).
+- Marionette 포트는 정하지 않아요. geckodriver 가 프로필에 `marionette.port = 0` 을 쓰고 브라우저가 고른 포트를 `MarionetteActivePort` 로 읽어요(1.3). 그래서 다시 뜬 브라우저가 다음 세션의 포트에 있을 일이 없어요.
+- 세션이 열리면 `moz:profile` 이 masc 가 만든 그 경로인지 확인하고, 아니면 그 세션을 닫고 거절해요. 다른 브라우저에 붙은 세션을 쓰지 않기 위해서예요. live Firefox 는 이미 이렇게 확인해요(`browser_addon_live_bidi.ml:218`, `runs_profile`).
 - 세션을 닫으면 worker 가 그 세션의 프로필을 G2~G4 로 지워요. driver 하나가 세션을 여러 번 열기 때문에(2.3), 그대로 두면 worker 가 사는 동안 프로필이 쌓여요.
 
 **G2. 잠금 주인을 커널에 물어요.**
 
 정리할 때 프로필 폴더마다 이렇게 해요. 이름이 정확한 UUID 가 아닌 항목은 Chrome 처럼 거절해요(2.2).
-1. `.parentlock` 을 `O_RDWR | O_NOFOLLOW` 로 하나만 열어요. 일반 파일이고, 소유자가 masc 실행 사용자이고, 링크 수가 1 이어야 해요. 이 fd 하나를 G2 부터 G4 까지 같은 패스 안에서 들고 있어요.
-   - POSIX 레코드 잠금은 그 파일의 fd 를 하나라도 닫으면 그 프로세스의 잠금이 다 풀려요. 코드도 이미 그렇게 적어요(`native_addon_lease.ml:492-493`). 그래서 같은 `.parentlock` 에 다른 fd 를 열지 않아요.
+1. `.parentlock` 을 `O_RDWR | O_NOFOLLOW` 로 열고, 없으면 0600 으로 만들어요. 일반 파일이고, 소유자가 masc 실행 사용자이고, 링크 수가 1 이어야 해요. 이 fd 하나를 G2 부터 G4 까지 같은 패스 안에서 들고 있어요.
+   - POSIX 레코드 잠금은 그 파일의 fd 를 하나라도 닫으면 그 프로세스의 잠금이 다 풀려요. 코드도 이미 그렇게 적어요(`native_addon_lease.ml:492-493`). 그래서 프로세스 안의 등록부가 파일마다 fd 하나만 열게 하고, 이미 열린 파일을 다시 열려는 호출은 거절해요(`Private_browser_profile.open_lock`).
 2. 그 fd 로 잠금 주인을 붙잡아요(G3 의 타입). `F_GETLK` 로 찾고, pid 파일은 읽지 않아요.
 3. 결과는 닫힌 합타입이에요.
    - `Unlocked`
    - `Held_by of holder`
-   - `No_lock_file`
    - `Changing`: 물어보는 사이에 주인이 끝나거나 바뀌었어요. 다음 패스에서 다시 물어요.
    - `Unreadable of string`: 경로와 실패한 검사를 남기고, 그 폴더는 다음 패스에 다시 봐요.
 4. Chrome 은 바꾸지 않아요. Chrome 은 자기 자식 slot 으로 띄우고 정리해요(2.2). 이 잠금 확인은 Gecko 에만 써요.
 
 **G3. 잠금 주인은 별도 타입으로 멈춰요.**
 - `Owner_process_identity` 의 계약은 그대로 둬요. 그 모듈의 대상은 workspace lease 주인, 곧 masc 서버예요. "SIGTERM to the captured process incarnation only; never PID fallback or SIGKILL escalation." (`owner_process_identity.mli:8-10`)
-- masc 전용 프로필 잠금 주인은 새 타입 `Private_profile_holder.t` 로 다뤄요.
+- masc 전용 프로필 잠금 주인은 새 라이브러리 `Private_browser_profile` 의 `holder` 로 다뤄요.
   - 이 값은 G2-1 의 검사를 통과한 잠금 fd 에서만 만들 수 있어요. 검사 결과를 담은 private 타입을 받기 때문이에요.
   - `request_termination` 과 `request_kill` 을 둬요. 둘 다 붙잡은 그 프로세스에만 보내요. 보내기 직전에 주인을 다시 확인하는 일은 지금 stub 이 이미 해요.
-  - C 쪽은 `owner_process_identity_stubs.c` 의 붙잡기·신원 확인(`F_GETLK`, `masc_owner_identity_capture`)을 함께 써요. 지금 stub 은 fd 를 복제하고 GC finalizer 로 닫아요(`:27-35`, `:83`). G 에서는 붙잡은 값을 G4 전에 명시적으로 닫아요. finalizer 가 G4 도중에 복제 fd 를 닫으면 1 의 규칙대로 잠금이 풀리기 때문이에요.
+  - C 쪽은 별도 stub(`private_browser_profile_stubs.c`)이에요. 붙잡는 방식(`F_GETLK`, macOS audit token, Linux pidfd)은 `owner_process_identity_stubs.c` 를 따르되 그 모듈의 계약은 건드리지 않아요. 붙잡은 값은 잠금 파일 fd 를 복제하지 않아서, 그 값을 놓아도 1 의 잠금이 풀리지 않아요. 놓는 일은 `release` 로 명시해요.
 - 그래서 masc 서버에 KILL 을 보내는 코드는 타입 검사를 통과하지 못해요.
-- TERM 과 KILL 사이에는 상태가 필요해요. 정리하는 쪽이 프로필마다 `Not_signalled | Terminated of identity` 를 메모리에 들고 있어요. identity 는 pid 와 신원 값이고 fd 는 들지 않아요.
-  - `Held_by` 를 처음 보면 TERM 을 보내고 `Terminated` 로 둬요.
-  - 다음 패스에 같은 신원이 아직 잠금을 쥐고 있으면 KILL 을 보내요.
-  - 서버가 다시 뜨면 상태가 사라지고 TERM 부터 다시 해요. 손해는 한 패스 늦어지는 것뿐이에요.
-- 유예는 한 패스(기본 60초)예요. 이건 masc 가 가진 프로세스를 멈추는 안전 한도예요. native worker 가 자기 그룹을 멈출 때 TERM 뒤 유예를 두고 KILL 하는 것(`lane_addon_native_worker` 의 `grace_seconds`)과 같은 종류예요. 행동을 막는 게이트가 아니에요.
+- TERM 과 KILL 사이에는 상태가 필요해요. 정리하는 쪽이 TERM 을 보낸 프로필마다 붙잡은 주인과 KILL 을 보내도 되는 시각을 메모리에 들고 있어요. 잠금 파일 fd 는 들지 않아요.
+  - `Held_by` 를 처음 보면 TERM 을 보내고 그 주인을 기록해요.
+  - 같은 신원이 유예가 지난 뒤에도 잠금을 쥐고 있으면 KILL 을 보내요. 유예 안에 온 패스는 아무것도 보내지 않아요.
+  - 보낸 TERM 은 그 프로필이 사라질 때까지 기억해요. 어떤 패스가 그 프로필에 닿지 못해도 유예는 이어져요.
+  - 서버가 다시 뜨면 상태가 사라지고 TERM 부터 다시 해요.
+- 유예는 70 초예요(`Browser_gecko_sweep.termination_grace_seconds`). Firefox 의 종료 감시가 종료 단계 하나에 주는 시간과 같아요. 한 단계가 `toolkit.asyncshutdown.crash_timeout`(기본 60 초)에 `crash_timeout_additional_wait`(10 초)를 더한 시간 동안 나아가지 않으면 Firefox 가 스스로 crash 해요(`toolkit/components/terminator/nsTerminator.cpp`). 단계마다 다시 세서, 계속 나아가는 종료는 70 초보다 길 수 있어요. 그래서 70 초는 Firefox 가 보장하는 값이 아니라 masc 가 고른 한도예요.
+  - 패스 간격을 유예로 쓰지 않아요. 재촉(nudge)으로 패스가 바로 이어질 수 있어서예요.
+  - 이건 masc 가 가진 프로세스를 멈추는 안전 한도예요. native worker 가 자기 그룹을 멈출 때 TERM 뒤 유예를 두고 KILL 하는 것(`lane_addon_native_worker` 의 `grace_seconds`)과 같은 종류예요. 행동을 막는 게이트가 아니에요.
 - 그 프로세스는 masc 전용 0700 폴더 안의 파일에 쓰기 잠금을 쥔 같은 사용자의 프로세스예요. 그래서 그 프로필로 뜬 Gecko 브라우저라고 봐요. 이건 추론이라서, 주인의 실행 파일 경로를 기록에 남겨 사람이 확인할 수 있게 해요. 주인을 끝내면 그 자식도 끝나요(1.3).
 
 **G4. 지우는 동안에는 masc 가 잠금을 쥐어요.**
@@ -365,11 +374,20 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
   - 인스턴스 기록은 worker 가 폴더를 만들기 전에 생겨요(admission 이 spawn 보다 먼저예요). 그래서 기록 없는 폴더는 남은 것뿐이에요.
   - 운영자가 retain 한 인스턴스의 폴더는 건드리지 않아요. retain 은 운영자가 그 자리를 그대로 두라는 뜻이에요.
   - 폴더의 프로필이 모두 지워지면 `<instance_id>` 폴더도 지워요.
+  - 기록과 함께 이 서버가 지금 돌리거나 복구 중인 인스턴스도 빼요. 읽지 못한 기록은 그 기록이 가리키는 인스턴스를 막고, 어느 인스턴스인지 모르면 그 패스는 쓸지 않아요.
+  - 다룰 인스턴스는 설정 잠금 안에서 정해요. 그 시점의 binding 전체(실행 중인 것 포함)와 실행 여부를 같이 읽고, root 를 한 번 읽어요. 지우기와 신호는 잠금을 놓은 뒤 systhread 에서 해요. 그래서 Attach·Detach·retain 이 프로필 지우기를 기다리지 않아요.
+  - 인스턴스 id 는 다시 쓰이지 않아서, 정한 뒤 대상이 다시 살아날 일이 없어요. 그 뒤에 생긴 폴더는 그 패스에 없어요.
+  - 남긴 항목은 설정 상태의 issue 로 보여요. 매 패스 경고 로그를 찍지 않아요.
 - 두 쪽이 다루는 폴더는 인스턴스가 살아 있는지로 갈라서 겹치지 않아요. worker 가 지우다 멈추면(그룹이 끝나면) 남은 것은 server 가 이어서 지워요. 지우는 함수는 반쯤 지워진 폴더에서 다시 시작해도 돼요.
 - 인스턴스 할당 정리(`Browser_addon_socket.cleanup`)는 더 이상 Gecko 프로필을 보지 않아요. 그래서 빠져나간 브라우저가 있어도 할당은 확인되고 새 인스턴스가 떠요. 빠져나간 브라우저는 server 가 따로 끝내요.
 
 **G6. 세션 권한을 잃은 worker 는 끝나요.**
-- `uncertain` 이 켜지면(2.3) automation worker 는 owner 를 revoke 하고 예외로 끝나요. live Firefox 가 연결을 잃었을 때와 같아요(`browser_addon_live_bidi.ml:290`).
+- 세션을 잃었는지는 WebDriver 클라이언트가 정해요(`Browser_webdriver.create ~lost`). 클라이언트가 스스로 세션 상태를 모른다고 기록하는 자리예요.
+  - 세션 생성이 예외(명령 시간 초과 포함)·전송·프로토콜 오류로 끝났거나, 답에 sessionId 가 없을 때
+  - 지금 세션에 대해 `invalid session id` 답을 받았을 때
+  - WebDriver 오류로 거절된 생성(`session not created` 등)은 브라우저를 띄우지 않았다는 뜻이라 잃은 게 아니에요.
+- serving 중에 세션을 잃거나 드라이버 프로세스가 끝나면, automation worker 는 owner 를 revoke 하고 예외로 끝나요. live Firefox 가 연결을 잃었을 때와 같아요(`browser_addon_live_bidi.ml:290`).
+- admission 이 이미 retire 된 뒤(Retire, SIGTERM)의 손실은 worker 를 끝내는 이유가 아니에요. 정리를 "확인되지 않음" 으로 남기고 멈춤을 이어 가요. 다른 백엔드의 정리를 중간에 끊지 않으려는 거예요.
 - 그러면 runtime 이 그 그룹을 끝내고, #45290 대로 다음 설정 패스에 새로 띄워요. 빠져나간 브라우저는 G5 가 끝내요.
 - 지금처럼 모든 명령을 거절한 채 떠 있는 상태(1.1 의 20:57~21:48)는 없어져요.
 
@@ -404,7 +422,7 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
 |---|---|---|
 | live Firefox 연결이 끊김 | worker 가 죽고 모든 출처가 꺼짐 | `browser-firefox` 만 끝나요. 다음 설정 패스가 새로 띄워요. 나머지 세션은 이어져요 |
 | ego 연결이 끝나거나, 운영자가 작업 공간을 쥐고 있어 시작하지 못함 | worker 가 죽거나 시작하지 못해 모든 출처가 꺼짐 | `browser-ego` 만 끝나거나 실패해요. 박자마다 다시 시도해요 |
-| Gecko 브라우저가 업데이트 재실행으로 빠져나감 | automation 이 모든 명령을 거절한 채 떠 있고, 다음 배포 뒤에는 영수증이 없어 모두 막힘 | automation worker 가 바로 끝나요(G6). 할당은 확인되고 다음 패스에 새 automation 이 떠요. 빠져나간 브라우저는 server 가 TERM, 다음 패스에 KILL 해요(G5). 나머지 출처는 상관없어요 |
+| Gecko 브라우저가 업데이트 재실행으로 빠져나감 | automation 이 모든 명령을 거절한 채 떠 있고, 다음 배포 뒤에는 영수증이 없어 모두 막힘 | automation worker 가 바로 끝나요(G6). 할당은 확인되고 다음 패스에 새 automation 이 떠요. 빠져나간 브라우저는 server 가 TERM 을 보내고, 70 초 뒤에도 남으면 KILL 해요(G5). 나머지 출처는 상관없어요 |
 | 정리한 뒤에 빠져나간 브라우저가 다시 떠서 프로필을 새로 만듦 | 해당 없음(정리가 끝나지 않음) | 그 폴더는 끝난 인스턴스의 것이라 다음 패스에 server 가 잡아요(G5) |
 | Gecko 세션 DELETE 가 실패함 | 영수증을 쓰지 않아 정리가 영영 막힘(2.3) | automation worker 를 멈출 때 그룹이 끝나요. 프로필은 G5 가 지워요 |
 | 출처 코드의 잡히지 않은 예외·C stub 충돌 | 모두 꺼짐 | 그 출처의 worker 하나만 꺼져요 |
@@ -414,16 +432,18 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
 
 ## 6. 단계
 
-세 스택으로 나눠요. G 는 지금 구조에서도 같은 코드라 먼저 해도 버려지지 않아요. 그래서 효과가 큰 G 를 먼저 내요. D 는 S 가 배포된 뒤에 내요. 출처별 선언이 먼저 있어야 `enabled` 키를 지울 수 있어서예요(7절).
+세 스택으로 나눠요. G 는 지금 구조에서도 같은 코드라 먼저 해도 버려지지 않아요(스택 1 = native stack #45404). 그래서 효과가 큰 G 를 먼저 내요. D 는 S 위에 쌓고 S 와 함께 배포해요(7절).
 
 **스택 1: Gecko 소유 (G)**
 
 | 층 | 내용 | 검증 |
 |---|---|---|
-| G-L1 | `Private_profile_holder`(붙잡기, TERM, KILL, 명시적 닫기)와 공용 프로필 삭제 함수(`.parentlock` 마지막) | 실제 자식 프로세스가 `fcntl` 쓰기 잠금을 쥔 픽스처로 `Held_by`·`Unlocked`·`No_lock_file`·`Changing` 확인. TERM 을 무시하는 픽스처가 KILL 로 끝나는지. 붙잡은 값을 닫아도 masc 쪽 잠금이 그대로인지. 링크·링크 수 2 파일 거절 |
-| G-L2 | workspace 프로필 root, `-profile`, `--marionette-port`, `--profile-root` 제거, `moz:profile` 확인, 닫은 세션의 프로필 삭제 (G1) | 세션이 masc 가 만든 프로필로 열리는지. 다른 프로필의 브라우저가 붙으면 세션을 거절하는지. 세션을 닫으면 그 프로필이 지워지는지 |
-| G-L3 | server 의 패스별 정리(G2~G5), 할당 정리에서 프로필 빼기, 영수증 삭제 (G7) | 끝난 인스턴스 폴더의 `.parentlock` 을 쥔 그룹 밖 자식이 TERM 뒤(또는 다음 패스 KILL 뒤) 끝나고 폴더가 지워지는지. 그동안 새 인스턴스가 기다리지 않고 뜨는지. retain 한 인스턴스 폴더는 그대로인지 |
-| G-L4 | `uncertain` 이면 automation worker 가 끝남 (G6) | sessionId 없는 생성 답을 주는 가짜 driver 로 worker 가 끝나고, runtime 이 다음 패스에 새로 띄우는지 |
+| 층 | PR | 내용 | 검증 |
+|---|---|---|---|
+| G-L1 | #45391 | `Private_browser_profile`(등록부로 파일마다 fd 하나, 붙잡기, TERM, KILL, 명시적 놓기)와 공용 프로필 삭제 함수(`.parentlock` 마지막) | 실제 자식 프로세스가 `fcntl` 쓰기 잠금을 쥔 픽스처로 `Held_by`·`Unlocked`·`Changing` 확인. TERM 을 무시하는 픽스처가 KILL 로 끝나는지. 붙잡은 값을 놓아도 masc 쪽 잠금이 그대로인지. 링크·링크 수 2 파일 거절 |
+| G-L2 | #45403 | Lane Add-on store 프로필 root, `-profile`, `--profile-root` 제거, Marionette 포트를 정하지 않음, `moz:profile` 확인, 끝난 세션의 프로필 놓기 (G1) | 세션이 masc 가 만든 프로필로 열리는지. 다른 프로필의 브라우저가 붙으면 세션을 거절하는지. 세션이 어떻게 끝나든 프로필을 정확히 한 번 놓는지 |
+| G-L3 | #45411 | server 의 패스별 정리(G2~G5), 할당 정리에서 프로필 빼기, 영수증 삭제 (G7) | 끝난 인스턴스 폴더의 `.parentlock` 을 쥔 그룹 밖 자식이 TERM 뒤(또는 유예 뒤 KILL 뒤) 끝나고 폴더가 지워지는지. 기록이 retained·실패인 인스턴스의 폴더는 그대로인지. 계획 뒤에 생긴 폴더는 건드리지 않는지 |
+| G-L4 | #45433 | 세션을 잃거나 드라이버가 끝나면 automation worker 가 끝남 (G6) | 생성 결과마다 손실을 세는지. sessionId 없는 답, 시간 초과가 끊은 생성, 준비 뒤 드라이버 종료로 worker 가 끝나는지. 생성 중 Retire 에는 예외 없이 멈추는지. 남긴 프로필을 host 패스가 지우는지 |
 
 **스택 2: 출처마다 worker 하나 (S, H)**
 
@@ -456,28 +476,25 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
 
 ## 7. 옮겨 가기 (hard cut)
 
-세 번 배포해요. 순서가 바뀌면 안 돼요.
+두 번 배포해요. 순서가 바뀌면 안 돼요. hard cut 이라 스위치가 둘인 중간 판을 두지 않아요.
 
 **배포 1: 스택 1 (G)**
-- 이전 판이 띄운 인스턴스의 할당에는 `automation-closed.json` 과 geckodriver 가 만든 프로필이 남아 있어요. 새 판은 모르는 항목으로 보고 정리를 거절해요. 그 배포에서 한 번은 운영자 retain 이 필요해요.
-- changelog 에 `Fresh state required` 로 적어요.
+- 새 판은 옛 automation 정리 기록(`driver`·`binary` 만 있는 것)을 읽지 않아요. 배포 전 검사가 그 기록을 가진 native claim 슬롯을 거절해요(`lane_addon_store_preflight.ml`, decoder `Browser_addon_socket.check_retained`).
+- 서버를 멈춰요. 거절마다 그 기록이 가리키는 `mb-…` 할당의 `profiles/` 를 아직 쥔 프로세스가 있으면 먼저 끝내요(`lsof +D <할당>/profiles`). 옛 판은 다시 뜬 Gecko 브라우저를 그곳에 남길 수 있어요(#45187). 그런 다음 배포 전 검사가 알려 주는 경로(슬롯, 그 인스턴스의 binding 과 observations)와 그 할당을 옮겨 두고 새 판을 띄워요. 옛 할당에 남은 `automation-closed.json` 과 `profiles/` 도 이때 함께 치워져요.
+- changelog 에 `Fresh state required` 로 적어요(#45403).
 
-**배포 2: 스택 2 (S, H)**
+**배포 2: 스택 2·3 (S, H, D)**
 1. 옛 서버가 떠 있는 동안 옛 `browser` 인스턴스를 Detach 하고, `released` 가 기록됐는지 봐요. 새 판은 옛 정리 descriptor 를 읽지 않아요(4.1). 옛 인스턴스가 남아 있으면 `install-local-build.sh` 의 `validate-stores` 가 설치를 멈춰요(`scripts/install-local-build.sh:293-295`, `lane_addon_store_preflight.ml:247`).
-   - released 가 되지 않으면, 서버를 멈추고 `browser` binding 과 그 native-claims slot, `$TMPDIR/mb-*` 을 지워요.
-2. 운영자가 runtime.toml 의 Exact Output lane 표를 새 선언 id 로 옮겨요.
+   - released 가 되지 않으면, 서버를 멈추고 `browser` binding 과 그 native-claims slot, 그 `mb-…` 할당을 지워요.
+2. 운영자가 지금의 `[browser.*] enabled` 값을 적어 두고, runtime.toml 에서 그 줄을 지워요. 그러고 나서 빈 표가 남으면(예: `enabled` 만 있던 `[browser.stagehand]`) 그 표도 지워요. 남아 있으면 새 판이 runtime.toml 을 읽지 못해요(4.4). `install-local-build.sh` 는 설치 전에 새 판으로 runtime.toml 을 확인해서 이걸 먼저 알려 줘요(`:280-284`).
+3. 운영자가 runtime.toml 의 Exact Output lane 표를 새 선언 id 로 옮겨요.
    - `[runtime.addon_exact_lanes.browser.locate]` → `[runtime.addon_exact_lanes.browser-automation.locate]`
    - `[runtime.addon_exact_lanes.browser.stagehand]` → `[runtime.addon_exact_lanes.browser-stagehand.stagehand]`
    - 옮기지 않으면 `locate` 와 act/extract 가 `Lane_unconfigured` 가 돼요(2.4).
-3. 설치해요. `install-local-build.sh` 는 `--no-browser-addon` 을 주지 않으면 browser Add-on 을 설치해요.
-4. `browser-lane-setup` 이 출처별 선언을 써요. 각 선언의 `enabled` 는 지금의 `*_enabled` 값을 따라요. `browser-external` 은 늘 켜진 선언이에요. 바깥 native host 는 지금도 `[browser.live] enabled` 의 영향을 받지 않아서예요(2.4).
-- 이 배포에서는 `*_enabled` 가 아직 유효한 키예요. 선언과 `*_enabled` 가 둘 다 켜져야 출처가 떠요. 스위치가 둘인 건 배포 3 까지만이에요.
+4. 설치해요. `install-local-build.sh` 는 `--no-browser-addon` 을 주지 않으면 browser Add-on 을 설치해요.
+5. `browser-lane-setup` 이 출처별 선언을 써요. 각 선언의 `enabled` 는 운영자가 2 에서 적어 둔 값으로 정해요. `browser-external` 은 늘 켜진 선언이에요. 바깥 native host 는 지금도 `[browser.live] enabled` 의 영향을 받지 않아서예요(2.4).
 - 호환 읽기나 옛 선언 변환은 만들지 않아요. changelog 에 `Fresh state required` 로 적어요.
-
-**배포 3: 스택 3 (D)**
-1. 운영자가 runtime.toml 의 `[browser.*]` 에서 `enabled` 줄을 지워요. 그러고 나서 빈 표가 남으면(예: `enabled` 만 있던 `[browser.stagehand]`) 그 표도 지워요. 남아 있으면 새 판이 runtime.toml 을 읽지 못해요(4.4). `install-local-build.sh` 는 설치 전에 새 판으로 runtime.toml 을 확인해서 이걸 먼저 알려 줘요(`:280-284`).
-2. 설치해요.
-- 되돌려도 안전해요. 배포 2 의 판은 `enabled` 가 없으면 켜진 걸로 읽지만(`browser_configuration.ml:41-43`), 출처는 선언으로도 꺼져 있어요.
+- 되돌리면 옛 판은 `enabled` 줄이 없는 표를 켜진 것으로 읽어요(`browser_configuration.ml:41-43`). 되돌릴 때는 2 에서 적어 둔 값을 다시 써 넣어요.
 
 ## 8. 대안과 트레이드오프
 
@@ -498,12 +515,12 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
 - 상주 프로세스가 하나에서 최대 다섯으로 늘어요. 설정한 출처만 떠요. `browser-ego`·`browser-external` 은 브라우저를 띄우지 않아요. 다섯 worker 의 메모리는 배포 2 뒤 재서 증거로 남겨요.
 - Automatic 요청과 live client 를 지정한 요청마다 로컬 `Snapshot` 왕복이 최대 다섯 늘어요. 멈춘 worker 가 있으면 그 요청은 control 시간 제한(기본 5초)만큼 늦어져요.
 - server 가 설정 패스마다 Gecko 프로필 root 를 읽어요.
-- 운영자가 runtime.toml 을 두 번 고치고, hard cut 이 세 번 있어요(7절).
+- 운영자가 runtime.toml 을 한 번 고치고, hard cut 이 두 번 있어요(7절).
 
 남는 한계
 - 잠금 주인이 Gecko 브라우저라는 판단은 추론이에요(G3). 실행 파일 경로를 기록해서 사람이 확인할 수 있게 해요.
-- 빠져나간 브라우저는 길면 두 패스(기본 2분) 동안 살아 있어요. 그동안 CPU·메모리를 써요. 다른 출처와 새 automation 인스턴스는 막히지 않아요.
-- masc 가 고른 Marionette 포트를 다른 프로세스가 먼저 잡으면 그 세션 시작이 실패해요. automation worker 만 영향을 받아요.
+- 빠져나간 브라우저는 SIGTERM 을 무시하면 길면 패스 간격 두 번과 유예 70 초(기본 약 3분) 동안 살아 있어요. 그동안 CPU·메모리를 써요. 다른 출처와 새 automation 인스턴스는 막히지 않아요.
+- 브라우저가 Marionette 포트를 고르는 동작은 geckodriver 0.37.1 에서 확인했어요(1.3). 문서가 말하는 버그가 남은 판을 쓰면 세션이 열리지 않을 수 있어요.
 
 ## 9. 검증 방법
 
@@ -511,12 +528,12 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
 
 | 장애 | 배포 | 성공 기준 |
 |---|---|---|
-| Gecko 탈출 | 1 | 운영자 Zen 에 업데이트를 받아 둔 채로 automation 세션을 열어요. automation worker 가 바로 끝나고, 다음 패스에 새 인스턴스가 운영자 retain 없이 떠요. 빠져나간 프로세스는 두 패스 안에 끝나고 그 폴더가 지워져요 |
+| Gecko 탈출 | 1 | 운영자 Zen 에 업데이트를 받아 둔 채로 automation 세션을 열어요. automation worker 가 바로 끝나고, 다음 패스에 새 인스턴스가 운영자 retain 없이 떠요. 빠져나간 프로세스는 SIGTERM 에 끝나거나 70 초 유예 뒤 KILL 로 끝나고, 그 폴더가 지워져요 |
 | live Firefox 끊김 | 2 | live Firefox 를 직접 꺼요. 다른 출처 명령이 계속 되고, 다음 설정 패스에 `browser-firefox` 가 새로 떠요 |
 | ego 시작 실패 | 2 | 운영자가 ego 작업 공간을 쥔 채로 둬요. `browser-ego` 만 실패로 남고, 나머지는 serving 이에요 |
 | 출처 하나가 죽음 | 2 | `browser-stagehand` worker 를 밖에서 죽여요. 다른 worker 는 그대로이고, stagehand 만 다시 떠요 |
 | 늦은 snapshot | 2 | `browser-stagehand` worker 를 SIGSTOP 으로 멈추고 Automatic 요청을 보내요. 요청은 stagehand 를 빼고 골라지고, worker 는 failed 가 되지 않아요. SIGCONT 뒤 그대로 써요 |
-| 출처 끄기 | 3 | TUI 에서 live Firefox 를 꺼요. `browser-firefox` 선언만 `enabled = false` 가 되고 그 worker 만 멈춰요 |
+| 출처 끄기 | 2 | TUI 에서 live Firefox 를 꺼요. `browser-firefox` 선언만 `enabled = false` 가 되고 그 worker 만 멈춰요 |
 
 ## 10. 정하지 않은 것
 

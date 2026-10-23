@@ -254,10 +254,12 @@ let prepare_history config kind =
     actor={actor_id=Some "original-agent";display_name=Some "Original agent";authority=Keeper_chat_store.External};
     urgency=Keeper_external_attention.Ambient;content_preview="Original admitted external evidence";
     content_ref=None;received_at=now -. 5.;metadata=[]} in
-  io (fun () -> match Keeper_external_attention.For_testing.record_with_clock
+  (* Admission prepares its directory through Keeper_fs's Eio mutex. Keep
+     the actual admission API on the fiber, like the source-capture fixture. *)
+  match Keeper_external_attention.For_testing.record_with_clock
     ~now:(fun () -> now -. 5.) ~base_path:config.Workspace.base_path item with
-    | `Recorded -> () | `Duplicate _ -> fail "duplicate original external fixture"
-    | `Error detail -> fail detail)
+  | `Recorded -> () | `Duplicate _ -> fail "duplicate original external fixture"
+  | `Error detail -> fail detail
 let progress fixture = io (fun () -> Position.read ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
   ~keeper_id:keeper_name |> Result.map_error Position.read_error_to_string |> get)
 let with_fixture ?(history_kind=Atoms) f =

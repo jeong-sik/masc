@@ -813,3 +813,5 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - [실행 근거](../docs/evidence/2026-10-23-librarian-history-owner/README.md): Pending 기반은 exact a309cae8의 6suite631건 PASS, Python worker는 실제 27건 PASS다. 새 production 통합 11사례는 별도 실제 HTTP/worker/Memory fixture이며 선택 CI의 완료 결과와 이전 컴파일 실패를 각각 기록한다. source/parser 판정을 실행 성공으로 올리지 않는다.
 - 독립 소스 리뷰에서 Memory/runtime 경로 혼동, checkpoint 원문과 별도 message 불일치, 세대 변경, 쓰기 직전 Memory basis 경합, 원본 오류 뒤 후속 phase 진행 및 실제 worker 재시작 증거 누락을 찾아 수리했다. 실제 저장 API가 이미 정규화하는 richer checkpoint 필드의 정상 재시작 장애는 확정되지 않았으며, 필드 보존과 저장 표현의 일치 검사를 구분한다.
 - 원래 A01–H06의54개 항목명과 완료 기준은 baseline959eda39와 동일하다. history의 용량/실패 descent, 다른 Librarian 목적, 유료 provider·실제 absorption-model·Docker·두 native UI·운영 설치와 실제 Keeper 기억 연속성을 이번 소스/fixture만으로 완료 처리하지 않는다.
+
+- completed-history 후속 실측: exactd22196의39894327289는438건 중421PASS/17FAIL이었다. 실제 checkpoint fixture와 baseline 수리 뒤 exact0bf669d의39895924935에서 source capture7·capacity callback25는 PASS했다. 새 nonempty external admission의 Eio 문맥 실수로 통합11건은 여전히 setup FAIL이며 호출 문맥을 수리한다. 별도 worker6사례·17실제프로세스 재실행은0.861초이며 원문/개별시간을 공개 evidence에 보존했다. 부모 성공·소스 판정을 통합 성공으로 올리지 않는다.

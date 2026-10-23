@@ -20,6 +20,13 @@ replacement request or another inference.
   including startup and fsync. The prior raw stdout was not saved as a file;
   [the reported receipt](python-worker-reported-execution.json) records that limit,
   command and exact source hashes. This is not a MASC/provider latency benchmark.
+- To close that raw-log gap, the six Librarian cases were reexecuted on the
+  unchanged worker source at exact `0bf669df54940552aeed51a941b67cede120c3a1`:
+  **6 passed**, 17 real processes, **0.861 s total / 46.9–64.5 ms per process**.
+  These timings include startup, differing request counts, fsync and exit.
+  [Raw output](python-worker-reexecution.txt) and [all individual timings and
+  source hashes](python-worker-reexecution.json) are retained. They measure
+  worker protocol/persistence rather than provider or full host latency.
 - The first new source-owner [run39892095882](https://github.com/jeong-sik/masc/actions/runs/39892095882),
   exact `c9c40295282b99c4768b00673ede8b53a60cbdad`, failed. Its requested list
   contained one nonexistent suite and compilation also found a fragile match
@@ -35,6 +42,14 @@ replacement request or another inference.
   [The exact-head receipt](history-production-first-execution.json) retains
   per-suite counts and timings. These failures require repaired fixtures and a
   fresh execution; the eleven integration cases are not yet a PASS claim.
+- The repaired [run39895924935](https://github.com/jeong-sik/masc/actions/runs/39895924935),
+  exact `0bf669df54940552aeed51a941b67cede120c3a1`, compiled all three selected
+  suites. Capture **7 passed** and capacity callback **25 passed**. All eleven
+  integration cases failed in the newly added nonempty external-admission setup:
+  that API also needs the Eio fiber for its directory mutex. Its call-site
+  repair keeps the real external item and final ACK=1 assertion. [The second
+  exact-head receipt](history-production-second-execution.json) preserves this
+  failure separately; another execution must verify the repaired integration.
 
 ## What the eleven integration cases exercise
 

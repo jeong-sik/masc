@@ -10,8 +10,10 @@ val authorize : base_path:string -> store:Lane_addon_store.t -> declaration_id:s
   (authorization option, string) result
 (** [None] means this request does not occupy the Librarian original namespace.
     A Librarian package or a namespaced request without a complete original
-    capture is refused. Restore the physical Keeper/Memory epoch, complete
-    original part forest, acknowledged ancestry and full original request/schema
+    capture is refused. Decode explicit-candidate and completed-history IDs as
+    separate typed namespaces. Restore the physical Keeper/Memory epoch and
+    either the complete candidate forest/acknowledged ancestry or complete
+    history source and immutable Memory preparation, then the original request/schema
     before returning a pure complete-domain validator and an execution-only
     fresh physical original/semantic Runtime guard and the original Keeper
     external-effect purge scope. The latter is called at each actual dispatch,

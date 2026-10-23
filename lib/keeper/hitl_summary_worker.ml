@@ -1093,7 +1093,7 @@ type cli_walk_outcome =
          as it would have without cli slots. *)
 
 let cli_prompt ~context_bundle =
-  canonical_output_contract () ^ "\n\n" ^ Yojson.Safe.to_string context_bundle
+  Hitl_judge_original.canonical_output_contract () ^ "\n\n" ^ Yojson.Safe.to_string context_bundle
 ;;
 
 let try_cli_slots

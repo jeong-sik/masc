@@ -3586,16 +3586,21 @@ let on_operation_execution_settled ~base_path ~keeper_name ~claimed_operation_id
   | None -> ()
   | Some _ ->
     List.iter (fun (operation : Keeper_chat_operation.t) ->
-      match Keeper_chat_failure_projection.persist ~base_path ~keeper_name operation with
-      | Error error ->
+      let log_pending error =
         Log.Keeper.error ~keeper_name
           "chat operation projection pending operation=%s: %s"
           (Keeper_chat_operation.Operation_id.to_string operation.operation_id)
-          (Keeper_chat_failure_projection.error_to_string error)
-      | Ok (Not_failed | Projected _) ->
+          (Keeper_chat_failure_projection.error_to_string error) in
+      let publish () =
         synthesize_wire_terminal_on_settle ~base_path ~keeper_name
           ~operation_id:(Keeper_chat_operation.Operation_id.to_string operation.operation_id)
-          ~execution) operations
+          ~execution in
+      match Keeper_chat_failure_projection.persist ~base_path ~keeper_name operation with
+      | Error error -> log_pending error
+      | Ok Not_failed -> publish ()
+      | Ok (Projected {transcript; journal}) ->
+        (match transcript with Ok () -> () | Error error -> log_pending error);
+        (match journal with Ok _ -> publish () | Error error -> log_pending error)) operations
 ;;
 
 let operation_runner ~state ~clock : Keeper_owner.operation_runner =

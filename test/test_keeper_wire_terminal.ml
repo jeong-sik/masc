@@ -597,6 +597,61 @@ let test_journal_failure_skips_live_broadcast () =
   check bool "no fabricated wire record or cursor survives" true
     (Option.is_none (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id))
 
+let test_transcript_failure_preserves_journal_and_live_terminal () =
+  with_workspace @@ fun base_path ->
+  let module Store = Keeper_chat_operation_store in
+  let module Projection = Keeper_chat_failure_projection in
+  let module Identity = Keeper_chat_delivery_identity in
+  let keeper_name = "blocked-transcript" and operation_id = "op-blocked-transcript" in
+  let id = Keeper_chat_operation.Operation_id.of_string operation_id |> Result.get_ok in
+  let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error) in
+  let store = store_ok (Store.open_or_create ~path:(Filename.concat base_path "failure.sqlite3")) in
+  Fun.protect ~finally:(fun () -> ignore (Store.close store)) @@ fun () ->
+  ignore (store_ok (Store.submit store ~now:1. ~operation_id:id
+    ~source:(operation_source keeper_name) ~input:(`Assoc ["message", `String "accepted input"])));
+  ignore (store_ok (Store.claim_next store ~now:2.));
+  let operation = store_ok (Store.fail_running store ~now:42. ~operation_id:id
+    ~kind:Keeper_chat_operation.Turn_cancelled ~detail:"owner shutdown" ~outcome_ref:None) in
+  let transcript_path = Keeper_chat_store.chat_path ~base_dir:base_path ~keeper_name in
+  (try Unix.mkdir (Filename.dirname transcript_path) 0o700 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Unix.mkdir transcript_path 0o700;
+  let events, sink = collect_sink () in
+  let unregister = Stream.For_testing.register_operation_live_sink
+    ~base_path ~keeper_name ~operation_id sink in
+  Fun.protect ~finally:unregister @@ fun () ->
+  Stream.For_testing.on_operation_execution_settled ~base_path ~keeper_name
+    ~claimed_operation_id:(Some id) ~operations:[operation]
+    ~execution:(failed_execution "owner shutdown");
+  (match !events with
+   | [event] -> check bool "transcript failure cannot hide the live terminal" true
+       (event.Ag_ui.event_type = Ag_ui.Run_error)
+   | _ -> fail "the healthy journal did not authorize one live terminal");
+  let project () = Projection.persist ~base_path ~keeper_name operation in
+  (match project () with
+   | Ok (Projection.Projected
+       {transcript=Error (Projection.Transcript_unavailable _);
+        journal=Ok (Journal.Existing_terminal_error {seq=0;ts=42.;_})}) -> ()
+   | _ -> fail "the pending transcript and durable journal outcomes were conflated");
+  Unix.rmdir transcript_path;
+  List.iter (fun () -> match project () with
+    | Ok (Projection.Projected {transcript=Ok ();
+        journal=Ok (Journal.Existing_terminal_error {seq=0;ts=42.;_})}) -> ()
+    | _ -> fail "repair did not fill only the missing transcript projection") [(); ()];
+  let key = Identity.Operation (Identity.Request_id.of_string operation_id |> Result.get_ok) in
+  let rows = Keeper_chat_store.load ~base_dir:base_path ~keeper_name
+    |> List.filter (fun (row : Keeper_chat_store.chat_message) -> match row.delivery_provenance with
+      | Some provenance -> Identity.delivery_key_equal provenance.delivery_key key
+          && Identity.transcript_slot_equal provenance.transcript_slot Identity.Settled_failure
+      | None -> false) in
+  check int "repair writes one settled-failure transcript" 1 (List.length rows);
+  let entries = read_journal ~base_path ~keeper_name ~operation_id in
+  check int "transcript recovery does not duplicate the durable terminal" 1 (List.length entries);
+  let persisted = Option.get (store_ok (Store.get store id)) in
+  check bool "recovery leaves the authoritative Failed fact unchanged" true
+    (Yojson.Safe.equal (Keeper_chat_operation.to_json operation)
+       (Keeper_chat_operation.to_json persisted))
+
 (* Every settlement path without a live stream ends the journal through
    [record_terminal_error], so the helper itself carries the guarantees: one
    terminal per failure, never a second one, and a finished earlier segment
@@ -751,6 +806,8 @@ let () =
             test_registry_shutdown_projects_every_claimed_batch_member
         ; test_case "journal failure skips live broadcast without durable seq" `Quick
             test_journal_failure_skips_live_broadcast
+        ; test_case "transcript failure preserves durable and live terminal" `Quick
+            test_transcript_failure_preserves_journal_and_live_terminal
         ; test_case "record_terminal_error writes once" `Quick
             test_record_terminal_error_writes_once
         ; test_case "record_terminal_error cuts a torn tail" `Quick

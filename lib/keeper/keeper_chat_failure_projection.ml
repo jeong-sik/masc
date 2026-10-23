@@ -1,11 +1,14 @@
 module Operation = Keeper_chat_operation
 module Journal = Keeper_chat_event_log
 
-type outcome = Not_failed | Projected of Journal.terminal_error_receipt
 type error =
   | Invalid_identity of string
   | Transcript_unavailable of string
   | Journal_unavailable of string
+
+type outcome = Not_failed | Projected of
+  { transcript : (unit, error) result
+  ; journal : (Journal.terminal_error_receipt, error) result }
 
 let error_to_string = function
   | Invalid_identity detail -> "failed operation identity: " ^ detail
@@ -34,13 +37,13 @@ let persist ~base_path ~keeper_name (operation : Operation.t) =
           conversation_id=source.conversation_id }
       | Error _ -> Keeper_chat_store.Row_route.none) in
     let content = "Keeper request failed: " ^ summary failure.kind in
-    let* appended = Keeper_chat_store.append_settled_failure_once
+    let appended = Keeper_chat_store.append_settled_failure_once
       ~base_dir:base_path ~keeper_name
       ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
       ~route
       ~content ()
       |> Result.map_error (fun detail -> Transcript_unavailable detail) in
-    (match appended with
+    let transcript = Result.map (fun appended -> match appended with
      | Keeper_chat_store.Already_present _ -> ()
      | Keeper_chat_store.Appended _ ->
        let surface = match Lazy.force source with
@@ -50,10 +53,14 @@ let persist ~base_path ~keeper_name (operation : Operation.t) =
              "failed operation %s has an unreadable source; failure row has no route: %s"
              operation_id detail;
            "operation" in
-       Keeper_chat_broadcast.chat_appended ~keeper_name ~source:surface ~content ());
+       (try Keeper_chat_broadcast.chat_appended ~keeper_name ~source:surface ~content ()
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Log.Keeper.warn ~keeper_name "failure transcript broadcast failed: %s"
+            (Printexc.to_string exn))) appended in
     let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
     let settlement = { Journal.operation_id = operation.operation_id; completed_at } in
-    Journal.record_terminal_error ~segment:(Journal.Operation_settlement settlement)
+    let journal = Journal.record_terminal_error ~segment:(Journal.Operation_settlement settlement)
       journal ~ts:completed_at ~message:(summary failure.kind)
-    |> Result.map (fun receipt -> Projected receipt)
-    |> Result.map_error (fun detail -> Journal_unavailable detail)
+    |> Result.map_error (fun detail -> Journal_unavailable detail) in
+    Ok (Projected {transcript; journal})

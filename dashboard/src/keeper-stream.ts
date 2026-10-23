@@ -595,18 +595,20 @@ export function applyKeeperOperationTurnEvent(
   if (liveSendOwnsRequest(operationId)) return null
 
   const entries = keeperThreads.value[keeperName] ?? []
-  // A persisted request_failure normalizes to a system-role row with the
-  // same terminal_result provenance: the operation it terminated is
-  // finished even though the row is not an assistant bubble, so a late
-  // event for it must be ignored instead of opening a new bubble.
+  // A persisted request_failure is a system row. Both the earlier stream
+  // terminal and the Owner's settled_failure close their operation; a late
+  // event cannot reopen it or replace an assistant result delivered earlier.
   const matched = [...entries].reverse().find(
     entry =>
       (entry.role === 'assistant' || entry.delivery === 'request_failure')
-      && isOperationDeliveryProvenance(
+      && (isOperationDeliveryProvenance(
         entry.deliveryProvenance,
         operationId,
         'terminal_result',
-      ),
+      ) || (entry.delivery === 'request_failure'
+        && entry.deliveryProvenance?.transcript_slot.kind === 'settled_failure'
+        && sameDeliveryKey(entry.deliveryProvenance.delivery_key,
+          { kind: 'operation', operation_id: operationId }))),
   )
   const outsideLiveDelivery = matched !== undefined
     && matched.delivery !== 'queued'

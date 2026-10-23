@@ -579,19 +579,11 @@ is-default = true
     if not resume then Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source ~input
       |> require "submit original operation" |> ignore;
     (match Eio.Promise.await settled with Ok () -> () | Error detail -> fail detail);
-    (* [on_execution_settled] runs before the Owner's durable settle (see the
-       hook-before-durable-settle note in [Keeper_owner.start]), and leaving
-       this switch cancels the Owner. Wait for the durable row to leave
-       Running, or the read after this phase races the settlement it checks. *)
-    let settle_deadline = Eio.Time.now env#clock +. 5.0 in
-    let rec await_durable_settle () =
-      match Registry.exact_operation ~base_path ~keeper_name operation_id with
-      | Ok (Some ({ state = Keeper_chat_operation.Running _; _ } : Keeper_chat_operation.t)) ->
-        if Eio.Time.now env#clock > settle_deadline
-        then fail "the operation was still Running 5s after the Owner reported its settlement"
-        else (Eio.Time.sleep env#clock 0.01; await_durable_settle ())
-      | Ok (Some _) | Ok None | Error _ -> () in
-    await_durable_settle ();
+    (* The hook follows the durable commit. This Owner round trip joins its
+       callback before the test leaves the switch; no settlement polling is
+       necessary. A subsequent execution may already have started. *)
+    ignore (Registry.exact_operation ~base_path ~keeper_name operation_id
+      |> require "read accepted operation settlement");
     if durable_native then
       check bool "Owner settlement leaves no unacknowledged native call" true
         (Registry.direct_native_call ~base_path ~keeper_name ~operation_id

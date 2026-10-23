@@ -78,16 +78,26 @@ let codepoint_name code =
     | 57371 -> Some "f8"
     | _ -> None
 
-(* With disambiguation enabled, iTerm reports Ctrl+letter as CSI-u instead of
-   the C0 byte sent in legacy mode. The bindings predate that protocol and
-   intentionally read those bytes, so make both encodings identical here. *)
-let legacy_control_byte { shift; alt; ctrl } name =
-  if ctrl && not shift && not alt && String.length name = 1 then
-    let letter = name.[0] in
-    if letter >= 'a' && letter <= 'z' then
-      Some (String.make 1 (Char.chr (Char.code letter - Char.code 'a' + 1)))
-    else None
-  else None
+(* The surface handlers predate CSI-u and consume the legacy byte vocabulary.
+   Normalize at this protocol boundary, including punctuation control keys;
+   teaching every composer, form and global binding another spelling drifts. *)
+let legacy_key { shift; alt; ctrl } name =
+  match shift, alt, ctrl, name with
+  | false, false, false, "tab" -> Some "\t"
+  | false, false, false, "enter" -> Some "\r"
+  | false, false, false, "backspace" -> Some "\127"
+  | false, false, true, "[" -> Some "esc"
+  | false, false, true, "\\" -> Some "\028"
+  | false, false, true, "]" -> Some "\029"
+  | false, false, true, "^" | true, false, true, "6" -> Some "\030"
+  | false, false, true, "_" -> Some "\031"
+  | false, false, true, "@" | false, false, true, " " -> Some "\000"
+  | false, false, true, name when String.length name = 1 ->
+      let letter = name.[0] in
+      if letter >= 'a' && letter <= 'z' then
+        Some (String.make 1 (Char.chr (Char.code letter - Char.code 'a' + 1)))
+      else None
+  | _ -> None
 
 let name ~parameters ~final =
   let first, second = split_parameters parameters in
@@ -115,7 +125,7 @@ let name ~parameters ~final =
           match codepoint_name code with
           | None -> None
           | Some key -> (
-              match legacy_control_byte modifiers key with
+              match legacy_key modifiers key with
               | Some byte -> Some byte
               | None -> Some (with_modifiers modifiers key))))
   | '~' -> Option.map (with_modifiers modifiers) (tilde_name (String.trim first))

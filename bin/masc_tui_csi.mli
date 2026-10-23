@@ -26,8 +26,9 @@ val name : parameters:string -> final:char -> string option
 (** The key for one CSI sequence, or [None] when this vocabulary has none.
 
     Named keys are lower-case and modifiers prefix them in a fixed order —
-    ["ctrl-shift-up"], never ["shift-ctrl-up"]. CSI-u Ctrl+letter sequences
-    instead return the same one-byte C0 string as legacy terminals. Thus a
+    ["ctrl-shift-up"], never ["shift-ctrl-up"]. CSI-u Enter, Tab, Backspace and Ctrl+ASCII sequences
+    instead return the same bytes as legacy terminals. Escape stays ["esc"].
+    Ctrl+Shift+6 and Ctrl+^ both name the legacy Ctrl-^ byte. Thus a
     binding receives one value regardless of which encoding the terminal
     uses. *)
 

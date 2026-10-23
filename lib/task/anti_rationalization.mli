@@ -272,6 +272,22 @@ val review_rendered :
     through [on_execution]; ordinary {!run} and {!review} keep their
     existing policy. Does not read or re-render the current prompt registry. *)
 
+val run_retained :
+  system_prompt:string -> prompt:string ->
+  ?on_execution:(execution_observation -> unit) ->
+  ?on_verdict:(review_result -> unit) ->
+  ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
+  ?sw:Eio.Switch.t option ->
+  log_info:(string -> unit) -> log_warn:(string -> unit) ->
+  lookup:lookup_surface -> provider_rest:(string -> provider_rest) ->
+  base_path:string -> unit -> review_result
+(** Subject-independent retained execution for the Goal caller. Both messages
+    are already captured. Use the existing candidate/slot dispatch policy and
+    structured verdict protocol, with the retained-original unknown-outcome
+    fence and the same read-result projection as Task review. No synthetic
+    Task request, producer, second runner or prompt-registry read is needed.
+    The caller owns retention, actual read authority and domain commitment. *)
+
 val parse_review_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
 
 (** Which decision a refused [report_review_verdict] call named. *)

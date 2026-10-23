@@ -6158,6 +6158,7 @@
 
 (include stanzas/test_verifier_review_original.inc)
 (include stanzas/test_goal_verifier_original.inc)
+(include stanzas/test_goal_verifier_worker.inc)
 
 (include stanzas/test_verifier_review_owner.inc)
 

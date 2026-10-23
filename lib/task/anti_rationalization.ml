@@ -1030,3 +1030,11 @@ let review_rendered ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw
   run_review ~execution_policy:Retained_original ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~render_prompt:(fun () -> Ok prompt)
     ~lookup ~provider_rest ~base_path req
 ;;
+
+let run_retained ~system_prompt ~prompt ?on_execution ?on_verdict ?on_tool_result ?sw
+    ~log_info ~log_warn ~lookup ~provider_rest ~base_path () =
+  run_with_execution_policy ~execution_policy:Retained_original
+    ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw
+    ~log_info ~log_warn ~render_prompt:(fun () -> Ok prompt)
+    ~lookup:(lookup_with_evidence_observation lookup) ~provider_rest ~base_path ()
+;;

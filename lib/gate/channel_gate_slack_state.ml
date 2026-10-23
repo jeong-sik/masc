@@ -59,20 +59,6 @@ let gateway_connected = function
   | Slack_gateway_state.Connected -> true
   | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
 
-(* Trigger policy registry — set once at gateway startup, read for dashboard. *)
-let trigger_policy_ref : Slack_gateway_state.trigger_policy option ref =
-  ref None
-
-let set_trigger_policy (p : Slack_gateway_state.trigger_policy) =
-  trigger_policy_ref := Some p
-
-let get_trigger_policy () = !trigger_policy_ref
-
-let trigger_policy_json = function
-  | None -> `Null
-  | Some policy ->
-    `String (Slack_gateway_state.trigger_policy_to_string policy)
-
 (* Outbound REST uses the bot token (xoxb-...). The app token (xapp-...) is read
    only by {!Slack_socket_client} for apps.connections.open. Both resolve
    through the config boundary ({!Env_config_slack}) so the token env names
@@ -152,7 +138,7 @@ let clear_workspace_id () = Atomic.set workspace_id None
    [available]) are computed at render time, not stored beside their source. *)
 type status = {
   gateway_state : Slack_gateway_state.connection_state;
-  trigger_policy : Slack_gateway_state.trigger_policy option;
+  trigger_policy : Slack_gateway_state.trigger_policy;
   available : bool;
   error : string;
   binding_store_path : string;
@@ -210,7 +196,7 @@ let read_status ~audit_limit =
   let recent_audit = read_recent_audit ~limit:audit_limit in
   {
     gateway_state;
-    trigger_policy = get_trigger_policy ();
+    trigger_policy = Runtime_params.get Runtime_settings.slack_trigger_policy;
     available;
     error;
     binding_store_path = binding_store_path ();
@@ -230,7 +216,8 @@ let read_status ~audit_limit =
 let status_fields status =
   [ ("channel", `String channel)
   ; ("capabilities", Channel_gate_connector_capability.all_json)
-  ; ("trigger_policy", trigger_policy_json status.trigger_policy)
+  ; ("trigger_policy",
+     `String (Slack_gateway_state.trigger_policy_to_string status.trigger_policy))
   ; ("available", `Bool status.available)
   ; ("connected", `Bool (gateway_connected status.gateway_state))
   ; ("status",

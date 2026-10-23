@@ -33,7 +33,13 @@ type interaction =
   | Unblock_requests
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
-type t = Open_tab of string | Open_window of string | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
+(** Who holds an ego task space. [Hand_off] gives the whole space to the
+    operator for a step only a person can take, such as a sign-in or a
+    captcha; [Take_over] takes it back, once the operator has said they are
+    done. Nothing checks that they said so. *)
+type control = Hand_off | Take_over
+type t = Open_tab of string | Open_window of string | Control of control
+  | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
 (** Reply observation window shared by built-in and Add-on action callers.
     Expiry does not prove that a dispatched browser effect did not happen. *)
 val reply_timeout_sec : t -> float

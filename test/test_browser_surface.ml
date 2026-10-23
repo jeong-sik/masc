@@ -487,6 +487,22 @@ let test_a_snapshot_target_is_checked_before_any_browser () =
   check bool "a target click on a live connection goes on to find the browser Add-on" true
     (reaches_the_addon_lookup (live (click @ url)))
 
+(* hand_off and take_over act on the whole space of a live ego connection,
+   named by its observed clientId. *)
+let test_a_hand_off_is_checked_before_any_browser () =
+  let module Cap = Masc.Browser_capabilities in
+  let act fields = addon_tool Cap.Act fields in
+  let live fields = act (("lane",`String "live") :: ("clientId",`String "0c000000-0000-4000-8000-000000000001") :: fields) in
+  List.iter (fun (name, result) -> check bool name true (refused_as_input result))
+    [ "a hand-off on the automation browser", act ["lane",`String "automation";"action",`String "hand_off"]
+    ; "a take-over on the Stagehand browser", act ["lane",`String "stagehand";"action",`String "take_over"]
+    ; "a hand-off with no connection named", act ["lane",`String "live";"action",`String "hand_off"]
+    ; "a hand-off with no lane", act ["action",`String "hand_off"]
+    ; "a hand-off of one tab", live ["action",`String "hand_off";"tabId",`Int 1] ];
+  List.iter (fun (name, result) -> check bool name true (reaches_the_addon_lookup result))
+    [ "a hand-off on a named live connection goes on to find the browser Add-on", live ["action",`String "hand_off"]
+    ; "and so does a take-over", live ["action",`String "take_over"] ]
+
 (* An ego snapshot is read over a live connection only, with its scope and
    root given to that mode alone and a root that is a ref. *)
 let test_a_snapshot_read_is_checked_before_any_browser () =
@@ -524,6 +540,7 @@ let () = run "browser surface" ["behavior",[
   test_case "malformed tool arguments reach no browser" `Quick test_malformed_arguments_reach_no_browser;
   test_case "a snapshot read is checked before any browser" `Quick test_a_snapshot_read_is_checked_before_any_browser;
   test_case "a snapshot target is checked before any browser" `Quick test_a_snapshot_target_is_checked_before_any_browser;
+  test_case "a hand-off is checked before any browser" `Quick test_a_hand_off_is_checked_before_any_browser;
   test_case "automatic discovery binds subsequent observations and input" `Quick test_automatic_selection_keeps_observed_browser;
   test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
   test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;

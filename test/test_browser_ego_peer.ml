@@ -625,6 +625,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.goto" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
     | "page.dialog" -> answered (obj ["dialog",ego_dialog "alert" "hello"])
+    | "space.hand_off" -> answered `Null
     | "page.target" -> answered resolved
     | "page.pointer" | "page.keyboard" | "page.drag" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
@@ -659,7 +660,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Tab_activation -> interact Activate_tab
     | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
     | Dialog_answer -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Dismiss_dialog})
-    | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}) in
+    | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}
+    | Operator_handoff -> Page_act (Action.Control Action.Hand_off)) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in
@@ -707,6 +709,7 @@ const page = {
   waitForLoadState: async () => { seen.push("load at " + current); %s },
 };
 const taskSpace = async () => ({
+  ownership: "agent",
   tabs: async () => [{label: "p1", openedBy: "agent", url: entries[current].url, title: entries[current].title}],
   page: () => page,
 });
@@ -735,6 +738,7 @@ const page = {
   info: async () => ({url: "https://app.slack.com/", title: "Slack", w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600}),
 };
 const taskSpace = async () => ({
+  ownership: "agent",
   tabs: async () => [{label: "p1", url: "https://app.slack.com/", title: "Slack", active: true}],
   page: () => page,
 });
@@ -816,6 +820,7 @@ const page = {
   fill: async (target, text) => { seen.push("fill " + target + " " + text); %s },
 };
 const taskSpace = async () => ({
+  ownership: "agent",
   tabs: async () => [{label: "p1", openedBy: "agent", url: %s, title: "Slack"}],
   page: () => page,
 });
@@ -902,6 +907,61 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     (match dispatch peer Live.Page_interact (interact_args ~tab_id:2 (Lane.Click_target (Lane.Target_ref 1))) with
      | Error (Live.Before_effect _) -> true | Ok _ | Error (Live.Partial_failure _ | Live.Outcome_unknown _) -> false);
   check int "no script ran for it" before (List.length !asked)
+
+(* A stand-in for ego's hand-off: a space whose owner the case sets, and
+   handOff, takeOverTaskSpace and the space's tab list that record each call. *)
+let control_stand_in ~ownership ~user_page = Printf.sprintf {js|
+const seen = [];
+process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
+const taskSpace = async space => ({
+  spaceId: space,
+  ownership: %s,
+  tabs: async () => { seen.push("tabs"); return [{label: "p1", openedBy: "agent", url: "https://app.slack.com/", title: "Slack", active: true}]; },
+  page: () => ({info: async () => ({url: "https://app.slack.com/"})}),
+  handOff: async () => { seen.push("handOff"); },
+});
+const takeOverTaskSpace = async id => { seen.push("takeOver " + id); return {ownership: "agent", userPage: () => %s}; };
+|js} (Yojson.Safe.to_string (str ownership)) user_page
+
+let test_the_space_goes_to_the_operator_and_back () =
+  let ownership = ref "agent" and user_page = ref {|({label: "p2"})|} and output = ref "" in
+  let run ~window_s script =
+    let sent = sent_of ~window_s script in
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str !ownership])
+    | _ -> output := in_node (control_stand_in ~ownership:!ownership ~user_page:!user_page ^ script); Ok !output in
+  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+    | Ok peer -> peer | Error detail -> fail detail in
+  let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
+    | Some line -> after ~prefix:"seen " line
+    | None -> fail "the stand-in did not say what it saw" in
+  let act control = dispatch peer Live.Page_act (Lane.Action.to_json (Lane.Action.Control control)) in
+  let answer label = function
+    | Ok answer -> Yojson.Safe.to_string answer
+    | other -> failf "%s was %s" label (failure_kind other) in
+  check string "the space is handed to the operator" {|{"action":"hand_off"}|} (answer "hand-off" (act Lane.Action.Hand_off));
+  check string "by ego's own handOff" {|["handOff"]|} (seen ());
+  ownership := "agentDelegatedToUser";
+  check bool "while the operator holds it, a step is refused before any effect" true
+    (contains (before_effect "a listing" (dispatch peer Live.Tabs_list (obj []))) "the operator holds this ego task space");
+  check string "and nothing in the space is called" "[]" (seen ());
+  check bool "a second hand-off is refused the same way, with ego's owner" true
+    (contains (before_effect "a second hand-off" (act Lane.Action.Hand_off)) "ego ownership: agentDelegatedToUser");
+  check string "taking it back names the tab that was active" {|{"action":"take_over","activeTabId":1}|}
+    (answer "take-over" (act Lane.Action.Take_over));
+  check string "by ego's takeOverTaskSpace on this space" {|["takeOver 51"]|} (seen ());
+  user_page := "({})";
+  check string "a tab the operator opened is not numbered" {|{"action":"take_over"}|}
+    (answer "take-over onto an operator tab" (act Lane.Action.Take_over));
+  ownership := "agent";
+  check bool "with the agent holding the space, a take-over is refused before any effect" true
+    (contains (before_effect "a needless take-over" (act Lane.Action.Take_over)) "already holds");
+  check string "and ego is not asked to take it" "[]" (seen ());
+  let open_owned_by owner = Peer.open_space ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 52;"ownership",str owner]))
+      ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) in
+  check bool "a space handed to the operator still opens, so take_over can bring it back" true
+    (Result.is_ok (open_owned_by "agentDelegatedToUser"));
+  check bool "a space the operator made does not" true (Result.is_error (open_owned_by "user"))
 
 let test_history_moves_one_entry () =
   let current = ref 1 and navigation = ref "" and detaches = ref false and same_url = ref false and load = ref "" in
@@ -1107,6 +1167,7 @@ const page = {
   close: async () => { seen.push("close"); },
 };
 const taskSpace = async () => ({
+  ownership: "agent",
   tabs: async () => [{label: "p1", openedBy: "agent", url: "https://app.slack.com/", title: "Slack", targetId: "T1", active: true}],
   page: () => page,
 });
@@ -1198,5 +1259,6 @@ let () =
       test_case "an input that opens a dialog answers with it" `Quick test_an_input_that_opens_a_dialog_answers_with_it;
       test_case "the dialog scripts run against a stand-in in node" `Quick test_dialog_scripts_in_node;
       test_case "a snapshot target is found by ego and checked first" `Quick test_a_snapshot_target_is_found_by_ego_and_checked_first;
+      test_case "the space goes to the operator and back" `Quick test_the_space_goes_to_the_operator_and_back;
       test_case "input acts through the shared page scripts" `Quick test_input_acts_through_the_shared_page_scripts;
       test_case "the peer serves what the lane table says" `Quick test_the_peer_serves_what_the_lane_table_says ] ]

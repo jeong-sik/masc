@@ -8,6 +8,7 @@ type operation =
   | Click | Double_click | Right_click | Middle_click | Pointer_down | Pointer_up | Hover | Pointer_drag | Html5_drop
   | Scroll_page | Scroll_at | Fill | Type_text | Press_key | Key_chord | Select_option
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
+  | Hand_off | Take_over
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
   | Read_clipboard | Write_clipboard | Read_network | Intercept_network
   | Read_console | Read_storage | Write_storage | Emulate_environment | Sentence_action
@@ -28,7 +29,7 @@ let operations = [List_tabs;Open_tab;Close_tab;Activate_tab;List_windows;Create_
   Click_snapshot_target;Fill_snapshot_target;
   Click;Double_click;Right_click;Middle_click;Pointer_down;Pointer_up;Hover;Pointer_drag;Html5_drop;Scroll_page;Scroll_at;
   Fill;Type_text;Press_key;Key_chord;Select_option;Read_frames;Frame_interaction;
-  Read_dialog;Accept_dialog;Dismiss_dialog;Upload_file;List_downloads;Page_zoom;
+  Read_dialog;Accept_dialog;Dismiss_dialog;Hand_off;Take_over;Upload_file;List_downloads;Page_zoom;
   Resize_viewport;Touch;Read_clipboard;Write_clipboard;Read_network;Intercept_network;
   Read_console;Read_storage;Write_storage;Emulate_environment;Sentence_action]
 let invoke ?action ?mode tool = {tool;action;mode}
@@ -297,6 +298,18 @@ let support backend operation = match backend with
           [observed;"The receipt names the dialog that was dismissed; with none open it is refused before any effect.";ego_agent_pages]
       | Owned_gecko | Owned_chromium | Connected Browser_lane.Web_extension | Safari_unavailable ->
           gecko_only backend (invoke ~action:"dismiss_dialog" Act) [observed])
+    | Hand_off -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"hand_off" Act
+          ["Requires the exact observed clientId. Hands the whole ego task space, tabs the operator opened there included, to the operator for a step only a person can take, such as a sign-in or a captcha; tell them what to do.";
+           "While the operator holds the space, every step on it is refused before any effect, until take_over."]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
+          Unsupported "Only an ego connection hands its task space to the operator.")
+    | Take_over -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"take_over" Act
+          ["Requires the exact observed clientId. Only after the operator has said they are done; nothing checks that they did, so taking it early takes the browser from under them.";
+           "Refused before any effect when the agent already holds the space. The receipt carries the tab that was active, unless it is a tab the operator opened; list the tabs before the next step."]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
+          Unsupported "Only an ego connection takes its task space back from the operator.")
     | Upload_file -> gecko_only backend (invoke ~action:"upload" Act)
         [observed;"Requires an owning Keeper, an observed file input and sandbox-authorized file paths; 16 MiB per file."]
     | List_downloads -> gecko_only backend (invoke ~mode:"downloads" Read)
@@ -361,7 +374,8 @@ let operation_name = function
   | Scroll_at -> "scroll_at" | Fill -> "fill" | Type_text -> "type_text" | Press_key -> "press_key"
   | Key_chord -> "key_chord" | Select_option -> "select_option" | Read_frames -> "read_frames"
   | Frame_interaction -> "frame_interaction" | Read_dialog -> "read_dialog"
-  | Accept_dialog -> "accept_dialog" | Dismiss_dialog -> "dismiss_dialog" | Upload_file -> "upload_file"
+  | Accept_dialog -> "accept_dialog" | Dismiss_dialog -> "dismiss_dialog" | Hand_off -> "hand_off" | Take_over -> "take_over"
+  | Upload_file -> "upload_file"
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"
   | Touch -> "touch" | Read_clipboard -> "read_clipboard" | Write_clipboard -> "write_clipboard"
   | Read_network -> "read_network" | Intercept_network -> "intercept_network" | Read_console -> "read_console"

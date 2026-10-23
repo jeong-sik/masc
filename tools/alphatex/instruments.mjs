@@ -59,8 +59,8 @@ export function pickerFooter(view) {
 // Owns native loading and selection, independently of score rendering and
 // playback. Leaving the menu retires every pending load/editor/read result.
 export class InstrumentPicker {
-  constructor({ directory, notify, selected, soundfont, failed, active = () => null, run = nativeJob }) {
-    Object.assign(this, { directory, notify, selected, soundfont, failed, active, run })
+  constructor({ directory, notify, selected, soundfont, soundfontChoices = [{ kind: 'soundfont', name: 'SoundFont' }], failed, active = () => null, run = nativeJob }) {
+    Object.assign(this, { directory, notify, selected, soundfont, soundfontChoices, failed, active, run })
     this.view = null
     this.epoch = 0
     this.job = null
@@ -72,8 +72,9 @@ export class InstrumentPicker {
   // SoundFont row is active only while no native instrument is loaded.
   isActive(item) {
     const active = typeof this.active === 'function' ? this.active() : null
-    if (item?.kind === 'soundfont') return active === null
-    if (!active || !item) return false
+    if (item?.kind === 'soundfont') return item.engine === undefined ? active === null
+      : active?.kind === 'soundfont' && (active.engine?.kind ?? 'alphasynth') === item.engine
+    if (!active || !item || active.kind === 'soundfont') return false
     if (item.plugin_path !== undefined && item.plugin_path !== active.plugin_path) return false
     if (item.plugin_name !== undefined && item.plugin_name !== active.plugin_name) return false
     if (item.preset_path !== undefined) return item.preset_path === active.preset_path
@@ -111,7 +112,7 @@ export class InstrumentPicker {
       if (epoch !== this.epoch) return
       this.view = previous?.kind === 'loading'
         ? { kind: 'plugins', title: 'VST unavailable · rerun scripts/install-alphatex.sh with Python 3.12+',
-          items: this.soundfont ? [{ kind: 'soundfont', name: 'SoundFont' }] : [], cursor: 0, query: '', searching: false }
+          items: this.soundfont ? this.soundfontChoices : [], cursor: 0, query: '', searching: false }
         : previous
       this.failed(error)
       this.notify()
@@ -136,7 +137,7 @@ export class InstrumentPicker {
         typeof item?.path !== 'string' || typeof item?.name !== 'string')) {
         throw new Error('VST host returned an invalid plug-in catalog')
       }
-      const items = [...(this.soundfont ? [{ kind: 'soundfont', name: 'SoundFont' }] : []),
+      const items = [...(this.soundfont ? this.soundfontChoices : []),
         ...result.candidates.map(item => ({ name: item.name, plugin_path: item.path }))]
       this.view = { kind: 'plugins', title: 'Choose a VST instrument · candidates are checked when selected',
         items, cursor: Math.max(0, items.findIndex(item => item.plugin_path === this.recent?.plugin_path)),
@@ -181,7 +182,7 @@ export class InstrumentPicker {
     await this.attempt(async epoch => {
       if (item.kind === 'soundfont') {
         this.close()
-        this.soundfont()
+        this.soundfont(item.engine)
         return
       }
       if (view.kind === 'presets') {

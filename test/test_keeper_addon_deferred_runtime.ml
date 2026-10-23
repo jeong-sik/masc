@@ -237,11 +237,26 @@ sources = []
          | Error _ -> () | Ok _ -> fail "old Agent handler followed replacement");
         check int "stale export refusal does not reach the new worker" count (List.length !calls);
         with_bundle ~config ~meta ~net:(Eio.Stdenv.net env) ~export:replacement ~deny:["addon:" ^ tool_name]
-          (fun _ denied_agent ->
-            check bool "an entirely denied surface offers no unusable loader" false
-              (Agent_core.Tool_set.mem Keeper_identity_tool_search.tool_name
-                (Agent_core.Agent.tools denied_agent));
+          (fun denied_bundle denied_agent ->
+            (* Denying this export does not remove unrelated composition
+               controls, including recovery of retained work. Exercise the
+               loader's exact denied name instead of assuming it has no
+               other admitted tools to offer. *)
+            check bool "denied export is absent from deferred discovery" false
+              (List.mem tool_name denied_bundle.on_demand_tool_names);
+            let loader = agent_tool denied_agent Keeper_identity_tool_search.tool_name in
+            (match execute "load-denied-addon" loader
+                (`Assoc ["names",`List [`String tool_name]]) with
+             | Error _ -> ()
+             | Ok _ -> fail "loader accepted a denied Addon export");
             check bool "denied actual export is never installed" false
+              (Agent_core.Tool_set.mem tool_name (Agent_core.Agent.tools denied_agent));
+            let recovery = Keeper_tool_composition_catalog.cancel_tool_name in
+            ignore (successful "load-admitted-recovery-control" loader
+              (`Assoc ["names",`List [`String recovery;`String tool_name]]));
+            check bool "unrelated admitted recovery control remains loadable" true
+              (Agent_core.Tool_set.mem recovery (Agent_core.Agent.tools denied_agent));
+            check bool "mixed load cannot install the denied export" false
               (Agent_core.Tool_set.mem tool_name (Agent_core.Agent.tools denied_agent));
             check int "deny causes no actual worker RPC" count (List.length !calls));
         with_bundle ~config ~meta ~net:(Eio.Stdenv.net env) ~export:replacement ~deny:[]

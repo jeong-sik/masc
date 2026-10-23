@@ -138,8 +138,8 @@ let () =
   run "Keeper_librarian_maintenance_capture"
     [ ( "boundary",
         [ test_case "create and JSON roundtrip" `Quick
-            (with_fixture test_create_and_roundtrip)
+            (fun () -> with_fixture test_create_and_roundtrip)
         ; test_case "create rejects a relabeled tool and the empty answer" `Quick
-            (with_fixture test_create_rejections)
+            (fun () -> with_fixture test_create_rejections)
         ; test_case "proposal validation recombines through the original parser"
-            `Quick (with_fixture test_proposal_validation) ] ) ]
+            `Quick (fun () -> with_fixture test_proposal_validation) ] ) ]

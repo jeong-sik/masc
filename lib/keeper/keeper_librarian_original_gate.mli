@@ -35,7 +35,7 @@ module Make (Capture : Capture) : sig
   val prepare_root : store:Lane_addon_store.t -> owner:Capture.owner ->
     capture:Capture.t -> parent:Lane_addon_tool_request_owner.retained ->
     proposal:Yojson.Safe.t -> request_id:string -> authority:Keeper_librarian_absorb_gate.live_authority ->
-    (Lane_addon_request_progress.successor, string) result
+    (Lane_addon_request_progress.preparation_intent, string) result
   (** Build and validate the full immutable first gate request before retaining
       its parent preparation intent. Does not publish or evaluate anything. *)
   val recover_root : store:Lane_addon_store.t -> owner:Capture.owner ->

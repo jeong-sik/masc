@@ -7,7 +7,7 @@ type authorization = {
 }
 val authorize : base_path:string -> store:Lane_addon_store.t -> declaration_id:string ->
   package:Lane_addon_types.package -> Lane_addon_exact.request ->
-  (authorization option, string) result
+  (authorization option, Lane_addon_exact.authority_refusal) result
 (** [None] means this request does not occupy the Librarian original namespace.
     A Librarian package or a namespaced request without a complete original
     capture is refused. Decode explicit-candidate and completed-history IDs as

@@ -28,7 +28,7 @@ let with_store f =
     Eio_main.run (fun _ ->
       let store = Store.create ~root:(Filename.concat parent "store") in
       owned (Owner.retain ~store ~scope ~request_id ~installation_id ~package_id:"fixture"
-        ~tool:"admit" ~request:(Exact.request_to_json request));
+        ~tool:"admit" ~summary:`Null ~request:(Exact.request_to_json request));
       f store))
 let load store = match owned (Owner.load ~store ~scope ~request_id) with
   | Some record -> record | None -> Alcotest.fail "original request disappeared"

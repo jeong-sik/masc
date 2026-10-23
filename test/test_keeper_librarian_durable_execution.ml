@@ -18,6 +18,7 @@ module Types = Keeper_memory_os_types
 module Capture = Keeper_librarian_durable_request
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
+module Exact = Lane_addon_exact
 module Store = Lane_addon_store
 module Runtime = Lane_addon_runtime
 module Protocol = Lane_addon_worker_protocol
@@ -817,7 +818,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       let child=io (fun () -> Capture.create
         ~predecessor:{request_id=original_record.request_id;request_digest=original_record.request_digest}
         ~request_id ~owner ~destination:(Capture.destination original) ~source:rebased ~preparation ()) |> get in
-      let intended:Progress.successor={request_id;request=Capture.to_json child} in
+      let intended:Progress.preparation_intent={request_id;request=Capture.to_json child} in
       let parent=io (fun () -> match Owner.advance ~store:fixture.store ~expected:parked
           ~event:(Progress.Replacement_intended intended) with
         | Ok (Owner.Stored record | Already_stored record) -> record
@@ -844,7 +845,9 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       (match authorize child with
        | Ok (Some authorization) -> check bool "Off still refuses actual dispatch after local ACK" true
            (Result.is_error (authorization.before_dispatch ()))
-       | Error detail -> fail detail | Ok None -> fail "history request lost its actual host namespace");
+       | Error (Exact.Unowned {reason}) -> fail reason
+       | Error (Exact.Undecided {detail}) -> fail detail
+       | Ok None -> fail "history request lost its actual host namespace");
       check int "local Off publication recovery does not call provider" 1 (F.post_count fixture.server);
       check bool "local Off publication recovery does not ACK source positions" true (progress fixture=positions_before));
     let changed=Eio.Condition.create () in

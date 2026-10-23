@@ -78,7 +78,7 @@ type inventory = {parts:Parts.inventory;executions:original list}
 let restore_gate ~store ~owner = Gate_journal.restore_size_evidence ~store ~owner
 let discover ~store ~owner =
   let* parts=Parts.discover ~store ~owner ~restore_gate:(restore_gate ~store ~owner) in
-  let* records=owned (Owner.discover ~store ~scope:(Capture.scope owner)) in
+  let* records=owned (Owner.load_scope ~store ~scope:(Capture.scope owner)) in
   let* executions=List.fold_left (fun result record ->
     let* originals=result in
     let* capture=Capture.restore ~owner ~load_parent:(Parts.load_parent parts) record in
@@ -87,7 +87,7 @@ let discover ~store ~owner =
       Capture.parent_part_id original.capture=Capture.parent_part_id capture) originals))
       "A Librarian part has multiple original executions" in
     Ok ({capture;record}::originals)) (Ok []) records in
-  let* gates=owned (Owner.discover ~store ~scope:(Gate_journal.scope owner)) in
+  let* gates=owned (Owner.load_scope ~store ~scope:(Gate_journal.scope owner)) in
   let* ()=List.fold_left (fun result gate ->
     let* ()=result in
     let* id=Gate_journal.parent_execution_id gate in
@@ -150,7 +150,7 @@ let new_capture ~config ~reserved ~owner part =
         "Original candidate part belongs to another semantic configuration" in
       let* capture=Capture.create ~request_id ~parent_part_id:(Parts.part_id part) ~owner ~destination
         ~batch:(Parts.batch part) ~input ~expected_revision ~now ~retirement ~preparation in
-      Ok (capture,Capture.to_json capture)) |> Result.map_error runtime_error in
+      Ok (capture,Capture.to_json capture,`Null)) |> Result.map_error runtime_error in
   let* record=io (fun () -> owned (Owner.load ~store:(Lane_addon_store.create
     ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")) ~scope:(Capture.scope owner) ~request_id)) in
   let* record=Option.to_result ~none:"Original captured admission disappeared" record in

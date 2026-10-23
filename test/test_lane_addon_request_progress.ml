@@ -462,7 +462,7 @@ let test_original_preparation_survives_partial_publication () = with_store (fun 
 
 let test_conflicted_replacement_survives_partial_child_publication () = with_store (fun root store ->
   let judged=judge store in
-  let prerequisite:Progress.successor={request_id="original-gate";request=`Assoc ["gate",request]} in
+  let prerequisite:Progress.preparation_intent={request_id="original-gate";request=`Assoc ["gate",request]} in
   let prepared=stored store judged (Progress.Preparation_intended prerequisite) in
   let prepared=stored store prepared (Progress.Preparation_observed prerequisite.request_id) in
   let registration=receipt 1. (`Assoc ["original",request]) in
@@ -472,7 +472,7 @@ let test_conflicted_replacement_survives_partial_child_publication () = with_sto
   let conflict=stored store committing (Progress.Commit_conflicted (evidence "known original basis superseded")) in
   let terminal=receipt 2. (`Assoc ["original_conflict",events conflict]) in
   let conflict=observe store conflict (Receipt.Intended (Receipt.Completion,terminal)) in
-  let intended:Progress.successor={request_id="one-original-replacement";
+  let intended:Progress.preparation_intent={request_id="one-original-replacement";
     request=get (Lane_addon_action.canonical
       (`Assoc ["original_source",request;"current_basis",`List [`String "later Memory"]]))} in
   let pending=stored store conflict (Progress.Replacement_intended intended) in
@@ -491,7 +491,7 @@ let test_conflicted_replacement_survives_partial_child_publication () = with_sto
   let child_scope="original-replacement" in
   owned (Owner.retain ~store ~scope:child_scope ~request_id:intended.request_id
     ~installation_id:pending.installation_id ~package_id:pending.package_id ~tool:pending.tool
-    ~request:intended.request);
+    ~summary:`Null ~request:intended.request);
   let child=some (owned (Owner.load ~store:(Store.create ~root) ~scope:child_scope ~request_id:intended.request_id)) in
   Alcotest.check json "actual retained child matches the whole immutable intent" intended.request child.request;
   let acknowledged=stored store reopened (Progress.Replacement_observed child.request_id) in
@@ -525,13 +525,14 @@ let test_replacement_cannot_infer_away_unknown_or_other_phases () =
   let judged=dispatch@[Progress.Judgment_retained judgment] in
   let committing=judged@[Progress.Commit_intended {before;after}] in
   let refused=dispatch@[Progress.Refused {stage=Progress.Execution;evidence=evidence "not a basis conflict"}] in
-  let child:Progress.successor={request_id="must-not-dispatch";request} in
+  let child:Progress.preparation_intent={request_id="must-not-dispatch";request} in
+  let successor:Progress.successor={request_id=child.request_id;request_digest=get (Owner.request_digest child.request)} in
   let invalid_histories=[[];dispatch;
     dispatch@[Progress.Execution_observed (Progress.Outcome_unknown (evidence "accepted but reply lost"))];
     judged;committing;committing@[Progress.Commit_uncertain (evidence "Memory effect unknown")];
     committing@[Progress.Commit_observed after];refused;
-    refused@[Progress.Successor_intended child];
-    refused@[Progress.Successor_intended child;Progress.Successor_observed child.request_id]] in
+    refused@[Progress.Successor_intended successor];
+    refused@[Progress.Successor_intended successor;Progress.Successor_observed child.request_id]] in
   List.iter (fun history ->
     let state=fold history in
     List.iter (fun event -> match Progress.append state event with
@@ -559,7 +560,45 @@ let test_replacement_strict_codec_rejects_malformed_and_changed_intents () =
   List.iter (fun tail -> match Progress.of_json (`List (history@tail)) with
     | Error _ -> () | Ok _ -> Alcotest.fail "malformed replacement history became valid") malformed
 
+let test_staged_successor_input_survives_publication_cuts () = with_store (fun root store ->
+  let child_id="one-retry-child" in
+  let child_request=`Assoc ["parent",request;"authority",`String "original replay"] in
+  let child_scope="retry-fixture" in
+  let successor=owned (Owner.prepare_successor ~store ~scope:child_scope ~request_id:child_id ~request:child_request) in
+  let reopen ()=Store.create ~root in
+  Alcotest.(check bool) "staging publishes no owner record" true
+    (owned (Owner.load ~store:(reopen ()) ~scope:child_scope ~request_id:child_id)=None);
+  Alcotest.(check int) "staged bodies are not discoverable requests" 0
+    (List.length (owned (Owner.discover ~store:(reopen ()) ~scope:child_scope)));
+  let original=dispatch store in
+  let refused=stored store original (Progress.Refused {stage=Progress.Execution;evidence=evidence "retry required"}) in
+  ignore (stored store refused (Progress.Successor_intended successor));
+  let pending=load (reopen ()) in
+  Alcotest.(check bool) "restart restores the exact digest intent before child publication" true
+    (match Progress.phase pending.progress with
+     | Progress.Subdividing (_,intent) -> intent=successor
+     | _ -> false);
+  let restored=owned (Owner.load_successor_request ~store:(reopen ()) ~scope:child_scope successor) in
+  Alcotest.check json "retained intent resolves the complete original child" child_request restored;
+  owned (Owner.retain ~store ~scope:child_scope ~request_id:child_id
+    ~installation_id:pending.installation_id ~package_id:pending.package_id ~tool:pending.tool
+    ~summary:`Null ~request:restored);
+  let child=some (owned (Owner.load ~store:(reopen ()) ~scope:child_scope ~request_id:child_id)) in
+  Alcotest.(check string) "child publication names the staged digest" successor.request_digest child.request_digest;
+  let acknowledged=stored store pending (Progress.Successor_observed child_id) in
+  check_events "restart preserves the same child acknowledgement" (events acknowledged) (load (reopen ()));
+  let path=Filename.concat root (Store.tool_request_body_path ~scope:child_scope ~request_digest:successor.request_digest) in
+  let bytes=Fs_compat.load_file path in
+  let refuses ()=Alcotest.(check bool) "missing or changed staged input cannot be reconstructed" true
+    (Result.is_error (Owner.load_successor_request ~store:(reopen ()) ~scope:child_scope successor)) in
+  save path (bytes ^ " "); refuses ();
+  Sys.remove path; refuses ();
+  Alcotest.(check bool) "a digest cannot address an arbitrary path" true
+    (Result.is_error (Store.load_tool_request_body store ~scope:child_scope ~request_digest:"../outside")))
+
 let () = Alcotest.run "Original Add-on request progress" ["owner",[
+  Alcotest.test_case "staged successor body survives intent/record/ACK cuts and rejects corruption" `Quick
+    test_staged_successor_input_survives_publication_cuts;
   Alcotest.test_case "conflicted replacement survives actual partial child publication and lost ACK" `Quick
     test_conflicted_replacement_survives_partial_child_publication;
   Alcotest.test_case "replacement cannot infer away unknown or non-conflicted work" `Quick

@@ -57,7 +57,7 @@ let original_owner base_path keepers_dir=Capture.observe_owner ~base_path ~keepe
 let originals_for ~keeper_name base_path keepers_dir store =
   let owner=Capture.observe_owner ~base_path ~keepers_dir ~keeper_id:keeper_name |> get in
   let inventory=Parts.discover ~store ~owner ~restore_gate:(Gate.restore_size_evidence ~store ~owner) |> get in
-  Owner.discover ~store ~scope:(Capture.scope owner) |> owned |> List.map (fun record ->
+  Owner.load_scope ~store ~scope:(Capture.scope owner) |> owned |> List.map (fun record ->
     let capture=Capture.restore ~owner ~load_parent:(Parts.load_parent inventory) record |> get in record,capture)
 let originals=originals_for ~keeper_name
 let new_claim claim=`Assoc ["claim",`String claim;"category",`String "fact";
@@ -218,7 +218,7 @@ let timeout_diagnostic fixture =
           `Assoc ["request_id",`String row.request_id;"sequence",`Int row.sequence]) (Queue.candidates batch)) in
     let originals=match Capture.observe_owner ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name with
       | Error detail -> `Assoc ["owner_error",`String detail]
-      | Ok owner -> (match Owner.discover ~store:fixture.store ~scope:(Capture.scope owner) with
+      | Ok owner -> (match Owner.load_scope ~store:fixture.store ~scope:(Capture.scope owner) with
         | Error error -> `Assoc ["discovery_error",`String (Owner.error_to_string error)]
         | Ok records -> `List (List.map (fun (record:Owner.retained) ->
             `Assoc ["request_id",`String record.request_id;"progress",Progress.to_json record.progress]) records)) in
@@ -358,7 +358,7 @@ let test_actual_happy_path ()=with_fixture (fun ~sw:_ fixture ->
     let store=Store.create ~root:(Filename.concat fixture.base_path "history-purpose-check") in
     Owner.retain ~store ~scope:record.scope ~request_id:record.request_id
       ~installation_id:record.installation_id ~package_id:record.package_id
-      ~tool:record.tool ~request |> owned;
+      ~tool:record.tool ~summary:record.summary ~request |> owned;
     let retained=match Owner.load ~store ~scope:record.scope ~request_id:record.request_id |> owned with
       | Some retained -> retained | None -> fail "the altered history capture was not retained" in
     Capture.restore ~owner ~load_parent:(fun ~request_id:_ -> Ok (Capture.batch capture)) retained) in
@@ -552,7 +552,7 @@ let test_invalid_original_blocks_receipt_backed_ack ()=with_fixture (fun ~sw:_ f
 let test_missing_finished_gate_is_not_recreated ()=with_fixture (fun ~sw:_ fixture ->
   drive_until fixture settled |> assert_settled;
   let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
-  let gates=io (fun () -> Owner.discover ~store:fixture.store ~scope:(Gate.scope owner) |> owned) in
+  let gates=io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Gate.scope owner) |> owned) in
   let gate=match gates with [gate] -> gate
     | [] | _::_::_ -> fail "finished actual execution must retain its one original gate" in
   let originals_before=List.map (fun (record,_) -> record.Owner.request_id,Progress.to_json record.progress)
@@ -563,11 +563,11 @@ let test_missing_finished_gate_is_not_recreated ()=with_fixture (fun ~sw:_ fixtu
   io (fun () -> Unix.unlink (original_path fixture ~scope:(Gate.scope owner) ~request_id:gate.request_id));
   run_worker fixture |> assert_unavailable;
   check int "missing original gate cannot mint a replacement journal" 0
-    (io (fun () -> Owner.discover ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
+    (io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
   check string "missing gate leaves the committed Memory unchanged" memory_before
     (io (fun () -> Fs_compat.load_file memory_path));
   check int "missing gate cannot repeat the original model call" posts (F.post_count fixture.server);
-  let originals_after=io (fun () -> Owner.discover ~store:fixture.store ~scope:(Capture.scope owner) |> owned)
+  let originals_after=io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Capture.scope owner) |> owned)
     |> List.map (fun record -> record.Owner.request_id,Progress.to_json record.progress) in
   check (list (pair string json)) "original completion is preserved for diagnosis" originals_before originals_after)
 
@@ -582,7 +582,7 @@ let test_original_epoch_drift_cannot_remint drift ()=with_fixture (fun ~sw:_ fix
   Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () -> Eio.Promise.await arrived);
   let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
   let scope=Capture.scope owner in
-  let records=io (fun () -> Owner.discover ~store:fixture.store ~scope |> owned) in
+  let records=io (fun () -> Owner.load_scope ~store:fixture.store ~scope |> owned) in
   let original=match records with [record] -> record
     | [] | _::_::_ -> fail "fixture did not retain exactly one actual dispatched original" in
   let path=original_path fixture ~scope ~request_id:original.request_id in
@@ -608,7 +608,7 @@ let test_original_epoch_drift_cannot_remint drift ()=with_fixture (fun ~sw:_ fix
     check string "epoch drift preserves the exact original request and progress bytes" original_bytes
       (io (fun () -> Fs_compat.load_file path));
     check int "epoch drift cannot mint a replacement request in the same generation" 1
-      (io (fun () -> Owner.discover ~store:fixture.store ~scope |> owned |> List.length));
+      (io (fun () -> Owner.load_scope ~store:fixture.store ~scope |> owned |> List.length));
     check (option string) "epoch drift grants no Memory disposition" memory_before
       (io (fun () -> Fs_compat.load_file_opt (Current.path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name)));
     check int "epoch drift starts no replacement provider" posts (F.post_count fixture.server)))
@@ -761,7 +761,7 @@ let test_forged_worker_finished_cannot_commit_without_host_proof ()=with_fixture
     check (list string) "worker JSON cannot publish Memory" [] (io (fun () -> claims fixture.keepers_dir));
     let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
     check int "worker JSON cannot prepare an absorption gate" 0
-      (io (fun () -> Owner.discover ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
+      (io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
     check bool "the host remains without completed provider execution" true
       (match io (fun () -> Lane_addon_exact.read_latest_original_execution ~store:fixture.store
           ~declaration_id:"librarian" ~schema exact |> get) with
@@ -828,7 +828,7 @@ let test_original_gate_root_publication_recovery cut ()=with_fixture (fun ~sw:_ 
    | Before_child -> ()
    | Child_before_ack -> io (fun () ->
        Owner.retain ~store:fixture.store ~scope:(Gate.scope owner) ~request_id
-         ~installation_id:parent.installation_id ~package_id:parent.package_id ~tool:parent.tool
+         ~installation_id:parent.installation_id ~package_id:parent.package_id ~tool:parent.tool ~summary:`Null
          ~request:successor.request |> owned)
    | Acknowledged_then_missing ->
      memory_action fixture (fun () -> ignore (Gate.recover_root ~store:fixture.store ~owner ~capture |> get));
@@ -842,7 +842,7 @@ let test_original_gate_root_publication_recovery cut ()=with_fixture (fun ~sw:_ 
      let root=match root with Some root -> root | None -> fail "the same original gate was not recovered" in
      check json "local recovery uses the full original immutable child request" successor.request root.request;
      check int "local recovery publishes exactly the original child" 1
-       (io (fun () -> Owner.discover ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
+       (io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
      check int "original receipt-backed commit ACKs both candidates" 0
        (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
      check (list string) "recovered original gate permits the real Memory disposition" ["Durable A";"Durable B"]
@@ -850,7 +850,7 @@ let test_original_gate_root_publication_recovery cut ()=with_fixture (fun ~sw:_ 
    | Acknowledged_then_missing ->
      run_worker fixture |> assert_unavailable;
      check int "an acknowledged missing child is never recreated" 0
-       (io (fun () -> Owner.discover ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
+       (io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
      check int "missing acknowledged proof keeps both candidates pending" 2
        (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
      check (list string) "missing acknowledged proof grants no Memory disposition" []

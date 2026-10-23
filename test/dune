@@ -4345,6 +4345,18 @@
  (deps (alias runtest-test_run_local_executable_binding)))
 
 (rule
+ (alias runtest-test_count_guideless_added)
+ (deps
+  test_count_guideless_added.py
+  ../scripts/release/count-guideless-added.py)
+ (action
+  (run python3 %{dep:test_count_guideless_added.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_count_guideless_added)))
+
+(rule
  (alias runtest-test_skill_activation_events)
  (deps
   test_skill_activation_events.py

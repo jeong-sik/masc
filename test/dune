@@ -6140,6 +6140,8 @@
 
 (include stanzas/test_candle_appraisal_flow.inc)
 
+(include stanzas/test_verifier_review_original.inc)
+
 (include stanzas/test_candle_balance.inc)
 
 (include stanzas/test_candle_appraiser_transport.inc)

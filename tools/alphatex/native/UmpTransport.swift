@@ -51,8 +51,10 @@ struct UmpPacket: Decodable {
     let hostTime: String
     let source: String
     let timestampOrigin: String
+    let recordedHostTime: String?
+    let recordedTimestampOrigin: String?
     let words: [UInt32]
-    enum CodingKeys: String, CodingKey { case kind, hostTime, source, timestampOrigin, words; case protocolID = "protocol" }
+    enum CodingKeys: String, CodingKey { case kind, hostTime, source, timestampOrigin, recordedHostTime, recordedTimestampOrigin, words; case protocolID = "protocol" }
 }
 struct UmpEvent {
     let seconds: Double
@@ -81,8 +83,12 @@ struct UmpTimeline: Decodable {
             guard !binding.source.isEmpty, let uid = Int32(binding.destination), String(uid) == binding.destination else { throw MidiFailure("invalid UMP source destination") }
         }
         for packet in packets {
-            guard packet.kind == "midi", packet.protocolID == 2, ["packet", "received"].contains(packet.timestampOrigin),
+            guard packet.kind == "midi", packet.protocolID == 2, ["packet", "received", "authored"].contains(packet.timestampOrigin),
                   let binding = bindings.first(where: { $0.source == packet.source }), !packet.words.isEmpty else { throw MidiFailure("invalid or unbound captured UMP packet") }
+            if packet.timestampOrigin == "authored" {
+                guard let recorded = packet.recordedHostTime, let tick = UInt64(recorded), String(tick) == recorded,
+                      let origin = packet.recordedTimestampOrigin, ["packet", "received"].contains(origin) else { throw MidiFailure("invalid authored UMP timestamp provenance") }
+            }
             let seconds = try clock.seconds(packet.hostTime)
             guard seconds.isFinite, seconds <= duration else { throw MidiFailure("UMP packet lies outside capture duration") }
             used.insert(packet.source)

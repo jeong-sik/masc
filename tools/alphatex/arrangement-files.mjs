@@ -272,6 +272,16 @@ export async function prepareArrangementCapture(project, assetID, { sourceRoot, 
       await writeFile(candidate, edited.map(packet => JSON.stringify(packet)).join('\n') + '\n', { flag: 'wx', mode: 0o444, signal })
       signal?.throwIfAborted()
       await rename(candidate, join(temporary, capturePartNames.midi))
+      if (asset.ump.timing?.length) {
+        // The portable asset still hashes the unmodified recorded manifest.
+        // This owned playback/export snapshot describes the derived packets.
+        const manifest = { ...asset.manifest, midiPacketCount: String(edited.length),
+          clock: { ...asset.manifest.clock, requestedStart: captureRange(asset).origin } }
+        const derivedManifest = join(temporary, 'edited-session.json')
+        await writeFile(derivedManifest, JSON.stringify(manifest) + '\n', { flag: 'wx', mode: 0o444, signal })
+        signal?.throwIfAborted()
+        await rename(derivedManifest, join(temporary, capturePartNames.manifest))
+      }
     }
     return { directory: temporary }
   } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }

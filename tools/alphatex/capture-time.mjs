@@ -32,10 +32,17 @@ export function captureRange(asset) {
   const firstAudio = manifest.clock.firstAudioHostTime === null ? null : unsigned(manifest.clock.firstAudioHostTime, 'audio origin', uint64Max)
   if ((frames > 0n) !== (firstAudio !== null)) throw new Error('Captured frame total disagrees with audio origin')
   if (!asset.midiTime || Object.keys(asset.midiTime).length !== 2) throw new Error('Invalid captured MIDI time bounds')
-  const first = asset.midiTime.first === null ? null : unsigned(asset.midiTime.first, 'first MIDI time', uint64Max)
-  const last = asset.midiTime.last === null ? null : unsigned(asset.midiTime.last, 'last MIDI time', uint64Max)
+  let first = asset.midiTime.first === null ? null : unsigned(asset.midiTime.first, 'first MIDI time', uint64Max)
+  let last = asset.midiTime.last === null ? null : unsigned(asset.midiTime.last, 'last MIDI time', uint64Max)
   if ((first === null) !== (last === null) || first !== null && first > last
       || (unsigned(manifest.midiPacketCount, 'MIDI packet total', uint64Max) > 0n) !== (first !== null)) throw new Error('Captured MIDI time bounds disagree with packet total')
+  // Keep the recorded clock span (and WAV alignment) when messages move inward;
+  // authored times may extend either edge. Original bounds remain provenance.
+  for (const edit of asset.ump?.timing ?? []) {
+    const tick = unsigned(edit.hostTime, 'authored MIDI time', uint64Max)
+    if (first === null || tick < first) first = tick
+    if (last === null || tick > last) last = tick
+  }
   if (firstAudio !== null && firstAudio < origin) origin = firstAudio
   if (first !== null && first < origin) origin = first
   const audioStart = firstAudio === null ? 0n : firstAudio - origin

@@ -243,7 +243,7 @@ let test_empty_terminal_completion_requires_this_attempt_saved_checkpoint () =
   (match unchanged with
    | Error actual -> Alcotest.(check bool) "unrelated failure retained" true (actual == unrelated)
    | Ok _ -> Alcotest.fail "unrelated failure was completed");
-  let input_error = Agent_core.Error.InputRequired (input_required_request ()) in
+  let input_error = Agent_core.Error.Agent (Agent_core.Error.InputRequired (input_required_request ())) in
   (match Attempt.complete_saved_tool_terminal
        ~tool_results_saved_in_attempt:true ~observed_provider_turn_ordinal:None
        ~checkpoint:(Some checkpoint) (Error input_error) with

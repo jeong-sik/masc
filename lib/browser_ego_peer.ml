@@ -536,9 +536,7 @@ let interact t args =
   let* expected_url, action = match request.action with
     | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _ | Browser_lane.Double_click _ ->
       let* resolved = resolve t ~label ~deadline (input ~expected_url:request.expected_url request.action) in
-      let* action = before (Browser_interaction.resolve_pointer_action request.action resolved) in
-      let* url = before (match field "url" resolved with Some (`String url) -> Ok url | _ -> Error "pointer resolution missing url") in
-      Ok (Some url, action)
+      before (Browser_interaction.resolve_pointer_input request.action resolved)
     | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Set_zoom _
     | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
     | Browser_lane.Scroll _ | Browser_lane.Drag_to _ | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _

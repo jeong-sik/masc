@@ -648,7 +648,13 @@ try {
 }
 |js}
 
-let resolve_pointer_action action = function
+let needs_pointer_resolution = function
+  | Browser_lane.Click _ | Click_node _ | Double_click _ | Hover _ | Drag_to _ -> true
+  | Browser_lane.Activate_tab | Fill _ | Select_option _ | Set_zoom _ | Set_viewport _
+  | Double_click_at _ | Type_text _ | Press_key _ | Scroll _ | Hover_at _ | Tap_at _
+  | Swipe _ | Click_at _ | Scroll_at _ | Drag _ | Follow_link _ | Fill_node _ -> false
+
+let resolve_pointer_input action = function
   | `Assoc fields ->
     let required key = match List.assoc_opt key fields with
       | Some value -> Ok value | None -> Error ("pointer resolution missing " ^ key) in
@@ -659,7 +665,7 @@ let resolve_pointer_action action = function
     let* raw_viewport = required "viewport" in
     let* viewport = Browser_lane.Pointer.viewport_of_json raw_viewport in
     let point key = let* raw = required key in Browser_lane.Pointer.point_of_json raw in
-    (match action with
+    let* native = match action with
      | Browser_lane.Double_click _ -> let* point = point "point" in Ok (Browser_lane.Double_click_at {point;viewport})
      | Browser_lane.Hover _ -> let* point = point "point" in Ok (Browser_lane.Hover_at {point;viewport})
      | Browser_lane.Click _ | Browser_lane.Click_node _ ->
@@ -672,5 +678,9 @@ let resolve_pointer_action action = function
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
      | Browser_lane.Tap_at _ | Browser_lane.Swipe _
      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
-     | Browser_lane.Fill_node _ -> Error "semantic pointer action required")
+     | Browser_lane.Fill_node _ -> Error "semantic pointer action required" in
+    let* url = required "url" in
+    (match url with
+     | `String url -> Ok (Some url, native)
+     | _ -> Error "pointer resolution missing url")
   | _ -> Error "invalid pointer target resolution"

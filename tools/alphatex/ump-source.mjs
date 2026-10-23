@@ -68,6 +68,25 @@ function noteOn(event) {
   if (event?.type !== 4 || event.status !== 9 || (event.words[0] >>> 8 & 255) > 127) throw new Error('Select a native MIDI2 NoteOn')
   return event
 }
+export function umpAttackFields(words) {
+  noteOn({ type: words[0] >>> 28, status: words[0] >>> 20 & 15, words })
+  const index = words[0] >>> 8 & 127, attribute = words[0] & 255
+  return { index, attribute, velocity: words[1] >>> 16, pitch: attribute === 3 ? words[1] & 65535 : index * 512,
+    basis: attribute === 3 ? 'absolute-attribute' : attribute === 0 ? 'key-index' : 'opaque-attribute' }
+}
+export function editUmpAttackWords(original, { pitch, velocity }) {
+  const words = [...original]; umpAttackFields(words)
+  if (pitch !== undefined) {
+    integer(pitch, 65535, 'absolute pitch')
+    const attribute = words[0] & 255
+    if (![0, 3].includes(attribute)) throw new Error('Absolute pitch cannot overwrite manufacturer, Profile or unknown note attributes')
+    if (attribute === 0 && (words[1] & 65535)) throw new Error('Invalid original MIDI2 no-attribute data')
+    words[0] = ((words[0] & 0xffffff00) | 3) >>> 0
+    words[1] = ((words[1] & 0xffff0000) | pitch) >>> 0
+  }
+  if (velocity !== undefined) { integer(velocity, 65535, 'velocity'); words[1] = (velocity * 65536 + (words[1] & 65535)) >>> 0 }
+  return words
+}
 // UMP 1.1.2 sections 7.4.3, 7.4.4 and 7.4.12: these four
 // per-note messages own one complete 32-bit data word. Keep their address
 // word and order; do not guess which attack a persistent controller belongs to.
@@ -91,16 +110,8 @@ export function umpEditedEvents(packets, edits, midiSha256) {
     changed.set(event.id, { ...event, words })
   }
   for (const edit of edits?.notes ?? []) {
-    const event = noteOn(originals.get(`${edit.packet}:${edit.word}`)), words = [...event.words]
-    if (Object.hasOwn(edit, 'pitch')) {
-      const attribute = words[0] & 255
-      if (![0, 3].includes(attribute)) throw new Error('Absolute pitch cannot overwrite manufacturer, Profile or unknown note attributes')
-      if (attribute === 0 && (words[1] & 65535)) throw new Error('Invalid original MIDI2 no-attribute data')
-      words[0] = ((words[0] & 0xffffff00) | 3) >>> 0
-      words[1] = ((words[1] & 0xffff0000) | edit.pitch) >>> 0
-    }
-    if (Object.hasOwn(edit, 'velocity')) words[1] = (edit.velocity * 65536 + (words[1] & 65535)) >>> 0
-    replace(event, words)
+    const event = noteOn(originals.get(`${edit.packet}:${edit.word}`))
+    replace(event, editUmpAttackWords(event.words, edit))
   }
   for (const edit of edits?.expressions ?? []) {
     const event = expression(originals.get(`${edit.packet}:${edit.word}`))
@@ -153,11 +164,7 @@ export function umpSourceNotes(packets, edits, midiSha256) {
 }
 function sourceNotes(events) {
   return events.filter(event => event.type === 4 && event.status === 9).map(event => {
-    noteOn(event)
-    const index = event.words[0] >>> 8 & 127, attribute = event.words[0] & 255
-    return { ...event, index, attribute, velocity: event.words[1] >>> 16,
-      pitch: attribute === 3 ? event.words[1] & 65535 : index * 512,
-      basis: attribute === 3 ? 'absolute-attribute' : attribute === 0 ? 'key-index' : 'opaque-attribute' }
+    return { ...event, ...umpAttackFields(event.words) }
   })
 }
 export function umpSourceView(packets, edits, midiSha256) {
@@ -252,7 +259,10 @@ export function umpOnset(notes, id) {
     && note.hostTime === selected.hostTime).sort((a, b) => a.pitch - b.pitch || a.packet - b.packet || a.word - b.word)
 }
 export function umpOnsetHarmony(notes, id) {
-  const voices = umpOnset(notes, id), pitches = voices.map(note => note.pitch)
+  return umpPitchHarmony(umpOnset(notes, id))
+}
+export function umpPitchHarmony(voices) {
+  const pitches = voices.map(note => note.pitch)
   if (voices.some(note => note.basis === 'opaque-attribute')) return { kind: 'opaque-attribute', pitches, candidates: [] }
   if (pitches.some(value => value % 512)) return { kind: 'fractional-pitch', pitches, candidates: [] }
   return { kind: voices.every(note => note.basis === 'absolute-attribute') ? 'absolute-attribute' : 'key-index-candidates', pitches,

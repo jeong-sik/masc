@@ -1419,3 +1419,22 @@ selected sample rate and refuses remaining buffered output, changed channel/fram
 counts or nonfinite audio. Runtime blocks are checked again. Additional buffering
 compensation and sidechain inputs are not implemented. Live hardware underrun remains a failure;
 a successful native render does not establish that a device played it.
+
+
+### Phrase playback shortcuts and SoundFont engines
+
+In the phrase piano roll, `Space` plays or pauses, `0` restarts the active
+playback range and `.` stops. These controls also work while viewing harmony.
+`i` lists instruments with separate **SoundFont · FluidSynth** and **SoundFont ·
+AlphaSynth** entries. `f` explicitly selects the configured SF2 with FluidSynth
+and previews it; the selected engine and frozen SF2 remain part of the saved
+project. Selecting an engine may take a moment; `.` cancels its pending preview.
+A failed selection retains the existing sound. Rendering errors do not silently
+substitute an engine or a different SoundFont.
+
+If AlphaSynth reports non-finite samples for a particular SF2, choose FluidSynth
+with `f` or select it in `i`. An SF2 compatible with one engine is not a guarantee
+of matching support in the other. Original MIDI notes and audio data are retained.
+Pitch colours distinguish note names, yellow marks selected notes, green marks
+playback and magenta marks the edit cursor. The terminal's own palette controls
+the exact shades.

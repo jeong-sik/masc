@@ -12,6 +12,7 @@ import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
 import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
+import { parsePromptAuthoringIssues, type PromptAuthoringIssue } from './schemas/prompt-authoring'
 
 // The activation ledger's wire schema — keeper_skill_activation_ledger.ml
 // writes exactly this tag, and every reader below pins it before trusting
@@ -2006,6 +2007,7 @@ export type PromptSource = 'override' | 'file' | 'missing'
 
 export interface DashboardPromptItem {
   key: string
+  authoring_issues?: readonly PromptAuthoringIssue[]
   category: string
   description: string
   current: string
@@ -2046,8 +2048,15 @@ interface PromptMutationResponse {
   error?: string
 }
 
-export function fetchDashboardPrompts(): Promise<DashboardPromptsResponse> {
-  return get('/api/v1/prompts')
+export async function fetchDashboardPrompts(): Promise<DashboardPromptsResponse> {
+  const response = await get<DashboardPromptsResponse>('/api/v1/prompts')
+  return {
+    ...response,
+    prompts: response.prompts.map(prompt => ({
+      ...prompt,
+      authoring_issues: parsePromptAuthoringIssues(prompt.authoring_issues),
+    })),
+  }
 }
 
 export function savePromptOverride(key: string, value: string): Promise<PromptMutationResponse> {

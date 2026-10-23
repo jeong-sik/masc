@@ -132,8 +132,11 @@ Buildx builder, while targeted non-minimal runs set one up without preparing the
 shim. Minimal runs prepare neither image.
 Native PDF, presentation and video suites still need host tools. Those packages
 are installed separately with `--no-install-recommends`; this omits optional
-packages, not required dependencies. All real media checks remain enabled. The
-installation lane still tests the embedded recipe through the release CLI.
+packages, not required dependencies. Minimal runs that explicitly select
+`test_verification_authority_tools` (bare or repository-relative) install only
+`poppler-utils` and `ffmpeg` for that suite's actual PDF/MP4 checks; they still
+omit presentation preparation and sandbox images. All real media checks remain
+enabled. The installation lane still tests the embedded recipe through the release CLI.
 The dashboard build helper owns dependency installation, so its caller does not
 install the same dependencies a second time.
 Behavior and Linux installation share the static shim builder recipe and its

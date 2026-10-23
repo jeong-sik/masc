@@ -838,6 +838,39 @@ test('stop queued directly after FluidSynth selection fences delayed capture and
 })
 
 
+test('first cursor audition retains its start through immediate instrument selection', async () => {
+  const view = await controller()
+  try {
+    view.command('cursor 4 C4'); view.key('p'); await flush(); await flush()
+    const job = view.observed.workers[0].requests.at(-1)
+    assert.equal(job.options.loop, true); assert.equal(job.project.loop.start, 4 * PPQ)
+    view.key('q'); await view.done
+    assert.deepEqual(view.observed.saved.at(-1).loop, { start: 0, end: 16 * PPQ })
+  } finally { view.signal.abort(); await view.done }
+})
+
+test('cursor audition retains its requested tick through asynchronous instrument capture; stop cancels it', async () => {
+  const bytes = Buffer.from('RIFF0000sfbk'), sound = { kind: 'soundfont', engine: { kind: 'fluidsynth', version: 'fixture', controlFrames: 64 },
+    bankStyle: 'mma', font: { name: 'Fixture', data: bytes.toString('base64'), sha256: createHash('sha256').update(bytes).digest('hex') } }
+  for (const cancel of [false, true]) {
+    let resolve; const capture = new Promise(done => { resolve = done })
+    const view = await controller({ autoSoundfont: false,
+      fluidCapture() { return { promise: capture, cancel() {} } },
+      fluidRender(_sound, { preparation }) { return { promise: preparation.promise, cancel() {} } } })
+    try {
+      view.command('cursor 4 C4'); view.key('p'); await flush()
+      view.observed.pickers[0].close(); view.observed.pickers[0].soundfont('fluidsynth'); await flush()
+      view.command('cursor 6 C4'); if (cancel) view.command('stop'); await flush()
+      resolve(sound); await flush(); await flush()
+      const requests = view.observed.workers[0].requests
+      if (cancel) assert.equal(requests.length, 0)
+      else { assert.equal(requests.at(-1).options.format, 'fluid-plan'); assert.equal(requests.at(-1).project.loop.start, 4 * PPQ) }
+      view.key('q'); await view.done
+      assert.deepEqual(view.observed.saved.at(-1).loop, { start: 0, end: 16 * PPQ })
+    } finally { resolve(sound); view.signal.abort(); await view.done }
+  }
+})
+
 for (const repeat of [false, true]) test(`cursor audition owns its prepared origin, repeat=${repeat}, and preserves the saved loop`, async () => {
   const calls = [], requests = [], closers = []
   let initial = editor.newEditor()
@@ -894,9 +927,13 @@ test('source cursor audition sends a temporary MIDI region without enabling nati
     const worker = view.observed.workers[0], job = worker.requests.at(-1)
     assert.deepEqual(job.project, project); assert.deepEqual(job.options.sourceLoop, { start: 960, end: 3840 })
     assert.equal(job.options.loop, true)
-    worker.emit('message', { id: job.id, ok: true, result: { path: '/source-region.json', format: 'midi-arrangement', midiOutput: '42',
+    worker.emit('message', { id: job.id, ok: true, result: { path: '/source-region.json', format: 'midi-arrangement', midiOutput: '42', duration: 1.5,
       sourceWindow: { start: 960, end: 3840, startSeconds: .5, endSeconds: 2 } } }); await flush()
     assert.equal(request.loop, false); assert.equal(request.format, 'midi-arrangement')
+    // Seeking is admitted while the native child is starting, before its first
+    // acknowledgement. The prepared window must already own its origin/end.
+    view.command('seek 2'); view.command('seek 4'); await flush()
+    assert.deepEqual(calls, [.5, 1.5]); calls.length = 0
     request.onEvent({ kind: 'playing', currentTime: 0, duration: 1.5 })
     view.command('seek 2'); view.command('seek .5'); view.command('seek 4'); await flush()
     assert.deepEqual(calls, [.5, 1.5])

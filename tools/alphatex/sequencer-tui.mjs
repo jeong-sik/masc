@@ -151,7 +151,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   const audioInstrument = () => editor.project.sound ?? { kind: 'unselected' }
   const statusBody = () => [status.text, '', `Instrument: ${projectSoundLabel(audioInstrument())}`,
     `Project: ${path}`].join('\n')
-  let currentVstRender = null, pendingSound = null
+  let currentVstRender = null, pendingSound = null, pickerPlayback = null
   const writeSnapshot = snapshotWriter(stateDirectory)
   let jobNumber = 0, generation = 0, transport = { kind: 'stopped' }, workerFailure = null, pendingDraw = null
   const wasRaw = process.stdin.isRaw
@@ -166,9 +166,15 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       .finally(() => observations.delete(pending))
   }
   function chooseInstrument(choice) {
-    task = task.then(() => beginInstrumentChoice(choice)).catch(error => { status = failure(error.message) }).finally(draw)
+    const playback = pickerPlayback
+    pickerPlayback = null
+    task = task.then(() => beginInstrumentChoice(choice, playback)).catch(error => { status = failure(error.message) }).finally(draw)
   }
-  function beginInstrumentChoice(choice) {
+  function openInstrumentPicker(playback = null) {
+    pickerPlayback = playback
+    picker.open()
+  }
+  function beginInstrumentChoice(choice, playback = null) {
     if (!accepting || closed || suspended) return
     stop()
     if (choice.kind === 'vst' || choice.kind === 'fluid-selection') {
@@ -180,14 +186,14 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         task = task.then(() => {
           if (cancelled || pendingSound !== owned || !accepting || closed || suspended) return
           pendingSound = null
-          adoptSound(sound, choice.preview !== false)
+          adoptSound(sound, choice.preview !== false, playback)
         }).catch(error => { status = failure(error.message) }).finally(draw)
         return task
       }).catch(error => {
         if (!cancelled && pendingSound === owned && accepting && !closed) status = failure(error.message)
       }).finally(() => { if (pendingSound === owned) pendingSound = null; nativeRenders.delete(owned); draw() })
       nativeRenders.add(owned)
-    } else adoptSound(choice)
+    } else adoptSound(choice, true, playback)
   }
   function chooseEffect(value) {
     if (!accepting || closed || suspended) return
@@ -222,7 +228,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     }).finally(() => { if (pendingSound === owned) pendingSound = null; nativeRenders.delete(owned); draw() })
     nativeRenders.add(owned)
   }
-  function adoptSound(sound, preview = true) {
+  function adoptSound(sound, preview = true, playback = null) {
       // Stop the previous sound's preview while its selection still describes
       // it, so play() renders the adopted sound instead of pausing the old one.
       stopPlayback()
@@ -230,7 +236,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       editor = editorSound(editor, sound)
       selectedMidiOutput = undefined; portBindings = []
       status = notice(`Selected ${projectSoundLabel(sound)}`)
-      if (preview) play()
+      if (preview) play(playback ?? {})
   }
   const picker = new InstrumentPicker({ directory: stateDirectory, notify: draw,
     active: () => {
@@ -453,6 +459,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   }
   function stop(options) {
     stepInput?.stop(options)
+    pickerPlayback = null
     pendingSound?.cancel(); pendingSound = null
     stopPlayback()
   }
@@ -575,7 +582,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       }
       draw()
     } })
-    transport = { kind: 'starting', handle, range }
+    transport = { kind: 'starting', handle, range, duration: wave.duration,
+      phraseDuration: wave.phraseDuration, sourceWindow: wave.sourceWindow }
     handle.ready.catch(error => {
       if (!closed && id === generation) { status = failure(error.message); draw() }
     })
@@ -590,11 +598,11 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     const preview = wave.vst ? `VST: ${wave.selection.name}` : midiDestination !== undefined ? 'MIDI output' : wave.soundfont ? `FluidSynth ${wave.soundfont.engine.version}` : 'SoundFont preview'
     status = notice(`${preview}${wave.clippedSamples > 0 ? ` · ${wave.clippedSamples} samples exceed full scale` : ''}`); draw()
   }
-  function play({ fromCursor = false } = {}) {
+  function play({ fromCursor = false, tick = editor.tick } = {}) {
     if (!accepting || suspended || childTask) return
     if (stepInput) throw new Error('Use :step-stop before playback')
     // Validate the requested window before retiring an existing transport.
-    const admitted = fromCursor ? editorPlayback(editor, { loop, fromCursor }) : null
+    const admitted = fromCursor ? editorPlayback({ ...editor, tick }, { loop, fromCursor }) : null
     if (fromCursor) stopPlayback()
     if (transport.kind === 'playing') {
       transport.handle.pause()
@@ -603,7 +611,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (transport.kind === 'paused') { transport.handle.resume(); return }
     if (transport.kind !== 'stopped') { stopPlayback(); draw(); return }
     const midiRoute = selectedMidiOutput !== undefined || portBindings.length > 0
-    if (!midiRoute && audioInstrument().kind === 'unselected') { picker.open(); return }
+    if (!midiRoute && audioInstrument().kind === 'unselected') { openInstrumentPicker(fromCursor ? { fromCursor, tick } : null); return }
     const playback = admitted ?? editorPlayback(editor, { loop })
     const id = ++generation, options = { ...playback.options, midiOutput: selectedMidiOutput, portBindings }
     const result = midiRoute ? render(playback.project, { ...options, format: 'midi' }) : renderAudio(playback.project, options)
@@ -805,6 +813,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         stop(); status = notice('Stopped'); draw(); return
       }
       try { await picker.keypress(text, key) } catch (error) { status = failure(`VST: ${error.message}`) }
+      if (!picker.view) pickerPlayback = null
       draw(); return
     }
     if (prompt !== null) {
@@ -858,7 +867,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (key.name === 'f' || key.name === 'i') {
           if (stepInput) throw new Error('Use :step-stop before choosing an instrument')
           if (key.name === 'f') beginInstrumentChoice({ kind: 'fluid-selection' })
-          else if (accepting && !suspended && !childTask) { stop(); picker.open() }
+          else if (accepting && !suspended && !childTask) { stop(); openInstrumentPicker() }
           return
         }
       }

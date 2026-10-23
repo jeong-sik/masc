@@ -1035,7 +1035,7 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
   let receipt = null, failure = null;
   try {
     switch (args.action) {
-      case "click": receipt = await page.click(args.target); break;
+      case "click": receipt = await page.click(args.target, {label: args.cursor}); break;
       case "fill": receipt = await page.fill(args.target, args.text); break;
       case "hover": receipt = await page.hover(args.target); break;
       case "double_click": receipt = await page.dblclick(args.target); break;
@@ -1043,7 +1043,7 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
   } catch (error) { failure = reason(error); }
   return {urlBefore, receipt, error: failure};
 }|js}
-let target_input t ~id ~label ~deadline ~expected_url ~target ~operation =
+let target_input t ~id ~label ~deadline ~cursor ~expected_url ~target ~operation =
   let verb, text = match operation with
     | Target_click -> "click", `Null
     | Target_fill text -> "fill", str text
@@ -1052,7 +1052,7 @@ let target_input t ~id ~label ~deadline ~expected_url ~target ~operation =
   let unknown = Printf.sprintf "read tab %d before another step" id in
   let response = run_step t ~window_s:(left t deadline) ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",str expected_url;"target",str (ego_locator target);
-        "action",str verb;"text",text;"waitMs",`Int target_wait_ms])
+        "action",str verb;"text",text;"waitMs",`Int target_wait_ms;"cursor",str cursor])
       (String.concat "\n" [
         target_input_script;
         unblocked_agent_page;
@@ -1125,7 +1125,8 @@ let interact ?actor t args =
       let* resolved = resolve t ~label ~deadline (input ~expected_url:request.expected_url request.action) in
       before (Browser_interaction.resolve_pointer_input request.action resolved)
     else Ok (request.expected_url, request.action) in
-  let cursor = "cursor",str (cursor_label ~actor ~verb) in
+  let cursor_text = cursor_label ~actor ~verb in
+  let cursor = "cursor",str cursor_text in
   let pointer (viewport : Browser_lane.Pointer.viewport) point motion =
     let x, y = Browser_lane.Pointer.viewport_pixels viewport point in
     guarded_input t ~id ~label ~deadline ~verb ~step:"page.pointer" ~guard:Browser_interaction.pointer_guard_script
@@ -1144,7 +1145,7 @@ let interact ?actor t args =
         "        if (outcome.error !== null) throw new Error(outcome.error);"]
       ~fields:["path",`List (List.map pixels path);cursor] in
   let on_target ~target operation = match expected_url with
-    | Some expected_url -> target_input t ~id ~label ~deadline ~expected_url ~target ~operation
+    | Some expected_url -> target_input t ~id ~label ~deadline ~cursor:cursor_text ~expected_url ~target ~operation
     | None -> Error (Live.Before_effect "a snapshot target requires expectedUrl") in
   match action with
   | Browser_lane.Click_at {point; viewport; button} -> pointer viewport point (Press {button; count = 1})

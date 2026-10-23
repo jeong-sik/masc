@@ -829,18 +829,20 @@ let test_a_snapshot_reads_egos_own_tree () =
 (* The target script runs in node against a stand-in for ego's agent page at
    [url]. [find] is what its waitForSelector does, [act] what its click or
    fill answers; with an open dialog the page answers no URL read, as ego's
-   does. The stand-in prints the calls the script made. *)
+   does. The stand-in prints the calls the script made and the cursor label
+   each click carried; ego's fill takes no options. *)
 let target_stand_in ~url ~blocked ~find ~act = Printf.sprintf {js|
 const seen = [];
+const labels = [];
 let currentUrl = %s;
 let dialogOpen = %b;
-process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
+process.on("exit", () => { console.log("seen " + JSON.stringify(seen)); console.log("labels " + JSON.stringify(labels)); });
 const page = {
   info: async () => { seen.push("info"); return dialogOpen ? {url: currentUrl, dialog: {type: "alert", message: "Hold on", defaultPrompt: ""}} : {url: currentUrl}; },
   url: async () => { seen.push("url"); if (dialogOpen) throw new Error("PageDialogOpenedError: Runtime.evaluate cannot run while a JavaScript alert dialog is open"); return currentUrl; },
   waitForSelector: async (target, options) => { seen.push("wait " + target + " " + options.state); %s },
-  click: async target => { seen.push("click " + target); %s },
-  fill: async (target, text) => { seen.push("fill " + target + " " + text); %s },
+  click: async (target, options) => { seen.push("click " + target); labels.push(options === undefined ? null : options.label); %s },
+  fill: async (target, text, options) => { seen.push("fill " + target + " " + text + (options === undefined ? "" : " with options")); %s },
   hover: async target => { seen.push("hover " + target); %s },
   dblclick: async target => { seen.push("double_click " + target); %s },
 };
@@ -867,10 +869,11 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
-  let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
-    | Some line -> Yojson.Safe.to_string (Yojson.Safe.from_string (after ~prefix:"seen " line))
+  let printed prefix = match List.find_opt (String.starts_with ~prefix) (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.to_string (Yojson.Safe.from_string (after ~prefix line))
     | None -> fail "the stand-in did not say what it saw" in
-  let on action = dispatch peer Live.Page_interact (interact_args action) in
+  let seen () = printed "seen " in
+  let on ?actor action = dispatch ?actor peer Live.Page_interact (interact_args action) in
   let answer label = function
     | Ok answer -> Yojson.Safe.to_string answer
     | other -> failf "%s was %s" label (failure_kind other) in
@@ -879,7 +882,10 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     (Yojson.Safe.to_string (obj ["tabId",`Int 1;"action",str "click";"target",obj ["ref",`Int 12];
       "urlBefore",str observed_url;"url",str observed_url;"title",str "Slack"]))
     (answer "ref click" (click (Lane.Target_ref 12)));
-  check string "the page is checked after finding the target" {|["info","url","wait @12 attached","url","click @12"]|} (seen ());
+  check string "the dialog check and the wait come before the click" {|["info","url","wait @12 attached","url","click @12"]|} (seen ());
+  check string "ego's click carries the cursor label" {|["MASC · agent · click"]|} (printed "labels ");
+  ignore (answer "named click" (on ~actor:"keeper/sangsu" (Lane.Click_target (Lane.Target_ref 12))));
+  check string "and names the actor" {|["MASC · keeper/sangsu · click"]|} (printed "labels ");
   ignore (answer "role" (click (Lane.Target_role {role="button";name="Say \"hi\"";exact=true})));
   check string "a role target is ego's role locator with a JSON name"
     {|["info","url","wait loc=role:button[name=\"Say \\\"hi\\\"\"] attached","url","click loc=role:button[name=\"Say \\\"hi\\\"\"]"]|} (seen ());
@@ -890,7 +896,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   ignore (answer "exact text" (click (Lane.Target_text {text="Send now";exact=true})));
   check bool "an exact text is ego's quoted text" true (contains (seen ()) {|click text=\"Send now\"|});
   ignore (answer "fill" (on (Lane.Fill_target {target=Lane.Target_ref 5;text="Ada"})));
-  check string "a fill gives ego its text" {|["info","url","wait @5 attached","url","fill @5 Ada"]|} (seen ());
+  check string "a fill gives ego its text and no label, which ego's fill refuses" {|["info","url","wait @5 attached","url","fill @5 Ada"]|} (seen ());
   ignore (answer "hover" (on (Lane.Hover_target (Lane.Target_ref 12))));
   check string "hover uses ego's element resolver and native input"
     {|["info","url","wait @12 attached","url","hover @12"]|} (seen ());

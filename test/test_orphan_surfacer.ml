@@ -1,7 +1,7 @@
 (* test/test_orphan_surfacer.ml
 
    RFC-0294 PR-4: single-owner orphan-task surfacer. Pins the pure grouping the
-   orchestrator pulse emits as the [masc_orphan_tasks] gauge:
+   workspace observation Pulse emits as the [masc_orphan_tasks] gauge:
    - Every status class in [orphan_status_classes] is reported (0 when empty), so
      a cleared class resets the gauge instead of going stale.
    - An AwaitingVerification orphan is counted under "awaiting_verification";

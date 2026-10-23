@@ -134,14 +134,6 @@ let test_env_tempo_default () =
   let default = Env_config.Tempo.default_interval_seconds in
   check bool "positive default" true (default > 0.0)
 
-let test_env_orchestrator_interval () =
-  let interval = Env_config.Orchestrator.check_interval_seconds in
-  check bool "positive interval" true (interval > 0.0)
-
-let test_env_orchestrator_agent_name () =
-  let name = Env_config.Orchestrator.agent_name in
-  check bool "non-empty name" true (String.length name > 0)
-
 let test_env_get_string () =
   let v = Env_config.get_string ~default:"fallback" "NONEXISTENT_VAR_12345" in
   check string "fallback value" "fallback" v
@@ -188,10 +180,6 @@ let () =
     ];
     "env_config.tempo", [
       test_case "default" `Quick test_env_tempo_default;
-    ];
-    "env_config.orchestrator", [
-      test_case "interval" `Quick test_env_orchestrator_interval;
-      test_case "agent_name" `Quick test_env_orchestrator_agent_name;
     ];
     "env_config.helpers", [
       test_case "get_string" `Quick test_env_get_string;

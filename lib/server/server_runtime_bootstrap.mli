@@ -224,7 +224,6 @@ val activate_owner_state
   -> sw:Eio.Switch.t
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> domain_mgr:[> Eio.Domain_manager.ty ] Eio.Domain_manager.t
   -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
   -> initialized_owner_state
   -> activated_owner_state

@@ -139,7 +139,6 @@ val start_keeper_loops :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  domain_mgr:[> Eio.Domain_manager.ty ] Eio.Domain_manager.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Process.mgr ->
   Mcp_server.server_state -> unit
 (** Spawn the keepalive bootstrap, supervisor sweep, and tool-execution

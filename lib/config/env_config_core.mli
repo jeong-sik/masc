@@ -268,8 +268,6 @@ val resolve_against_base_path : string -> string
     relative.  Raises [Config_error] through [base_path] when
     [MASC_BASE_PATH] is unset. *)
 
-val orchestrator_enabled_env_key : string
-
 (** {1 Config dir} *)
 
 val config_dir_env_key : string

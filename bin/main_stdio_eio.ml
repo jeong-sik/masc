@@ -106,7 +106,6 @@ let run_cmd cli_base_path =
        ~sw
        ~clock
        ~net
-       ~domain_mgr
        ~proc_mgr
        initialized
     with

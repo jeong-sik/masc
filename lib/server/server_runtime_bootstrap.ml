@@ -1290,7 +1290,6 @@ let claim_and_start_keeper_persistence
       ~sw
       ~clock
       ~net
-      ~domain_mgr
       ~proc_mgr
       state
   =
@@ -1314,7 +1313,6 @@ let claim_and_start_keeper_persistence
       ~sw
       ~clock
       ~net
-      ~domain_mgr
       ~proc_mgr
       state
   with
@@ -1534,7 +1532,6 @@ let activate_owner_state
       ~sw
       ~clock
       ~net
-      ~domain_mgr
       ~proc_mgr
       (initialized : initialized_owner_state)
   =
@@ -1563,7 +1560,6 @@ let activate_owner_state
     ~sw
     ~clock
     ~net
-    ~domain_mgr
     ~proc_mgr
     state;
   boot_stage "keeper_persistence.end";
@@ -1698,7 +1694,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
         ~sw
         ~clock
         ~net
-        ~domain_mgr
         ~proc_mgr
         initialized_owner
       in

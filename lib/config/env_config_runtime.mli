@@ -70,15 +70,6 @@ module Executor : sig
       recommended count. *)
 end
 
-(** {1 Orchestrator} *)
-
-module Orchestrator : sig
-  val check_interval_seconds : float
-  val agent_name : string
-  val min_priority : int
-  val enabled : bool
-end
-
 (** {1 Local runtime / llama.cpp} *)
 
 module Local_runtime : sig

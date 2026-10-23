@@ -687,11 +687,6 @@ let resolve_against_base_path raw_path =
   else
     raw_path
 
-(** SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352).
-    Referenced by the env_config_runtime reader, env_config_snapshot entry,
-    and orchestrator bootstrap. *)
-let orchestrator_enabled_env_key = "MASC_ORCHESTRATOR_ENABLED"
-
 (** SSOT for the MASC_CONFIG_DIR env-var name (issue 8352). *)
 let config_dir_env_key = "MASC_CONFIG_DIR"
 

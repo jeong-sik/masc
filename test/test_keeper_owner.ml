@@ -1199,13 +1199,18 @@ let test_direct_waiter_skips_continuations_and_wakes_on_new_input () =
     (Chat_operation.Operation_id.equal first running.operation_id);
   let observed, resolve_observed = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve_observed
-    (Owner.await_newer_original_operation owner ~operation_id:first));
+    (Owner.await_queued_handoff_recipient owner ~operation_id:first));
   Eio.Fiber.yield ();
   ignore (owner_ok (Owner.exact_operation owner first));
   check bool "a later continuation does not cause handoff ping-pong" true
     (Option.is_none (Eio.Promise.peek observed));
   submit (operation_id "kmsg-waiter-fresh");
-  check bool "fresh original input wakes the direct waiter" true
+  Eio.Fiber.yield ();
+  ignore (owner_ok (Owner.exact_operation owner first));
+  check bool "fresh input behind the FIFO barrier does not cause a handoff" true
+    (Option.is_none (Eio.Promise.peek observed));
+  ignore (owner_ok (Owner.move_queued_operation_to_end owner continued));
+  check bool "a fresh original at the actual head wakes the direct waiter" true
     (Eio.Promise.await observed)
 ;;
 
@@ -1222,7 +1227,7 @@ let test_direct_waiter_returns_when_owner_closes () =
       ~source:operation_source ~input:(operation_input "running work")));
     ignore (owner_ok (Owner.claim_next_operation owner));
     Eio.Fiber.fork ~sw:waiter_sw (fun () -> Eio.Promise.resolve resolve_observed
-      (Owner.await_newer_original_operation owner ~operation_id));
+      (Owner.await_queued_handoff_recipient owner ~operation_id));
     Eio.Fiber.yield ();
     ignore (owner_ok (Owner.exact_operation owner operation_id)));
   check bool "owner closure releases its direct waiter" false

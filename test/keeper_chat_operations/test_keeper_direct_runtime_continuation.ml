@@ -278,16 +278,99 @@ let test_cooperative_checkpoint_preserves_identity_and_yields_to_steering () = w
     check bool "actual answer settles semantic execution" true (Semantic.is_terminal (execution store));
     check bool "success releases original input" true ((current store).input = None)))
 
+let test_handoff_reaches_waiting_original_before_other_continuation () =
+  with_path (fun path -> with_open path (fun store ->
+    let first = admitted store in
+    let second_id = Operation.Operation_id.of_string "another-checkpoint" |> string_ok in
+    let fresh_id = Operation.Operation_id.of_string "waiting-original" |> string_ok in
+    let saved_first = Semantic.Agent_core (checkpoint "first completed effects") in
+    let saved_second = Semantic.Agent_core (checkpoint "second completed effects") in
+    ignore (Store.submit store ~now:12. ~operation_id:second_id ~source ~input |> ok);
+    ignore (Store.defer_direct_checkpoint store ~now:13. ~operation_id
+      ~execution_digest:first.execution_digest ~checkpoint:saved_first |> ok);
+    let second = Store.claim_next store ~now:14. |> ok |> Option.get in
+    check string "second original first gets its own slot"
+      (Operation.Operation_id.to_string second_id) (Operation.Operation_id.to_string second.operation_id);
+    ignore (Store.defer_direct_checkpoint store ~now:15. ~operation_id:second_id
+      ~execution_digest:second.execution_digest ~checkpoint:saved_second |> ok);
+    ignore (Store.submit store ~now:16. ~operation_id:fresh_id ~source ~input |> ok);
+    let resumed = Store.claim_next store ~now:17. |> ok |> Option.get in
+    check string "ordinary FIFO still claims the first continuation"
+      (Operation.Operation_id.to_string operation_id) (Operation.Operation_id.to_string resumed.operation_id);
+    Store.resume_direct_checkpoint store ~now:18. ~operation_id ~observed:saved_first |> ok;
+    check bool "a continuation barrier cannot accept an original-input handoff" false
+      (Store.has_queued_handoff_recipient store ~now:18.5 ~operation_id |> ok);
+    ignore (Store.succeed_running store ~now:19. ~operation_id ~outcome_ref:"first-work-finished" |> ok);
+    let next = Store.claim_next store ~now:20. |> ok |> Option.get in
+    check string "ordinary continuation FIFO is unchanged"
+      (Operation.Operation_id.to_string second_id) (Operation.Operation_id.to_string next.operation_id);
+    Store.resume_direct_checkpoint store ~now:21. ~operation_id:second_id ~observed:saved_second |> ok;
+    check bool "the waiting original now really is the next recipient" true
+      (Store.has_queued_handoff_recipient store ~now:21.5 ~operation_id:second_id |> ok);
+    ignore (Store.defer_direct_checkpoint store ~now:22. ~operation_id:second_id
+      ~execution_digest:second.execution_digest ~checkpoint:saved_second |> ok);
+    let recipient = Store.claim_next store ~now:23. |> ok |> Option.get in
+    check string "an admitted handoff reaches the waiting original"
+      (Operation.Operation_id.to_string fresh_id) (Operation.Operation_id.to_string recipient.operation_id)))
+
+let test_handoff_uses_the_actual_retry_eligibility () =
+  with_path (fun path -> with_open path (fun store ->
+    let first = admitted store in
+    let retry = Semantic.runtime_retry ~not_before:(Some 100.)
+      ~checkpoint:(checkpoint "cooling before handoff") ~assignment_id:"cooling-assignment"
+      ~failed_runtime_id:"throttled-runtime" ~next_runtime_id:"next-runtime"
+      ~later_runtime_ids:[] |> string_ok in
+    ignore (defer store first retry |> ok);
+    let running_id = Operation.Operation_id.of_string "running-before-fresh" |> string_ok in
+    let fresh_id = Operation.Operation_id.of_string "fresh-after-cooling" |> string_ok in
+    ignore (Store.submit store ~now:13. ~operation_id:running_id ~source ~input |> ok);
+    let running = Store.claim_next store ~now:14. |> ok |> Option.get in
+    check string "cooling row does not block the actual claim"
+      (Operation.Operation_id.to_string running_id) (Operation.Operation_id.to_string running.operation_id);
+    ignore (Store.submit store ~now:15. ~operation_id:fresh_id ~source ~input |> ok);
+    check bool "a blocked retry is skipped for the actual fresh head" true
+      (Store.has_queued_handoff_recipient store ~now:16. ~operation_id:running_id |> ok);
+    check bool "an eligible retry is a continuation barrier, not an original" false
+      (Store.has_queued_handoff_recipient store ~now:101. ~operation_id:running_id |> ok);
+    ignore (Store.succeed_running store ~now:102. ~operation_id:running_id ~outcome_ref:"finished" |> ok);
+    let next = Store.claim_next store ~now:103. |> ok |> Option.get in
+    check string "readiness did not reserve or reorder the earlier fresh observation"
+      (Operation.Operation_id.to_string operation_id) (Operation.Operation_id.to_string next.operation_id)))
+
+let test_handoff_preserves_an_older_original_and_manual_priority () =
+  with_path (fun path -> with_open path (fun store ->
+    let selected = Operation.Operation_id.of_string "manually-selected-running" |> string_ok in
+    let fresh = Operation.Operation_id.of_string "later-fresh-original" |> string_ok in
+    ignore (Store.submit store ~now:1. ~operation_id ~source ~input |> ok);
+    ignore (Store.submit store ~now:2. ~operation_id:selected ~source ~input |> ok);
+    ignore (Store.move_queued_to_front store ~now:3. ~operation_id:selected |> ok);
+    let running = Store.claim_next store ~now:4. |> ok |> Option.get in
+    check string "manual priority selected the requested original"
+      (Operation.Operation_id.to_string selected) (Operation.Operation_id.to_string running.operation_id);
+    ignore (Store.submit store ~now:5. ~operation_id:fresh ~source ~input |> ok);
+    check bool "later fresh input cannot skip an older original head" false
+      (Store.has_queued_handoff_recipient store ~now:6. ~operation_id:selected |> ok);
+    let rows = Store.list_queued store ~after_sequence:None ~limit:10 |> ok in
+    check (list string) "readiness preserves the entire queue order"
+      [Operation.Operation_id.to_string operation_id; Operation.Operation_id.to_string fresh]
+      (List.map (fun (row : Operation.t) -> Operation.Operation_id.to_string row.operation_id) rows);
+    ignore (Store.move_queued_to_front store ~now:7. ~operation_id:fresh |> ok);
+    check bool "manual priority can make the later original the recipient" true
+      (Store.has_queued_handoff_recipient store ~now:8. ~operation_id:selected |> ok);
+    ignore (Store.cancel_queued store ~now:9. ~operation_id:fresh |> ok);
+    check bool "cancelling that recipient restores the older-original barrier" false
+      (Store.has_queued_handoff_recipient store ~now:10. ~operation_id:selected |> ok)))
+
 let test_direct_yield_ignores_older_continuation () = with_path (fun path ->
   with_open path (fun store ->
     let first = admitted store in
     let second = Operation.Operation_id.of_string "second-direct-chat" |> string_ok in
     let third = Operation.Operation_id.of_string "third-direct-chat" |> string_ok in
     check bool "no newer chat yet" false
-      (Store.has_newer_original_queued store ~operation_id |> ok);
+      (Store.has_queued_handoff_recipient store ~now:11.5 ~operation_id |> ok);
     ignore (Store.submit store ~now:12. ~operation_id:second ~source ~input |> ok);
     check bool "A yields to B's original chat" true
-      (Store.has_newer_original_queued store ~operation_id |> ok);
+      (Store.has_queued_handoff_recipient store ~now:12.5 ~operation_id |> ok);
     ignore (Store.defer_direct_checkpoint store ~now:13. ~operation_id
       ~execution_digest:first.execution_digest
       ~checkpoint:(Semantic.Agent_core (checkpoint "A's settled tool result")) |> ok);
@@ -297,10 +380,13 @@ let test_direct_yield_ignores_older_continuation () = with_path (fun path ->
     check bool "A's continuation is claimable" true
       (Store.has_claimable_queued store ~now:14. |> ok);
     check bool "B does not yield back to older A" false
-      (Store.has_newer_original_queued store ~operation_id:second |> ok);
+      (Store.has_queued_handoff_recipient store ~now:14.5 ~operation_id:second |> ok);
     ignore (Store.submit store ~now:15. ~operation_id:third ~source ~input |> ok);
-    check bool "B still yields to a later original C" true
-      (Store.has_newer_original_queued store ~operation_id:second |> ok)))
+    check bool "a continuation before C remains a FIFO barrier" false
+      (Store.has_queued_handoff_recipient store ~now:15.5 ~operation_id:second |> ok);
+    ignore (Store.move_queued_to_front store ~now:16. ~operation_id:third |> ok);
+    check bool "explicitly prioritized original C can accept the handoff" true
+      (Store.has_queued_handoff_recipient store ~now:16.5 ~operation_id:second |> ok)))
 ;;
 
 let test_direct_yield_uses_admission_order_when_clock_repeats_or_rewinds () =
@@ -309,13 +395,13 @@ let test_direct_yield_uses_admission_order_when_clock_repeats_or_rewinds () =
     let second = Operation.Operation_id.of_string "same-time-chat" |> string_ok in
     ignore (Store.submit store ~now:10. ~operation_id:second ~source ~input |> ok);
     check bool "same timestamp is still a later admission" true
-      (Store.has_newer_original_queued store ~operation_id |> ok)));
+      (Store.has_queued_handoff_recipient store ~now:11.5 ~operation_id |> ok)));
   with_path (fun path -> with_open path (fun store ->
     ignore (admitted store);
     let second = Operation.Operation_id.of_string "clock-rewound-chat" |> string_ok in
     ignore (Store.submit store ~now:9. ~operation_id:second ~source ~input |> ok);
     check bool "clock rewind does not hide a later admission" true
-      (Store.has_newer_original_queued store ~operation_id |> ok)))
+      (Store.has_queued_handoff_recipient store ~now:11.5 ~operation_id |> ok)))
 ;;
 
 let test_fresh_batch_stops_before_queued_continuation () = with_path (fun path ->
@@ -399,6 +485,8 @@ let test_fresh_batch_stops_before_frozen_leader () = with_path (fun path ->
     let first_run = claim 6. in
     check bool "fresh chat before frozen leader runs alone" true
       (Operation.Operation_id.equal first first_run.operation_id);
+    check bool "frozen batch cannot receive a new-original handoff" false
+      (Store.has_queued_handoff_recipient store ~now:6.5 ~operation_id:first |> ok);
     check int "frozen leader blocks a later fresh batch member" 1
       (List.length (Store.batch_operations store ~operation_id:first |> ok));
     ignore (Store.succeed_running store ~now:7. ~operation_id:first
@@ -497,6 +585,9 @@ let test_official_checkpoint_retains_session_input_and_cancel_boundary () = with
     check bool "cancel removes resume authority" true (Store.direct_checkpoint store ~operation_id |> ok = None)))
 
 let () = run "Keeper direct runtime continuation" ["durable owner journal", [
+  test_case "handoff uses the actual retry eligibility" `Quick test_handoff_uses_the_actual_retry_eligibility;
+  test_case "handoff preserves older input and manual priority" `Quick test_handoff_preserves_an_older_original_and_manual_priority;
+  test_case "scheduling handoff reaches its waiting original before another checkpoint" `Quick test_handoff_reaches_waiting_original_before_other_continuation;
   test_case "official checkpoint preserves original conversation without native replay" `Quick test_official_checkpoint_retains_session_input_and_cancel_boundary;
   test_case "cooperative checkpoint yields to steering and survives claim crash" `Quick test_cooperative_checkpoint_preserves_identity_and_yields_to_steering;
   test_case "fresh batch stops before a queued continuation" `Quick test_fresh_batch_stops_before_queued_continuation;

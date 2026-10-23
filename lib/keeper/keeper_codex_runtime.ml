@@ -1448,7 +1448,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
           | Autonomous_schedule ->
             (fun () -> Keeper_owner.await_claimable_operation owner)
           | Direct_schedule operation_id ->
-            (fun () -> Keeper_owner.await_newer_original_operation owner ~operation_id)) scheduling_turn in
+            (fun () -> Keeper_owner.await_queued_handoff_recipient owner ~operation_id)) scheduling_turn in
         (match
        Runtime_codex_app_server.run_turn
          ?await_handoff

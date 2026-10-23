@@ -16,7 +16,7 @@ let request ~turn ~base_path ~keeper_name =
          let ready = match turn with
            | Autonomous -> Ok operations.has_claimable_queued
            | Direct operation_id ->
-             Keeper_owner_registry.has_newer_original_queued
+             Keeper_owner_registry.has_queued_handoff_recipient
                ~base_path ~keeper_name ~operation_id
              |> Result.map_error Keeper_owner_registry.command_error_to_string
          in

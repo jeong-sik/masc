@@ -157,7 +157,7 @@ val exact_operation
   -> Keeper_chat_operation.Operation_id.t
   -> (Keeper_chat_operation.t option, command_error) result
 
-val has_newer_original_queued
+val has_queued_handoff_recipient
   :  base_path:string
   -> keeper_name:string
   -> operation_id:Keeper_chat_operation.Operation_id.t

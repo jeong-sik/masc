@@ -1,6 +1,12 @@
 (** Immutable Memory-maintenance execution boundary. See the .mli. *)
 let ( let* ) = Result.bind
+let ( >>= ) = Result.bind
 let ( let+ ) result fn = Result.map fn result
+
+type error =
+  | Request_invalid of string
+  | Preparation_invalid of string
+  | Proposal_invalid of Keeper_librarian.parse_error
 
 let error_to_string = function
   | Request_invalid detail -> detail
@@ -74,7 +80,11 @@ let destination_of_json (json : Yojson.Safe.t) : (destination, string) result =
        && tool = Keeper_librarian_durable_request.tool
     then Ok ()
     else Error (error "package/tool differs") in
-  Ok { installation_id; package_id; tool; source_revision; configuration_revision }
+  Ok { Keeper_librarian_durable_request.installation_id
+     ; Keeper_librarian_durable_request.package_id
+     ; Keeper_librarian_durable_request.tool
+     ; Keeper_librarian_durable_request.source_revision
+     ; Keeper_librarian_durable_request.configuration_revision }
 
 type t =
   { request_id : string
@@ -107,16 +117,18 @@ let create ~request_id ~owner ~destination ~preparation ~answer_text ~captured_a
     | Some _ -> Ok ()
     | None -> Error (error "owner requires a canonical Keeper ID") in
   let* () =
-    if destination.package_id = Keeper_librarian_durable_request.package_id
-       && destination.tool = Keeper_librarian_durable_request.tool
+    if destination.Keeper_librarian_durable_request.package_id
+         = Keeper_librarian_durable_request.package_id
+       && destination.Keeper_librarian_durable_request.tool
+            = Keeper_librarian_durable_request.tool
     then Ok ()
     else Error (error "destination package/tool differs") in
   let* () =
     if String.length answer_text > 0 then Ok ()
     else Error (error "answer is empty") in
-  { request_id; owner_json = Keeper_librarian_durable_request.owner_to_json owner
-  ; destination; preparation; answer_text
-  ; answer_digest = digest_of_string answer_text; captured_at }
+  Ok { request_id; owner_json = Keeper_librarian_durable_request.owner_to_json owner
+     ; destination; preparation; answer_text
+     ; answer_digest = digest_of_string answer_text; captured_at }
 
 let policy_json (policy : Keeper_librarian_runtime.durable_policy) =
   `Assoc
@@ -141,8 +153,8 @@ let policy_of_json json =
   let* facts_max_bytes = integer "facts_max_bytes" in
   let* category_cap = integer "category_cap" in
   let+ facts_per_category_cap = integer "facts_per_category_cap" in
-  { Keeper_librarian_runtime.facts_max_bytes; category_cap
-  ; facts_per_category_cap }
+  ({ facts_max_bytes; category_cap; facts_per_category_cap }
+     : Keeper_librarian_runtime.durable_policy)
 
 let prompt_json (p : Prompt_registry.prompt_resolution) =
   `Assoc
@@ -298,7 +310,12 @@ let of_json json =
     match List.assoc_opt "owner" fields with
     | Some value -> value
     | None -> `Null in
-  let* destination = field "destination" >>= destination_of_json in
+  let* destination =
+    field "destination"
+    >>= (fun json ->
+      destination_of_json json
+      |> Result.map_error (fun detail ->
+             Preparation_invalid ("destination: " ^ detail))) in
   let* captured_at =
     match List.assoc_opt "captured_at" fields with
     | Some (`Float time) when Float.is_finite time -> Ok time
@@ -320,7 +337,12 @@ let of_json json =
     match input.Keeper_librarian.current with
     | Some _ -> Ok ()
     | None -> Error (error "input lost its current snapshot") in
-  let* preparation = field "preparation" >>= preparation_of_json ~source_input:input in
+  let* preparation =
+    field "preparation"
+    >>= (fun json ->
+      preparation_of_json ~source_input:input json
+      |> Result.map_error (fun detail ->
+             Preparation_invalid ("preparation: " ^ detail))) in
   Ok { request_id; owner_json; destination; preparation; answer_text
      ; answer_digest; captured_at }
 

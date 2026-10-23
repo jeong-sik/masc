@@ -10,6 +10,9 @@ let roundtrips () =
   let verbs = [B.Tabs_list; Page_read {tab_id=None;max_chars=None};Page_document {tab_id=7};
     Page_downloads {tab_id=7};Page_capture {tab_id=7};
     Page_scene {tab_id=7;max_chars=1000;view=B.Regions;scope=Some {document_id="doc";node_id="region"}};
+    Page_snapshot {tab_id=7;max_chars=1000;scope=B.Snapshot_viewport};
+    Page_snapshot {tab_id=7;max_chars=1000;scope=B.Snapshot_full_page};
+    Page_snapshot {tab_id=7;max_chars=1000;scope=B.Snapshot_subtree 12};
     Page_interact {frame_path=[];tab_id=7;expected_url=Some "https://example.org";action=B.Fill_node {target={document_id="doc";node_id="edit"};text=""}};
     Session_open {headless=Some false};Session_close;Session_status;
     Page_goto {url="https://example.org";tab_id=Some 7};Page_elements {tab_id=Some 7;filter={within=None;selector=None}};
@@ -39,6 +42,15 @@ let rejections () =
   check bool "duplicate verb rejected" true (Result.is_error (W.verb_of_json ~route
     (`Assoc ["verb",`String "tabs.list";"verb",`String "tabs.list";"args",`Assoc []])));
   check bool "irrelevant read field rejected" true (Result.is_error (decode "tabs.list" ["tabId",`Int 7]));
+  let snapshot fields = decode "page.snapshot" (["tabId",`Int 7;"maxChars",`Int 1000] @ fields) in
+  check bool "a subtree snapshot needs its root" true (Result.is_error (snapshot ["scope",`String "subtree"]));
+  check bool "a snapshot root is a ref" true
+    (Result.is_error (snapshot ["scope",`String "subtree";"root",`String "12"]));
+  check bool "a viewport snapshot has no root" true
+    (Result.is_error (snapshot ["scope",`String "viewport";"root",`String "@12"]));
+  check bool "ref=N names the same root as @N" true
+    (snapshot ["scope",`String "subtree";"root",`String "ref=12"]
+     = Ok (B.Page_snapshot {tab_id=7;max_chars=1000;scope=B.Snapshot_subtree 12}));
   check bool "empty within is not a scope" true
     (Result.is_error (decode "page.elements" ["tabId",`Int 7;"within",`String ""]));
   check bool "within scopes elements only" true (Result.is_error (decode "page.context"

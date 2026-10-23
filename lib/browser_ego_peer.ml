@@ -243,6 +243,42 @@ let scene t args =
   let* id,page = evaluate t args ~step:"page.scene" Browser_scene_script.read_call (obj (("mode",str "read")::fields)) in
   with_tab id page
 
+(* ego's own snapshot of a page: the accessibility tree, each actionable node
+   with the ref ego's element actions accept. A ref names a node of the page
+   as it was read; after the page changes it needs a new snapshot. *)
+let snapshot_options = function
+  | Browser_lane.Snapshot_viewport -> `Null
+  | (Snapshot_full_page | Snapshot_subtree _) as scope -> obj (Browser_lane.snapshot_scope_fields scope)
+let snapshot t args =
+  let* cap = match field "maxChars" args with
+    | Some (`Int cap) -> Browser_page_script.text_cap (Some cap)
+    | Some _ | None -> Error Browser_page_script.text_cap_refused in
+  let* scope = match field "scope" args, field "root" args with
+    | Some (`String scope), None -> Browser_lane.snapshot_scope_of_wire ~scope ~root:None
+    | Some (`String scope), Some (`String root) -> Browser_lane.snapshot_scope_of_wire ~scope ~root:(Some root)
+    | _ -> Error "invalid snapshot scope" in
+  let* label = match field "tabId" args with
+    | Some (`Int _) -> target t args
+    | Some _ | None -> Error "a snapshot reads one tab; give its tabId" in
+  let* value = ask t ~step:"page.snapshot" ~args:(obj ["label",label;"options",snapshot_options scope;"cap",`Int cap])
+      (on_page (String.concat "\n" [
+        "    const text = await (args.options === null ? page.snapshot() : page.snapshot(args.options));";
+        "    if (typeof text !== \"string\") emit({ok: false, error: \"ego answered a snapshot that is not text\"});";
+        "    else {";
+        (* A cut never splits a surrogate pair. *)
+        "      const end = text.length <= args.cap ? text.length : (/[\\uD800-\\uDBFF]/.test(text[args.cap - 1]) ? args.cap - 1 : args.cap);";
+        "      emit({ok: true, value: {label: tab.label, url: await page.url(), title: await page.title(),";
+        "        snapshot: text.slice(0, end), truncated: end < text.length, chars: text.length}});";
+        "    }" ])) in
+  match field "label" value, field "url" value, field "title" value, field "snapshot" value,
+        field "truncated" value, field "chars" value with
+  | Some (`String label), Some (`String url), Some (`String title), Some (`String text),
+    Some (`Bool truncated), Some (`Int chars) ->
+    let id = remember t (Managed label) in
+    Ok (obj (["tabId",`Int id;"url",str url;"title",str title] @ Browser_lane.snapshot_scope_fields scope
+      @ ["snapshot",str text;"truncated",`Bool truncated;"chars",`Int chars]))
+  | _ -> Error "ego answered a snapshot without its page, text or length"
+
 let png_signature = "\137PNG\r\n\026\n"
 let remove path = match Unix.unlink path with
   | () -> Ok ()
@@ -713,5 +749,6 @@ let dispatch t ~verb args =
   | Page_capture -> pre (capture t args)
   | Page_goto -> goto t args
   | Page_context -> Error (Live.Before_effect "an ego connection does not read inside frames")
+  | Page_snapshot -> pre (snapshot t args)
   | Page_act -> act t args
   | Page_interact -> interact t args

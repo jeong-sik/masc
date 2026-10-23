@@ -960,6 +960,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | Element_inventory -> Page_elements {tab_id=Some 1;filter={within=None;selector=None}}
       | Viewport_capture -> Page_capture {tab_id=1}
       | Scene_read -> Page_scene {tab_id=1; max_chars=1000; view=Content; scope=None}
+      | Accessibility_snapshot -> Page_snapshot {tab_id=1; max_chars=1000; scope=Snapshot_viewport}
       | Dom_interaction -> interact (Click "#button")
       | Point_click -> interact (Click_at {point;viewport;button=Pointer.Primary})
       | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
@@ -983,7 +984,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | "tabs.list" -> Peer.Tabs_list | "page.read" -> Peer.Page_read | "page.scene" -> Peer.Page_scene
       | "page.elements" -> Peer.Page_elements | "page.capture" -> Peer.Page_capture
       | "page.interact" -> Peer.Page_interact | "page.act" -> Peer.Page_act | "page.goto" -> Peer.Page_goto
-      | "page.context" -> Peer.Page_context
+      | "page.context" -> Peer.Page_context | "page.snapshot" -> Peer.Page_snapshot
       | other -> failf "the lane put a verb on the wire that the host does not forward: %s" other in
     let calls = ref [] in
     let created = ref false in

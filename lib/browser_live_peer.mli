@@ -16,7 +16,7 @@ type failure =
 
 (** Native host verbs, decoded once from the MASC poll wire. *)
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
-  | Page_goto | Page_context
+  | Page_goto | Page_context | Page_snapshot
 
 (** The name a verb goes by on the wire and in the host's record. *)
 val verb_to_wire : verb -> string

@@ -27,6 +27,9 @@ let default_timeout_sec = 20.
 
 type node_ref = { document_id : string; node_id : string }
 type scene_view = Content | Regions
+(* What an accessibility snapshot covers: the viewport, the whole page, or the
+   subtree under one ref an earlier snapshot of the same page printed. *)
+type snapshot_scope = Snapshot_viewport | Snapshot_full_page | Snapshot_subtree of int
 type pointer_target = Selector of string | Scene_node of node_ref
 
 (* A CSS-pixel size the browser's viewport is forced to, or the browser's own size again. *)
@@ -74,6 +77,9 @@ type verb =
   | Page_cookies of { tab_id : int }
   | Page_capture of { tab_id : int }
   | Page_scene of { tab_id : int; max_chars : int; view : scene_view; scope : node_ref option }
+  (* The connection's own accessibility snapshot of a page, with the refs its
+     element actions accept (an ego task space; RFC-browser-live-ego). *)
+  | Page_snapshot of { tab_id : int; max_chars : int; scope : snapshot_scope }
   | Page_interact of { tab_id : int; frame_path : string list; expected_url : string option; action : interaction }
   | Session_open of { headless : bool option }
   | Session_close
@@ -101,7 +107,7 @@ let reply_timeout_sec = function
   | Page_goto _ -> 45.
   | Page_act action -> Action.reply_timeout_sec action
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
-  | Page_scene _ | Page_interact _ | Page_elements _ | Page_context _
+  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_elements _ | Page_context _
   | Page_instruct _ | Page_locate _ | Page_extract _ -> default_timeout_sec
 
 (* The CSS scope an elements read carries, top-level or in a frame. Every
@@ -111,7 +117,7 @@ let elements_filter = function
   | Page_context { mode = `Elements filter; _ } -> filter
   | Page_context { mode = (`Text _ | `Frames | `Dialog); _ }
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _
-  | Page_cookies _ | Page_capture _ | Page_scene _ | Page_interact _ | Session_open _ | Session_close
+  | Page_cookies _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Session_close
   | Session_status | Page_goto _ | Page_act _ | Page_instruct _ | Page_locate _ | Page_extract _ -> unfiltered_elements
 ;;
 
@@ -125,6 +131,7 @@ let verb_to_string = function
   | Page_cookies _ -> "page.cookies"
   | Page_capture _ -> "page.capture"
   | Page_scene _ -> "page.scene"
+  | Page_snapshot _ -> "page.snapshot"
   | Page_interact _ -> "page.interact"
   | Session_open _ -> "session.open"
   | Session_close -> "session.close"
@@ -220,6 +227,31 @@ let scene_args ~tab_id ~max_chars ~view ~scope =
     @ (match scope with None -> [] | Some target -> ["scope",`Assoc [
       "documentId",`String target.document_id;"nodeId",`String target.node_id]]))
 
+(* A ref as an ego snapshot prints it ([@12]) or as its selectors accept it
+   ([ref=12]): decimal digits only. *)
+let snapshot_ref_of_string raw =
+  let after prefix = String.sub raw (String.length prefix) (String.length raw - String.length prefix) in
+  let digits = if String.starts_with ~prefix:"@" raw then after "@"
+    else if String.starts_with ~prefix:"ref=" raw then after "ref="
+    else "" in
+  let decimal = digits <> "" && String.for_all (fun c -> c >= '0' && c <= '9') digits in
+  match decimal, int_of_string_opt digits with
+  | true, Some ref -> Ok ref
+  | true, None | false, _ -> Error "root must be a ref an ego snapshot printed, such as @12"
+let snapshot_scope_of_wire ~scope ~root = match scope, root with
+  | "viewport", None -> Ok Snapshot_viewport
+  | "full_page", None -> Ok Snapshot_full_page
+  | "subtree", Some raw -> Result.map (fun ref -> Snapshot_subtree ref) (snapshot_ref_of_string raw)
+  | "subtree", None -> Error "a subtree snapshot needs root, a ref an ego snapshot printed such as @12"
+  | ("viewport" | "full_page"), Some _ -> Error "root applies only to a subtree snapshot"
+  | _, (None | Some _) -> Error "snapshot scope is viewport, full_page or subtree"
+let snapshot_scope_fields = function
+  | Snapshot_viewport -> ["scope",`String "viewport"]
+  | Snapshot_full_page -> ["scope",`String "full_page"]
+  | Snapshot_subtree ref -> ["scope",`String "subtree";"root",`String ("@" ^ string_of_int ref)]
+let snapshot_args ~tab_id ~max_chars ~scope =
+  `Assoc (["tabId",`Int tab_id;"maxChars",`Int max_chars] @ snapshot_scope_fields scope)
+
 let verb_json = function
   | Tabs_list -> `Assoc [ ("verb", `String "tabs.list"); ("args", `Assoc []) ]
   | Page_read { tab_id; max_chars } ->
@@ -245,6 +277,8 @@ let verb_json = function
     `Assoc ["verb",`String "page.cookies";"args",`Assoc ["tabId",`Int tab_id]]
   | Page_scene {tab_id;max_chars;view;scope} ->
     `Assoc ["verb",`String "page.scene";"args",scene_args ~tab_id ~max_chars ~view ~scope]
+  | Page_snapshot {tab_id;max_chars;scope} ->
+    `Assoc ["verb",`String "page.snapshot";"args",snapshot_args ~tab_id ~max_chars ~scope]
   | Page_capture { tab_id } ->
     `Assoc ["verb", `String "page.capture"; "args", `Assoc ["tabId", `Int tab_id]]
   | Page_interact { tab_id; frame_path; expected_url; action } ->
@@ -293,12 +327,12 @@ let verb_json = function
      supported. Session ownership and direct navigation remain with the
      automation backend. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
+  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
   | Session_status | Page_locate _ | Page_extract _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ | Page_instruct _ -> false
 let verb_uses_model = function
   | Page_instruct _ | Page_locate _ | Page_extract _ -> true
-  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _
+  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _
   | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Session_open _ | Session_close | Session_status
   | Page_goto _ | Page_act _ | Page_interact _ -> false
 ;;
@@ -314,6 +348,7 @@ type live_capability =
   | Element_inventory
   | Viewport_capture
   | Scene_read
+  | Accessibility_snapshot
   | Dom_interaction
   | Point_click
   | Point_scroll
@@ -341,6 +376,7 @@ let live_capability_to_wire = function
   | Element_inventory -> "element_inventory"
   | Viewport_capture -> "viewport_capture"
   | Scene_read -> "scene_read"
+  | Accessibility_snapshot -> "accessibility_snapshot"
   | Dom_interaction -> "dom_interaction"
   | Point_click -> "point_click"
   | Point_scroll -> "point_scroll"
@@ -389,6 +425,7 @@ let live_capability = function
   | Page_elements _ -> Some Element_inventory
   | Page_capture _ -> Some Viewport_capture
   | Page_scene _ -> Some Scene_read
+  | Page_snapshot _ -> Some Accessibility_snapshot
   | Page_interact { action; _ } -> Some (live_capability_of_interaction action)
   | Page_act (Action.Open_tab _ | Action.Open_window _) -> Some Tab_creation
   | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Some Tab_history
@@ -407,13 +444,19 @@ let live_capability = function
 
 let verb_allowed_on_live verb = Option.is_some (live_capability verb)
 
-(* Model-assisted locate is admitted separately by the installed executor. *)
-let verb_allowed_on_automation = function
+(* Gecko's selected read-only locate consumer does not execute instructions. *)
+let sentence_verbs_refused = "act and extract require the stagehand lane"
+let snapshot_refused = "an accessibility snapshot is served only by an ego connection on the live lane"
+(* Why the automation lane does not serve a verb, if it does not.
+   Model-assisted locate is admitted separately by the installed executor. *)
+let automation_refusal = function
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _
   | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _
-  | Page_locate _ -> true
-  | Page_instruct _ | Page_extract _ -> false
+  | Page_locate _ -> None
+  | Page_instruct _ | Page_extract _ -> Some sentence_verbs_refused
+  | Page_snapshot _ -> Some snapshot_refused
 ;;
+let verb_allowed_on_automation verb = Option.is_none (automation_refusal verb)
 
 (* What the Stagehand backend serves once its executor is installed
    (RFC-browser-lane-stagehand §7 step 7): its session, tabs, navigation,
@@ -432,7 +475,8 @@ let verb_allowed_on_stagehand = function
      | Action.Back | Forward | Reload | Close_tab -> frame_path = []
      | Action.Upload _ | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation
      | Block_requests _ | Unblock_requests -> false)
-  | Page_document _ | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ -> false
+  | Page_document _ | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
+  | Page_snapshot _ -> false
 ;;
 
 let verb_allowed (lane : Lane_name.t) verb =
@@ -442,8 +486,6 @@ let verb_allowed (lane : Lane_name.t) verb =
   | Stagehand -> verb_allowed_on_stagehand verb
 ;;
 
-(* Gecko's selected read-only locate consumer does not execute instructions. *)
-let sentence_verbs_refused = "act and extract require the stagehand lane"
 
 type issued = { id : string; verb_json : Yojson.Safe.t }
 
@@ -471,7 +513,7 @@ let activity_rejection_message = function
 let activity_rejection lane = function
   | Session_close | Session_status -> None
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
-  | Page_scene _ | Page_interact _ | Session_open _ | Page_goto _ | Page_elements _
+  | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Page_goto _ | Page_elements _
   | Page_act _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ ->
     match activity lane with
     | Enabled -> None
@@ -529,15 +571,15 @@ let live_transport_serves transport capability =
   | Web_extension, Browser_zoom -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing | Dialog_answer | Frame_read) -> false
+                    | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read) -> true
-  | Webdriver_bidi, Browser_zoom -> false
+  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot) -> false
   | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
-                    | Trusted_drag | Trusted_keyboard | Tab_history) -> true
+                    | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot) -> true
   | Ego_task_space, (Document_source | Touch_input | Browser_zoom | Viewport_resize
                     | Tab_activation | Dialog_answer | Frame_read) -> false
 ;;
@@ -902,7 +944,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
            | Page_interact {tab_id;action;_} -> Hashtbl.add client.interactions id
                {request_id=id;actor;action=interaction_verb action;tab_id;phase=Interaction_queued}
            | Session_open _|Session_close|Session_status|Tabs_list|Page_read _|Page_document _
-           | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_goto _|Page_elements _|Page_act _
+           | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _ | Page_snapshot _|Page_goto _|Page_elements _|Page_act _
            | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> ()); Ok ())) in
       Eio.Switch.on_release sw (fun () ->
         Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id; Hashtbl.remove client.interactions id));
@@ -937,9 +979,9 @@ let automation_locate_available () = match Atomic.get automation_executor with
 let automation_document_observer : (tab_id:int -> answer) option Atomic.t = Atomic.make None
 let install_automation_document_observer observer = Atomic.set automation_document_observer observer
 let issue_automation_with ~activity_check ~verb ~timeout_sec =
-  if not (verb_allowed_on_automation verb) then
-    Rejected_before_effect sentence_verbs_refused
-  else match activity_check verb with
+  match automation_refusal verb with
+  | Some refusal -> Rejected_before_effect refusal
+  | None -> match activity_check verb with
   | Some refusal -> refusal
   | None -> match Atomic.get automation_executor with
   | None -> Lane_absent
@@ -947,7 +989,7 @@ let issue_automation_with ~activity_check ~verb ~timeout_sec =
       (match verb with
        | Page_locate _ when not backend.locate -> Rejected_before_effect "browser locate Exact Output is not selected"
        | Page_locate _ -> backend.execute verb
-       | Tabs_list|Page_read _|Page_document _|Page_elements _|Page_capture _|Page_scene _|Page_context _
+       | Tabs_list|Page_read _|Page_document _|Page_elements _|Page_capture _|Page_scene _ | Page_snapshot _|Page_context _
        | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_interact _|Session_open _|Session_close|Session_status|Page_goto _|Page_act _
        | Page_instruct _|Page_extract _ ->
            Watched_work.run (fun () -> backend.execute verb)
@@ -1056,7 +1098,7 @@ let stagehand_server_deadline verb ~timeout_sec =
   match verb with
   | Session_open _ -> None
   | Session_close | Session_status | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
-  | Page_scene _ | Page_interact _ | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
+  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
   | Page_locate _ | Page_extract _ -> Some timeout_sec
 ;;
 

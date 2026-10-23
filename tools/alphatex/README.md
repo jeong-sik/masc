@@ -392,7 +392,9 @@ refuse the entire edit. Original overlaps remain supported. Unclosed raw attacks
 also participate in conflict checks without an inferred end; at a shared tick,
 actual source event order compares every attack against moved releases, including
 paired attacks whose existing diagnostics mask a new collision.
-Both source quantizers use the same raw-attack checks. Pedal-derived sounding
+Both source quantizers use these actual event-order checks, preserving existing
+endpoint overlaps. Sequential on/off point notes may share a tick without
+overlapping. Phrase documents keep their interval-based overlap policy. Pedal-derived sounding
 durations are not inferred by these key-length commands.
 
 From `/score`, press **p** to open the piano-roll editor. It also opens directly

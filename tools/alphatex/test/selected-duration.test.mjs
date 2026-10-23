@@ -81,7 +81,7 @@ test('new paired, point and masked unclosed collisions refuse without changing a
     else track.add(300,JZZ.MIDI.noteOn(0,60,77)).add(mode==='point'?300:400,JZZ.MIDI.noteOff(0,60,12))
     file.push(track.add(2000,JZZ.MIDI.smfEndOfTrack()))
     const editor=command(newEditor(importMidiSource(file.toUint8Array())),'select-notes 0 0.1'),before=structuredClone(editor)
-    assert.throws(()=>command(editor,'duration-notes 0.5'),/overlapping/);assert.deepEqual(editor,before)
+    assert.throws(()=>command(editor,'duration-notes 0.5'));assert.deepEqual(editor,before)
   }
   const editor=commands(newEditor(),['note C4 0 1','note C4 2 1','select-notes 0 1'])
   const before=structuredClone(editor);assert.throws(()=>command(editor,'duration-add-notes 2'),/overlapping/);assert.deepEqual(editor,before)
@@ -157,5 +157,24 @@ test('paired endpoint attacks masked by an existing overlap refuse absolute and 
       assert.deepEqual(command(next,'undo').project,editor.project)
       assert.deepEqual(next.performance.diagnostics,editor.performance.diagnostics)
     }
+  }
+})
+
+
+test('lengthening an existing actual endpoint overlap preserves it, while an originally released key cannot newly overlap',()=>{
+  for(const attackFirst of [false,true])for(const pairedAttack of [false,true])for(const line of ['duration-notes 0.42','duration-add-notes 0.01']) {
+    const file=new JZZ.MIDI.SMF(1,1000),attack=new JZZ.MIDI.SMF.MTrk().add(550,JZZ.MIDI.noteOn(0,60,90))
+    if(pairedAttack)attack.add(800,JZZ.MIDI.noteOff(0,60,20))
+    attack.add(2000,JZZ.MIDI.smfEndOfTrack())
+    const moved=new JZZ.MIDI.SMF.MTrk().add(140,JZZ.MIDI.noteOn(0,60,80)).add(550,JZZ.MIDI.noteOff(0,60,45)).add(2000,JZZ.MIDI.smfEndOfTrack())
+    file.push(attackFirst?attack:moved);file.push(attackFirst?moved:attack)
+    const editor=commands(newEditor(importMidiSource(file.toUint8Array())),[`track ${attackFirst?2:1}`,'select-all']),before=structuredClone(editor)
+    if(attackFirst) {
+      const next=command(editor,line),note=next.performance.notes.find(n=>n.track===1)
+      assert.deepEqual([note.start,note.duration,note.id,note.off],[140,420,editor.performance.notes.find(n=>n.track===1).id,editor.performance.notes.find(n=>n.track===1).off])
+      assert.deepEqual(next.performance.diagnostics,editor.performance.diagnostics)
+      assert.deepEqual(command(next,'undo').project,editor.project)
+      assert.deepEqual(midiSourcePattern(importMidiSource(projectMidi(next.project))).notes.map(n=>[n.start,n.duration]),next.performance.notes.map(n=>[n.start,n.duration]))
+    } else {assert.throws(()=>command(editor,line),/overlapping/);assert.deepEqual(editor,before)}
   }
 })

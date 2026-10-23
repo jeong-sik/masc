@@ -20,7 +20,7 @@ function declaration(id: string, overrides: Partial<LaneDeclaration> = {}): Lane
 
 function worker(declaration: LaneDeclaration, overrides: Partial<LaneAddonInstance> = {}): LaneAddonInstance {
   return {
-    instance_id: declaration.instance_id!, run_id: `run-${declaration.id}`, addon_id: 'ego-browser',
+    instance_id: declaration.instance_id!, run_id: `run-${declaration.id}`, addon_id: 'example-addon',
     title: `Browser ${declaration.id}`, revision: 'package-v1', incarnation: `epoch-${declaration.id}`,
     action_schema: null, runtime_presence: 'live',
     package: { outputs: {}, binding_schema: null, presentation: { description: null, readings: [] } },
@@ -185,7 +185,7 @@ describe('LaneInstallationManager', () => {
     const alpha = declaration('alpha', { source_path: '/config/special/alpha.toml' })
     const beta = declaration('beta', { application: { kind: 'unknown', messages: ['Read failed'] } })
     const view = mount(snapshot([alpha, beta], [worker(alpha), worker(beta)]))
-    fireEvent.input(screen.getByRole('searchbox'), { target: { value: 'EGO-BROWSER run-alpha special' } })
+    fireEvent.input(screen.getByRole('searchbox'), { target: { value: 'EXAMPLE-ADDON run-alpha special' } })
     expect(visibleIds()).toEqual(['Installation alpha'])
     fireEvent.click(screen.getByRole('button', { name: /^Needs attention:/ }))
     expect(visibleIds()).toEqual([])

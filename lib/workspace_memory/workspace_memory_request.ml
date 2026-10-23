@@ -24,6 +24,7 @@ type ids =
 type batch =
   { rows : row list
   ; selected : Ledger.pending_fact list
+  ; size : size
   ; input : Yojson.Safe.t
   ; rendered_prompt : string
   ; ids : ids
@@ -166,22 +167,27 @@ let check_rows rows =
   let* _ = traverse neighbors rows in
   Ok ()
 
-let render_batch ~render ~ledger ~index_stats rows =
+let render_batch ~render ~ledger ~size ~index_stats rows =
   let* input, ids = build ~ledger rows |> Result.map_error (fun detail -> Invalid_batch detail) in
   let* rendered_prompt = render input |> Result.map_error (fun detail -> Render_failed detail) in
-  Ok { rows; selected = List.map (fun (row : row) -> row.fact) rows; input; rendered_prompt; ids; index_stats }
+  Ok { rows; selected = List.map (fun (row : row) -> row.fact) rows; size; input; rendered_prompt; ids; index_stats }
 
 let selected_ids batch = batch.ids.selected_ids
 let claim_ids batch = batch.ids.claim_ids
 let conflict_ids batch = batch.ids.conflict_ids
 
-let batch_schema = "workspace.memory.classification-batch.v2"
+let batch_schema = "workspace.memory.classification-batch.v3"
+
+(* [null] is [Fill_frame]: no count bound, the frame decides. *)
+let size_to_json = function
+  | Fill_frame -> `Null
+  | Up_to count -> `Int count
 
 let batch_to_json (batch : batch) =
   let stats = batch.index_stats in
   let pairs field values =
     `List (List.map (fun (local, value) -> `Assoc ["id", `String local; field, value]) values) in
-  `Assoc ["schema", `String batch_schema; "input", batch.input;
+  `Assoc ["schema", `String batch_schema; "up_to", size_to_json batch.size; "input", batch.input;
     "rendered_prompt", `String batch.rendered_prompt;
     "facts", pairs "fact" (List.map (fun (id, fact) -> id, Ledger.fact_ref_to_json fact) batch.ids.fact_ids);
     "claims", pairs "claim_id" (List.map (fun (id, claim) -> id, `String claim) batch.ids.claim_ids);
@@ -209,9 +215,13 @@ let snapshot_pairs field decode json =
 let batch_of_json ~ledger json =
   let decode () =
     let* fields = snapshot_fields
-        ["schema"; "input"; "rendered_prompt"; "facts"; "claims"; "conflicts"; "index_stats"] json in
+        ["schema"; "up_to"; "input"; "rendered_prompt"; "facts"; "claims"; "conflicts"; "index_stats"] json in
     let* schema = snapshot_text (List.assoc "schema" fields) in
     let* () = if String.equal schema batch_schema then Ok () else Error "unknown classification batch schema" in
+    let* size = match List.assoc "up_to" fields with
+      | `Null -> Ok Fill_frame
+      | `Int count when count >= 1 -> Ok (Up_to count)
+      | _ -> Error "batch snapshot up_to must be null or a positive fact count" in
     let* fact_ids = snapshot_pairs "fact" Ledger.fact_ref_of_json (List.assoc "facts" fields) in
     let* claim_ids = snapshot_pairs "claim_id" snapshot_text (List.assoc "claims" fields) in
     let* conflict_ids = snapshot_pairs "conflict_id" snapshot_text (List.assoc "conflicts" fields) in
@@ -236,6 +246,9 @@ let batch_of_json ~ledger json =
             (List.assoc "neighbors" fields) in
         Ok { fact; neighbors }) (List.assoc "new_facts" input_fields) in
     let* () = if rows = [] then Error "classification batch has no selected facts" else check_rows rows in
+    let* () = match size with
+      | Up_to count when List.length rows > count -> Error "snapshot selects more facts than its up_to"
+      | Up_to _ | Fill_frame -> Ok () in
     let disposed =
       List.fold_left (fun map (fact, _) -> Fact_map.add fact () map) Fact_map.empty (Ledger.dispositions ledger) in
     let* () = if List.exists (fun (row : row) -> Fact_map.mem row.fact.fact disposed) rows
@@ -255,7 +268,7 @@ let batch_of_json ~ledger json =
     let* index_builds = count "index_builds" in
     let* indexed_rows = count "indexed_rows" in
     let* queries_executed = count "queries_executed" in
-    Ok { rows; selected = List.map (fun (row : row) -> row.fact) rows; input; rendered_prompt; ids;
+    Ok { rows; selected = List.map (fun (row : row) -> row.fact) rows; size; input; rendered_prompt; ids;
          index_stats = { Index.index_builds; indexed_rows; queries_executed } } in
   decode () |> Result.map_error (fun detail -> Invalid_batch detail)
 
@@ -293,7 +306,7 @@ let prepare ~neighbor_limit ~render ~ledger ~current ~pending ~size ~frame ~meas
       let attempt ranked prefix =
         let* ranked = rank_through ~rank ~sources pending ranked prefix in
         let rows = List.take prefix (List.rev ranked.rows_rev) in
-        let* batch = render_batch ~render ~ledger ~index_stats:unranked rows in
+        let* batch = render_batch ~render ~ledger ~size ~index_stats:unranked rows in
         let* bytes = measure batch |> Result.map_error (fun detail -> Measure_failed detail) in
         Ok (ranked, batch, bytes) in
       (* Bytes nearly always grow with the prefix, so doubling then bisecting
@@ -346,5 +359,5 @@ let narrow ~render ~ledger batch =
        always yields the same child. This is not a byte/token estimate and
        never trims a row's neighbors. *)
     let rows = List.take (List.length batch.rows / 2) batch.rows in
-    let* child = render_batch ~render ~ledger ~index_stats:batch.index_stats rows in
+    let* child = render_batch ~render ~ledger ~size:batch.size ~index_stats:batch.index_stats rows in
     Ok (Some child)

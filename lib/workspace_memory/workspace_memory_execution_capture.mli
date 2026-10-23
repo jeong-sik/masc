@@ -56,11 +56,17 @@ val classification_size : (t * Lane_addon_request_progress.phase) list -> Worksp
 (** The size of the next classification batch
     (RFC-workspace-curator-curates-changed-facts 2.4, "다음 묶음"), from the
     latest-minted classification a provider answered ([Finished] or
-    [Conflicted]). A child exists only after a size refusal, so a child's size
-    fit: [Up_to] that size. A root was answered without one: [Up_to] twice its
-    size. With no answered classification, [Fill_frame]. Briefing and every
-    other phase are not evidence. Nothing is stored for this; each pass reads
-    the originals it keeps. *)
+    [Conflicted]):
+    - A child exists only after a size refusal, so its count fit: [Up_to]
+      that count.
+    - A root answered without a refusal keeps what it was prepared for:
+      [Fill_frame] stays [Fill_frame], the frame being the bound that held.
+      [Up_to n] doubles to [Up_to 2n] when the root held [n] facts, and stays
+      [Up_to n] when the frame or a short backlog stopped it below [n], since
+      that answer says nothing about [n].
+    - With no answered classification, [Fill_frame].
+    Briefing and every other phase are not evidence. Each pass reads the
+    originals it keeps; the batch records the size it was prepared for. *)
 val narrow : request_id:Request_id.t -> final:Lane_addon_exact.final -> t -> (t option, string) result
 (** Pure whole-row/whole-entry bisection using the original captured template,
     ledger, physical workspace and destination. Input_capacity, Context_overflow

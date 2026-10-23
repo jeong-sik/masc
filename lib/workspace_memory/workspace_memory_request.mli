@@ -14,9 +14,8 @@ type error =
   | Invalid_size of int
 
 (** How many facts a new batch may hold. [Fill_frame] takes as many as the
-    frame holds. [Up_to n] takes at most [n], the size an earlier provider
-    answer supports (RFC-workspace-curator-curates-changed-facts 2.4,
-    "다음 묶음"). *)
+    frame holds. [Up_to n] takes at most [n], a count earlier provider answers
+    support (RFC-workspace-curator-curates-changed-facts 2.4, "다음 묶음"). *)
 type size = Fill_frame | Up_to of int
 
 val error_to_string : error -> string
@@ -30,6 +29,10 @@ type ids
 type batch = private
   { rows : row list  (** selected facts in [pending] order *)
   ; selected : Workspace_memory_ledger.pending_fact list  (** the facts of [rows] *)
+  ; size : size
+        (** The size the batch was prepared for; a narrowed child keeps its
+            parent's. [selected] can be shorter: the frame or the backlog
+            stopped it first. *)
   ; input : Yojson.Safe.t
   ; rendered_prompt : string
   ; ids : ids
@@ -84,11 +87,12 @@ val prepare
       twice the chosen facts are ranked.
     - [Up_to n]: the first [n] facts are ranked and measured; only when the
       frame does not hold them is a smaller prefix searched, without ranking
-      more.
+      more. At most [n] facts are ranked, however few the frame then holds.
     Only a measured size is returned. Bytes nearly always grow with the
-    prefix but can shrink a little when renumbering shortens local ids, so a
-    slightly longer prefix may also fit. Either way the work follows the
-    batch, not the backlog. [index_stats] counts the build and every query.
+    prefix but can shrink a little when renumbering shortens local ids, so the
+    bisection returns a prefix that fits, not always the longest one. Ranking
+    is bounded by the chosen facts or by [n], never by the backlog.
+    [index_stats] counts the build and every query.
     This is the declared protocol frame, not an estimate of provider input
     capacity. No pending facts return [Ok None] without building an index or
     rendering a prompt.

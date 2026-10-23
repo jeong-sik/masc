@@ -164,9 +164,10 @@ let test_next_classification_size_follows_the_last_answer () = with_workspace (f
   let workspace = get (C.observe_workspace ~base_path:root) in
   let classify_render = render Prompt_names.workspace_memory_curator "workspace_memory_changes" classification_prompt in
   let facts = List.init 4 (fun i -> fact ("keeper-" ^ string_of_int i) ("Changed fact " ^ string_of_int i)) in
-  let root_of count =
+  (* [pending] facts prepared for [size]. *)
+  let root_of ?(size=R.Fill_frame) pending =
     let batch = some (requested (R.prepare ~neighbor_limit:0 ~render:classify_render ~ledger:L.empty ~current:facts
-        ~pending:(List.take count facts) ~size:R.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0))) in
+        ~pending:(List.take pending facts) ~size ~frame:max_int ~measure:(fun _ -> Ok 0))) in
     get (C.classification ~request_id:(C.Request_id.fresh ()) ~workspace ~destination
            ~prompt:classification_prompt ~ledger:L.empty ~batch) in
   let commit : P.commit = {judgment=`Null;change={before=`Null;after=`Null}} in
@@ -175,19 +176,24 @@ let test_next_classification_size_follows_the_last_answer () = with_workspace (f
       | R.Fill_frame -> Format.pp_print_string format "Fill_frame"
       | R.Up_to count -> Format.fprintf format "Up_to %d" count) ( = ) in
   Alcotest.check size "no answered classification fills the frame" R.Fill_frame (C.classification_size []);
-  let older = root_of 3 in
-  Alcotest.check size "a root answered without a refusal tries twice its size" (R.Up_to 6)
+  Alcotest.check size "a root the frame bounded keeps filling the frame" R.Fill_frame
+    (C.classification_size [root_of 3,P.Finished commit]);
+  let older = root_of ~size:(R.Up_to 3) 3 in
+  Alcotest.check size "a root that held its size tries twice that size" (R.Up_to 6)
     (C.classification_size [older,P.Finished commit]);
-  let parent = root_of 4 in
+  Alcotest.check size "a root a short backlog stopped keeps its size" (R.Up_to 4)
+    (C.classification_size [root_of ~size:(R.Up_to 4) 1,P.Finished commit]);
+  let parent = root_of ~size:(R.Up_to 4) 4 in
   let child = some (get (C.narrow ~request_id:(C.Request_id.fresh ())
       ~final:(Lane_addon_exact.Call_final (Input_refused Input_capacity)) parent)) in
   let link : P.successor = {request_id=C.Request_id.to_string (C.request_id child);request=`Null} in
-  Alcotest.check size "a child answered after a size refusal keeps its size" (R.Up_to 2)
+  Alcotest.check size "a child answered after a size refusal keeps its count" (R.Up_to 2)
     (C.classification_size [older,P.Finished commit;parent,P.Subdivided (refusal,link);
                             child,P.Conflicted (commit,`Null)]);
   Alcotest.check size "the latest answer decides, whatever the list order" (R.Up_to 2)
     (C.classification_size [child,P.Finished commit;older,P.Finished commit]);
-  let refused = root_of 1 in
+  (* Were it evidence, this later root would double its three facts. *)
+  let refused = root_of ~size:(R.Up_to 3) 3 in
   let source id : B.source = {id;kind=B.Claim;text="Briefing evidence " ^ id} in
   let briefing_prompt = prompt "Original briefing: {{workspace_memory_briefing}}" in
   let briefing_render = render Prompt_names.workspace_memory_briefing "workspace_memory_briefing" briefing_prompt in

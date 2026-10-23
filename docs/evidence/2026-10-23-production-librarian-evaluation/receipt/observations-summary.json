@@ -1,0 +1,57 @@
+{
+  "assertions": 63,
+  "full_observations_sha256": "ca0eb953392ad470e72f6f3c806093f3f9cb057dae6533b2f5fc20c738f618de",
+  "saved_progress_count": 7,
+  "progress": [
+    {
+      "work_status": "started",
+      "selected_message_count": 3,
+      "snapshot_status": "not_started",
+      "baseline_tag": "Not_started",
+      "restored_tag": "Not_started"
+    },
+    {
+      "work_status": "finished",
+      "selected_message_count": 3,
+      "snapshot_status": "not_started",
+      "baseline_tag": "Not_started",
+      "restored_tag": "Not_started"
+    },
+    {
+      "work_status": "finished",
+      "selected_message_count": 3,
+      "snapshot_status": "ready",
+      "baseline_tag": "Not_started",
+      "restored_tag": "Not_started"
+    },
+    {
+      "work_status": "finished",
+      "selected_message_count": 3,
+      "snapshot_status": "ready",
+      "baseline_tag": "Answer_ready",
+      "restored_tag": "Not_started"
+    },
+    {
+      "work_status": "finished",
+      "selected_message_count": 3,
+      "snapshot_status": "ready",
+      "baseline_tag": "Scored",
+      "restored_tag": "Not_started"
+    },
+    {
+      "work_status": "finished",
+      "selected_message_count": 3,
+      "snapshot_status": "ready",
+      "baseline_tag": "Scored",
+      "restored_tag": "Answer_ready"
+    },
+    {
+      "work_status": "finished",
+      "selected_message_count": 3,
+      "snapshot_status": "ready",
+      "baseline_tag": "Scored",
+      "restored_tag": "Scored"
+    }
+  ],
+  "reproduce_full_observations": "Run verify_production_evaluation.py; its output directory contains observations.json and exact extracted source."
+}

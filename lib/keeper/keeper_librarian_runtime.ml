@@ -221,6 +221,19 @@ type librarian_prompt_material =
   ; rendered : string
   }
 
+type working_state_prompt =
+  { run_id : string
+  ; resolution : Prompt_registry.prompt_resolution
+  ; variables : (string * string) list
+  ; rendered_prompt : string
+  ; output_schema : Yojson.Safe.t
+  }
+
+type working_state_preparation =
+  | Not_prepared
+  | Prompt_failed of { run_id : string; variables : (string * string) list; detail : string }
+  | Prompt_prepared of working_state_prompt
+
 (* A process-only decision retains the exact source and gate evidence. *)
 type memory_step =
   { run_id : string
@@ -239,6 +252,7 @@ type inference =
   | Infer_state of
       { previous_state : string option
       ; unread_messages : Keeper_librarian_unread.t list
+      ; preparation : working_state_preparation ref
       ; observe : served_by:served_slot -> string -> unit
       ; observe_failure : Keeper_librarian_input_refusal.t list option -> unit
       }
@@ -1532,6 +1546,15 @@ let run_pass
              | None | Some (Error _) -> output_requirement_of_pass pass)
           | Some _ -> Exact_output.make_output_requirement ~schema:(admission_schema ())
               ~minimum_guarantee:Exact_output.Json_syntax in
+        (match inference with
+         | None | Some (Infer_memory _) -> ()
+         | Some (Infer_state observation) ->
+           observation.preparation := (match prompt_material with
+             | Error detail -> Prompt_failed {run_id; variables=prompt_variables; detail}
+             | Ok material -> Prompt_prepared
+               { run_id; resolution=material.resolution; variables=prompt_variables
+               ; rendered_prompt=material.rendered
+               ; output_schema=Exact_output.domain_schema requirement }));
         Exact_lane_run_registry.register_running
           registry
           ~run_id
@@ -2302,23 +2325,30 @@ type inference_failure =
   ; exhausted_input_refusals : Keeper_librarian_input_refusal.t list option
   }
 
-type working_state_inference =
+type working_state_outcome =
   | Inferred of { working_state : string; served_by : served_slot }
   | Not_inferred of inference_failure
+
+type working_state_inference =
+  { preparation : working_state_preparation
+  ; outcome : working_state_outcome
+  }
 
 let infer_working_state ?cli_runner ~base_path ~keepers_dir ~keeper_id
     ~previous_state ~unread_messages input =
   let inferred = ref None and reports = ref [] and exhausted_input_refusals = ref None in
+  let preparation = ref Not_prepared in
   run_pass ~write_scope:Context_only
-    ~inference:(Infer_state {previous_state; unread_messages;
+    ~inference:(Infer_state {previous_state; unread_messages; preparation;
       observe=(fun ~served_by working_state -> inferred := Some (working_state, served_by));
       observe_failure=(fun exhausted -> exhausted_input_refusals := exhausted)})
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ?cli_runner ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
-  match !inferred with
-  | Some (working_state, served_by) -> Inferred { working_state; served_by }
-  | None -> Not_inferred {reports=List.rev !reports;
-      exhausted_input_refusals= !exhausted_input_refusals}
+  let outcome = match !inferred with
+    | Some (working_state, served_by) -> Inferred { working_state; served_by }
+    | None -> Not_inferred {reports=List.rev !reports;
+        exhausted_input_refusals= !exhausted_input_refusals} in
+  {preparation= !preparation; outcome}
 ;;
 
 type memory_inference =

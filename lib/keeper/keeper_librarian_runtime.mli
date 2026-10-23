@@ -163,9 +163,32 @@ type inference_failure = private
     semantic/domain-invalid output or local terminal interrupted the walk.
     Diagnostic reports alone never establish this skip authority. *)
 
-type working_state_inference =
+type working_state_prompt = private
+  { run_id : string
+  ; resolution : Prompt_registry.prompt_resolution
+  ; variables : (string * string) list
+  ; rendered_prompt : string
+  ; output_schema : Yojson.Safe.t
+  }
+(** Immutable base prompt and requirement captured by the actual inference
+    pass before preflight. CLI transports append their schema instructions.
+    This is preparation evidence, not provider-wire or dispatch evidence. *)
+
+type working_state_preparation =
+  | Not_prepared
+  | Prompt_failed of { run_id : string; variables : (string * string) list; detail : string }
+  | Prompt_prepared of working_state_prompt
+(** [Not_prepared] means the pass never reached prompt preparation. Failure
+    reports retain the actual setup reason; no later prompt lookup fills it. *)
+
+type working_state_outcome =
   | Inferred of { working_state : string; served_by : served_slot }
   | Not_inferred of inference_failure
+
+type working_state_inference =
+  { preparation : working_state_preparation
+  ; outcome : working_state_outcome
+  }
 
 val infer_working_state
   :  ?cli_runner:Keeper_lane_cli_oneshot.runner

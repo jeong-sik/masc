@@ -229,13 +229,15 @@ let warn_browser_stagehand_slots registry =
 (* The lanes runtime.toml declares, refused when a mandatory one is unusable,
    and the catalog the loaded runtimes give them. Boot publishes from these;
    the deployment preflight only asks whether it could. *)
-let exact_output_lanes_and_catalog ?config_path ?config_root () =
-  let config_path, lanes =
-    load_exact_output_lane_declarations ?config_path ?config_root ()
-  in
+let exact_output_catalog_for_lanes ~config_path lanes =
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
   let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
   lanes, Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes, runtimes
+;;
+
+let exact_output_lanes_and_catalog ?config_path ?config_root () =
+  let config_path, lanes = load_exact_output_lane_declarations ?config_path ?config_root () in
+  exact_output_catalog_for_lanes ~config_path lanes
 ;;
 
 let exact_output_resolver_snapshot (catalog : Runtime.exact_output_catalog) =
@@ -261,8 +263,7 @@ let exact_output_registry_refused detail =
   Env_config_core.Config_error ("exact-output resolver-and-lane registry: " ^ detail)
 ;;
 
-let configure_exact_output_registry ?config_path ?config_root () =
-  let lanes, catalog, runtimes = exact_output_lanes_and_catalog ?config_path ?config_root () in
+let publish_exact_output_catalog (lanes, catalog, runtimes) =
   (* Logged before the registry is published, so it is said even when
      publication fails. *)
   Runtime.warn_exact_slot_degradation catalog.Runtime.catalog_exact_slots;
@@ -284,6 +285,19 @@ let configure_exact_output_registry ?config_path ?config_root () =
       "exact_output: immutable resolver-and-lane registry published%s"
       catalog.Runtime.catalog_description;
     warn_browser_stagehand_slots registry
+;;
+
+let configure_exact_output_registry ?config_path ?config_root () =
+  publish_exact_output_catalog (exact_output_lanes_and_catalog ?config_path ?config_root ())
+;;
+
+let publish_exact_output_registry_from_observation (observation : Runtime.config_observation) =
+  let lanes = match Runtime_toml.parse_string observation.source_text with
+    | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+    | Error errors -> raise (Env_config_core.Config_error
+        (Printf.sprintf "exact-output registry: runtime config observation parse failed (%s): %d error(s)"
+          observation.path (List.length errors))) in
+  publish_exact_output_catalog (exact_output_catalog_for_lanes ~config_path:observation.path lanes)
 ;;
 
 let check_exact_output_registry ?config_root () =

@@ -77,6 +77,9 @@ val external_prepared : t -> Keeper_external_read_cursor.observation
 val runtime_keepers_dir : t -> string
 val extent : t -> Keeper_librarian_range.extent
 val to_json : t -> Yojson.Safe.t
+(** Restores complete data only. Every checkpoint-persisted message field
+    must agree with the retained exact canonical bytes; additional complete
+    lineage fields remain separately retained and are not execution authority. *)
 val of_json : Yojson.Safe.t -> (t, error) result
 (** Field-exact envelope and typed structured children. Original payload JSON and
     ordered message metadata use the complete Librarian input codec. Complete

@@ -210,6 +210,12 @@ let checkpoint_of_json json =
   let* ()=check (Keeper_checkpoint_ref.equal reference (C.exact_snapshot_reference decoded))
     "Restored checkpoint bytes differ from the original reference" in
   let* messages=list (fun json -> string_error (I.message_of_json json)) (field "messages" f) in
+  (* Lineage values can retain richer ToolResult JSON than the checkpoint
+     codec persists. Bind every persisted message field to the original bytes,
+     while keeping that richer complete value in the separate input codec. *)
+  let persisted messages=`List (List.map Agent_core.Checkpoint.message_to_json messages) in
+  let* ()=check (Yojson.Safe.equal (persisted messages) (persisted (C.exact_snapshot_messages decoded)))
+    "Restored checkpoint messages differ from the original canonical bytes" in
   let* range=range_of_json (field "range" f) in
   let* boundary_lines_seen=int (field "boundary_lines_seen" f) in
   let+ end_boundary_line=int (field "end_boundary_line" f) in
@@ -442,7 +448,8 @@ let validate original =
       (match List.assoc_opt cursor.O.boundary_line original.original_boundaries with
        | Some (Ok {B.recorded_at;event=B.Turn_ended {position=B.No_atom_history;_}}) ->
          Ok (if cursor.boundary_line<first_line then Some recorded_at else None)
-       | Some (Ok {B.event=(B.Turn_ended _ | B.History_restarted _);_}) | Some (Error _) | None ->
+       | Some (Ok {B.event=B.Turn_ended {position=(B.Atom_history _ | B.Empty_atom_history | B.Stale_noop);_};_})
+       | Some (Ok {B.event=B.History_restarted _;_}) | Some (Error _) | None ->
          refuse "Durable official cursor has no original official boundary") in
   let after=List.fold_left (fun acc value -> match acc,value with
     | None,None -> None | Some value,None | None,Some value -> Some value

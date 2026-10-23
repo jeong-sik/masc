@@ -186,6 +186,62 @@ let test_tampered_original_is_refused () = with_fixture Mixed @@ fun _ _ origina
     | _ -> fail "expected mixed fixture")) json);
   expect_refusal (match json with `Assoc fields -> `Assoc (("schema",`Int 1)::fields) | _ -> fail "object");
   expect_refusal (match json with `Assoc fields -> `Assoc (("extra",`Null)::fields) | _ -> fail "object")
+let test_matching_source_and_input_cannot_disagree_with_checkpoint_bytes () =
+  with_fixture Atoms @@ fun _ _ original ->
+  let tamper change =
+    let messages values=match values with
+      | `List rows -> `List (List.map (fun json ->
+          let message=Keeper_librarian_input_capture.message_of_json json |> get in
+          Keeper_librarian_input_capture.message_json (change message)) rows)
+      | _ -> fail "expected complete captured messages" in
+    let changed=Capture.to_json original
+      |> map_field "input_text" (map_json_text (map_field "messages" messages))
+      |> map_field "source_text" (map_json_text (function
+        | `List [`String "checkpoint";checkpoint] ->
+          `List [`String "checkpoint";map_field "messages" messages checkpoint]
+        | _ -> fail "expected checkpoint source")) in
+    expect_refusal changed in
+  tamper (fun (message:Agent_core.Types.message) ->
+    if message.name=Some "original speaker" then
+      {message with content=[Agent_core.Types.Text "replaced selected atom"]} else message);
+  tamper (fun (message:Agent_core.Types.message) ->
+    {message with content=List.map (function
+      | Agent_core.Types.ToolResult value -> Agent_core.Types.ToolResult {value with content="replaced tool payload"}
+      | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _) as block ->
+        block) message.content})
+let test_richer_producer_snapshot_retains_complete_tool_json () =
+  with_fixture Atoms @@ fun config trace_id original ->
+  let old=match Capture.source original with Capture.Checkpoint_only value -> value
+    | Official_only _ | Mixed _ -> fail "expected checkpoint fixture" in
+  let payload=`Assoc ["raw",`Null;"raw",`String "ordered duplicate"] in
+  let messages=List.map (fun (message:Agent_core.Types.message) ->
+    {message with content=List.map (function
+      | Agent_core.Types.ToolResult value -> Agent_core.Types.ToolResult {value with json=Some payload}
+      | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _) as block -> block)
+      message.content}) old.messages in
+  (* The producer-value snapshot port intentionally retains richer data than
+     its canonical checkpoint codec. This is data restoration, not a live lock. *)
+  let snapshot=C.exact_snapshot_of_value ~expected_session_id:old.reference.trace_id
+    (checkpoint ~trace_id messages old.reference.turn_count)
+    |> Result.map_error C.checkpoint_ref_load_error_to_string |> get in
+  let source=Capture.Checkpoint_only (Capture.checkpoint ~snapshot ~range:old.range
+    ~boundary_lines_seen:old.boundary_lines_seen ~end_boundary_line:old.end_boundary_line) in
+  let projection=Capture.project_source ~boundaries:(Capture.boundaries original) source
+    |> Result.map_error Capture.error_to_string |> get in
+  let input={(Capture.input original) with messages=projection.messages;
+    tool_observations=projection.tool_observations;historical_task_contexts=projection.historical_task_contexts} in
+  let richer=Capture.create ~runtime_keepers_dir:(Capture.runtime_keepers_dir original)
+    ~extent:(Capture.extent original) ~boundaries:(Capture.boundaries original) ~positions:(Capture.positions original)
+    ~source ~counterparts:(Capture.counterparts original) ~external_before:(Capture.external_before original)
+    ~external_prepared:(Capture.external_prepared original) ~expected_revision:(Capture.expected_revision original)
+    ~range_id:(Capture.range_id original) ~official_range_id:(Capture.official_range_id original) input
+    |> Result.map_error Capture.error_to_string |> get in
+  let restored=restore_from_disk config richer in
+  check bool "complete producer ToolResult JSON survives persisted-field consistency check" true
+    (List.exists (fun (message:Agent_core.Types.message) -> List.exists (function
+      | Agent_core.Types.ToolResult {json;_} -> json=Some payload
+      | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _ -> false)
+      message.content) (Capture.input restored).messages)
 let test_source_changes_do_not_replace_the_original () = with_fixture Mixed @@ fun config trace_id original ->
   let retained=Capture.to_json original in
   let runtime_keepers_dir=Workspace.keepers_runtime_dir config in
@@ -209,4 +265,8 @@ let () = Alcotest.run "durable source original capture" ["actual source retentio
   test_case "official Main and Internal originals survive strict disk roundtrip" `Quick (check_roundtrip Official);
   test_case "mixed original preserves source order and both receipt kinds" `Quick (check_roundtrip Mixed);
   test_case "changed source bodies receipts and malformed envelopes refuse" `Quick test_tampered_original_is_refused;
+  test_case "source and input tampering cannot contradict canonical checkpoint bytes" `Quick
+    test_matching_source_and_input_cannot_disagree_with_checkpoint_bytes;
+  test_case "producer snapshot richer ToolResult JSON survives strict data restoration" `Quick
+    test_richer_producer_snapshot_retains_complete_tool_json;
   test_case "later source replacement and restart cannot substitute a retained original" `Quick test_source_changes_do_not_replace_the_original]]

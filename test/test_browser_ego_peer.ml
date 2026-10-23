@@ -564,7 +564,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Tab_navigation -> Page_goto {url="https://example.test/next";tab_id=Some 1}
     | Tab_activation -> interact Activate_tab
     | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
-    | Dialog_answer -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Dismiss_dialog})) in
+    | Dialog_answer -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Dismiss_dialog})
+    | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in

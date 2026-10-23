@@ -591,5 +591,6 @@ let dispatch t ~verb args =
   | Page_scene -> pre (scene t args)
   | Page_capture -> pre (capture t args)
   | Page_goto -> goto t args
+  | Page_context -> Error (Live.Before_effect "an ego connection does not read inside frames")
   | Page_act -> act t args
   | Page_interact -> interact t args

@@ -129,6 +129,7 @@ build their rejection from it.
 | `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes | yes, only a page an agent opened in the task space |
 | `tab_creation` | `open_tab` | no | yes | yes |
 | `dialog_answer` | `accept_dialog`, `dismiss_dialog`, only for a tab the same connection opened; the dialog is read from the tab's `list_tabs` row (`dialog`: type, message, defaultValue) | no | yes | no |
+| `frame_read` | `BrowserRead` text, elements and frames modes with `framePath` (observed outer-to-inner iframe selectors); a dialog is not read this way | no | yes | no |
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel | yes, on a page an agent opened, ego's wheel |
 | `trusted_hover` | `hover`, `hover_at` | no | yes | yes, on a page an agent opened |
 | `trusted_drag` | `drag_to`, `drag` | no | yes | no |

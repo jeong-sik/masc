@@ -1,4 +1,4 @@
-import { isImeComposing } from '../lib/keyboard'
+import { isDismissEscape } from '../lib/keyboard'
 import { html } from 'htm/preact'
 import { lazy, memo, Suspense } from 'preact/compat'
 import { useState, useRef, useEffect } from 'preact/hooks'
@@ -582,7 +582,7 @@ function KeeperConfigOverlay({
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.defaultPrevented && !isImeComposing(event) && event.key === 'Escape') {
+      if (isDismissEscape(event)) {
         event.stopPropagation()
         onClose()
       }

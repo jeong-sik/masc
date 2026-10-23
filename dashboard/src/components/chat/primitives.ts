@@ -29,7 +29,7 @@ import { useVoiceInput } from './voice-input'
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost, formatMsCompact } from '../../lib/format-number'
-import { isImeComposing, isSubmitEnter } from '../../lib/keyboard'
+import { isDismissEscape, isImeComposing, isSubmitEnter } from '../../lib/keyboard'
 import { isFailedDelivery } from '../../lib/keeper-delivery'
 import { parseTextToChatBlocks } from '../../lib/chat-blocks'
 import { createPortal, memo } from 'preact/compat'
@@ -995,7 +995,7 @@ function ChatPreviewModal({
 }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!e.defaultPrevented && !isImeComposing(e) && e.key === 'Escape') onClose()
+      if (isDismissEscape(e)) onClose()
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)

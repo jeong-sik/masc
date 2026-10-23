@@ -1,4 +1,4 @@
-import { isImeComposing } from '../../lib/keyboard'
+import { isDismissEscape } from '../../lib/keyboard'
 // Goal creation form — right-hand side panel in the Work surface.
 // Design reference: prototype NewGoalComposer (work.jsx ~line 437).
 // A new Goal declares its measured quantity and target alongside its title.
@@ -44,7 +44,7 @@ export function GoalCreateForm() {
   // Escape key dismisses
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!e.defaultPrevented && !isImeComposing(e) && e.key === 'Escape' && showGoalCreate.value) {
+      if (isDismissEscape(e) && showGoalCreate.value) {
         e.stopPropagation()
         showGoalCreate.value = false
         resetGoalCreateFormLocal()

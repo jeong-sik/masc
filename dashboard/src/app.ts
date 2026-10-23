@@ -15,6 +15,7 @@ import { useEffect } from 'preact/hooks'
 import { lazy, Suspense } from 'preact/compat'
 import { signal } from '@preact/signals'
 import { persistentSignal } from './lib/persistent-signal'
+import { isImeComposing } from './lib/keyboard'
 import { route, initRouter } from './router'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingServerPushRefreshes, registerGateRefresh, registerMissionRefresh, setupServerPushReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
@@ -116,8 +117,7 @@ export function shouldBootstrapCommandPaletteShortcut(
 ): boolean {
   return !mounted
     && !event.defaultPrevented
-    && !event.isComposing
-    && event.keyCode !== 229
+    && !isImeComposing(event)
     && matchesShortcutChord({ key: 'k', modifiers: ['Mod'] }, event)
 }
 

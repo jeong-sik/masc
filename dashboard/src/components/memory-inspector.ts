@@ -1,4 +1,4 @@
-import { isImeComposing } from '../lib/keyboard'
+import { isDismissEscape } from '../lib/keyboard'
 // MASC v2 — Keeper memory inspector (read-only overlay-drawer).
 //
 // Pixel-matched to the Claude-Design prototype keeper-v2/memory.jsx — same
@@ -1035,7 +1035,7 @@ export function MemoryInspector({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!e.defaultPrevented && !isImeComposing(e) && e.key === 'Escape') {
+      if (isDismissEscape(e)) {
         e.stopPropagation()
         onClose()
       }

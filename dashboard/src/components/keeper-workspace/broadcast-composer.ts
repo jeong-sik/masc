@@ -1,4 +1,4 @@
-import { isImeComposing } from '../../lib/keyboard'
+import { isDismissEscape } from '../../lib/keyboard'
 // Keeper Workspace — 전체 브로드캐스트 작성기 (rails.jsx BroadcastComposer).
 // `masc_broadcast`는 content 만 받는다 — 수신 범위(scope)와 경로(via) 선택은
 // 백엔드가 지원하지 않으므로 디자인의 `.bcc-seg`/`.bcc-opt` 선택 UI는 심지
@@ -27,7 +27,7 @@ export function BroadcastComposer({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.defaultPrevented && !isImeComposing(event) && event.key === 'Escape') {
+      if (isDismissEscape(event)) {
         event.stopPropagation()
         onClose()
       }

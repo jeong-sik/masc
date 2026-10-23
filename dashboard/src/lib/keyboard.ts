@@ -1,7 +1,9 @@
-/** Keyboard helpers shared by text inputs that submit on Enter. */
+/** Shared keyboard ownership rules for composition, submission and dismissal. */
 
 /** Safari can report composition keydowns with only the legacy code set. */
-export function isImeComposing(event: KeyboardEvent): boolean {
+export function isImeComposing(
+  event: Partial<Pick<KeyboardEvent, 'isComposing' | 'keyCode'>>,
+): boolean {
   return event.isComposing || event.keyCode === 229
 }
 
@@ -21,4 +23,10 @@ export function isSubmitEnter(event: KeyboardEvent): boolean {
   if (event.key !== 'Enter') return false
   if (isImeComposing(event)) return false
   return true
+}
+
+/** True when Escape is available to dismiss the current overlay or menu.
+ * Input-owned and IME composition keydowns remain with their owner. */
+export function isDismissEscape(event: KeyboardEvent): boolean {
+  return event.key === 'Escape' && !event.defaultPrevented && !isImeComposing(event)
 }

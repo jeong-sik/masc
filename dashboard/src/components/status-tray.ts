@@ -1,4 +1,4 @@
-import { isImeComposing } from '../lib/keyboard'
+import { isDismissEscape } from '../lib/keyboard'
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Activity, AlertTriangle, Bell, Radio, Users, X } from 'lucide-preact'
@@ -566,7 +566,7 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
   useEffect(() => {
     if (!activeKey) return undefined
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.defaultPrevented && !isImeComposing(event) && event.key === 'Escape') {
+      if (isDismissEscape(event)) {
         setActiveKey(null)
       }
     }

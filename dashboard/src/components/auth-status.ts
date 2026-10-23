@@ -1,4 +1,4 @@
-import { isImeComposing, isSubmitEnter } from '../lib/keyboard'
+import { isDismissEscape, isSubmitEnter } from '../lib/keyboard'
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
@@ -267,7 +267,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
   // close-on-ESC behavior independently.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.defaultPrevented && !isImeComposing(event) && event.key === 'Escape') {
+      if (isDismissEscape(event)) {
         event.preventDefault()
         popoverOpen.value = false
       }

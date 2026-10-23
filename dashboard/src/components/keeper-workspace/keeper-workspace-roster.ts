@@ -1,4 +1,4 @@
-import { isImeComposing } from '../../lib/keyboard'
+import { isDismissEscape } from '../../lib/keyboard'
 // Keeper Workspace — roster pane (left). Search + status filter chips +
 // status-grouped keeper rows. Ported from the v2 design (rails.jsx Roster),
 // wired to the live `keepers` store. Selecting a row routes to that keeper,
@@ -556,7 +556,7 @@ export function KeeperWorkspaceRoster({
     // scroll closes it too (capture phase) so the row-anchored menu can't drift
     // away from its row. Mirrors the design roster menu (rails.jsx).
     const onKey = (event: KeyboardEvent) => {
-      if (!event.defaultPrevented && !isImeComposing(event) && event.key === 'Escape') setMenu(null)
+      if (isDismissEscape(event)) setMenu(null)
     }
     window.addEventListener('click', close)
     window.addEventListener('scroll', close, true)

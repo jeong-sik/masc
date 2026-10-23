@@ -280,6 +280,7 @@ let rank_through ~rank ~sources pending ranked size =
 let unranked = { Index.index_builds = 0; indexed_rows = 0; queries_executed = 0 }
 
 let prepare ~neighbor_limit ~render ~ledger ~current ~pending ~size ~frame ~measure =
+  Domain_pool_ref.submit_cpu_or_inline @@ fun () ->
   if neighbor_limit < 0 then Error Invalid_limit
   else match size, pending with
   | Up_to count, _ when count < 1 -> Error (Invalid_size count)

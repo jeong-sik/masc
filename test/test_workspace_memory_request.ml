@@ -286,6 +286,70 @@ let test_next_batch_takes_at_most_the_answered_size () =
                   | Measure_failed _ | Exceeds_frame _ | Invalid_size _) ->
      Alcotest.fail "an empty batch size was accepted")
 
+let with_cpu_pool f =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let previous = Domain_pool_ref.get () in
+    Eio_guard.enable ();
+    Fun.protect ~finally:(fun () ->
+      (match previous with
+       | Some pool -> Domain_pool_ref.set pool
+       | None -> Domain_pool_ref.clear_for_tests ());
+      Eio_guard.disable ()) (fun () ->
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      f ~sw ~caller:(Domain.self () :> int))))
+
+let prepare_with ~render ~measure =
+  Request.prepare ~neighbor_limit:3 ~render ~ledger ~current ~pending:[changed; second]
+    ~size:Request.Fill_frame ~frame:max_int ~measure
+
+let test_preparation_owns_its_cpu_domain () =
+  let expected = get (prepare_with ~render ~measure:(fun _ -> Ok 0)) in
+  with_cpu_pool (fun ~sw:_ ~caller ->
+    let rendered_on = Atomic.make [] and measured_on = Atomic.make [] in
+    let record target =
+      let worker = (Domain.self () :> int) in
+      (* A nested submit on a one-worker pool must finish on that worker. *)
+      let nested = Domain_pool_ref.submit_cpu_or_inline (fun () -> (Domain.self () :> int)) in
+      Atomic.set target ((worker, nested) :: Atomic.get target) in
+    let actual = get (prepare_with
+      ~render:(fun input -> record rendered_on; render input)
+      ~measure:(fun _ -> record measured_on; Ok 0)) in
+    List.iter (fun seen ->
+      Alcotest.(check bool) "callback was exercised" true (seen <> []);
+      List.iter (fun (worker, nested) ->
+        Alcotest.(check bool) "preparation runs off the caller domain" true (worker <> caller);
+        Alcotest.(check int) "nested work stays on its worker" worker nested) seen)
+      [Atomic.get rendered_on; Atomic.get measured_on];
+    Alcotest.check json "pool placement preserves the complete captured batch"
+      (Request.batch_to_json expected) (Request.batch_to_json actual))
+
+let test_preparation_does_not_replay_a_failed_callback () =
+  with_cpu_pool (fun ~sw:_ ~caller:_ ->
+    let entered = Atomic.make 0 in
+    let original = Failure "render already performed its effect" in
+    (match prepare_with ~render:(fun _ ->
+       ignore (Atomic.fetch_and_add entered 1); raise original) ~measure:(fun _ -> Ok 0) with
+     | Ok _ | Error _ -> Alcotest.fail "callback exception disappeared"
+     | exception actual -> Alcotest.(check bool) "original exception propagates" true (actual == original));
+    Alcotest.(check int) "failed callback executes once" 1 (Atomic.get entered))
+
+let test_preparation_cancellation_joins_callback_cleanup () =
+  with_cpu_pool (fun ~sw:_ ~caller:_ ->
+    let entered, entered_u = Eio.Promise.create () in
+    let cleaned = Atomic.make false and calls = Atomic.make 0 in
+    Eio.Fiber.first
+      (fun () ->
+        ignore (prepare_with ~render:(fun _ ->
+          ignore (Atomic.fetch_and_add calls 1);
+          Eio.Switch.run (fun worker_sw ->
+            Eio.Switch.on_release worker_sw (fun () -> Atomic.set cleaned true);
+            Eio.Promise.resolve entered_u ();
+            Eio.Fiber.await_cancel ())) ~measure:(fun _ -> Ok 0)))
+      (fun () -> Eio.Promise.await entered);
+    Alcotest.(check int) "cancelled callback was entered once" 1 (Atomic.get calls);
+    Alcotest.(check bool) "caller returns after worker cleanup" true (Atomic.get cleaned))
+
 let () =
   Alcotest.run "Workspace memory request"
     [ "request shape", [Alcotest.test_case "each fact and entry is listed once" `Quick
@@ -300,6 +364,12 @@ let () =
                          test_first_batch_fills_the_frame_with_the_oldest_facts
                        ; Alcotest.test_case "next batch takes at most the answered size" `Quick
                          test_next_batch_takes_at_most_the_answered_size ]
+    ; "CPU execution", [Alcotest.test_case "preparation owns its CPU domain" `Quick
+                         test_preparation_owns_its_cpu_domain
+                       ; Alcotest.test_case "callback failure is not replayed" `Quick
+                         test_preparation_does_not_replay_a_failed_callback
+                       ; Alcotest.test_case "cancellation joins callback cleanup" `Quick
+                         test_preparation_cancellation_joins_callback_cleanup]
     ; "provider refusal", [Alcotest.test_case "narrow keeps the oldest half" `Quick
                             test_narrow_keeps_the_oldest_half_and_its_context
                           ; Alcotest.test_case "many changes drain oldest first" `Quick

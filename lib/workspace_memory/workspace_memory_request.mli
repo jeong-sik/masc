@@ -91,7 +91,14 @@ val prepare
     batch, not the backlog. [index_stats] counts the build and every query.
     This is the declared protocol frame, not an estimate of provider input
     capacity. No pending facts return [Ok None] without building an index or
-    rendering a prompt. *)
+    rendering a prompt.
+
+    Preparation, including [render] and [measure], runs as one CPU-pool job
+    from an Eio caller with an installed pool. The callbacks must use captured
+    inputs rather than caller-fiber state. Nested index submissions stay on
+    that worker. Without a pool, outside Eio, or already on a pool worker, the
+    same computation runs inline. Exceptions propagate without replay; caller
+    cancellation joins entered worker cleanup before returning. *)
 
 val narrow
   :  render:(Yojson.Safe.t -> (string, string) result)

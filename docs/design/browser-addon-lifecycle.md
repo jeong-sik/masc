@@ -208,9 +208,12 @@ receipts remain distinct from successful contract validation.
    ([geckodriver profiles](https://firefox-source-docs.mozilla.org/testing/geckodriver/Profiles.html)),
    and a browser can leave the worker's process group, for example to apply a
    staged update, and recreate its profile path. So on each configuration pass
-   the host looks at the profiles of instances it no longer owns: it removes a
-   profile nobody holds under its own lock, sends SIGTERM to the process that
-   holds one, and SIGKILL on the next pass if the same process still holds it.
+   the host looks at the profiles of instances whose record says the
+   allocation was released, or that no record names, and that this process
+   neither runs nor recovers. It removes a profile nobody holds under its own
+   lock and sends SIGTERM to the process that holds one. It sends SIGKILL when
+   the same process still holds the profile 70 s after the SIGTERM: by then
+   Firefox's own shutdown watchdog has ended a shutdown that hung.
    Downloads are staged privately but publication/upload and shared persistent
    profiles still require their host brokers. Chrome now has the owned controller
    described below, including dedicated persistent-profile admission. Gecko
@@ -226,9 +229,8 @@ receipts remain distinct from successful contract validation.
    The leftover files stay in place, and the declaration may start a new
    instance. Every later cleanup of that claim reports the allocation as
    retained, never as released, so a binding write that did not land still
-   converges on `Native_retained`. A Gecko build that relaunches itself during
-   startup leaves the group this way: geckodriver reports the original process
-   exit, while the relaunched browser keeps the instance profile (#45187).
+   converges on `Native_retained`. The host's Gecko profile pass leaves a
+   retained instance's profiles in place as well.
 
    The tool proxy must
    preserve the exported tool's installation-selected command/result hooks;

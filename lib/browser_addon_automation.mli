@@ -13,8 +13,9 @@ val run : env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t ->
     only after readiness. Each session runs on a fresh profile in [profiles],
     which is removed when the session ends and its browser has let it go.
     On exit retire admission, close the session and reap the driver. The
-    settled result tells the owner whether the session closed cleanly; the host
-    confirms cleanup from the worker's process group and the profile locks,
-    never from a file this backend writes. Download bytes stay in this
+    settled result tells the owner whether the session closed cleanly. The
+    host releases the allocation once the worker's process group has ended,
+    never on a file this backend writes, and its pass over Gecko profiles ends
+    a browser left behind. Download bytes stay in this
     allocation until a host broker handles them; this backend never publishes
     ambient workspace artifacts. *)

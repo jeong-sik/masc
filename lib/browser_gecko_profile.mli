@@ -23,6 +23,10 @@ val is_masc_name : string -> bool
 (** Whether an instance or profile directory name is a canonical UUID, the only
     names masc gives them. *)
 
+val existing_root : string -> (string option, string) result
+(** The canonical [root], or [None] when it does not exist. A root that is a
+    symbolic link or not a private directory is refused. *)
+
 val check_instance : string -> (unit, string) result
 (** Refuses a directory that is not a private directory with a canonical path. *)
 

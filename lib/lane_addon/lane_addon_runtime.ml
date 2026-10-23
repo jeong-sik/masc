@@ -1791,7 +1791,8 @@ let manager config =
                      fleet_operations=Hashtbl.create 8; fleet_recipients=Hashtbl.create 16; fleet_nudge=(fun () -> ());
                      configuration_status = None; configuration_nudge = (fun () -> ()); configuration_visibility=[];
                      swept = []; sweep_retries = Hashtbl.create 2; sweep_warned = Hashtbl.create 2;
-                     gecko_sweep = Browser_gecko_sweep.create () } in
+                     gecko_sweep = Browser_gecko_sweep.create
+                       ~termination_grace_seconds:Browser_gecko_sweep.termination_grace_seconds } in
       Hashtbl.add managers root m; m
 let reading_exports (reading : live_reading) =
   reading.ready |> List.concat_map (fun ((e : entry), connection) ->
@@ -2288,6 +2289,28 @@ let is_live m (binding : retained_binding) =
 let historical m =
   let* reading = read_retained_bindings m in
   Ok { reading with readable = List.filter (fun binding -> not (is_live m binding)) reading.readable }
+(* G5 of RFC #45368: the host sweeps an instance's Gecko profiles once its
+   record says its allocation was released, or when no record names it, and
+   never while this process runs or recovers it. A record that cannot be read
+   holds back the instance it names, or every instance when it names none.
+   [None] means no instance may be swept on this pass. *)
+let gecko_sweepable m (past : (retained_reading, string) result) =
+  match past with
+  | Error _ -> None
+  | Ok reading ->
+    let held = Hashtbl.create 16 and unattributed = ref false in
+    List.iter (fun (fault : retained_fault) -> match fault.fault_instance with
+        | Some id -> Hashtbl.replace held id ()
+        | None -> unattributed := true) reading.faults;
+    List.iter (fun (binding : retained_binding) ->
+        match text binding.binding_fields "instance_id", lifecycle_of_fields binding.binding_fields with
+        | Ok _, Ok (Lifecycle.Detached (Lifecycle.Never_created | Lifecycle.Released _ | Lifecycle.Native_released _)) -> ()
+        | Ok id, Ok (Lifecycle.Detached (Lifecycle.Native_retained _)
+                     | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Failed _ | Lifecycle.Detaching _)
+        | Ok id, Error _ -> Hashtbl.replace held id ()
+        | Error _, (Ok _ | Error _) -> unattributed := true) reading.readable;
+    if !unattributed then None
+    else Some (fun id -> not (is_live_instance m id || Hashtbl.mem held id))
 (* The record decoder the inventory applies to one retained binding file.
    [recovering] names the instances this process is still cleaning up; it only
    changes the projected phase, never whether a record is read. *)
@@ -2585,7 +2608,7 @@ let historical_detach ~sw ?(wait = false) m fields =
 (* The operator takes over the resources of a native instance whose cleanup
    could not be confirmed (docs/design/browser-addon-lifecycle.md). The host
    still confirms what it can observe, in [native_retain]. What it cannot
-   observe, a missing receipt or an allocation's contents, is not inferred: the
+   observe, an allocation's contents, is not inferred: the
    record says the operator took it over, and the declaration may start a new
    instance. A refusal changes nothing. *)
 let retain_unconfirmed m args =
@@ -4105,17 +4128,26 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Some publish ->
          (match publish ~config exports with
           | Ok () -> () | Error message -> add_issue directory message));
-    (* Gecko browsers that outlived their automation instance. The pass runs
-       on the owner domain without yielding, so the live instances it reads
-       cannot change during it; it is a few file and signal calls. *)
-    List.iter (fun (outcome : Browser_gecko_sweep.outcome) ->
-        let text = Browser_gecko_sweep.outcome_to_string outcome in
-        match outcome with
-        | Removed _ -> Log.Misc.info "Lane Add-on %s" text
-        | Terminated _ | Killed _ | Kept _ -> Log.Misc.warn "Lane Add-on %s" text)
-      (Browser_gecko_sweep.pass m.gecko_sweep
-         ~root:(Browser_gecko_profile.root ~lane_addon_root:(Lane_addon_store.root m.store))
-         ~live:(Hashtbl.mem m.entries));
+    (* Gecko browsers that outlived their automation instance. The plan reads
+       the profile root here, where the sweepable instances are decided; the
+       file and signal work runs off the owner domain. An entry the pass keeps
+       is an issue of this reading, not a log line per beat. *)
+    (match gecko_sweepable m past with
+     | None -> ()
+     | Some sweepable ->
+       let gecko_root = Browser_gecko_profile.root ~lane_addon_root:(Lane_addon_store.root m.store) in
+       let plan = Browser_gecko_sweep.plan ~root:gecko_root ~sweepable in
+       match offload (fun () -> Browser_gecko_sweep.pass m.gecko_sweep plan) with
+       | outcomes ->
+         List.iter (fun (outcome : Browser_gecko_sweep.outcome) ->
+             let text = Browser_gecko_sweep.outcome_to_string outcome in
+             match outcome with
+             | Removed _ -> Log.Misc.info "Lane Add-on %s" text
+             | Terminated _ | Killed _ -> Log.Misc.warn "Lane Add-on %s" text
+             | Kept _ -> add_issue gecko_root text)
+           outcomes
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception exn -> add_issue gecko_root ("the Gecko profile pass failed: " ^ Printexc.to_string exn));
     let reading={directory;snapshot;issues=List.rev !issues} in
     let changed=configuration_event_packages m m.configuration_status reading in
     m.configuration_status <- Some reading;

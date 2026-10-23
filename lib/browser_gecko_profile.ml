@@ -23,18 +23,28 @@ let is_masc_name text = match Uuidm.of_string text with
   | Some uuid -> String.equal (Uuidm.to_string uuid) text
   | None -> false
 
+(* Resolve the parent only: a symlinked root is refused, not followed. *)
+let resolved root = Filename.concat (Unix.realpath (Filename.dirname root)) (Filename.basename root)
+
 let prepare_instance ~root ~instance_id =
   if not (is_masc_name instance_id) then
     Error (Printf.sprintf "%s require a canonical instance UUID; it is %S" instance_label instance_id)
   else protect ~label:root_label root (fun () ->
     ensure_directory root;
-    (* Resolve the parent only: a symlinked root is refused, not followed. *)
-    let root = Filename.concat (Unix.realpath (Filename.dirname root)) (Filename.basename root) in
+    let root = resolved root in
     let* () = checked ~label:root_label root in
     let instance = Filename.concat root instance_id in
     ensure_directory instance;
     let* () = checked ~label:instance_label instance in
     Ok instance)
+
+let existing_root root = protect ~label:root_label root (fun () ->
+  match Unix.lstat root with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | _ ->
+    let root = resolved root in
+    let* () = checked ~label:root_label root in
+    Ok (Some root))
 
 let check_instance instance = protect ~label:instance_label instance (fun () -> checked ~label:instance_label instance)
 

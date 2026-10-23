@@ -400,3 +400,30 @@ containing a quote. Paths and fixture contents use explicit OCaml byte escapes,
 and every expected read is `Some` of the actual 898-byte fixture. A negative
 check where both readers returned `None` failed instead of passing equality.
 The final packet records the runner hash as well as its production-source hashes.
+
+## Native metadata-key comparison
+
+Run [39945639233](https://github.com/jeong-sik/masc/actions/runs/39945639233)
+produced source `0b4ebf61148ebc0f68844af9ed20ed3dd6f88400` from workflow head
+`9c2256fea8fad3bb8ca7e5aed8a92cd803fcbdda`. Artifact metadata, checksums,
+packaged provenance and actual server/TUI embedded identities were verified.
+This source contains the metadata-key change but **not** the optional-reader
+change above. Its comparison source is `196f1f7134dc0bb3835c5e1d74e19d4cd4c6871c`.
+
+Four sequential private-server runs (before, after, after, before) completed
+80 requests at 350 paused metadata rows with all semantic and cleanup checks
+passing. Each cell is p50 / p95 milliseconds from ten requests.
+
+| Pair | Phase | Before | After |
+|---|---|---:|---:|
+| before then after | unchanged | 157.600 / 200.126 | 152.672 / 188.491 |
+| before then after | address changed | 169.443 / 644.668 | 188.174 / 1,569.290 |
+| after then before | unchanged | 174.548 / 318.084 | 138.934 / 780.161 |
+| after then before | address changed | 224.841 / 347.008 | 176.638 / 196.486 |
+
+The unchanged p50 decreased in both pairs, but changed-response and tail
+latencies are inconsistent. This does not establish a uniform native HTTP
+speedup or attainment of 0.1 ms. The raw 80 measurements are in
+`native_meta_key_http.csv`; `native_meta_key_http.json` binds them to the
+source, binary, driver, runtime and cleanup receipts. No candidate was deployed
+to the operating workspace, and no active 350-agent or TUI-render claim follows.

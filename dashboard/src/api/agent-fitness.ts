@@ -41,7 +41,7 @@ export function parseAgentFitness(raw: unknown, agentName: string): AgentFitness
   if (row.agent_id !== agentName) throw new Error('Fitness identity differs from selection')
   if (row.metrics === null && row.components === null) return null
   const metrics = object(row.metrics, [
-    'agent_id', 'period_start', 'period_end', 'record_count', 'total_tasks', 'completed_tasks',
+    'agent_id', 'period_start', 'period_end', 'record_count', 'total_tasks', 'conflicting_tasks', 'completed_tasks',
     'successful_tasks', 'failed_tasks', 'avg_completion_time_s', 'task_completion_rate',
     'task_success_rate', 'error_rate', 'handoff_tasks', 'completed_handoff_tasks',
     'successful_handoff_tasks', 'handoff_task_success_rate', 'unique_collaborators',
@@ -54,6 +54,7 @@ export function parseAgentFitness(raw: unknown, agentName: string): AgentFitness
   }
   const records = count('record_count'), total = count('total_tasks'), completed = count('completed_tasks')
   const successful = count('successful_tasks'), failed = count('failed_tasks')
+  const conflicting = count('conflicting_tasks')
   const handoffs = count('handoff_tasks'), completedHandoffs = count('completed_handoff_tasks')
   const successfulHandoffs = count('successful_handoff_tasks')
   const average = nullableNumber(metrics.avg_completion_time_s)
@@ -61,7 +62,7 @@ export function parseAgentFitness(raw: unknown, agentName: string): AgentFitness
   const speed = rate(components.speed), handoff = rate(components.handoff_task_success)
   const ratio = (n: number, d: number): number | null => d === 0 ? null : n / d
   if (metrics.agent_id !== agentName || number(metrics.period_start) > number(metrics.period_end)
-    || total === 0 || records < total || completed > total || successful + failed !== completed
+    || total === 0 || records < total || completed + conflicting > total || successful + failed !== completed
     || handoffs > total || completedHandoffs > Math.min(handoffs, completed)
     || successfulHandoffs > Math.min(completedHandoffs, successful)
     || completedHandoffs - successfulHandoffs > failed

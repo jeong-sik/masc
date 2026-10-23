@@ -16,7 +16,7 @@ const pending = () => ({
   components: { completion: 0, reliability: null, speed: null, handoff_task_success: null },
   metrics: {
     agent_id: ' Exact ', period_start: 100, period_end: 200,
-    record_count: 2, total_tasks: 1, completed_tasks: 0, successful_tasks: 0, failed_tasks: 0,
+    record_count: 2, total_tasks: 1, conflicting_tasks: 0, completed_tasks: 0, successful_tasks: 0, failed_tasks: 0,
     avg_completion_time_s: null, task_completion_rate: 0, task_success_rate: null, error_rate: null,
     handoff_tasks: 1, completed_handoff_tasks: 0, successful_handoff_tasks: 0,
     handoff_task_success_rate: null, unique_collaborators: [],
@@ -67,6 +67,24 @@ describe('named Task performance delivery', () => {
     for (const value of invalid) expect(() => parseAgentFitness(value, ' Exact ')).toThrow()
     expect(() => parseAgentFitness({ ...response(), count: 2 }, ' Exact ')).toThrow()
     expect(() => parseAgentFitness(response(), 'Exact')).toThrow()
+  })
+
+  it('retains unresolved Task evidence without inventing a completed outcome', () => {
+    const row = pending()
+    const conflicting = { ...row, metrics: { ...row.metrics, conflicting_tasks: 1 } }
+    expect(parseAgentFitness(response(conflicting), ' Exact ')).toEqual(row.components)
+    expect(() => parseAgentFitness(response({ ...conflicting,
+      metrics: { ...conflicting.metrics, conflicting_tasks: 2 },
+    }), ' Exact ')).toThrow()
+    const completed = failed()
+    expect(() => parseAgentFitness(response({ ...completed,
+      metrics: { ...completed.metrics, conflicting_tasks: 1 },
+    }), ' Exact ')).toThrow()
+    for (const value of [-1, 0.5, NaN]) {
+      expect(() => parseAgentFitness(response({ ...row,
+        metrics: { ...row.metrics, conflicting_tasks: value },
+      }), ' Exact ')).toThrow()
+    }
   })
 
   it('requires measured positive duration for a named speed score', () => {

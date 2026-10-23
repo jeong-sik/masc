@@ -27,7 +27,14 @@ replacement request or another inference.
   retained in the later integration candidate.
 - Production integration: [run39894327289](https://github.com/jeong-sik/masc/actions/runs/39894327289),
   exact `d22196b9e65e83df4d6aaacac40b716ee5dbdcfd`, requested ten concrete suites.
-  Its completed result has not yet been read. This is not a PASS claim.
+  Compilation passed. Execution ran **438 cases: 421 passed and 17 failed**.
+  Seven suites succeeded completely, including the actual atomic Memory basis
+  guard. Ten integration cases failed in fixture checkpoint setup, six capture
+  cases used metadata refused by the canonical encoder, and the capacity
+  fixture incorrectly marked its already-read baseline as a restart.
+  [The exact-head receipt](history-production-first-execution.json) retains
+  per-suite counts and timings. These failures require repaired fixtures and a
+  fresh execution; the eleven integration cases are not yet a PASS claim.
 
 ## What the eleven integration cases exercise
 

@@ -128,12 +128,13 @@ let inventory_hash ~ceilings inventory =
       then identity else identity @ ["size",`Int s.file_size;"modified",`Float s.modified_at;"changed",`Float s.changed_at] in
     `Assoc fields) (prefix ~ceilings inventory.files) in
   hash (Yojson.Safe.to_string (`List (inventory.roots @ rows)))
-(* A transfer buffer, not a record/window/history limit. A row can span any
-   number of blocks. Owned reads validate the no-follow path and descriptor. *)
-let io_block_bytes=4096
+(* The same 64 KiB transfer size used by Fs_compat's streaming file readers.
+   This amortizes owned opens and systhread crossings without loading a dated
+   file into memory. It is not a row/history limit: rows span arbitrary blocks. *)
+let io_block_bytes=65536
 type reader = { root : string; file : file; mutable block_from : int; mutable block : string }
 let reader ~root file = {root;file;block_from=(-1);block=""}
-let byte reader offset =
+let load_block reader offset =
   if offset<0 || offset>=reader.file.snapshot.file_size then Error Source_changed
   else
     let* () =
@@ -151,23 +152,32 @@ let byte reader offset =
             && String.length range.content=length ->
           reader.block_from<-from;reader.block<-range.content;Ok ()
         | Some _ -> Error Source_changed in
-    Ok reader.block.[offset-reader.block_from]
+    Ok ()
+let byte reader offset =
+  let* ()=load_block reader offset in
+  Ok reader.block.[offset-reader.block_from]
 let previous reader before =
   if before=0 then Ok None
   else
     let* ending=byte reader (before-1) in
     if ending<>'\n' then Error (Invalid_event {file=reader.file.relative;offset=before-1})
     else
-      let buffer=Buffer.create 128 in
-      let finish start = let backwards=Buffer.contents buffer in
-        let length=String.length backwards in
-        Some (start,String.init length (fun i -> backwards.[length-i-1])) in
-      let rec walk offset =
-        if offset<0 then Ok (finish 0)
-        else let* value=byte reader offset in
-          if value='\n' then Ok (finish (offset+1))
-          else (Buffer.add_char buffer value;walk (offset-1)) in
-      walk (before-2)
+      (* Search whole slices, preserving their forward byte order. Walking
+         Result/Buffer once per byte and reversing every row made sparse
+         histories spend seconds on unrelated workspace activity. *)
+      let rec walk offset chunks =
+        if offset<0 then Ok (Some (0,String.concat "" chunks))
+        else
+          let* ()=load_block reader offset in
+          let index=offset-reader.block_from in
+          match String.rindex_from_opt reader.block index '\n' with
+          | Some ending ->
+            let chunk=String.sub reader.block (ending+1) (index-ending) in
+            Ok (Some (reader.block_from+ending+1,String.concat "" (chunk::chunks)))
+          | None ->
+            let chunk=String.sub reader.block 0 (index+1) in
+            walk (reader.block_from-1) (chunk::chunks) in
+      walk (before-2) []
 let anchor_matches reader position =
   let* () = if position.device=reader.file.snapshot.device && position.inode=reader.file.snapshot.inode
       && position.before<reader.file.snapshot.file_size then Ok () else Error Source_changed in
@@ -176,9 +186,16 @@ let anchor_matches reader position =
   let buffer=Buffer.create 128 in
   let rec walk offset =
     if offset>=reader.file.snapshot.file_size then Error Source_changed
-    else let* value=byte reader offset in
-      if value='\n' then if hash (Buffer.contents buffer)=position.anchor then Ok () else Error Source_changed
-      else (Buffer.add_char buffer value;walk (offset+1)) in
+    else
+      let* ()=load_block reader offset in
+      let index=offset-reader.block_from in
+      match String.index_from_opt reader.block index '\n' with
+      | Some ending ->
+        Buffer.add_substring buffer reader.block index (ending-index);
+        if hash (Buffer.contents buffer)=position.anchor then Ok () else Error Source_changed
+      | None ->
+        Buffer.add_substring buffer reader.block index (String.length reader.block-index);
+        walk (reader.block_from+String.length reader.block) in
   walk position.before
 let matches_task ~task_id ~file ~offset line =
   let invalid () = Error (Invalid_event {file=file.relative;offset}) in

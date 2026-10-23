@@ -130,16 +130,20 @@ let with_fs_or_fallback ~path ~fallback f =
   | None -> fallback ()
 ;;
 
-let load_file_unix (path : string) : string =
-  let ic = Stdlib.open_in path in
+let read_channel_and_close ~before_read (path : string) ic : string =
   Stdlib.Fun.protect
     ~finally:(fun () -> Stdlib.close_in_noerr ic)
     (fun () ->
        let len = Stdlib.in_channel_length ic in
+       before_read ();
        (* A file that shrinks between the length and the read is an I/O failure
           like any other: [load_file_opt] documents [Sys_error] for them. *)
        try Stdlib.really_input_string ic len with
        | End_of_file -> raise (Sys_error (path ^ ": file shrank while it was being read")))
+;;
+
+let load_file_unix (path : string) : string =
+  read_channel_and_close ~before_read:ignore path (Stdlib.open_in path)
 ;;
 
 (* The Eio path below creates with 0o644. [Stdlib.open_out] creates with
@@ -1638,26 +1642,37 @@ let read_dir (path : string) : string list =
 ;;
 
 (** Load entire file contents as string, or [None] when the file is
-    missing. A path lookup failure is not absence. A file that vanishes
-    between lookup and open is also absent; all other I/O failures propagate
-    as [Sys_error], matching {!load_file}. *)
-let load_file_opt (path : string) : string option =
-  let missing () =
-    match exact_path_kind path with
-    | Exact_missing -> true
-    | Exact_kind _ | Exact_unknown -> false
-  in
-  try
-    if missing ()
-    then None
-    else (
-      try Some (load_file path) with
-      | Sys_error _ when missing () -> None)
-  with
-  | Unix.Unix_error (error, operation, argument) ->
-    raise
-      (Sys_error
-         (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)))
+    absent at open. Once opened, the descriptor owns the read result: a
+    later unlink cannot turn a read failure into absence. *)
+let load_file_opt_unix ~before_read (path : string) : string option =
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+  | fd ->
+    let ic =
+      match Unix.in_channel_of_descr fd with
+      | ic -> ic
+      | exception exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        (try Unix.close fd with Unix.Unix_error _ -> ());
+        Printexc.raise_with_backtrace exn bt
+    in
+    Some (read_channel_and_close ~before_read path ic)
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
+  | exception Unix.Unix_error (error, _, _) ->
+    raise (Sys_error (Printf.sprintf "%s: %s" path (Unix.error_message error)))
+;;
+
+let load_file_opt_with ~before_read path =
+  let read () = load_file_opt_unix ~before_read path in
+  with_fs_or_fallback ~path ~fallback:read (fun _fs ->
+    on_systhread ~label:(labelled "fs-compat-load-file-opt" path) read)
+;;
+
+let load_file_opt path = load_file_opt_with ~before_read:ignore path
+;;
+
+module Optional_read_for_testing = struct
+  let load_file_opt = load_file_opt_with
+end
 ;;
 
 let file_size (path : string) : int option =

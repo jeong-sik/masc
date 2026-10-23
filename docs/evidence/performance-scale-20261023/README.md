@@ -341,5 +341,62 @@ OCaml 5.5.1 interpreter, valid metadata key validation only:
 
 This component becomes faster in the interpreter but allocates an additional
 512 bytes per valid object in this fixture. It is not a native server speedup,
-a file-I/O improvement, or an active-agent capacity result. Native schema and
-consumer execution for this additional source change remains pending.
+a file-I/O improvement, or an active-agent capacity result. Native schema and consumer execution for this additional source change
+completed in run [39945635957](https://github.com/jeong-sik/masc/actions/runs/39945635957)
+at `0b4ebf61148ebc0f68844af9ed20ed3dd6f88400`: current schema 12, current
+keyset 3, invalid recovery 6 and Dashboard HTTP core 156 tests passed (177 total).
+These do not cover the subsequent optional-read change below.
+
+## One descriptor for optional metadata reads
+
+Metadata presence and byte capture previously used a separate existence check
+and read, with another path check inside the safe read adapter. The new path
+uses one optional descriptor read in one blocking job; JSON decoding, UTF-8
+repair, schema validation and recovery logging stay in their original caller
+context. Every request still opens the current file. There is no new cache,
+freshness interval, or batch cancellation delay across multiple files.
+
+The shared optional reader treats only `ENOENT` from open as absence. A successful
+open owns the length/read/close result even when the path is later replaced or
+unlinked. This also fixes a reproduced failure: the prior optional wrapper
+turned a short read into `None` if the path disappeared before its error handler
+looked again. The candidate retains the read error. A non-directory metadata
+parent now produces the documented read error instead of an absent Keeper.
+
+The focused probe executes actual before/after Fs helper source with installed
+Eio. Only fixture write/removal helpers are supplied locally. A declared
+after-length hook in the historical reader creates the same controlled
+truncate-and-unlink boundary as the candidate test hook. The baseline returned
+`None`; the candidate raised `Sys_error`. Six cases in each of inline/Eio mode
+plus the Eio cancellation case passed (13 total), including permission errors,
+symlinks, opened-file replacement, failed reads and worker completion before
+cancellation returns. The cancellation check yields before releasing the
+blocked reader so an early-return implementation could not pass it trivially.
+
+```sh
+python3 docs/evidence/performance-scale-20261023/run_optional_read_probe.py \
+  --output /tmp/new-optional-read-probe
+```
+
+Nine alternating rounds, warm synthetic metadata files, OCaml 5.5.1 interpreter
+with actual Eio handoffs. Full GC and input preparation are outside each timer.
+The timer includes every read and returned list allocation; exact bytes are
+compared after the timer. This does not measure native HTTP, full metadata
+parsing, active agents or installed-runtime improvement.
+
+| Files | Before median ms | After median ms | Before / after allocated bytes |
+|---:|---:|---:|---:|
+| 35 | 2.053458 | 1.230084 | 154,648 / 86,608 |
+| 350 | 17.025042 | 10.868625 | 1,540,648 / 860,248 |
+
+The baseline source is `0b4ebf61148ebc0f68844af9ed20ed3dd6f88400`.
+`optional_read_sources.json`, `optional_read_checks.txt` and
+`optional_read_probe.csv` retain hashes, checks and all 36 measurement rows.
+The source-extracted test run is distinct from the full native Fs and metadata
+consumer suites, which remain pending for this change.
+
+The final optional-read probe also ran beneath a non-ASCII temporary directory
+containing a quote. Paths and fixture contents use explicit OCaml byte escapes,
+and every expected read is `Some` of the actual 898-byte fixture. A negative
+check where both readers returned `None` failed instead of passing equality.
+The final packet records the runner hash as well as its production-source hashes.

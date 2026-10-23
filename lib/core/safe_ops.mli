@@ -99,6 +99,10 @@ val read_file_result : string -> (string, read_file_error) result
     message's prefix. Uses Eio-native I/O via Fs_compat when available
     (after set_fs), falls back to blocking I/O in non-Eio contexts. *)
 
+val read_file_opt_result : string -> (string option, read_file_error) result
+(** One descriptor-based optional read. [Ok None] means absent at open;
+    an I/O failure is [Error (Read_failed _)]. Cancellation propagates. *)
+
 val read_file_safe : string -> (string, string) result
 (** [read_file_result] with the error rendered for display. *)
 

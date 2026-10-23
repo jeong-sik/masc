@@ -1,0 +1,45 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import JZZ from 'jzz'
+import midiFiles from 'jzz-midi-smf'
+import {newEditor,editorCommand} from '../sequencer-editor.mjs'
+import {importMidiSource,midiSourcePattern} from '../midi-source.mjs'
+import {projectMidi} from '../sequencer-files.mjs'
+midiFiles(JZZ)
+const command=(editor,line)=>editorCommand(editor,line).editor
+function source({attacks=[500],port=0,channel=0,format=1}={}) {
+  const file=new JZZ.MIDI.SMF(format,1000)
+  file.push(new JZZ.MIDI.SMF.MTrk().add(140,JZZ.MIDI.noteOn(0,60,80))
+    .add(440,JZZ.MIDI.noteOff(0,60,45)).add(2000,JZZ.MIDI.smfEndOfTrack()))
+  const raw=new JZZ.MIDI.SMF.MTrk().add(0,JZZ.MIDI.smfMidiPort(port))
+  for(const tick of attacks)raw.add(tick,JZZ.MIDI.noteOn(channel,60,77))
+  file.push(raw.add(2000,JZZ.MIDI.smfEndOfTrack()))
+  return newEditor(importMidiSource(file.toUint8Array()))
+}
+
+test('both quantizers refuse entering an unclosed attack even when an old diagnostic masks the new pair',()=>{
+  for(const attacks of [[500],[300,500]])for(const selected of [false,true]) {
+    let editor=source({attacks})
+    if(selected)editor=command(editor,'select-all')
+    const before=structuredClone(editor),bytes=projectMidi(editor.project)
+    assert.throws(()=>command(editor,`${selected?'quantize-notes':'quantize'} 0.25`),/overlapping/)
+    assert.deepEqual(editor,before)
+    assert.deepEqual(projectMidi(editor.project),bytes)
+  }
+})
+
+test('original unclosed overlaps remain supported, distinct routes and SMF2 patterns stay independent',()=>{
+  for(const options of [{attacks:[300]},{port:1},{channel:1},{attacks:[600]}]) {
+    const editor=source(options), next=command(editor,'quantize 0.25')
+    assert.deepEqual(next.performance.notes.map(n=>[n.start,n.duration]),[[250,300]])
+    const exported=midiSourcePattern(importMidiSource(projectMidi(next.project)))
+    const onsets=events=>events.filter(e=>e.kind==='channel'&&e.track===1).map(e=>[e.tick,e.port,e.bytes])
+    assert.deepEqual(onsets(exported.events),onsets(editor.performance.events))
+    assert.deepEqual(command(next,'undo').project,editor.project)
+  }
+  const editor=command(source({format:2}),'pattern 1')
+  const next=command(editor,'quantize 0.25')
+  assert.equal(next.performance.notes[0].start,250)
+  const originalTracks=new JZZ.MIDI.SMF(projectMidi(editor.project)),tracks=new JZZ.MIDI.SMF(projectMidi(next.project))
+  assert.equal(tracks[1].dump(),originalTracks[1].dump())
+})

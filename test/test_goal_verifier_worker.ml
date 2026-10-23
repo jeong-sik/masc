@@ -339,10 +339,161 @@ let test_actual_goal_commit_reply_loss_and_conflict () =
   exercise false;
   exercise true
 
+module H = Goal_verifier_host
+module R = Goal_verification_run_registry
+module Agent = Goal_verification_agent.For_testing
+let hosted = function Ok value -> value | Error error -> Alcotest.fail (H.error_to_string error)
+let host_prepared config store =
+  let goal_id = pending config in
+  let authority = get (A.create_goal_review ~config ~goal_id) in
+  let original = get (V.prepare ~attempt:0 ~authority) in
+  let run : W.run_identity = {run_id="host/" ^ (V.subject original).request_id; started_at=Time_compat.now ()} in
+  authority, checked (W.retain ~store ~installation_id:W.host_installation_id
+    ~package_id:W.host_package_id ~run original)
+let host_load store original =
+  let subject = V.subject original in
+  match checked (W.load ~store ~installation_id:W.host_installation_id ~package_id:W.host_package_id
+    ~goal_id:subject.goal_id ~request_id:subject.request_id ~attempt:(V.attempt original)) with
+  | Some retained -> retained | None -> Alcotest.fail "actual host original vanished"
+let drain config = match Agent.drain_once config with
+  | Ok () -> () | Error error -> Alcotest.fail (Agent.scan_failure_to_string error)
+let phase config goal_id = match Goal_store.find_goal config ~goal_id with
+  | Goal_found goal -> goal.phase
+  | Goal_absent -> Alcotest.fail "Goal vanished"
+  | Store_unavailable unavailable -> Alcotest.fail (Goal_store.unavailable_to_string unavailable)
+let transition config goal_id action =
+  let ctx : Workspace_types.context = {config; agent_name="planner"} in
+  let result = Workspace_goals.handle_goal_transition ~tool_name:"goal_transition"
+    ~start_time:(Tool_timing.start ()) ctx
+    (`Assoc ["goal_id", `String goal_id; "action", `String action; "note", `String "fixture actor request"]) in
+  if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result)
+let actual_approve calls =
+  fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
+      ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+    incr calls;
+    let input = `Assoc ["file_path", `String measurement_path] in
+    let result = lookup.AR.dispatch ~name:"tool_read_file" ~args:input in
+    if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
+    on_tool_result ~input result;
+    Ok {AR.selected_runtime_id="goal-reviewer"; verdict=Some (AR.Approve "actual target measured")}
+
+let test_actual_agent_restores_before_lookup_and_registry () = with_workspace (fun config store root ->
+  let authority, retained = host_prepared config store in
+  let original = W.original retained in
+  let subject = V.subject original in
+  let calls = ref 0 in
+  with_reviewer (actual_approve calls) (fun () ->
+    let first = checked (run store retained authority) in
+    Alcotest.(check bool) "actual tool result exists before restart" true (first.tools <> []);
+    Alcotest.(check bool) "registry is actually missing" true
+      (R.get (R.global ()) ~run_id:first.run.run_id = None);
+    let shared_root = Filename.dirname root in
+    Fs_compat.remove_tree shared_root;
+    Out_channel.with_open_bin shared_root (fun out -> output_string out "not a lookup directory");
+    (match A.create_goal_review ~config ~goal_id:subject.goal_id with
+     | Error _ -> () | Ok _ -> Alcotest.fail "lookup refusal fixture did not really fail");
+    let prompt_dir = Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts" in
+    Fun.protect ~finally:(fun () -> Prompt_registry.set_markdown_dir prompt_dir) (fun () ->
+      Prompt_registry.set_markdown_dir (Filename.concat config.base_path "missing-prompts");
+      drain config;
+      drain config);
+    Alcotest.(check int) "production recovery never asks another model" 1 !calls;
+    Alcotest.(check bool) "human confirmation still pending" true
+      (phase config subject.goal_id = Goal_phase.Awaiting_confirmation);
+    (match R.get (R.global ()) ~run_id:first.run.run_id with
+     | Some (R.Review {status=R.Completed {outcome=R.Committed; tools; _}; started_at; _}) ->
+       Alcotest.(check bool) "same original tools and start time survive" true
+         (tools = first.tools && started_at = first.run.started_at)
+     | None | Some (R.Review _ | R.Scan_skipped _) -> Alcotest.fail "actual fixed run completion was not restored");
+    match P.phase (W.progress (host_load store original)) with
+    | Finished _ -> ()
+    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+    | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Alcotest.fail "actual host did not confirm its original commit"))
+
+let test_actual_partial_proof_and_nonverifying_boot () = with_workspace (fun config store _ ->
+  let authority, retained = host_prepared config store in
+  let original = W.original retained in
+  let subject = V.subject original in
+  let calls = ref 0 in
+  with_reviewer (actual_approve calls) (fun () ->
+    let receipt = checked (run store retained authority) in
+    let verdict : Goal_verification.verdict = {outcome=Goal_verification.Proven;
+      request_id=subject.request_id; criterion=subject.criterion; verification_run_id=receipt.run.run_id;
+      authority=Workspace_goals.verifier_authority; evidence="actual target measured";
+      recorded_at=Masc_domain.now_iso ()} in
+    ignore (stored (Goal_store.transact_goal config ~goal_id:subject.goal_id (fun goal ->
+      Result.map (fun record -> goal, record) (Goal_verification.record_proof_verdict
+        ~before_commit:(fun () -> Candle_snapshot.before_proof_commit config goal verdict)
+        config ~goal_id:subject.goal_id verdict))));
+    Alcotest.(check bool) "real ledger-before-phase crash" true (phase config subject.goal_id=Goal_phase.Verifying);
+    let isolated_registry = R.create ~path:(Filename.concat (Workspace.masc_dir config) "partial-proof-runs.jsonl") () in
+    hosted (H.commit_proof ~config ~store ~registry:isolated_registry (host_load store original));
+    Alcotest.(check bool) "partial commit converged through real Goal reconciliation" true
+      (phase config subject.goal_id=Goal_phase.Awaiting_confirmation);
+    drain config;
+    Alcotest.(check int) "non-Verifying boot recovery makes no model call" 1 !calls;
+    (match R.get (R.global ()) ~run_id:receipt.run.run_id with
+     | Some (R.Review {status=R.Completed {outcome=R.Committed; _}; _}) -> ()
+     | None | Some (R.Review _ | R.Scan_skipped _) -> Alcotest.fail "phase-moved original missing from actual boot recovery");
+    match get (Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id) with
+    | Some {completion=Goal_verification.Proof_proven stored; _} ->
+      Alcotest.(check string) "original proof timestamp was not rewritten" verdict.recorded_at stored.recorded_at
+    | None | Some _ -> Alcotest.fail "real proof was lost"))
+
+let test_actual_explicit_retry_and_unknown_fence () =
+  let exercise unknown = with_workspace (fun config store _ ->
+    let authority, retained = host_prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      incr calls;
+      if unknown then Error (Agent_core.Error.Api (Agent_core.Retry.NetworkError
+        {message="reply lost"; kind=Llm_provider.Http_client.Connection_reset}))
+      else Error (Agent_core.Error.Api (Agent_core.Retry.NotFound {message="candidate removed"}))) (fun () ->
+      ignore (run store retained authority);
+      transition config subject.goal_id "request_complete";
+      let rows = checked (W.inventory ~store ~installation_id:W.host_installation_id ~package_id:W.host_package_id) in
+      Alcotest.(check int) "explicit request links only a definitely settled failure" (if unknown then 1 else 2) (List.length rows);
+      Atomic.set AR.run_llm_reviewer_fn (actual_approve calls);
+      drain config;
+      Alcotest.(check int) "unknown execution never re-enters after explicit request" (if unknown then 1 else 2) !calls;
+      Alcotest.(check bool) "actual phase follows definite retry authority" true
+        (phase config subject.goal_id = if unknown then Goal_phase.Verifying else Awaiting_confirmation))) in
+  exercise false;
+  exercise true
+
+let test_actual_bound_suspend_and_drop () =
+  let exercise dropped = with_workspace (fun config store _ ->
+    let authority, retained = host_prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      ignore (checked (run store retained authority));
+      transition config subject.goal_id (if dropped then "drop" else "pause");
+      drain config;
+      Alcotest.(check int) "suspended or dropped original never calls another model" 1 !calls;
+      Alcotest.(check bool) "actual operator lifecycle is preserved" true
+        (phase config subject.goal_id = if dropped then Goal_phase.Dropped else Paused Resume_verifying);
+      if not dropped then (
+        transition config subject.goal_id "resume";
+        Alcotest.(check bool) "resume reconciles proof without human completion" true
+          (phase config subject.goal_id=Goal_phase.Awaiting_confirmation)))) in
+  exercise false;
+  exercise true
+
 let () = Alcotest.run "retained Goal worker" ["execution", [
   Alcotest.test_case "actual retained visual lookup and restart receipt" `Quick test_actual_retained_lookup_and_restored_receipt;
   Alcotest.test_case "unknown and cancellation never redispatch" `Quick test_unknown_and_cancellation_never_redispatch;
   Alcotest.test_case "same-original pre-admission repair" `Quick test_pre_admission_repair_keeps_original;
   Alcotest.test_case "authority destination and strict inventory" `Quick test_destination_authority_and_inventory;
   Alcotest.test_case "linked frontier restores the original staged run" `Quick test_linked_frontier_and_staged_run_recovery;
-  Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict]]
+  Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict;
+  Alcotest.test_case "actual agent restores before lookup and registry" `Quick test_actual_agent_restores_before_lookup_and_registry;
+  Alcotest.test_case "actual proof partial write and phase-moved boot" `Quick test_actual_partial_proof_and_nonverifying_boot;
+  Alcotest.test_case "actual explicit retry and unknown fence" `Quick test_actual_explicit_retry_and_unknown_fence;
+  Alcotest.test_case "actual bound suspend and drop" `Quick test_actual_bound_suspend_and_drop]]

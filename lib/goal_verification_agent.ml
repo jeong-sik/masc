@@ -6,7 +6,7 @@
     persists BEFORE any model call, written before the phase enters
     [Verifying] (B3), asks one question of each — did the goal's declared
     metric reach its declared target value — through
-    {!Task.Anti_rationalization.run} (so provider selection is the
+    {!Goal_verifier_worker.run} (so provider selection is the
     [verifier_exact] exact-output lane with frozen-order failover), and
     commits the verdict through the typed internal boundary
     {!Workspace_goals.commit_verifier_decision}, so the FSM decides, the
@@ -25,7 +25,7 @@
     Failure keeps evidence. Typed transient provider failures retry the same
     request after the earliest candidate rest; permanent or unclassified
     failures wait for an explicit completion request or configuration recovery.
-    Every retry rechecks the request identity. No wall-clock expiry. *)
+    Every retry restores its linked original and rechecks the request identity. Unknown dispatch never replays. No wall-clock expiry. *)
 
 type pending_work = { goal_id : string }
 
@@ -212,123 +212,30 @@ let skip_scan (unavailable : Goal_store.unavailable) =
     ~unavailable
 ;;
 
-(* {1 Proof prompt}
+(* {1 Retained Goal review host}
 
-   A Goal declares a metric and a target value when it is created. The proof
-   review asks one question: did that metric reach that target. The prompt is
-   config/prompts/goal_verification.md (slot proof) and its variables are the goal's
-   own — nothing about Tasks reaches the judge, because a Task proves its own
-   contract and says nothing about a Goal's metric. *)
-
-(* The judge is told what it holds. A surface it is never described cannot be
-   used: an evaluator that held read tools and was told nothing about them
-   spent the whole review guessing paths (masc#29250). *)
-let render_lookup_section
-      ~(lookup : Task.Anti_rationalization.lookup_surface)
-      ~root_layout
-      ~submitted_evidence
-  =
-  let tool_names =
-    lookup.Task.Anti_rationalization.schemas
-    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-    |> String.concat ", "
-  in
-  (* The empty-root sentence is the same prose the task verifier renders;
-     both lanes share the one slot in verification.md. *)
-  let root_layout_lines =
-    match root_layout with
-    | [] ->
-      Result.map
-        (fun text -> "  " ^ String.trim text)
-        (Prompt_registry.render_prompt_template
-           Prompt_names.verification_lookup_root_layout_empty
-           [])
-    | entries ->
-      Ok (entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n")
-  in
-  (* The submitted identities are data. What the judge does with them is
-     said in the [lookup] slot of goal_verification.md. *)
-  let submitted_sources =
-    Yojson.Safe.to_string
-      (`List
-          (List.map
-             Workspace_verification_store.submitted_evidence_item_metadata_to_yojson
-             submitted_evidence))
-  in
-  match root_layout_lines with
-  | Error _ as error -> error
-  | Ok root_layout_lines ->
-    Prompt_registry.render_prompt_template
-      Prompt_names.goal_verification_lookup
-      [ "lookup_tools", tool_names
-      ; "lookup_root_layout", root_layout_lines
-      ; "submitted_sources", submitted_sources
-      ]
-;;
-
-let render_proof_prompt ~lookup ~root_layout ~submitted_evidence (goal : Goal_store.goal) =
-  let open Result.Syntax in
-  let declared = function
-    | Some value when String.trim value <> "" -> value
-    | Some _ | None -> "(not declared)"
-  in
-  let* lookup_section = render_lookup_section ~lookup ~root_layout ~submitted_evidence in
-  Prompt_registry.render_prompt_template
-    Prompt_names.goal_verification_proof
-    [ "goal_title", goal.Goal_store.title
-    ; "metric", declared goal.Goal_store.metric
-    ; "target_value", declared goal.Goal_store.target_value
-    ; "lookup_section", lookup_section
-    ]
-;;
-
-(* The Goal proof read surface. It is built here rather than derived from
-   anything the Goal links to: the root is the shared playground, one fixed
-   workspace location, and every producer's tree sits under it. An unreadable
-   root is not turned into "the tree is empty" — the review defers with the
-   reason and the pending row stays durable. *)
-let goal_proof_lookup config ~submitted_evidence =
-  let open Result.Syntax in
-  let* tools = Verification_authority_tools.create_goal_proof ~config ~submitted_evidence in
-  let* root_layout = Verification_authority_tools.goal_proof_root_layout tools in
-  Ok
-    ( { Task.Anti_rationalization.schemas = Verification_authority_tools.schemas tools
-      ; dispatch = Verification_authority_tools.dispatch tools
-      }
-    , root_layout )
-;;
-
-(* {1 Verdict commit}
-
-   The application-owned worker crosses a typed internal boundary. Public MCP
-   callers can request lifecycle changes but cannot name verifier verdicts or
-   impersonate the fixed verifier authority.
-
-   A passing verdict is committed after the Candle Snapshot step has recorded
-   the Goal's inputs to a payout (RFC-goal-candle-ledger 3.2). The step writes
-   nothing unless Candle is enabled, and while it is enabled a Snapshot that
-   cannot be written refuses the commit, so the request stays pending. *)
-
-let commit_gate_verdict config ~goal_id ~request_id ~criterion ~verification_run_id ~decision ~evidence
-  : (unit, string) result
-  =
-  let result =
-    Workspace_goals.commit_verifier_decision
-      ~before_proof_commit:(Candle_snapshot.before_proof_commit config)
-      ~tool_name:"goal_verifier_commit"
-      ~start_time:(Tool_timing.start ())
-      config
-      ~goal_id
-      ~request_id
-      ~criterion
-      ~verification_run_id
-      ~decision
-      ~evidence
-  in
-  if Tool_result.is_success result
-  then Ok ()
-  else Error (Tool_result.message result)
-;;
+   The existing Goal lock/proof ledger and registry remain their owners.
+   Original selection precedes lookup or prompt construction. *)
+module Original = Goal_verifier_original
+module Worker = Goal_verifier_worker
+module Host = Goal_verifier_host
+module Progress = Lane_addon_request_progress
+module Registry = Goal_verification_run_registry
+let ( let* ) = Result.bind
+let owner_store config = Lane_addon_store.create
+  ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")
+let worker_detail = function
+  | Worker.Store_unavailable detail | Original_invalid detail | Authority_changed detail
+  | Execution_pending detail -> detail
+let originals store = Worker.inventory ~store ~installation_id:Worker.host_installation_id
+  ~package_id:Worker.host_package_id |> Result.map_error worker_detail
+let reload_original store retained =
+  let original = Worker.original retained in
+  let subject = Original.subject original in
+  let* current = Worker.load ~store ~installation_id:Worker.host_installation_id ~package_id:Worker.host_package_id
+    ~goal_id:subject.goal_id ~request_id:subject.request_id ~attempt:(Original.attempt original)
+    |> Result.map_error worker_detail in
+  match current with Some value -> Ok value | None -> Error "Goal original disappeared before host observation"
 
 (* {1 Processing} *)
 
@@ -412,235 +319,189 @@ let announce_raised ~config ~goal_id ~request_id ~evaluator_runtime ~detail =
       (Printexc.to_string exn)
 ;;
 
-let process_pending_work_inner
-      ?(sw : Eio.Switch.t option = None)
-      ~observe_tool
-      ~observe_evaluator_runtime
-      ~persist_reviewed
-      ~verification_run_id
-      ~bound_review
-      config
-      (work : pending_work)
-  : process_outcome
-  =
-  let goal, (request_id, criterion, submitted_evidence) = bound_review in
-    let outcome =
-       (match goal_proof_lookup config ~submitted_evidence with
-        | Error detail ->
-          defer
-            ~goal_id:work.goal_id
-            (Proof_lookup_unavailable
-               { detail = "goal proof lookup surface unavailable: " ^ detail })
-        | Ok (lookup, root_layout) ->
-       let on_tool_result ~input result = observe_tool ~input result in
-       let result =
-         Task.Anti_rationalization.run
-           ~base_path:config.base_path
-           ~sw
-           ~log_info:(fun message ->
-             Log.Misc.info
-               "[goal-proof-review] goal_id=%s %s"
-               work.goal_id
-               message)
-           ~log_warn:(fun message ->
-             Log.Misc.warn
-               "[goal-proof-review] goal_id=%s %s"
-               work.goal_id
-               message)
-           ~render_prompt:(fun () ->
-             render_proof_prompt ~lookup ~root_layout ~submitted_evidence goal)
-           ~lookup
-           ~provider_rest:Verification_retry.provider_rest
-           ~on_tool_result
-           ()
-       in
-       observe_evaluator_runtime result.evaluator_runtime;
-          (match result.verdict with
-           | None ->
-             let detail =
-               match result.fallback_reason with
-               | Some reason -> reason
-               | None -> Task.Anti_rationalization.gate_to_string result.gate
-             in
-             (* The unchanged pending request retains transient candidate
-                identities for the daemon's retry scheduler; permanently
-                refused candidates (model-absence) are named separately so the
-                deferral records every candidate's outcome, not only the last
-                one's error. *)
-             defer
-               ~goal_id:work.goal_id
-               (Not_reviewed
-                  { gate = Task.Anti_rationalization.gate_to_string result.gate
-                  ; detail
-                  ; evaluator_runtime = Some result.evaluator_runtime
-                  ; retryable_runtimes = result.retryable_runtimes
-                  ; model_absent_runtimes = result.model_absent_runtimes
-                  })
-           | Some review_verdict ->
-             let evidence =
-               match review_verdict with
-               | Task.Anti_rationalization.Reject reason
-               | Task.Anti_rationalization.Approve reason -> reason
-             in
-             if String.equal (String.trim evidence) ""
-             then
-               defer ~goal_id:work.goal_id Verdict_without_reason
-             else (
-               let decision =
-                 match review_verdict with
-                 | Task.Anti_rationalization.Approve _ -> Workspace_goals.Proof_proven
-                 | Task.Anti_rationalization.Reject reason ->
-                   Workspace_goals.Proof_refuted { reason }
-               in
-               let evaluated_verdict = match review_verdict with
-                 | Task.Anti_rationalization.Approve reason -> Goal_verification_run_registry.Approved { reason }
-                 | Task.Anti_rationalization.Reject reason -> Goal_verification_run_registry.Rejected { reason } in
-               persist_reviewed evaluated_verdict;
-               match
-                 commit_gate_verdict
-                   config
-                   ~goal_id:work.goal_id
-                   ~request_id
-                   ~criterion
-                   ~verification_run_id
-                   ~decision
-                   ~evidence
-               with
-               | Ok () ->
-                 Log.Misc.info
-                   "goal verifier committed goal_id=%s verdict=%s"
-                   work.goal_id
-                   (Task.Anti_rationalization.verdict_constructor_name review_verdict);
-                 Committed
-               | Error detail ->
-                 (* A refused commit (stale verifier answer, a phase that moved
-                    under the review) consumes nothing: the pending row stays
-                    durable and the next pulse re-reads it. *)
-                 defer ~goal_id:work.goal_id (Commit_refused { detail }))))
-    in
-    match outcome with
-    | Committed | Superseded -> outcome
-    | Deferred _ ->
-      (* Re-read the Goal under its lock. A newer request supersedes this
-         review; only the same request may schedule a retry or announce a stall. A Goal that left
-         Verifying has nothing to wait for. *)
-      (match bind_review config ~goal_id:work.goal_id with
-       | Ok (_, (current_request_id, _, _))
-         when not (String.equal request_id current_request_id) -> Superseded
-       | Ok _ -> outcome
-       | Error _ -> outcome)
+let new_run () : Worker.run_identity =
+  {run_id=Random_id.uuid_v7 (); started_at=Time_compat.now ()}
+
+let retained_recovery_work config work =
+  let store = owner_store config in
+  match originals store with
+  | Error detail ->
+    (* This is not a complete inventory. Ordinary pending work still reaches
+       the same strict read in process_pending_work and cannot dispatch. *)
+    Log.Misc.error "goal verifier original inventory unavailable: %s" detail;
+    work
+  | Ok rows ->
+    List.fold_left (fun work retained ->
+      let needed = match Host.needs_recovery ~registry:(Registry.global ()) retained with
+        | Ok needed -> needed
+        | Error error ->
+          Log.Misc.error "goal verifier retained observation unavailable: %s" (Host.error_to_string error);
+          true in
+      let goal_id = (Original.subject (Worker.original retained)).goal_id in
+      if needed && not (List.exists (fun item -> item.goal_id=goal_id) work)
+      then work @ [{goal_id}] else work) work rows
 ;;
 
 let process_pending_work ?(sw : Eio.Switch.t option = None)
     ?(schedule_retry = fun ~goal_id:_ ~request_id:_ _ -> Verification_protocol.No_retry_armed)
-    config (work : pending_work)
-  : process_outcome
-  =
-  match bind_review config ~goal_id:work.goal_id with
-  | Error detail -> defer ~goal_id:work.goal_id (Review_not_bound { detail })
-  | Ok ((_goal, (request_id, criterion, _)) as bound_review) ->
-  let registry = Goal_verification_run_registry.global () in
-  let run_id = Random_id.uuid_v7 () in
-  let started_at = Time_compat.now () in
-  let tools = ref [] in
-  let evaluator_runtime = ref None in
-  let evaluated_verdict = ref None in
-  Goal_verification_run_registry.register_running
-    registry
-    ~run_id
-    ~goal_id:work.goal_id
-    ~request_id
-    ~criterion
-    ~review_kind:Goal_verification_run_registry.Proof
-    ~authority_actor:(Standalone_lane.to_id Standalone_lane.Verifier)
-    ~started_at;
-  let observe_tool ~input result =
-    tools :=
-      Verification_run_registry.observe_tool_result
-        ~input
-        ~finished_at:(Time_compat.now ())
-        result
-      :: !tools
-  in
-  let observe_evaluator_runtime runtime = evaluator_runtime := Some runtime in
-  let persist outcome =
-    Goal_verification_run_registry.mark_completed
-      registry
-      ~run_id
-      ~outcome
-      ~evaluated_verdict:!evaluated_verdict
-      ~tools:(List.rev !tools)
-      ?evaluator_runtime:!evaluator_runtime
-      ~elapsed_s:(max 0.0 (Time_compat.now () -. started_at))
-      ()
-  in
-  let persist_reviewed verdict =
-    evaluated_verdict := Some verdict;
-    persist Goal_verification_run_registry.Reviewed
-  in
-  let complete outcome =
-    let registry_outcome =
-      match outcome with
-      | Committed -> Goal_verification_run_registry.Committed
-      | Superseded -> Goal_verification_run_registry.Superseded
-          { detail = "review superseded by a newer pending proof request" }
-      | Deferred deferral ->
-        Goal_verification_run_registry.Deferred { detail = deferral_detail deferral }
-    in
-    persist registry_outcome
-  in
+    config (work : pending_work) : process_outcome =
+  let store = owner_store config in
+  let registry = Registry.global () in
+  let active = ref None in
+  let publish retained outcome = Host.publish ~registry retained ~outcome
+    |> Result.map_error Host.error_to_string in
+  let fail_original detail = defer ~goal_id:work.goal_id (Proof_lookup_unavailable {detail}) in
+  let commit retained =
+    let subject = Original.subject (Worker.original retained) in
+    match Host.commit_proof ~config ~store ~registry retained with
+    | Ok () ->
+      Log.Misc.info "goal verifier committed retained goal_id=%s run_id=%s"
+        subject.goal_id (Worker.run_identity retained).run_id;
+      Committed
+    | Error (Host.Conflict detail) ->
+      (match publish retained (Registry.Superseded {detail}) with
+       | Ok () -> Superseded
+       | Error detail -> defer ~goal_id:work.goal_id (Commit_refused {detail}))
+    | Error (Host.Unavailable detail | Invalid_original detail) ->
+      let detail = match publish retained (Registry.Deferred {detail}) with
+        | Ok () -> detail | Error observation -> detail ^ " | observation: " ^ observation in
+      defer ~goal_id:work.goal_id (Commit_refused {detail}) in
+  let recover rows =
+    List.fold_left (fun (committed, failed) retained ->
+      let subject = Original.subject (Worker.original retained) in
+      if subject.goal_id <> work.goal_id then committed, failed
+      else match Host.needs_recovery ~registry retained with
+      | Error error -> committed, Some (Host.error_to_string error)
+      | Ok false -> committed, failed
+      | Ok true ->
+        active := Some retained;
+        (match Progress.phase (Worker.progress retained) with
+         | Judged _ | Committing _ | Commit_unknown _ | Finished _ ->
+           (match commit retained with
+            | Committed -> true, failed
+            | Superseded -> committed, failed
+            | Deferred deferral -> committed, Some (deferral_detail deferral))
+         | Conflicted _ ->
+           (match publish retained (Registry.Superseded {detail="original proof conflicted with a later Goal state"}) with
+            | Ok () -> committed, failed | Error detail -> committed, Some detail)
+         | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
+           (match publish retained (Registry.Deferred {detail="retained original review has no settled Goal proof"}) with
+            | Ok () -> committed, failed | Error detail -> committed, Some detail)))
+      (false,None) rows in
+  let process_current ~recovered =
+    match bind_review config ~goal_id:work.goal_id with
+    | Error _ when recovered -> Committed
+    | Error detail -> defer ~goal_id:work.goal_id (Review_not_bound {detail})
+    | Ok (_, (request_id, criterion, _)) ->
+      let operation () =
+        let* selected = Worker.frontier ~store ~installation_id:Worker.host_installation_id
+          ~package_id:Worker.host_package_id ~goal_id:work.goal_id ~request_id ~new_run
+          |> Result.map_error worker_detail in
+        let* retained, prepared_authority = match selected with
+          | Some retained -> Ok (retained, None)
+          | None ->
+            let* authority = Verification_authority_tools.create_goal_review ~config ~goal_id:work.goal_id in
+            let subject = Verification_authority_tools.goal_review_subject authority in
+            let* () = if subject.request_id=request_id && Goal_store.criterion_equal subject.criterion criterion
+              then Ok () else Error "Goal proof changed during original preparation" in
+            let* original = Original.prepare ~attempt:0 ~authority in
+            let* retained = Worker.retain ~store ~installation_id:Worker.host_installation_id ~package_id:Worker.host_package_id
+              ~run:(new_run ()) original |> Result.map_error worker_detail in
+            Ok (retained, Some authority) in
+        active := Some retained;
+        let* () = Host.ensure_registered ~registry retained |> Result.map_error Host.error_to_string in
+        let* restored = Worker.restored_receipt retained |> Result.map_error worker_detail in
+        let execution = match restored with
+          | Some receipt -> Ok receipt
+          | None ->
+            let authority = match prepared_authority with
+              | Some authority -> Ok authority
+              | None -> Verification_authority_tools.create_goal_review ~config ~goal_id:work.goal_id in
+            (match authority with
+             | Error detail -> Error (Worker.Authority_changed detail)
+             | Ok authority -> Worker.run ~store ~retained ~authority ~sw
+                 ~provider_rest:Verification_retry.provider_rest ()) in
+        let* saved = reload_original store retained in
+        active := Some saved;
+        let result = match execution with
+          | Error error ->
+            let detail = worker_detail error in
+            let* () = publish saved (Registry.Deferred {detail}) in
+            let deferral = match error with
+              | Worker.Execution_pending _ ->
+                let* receipt = Worker.observed_receipt saved |> Result.map_error worker_detail in
+                Ok (Not_reviewed {gate="Original_pending"; detail;
+                  evaluator_runtime=Option.map (fun receipt -> receipt.Worker.result.evaluator_runtime) receipt;
+                  retryable_runtimes=[]; model_absent_runtimes=[]})
+              | Store_unavailable _ | Original_invalid _ | Authority_changed _ ->
+                Ok (Proof_lookup_unavailable {detail}) in
+            let* deferral = deferral in
+            Ok (defer ~goal_id:work.goal_id deferral)
+          | Ok receipt ->
+            let result = receipt.Worker.result in
+            (match result.verdict with
+             | None ->
+               let detail = match result.fallback_reason with Some reason -> reason
+                 | None -> Task.Anti_rationalization.gate_to_string result.gate in
+               let deferral = Not_reviewed {
+                 gate=Task.Anti_rationalization.gate_to_string result.gate; detail;
+                 evaluator_runtime=Some result.evaluator_runtime; retryable_runtimes=result.retryable_runtimes;
+                 model_absent_runtimes=result.model_absent_runtimes} in
+               let* () = publish saved (Registry.Deferred {detail=deferral_detail deferral}) in
+               Ok (defer ~goal_id:work.goal_id deferral)
+             | Some (Task.Anti_rationalization.Approve reason | Reject reason) when String.trim reason = "" ->
+               let* () = publish saved (Registry.Deferred {detail=deferral_detail Verdict_without_reason}) in
+               Ok (defer ~goal_id:work.goal_id Verdict_without_reason)
+             | Some (Approve _ | Reject _) -> Ok (commit saved)) in
+        let* outcome = result in
+        let outcome = match outcome with
+          | Committed | Superseded -> outcome
+          | Deferred _ ->
+            (match bind_review config ~goal_id:work.goal_id with
+             | Ok (_, (current,_,_)) when current <> request_id -> Superseded
+             | Ok _ | Error _ -> outcome) in
+        (match outcome with
+         | Deferred deferral ->
+           (match bind_review config ~goal_id:work.goal_id with
+            | Ok (_, (current,_,_)) when current=request_id ->
+              let disposition = schedule_retry ~goal_id:work.goal_id ~request_id deferral in
+              announce_deferral ~goal_id:work.goal_id ~request_id ~disposition deferral
+            | Ok _ | Error _ -> ())
+         | Committed | Superseded -> ());
+        Ok outcome in
+      (match operation () with Ok outcome -> outcome | Error detail -> fail_original detail) in
   try
-    let outcome =
-      process_pending_work_inner
-        ~sw
-        ~observe_tool
-        ~observe_evaluator_runtime
-        ~persist_reviewed
-        ~verification_run_id:run_id
-        ~bound_review
-        config
-        work
-    in
-    complete outcome;
-    (match outcome with
-     | Deferred deferral ->
-       (match bind_review config ~goal_id:work.goal_id with
-        | Ok (_, (current, _, _)) when String.equal current request_id ->
-          let disposition = schedule_retry ~goal_id:work.goal_id ~request_id deferral in
-          announce_deferral ~goal_id:work.goal_id ~request_id ~disposition deferral
-        | Ok _ | Error _ -> ())
-     | Committed | Superseded -> ());
-    outcome
+    match originals store with
+    | Error detail -> fail_original detail
+    | Ok rows ->
+      let recovered, failure = recover rows in
+      (match failure with
+       | Some detail -> defer ~goal_id:work.goal_id (Commit_refused {detail})
+       | None -> process_current ~recovered)
   with
   | Eio.Cancel.Cancelled _ as exn ->
-    (* Same discipline as the task verifier: the cancelled review completes
-       its observation row before the cancellation continues (W6). *)
     Eio.Cancel.protect (fun () ->
-      persist
-        (Goal_verification_run_registry.Review_cancelled
-           { detail = "review fiber cancelled: " ^ Printexc.to_string exn }));
+      match !active with
+      | None -> ()
+      | Some retained ->
+        (match reload_original store retained with
+         | Error detail -> Log.Misc.error "goal cancellation original read failed: %s" detail
+         | Ok saved ->
+           match publish saved (Registry.Review_cancelled {detail="review fiber cancelled: " ^ Printexc.to_string exn}) with
+           | Ok () -> () | Error detail -> Log.Misc.error "goal cancellation observation failed: %s" detail));
     raise exn
   | exn ->
-    (* The notice goes first: the run registry write below raises when the
-       registry cannot persist, and a failure of the registry is exactly when
-       the Board is most needed. *)
-    announce_raised
-      ~config
-      ~goal_id:work.goal_id
-      ~request_id
-      ~evaluator_runtime:!evaluator_runtime
-      ~detail:(Printexc.to_string exn);
-    Goal_verification_run_registry.mark_completed
-      registry
-      ~run_id
-      ~outcome:
-        (Goal_verification_run_registry.Raised
-           { detail = Printexc.to_string exn })
-      ~evaluated_verdict:!evaluated_verdict
-      ~tools:(List.rev !tools)
-      ?evaluator_runtime:!evaluator_runtime
-      ~elapsed_s:(max 0.0 (Time_compat.now () -. started_at))
-      ();
+    (match !active with
+     | None -> ()
+     | Some retained ->
+       let subject = Original.subject (Worker.original retained) in
+       announce_raised ~config ~goal_id:work.goal_id ~request_id:subject.request_id
+         ~evaluator_runtime:None ~detail:(Printexc.to_string exn);
+       match reload_original store retained with
+       | Error detail -> Log.Misc.error "raised Goal original read failed: %s" detail
+       | Ok saved ->
+         match publish saved (Registry.Raised {detail=Printexc.to_string exn}) with
+         | Ok () -> () | Error detail -> Log.Misc.error "raised Goal observation failed: %s" detail);
     raise exn
 ;;
 
@@ -657,7 +518,7 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
             (commit/defer); the synchronous drain discards them. *)
          (* fire-and-forget: per-row results are durable in the ledger. *)
          ignore (process_pending_work ~sw config item))
-      collected;
+      (retained_recovery_work config collected);
     Ok ()
 ;;
 
@@ -868,6 +729,7 @@ let process_pending (runtime : runtime) =
   | Error (Scan_skipped unavailable) -> skip_scan unavailable
   | Ok { collected = work; unreconciled } ->
     publish_unreconciled unreconciled;
+    let work = retained_recovery_work runtime.config work in
     let active = Atomic.get runtime.in_flight in
     let available = max 0 (max_concurrent_reviews - List.length active) in
     let eligible =

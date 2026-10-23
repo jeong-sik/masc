@@ -17,8 +17,11 @@ type error =
   | Original_invalid of string
   | Authority_changed of string
   | Execution_pending of string
+val error_to_string : error -> string
 
 type retained
+val host_installation_id : string
+val host_package_id : string
 
 val retain :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
@@ -50,8 +53,20 @@ val frontier :
     retry. [None] means no first attempt exists. The host serializes this
     request under its workspace lease through selection, retention and run. *)
 
+val request_retry :
+  store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
+  goal_id:string -> request_id:string -> requested_by:string ->
+  new_run:(unit -> run_identity) -> (unit, error) result
+(** Actual explicit request_complete boundary only: retain one linked retry
+    after a definitely settled non-verdict, including a permanent candidate
+    refusal whose configuration an actor repaired. Store the actor/parent
+    authorization in the complete staged child before acknowledging it.
+    An ordinary wake, active/unknown dispatch or judgment grants no retry. *)
+
 val original : retained -> Goal_verifier_original.t
 val run_identity : retained -> run_identity
+val destination : retained -> string * string
+(** The original installation_id and package_id, in that order. *)
 val progress : retained -> Lane_addon_request_progress.t
 val restored_receipt : retained -> (receipt option, error) result
 (** A retained judgment/terminal refusal and all actual tool observations, independent
@@ -60,6 +75,16 @@ val restored_receipt : retained -> (receipt option, error) result
 val retained_judgment : retained -> (Yojson.Safe.t, error) result
 (** Complete validated stored judgment for the host's commit payload. Returns
     an error before judgment; never rebuilds a receipt or a model decision. *)
+
+val tool_observations : retained ->
+  (Verification_run_registry.tool_observation list, error) result
+(** Restore actual saved observations, including unknown/cancelled dispatch.
+    This passive read grants no judgment, retry or domain effect. *)
+
+val observed_receipt : retained -> (receipt option, error) result
+(** Passive receipt restoration including admission and unknown outcomes.
+    Unlike [restored_receipt], a returned value need not be a settled review;
+    the caller must use progress for dispatch/commit authority. *)
 
 val run :
   ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->

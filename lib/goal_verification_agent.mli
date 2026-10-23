@@ -3,7 +3,7 @@
     Application-owned LLM agent (not a Keeper) that drains the goal
     verification ledger's durable [Proof_pending] requests (B3), judges each
     through
-    {!Task.Anti_rationalization.review} on the [verifier_exact] lane, and
+    the durable {!Goal_verifier_worker} on the [verifier_exact] lane, and
     commits the verdict through {!Workspace_goals.commit_verifier_decision},
     the typed internal FSM+ledger+phase+event boundary, under the fixed
     identity [System_llm_agent { agent_run_id = "verifier_exact" }]
@@ -11,8 +11,11 @@
 
     Typed non-verdicts (evaluator unavailable, malformed reply after all
     slots failed, verdict without a stated reason, refused commit) leave the
-    pending row durable. Typed retryable evaluator errors retry the same
-    request after candidate rest; other deferrals need an explicit wake.
+    pending row durable. Typed definite retryable evaluator errors select a
+    durably linked successor after candidate rest. Proven pre-admission repair
+    reuses the original; unknown dispatch never replays. Boot restores saved
+    judgments/commits before lookup preparation, including phase-moved Goals.
+    Other deferrals need an explicit wake.
     A pending row is never consumed on failure and has no wall-clock expiry. *)
 
 val start :

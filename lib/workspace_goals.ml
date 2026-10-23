@@ -792,6 +792,21 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
   match result with
   | Error error -> proof_request_failure ~tool_name ~start_time error
   | Ok (goal, (record, reconciled)) ->
+      let retry = match goal.phase, record with
+        | Goal_phase.Verifying, Some {Goal_verification.completion=Proof_pending {request_id; _}; _} ->
+          let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir ctx.config) "lane-addons") in
+          Goal_verifier_worker.request_retry ~store
+            ~installation_id:Goal_verifier_worker.host_installation_id
+            ~package_id:Goal_verifier_worker.host_package_id ~goal_id ~request_id
+            ~requested_by:ctx.agent_name ~new_run:(fun () ->
+              {Goal_verifier_worker.run_id=Random_id.uuid_v7 (); started_at=Time_compat.now ()})
+          |> Result.map_error (fun error -> Refused (refuse Internal_error
+            ("Goal retry publication unconfirmed: " ^ Goal_verifier_worker.error_to_string error)))
+        | (Goal_phase.Executing | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _), _
+        | Verifying, (None | Some {completion=(Completion_idle | Proof_proven _ | Proof_refuted _ | Human_confirmed _); _}) -> Ok () in
+      (match retry with
+       | Error error -> proof_request_failure ~tool_name ~start_time error
+       | Ok () ->
       let delivery = deliver_goal_effects ctx.config in
       (match goal.phase, record with
        | Goal_phase.Verifying, Some { Goal_verification.completion = Goal_verification.Proof_pending _; _ } ->
@@ -807,7 +822,7 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
              [ "goal_id", `String goal_id; "action", `String (Goal_phase.action_to_string action)
              ; "noop", `Bool false; "reconciled", `Bool true; "effect_delivery", delivery
              ; "phase", Goal_phase.to_yojson goal.phase; "goal", Goal_store.goal_to_yojson goal
-             ; "verification", Goal_verification.record_to_yojson_for_goal ~goal proof_record ])
+             ; "verification", Goal_verification.record_to_yojson_for_goal ~goal proof_record ]))
 ;;
 
 (* The work a dropped Goal leaves behind. A Task also linked to a Goal that is

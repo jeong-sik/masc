@@ -158,7 +158,7 @@ export function midiClipPerformance(document) {
     if (!event) throw new Error('Unknown original MIDI Clip message identity')
     if (Object.hasOwn(edit, 'words')) {
       if (!Array.isArray(edit.words) || edit.words.length !== event.words.length
-          || edit.words.some(word => !Number.isInteger(word) || word < 0 || word > 0xffffffff)
+          || Array.from(edit.words).some(word => !Number.isInteger(word) || word < 0 || word > 0xffffffff)
           || (edit.words[0] & 0xffffff00) !== (event.words[0] & 0xffffff00)) throw new Error('MIDI Clip edits must preserve message width and address')
       if (edit.words[0] !== event.words[0] && !((event.words[0] >>> 28) === 4 && (event.words[0] >>> 20 & 15) === 9
           && [0, 3].includes(event.words[0] & 255) && (edit.words[0] & 255) === 3)) throw new Error('Only an explicit native NoteOn absolute-pitch override can change its attribute')
@@ -177,7 +177,10 @@ export function midiClipPerformance(document) {
   // Validate authored known metadata as well as original metadata.
   for (const row of [...configuration, ...sequence]) { clipTempo(row); clipMeter(row) }
   const endTick = sequence.reduce((end, row) => clipTick(row.tick) > end ? clipTick(row.tick) : end, clipTick(source.end.tick))
-  return { ...source, configuration, sequence, ticks: String(endTick), bytes }
+  const configurationTempo = configuration.map(clipTempo).find(value => value !== null) ?? null
+  const configurationMeter = configuration.map(clipMeter).find(value => value !== null) ?? null
+  return { ...source, events: [...configuration, ...sequence], configurationTempo, configurationMeter,
+    configuration, sequence, ticks: String(endTick), bytes }
 }
 
 // All elapsed times share PPQ as a denominator. Accumulate integer tempo*ticks

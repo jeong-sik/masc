@@ -75,6 +75,27 @@ test('a missing tempo stays unresolved until explicitly supplied, without repair
   assert.equal(midiClipClock(empty).sequence.duration.numerator, '0')
 })
 
+test('edited configuration summaries, effective events and clocks agree before export, after reread and after reset', () => {
+  const document = importMidiClip(source()), original = midiClipPerformance(document)
+  const [tempo, meter] = original.configuration
+  const edited = editMidiClip(document, [
+    { kind: 'words', id: tempo.id, words: [tempo.words[0], 60000000, 0, 0] },
+    { kind: 'words', id: meter.id, words: [meter.words[0], 0x03020800, 0, 0] },
+  ])
+  const current = midiClipPerformance(edited), reread = midiClipPerformance(importMidiClip(exported(edited)))
+  assert.equal(current.configurationTempo, 60000000)
+  assert.deepEqual(current.configurationMeter, { numeratorCode: 3, denominatorPower: 2, notated32nds: 8 })
+  assert.deepEqual(current.events, [...current.configuration, ...current.sequence])
+  assert.equal(current.configurationTempo, reread.configurationTempo)
+  assert.deepEqual(current.configurationMeter, reread.configurationMeter)
+  assert.deepEqual(midiClipClock(edited).configuration.duration,
+    midiClipClock(importMidiClip(exported(edited))).configuration.duration)
+  const reset = editMidiClip(edited, [{ kind: 'reset-words', id: tempo.id }, { kind: 'reset-words', id: meter.id }])
+  assert.deepEqual(midiClipPerformance(reset).configurationMeter, original.configurationMeter)
+  assert.equal(midiClipPerformance(reset).configurationTempo, original.configurationTempo)
+  assert.deepEqual(exported(reset), exported(document))
+})
+
 test('opaque untimed SysEx7 setup and nonstandard meter codes stay source data', () => {
   const opaque = [0x30, 0x06, 0x7e, 0x7f, 0x0d, 0x22, 1, 0x7f]
   const bytes = file([opaque, ...prefix(), JZZ.UMP.umpTempo(0, 50000000), raw([0xd0100001, 0x00000800, 0, 0]), dc(0), start(), dc(0), end()])
@@ -93,7 +114,9 @@ test('broken envelopes, zero resolution, duplicate IDs and address changes refus
     file([...prefix(), dc(0), dc(1), start(), dc(0), end()])]
   for (const bytes of bad) assert.throws(() => importMidiClip(bytes))
   const document = importMidiClip(good), note = midiClipNotes(document)[0], before = structuredClone(document)
+  const sparse = Array(2); sparse[0] = note.words[0]
   for (const changes of [[{ id: note.id, words: undefined }], [{ id: note.id, tick: undefined }],
+    [{ id: note.id, words: sparse }],
     [{ id: note.id, tick: '-1' }], [{ id: note.id, tick: '01' }],
     [{ id: note.id, tick: '1' }, { id: note.id, tick: '2' }],
     [{ id: note.id, words: [note.words[0] ^ 0x100, note.words[1]] }]]) {

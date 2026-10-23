@@ -38,7 +38,7 @@
 | ID | 항목 | 근거 | 상태 |
 |---|---|---|---|
 | C1 | 연속 실패 예산 숫자 게이트 (3, 5) — crash accounting 전환 | `keeper_unified_turn_failure.ml` 에 threshold 없음 (2026-09-02 재확인, RFC turn-failure-visible-stop #32105) | 완료 |
-| C2 | 반복 툴 호출 threshold=3 → 턴 yield. 2026-09-02 재확인: tool 축(`:156`)에 assistant-text 축(`:169`)이 더해져 둘. 둘 다 "입력+출력 지문 동일" typed 조건 위의 count 이며 예외 주석을 달고 있다. #32472 배포 24h 뒤 `yielded_after_repeated_*` 발화 비중을 재서 제거 여부를 정한다 | `keeper_agent_run.ml:156,169,215,244` | 재측정 대기 |
+| C2 | 도구·입력·응답·문장 반복 횟수로 진행 정체를 단정하던 자동 중단을 제거한다. 명시적 종단 효과·실패·큐 요청의 경계와 외부 효과 재실행 방지는 유지한다. 같은 키 입력/응답 반복은 화면 상태 불변의 증거가 아니다 | `keeper_agent_run.ml`의 `native_tool_boundary`, `official_client_tool_boundary`; `keeper_official_client_host.ml`의 `dynamic_tools` | 소스 수정; native 실행·설치 검증 미완료 |
 | C3 | `"SKIP:"` 접두사 문자열 매칭으로 turn_mode 분류 | `keeper_unified_metrics_support.ml` 에 `"SKIP` 리터럴 없음 (2026-09-02 재확인) | 완료 |
 | C4 | provider 에러 detail 자유 텍스트 접두사 검사 — 뿌리는 agent_core 가 typed `stop_reason` 을 문자열로 납작하게 만든 것 | `Llm_provider.Error.EmptyCompletion` variant 로 재타입, `keeper_error_classify.ml` 은 variant 매치 | PR (empty-completion-is-a-variant) |
 

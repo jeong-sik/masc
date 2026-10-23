@@ -25,11 +25,16 @@ type destination = {
   configuration_revision : string;
 }
 type work = private
-  | Classification of { ledger : Workspace_memory_ledger.t; batch : Workspace_memory_request.batch }
+  | Classification of {
+      ledger : Workspace_memory_ledger.t;
+      revision : Workspace_memory_revision.ledger;
+      batch : Workspace_memory_request.batch;
+    }
   | Briefing of Workspace_memory_briefing.batch
 type t
 val classification : request_id:Request_id.t -> workspace:workspace -> destination:destination ->
   prompt:Prompt_registry.prompt_resolution -> ledger:Workspace_memory_ledger.t ->
+  stored_ledger:Workspace_memory_revision.stored_ledger ->
   batch:Workspace_memory_request.batch -> (t, string) result
 val briefing : request_id:Request_id.t -> workspace:workspace -> destination:destination ->
   prompt:Prompt_registry.prompt_resolution -> batch:Workspace_memory_briefing.batch -> (t, string) result
@@ -37,6 +42,10 @@ val briefing : request_id:Request_id.t -> workspace:workspace -> destination:des
     template: a restore of the stored snapshot must render the same prompt, so
     the capture stores the input once and only the SHA-256 of the prompt. Briefing
     must have the same original prompt/schema contract as its prepared pass.
+    Classification requires a completed revision write in this exact physical
+    workspace and for this exact typed ledger. Its body stores only that
+    revision reference. Constructors remain pure; the trusted producer writes
+    the revision before constructing and publishing the original.
     Destination revisions and prompt resolution must be supplied by the trusted
     host owner; these constructors do not establish their external provenance
     or ownership. *)
@@ -53,7 +62,11 @@ val base_path : t -> string
 val work : t -> work
 val rendered_prompt : t -> string
 val output_schema : t -> Yojson.Safe.t
+(** Original capture bytes. Classification serializes [ledger_revision], never
+    the complete ledger; a fresh classification requires its write receipt,
+    while restore obtains the same state from its verified immutable revision. *)
 val to_json : t -> Yojson.Safe.t
+
 (** What a pass reads about an original without restoring it: its
     predecessor, the physical workspace that captured it, and for
     classification the size it was prepared for and the facts it selected,
@@ -113,7 +126,9 @@ val restore : workspace:workspace ->
     and require the request digest the parent's intent names, and reject
     missing, conflicting, unreadable or cyclic ancestry. A retained
     child whose parent is still Subdividing cannot execute. This is neither
-    restart enumeration nor a commit journal. *)
+    restart enumeration nor a commit journal. Classification restore reads
+    its named revision from the captured workspace and refuses missing,
+    damaged or unreadable bytes. It never substitutes today's ledger. *)
 val recoverable_successors : workspace:workspace ->
   (Lane_addon_tool_request_owner.Record.t * Summary.t) list -> (string list, string) result
 (** Validate the links of the freshly discovered original forest before

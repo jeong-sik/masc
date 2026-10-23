@@ -3,6 +3,7 @@ module C = Workspace_memory_execution_capture
 module L = Workspace_memory_ledger
 module R = Workspace_memory_request
 module B = Workspace_memory_briefing
+module Revision = Workspace_memory_revision
 module Owner = Lane_addon_tool_request_owner
 module Store = Lane_addon_store
 let get = function Ok v -> v | Error e -> Alcotest.fail e
@@ -33,13 +34,15 @@ let render key variable p input =
   Prompt_registry.render_resolved_prompt_template key p [variable,Yojson.Safe.to_string input]
 let fact keeper claim : L.pending_fact =
   {fact=L.Ordinary {keeper_id=keeper;claim_sha256=Digestif.SHA256.(digest_string claim |> to_hex)};claim}
-let classification workspace =
+let stored_ledger base_path ledger =
+  get (Revision.write_ledger ~base_path ledger |> Result.map_error Revision.write_error_to_string)
+let classification ?(ledger=L.empty) ?(narrowed=true) ?(request_id=id) ~base_path workspace =
   let a = fact "writer" "Complete source evidence A" and b = fact "writer" "Complete source evidence B" in
   let render = render Prompt_names.workspace_memory_curator "workspace_memory_changes" classification_prompt in
-  let full = some (requested (R.prepare ~neighbor_limit:0 ~render ~ledger:L.empty ~current:[a;b] ~pending:[a;b]
+  let full = some (requested (R.prepare ~neighbor_limit:0 ~render ~ledger ~current:[a;b] ~pending:[a;b]
       ~size:R.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0))) in
-  let batch = some (requested (R.narrow ~render ~ledger:L.empty full)) in
-  a,b,batch,get (C.classification ~request_id:id ~workspace ~destination ~prompt:classification_prompt ~ledger:L.empty ~batch)
+  let batch = if narrowed then some (requested (R.narrow ~render ~ledger full)) else full in
+  a,b,batch,get (C.classification ~request_id ~workspace ~destination ~prompt:classification_prompt ~ledger ~stored_ledger:(stored_ledger base_path ledger) ~batch)
 let summary_of capture = C.Summary.to_json (get (C.summary capture))
 let retain ?(scope=C.scope) ?(installation_id=destination.installation_id) ?(tool=destination.tool)
     ~summary ~request store =
@@ -61,7 +64,7 @@ let occurrences sub text =
 
 let test_canonical_storage_preserves_original_prompt_and_selected_judgment () = with_workspace (fun root store ->
   let workspace = get (C.observe_workspace ~base_path:root) in
-  let a,_,batch,capture = classification workspace in
+  let a,_,batch,capture = classification ~base_path:root workspace in
   let retained = retain ~summary:(summary_of capture) ~request:(C.to_json capture) store in
   let restored = get (restore store ~workspace:(get (C.observe_workspace ~base_path:root)) retained) in
   Alcotest.(check int) "the stored capture holds the model input once" 1
@@ -96,10 +99,10 @@ let test_canonical_storage_preserves_original_prompt_and_selected_judgment () = 
 
 let test_changed_capture_provenance_and_owner_are_refused () = with_workspace (fun root store ->
   let workspace = get (C.observe_workspace ~base_path:root) in
-  let _,_,batch,capture = classification workspace in
-  rejected (C.classification ~request_id:id ~workspace ~destination ~ledger:L.empty ~batch
+  let _,_,batch,capture = classification ~base_path:root workspace in
+  rejected (C.classification ~request_id:id ~workspace ~destination ~ledger:L.empty ~stored_ledger:(stored_ledger root L.empty) ~batch
     ~prompt:(prompt "Different initial template: {{workspace_memory_changes}}"));
-  rejected (C.classification ~request_id:id ~workspace ~destination ~ledger:L.empty ~batch
+  rejected (C.classification ~request_id:id ~workspace ~destination ~ledger:L.empty ~stored_ledger:(stored_ledger root L.empty) ~batch
     ~prompt:{classification_prompt with file_path=Some ""});
   let original = C.to_json capture in
   (* A consistent template that renders another prompt than the one sent. *)
@@ -124,7 +127,7 @@ let test_changed_capture_provenance_and_owner_are_refused () = with_workspace (f
 
 let test_physical_root_replacement_and_copy_are_refused () = with_workspace (fun root store ->
   let workspace = get (C.observe_workspace ~base_path:root) in
-  let _,_,_,capture = classification workspace in
+  let _,_,_,capture = classification ~base_path:root workspace in
   let retained = retain ~summary:(summary_of capture) ~request:(C.to_json capture) store in
   let other = Filename.concat (Filename.dirname root) "other-workspace" in Unix.mkdir other 0o700;
   let copy = retain ~summary:retained.summary ~request:retained.request (Store.create ~root:(Filename.concat other "store")) in
@@ -169,7 +172,7 @@ let test_a_restore_refuses_a_changed_input_that_still_decodes () = with_workspac
     let work = member "work" capture in
     replace "work" (replace "batch" (f (member "batch" work)) work) capture in
   let rows f = function `List rows -> `List (List.map f rows) | _ -> Alcotest.fail "expected array" in
-  let a,_,_,classified = classification workspace in
+  let a,_,_,classified = classification ~base_path:root workspace in
   let forged = "Forged source evidence A" in
   let sha text = `String Digestif.SHA256.(digest_string text |> to_hex) in
   let forge_claim batch =
@@ -221,7 +224,7 @@ let test_a_restore_refuses_a_summary_other_than_its_capture () = with_workspace 
   let restores_with name summary capture =
     let store = Store.create ~root:(Filename.concat root name) in
     restore store ~workspace (retain ~summary ~request:(C.to_json capture) store) in
-  let _,_,_,classified = classification workspace in
+  let _,_,_,classified = classification ~base_path:root workspace in
   ignore (get (restores_with "classification-as-kept" (summary_of classified) classified));
   rejected (restores_with "classification-other-size" (replace "up_to" (`Int 7) (summary_of classified)) classified);
   rejected (restores_with "classification-no-facts" (replace "selected" (`List []) (summary_of classified)) classified);
@@ -267,7 +270,7 @@ let test_next_classification_size_follows_the_last_answer () = with_workspace (f
     let batch = some (requested (R.prepare ~neighbor_limit:0 ~render:classify_render ~ledger:L.empty ~current:facts
         ~pending:(List.take pending facts) ~size ~frame:max_int ~measure:(fun _ -> Ok 0))) in
     get (C.classification ~request_id:(C.Request_id.fresh ()) ~workspace ~destination
-           ~prompt:classification_prompt ~ledger:L.empty ~batch) in
+           ~prompt:classification_prompt ~ledger:L.empty ~stored_ledger:(stored_ledger root L.empty) ~batch) in
   let commit : P.commit = {judgment=`Null;change={before=`Null;after=`Null}} in
   let refusal : P.refusal = {stage=P.Execution;evidence=`Null} in
   (* What a pass reads: each original's ID, summary and phase. *)
@@ -323,7 +326,7 @@ let test_settled_chains_are_the_ones_no_pass_reads () = with_workspace (fun root
     let batch = some (requested (R.prepare ~neighbor_limit:0 ~render:classify_render ~ledger:L.empty ~current:facts
         ~pending:facts ~size:R.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0))) in
     get (C.classification ~request_id:(C.Request_id.fresh ()) ~workspace ~destination
-           ~prompt:classification_prompt ~ledger:L.empty ~batch) in
+           ~prompt:classification_prompt ~ledger:L.empty ~stored_ledger:(stored_ledger root L.empty) ~batch) in
   let advance record event =
     match get (Result.map_error Owner.update_error_to_string (Owner.advance ~store ~expected:record ~event)) with
     | Owner.Stored record -> record
@@ -426,7 +429,109 @@ let test_settled_chains_are_the_ones_no_pass_reads () = with_workspace (fun root
     |> List.map (fun record -> record,get (C.Summary.of_json (Owner.Record.summary record))) in
   rejected (C.settled_chains C.Classifications invalid))
 
+let unrelated_ledger text =
+  let claim = fact "unrelated" "Unrelated source" in
+  let fact = match claim.fact with
+    | L.Ordinary {keeper_id;claim_sha256} -> `Assoc ["keeper_id",`String keeper_id;
+        "store",`String "ordinary";"claim_sha256",`String claim_sha256;
+        "disposition",`Assoc ["kind",`String "claim";"claim_id",`String "c1"]]
+    | L.Source_bound _ -> Alcotest.fail "ordinary fixture" in
+  get (L.of_json (`Assoc ["schema",`String "workspace.memory.ledger.v1";
+    "claims",`List [`Assoc ["claim_id",`String "c1";"claim",`String text]];
+    "conflicts",`List [];"facts",`List [fact]]))
+let capture_revision capture = member "work" (C.to_json capture) |> member "ledger_revision"
+let ledger_file root capture =
+  let digest = member "sha256" (capture_revision capture) |> Yojson.Safe.Util.to_string in
+  Filename.concat (Filename.concat (L.directory ~base_path:root) "revisions/ledger") (digest ^ ".json")
+
+let test_capture_and_child_share_the_written_revision () = with_workspace (fun root store ->
+  let workspace = get (C.observe_workspace ~base_path:root) in
+  let text = String.make 100_000 'z' in
+  let ledger = unrelated_ledger text in
+  let _,_,_,original = classification ~ledger ~narrowed:false ~base_path:root workspace in
+  let _,_,_,again = classification ~ledger ~narrowed:false ~request_id:(C.Request_id.fresh ()) ~base_path:root workspace in
+  let _,_,_,small = classification ~narrowed:false ~base_path:root workspace in
+  let bytes capture = Yojson.Safe.to_string (C.to_json capture) in
+  Alcotest.(check int) "unselected ledger size adds no capture bytes"
+    (String.length (bytes small)) (String.length (bytes original));
+  Alcotest.(check int) "the complete unrelated claim is absent" 0 (occurrences text (bytes original));
+  Alcotest.check json "two originals name the same revision" (capture_revision original) (capture_revision again);
+  Alcotest.(check bool) "no inline ledger field" true (member "ledger" (member "work" (C.to_json original))=`Null);
+  let file = ledger_file root original in
+  Alcotest.check json "the named file holds the full typed ledger" (L.to_json ledger)
+    (In_channel.with_open_bin file (fun channel -> Yojson.Safe.from_string (In_channel.input_all channel)));
+  get (L.save ~base_path:root L.empty);
+  let retained = retain ~summary:(summary_of original) ~request:(C.to_json original) store in
+  let restored = get (restore store ~workspace retained) in
+  (match C.work restored with
+   | C.Classification {ledger=before;_} -> Alcotest.check json "restore uses the old revision" (L.to_json ledger) (L.to_json before)
+   | C.Briefing _ -> Alcotest.fail "classification expected");
+  let child_id = C.Request_id.fresh () in
+  let narrow capture = some (get (C.narrow ~request_id:child_id
+      ~final:(Lane_addon_exact.Call_final (Input_refused Input_capacity)) capture)) in
+  let child = narrow restored in
+  Alcotest.check json "fresh and restored originals derive identical children" (C.to_json (narrow original)) (C.to_json child);
+  Alcotest.check json "child keeps its parent's revision" (capture_revision original) (capture_revision child);
+  Alcotest.(check (list string)) "the two ledger states each have one file"
+    (List.sort String.compare [Filename.basename file;Filename.basename (ledger_file root small)])
+    (Array.to_list (Sys.readdir (Filename.dirname file)) |> List.sort String.compare))
+
+let test_restore_never_substitutes_a_missing_or_damaged_revision () = with_workspace (fun root store ->
+  let workspace = get (C.observe_workspace ~base_path:root) in
+  let _,_,_,capture = classification ~base_path:root workspace in
+  let retained = retain ~summary:(summary_of capture) ~request:(C.to_json capture) store in
+  get (L.save ~base_path:root L.empty);
+  let file = ledger_file root capture in
+  let digest = member "sha256" (capture_revision capture) |> Yojson.Safe.Util.to_string in
+  let refuses name = match restore store ~workspace retained with
+    | Ok _ -> Alcotest.fail (name ^ " revision restored")
+    | Error detail ->
+      Alcotest.(check bool) (name ^ " names the original") true (occurrences (C.Request_id.to_string id) detail > 0);
+      Alcotest.(check bool) (name ^ " names the revision") true (occurrences digest detail > 0) in
+  Sys.remove file; refuses "missing";
+  Out_channel.with_open_bin file (fun channel -> output_string channel "{}"); refuses "damaged";
+  Sys.remove file;
+  Unix.symlink (Filename.concat (L.directory ~base_path:root) "ledger.json") file;
+  refuses "unreadable symbolic link")
+
+let test_constructor_requires_the_same_workspace_and_state_receipt () = with_workspace (fun root _ ->
+  let workspace = get (C.observe_workspace ~base_path:root) in
+  let _,_,batch,_ = classification ~base_path:root workspace in
+  let make stored_ledger = C.classification ~request_id:id ~workspace ~destination
+    ~prompt:classification_prompt ~ledger:L.empty ~stored_ledger ~batch in
+  rejected (make (stored_ledger root (unrelated_ledger "A different typed state")));
+  let other = Filename.concat root "another-workspace" in Unix.mkdir other 0o700;
+  rejected (make (stored_ledger other L.empty));
+  let written = stored_ledger root L.empty in
+  Unix.rename root (root ^ "-old"); Unix.mkdir root 0o700;
+  rejected (C.classification ~request_id:id ~workspace:(get (C.observe_workspace ~base_path:root)) ~destination
+    ~prompt:classification_prompt ~ledger:L.empty ~stored_ledger:written ~batch))
+
+let test_revision_shape_is_strict_without_inline_ledger_fallback () = with_workspace (fun root _ ->
+  let workspace = get (C.observe_workspace ~base_path:root) in
+  let _,_,_,capture = classification ~base_path:root workspace in
+  let original = C.to_json capture in
+  let work = member "work" original in
+  let old_store = Store.create ~root:(Filename.concat root "old-inline-envelope") in
+  rejected (restore old_store ~workspace
+    (retain ~summary:(summary_of capture)
+      ~request:(replace "schema" (`String "workspace.memory.execution-capture.v3") original) old_store));
+  let inline = match work with `Assoc fields -> `Assoc (("ledger",L.to_json L.empty)::List.remove_assoc "ledger_revision" fields)
+    | _ -> Alcotest.fail "work object" in
+  let mixed = match work with `Assoc fields -> `Assoc (("ledger",L.to_json L.empty)::fields)
+    | _ -> Alcotest.fail "work object" in
+  let wrong_kind = replace "ledger_revision"
+      (Revision.to_json (Revision.Briefing (Revision.of_briefing B.empty))) work in
+  List.iteri (fun i changed ->
+    let store = Store.create ~root:(Filename.concat root ("strict-" ^ string_of_int i)) in
+    rejected (restore store ~workspace
+      (retain ~summary:(summary_of capture) ~request:(replace "work" changed original) store))) [inline;mixed;wrong_kind])
+
 let () = Alcotest.run "Curator trusted host capture" ["capture",[
+  Alcotest.test_case "capture and child share the written revision" `Quick test_capture_and_child_share_the_written_revision;
+  Alcotest.test_case "no substitution for missing, damaged or unreadable revision" `Quick test_restore_never_substitutes_a_missing_or_damaged_revision;
+  Alcotest.test_case "constructor binds the write receipt to workspace and state" `Quick test_constructor_requires_the_same_workspace_and_state_receipt;
+  Alcotest.test_case "strict revision shape without inline fallback" `Quick test_revision_shape_is_strict_without_inline_ledger_fallback;
   Alcotest.test_case "canonical storage preserves exact original prompt and judgment" `Quick test_canonical_storage_preserves_original_prompt_and_selected_judgment;
   Alcotest.test_case "changed provenance, schema and original owner" `Quick test_changed_capture_provenance_and_owner_are_refused;
   Alcotest.test_case "physical root copy and replacement" `Quick test_physical_root_replacement_and_copy_are_refused;

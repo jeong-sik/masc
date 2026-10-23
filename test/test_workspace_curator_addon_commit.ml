@@ -3,6 +3,7 @@
 open Alcotest
 open Masc
 module Capture = Workspace_memory_execution_capture
+module Revision = Workspace_memory_revision
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Store = Lane_addon_store
@@ -57,7 +58,8 @@ let classification ?(request_id=Capture.Request_id.fresh ()) base_path claims =
       |> Result.map_error Request.error_to_string |> get with
     | Some batch -> batch | None -> fail "expected original changed facts" in
   let capture=get (Capture.classification ~request_id
-    ~workspace:(get (Capture.observe_workspace ~base_path)) ~destination ~prompt ~ledger:Ledger.empty ~batch) in
+    ~workspace:(get (Capture.observe_workspace ~base_path)) ~destination ~prompt ~ledger:Ledger.empty
+      ~stored_ledger:(get (Revision.write_ledger ~base_path Ledger.empty |> Result.map_error Revision.write_error_to_string)) ~batch) in
   let output=`Assoc ["decisions",`List (List.map (fun (id,(fact : Ledger.pending_fact)) ->
     `Assoc ["fact_id",`String id;"kind",`String "create_claim";"value",`String fact.claim]) (Request.selected_ids batch))] in
   capture,output

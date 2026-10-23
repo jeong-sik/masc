@@ -1,6 +1,7 @@
 module Ledger = Workspace_memory_ledger
 module Request = Workspace_memory_request
 module Brief = Workspace_memory_briefing
+module Revision = Workspace_memory_revision
 module Decision = Workspace_memory_decision
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
@@ -28,7 +29,7 @@ type destination = {
   installation_id : string; package_id : string; tool : string;
   source_revision : string; configuration_revision : string;
 }
-type work = Classification of {ledger : Ledger.t; batch : Request.batch} | Briefing of Brief.batch
+type work = Classification of {ledger : Ledger.t; revision : Revision.ledger; batch : Request.batch} | Briefing of Brief.batch
 type t = {id : Request_id.t; predecessor : Request_id.t option; workspace : workspace; destination : destination;
   prompt : Prompt_registry.prompt_resolution; work : work}
 let scope = "workspace-curator"
@@ -115,18 +116,21 @@ let renderer ~prompt = function
   | Briefing _ -> briefing_render ~prompt
 let sha256 text = Digestif.SHA256.(digest_string text |> to_hex)
 let work_json = function
-  | Classification {ledger;batch} -> `Assoc ["kind",`String "classification";
-      "ledger",Ledger.to_json ledger;"batch",Request.batch_to_json batch]
+  | Classification {revision;batch;_} -> `Assoc ["kind",`String "classification";
+      "ledger_revision",Revision.to_json (Revision.Ledger revision);"batch",Request.batch_to_json batch]
   | Briefing batch -> `Assoc ["kind",`String "briefing";"batch",Brief.batch_to_json batch]
-let work_of_json ~prompt json =
+let work_of_json ~load_ledger ~prompt json =
   let kind = match json with `Assoc f -> List.assoc_opt "kind" f | _ -> None in
   match kind with
   | Some (`String "classification") ->
-    let* f = fields ["kind";"ledger";"batch"] json in
-    let* ledger = Ledger.of_json (List.assoc "ledger" f) in
+    let* f = fields ["kind";"ledger_revision";"batch"] json in
+    let* revision = Revision.of_json (List.assoc "ledger_revision" f) in
+    let* revision = match revision with Revision.Ledger revision -> Ok revision
+      | Revision.Briefing _ -> Error "a classification capture requires a ledger revision" in
+    let* ledger = load_ledger revision in
     let* batch = Request.batch_of_json ~ledger ~render:(classification_render ~prompt) (List.assoc "batch" f)
       |> Result.map_error Request.error_to_string in
-    Ok (Classification {ledger;batch})
+    Ok (Classification {ledger;revision;batch})
   | Some (`String "briefing") ->
     let* f = fields ["kind";"batch"] json in
     let* batch = Brief.batch_of_json ~render:(briefing_render ~prompt) (List.assoc "batch" f) in
@@ -147,16 +151,25 @@ let make ~request_id ~workspace ~destination ~prompt work =
      restored capture narrow to the same child. The prompt the caller rendered
      must be the one the captured template renders. *)
   let* snapshot = Lane_addon_action.canonical (work_json work) in
-  let* restored = work_of_json ~prompt snapshot in
+  let load_ledger revision = match work with
+    | Classification {ledger;revision=expected;_}
+        when String.equal (Revision.ledger_sha256 revision) (Revision.ledger_sha256 expected) -> Ok ledger
+    | Classification _ | Briefing _ -> Error "captured work names another ledger revision" in
+  let* restored = work_of_json ~load_ledger ~prompt snapshot in
   let* () = if String.equal (rendered work) (rendered restored) then Ok ()
     else Error "captured prompt differs from the one its stored snapshot renders" in
   let* () = check ~prompt restored in
   Ok {id=request_id;predecessor=None;workspace;destination;prompt;work=restored}
-let classification ~request_id ~workspace ~destination ~prompt ~ledger ~batch =
-  make ~request_id ~workspace ~destination ~prompt (Classification {ledger;batch})
+let classification ~request_id ~workspace ~destination ~prompt ~ledger ~stored_ledger ~batch =
+  let revision = Revision.stored_ledger_revision stored_ledger in
+  let* () = if Revision.stored_ledger_workspace stored_ledger = (workspace.path,workspace.device,workspace.inode)
+    then Ok () else Error "stored ledger belongs to another physical workspace" in
+  let* () = if String.equal (Revision.ledger_sha256 revision) (Ledger.sha256 ledger) then Ok ()
+    else Error "stored ledger receipt names another ledger state" in
+  make ~request_id ~workspace ~destination ~prompt (Classification {ledger;revision;batch})
 let briefing ~request_id ~workspace ~destination ~prompt ~batch =
   make ~request_id ~workspace ~destination ~prompt (Briefing batch)
-let capture_schema = "workspace.memory.execution-capture.v3"
+let capture_schema = "workspace.memory.execution-capture.v4"
 (* The model input is stored once, inside [work]; the prompt is rendered again
    on restore and only its digest is kept. *)
 let to_json t = `Assoc ["schema",`String capture_schema;
@@ -248,7 +261,9 @@ let restore_record ~workspace (retained : Owner.retained) =
       && String.equal retained.package_id destination.package_id && String.equal retained.tool destination.tool
     then Ok () else Error "Curator capture differs from its original request owner" in
   let* prompt = prompt_of_json (List.assoc "prompt" f) in
-  let* work = work_of_json ~prompt (List.assoc "work" f) in
+  let load_ledger revision = Revision.read_ledger ~base_path:workspace.path revision
+    |> Result.map_error (fun error -> "Curator original " ^ id_text ^ ": " ^ Revision.read_error_to_string error) in
+  let* work = work_of_json ~load_ledger ~prompt (List.assoc "work" f) in
   let* () = if Yojson.Safe.equal (List.assoc "output_schema" f) (schema work) then Ok ()
     else Error "Curator capture has a different domain output schema" in
   let* sent = text (List.assoc "rendered_prompt_sha256" f) in
@@ -295,9 +310,9 @@ let narrow ~request_id ~final t =
       Error "the original terminal does not permit this batch to be narrowed" in
   let render = renderer ~prompt:t.prompt t.work in
   let* smaller = match t.work with
-    | Classification {ledger;batch} ->
+    | Classification {ledger;revision;batch} ->
       Request.narrow ~render ~ledger batch |> Result.map_error Request.error_to_string
-      |> Result.map (Option.map (fun batch -> Classification {ledger;batch}))
+      |> Result.map (Option.map (fun batch -> Classification {ledger;revision;batch}))
     | Briefing batch -> Brief.narrow ~render batch |> Result.map (Option.map (fun batch -> Briefing batch)) in
   match smaller with
   | None -> Ok None
@@ -470,7 +485,7 @@ let settled_chains settling originals =
   Ok (List.rev chains)
 type expected_commit = Classification_commit of Ledger.t | Briefing_commit of Brief.t
 let validate_output t raw = match t.work with
-  | Classification {ledger;batch} ->
+  | Classification {ledger;batch;_} ->
     let* assignments = Decision.decode ~batch raw in
     Ledger.apply ledger ~selected:batch.selected assignments
     |> Result.map_error Ledger.apply_error_to_string |> Result.map (fun ledger -> Classification_commit ledger)

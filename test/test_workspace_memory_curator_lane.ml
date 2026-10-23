@@ -586,6 +586,28 @@ let test_capture_refuses_a_batch_over_the_destination_frame ()=
        fail "a classification over the destination frame was captured");
     check bool "a refused capture retains nothing" true
       (owned (Owner.load ~store ~scope:Capture.scope ~request_id:(Capture.Request_id.to_string request_id))=None))
+let test_revision_write_failure_publishes_no_original ()=
+  with_fixture ~start_owner:false
+    (fun ~sw:_ ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode:_ ~delivery:_ ->
+    await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
+    let prompt=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_curator in
+    let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
+      prompt ["workspace_memory_changes",Yojson.Safe.to_string input] in
+    let claim="A source that must not lose its revision" in
+    let fact : Ledger.pending_fact={fact=Ledger.Ordinary {keeper_id="writer";claim_sha256=Store.digest claim};claim} in
+    let batch=match Request.prepare ~neighbor_limit:0 ~render ~ledger:Ledger.empty ~current:[fact] ~pending:[fact]
+        ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0)
+        |> Result.map_error Request.error_to_string |> get with
+      | Some batch -> batch | None -> fail "expected a pending classification" in
+    (* A regular file at the revision directory fails for privileged users too. *)
+    write (Filename.concat (Ledger.directory ~base_path) "revisions") "not a directory";
+    let request_id=Capture.Request_id.fresh () in
+    (match Consumer.capture_classification ~config ~request_id ~prompt ~ledger:Ledger.empty ~batch with
+     | Error (Consumer.Unavailable _) -> ()
+     | Ok _ | Error (Consumer.Rejected _ | Consumer.Uncertain _) -> fail "revision write failure was not returned");
+    check bool "failure publishes no original owner or capture" true
+      (owned (Owner.load ~store ~scope:Capture.scope ~request_id:(Capture.Request_id.to_string request_id))=None);
+    check int "failure dispatches no provider" 0 (F.post_count server))
 let test_accepted_host_terminal_commits_off_without_worker ()=
   let response_error=ref None in
   with_fixture ~start_owner:false
@@ -1252,6 +1274,7 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
     test_the_next_root_takes_the_size_its_last_answer_supports;
   test_case "the owner narrows a batch its worker could not list" `Quick
     test_the_owner_narrows_a_batch_its_worker_could_not_list;
+  test_case "revision write failure publishes no original" `Quick test_revision_write_failure_publishes_no_original;
   test_case "capture refuses a classification over the destination frame" `Quick
     test_capture_refuses_a_batch_over_the_destination_frame;
   test_case "idle subscription observes queued and already completed wakes" `Quick test_idle_barrier_has_no_lost_wake;

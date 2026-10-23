@@ -401,16 +401,42 @@ original execution refusal. This is recoverable publication across two records,
 under the existing serialized workspace lease; it is not a cross-file transaction.
 The link operation makes no worker call, model call, domain save or observer ACK.
 
-Capture format `workspace.memory.execution-capture.v3` stores the model input
-once, inside the batch snapshot. A classification restore builds the input again
-from the snapshot rows and the captured ledger and requires it to equal the
-stored one. A Briefing snapshot keeps the pass and how many of its unconsumed
-entries the batch selected, and a restore builds the input from them. Either
-restore renders the prompt again with the captured template; the capture keeps
-only the prompt's SHA-256 and refuses a restore whose rendering no longer
-matches it. The captured ledger is the classification before-state and also
-holds the claim and conflict texts the input cites. The observer registration
-receipt names the capture by its request digest instead of holding a copy.
+Capture format `workspace.memory.execution-capture.v4` stores the model input
+once, inside the batch snapshot. Classification work contains exactly `kind`,
+`ledger_revision` and `batch`; `ledger_revision` is
+`{"kind":"ledger","sha256":"<64 lowercase hex digits>"}`. The capture has no
+inline `ledger`. The digest names the existing `Ledger.to_json` bytes stored at
+`<base-path>/.masc/workspace-memory/revisions/ledger/<sha256>.json`, with the
+same digest as `Workspace_memory_ledger.sha256`.
+
+Before publishing a classification original, the trusted producer durably writes
+that revision. Only `Workspace_memory_revision.write_ledger` can create the
+opaque `stored_ledger` receipt the pure capture constructor requires. The receipt
+binds the ledger digest to the canonical workspace path, device and inode,
+checked across the write; a receipt from another state or physical workspace is
+refused. A failed write publishes no original. The receipt proves that write
+completed; it does not prevent a later external deletion or authorize execution.
+The constructor stays pure by resolving its reference from the supplied typed
+ledger. Restore instead reads only the named revision under the captured
+workspace, checks its bytes, schema and typed revision, and rebuilds the input
+from the snapshot rows and that ledger. It requires the rebuilt input to equal
+the stored one. Missing, damaged or unreadable revisions fail with the original
+ID and revision; today's `ledger.json` is never substituted. A classification
+child keeps its parent's revision and rebuilds its selected rows against that
+same state.
+
+A Briefing snapshot still embeds the pass and how many of its unconsumed entries
+the batch selected, and restore builds the input from them. Both domains share
+the strict v4 envelope: v3 Briefing captures are refused too, despite their
+unchanged work payload. Either restore renders the prompt again with the
+captured template; the capture keeps only the prompt's SHA-256 and refuses a
+restore whose rendering no longer matches it. The captured ledger revision is
+the classification before-state and holds the claim and conflict texts the input
+cites. The observer registration receipt names the capture by its request digest
+instead of holding a copy. Commit before/after states, conflict evidence and
+completion receipts still embed their full domain states; moving those to
+revision references and moving Briefing work to references are later layers of
+[RFC-workspace-curator-originals-name-ledger-revisions](../rfc/RFC-workspace-curator-originals-name-ledger-revisions.md).
 
 An original owner record (`lane.addon.tool-request-owner.v4`) holds the
 identity, the request digest, the consumer's summary of the request and the
@@ -446,12 +472,74 @@ still holds its pass and how large the next batch starts.
 
 The capture format requires an explicit nullable predecessor. Root constructors
 emit null; a child records its immediate original parent. The decoder is strict: missing predecessor and old-format
-records are errors, not inferred roots. This branch has no production scheduler
-cutover or installed-data migration. Before any child resume, commit or direct
+records are errors, not inferred roots. There is no in-place conversion of old
+captures; deploying v4 requires the scope cut below. Before any child resume, commit or direct
 Exact authorization, strict restoration reads every ancestor and requires the
 matching acknowledged child, original size refusal and complete deterministic
 whole-batch reduction. Missing/unreadable parents, cycles and mismatches refuse.
 A child retained before parent acknowledgement cannot execute.
+
+
+### Deploying the capture-only revision layer
+
+This layer changes classification capture storage and the shared envelope only.
+It does not migrate old originals, infer their outcome, delete revision files or
+change commit/receipt formats. An old v3 classification **or Briefing** original
+cannot resume on the new build. Follow the whole Curator scope cut from RFC §3.5;
+removing only the currently blocked chains leaves other incompatible originals,
+including settled ancestry, behind.
+
+1. While a compatible build can still read the originals, inventory the complete
+   Curator scope, its parent/child chains, progress, observer receipts and retained
+   Exact evidence. Reconcile pending originals before the cut where possible,
+   including uncertain domain commits against authoritative ledger/Briefing state
+   and receipt delivery. If originals remain pending, an operator must review and
+   choose a whole-scope fresh reprepare from authoritative state, preserving the
+   original evidence and recording what remains uncertain. Moving a scope is not
+   proof that a call failed or a commit did not happen, and must not manufacture a
+   successful terminal or an observer acknowledgement.
+2. Stop the server and confirm that no process can write these stores during the
+   cut. Resolve the actual workspace base from the effective runtime/configuration
+   and confirm its physical identity; do not substitute a guessed home directory.
+   Choose a durable evidence destination outside `<base-path>/.masc/lane-addons/`.
+3. Move aside all three complete directories below, preserving their contents and
+   recording absent directories explicitly. The scope directory is
+   `sha256("workspace-curator")` =
+   `5e5665b70b1920c0c1dc7d16ab2b33c8d21773a7a0fab71bed62b03a8dd851e3`:
+
+   | Contents | Path under `<base-path>/.masc/lane-addons/` |
+   | --- | --- |
+   | Every active Curator owner record, across all phases | `tool-request-owners/5e5665b70b1920c0c1dc7d16ab2b33c8d21773a7a0fab71bed62b03a8dd851e3/` |
+   | Every active Curator request body, including an unreferenced body | `tool-request-bodies/5e5665b70b1920c0c1dc7d16ab2b33c8d21773a7a0fab71bed62b03a8dd851e3/` |
+   | Every settled Curator record and body, across every date | `tool-request-owners-settled/5e5665b70b1920c0c1dc7d16ab2b33c8d21773a7a0fab71bed62b03a8dd851e3/` (all `<YYYY-MM-DD>/{records,bodies}/`) |
+
+   Keep records and their named bodies together. Save the original paths, file
+   inventory and hashes with the cut evidence. These paths are specific to
+   Curator; do not move another consumer's scope or the entire `lane-addons/` root.
+4. Preserve original Keeper queues and memory stores, the current
+   `workspace-memory/ledger.json` and `workspace-memory/briefing.json`, the revision
+   store, worker request stores/volumes, and retained host Exact requests and
+   execution proofs. This layer gives no instruction to reset them. Preserve
+   existing registry events and `exact-lane-run-payloads-v7` input/output files as
+   historical evidence; their old embedded capture bytes are not rewritten or
+   offered to the new capture decoder. Normal registry retention remains in
+   effect. Separately required cuts from another deployed change need their own
+   reviewed scope.
+5. Confirm all three old Curator scope locations are absent and the complete
+   evidence is readable at the destination before starting the new build. Run
+   its normal deploy preflight, then verify a newly prepared classification has a
+   v4 body with only `ledger_revision`, its named file loads and verifies, and a
+   restore/child uses that revision. Store preflight checks owner records and
+   bodies; passing it alone does not prove capture restore or revision loading.
+   Repreparing work uses the preserved authoritative queues/domain state; old
+   registry history is evidence, not an execution queue.
+
+To roll back, stop writers again and use the matching old binary with its
+preserved whole scope. Do not combine restored v3 records with newly prepared v4
+originals or copy only one member of a parent/child chain. Any domain state changed
+since the cut must be reconciled before restoring old executable originals; an
+old backup is not permission to replay them. These are deployment instructions,
+not evidence that a cut or runtime verification has been performed.
 
 Classification permits whole-row bisection on typed input capacity, context
 overflow, request-body refusal or output limit. Briefing permits the three input

@@ -113,6 +113,74 @@ for raw in stream:
     stream.write(json.dumps({'id':command['id'],'lines':lines})+'\n');stream.flush()
 |}
 
+(* A stand-in that writes its pid next to itself and never connects, so a
+   start is still waiting for it when the start is cancelled. *)
+let unconnected_stand_in = {|#!/usr/bin/env python3
+import os,pathlib,time
+here=pathlib.Path(__file__).resolve().parent
+(here/'pid.part').write_text(str(os.getpid()));(here/'pid.part').rename(here/'pid')
+time.sleep(30)
+|}
+
+let running pid = match Unix.kill pid 0 with
+  | () -> true
+  | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
+
+(* A start cancelled before its process connected stops that process, so
+   nothing of the session keeps the connection's switch from ending, and
+   the next command starts again. *)
+let test_a_cancelled_start_stops_its_process () =
+  let root = Unix.realpath (Filename.temp_dir ~perms:0o700 "owned-live-ego-" "") in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let command = Filename.concat root "ego-browser" in
+    write command unconnected_stand_in; Unix.chmod command 0o700;
+    let pid_file = Filename.concat root "pid" in
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      (* The cancel waits for the process to run, not for a fixed time,
+         because an interpreter behind a version shim starts slowly. *)
+      let rec until_running () =
+        if not (Sys.file_exists pid_file) then (Eio.Time.sleep clock 0.05; until_running ()) in
+      let ended = Eio.Time.with_timeout clock 6. (fun () ->
+        Ok (Eio.Switch.run (fun sw ->
+          let session = Ego.session ~sw ~env ~command ~directory:root in
+          match Eio.Fiber.first
+                  (fun () -> `Answered (Ego.runner session ~window_s:10. "count"))
+                  (fun () -> until_running (); `Cancelled) with
+          | `Answered _ -> Error "the start answered before it was cancelled"
+          | `Cancelled ->
+            let pid = int_of_string (String.trim (read pid_file)) in
+            check bool "the process that would have connected was stopped" false (running pid);
+            check bool "its socket was removed" false (Sys.file_exists (Filename.concat root "s"));
+            write command session_stand_in;
+            let restarted = Ego.runner session ~window_s:5. "count" in
+            Ego.end_session session;
+            Result.map_error failure_name restarted |> Result.map ignore))) in
+      match ended with
+      | Ok (Ok ()) -> ()
+      | Ok (Error detail) -> failf "the next command after the cancelled start: %s" detail
+      | Error `Timeout -> fail "the connection's switch did not end after its start was cancelled"))
+
+(* A fork on a cancelled switch runs nothing, so a start there is refused
+   before a process exists instead of waiting for one that never ends. *)
+let test_a_start_on_a_cancelled_connection_starts_nothing () =
+  let root = Unix.realpath (Filename.temp_dir ~perms:0o700 "owned-live-ego-" "") in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let command = Filename.concat root "ego-browser" in
+    write command unconnected_stand_in; Unix.chmod command 0o700;
+    let refused = ref false in
+    Eio_main.run (fun env ->
+      match Eio.Switch.run (fun sw ->
+        let session = Ego.session ~sw ~env ~command ~directory:root in
+        Eio.Switch.fail sw Exit;
+        match Ego.runner session ~window_s:5. "count" with
+        | Ok _ | Error _ -> ()
+        | exception Eio.Cancel.Cancelled _ -> refused := true) with
+      | () -> fail "the failed connection's switch returned"
+      | exception Exit -> ());
+    check bool "the start raised the connection's cancellation" true !refused;
+    check bool "no process was started" false (Sys.file_exists (Filename.concat root "pid")))
+
 let test_one_process_runs_the_connections_commands () =
   let root = Unix.realpath (Filename.temp_dir ~perms:0o700 "owned-live-ego-" "") in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
@@ -338,6 +406,8 @@ let () =
       test_case "a run answers both streams, or why not" `Quick test_a_run_answers_both_streams_or_why_not;
       test_case "a stopped run answers within the peer's window" `Quick test_a_stopped_run_answers_within_the_peers_window;
       test_case "one process runs the connection's commands" `Quick test_one_process_runs_the_connections_commands;
+      test_case "a cancelled start stops its process" `Quick test_a_cancelled_start_stops_its_process;
+      test_case "a start on a cancelled connection starts nothing" `Quick test_a_start_on_a_cancelled_connection_starts_nothing;
       test_case "the worker serves the space until retirement" `Quick (child "normal");
       test_case "a result delivered after the caller stopped waiting does not end the connection" `Quick (child "late");
       test_case "retirement stops a running command and ends the space" `Quick (child "retire");

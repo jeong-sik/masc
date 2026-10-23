@@ -131,6 +131,10 @@ let start_session t ~timeout_s =
     let stop_requested, request_stop = Eio.Promise.create () in
     let ended, set_ended = Eio.Promise.create () in
     let stop () = ignore (Eio.Promise.try_resolve request_stop ()); Eio.Promise.await ended in
+    (* A fork on a cancelled switch never runs its fiber, so nothing would
+       resolve [ended] for the stop below; the check raises the
+       cancellation before anything starts. *)
+    Eio.Switch.check t.sw;
     Eio.Fiber.fork ~sw:t.sw (fun () ->
       Fun.protect ~finally:(fun () ->
           ignore (Eio.Promise.try_resolve set_ready (Error (Peer.Unstarted "the ego session ended before it connected")));
@@ -166,12 +170,16 @@ let start_session t ~timeout_s =
             let ended_early status = match status with
               | `Exited code -> Peer.Exited {code; output = Buffer.contents written}
               | `Signaled signal -> Peer.Signaled signal in
+            (* A stop asked for while the process has not connected, by a
+               start that was cancelled, ends the wait as well. *)
             match Eio.Time.with_timeout clock timeout_s (fun () ->
-              Eio.Fiber.first
-                (fun () -> Ok (`Connected (fst (Eio.Net.accept ~sw:process_sw listening))))
-                (fun () -> Ok (`Ended (Eio.Process.await process)))) with
+              Eio.Fiber.any [
+                (fun () -> Ok (`Connected (fst (Eio.Net.accept ~sw:process_sw listening))));
+                (fun () -> Ok (`Ended (Eio.Process.await process)));
+                (fun () -> Eio.Promise.await stop_requested; Ok `Stopped) ]) with
             | Error `Timeout -> ignore (Eio.Promise.try_resolve set_ready (Error Peer.Timed_out))
             | Ok (`Ended status) -> ignore (Eio.Promise.try_resolve set_ready (Error (ended_early status)))
+            | Ok `Stopped -> ignore (Eio.Promise.try_resolve set_ready (Error (Peer.Unstarted "the ego session was stopped before it connected")))
             | Ok (`Connected flow) ->
               Eio.Net.close listening; remove_socket t.socket;
               let reader = Eio.Buf_read.of_flow flow ~initial_size:read_chunk_bytes ~max_size:Peer.output_limit_bytes in
@@ -201,10 +209,13 @@ let start_session t ~timeout_s =
         | () -> ()
         | exception (Eio.Io _ as exn) ->
           ignore (Eio.Promise.try_resolve set_ready (Error (Peer.Unstarted (Printexc.to_string exn))))));
-    (* A start that failed has stopped its process by the time it answers. *)
+    (* A start that failed has stopped its process by the time it answers.
+       A start that is cancelled stops it too, so no process connects
+       later to a caller that is gone and holds the connection open. *)
     match Eio.Promise.await ready with
     | Ok process -> Ok process
     | Error failure -> Eio.Promise.await ended; Error failure
+    | exception (Eio.Cancel.Cancelled _ as exn) -> Eio.Cancel.protect stop; raise exn
 
 (* Stopping a run spends the stop grace, so it is taken out of the window
    the peer gives. Commands come one at a time: the connection's fiber

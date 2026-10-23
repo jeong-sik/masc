@@ -119,11 +119,38 @@ let probe command =
      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
        Failed { command; path; status; detail = output })
 
+(* ego-browser 0.6.0.16 prints its version on the first line and Chromium's
+   on an indented "chromium" line. *)
+let ego_versions output =
+  let lines = List.map String.trim (String.split_on_char '\n' output) in
+  let after prefix = List.find_map (fun line ->
+    if String.starts_with ~prefix line
+    then Some (String.trim (String.sub line (String.length prefix) (String.length line - String.length prefix)))
+    else None) lines in
+  match after "ego-browser ", after "chromium " with
+  | Some version, Some engine when version <> "" && engine <> "" -> Ok (version, engine)
+  | (None | Some _), (None | Some _) ->
+    Error ("ego-browser --version named no ego lite and Chromium versions: " ^ output)
+
+(* geckodriver and Firefox answer by exiting 0. An ego-browser that exits 0
+   without naming its versions belongs to an ego lite whose onboarding is not
+   finished, and the worker cannot start it, so it has not answered. *)
+let probe_program program command =
+  match probe command with
+  | Started { command; path; output } as check ->
+    (match program with
+     | Geckodriver | Firefox -> check
+     | Ego_browser ->
+       (match ego_versions output with
+        | Ok _ -> check
+        | Error detail -> Failed { command; path; status = Unix.WEXITED 0; detail }))
+  | (Missing _ | Failed _) as check -> check
+
 (* Candidates are tried in order and the first one that answers ends the walk:
    a later candidate is never started once an earlier one has answered, which
    matters when a candidate is a launcher that opens a window. A failure and a
    missing file are remembered, the first of each, for when nothing answers. *)
-let first_answer ~label candidates =
+let walk_candidates ~probe ~label candidates =
   let rec walk ~failed ~missing = function
     | [] ->
       (match failed, missing with
@@ -141,7 +168,10 @@ let first_answer ~label candidates =
   in
   walk ~failed:None ~missing:None candidates
 
-let observe program = first_answer ~label:(name program) (candidates program)
+let first_answer ~label candidates = walk_candidates ~probe ~label candidates
+
+let observe program =
+  walk_candidates ~probe:(probe_program program) ~label:(name program) (candidates program)
 
 let available = function
   | Started _ -> true

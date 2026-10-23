@@ -89,7 +89,7 @@ let with_fixture ?(with_table = false) ?config f =
 
 let request ?command ?space fixture = { E.runtime_config_path = fixture.runtime; command; space }
 
-let found fixture () = R.probe fixture.ego
+let found fixture () = R.probe_program R.Ego_browser fixture.ego
 
 let never_asked () : R.check = fail "ego-browser was looked for, and nothing needed one"
 
@@ -188,7 +188,7 @@ let test_an_ego_that_names_no_versions_is_refused () =
       (request ~command:silent fixture) ();
     refused "a discovered ego-browser that names no versions"
       (function E.Ego_unusable { detail; _ } -> contains detail "named no ego lite" | _ -> false) fixture
-      (request fixture) ~find:(fun () -> R.probe silent) ())
+      (request fixture) ~find:(fun () -> R.probe_program R.Ego_browser silent) ())
 
 let test_a_named_command_must_be_an_absolute_file_that_runs () =
   with_fixture (fun fixture ->

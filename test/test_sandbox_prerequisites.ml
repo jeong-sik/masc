@@ -353,6 +353,44 @@ let test_firefox_bundle_locations_follow_an_absolute_home () =
       check (list string) "no relative place for ego-browser" ["ego-browser"] (B.candidates B.Ego_browser)))
     [""; "relative/home"]
 
+let finished_ego = "#!/bin/sh\necho 'ego-browser 0.6.0.16'\necho '  chromium 154.0.8037.44'\n"
+(* What an ego lite whose onboarding is not finished is taken to print. *)
+let unfinished_ego = "#!/bin/sh\necho 'ego-browser 0.6.0.16'\n"
+
+(* An ego-browser answers only by naming ego lite's and Chromium's versions:
+   the setup checklist, [--mode ego] and the worker read the same rule. One
+   that exits 0 without them is Failed, and the walk goes on past it. *)
+let test_an_ego_browser_answers_only_with_its_versions () =
+  (match B.ego_versions "ego-browser 0.6.0.16\n  chromium 154.0.8037.44\n  node v24.21.0\n" with
+   | Ok (version, engine) ->
+     check string "ego lite" "0.6.0.16" version; check string "Chromium" "154.0.8037.44" engine
+   | Error detail -> fail detail);
+  check bool "an answer naming no Chromium is refused" true
+    (Result.is_error (B.ego_versions "ego-browser 0.6.0.16\n"));
+  with_directory (fun path_dir ->
+    let unfinished = write_program path_dir "ego-browser" unfinished_ego in
+    (match B.probe_program B.Ego_browser unfinished with
+     | B.Failed {status = Unix.WEXITED 0; detail; _} ->
+       check bool "it says which versions were missing" true
+         (String.starts_with ~prefix:"ego-browser --version named no ego lite" detail)
+     | B.Started _ | B.Failed _ | B.Missing _ -> fail "an ego-browser without its versions answered");
+    check bool "the same output answers for geckodriver" true
+      (B.available (B.probe_program B.Geckodriver unfinished));
+    with_directory (fun home ->
+      let local = Filename.concat home ".local" in
+      let bin = Filename.concat local "bin" in
+      Unix.mkdir local 0o700; Unix.mkdir bin 0o700;
+      let finished = write_program bin "ego-browser" finished_ego in
+      Fun.protect ~finally:(fun () -> Sys.remove finished; Unix.rmdir bin; Unix.rmdir local) (fun () ->
+        with_env "PATH" path_dir (fun () ->
+          with_env "HOME" home (fun () ->
+            match B.observe B.Ego_browser with
+            | B.Started {path; _} -> check string "the walk goes on past the unfinished one" finished path
+            | B.Failed _ | B.Missing _ -> fail "the finished ego-browser in ~/.local/bin was not found");
+          with_env "HOME" "" (fun () ->
+            check bool "the unfinished one alone is not available" false
+              (B.available (B.observe B.Ego_browser)))))))
+
 (* Same words as the PDF and presentation checks, because one reader walks all
    three. *)
 let test_the_readiness_json_uses_the_shared_status_words () =
@@ -1010,6 +1048,8 @@ let () = run "prerequisite actions" ["user-selected plans",[
     test_firefox_bundle_locations_follow_an_absolute_home;
   test_case "ego lite is a download page on a mac only" `Quick
     test_ego_lite_is_a_download_page_on_a_mac_only;
+  test_case "an ego-browser answers only with its versions" `Quick
+    test_an_ego_browser_answers_only_with_its_versions;
   test_case "the readiness JSON uses the shared status words" `Quick
     test_the_readiness_json_uses_the_shared_status_words;
   test_case "effects are not readiness" `Quick test_completion_never_means_ready;

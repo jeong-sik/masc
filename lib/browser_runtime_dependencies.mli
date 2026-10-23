@@ -46,6 +46,16 @@ val probe : string -> check
     found on [PATH]. A program that needs a variable the scrub drops (such as
     [DISPLAY]) to print its version reports [Failed]. *)
 
+val ego_versions : string -> (string * string, string) result
+(** ego lite's version and its Chromium's, read from what
+    [ego-browser --version] printed. *)
+
+val probe_program : program -> string -> check
+(** {!probe}, and what [program]'s answer must say. geckodriver and Firefox
+    answer by exiting 0. An [ego-browser] must also name ego lite's and
+    Chromium's versions ({!ego_versions}); one that exits 0 without them is
+    [Failed], as an ego lite whose onboarding is not finished is. *)
+
 val first_answer : label:string -> string list -> check
 (** Walk the executables in order and stop at the first that {!probe} reports
     [Started]; a later one is never started. When none answers, the first
@@ -53,7 +63,8 @@ val first_answer : label:string -> string list -> check
     [Missing] for an empty list. *)
 
 val observe : program -> check
-(** {!first_answer} over {!candidates}. *)
+(** {!first_answer} over {!candidates}, with {!probe_program}'s rule for
+    what counts as an answer. *)
 
 val available : check -> bool
 val path : check -> string option

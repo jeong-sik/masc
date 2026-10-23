@@ -36,10 +36,6 @@ type runner = window_s:float -> string -> (string, run_failure) result
 (** The prefix of the one line each script writes its answer on. *)
 val result_marker : string
 
-(** ego lite's version and its Chromium's, read from what
-    [ego-browser --version] printed. *)
-val version_of_output : string -> (string * string, string) result
-
 type t
 
 (** Opens the agent task space called [space], or resumes it when this

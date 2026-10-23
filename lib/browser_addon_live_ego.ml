@@ -62,7 +62,7 @@ let runner ~env ~command : Peer.runner = fun ~window_s script ->
 let version ~env ~command =
   let* output = run_command ~env ~timeout_s:version_timeout_s ~stdin:"" ~command ["--version"]
     |> Result.map_error Peer.run_failure_message in
-  Peer.version_of_output output
+  Browser_runtime_dependencies.ego_versions output
 
 let capture_directory () = Eio_unix.run_in_systhread (fun () ->
   match Filename.temp_dir ~perms:0o700 "masc-ego-" "" with

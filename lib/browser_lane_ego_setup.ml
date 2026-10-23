@@ -102,10 +102,10 @@ let edited ~existing ~table ~set text =
 let installed_ego () =
   Browser_runtime_dependencies.observe Browser_runtime_dependencies.Ego_browser
 
-(* An ego-browser that answered names ego lite's and Chromium's versions; one
-   whose onboarding is not finished answers without them. *)
+(* An ego-browser that answered named ego lite's and Chromium's versions
+   (Browser_runtime_dependencies.probe_program); they are read from its answer. *)
 let versions_of ~path output =
-  Browser_ego_peer.version_of_output output
+  Browser_runtime_dependencies.ego_versions output
   |> Result.map_error (fun detail -> Ego_unusable { path; detail })
 
 let discovered ~find_ego =
@@ -122,7 +122,7 @@ let named path =
   if not (String.equal (String.trim path) path) || Filename.is_relative path
   then Error (Ego_not_executable path)
   else
-    match Browser_runtime_dependencies.probe path with
+    match Browser_runtime_dependencies.(probe_program Ego_browser) path with
     | Browser_runtime_dependencies.Missing _ -> Error (Ego_not_executable path)
     | Browser_runtime_dependencies.Failed { detail; _ } -> Error (Ego_unusable { path; detail })
     | Browser_runtime_dependencies.Started { output; _ } -> versions_of ~path output

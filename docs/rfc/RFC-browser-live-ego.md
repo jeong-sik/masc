@@ -87,6 +87,7 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 | `viewport_capture` | `page.screenshot()` 파일을 읽어 base64, 앞뒤로 `info()` 비교 | 한다 |
 | `accessibility_snapshot` | `page.snapshot()`(viewport), `{scope: "full_page"}`, `{scope: "subtree", root: "@12"}`. 글을 `maxChars` 에서 자르되 서로게이트 쌍은 쪼개지 않는다 | 한다(BrowserRead `mode=snapshot`). ego 연결만 한다 |
 | `dom_interaction` (click·fill·select·scroll·follow_link) | click 은 `Browser_interaction.pointer_target_script` 로 대상 점을 찾고 `page.mouse.click`. 나머지는 `Browser_interaction.script` 를 `page.evaluate` 로 그대로 실행 | 한다. selector 와 node 가 BiDi 와 같은 뜻이 된다. ego 의 `page.click(selector)` 는 일치를 하나만 받고 frame 까지 찾아서 뜻이 다르다 |
+| `snapshot_target_input` (click·fill 의 `target`) | 같은 실행 안에서 탭이 `expectedUrl` 에 있는지 보고, `waitForSelector(loc, {state: "attached"})` 로 대상이 정확히 하나인지 확인한 뒤 ego 의 `page.click`·`page.fill`. `target` 은 snapshot ref(`{ref: 12}` → `@12`), role 과 이름(`loc=role:button[name="보내기"]`, `exact: false` 면 `name*=`), 보이는 글(`text="보내기"`, `exact: false` 면 따옴표 없이) 중 하나다. locator 글은 masc 가 만든다 | 한다. ego 연결만 한다. receipt 의 `popups` 는 `{tabId, label}` 로, `dialog` 는 `Browser_surface.dialog_json` 으로 돌려준다. 대화상자가 열려 있으면 행동 뒤 URL 은 읽지 않는다 |
 | `trusted_hover`, `trusted_keyboard` | `page.mouse.move`, `page.keyboard.type`·`press` | 한다. 입력 전에 `pointer_guard_script`·`keyboard_guard_script` 가 관측한 문서·URL·화면을 확인한다 |
 | `point_click`, `trusted_button_click`, `trusted_double_click`, `point_scroll` | `page.mouse.click`(`button`, `clickCount`), `page.mouse.wheel` | 한다 |
 | `tab_creation` | `task.newPage()` 뒤 `goto` | 한다 |
@@ -97,7 +98,7 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 | `tab_activation` | CDP `Target.activateTarget` | 다음 단계 |
 | 드래그, 터치, 줌, 뷰포트 | `page.mouse.down`·`up` 등 | 다음 단계 |
 
-ego 만의 읽기는 연결 방식 표의 새 기능 `accessibility_snapshot` 으로 둔다. BrowserRead `mode=snapshot` 이 ego 스냅샷을 그대로 돌려주고, 줄마다 붙은 ref(`ref=12`)는 그 순간의 페이지를 가리킨다. 다음 단계는 BrowserInteract 가 그 ref 와 `loc=role:` selector 를 받게 하는 일이다.
+ego 만의 읽기는 연결 방식 표의 기능 `accessibility_snapshot` 으로 둔다. BrowserRead `mode=snapshot` 이 ego 스냅샷을 그대로 돌려주고, 줄마다 붙은 ref(`ref=12`)는 그 순간의 페이지를 가리킨다. BrowserInteract 의 click·fill 은 그 ref 나 role·글을 `target` 으로 받는다(`snapshot_target_input`). `selector` 와 달리 `target` 은 ego 자신의 locator 뜻을 따른다. 그래서 다른 연결은 효과 전에 거절한다.
 
 ## 6. 실패
 

@@ -1,0 +1,15 @@
+Testing `jsonl_incremental_projection'.
+This run has ID `HRN8FOBQ'.
+
+  [OK]          incremental          0   seeds from the tail.
+  [OK]          incremental          1   unchanged file re-folds nothing.
+  [OK]          incremental          2   append folds only new lines.
+  [OK]          incremental          3   same path distinct keys keep indepen...
+  [OK]          incremental          4   partial trailing line is held.
+  [OK]          incremental          5   truncation reseeds from tail.
+  [OK]          incremental          6   rewrite during fold reseeds.
+  [OK]          incremental          7   rotation during fold reseeds.
+  [OK]          incremental          8   failed fold preserves previous proje...
+
+Full test results in `/private/tmp/masc-perf-scale-20261023/_build/_tests/jsonl_incremental_projection'.
+Test Successful in 0.013s. 9 tests run.

@@ -112,6 +112,55 @@ let test_truncation_reseeds () =
       check int "reseeded: one new line folded" 4 !c;
       check (list string) "fresh accumulator after rotation" [ "x" ] acc)
 
+let test_rewrite_during_fold_reseeds () =
+  with_temp_file (fun path ->
+      rewrite path "a\nb\n";
+      let cache = P.create () in
+      let rewritten = ref false in
+      let first = P.read cache ~key:"k" ~path ~empty:[]
+          ~initial_tail_bytes:big_tail
+          ~add:(fun acc line ->
+            if not !rewritten then (
+              rewritten := true;
+              rewrite path "x\ny\n");
+            line :: acc) in
+      check (list string) "fold uses the bytes it already read" ["b"; "a"] first;
+      check (list string) "new bytes do not validate the old accumulator"
+        ["y"; "x"] (reader cache path (ref 0)))
+
+let test_rotation_during_fold_reseeds () =
+  with_temp_file (fun path ->
+      rewrite path "a\nb\n";
+      let cache = P.create () in
+      let replaced = ref false in
+      let first = P.read cache ~key:"k" ~path ~empty:[]
+          ~initial_tail_bytes:big_tail
+          ~add:(fun acc line ->
+            if not !replaced then (
+              replaced := true;
+              with_temp_file (fun replacement ->
+                rewrite replacement "x\ny\n";
+                Unix.rename replacement path));
+            line :: acc) in
+      check (list string) "one observation keeps one file's rows" ["b"; "a"] first;
+      check (list string) "replacement starts a fresh projection"
+        ["y"; "x"] (reader cache path (ref 0)))
+
+let test_failed_fold_preserves_previous_projection () =
+  with_temp_file (fun path ->
+      rewrite path "a\n";
+      let cache = P.create () in
+      ignore (reader cache path (ref 0));
+      append path "b\n";
+      (match P.read cache ~key:"k" ~path ~empty:[]
+          ~initial_tail_bytes:big_tail ~add:(fun _ _ -> raise Exit) with
+       | exception Exit -> ()
+       | _ -> fail "fold failure must propagate");
+      check (option (list string)) "previous successful projection retained"
+        (Some ["a"]) (P.peek cache ~key:"k");
+      check (list string) "failed append remains unread"
+        ["b"; "a"] (reader cache path (ref 0)))
+
 let () =
   run "jsonl_incremental_projection"
     [
@@ -124,5 +173,9 @@ let () =
             test_same_path_distinct_keys_do_not_share_offsets;
           test_case "partial trailing line is held" `Quick test_partial_line_held;
           test_case "truncation reseeds from tail" `Quick test_truncation_reseeds;
+          test_case "rewrite during fold reseeds" `Quick test_rewrite_during_fold_reseeds;
+          test_case "rotation during fold reseeds" `Quick test_rotation_during_fold_reseeds;
+          test_case "failed fold preserves previous projection" `Quick
+            test_failed_fold_preserves_previous_projection;
         ] );
     ]

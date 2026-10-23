@@ -37,43 +37,25 @@ type 'a t = (string, int * int * string * 'a) Hashtbl.t
 
 let create () : 'a t = Hashtbl.create 16
 
-(* Stable file identity for rotation detection. A path whose inode changed since
-   the last read is a different physical file (deleted+recreated or rotated), so
-   its consumed offset must not carry over. [-1] when the file cannot be stat'd,
-   which never matches a stored inode (guarded by [>= 0]) and forces a cold
-   reseed. *)
-let file_inode path : int =
-  match Unix.stat path with
-  | s -> s.Unix.st_ino
-  | exception Unix.Unix_error _ -> -1
-
-(* Read bytes [start, upto) from [path]. Robust to the file having grown since
-   the size was sampled: never reads past the channel's own length. *)
-let read_range path ~start ~upto : string =
+(* All ranges in one observation belong to the same descriptor and sampled
+   size. An append waits for the next observation; a concurrent truncation
+   cannot silently advance the cache over bytes we failed to read. *)
+let read_range ic ~size ~start ~upto : string =
+  let start = max 0 (min start size) in
+  let upto = min upto size in
   if upto <= start then ""
-  else
-    In_channel.with_open_bin path (fun ic ->
-        let len = Int64.to_int (In_channel.length ic) in
-        let start = if start < 0 then 0 else min start len in
-        let upto = min upto len in
-        if upto <= start then ""
-        else begin
-          In_channel.seek ic (Int64.of_int start);
-          match In_channel.really_input_string ic (upto - start) with
-          | Some s -> s
-          | None -> ""
-        end)
+  else begin
+    In_channel.seek ic (Int64.of_int start);
+    match In_channel.really_input_string ic (upto - start) with
+    | Some s -> s
+    | None -> raise End_of_file
+  end
 
 let fingerprint_bytes = 512
 
-let boundary_fingerprint path ~offset =
+let boundary_fingerprint ic ~size ~offset =
   let start = max 0 (offset - fingerprint_bytes) in
-  read_range path ~start ~upto:offset
-;;
-
-let boundary_matches path ~offset ~fingerprint =
-  try String.equal (boundary_fingerprint path ~offset) fingerprint with
-  | Sys_error _ -> false
+  read_range ic ~size ~start ~upto:offset
 ;;
 
 let last_newline (s : string) : int option =
@@ -95,53 +77,59 @@ let read (t : 'a t) ~(key : string) ~(path : string) ~(empty : 'a)
   | None ->
       (* Missing file: keep whatever was last projected, else empty. *)
       (match Hashtbl.find_opt t key with Some (_, _, _, acc) -> acc | None -> empty)
-  | Some size ->
-      let inode = file_inode path in
-      (* Resolve the starting offset and whether it is already line-aligned.
-         Reuse the cached offset only when the file is the same physical file
-         (inode unchanged) and has not been truncated below it; otherwise — cold
-         key, truncation ([c > size]), or rotation/recreation (inode changed) —
-         reseed from the tail. *)
-      let consumed, base_acc, aligned =
-        match Hashtbl.find_opt t key with
-        | Some (c, ino, fingerprint, acc)
-          when ino = inode
-               && ino >= 0
-               && c <= size
-               && boundary_matches path ~offset:c ~fingerprint ->
-            (c, acc, true)
-        | _ ->
-            let s = max 0 (size - initial_tail_bytes) in
-            (s, empty, s = 0)
-      in
-      if consumed >= size then (
-        Hashtbl.replace t key (size, inode, boundary_fingerprint path ~offset:size, base_acc);
-        base_acc)
-      else
-        let buf = read_range path ~start:consumed ~upto:size in
-        (* Align a mid-file cold start to the next line boundary. *)
-        let buf, consumed =
-          if aligned then (buf, consumed)
+  | Some _ ->
+      let consumed, inode, fingerprint, base_acc, complete =
+        In_channel.with_open_bin path (fun ic ->
+          let stat = Unix.fstat (Unix.descr_of_in_channel ic) in
+          let size = stat.Unix.st_size in
+          let inode = stat.Unix.st_ino in
+          (* Resolve the starting offset and whether it is already line-aligned.
+             Reuse the cached offset only when the file is the same physical file
+             (inode unchanged) and has not been truncated below it; otherwise — cold
+             key, truncation ([c > size]), or rotation/recreation (inode changed) —
+             reseed from the tail. *)
+          let consumed, base_acc, aligned, validated_boundary =
+            match Hashtbl.find_opt t key with
+            | Some (c, ino, fingerprint, acc)
+              when ino = inode
+                   && c <= size
+                   && String.equal (boundary_fingerprint ic ~size ~offset:c) fingerprint ->
+                (c, acc, true, Some fingerprint)
+            | _ ->
+                let s = max 0 (size - initial_tail_bytes) in
+                (s, empty, s = 0, None)
+          in
+          let fingerprint_at offset =
+            match validated_boundary with
+            | Some fingerprint when offset = consumed -> fingerprint
+            | Some _ | None -> boundary_fingerprint ic ~size ~offset
+          in
+          if consumed >= size then
+            (size, inode, fingerprint_at size, base_acc, "")
           else
-            match first_newline buf with
-            | Some f ->
-                ( String.sub buf (f + 1) (String.length buf - f - 1),
-                  consumed + f + 1 )
-            | None -> ("", size)
-        in
-        (match last_newline buf with
-        | None ->
-            (* No complete line yet; hold the offset and wait for the writer. *)
-            Hashtbl.replace t key
-              (consumed, inode, boundary_fingerprint path ~offset:consumed, base_acc);
-            base_acc
-        | Some p ->
-            let complete = String.sub buf 0 (p + 1) in
-            let new_consumed = consumed + p + 1 in
-            let acc = List.fold_left add base_acc (lines_of complete) in
-            Hashtbl.replace t key
-              (new_consumed, inode, boundary_fingerprint path ~offset:new_consumed, acc);
-            acc)
+            let buf = read_range ic ~size ~start:consumed ~upto:size in
+            (* Align a mid-file cold start to the next line boundary. *)
+            let buf, consumed =
+              if aligned then (buf, consumed)
+              else
+                match first_newline buf with
+                | Some f ->
+                    ( String.sub buf (f + 1) (String.length buf - f - 1),
+                      consumed + f + 1 )
+                | None -> ("", size)
+            in
+            (match last_newline buf with
+            | None ->
+                (* No complete line yet; hold the offset and wait for the writer. *)
+                (consumed, inode, fingerprint_at consumed, base_acc, "")
+            | Some p ->
+                let complete = String.sub buf 0 (p + 1) in
+                let new_consumed = consumed + p + 1 in
+                (new_consumed, inode, fingerprint_at new_consumed, base_acc, complete)))
+      in
+      let acc = List.fold_left add base_acc (lines_of complete) in
+      Hashtbl.replace t key (consumed, inode, fingerprint, acc);
+      acc
 
 let recent_lines (t : string list t) ~(key : string) ~(path : string)
     ~(window : int) ~(initial_tail_bytes : int) : string list =

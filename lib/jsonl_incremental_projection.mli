@@ -30,7 +30,17 @@ val read :
     already-consumed line, so it is where a feed enforces a most-recent-N ring.
     A partial trailing line is held until the writer completes it; a file
     shorter than the consumed offset, or one whose inode changed
-    (rotation/recreation), reseeds from the tail. *)
+    (rotation/recreation), reseeds from the tail.
+
+    Each read opens one descriptor for file identity, boundary validation and
+    appended bytes. It closes that descriptor before calling [add]. The saved
+    boundary fingerprint is captured before [add], so a rewrite during the
+    fold that changes that boundary is detected on the next read instead of
+    blessing an old accumulator with new file bytes. The fingerprint covers
+    only the consumed boundary, not the complete prefix. A short read raises
+    [End_of_file] and leaves the cache
+    unchanged. File reads are synchronous; callers must use their existing
+    blocking-I/O execution boundary. *)
 
 val recent_lines :
   string list t ->

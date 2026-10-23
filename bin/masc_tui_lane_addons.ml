@@ -389,16 +389,30 @@ type current_category = Classified of Category.t | Unclassified | Unverified
 (* The current group comes from the declaration whose installation id and
    source path both match. A worker's own start-time category is never
    borrowed when that declaration was not read. *)
-let current_category snapshot = function
-  | `Declaration (_, (d : declaration)) -> (match d.ui_category with Some c -> Classified c | None -> Unclassified)
+let current_category snapshot entry =
+  (* A declaration speaks for the current group only when the whole reading is
+     trustworthy: the inventory is complete, the declaration parsed without
+     issues, and no other declaration or issue claims the same id or path. *)
+  let trusted_declaration ~id ~path =
+    match snapshot.configuration with
+    | Some ({complete=true;_} as config) ->
+        let claims (d : declaration) =
+          d.source_path=path || (id <> None && d.installation_id=id) in
+        (match List.filter claims config.declarations with
+         | [{origin=Parsed_declaration; issues=[]; ui_category; _}] ->
+             Some (match ui_category with Some c -> Classified c | None -> Unclassified)
+         | _ -> None)
+    | Some {complete=false;_} | None -> None in
+  match entry with
+  | `Declaration (_, (d : declaration)) ->
+      Option.value ~default:Unverified (trusted_declaration ~id:d.installation_id ~path:d.source_path)
   | `Instance (i : instance) ->
-      match snapshot.configuration, i.installation_id, i.source_path with
-      | Some config, Some id, Some path ->
-          (match List.find_opt (fun (d : declaration) -> d.installation_id=Some id && d.source_path=path) config.declarations with
-           | Some {ui_category=Some c;_} -> Classified c
-           | Some {ui_category=None;_} -> Unclassified
-           | None -> Unverified)
-      | _ -> Unverified
+      match i.installation_id, i.source_path with
+      | Some id, Some path -> Option.value ~default:Unverified (trusted_declaration ~id:(Some id) ~path)
+      | None, None ->
+          (* A manual attachment has no declaration: its own package says. *)
+          (match i.ui_category with Some c -> Classified c | None -> Unclassified)
+      | Some _, None | None, Some _ -> Unverified
 let category_rank = function
   | Classified c -> Option.value ~default:0 (List.find_index (fun x -> x=c) category_order)
   | Unclassified -> List.length category_order

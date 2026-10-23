@@ -396,7 +396,7 @@ let run_keeper_invocation_turn_admitted_inner
              | Agent_core.Types.SSEParseFailed _ | Agent_core.Types.NDJSONParseFailed _
              | Agent_core.Types.SSEUnknownEventType _ | Agent_core.Types.SSEUnsupportedPart _
              | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
-             | Agent_core.Types.StreamIncomplete _ | Agent_core.Types.StreamRepeating _ -> ()))
+             | Agent_core.Types.StreamIncomplete _ -> ()))
   in
   let name = Keeper_invocation_contract.target_name request in
   let message = Keeper_invocation_contract.prompt request in

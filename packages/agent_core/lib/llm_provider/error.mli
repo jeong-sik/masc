@@ -48,20 +48,6 @@ type provider_error =
       to distinguish recoverable model output from an unknown provider contract;
       an unknown token is not an invalid request or evidence of overflow.
       The core boundary promotes a known overflow to [Api ContextOverflow]. *)
-  | RepeatingGeneration of
-      { provider : string
-      ; shape : Types.repeating_shape
-      ; occurrences : int
-      ; unit_bytes : int
-      ; detail : string
-      }
-  (** The model's generation repeated one unit past the threshold and the
-      client ended the stream. The bytes were intact, so this is not a
-      [ProviderWireError]: the failure belongs to the model, and the same
-      model reached through another provider repeats the same way. A caller
-      rotating candidates should leave the model, not only the connection.
-      [is_retryable] is false: the identical request to the same model is the
-      same roll. *)
   | RateLimit of
       { provider : string
       ; retry_after : float option
@@ -133,10 +119,6 @@ val is_retryable : provider_error -> bool
 val capacity_scope_to_string : capacity_scope -> string
 val of_retry_api_error : ?provider:string -> Retry.api_error -> provider_error
 val of_http_error : ?provider:string -> Http_client.http_error -> provider_error
-
-val is_repeating_generation : provider_error -> bool
-(** [true] only for [RepeatingGeneration]: the model repeated one unit of
-    output until accept refused it. *)
 
 val timeout_phase_is_local_admission : Http_client.timeout_phase option -> bool
 (** [true] for [Queue] and [Capacity_backpressure]: the wait expired in MASC's

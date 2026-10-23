@@ -36,13 +36,6 @@ type provider_error =
       ; stop_reason : Types.stop_reason
       ; detail : string
       }
-  | RepeatingGeneration of
-      { provider : string
-      ; shape : Types.repeating_shape
-      ; occurrences : int
-      ; unit_bytes : int
-      ; detail : string
-      }
   | RateLimit of
       { provider : string
       ; retry_after : float option
@@ -162,15 +155,6 @@ let to_string = function
   | UnknownVariant r -> Printf.sprintf "Unknown %s variant: %s" r.type_name r.value
   | ProviderUnavailable r ->
     Printf.sprintf "Provider '%s' unavailable: %s" r.provider r.detail
-  | RepeatingGeneration r ->
-    Printf.sprintf
-      "Provider '%s' model repeated itself (%s: one %d-byte unit %d times); the stream \
-       was ended and the next candidate must be a different model: %s"
-      r.provider
-      (Types.repeating_shape_to_string r.shape)
-      r.unit_bytes
-      r.occurrences
-      r.detail
   | EmptyCompletion r ->
     (match Retry.verdict_of_empty_completion ~stop_reason:r.stop_reason ~message:r.detail with
      | Retry.Empty_unattributed { token } ->
@@ -370,10 +354,6 @@ let of_provider_failure ?provider kind message =
           other unavailability producers matches this variant instead of a
           rendered prefix. *)
        EmptyCompletion { provider; stop_reason; detail = message })
-  | Http_client.Repeating_generation { shape; occurrences; unit_bytes } ->
-    (* The stream ended because the model repeated itself. Kept typed so a
-       lane walk can rotate away from the model, not merely the provider. *)
-    RepeatingGeneration { provider; shape; occurrences; unit_bytes; detail = message }
   | Http_client.Context_overflow { limit } ->
     (* agent-core boundary: same agent-core-boundary flattening as the Empty_overflow arm above —
        the typed overflow value is rendered via [Retry.error_message] into
@@ -437,7 +417,6 @@ let is_retryable = function
   | UnknownVariant _
   | ProviderUnavailable _
   | EmptyCompletion _
-  | RepeatingGeneration _
   | HardQuota _
   | AuthError _
   | AuthorizationError _
@@ -449,29 +428,6 @@ let is_retryable = function
 (* The classifications below are the one place that lists every constructor
    for its question. A new [provider_error] constructor stops the build here,
    so no caller answers the question by default. *)
-
-let is_repeating_generation = function
-  | RepeatingGeneration _ -> true
-  | MissingApiKey _
-  | InvalidConfig _
-  | ParseError _
-  | ProviderWireError _
-  | ProviderReportedError _
-  | UnknownVariant _
-  | ProviderUnavailable _
-  | EmptyCompletion _
-  | RateLimit _
-  | HardQuota _
-  | CapacityExhausted _
-  | AuthError _
-  | AuthorizationError _
-  | ServerError _
-  | NetworkError _
-  | Timeout _
-  | InvalidRequest _
-  | NotFound _
-  | ProviderTerminal _ -> false
-;;
 
 let timeout_phase_is_local_admission = function
   | Some (Http_client.Queue | Http_client.Capacity_backpressure) -> true
@@ -499,7 +455,6 @@ let is_local_admission_timeout = function
   | UnknownVariant _
   | ProviderUnavailable _
   | EmptyCompletion _
-  | RepeatingGeneration _
   | RateLimit _
   | HardQuota _
   | CapacityExhausted _
@@ -522,7 +477,6 @@ let is_candidate_access_rejection = function
   | UnknownVariant _
   | ProviderUnavailable _
   | EmptyCompletion _
-  | RepeatingGeneration _
   | RateLimit _
   | HardQuota _
   | CapacityExhausted _
@@ -555,7 +509,6 @@ let is_end_turn_empty_completion = function
   | ProviderReportedError _
   | UnknownVariant _
   | ProviderUnavailable _
-  | RepeatingGeneration _
   | RateLimit _
   | HardQuota _
   | CapacityExhausted _

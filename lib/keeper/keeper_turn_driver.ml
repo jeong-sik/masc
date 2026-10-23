@@ -581,7 +581,6 @@ let attempt_runtime_candidates
     ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
     ?(provider_answered = fun _ -> true)
     ?quota_scope_of
-    ?model_of
     ?candidate_backpressure_of
     ?candidate_dispatchable
     ?read_usage_after_account_refusal
@@ -650,50 +649,6 @@ let attempt_runtime_candidates
       fun candidate ->
         Option.is_some (Runtime.get_runtime_by_id (runtime_id_of candidate))
   in
-  (* The model behind a candidate, for the one failure that belongs to the
-     model rather than to its provider: a generation that repeated itself.
-     The same model reached through another provider repeats the same way,
-     so once a candidate has repeated, every later candidate on that model is
-     refused before dispatch and the walk moves to a different model.
-
-     The identity is the name the provider serves ([model.api_name]), not the
-     runtime.toml model id: operators declare one [models.*] row per provider
-     for the same model, each under its own id, so ids never meet across
-     providers and a skip keyed on them would fire nowhere. A provider that
-     serves the same model under a prefixed name is not recognised as the
-     same model by this rule; that gap is named (RFC-0419 §9), not guessed
-     at. The id-table default reads the registry; richer callers inject it. *)
-  let model_of =
-    match model_of with
-    | Some model_of -> model_of
-    | None ->
-      fun candidate ->
-        Runtime.get_runtime_by_id (runtime_id_of candidate)
-        |> Option.map (fun (runtime : Runtime_instance.t) -> runtime.model.api_name)
-  in
-  (* The refusal a candidate earns from the models that repeated so far: its
-     served name and the terminal record that observed the repeat. One pure
-     lookup, read once per candidate. *)
-  let refusal_for ~(repeated_models : (string * lane_terminal_error) list) candidate =
-    match model_of candidate with
-    | None -> None
-    | Some model ->
-      Option.map (fun observed -> model, observed) (List.assoc_opt model repeated_models)
-  in
-  let repeated_generation (error : Agent_core.Error.t) =
-    match error with
-    | Agent_core.Error.Provider provider_error ->
-      Llm_provider.Error.is_repeating_generation provider_error
-    | Agent_core.Error.Api _
-    | Agent_core.Error.Agent _
-    | Agent_core.Error.Mcp _
-    | Agent_core.Error.Config _
-    | Agent_core.Error.Serialization _
-    | Agent_core.Error.Io _
-    | Agent_core.Error.Orchestration _
-    | Agent_core.Error.Internal _
-    | Agent_core.Error.Internal_carried _ -> false
-  in
   let demote_rest rest =
     let dispatchable, undispatchable =
       List.partition candidate_dispatchable rest
@@ -713,7 +668,6 @@ let attempt_runtime_candidates
   in
   let rec loop
       ~(observed_overflow : lane_terminal_error option)
-      ~(repeated_models : (string * lane_terminal_error) list)
       idx
     = function
     | [] ->
@@ -725,52 +679,8 @@ let attempt_runtime_candidates
               (Printf.sprintf
                  "runtime lane %S exhausted all candidates"
                  runtime_id)))
-    | candidate :: rest ->
-      (match refusal_for ~repeated_models candidate with
-       | Some refusal -> refuse ~observed_overflow ~repeated_models idx candidate rest refusal
-       | None -> attempt ~observed_overflow ~repeated_models idx candidate rest)
-  (* The candidate's model already repeated itself earlier in the walk.
-     Refusing it is the walk's own policy, so it is recorded as a rejection
-     before dispatch, like the reasoning-effort ladder's. If it was the last
-     candidate, the lane's error is what the walk observed: an overflow seen
-     anywhere in the rotation still outranks it, then the repeat itself,
-     never this refusal. *)
-  and refuse ~observed_overflow ~repeated_models idx candidate rest
-      (model, (observed : lane_terminal_error)) =
-    let attempt_runtime_id = runtime_id_of candidate in
-    let error =
-      Agent_core.Error.Api
-        (Llm_provider.Retry.InvalidRequest
-           { reason = Llm_provider.Retry.Attempt_rejected
-           ; message =
-               Printf.sprintf
-                 "candidate %s refused before dispatch: model %s repeated itself on %s \
-                  in this walk"
-                 attempt_runtime_id
-                 model
-                 observed.origin_runtime_id
-           })
-    in
-    emit_runtime_manifest
-      ~status:"attempt"
-      ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
-      Keeper_runtime_manifest.Runtime_routed;
-    emit_runtime_manifest
-      ~status:"failed"
-      ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
-      Keeper_runtime_manifest.Runtime_failed;
-    on_attempt_error
-      ~runtime_id:attempt_runtime_id
-      ~attempt:idx
-      ~dispatch:Keeper_attempt_dispatch.Rejected_before_dispatch
-      error;
-    if rest = []
-    then (
-      match observed_overflow with
-      | Some overflow -> lane_terminal overflow
-      | None -> lane_terminal observed)
-    else loop ~observed_overflow ~repeated_models (idx + 1) rest
-  and attempt ~observed_overflow ~repeated_models idx candidate rest =
+    | candidate :: rest -> attempt ~observed_overflow idx candidate rest
+  and attempt ~observed_overflow idx candidate rest =
     let is_last = rest = [] in
     let attempt_runtime_id = runtime_id_of candidate in
     (* Bind quota ownership to the exact candidate that will be dispatched.
@@ -946,7 +856,6 @@ let attempt_runtime_candidates
                 | Keeper_runtime_failure_route.No_progress_thinking_only
                 | Keeper_runtime_failure_route.No_progress_truncated
                 | Keeper_runtime_failure_route.Refusal_body_not_received
-                | Keeper_runtime_failure_route.Generation_repeated
                 | Keeper_runtime_failure_route.Admission
                 | Keeper_runtime_failure_route.Provider_reported_failure
                 | Keeper_runtime_failure_route.Request_refused
@@ -1060,15 +969,10 @@ let attempt_runtime_candidates
          ; checkpoint_after
          }
        in
-       let repeated_models =
-         match repeated_generation error, model_of candidate with
-         | true, Some model -> (model, this_candidate error) :: repeated_models
-         | true, None | false, _ -> repeated_models
-       in
        if not effect_retry_admitted
        then lane_terminal (this_candidate terminal_error)
        else if retry_admitted && error_is_retryable
-       then loop ~observed_overflow ~repeated_models (idx + 1) rest
+       then loop ~observed_overflow (idx + 1) rest
        else if is_last
        then (
          (* Lane fully exhausted: an overflow seen anywhere in the rotation
@@ -1131,16 +1035,7 @@ let attempt_runtime_candidates
             | None -> ());
            lane_terminal (this_candidate error))
        else (
-         (* The next cycle starts from this hint with an empty memory of
-            repeats, so a candidate whose model repeated in this walk must
-            not be named in it: the hint is the only thing that carries the
-            refusal across the cycle boundary. *)
-         let rest_for_next_cycle =
-           List.filter
-             (fun candidate -> Option.is_none (refusal_for ~repeated_models candidate))
-             rest
-         in
-         (match error_is_retryable, effect_retry_admitted, rest_for_next_cycle with
+         (match error_is_retryable, effect_retry_admitted, rest with
           | true, true, next :: later ->
             Option.iter
               (fun { continuation = _; on_deferred } ->
@@ -1155,7 +1050,7 @@ let attempt_runtime_candidates
           | false, _, _ | true, false, _ | true, true, [] -> ());
          lane_terminal (this_candidate terminal_error)))
   in
-  loop ~observed_overflow:None ~repeated_models:[] 0 candidates
+  loop ~observed_overflow:None 0 candidates
 
 (* A candidate a reload removed is a binding that cannot serve, not an
    internal defect: typed as the provider's own NotFound, the lane walk
@@ -2320,12 +2215,6 @@ let run_named
         in
         ()
       | Missing_runtime _ -> ())
-    ~model_of:(function
-      (* The served name comes from the same frozen snapshot as the quota
-         scope and backpressure above: a runtime.toml reload mid-walk must not
-         turn the same-model refusal off by dropping the id from the table. *)
-      | Resolved_runtime runtime -> Some runtime.Runtime_instance.model.api_name
-      | Missing_runtime _ -> None)
     ~candidate_dispatchable:(function
       (* A materialized snapshot stays dispatchable even if a runtime.toml
          reload removed its id from the current table; only a candidate that

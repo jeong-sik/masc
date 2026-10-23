@@ -243,8 +243,7 @@ let on_event t (event : Agent_core.Types.sse_event) =
   | SSEUnsupportedPart _
   | SSEUnsupportedResponse _
   | Timeout _
-  | StreamIncomplete _
-  | StreamRepeating _ -> flush t @ [ event ]
+  | StreamIncomplete _ -> flush t @ [ event ]
   | ContentBlockDelta
       { delta = ThinkingSignatureDelta _ | RedactedThinkingSnapshot _ | MediaDelta _; _ }
   | MessageStart _

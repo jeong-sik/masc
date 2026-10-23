@@ -163,7 +163,6 @@ let%test "oversized payload remains a typed wire fact" =
           | Http_client.Response_body_too_large _
           | Http_client.Empty_completion _
           | Http_client.Context_overflow _
-          | Http_client.Repeating_generation _
           | Http_client.Unknown_provider_failure _ )
       ; _
       }
@@ -263,13 +262,6 @@ let project_stream_error
             { format = wire_format; kind = Http_client.Incomplete_stream }
       ; message = Printf.sprintf "%s stream incomplete: %s" wire_label reason
       })
-  | Types.Stream_repeating { repeated; occurrences; bytes_seen; shape } ->
-    without_diagnostic (Http_client.ProviderFailure
-      { kind =
-          Http_client.Repeating_generation
-            { shape; occurrences; unit_bytes = String.length repeated }
-      ; message = Types.repeating_generation_message ~repeated ~occurrences ~bytes_seen shape
-      })
   | Types.Stream_unknown_event { event_type; _ } ->
     without_diagnostic (Http_client.ProviderFailure
       { kind =
@@ -348,7 +340,6 @@ let%test "an errored choice with no object reads as an interrupted generation" =
              | Http_client.Response_body_too_large _
              | Http_client.Empty_completion _
              | Http_client.Context_overflow _
-             | Http_client.Repeating_generation _
              | Http_client.Unknown_provider_failure _ )
          ; _
          }
@@ -396,7 +387,6 @@ let%test "generic stream provider type stays diagnostic" =
           | Http_client.Response_body_too_large _
           | Http_client.Empty_completion _
           | Http_client.Context_overflow _
-          | Http_client.Repeating_generation _
           | Http_client.Unknown_provider_failure _ )
       ; _
       }
@@ -457,7 +447,6 @@ let%test "a choice-level 429 is a rate limit classified from its error object al
              | Http_client.Response_body_too_large _
              | Http_client.Empty_completion _
              | Http_client.Context_overflow _
-             | Http_client.Repeating_generation _
              | Http_client.Unknown_provider_failure _ )
          ; _
          } -> false)
@@ -527,7 +516,6 @@ let%test "a top-level 502 is a server error and a 4xx code stays provider-owned"
                | Http_client.Response_body_too_large _
                | Http_client.Empty_completion _
                | Http_client.Context_overflow _
-               | Http_client.Repeating_generation _
                | Http_client.Unknown_provider_failure _ )
            ; _
            } ) -> false)
@@ -560,7 +548,6 @@ let%test "a top-level 502 is a server error and a 4xx code stays provider-owned"
               | Http_client.Response_body_too_large _
               | Http_client.Empty_completion _
               | Http_client.Context_overflow _
-              | Http_client.Repeating_generation _
               | Http_client.Unknown_provider_failure _ )
           ; _
           } ) -> false
@@ -608,7 +595,6 @@ let[@warning "-32"] maps_to_sse_wire_failure ~expected_kind stream_error =
           | Http_client.Response_body_too_large _
           | Http_client.Empty_completion _
           | Http_client.Context_overflow _
-          | Http_client.Repeating_generation _
           | Http_client.Unknown_provider_failure _ )
       ; _
       }
@@ -680,7 +666,6 @@ let%test "semantic parse failure uses the active NDJSON wire format" =
           | Http_client.Response_body_too_large _
           | Http_client.Empty_completion _
           | Http_client.Context_overflow _
-          | Http_client.Repeating_generation _
           | Http_client.Unknown_provider_failure _ )
       ; message = _
       }
@@ -735,7 +720,6 @@ let%test "stream incompleteness remains distinct from malformed payload" =
           | Http_client.Response_body_too_large _
           | Http_client.Empty_completion _
           | Http_client.Context_overflow _
-          | Http_client.Repeating_generation _
           | Http_client.Unknown_provider_failure _ )
       ; message = _
       }
@@ -810,7 +794,6 @@ let%test "unsupported content part is a capability mismatch" =
           | Http_client.Response_body_too_large _
           | Http_client.Empty_completion _
           | Http_client.Context_overflow _
-          | Http_client.Repeating_generation _
           | Http_client.Unknown_provider_failure _ )
       ; message = _
       }
@@ -844,7 +827,6 @@ let%test "unsupported response is a capability mismatch" =
           | Http_client.Response_body_too_large _
           | Http_client.Empty_completion _
           | Http_client.Context_overflow _
-          | Http_client.Repeating_generation _
           | Http_client.Unknown_provider_failure _ )
       ; message = _
       }

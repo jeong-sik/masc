@@ -20,7 +20,6 @@ let provider_failure = function
   | Response_body_too_large _ -> "response_body_too_large"
   | Empty_completion _ -> "empty_completion"
   | Context_overflow _ -> "context_overflow"
-  | Repeating_generation _ -> "repeating_generation"
   | Unknown_provider_failure _ -> "unknown_provider_failure"
 
 let transport = function

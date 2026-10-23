@@ -72,7 +72,7 @@ let%test "ordinary unclassified transport exceptions remain typed" =
                | Response_body_too_large _
                | Empty_completion _
                | Context_overflow _
-               | Repeating_generation _ )
+                )
            ; _
            }) -> false
   in

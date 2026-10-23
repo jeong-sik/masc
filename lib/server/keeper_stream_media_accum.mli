@@ -26,7 +26,7 @@ val on_event : ?stream_scope:int -> t -> Agent_core.Types.sse_event -> unit
     [stream_scope] is the exact Agent Core turn scope; production callers always
     pass it, while focused single-scope tests may use the default 0. A new scope
     clears block occupancy while retaining completed media. Provider failures and
-    timeout also clear occupancy; [StreamIncomplete] and [StreamRepeating] are ignored. *)
+    timeout also clear occupancy; [StreamIncomplete] is ignored. *)
 
 val to_chat_blocks : base_dir:string -> t -> Keeper_chat_blocks.chat_block list
 (** Decode and persist each finalized media payload under [base_dir] via

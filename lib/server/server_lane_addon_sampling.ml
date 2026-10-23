@@ -198,7 +198,6 @@ let invoke ~sw ~net ~store ~route ~request params =
                         | Llm_provider.Http_client.Provider_interrupted
                         | Llm_provider.Http_client.Response_body_too_large _
                         | Llm_provider.Http_client.Context_overflow _
-                        | Llm_provider.Http_client.Repeating_generation _
                         | Llm_provider.Http_client.Unknown_provider_failure _);_}) -> [] in
             let diagnostic = Eio_unix.run_in_systhread (fun () ->
               Lane_addon_store.write_blob store (Yojson.Safe.to_string (`Assoc (

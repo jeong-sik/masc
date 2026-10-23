@@ -263,7 +263,7 @@ let activity_of_event preview (event : Agent_core.Types.sse_event) =
   | Agent_core.Types.SSEParseFailed _ | Agent_core.Types.NDJSONParseFailed _
   | Agent_core.Types.SSEUnknownEventType _ | Agent_core.Types.SSEUnsupportedPart _
   | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
-  | Agent_core.Types.StreamIncomplete _ | Agent_core.Types.StreamRepeating _
+  | Agent_core.Types.StreamIncomplete _
   | ContentBlockDelta {delta=TextSnapshot _; _ } -> None
 
 (* Positions count only bytes actually emitted by this writer's redactor.
@@ -282,7 +282,7 @@ let released_text entry events =
       | Agent_core.Types.SSEParseFailed _ | Agent_core.Types.NDJSONParseFailed _
       | Agent_core.Types.SSEUnknownEventType _ | Agent_core.Types.SSEUnsupportedPart _
       | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
-      | Agent_core.Types.StreamIncomplete _ | Agent_core.Types.StreamRepeating _ -> false, None in
+      | Agent_core.Types.StreamIncomplete _ -> false, None in
     match text with
     | None -> entry, changed
     | Some text ->
@@ -323,8 +323,7 @@ let note_stream ~writer ~now event =
       | Agent_core.Types.SSEUnknownEventType _
       | Agent_core.Types.SSEUnsupportedPart _
       | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
-      | Agent_core.Types.StreamIncomplete _
-      | Agent_core.Types.StreamRepeating _ ->
+      | Agent_core.Types.StreamIncomplete _ ->
         entry.tools, activity_of_event preview event
     in
     let entry = { released_entry with tools } in

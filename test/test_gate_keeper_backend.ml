@@ -3141,7 +3141,6 @@ let test_keeper_stream_bridge_attempt_failures_are_not_turn_terminals () =
     ; "sse_unsupported_part", SSEUnsupportedPart { provider_kind; part = "inline_data"; raw = "{}" }
     ; "sse_unsupported_response", SSEUnsupportedResponse { provider_kind; response = "prompt_feedback"; raw = "{}" }
     ; "sse_stream_incomplete", StreamIncomplete { reason = "max_output_tokens" }
-    ; "sse_stream_repeating", StreamRepeating { repeated = "again"; occurrences = 4; bytes_seen = 400; shape = Repeated_paragraph }
     ; "sse_timeout", Timeout "idle timeout after 120.0s"
     ]
   in
@@ -3207,7 +3206,7 @@ let test_keeper_stream_bridge_timeout_quarantines_the_open_tool_once () =
     (stream_protocol_error_kinds
        after_terminal.Keeper_chat_agent_core_stream_bridge.chat_events)
 
-(* An incomplete or repeating stream is the attempt's own failure report. When
+(* An incomplete stream is the provider's own failure report. When
    that attempt was the last one, the Completion path's [fail_stream] finds the
    scope already cut and adds nothing: one kind on the wire, not that kind plus
    a second [sse_stream_incomplete]. An open tool block is quarantined once,
@@ -3297,9 +3296,6 @@ let test_keeper_stream_bridge_cut_stream_is_diagnosed_once () =
     [ ( "sse_stream_incomplete"
       , Keeper_chat_events.Sse_stream_incomplete
       , StreamIncomplete { reason = "max_output_tokens" } )
-    ; ( "sse_stream_repeating"
-      , Keeper_chat_events.Sse_stream_repeating
-      , StreamRepeating { repeated = "again"; occurrences = 4; bytes_seen = 400; shape = Repeated_paragraph } )
     ]
 
 let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =

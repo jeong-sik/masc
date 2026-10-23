@@ -26,8 +26,6 @@ let stream_error_event = function
   | Types.Stream_ndjson_parse_failed { reason; raw } ->
     Types.NDJSONParseFailed { reason; raw }
   | Types.Stream_incomplete { reason } -> Types.StreamIncomplete { reason }
-  | Types.Stream_repeating { repeated; occurrences; bytes_seen; shape } ->
-    Types.StreamRepeating { repeated; occurrences; bytes_seen; shape }
   | Types.Stream_unknown_event { event_type; raw } ->
     Types.SSEUnknownEventType { event_type; raw }
   | Types.Stream_unsupported_part { provider_kind; part; raw } ->
@@ -43,8 +41,7 @@ let event_carries_stream_failure = function
   | Types.NDJSONParseFailed _
   | Types.SSEUnknownEventType _
   | Types.SSEUnsupportedPart _
-  | Types.SSEUnsupportedResponse _
-  | Types.StreamRepeating _ -> true
+  | Types.SSEUnsupportedResponse _ -> true
   | Types.Connected
   | Types.MessageStart _
   | Types.ContentBlockStart _
@@ -246,7 +243,7 @@ let%test "Ollama done without reason finalizes typed incomplete" =
     -> true
   | Error (Types.Stream_provider_error _) | Ok _ | Error (Types.Stream_parse_failed _)
   | Error (Types.Stream_ndjson_parse_failed _) | Error (Types.Stream_incomplete _)
-  | Error (Types.Stream_repeating _) | Error (Types.Stream_unknown_event _)
+  | Error (Types.Stream_unknown_event _)
   | Error (Types.Stream_unsupported_part _) | Error (Types.Stream_unsupported_response _) -> false
 ;;
 
@@ -265,7 +262,7 @@ let%test "Responses terminal event without status finalizes typed incomplete" =
     true
   | Error (Types.Stream_provider_error _) | Ok _ | Error (Types.Stream_parse_failed _)
   | Error (Types.Stream_ndjson_parse_failed _) | Error (Types.Stream_incomplete _)
-  | Error (Types.Stream_repeating _) | Error (Types.Stream_unknown_event _)
+  | Error (Types.Stream_unknown_event _)
   | Error (Types.Stream_unsupported_part _) | Error (Types.Stream_unsupported_response _) -> false
 ;;
 
@@ -298,7 +295,7 @@ let%test "OpenAI-compat [DONE] without finish_reason fails closed" =
     true
   | Error (Types.Stream_provider_error _) | Ok _ | Error (Types.Stream_parse_failed _)
   | Error (Types.Stream_ndjson_parse_failed _) | Error (Types.Stream_incomplete _)
-  | Error (Types.Stream_repeating _) | Error (Types.Stream_unknown_event _)
+  | Error (Types.Stream_unknown_event _)
   | Error (Types.Stream_unsupported_part _) | Error (Types.Stream_unsupported_response _) -> false
 ;;
 
@@ -598,7 +595,7 @@ let complete_stream_http
         | Types.NDJSONParseFailed _ -> `Wire_error Http_client.Ndjson
         | Types.Connected -> `Skip
         | Types.Timeout _ -> `Wire_error active_wire_format
-        | Types.StreamIncomplete _ | Types.StreamRepeating _ -> `Skip
+        | Types.StreamIncomplete _ -> `Skip
       in
       let percentiles () =
         match !inter_chunk_samples with
@@ -976,8 +973,7 @@ let complete_stream_http
                                      | Types.ResponsesOutputItems _
                                      | Types.Connected
                                      | Types.Timeout _
-                                     | Types.StreamIncomplete _
-                                     | Types.StreamRepeating _ ) as evt) ->
+                                     | Types.StreamIncomplete _) as evt) ->
                                   [ evt ], None
                                 | None ->
                                   ( [ Types.SSEParseFailed
@@ -1176,8 +1172,7 @@ let complete_stream_http
                              | Types.Stream_parse_failed _
                              | Types.Stream_ndjson_parse_failed _
                              | Types.Stream_unknown_event _
-                             | Types.Stream_incomplete _
-                             | Types.Stream_repeating _ ->
+                             | Types.Stream_incomplete _ ->
                                Complete_stream_error.wire_error_terminal_label
                                  active_wire_format
                              | Types.Stream_unsupported_part _

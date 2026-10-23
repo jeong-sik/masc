@@ -810,7 +810,7 @@ let stream_start_is_tool_progress (evt : Agent_core.Types.sse_event) =
   | Llm_provider.Types.SSEParseFailed _ | Llm_provider.Types.NDJSONParseFailed _
   | Llm_provider.Types.SSEUnknownEventType _ | Llm_provider.Types.SSEUnsupportedPart _
   | Llm_provider.Types.SSEUnsupportedResponse _ | Llm_provider.Types.Timeout _
-  | Llm_provider.Types.StreamIncomplete _ | Llm_provider.Types.StreamRepeating _ -> false
+  | Llm_provider.Types.StreamIncomplete _ -> false
 
 let stream_start_has_tool_name (evt : Agent_core.Types.sse_event) =
   match evt with
@@ -825,7 +825,7 @@ let stream_start_has_tool_name (evt : Agent_core.Types.sse_event) =
   | Llm_provider.Types.SSEParseFailed _ | Llm_provider.Types.NDJSONParseFailed _
   | Llm_provider.Types.SSEUnknownEventType _ | Llm_provider.Types.SSEUnsupportedPart _
   | Llm_provider.Types.SSEUnsupportedResponse _ | Llm_provider.Types.Timeout _
-  | Llm_provider.Types.StreamIncomplete _ | Llm_provider.Types.StreamRepeating _ -> false
+  | Llm_provider.Types.StreamIncomplete _ -> false
 
 let stream_start_is_tool evt =
   stream_start_is_tool_progress evt && stream_start_has_tool_name evt
@@ -854,7 +854,7 @@ let content_event_allowed t (evt : Agent_core.Types.sse_event) =
     | Llm_provider.Types.SSEUnsupportedPart _
     | Llm_provider.Types.SSEUnsupportedResponse _ | Llm_provider.Types.Timeout _
     | Llm_provider.Types.StreamIncomplete _
-    | Llm_provider.Types.StreamRepeating _ ),
+     ),
     _ -> true
 ;;
 
@@ -872,7 +872,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
    | Llm_provider.Types.SSEParseFailed _ | Llm_provider.Types.NDJSONParseFailed _
    | Llm_provider.Types.SSEUnknownEventType _ | Llm_provider.Types.SSEUnsupportedPart _
    | Llm_provider.Types.SSEUnsupportedResponse _ | Llm_provider.Types.Timeout _
-   | Llm_provider.Types.StreamIncomplete _ | Llm_provider.Types.StreamRepeating _ -> ());
+   | Llm_provider.Types.StreamIncomplete _ -> ());
   (match evt with
    | Agent_core.Types.MessageStart _
    | Agent_core.Types.Connected
@@ -884,7 +884,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
    | Llm_provider.Types.NDJSONError _ | Llm_provider.Types.SSEParseFailed _
    | Llm_provider.Types.NDJSONParseFailed _ | Llm_provider.Types.SSEUnknownEventType _
    | Llm_provider.Types.SSEUnsupportedPart _ | Llm_provider.Types.SSEUnsupportedResponse _
-   | Llm_provider.Types.StreamIncomplete _ | Llm_provider.Types.StreamRepeating _ -> t.current_scope_progress_seen <- true);
+   | Llm_provider.Types.StreamIncomplete _ -> t.current_scope_progress_seen <- true);
   if not (content_event_allowed t evt)
   then invalidate_current_scope t
   else if current_scope_is_invalid t
@@ -1096,7 +1096,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
   | Agent_core.Types.SSEUnsupportedResponse _
   (* A repeat ends the generation, not just its tool blocks: the text this
      scope carries is the repetition itself. *)
-  | Agent_core.Types.StreamRepeating _
+
   (* A liveness timeout ends the attempt the same way; the bridge quarantines
      the scope's open tool blocks under [Sse_timeout]. *)
   | Agent_core.Types.Timeout _ -> invalidate_current_scope t

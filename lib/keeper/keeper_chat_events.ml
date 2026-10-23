@@ -38,7 +38,6 @@ type stream_protocol_error_kind =
   | Sse_unsupported_part
   | Sse_unsupported_response
   | Sse_stream_incomplete
-  | Sse_stream_repeating
   | Sse_timeout
 
 type runtime_attempt_scope_disposition =
@@ -496,7 +495,6 @@ let stream_protocol_error_kind_to_string = function
   | Sse_unsupported_part -> "sse_unsupported_part"
   | Sse_unsupported_response -> "sse_unsupported_response"
   | Sse_stream_incomplete -> "sse_stream_incomplete"
-  | Sse_stream_repeating -> "sse_stream_repeating"
   | Sse_timeout -> "sse_timeout"
 
 let stream_protocol_error_kind_of_string = function
@@ -523,7 +521,6 @@ let stream_protocol_error_kind_of_string = function
   | "sse_unsupported_part" -> Some Sse_unsupported_part
   | "sse_unsupported_response" -> Some Sse_unsupported_response
   | "sse_stream_incomplete" -> Some Sse_stream_incomplete
-  | "sse_stream_repeating" -> Some Sse_stream_repeating
   | "sse_timeout" -> Some Sse_timeout
   | _ -> None
 

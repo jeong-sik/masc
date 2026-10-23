@@ -56,7 +56,7 @@ let completion (error : Http.http_error) =
   | Http.ProviderFailure
       { kind =
           ( Http.Provider_parse_error _ | Http.Provider_wire_error _ | Http.Response_body_too_large _
-          | Http.Empty_completion _ | Http.Repeating_generation _ )
+          | Http.Empty_completion _  )
       ; _ } -> unless_retryable Output_unusable
   | Http.ProviderFailure { kind = Http.Context_overflow _; _ } -> unless_retryable (Input_refused Context_overflow)
 

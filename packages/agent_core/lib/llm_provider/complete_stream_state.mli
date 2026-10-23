@@ -44,7 +44,10 @@ val transition : t -> Types.sse_event -> t
     [Types.Stream_event_suppressed] means the raw event must not be projected
     (an exact/older typed snapshot replay, or input after a sticky failure).
     [Types.Stream_event_rejected] carries the first sticky typed failure.
-    Ordinary [TextDelta] values always append. *)
+    Ordinary [TextDelta] values always append, including repeated text.
+    Content repetition does not establish a terminal or failure boundary.
+    Text and reasoning continue until a provider terminal, typed protocol
+    failure, or cancellation at the transport shell. *)
 val transition_with_resolution
   :  t
   -> Types.sse_event

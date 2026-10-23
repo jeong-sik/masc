@@ -98,7 +98,7 @@ let is_transient_network_error (err : Agent_core.Error.t) : bool =
       | Llm_provider.Error.UnknownVariant _
       | Llm_provider.Error.ProviderUnavailable _
       | Llm_provider.Error.EmptyCompletion _
-      | Llm_provider.Error.RepeatingGeneration _ | Llm_provider.Error.RateLimit _
+      | Llm_provider.Error.RateLimit _
       | Llm_provider.Error.HardQuota _ | Llm_provider.Error.CapacityExhausted _
       | Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _
       | Llm_provider.Error.InvalidRequest _ | Llm_provider.Error.NotFound _
@@ -140,7 +140,6 @@ let is_provider_rejected_parse_error (err : Agent_core.Error.t) : bool =
       | Llm_provider.Error.HardQuota _
       | Llm_provider.Error.ProviderUnavailable _
       | Llm_provider.Error.EmptyCompletion _
-      | Llm_provider.Error.RepeatingGeneration _
       | Llm_provider.Error.ProviderTerminal _
       | Llm_provider.Error.ProviderWireError _
       | Llm_provider.Error.ProviderReportedError _
@@ -164,7 +163,7 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
       | Llm_provider.Error.UnknownVariant _
       | Llm_provider.Error.ProviderUnavailable _
       | Llm_provider.Error.EmptyCompletion _
-      | Llm_provider.Error.RepeatingGeneration _ | Llm_provider.Error.RateLimit _
+      | Llm_provider.Error.RateLimit _
       | Llm_provider.Error.HardQuota _ | Llm_provider.Error.CapacityExhausted _
       | Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _
       | Llm_provider.Error.ServerError _ | Llm_provider.Error.NetworkError _
@@ -209,7 +208,6 @@ let is_empty_completion_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _)
   | Agent_core.Error.Provider (Llm_provider.Error.UnknownVariant _)
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)
-  | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _)
   | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _)
   | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)
   | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _)
@@ -497,9 +495,6 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
              | Llm_provider.Error.Timeout _
              | Llm_provider.Error.ParseError _
              | Llm_provider.Error.ProviderWireError _
-             (* A repeating generation rotates within the turn: the driver
-                maps it to [ProviderFailure] and leaves the model behind. *)
-             | Llm_provider.Error.RepeatingGeneration _
              | Llm_provider.Error.ProviderReportedError _
              | Llm_provider.Error.UnknownVariant _
              | Llm_provider.Error.ProviderTerminal _) ->

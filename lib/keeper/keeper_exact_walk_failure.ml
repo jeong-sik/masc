@@ -84,7 +84,7 @@ type completion =
   | Capability_mismatch | Cli_policy_invalid | Cli_startup_failed | Provider_parse_error
   | Provider_wire_error | Provider_reported_error | Provider_interrupted
   | Response_body_too_large | Empty_completion of stop | Context_overflow_failure
-  | Repeating_generation | Unknown_provider_failure
+  | Unknown_provider_failure
 [@@deriving yojson]
 
 type api_observation =
@@ -116,7 +116,7 @@ let completion (error : Http_client.http_error) = match error with
       | Provider_wire_error _ -> Provider_wire_error | Provider_reported_error _ -> Provider_reported_error
       | Provider_interrupted -> Provider_interrupted | Response_body_too_large _ -> Response_body_too_large
       | Empty_completion {stop_reason} -> Empty_completion (stop stop_reason)
-      | Context_overflow _ -> Context_overflow_failure | Repeating_generation _ -> Repeating_generation
+      | Context_overflow _ -> Context_overflow_failure
       | Unknown_provider_failure _ -> Unknown_provider_failure
 
 let api_observation (cause : Exact_output.execution_error_cause) = match cause with
@@ -135,7 +135,7 @@ let of_completion = function
   | Deadline (Stream_idle _ | Cli_stdout_idle | Provider_step | Queue | Capacity_backpressure | Unknown_timeout)
   | Http_failure | Network_failure _ | Accept_rejected | Provider_terminal | Capacity_exhausted | Hard_quota
   | Capability_mismatch | Cli_policy_invalid | Cli_startup_failed | Provider_parse_error
-  | Provider_wire_error | Provider_reported_error | Provider_interrupted | Repeating_generation
+  | Provider_wire_error | Provider_reported_error | Provider_interrupted
   | Unknown_provider_failure
   | Empty_completion (End_turn | Stop_tool_use | Stop_sequence | Refusal | Content_filter
       | Repetition_truncation | Pause_turn | Compaction | Unmatched_tool_calls | Unknown_stop _) -> size_independent

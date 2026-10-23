@@ -42,8 +42,8 @@ type tool_quarantine =
 type scope_disposition =
   | Scope_live
   | Scope_cut
-      (* The attempt reported a failure of its own: an incomplete or a
-         repeating stream. The text and media it streamed stay deliverable,
+      (* The provider reported an incomplete stream.
+         The text and media it streamed stay deliverable,
          and the scope may still close normally (the OpenAI Responses parser
          emits [StreamIncomplete] on [response.incomplete] and then the
          terminal [MessageDelta] and [MessageStop]), so later events of the
@@ -786,7 +786,7 @@ let content_event_allowed state (evt : Agent_core.Types.sse_event) =
     | Agent_core.Types.Connected
     | Agent_core.Types.Timeout _
     | Agent_core.Types.StreamIncomplete _
-    | Agent_core.Types.StreamRepeating _),
+    ),
     (Accepting_content | Stop_reason_seen _ | Message_stopped) -> true
 ;;
 
@@ -812,7 +812,7 @@ let reject_quarantined_content_event ~stream_scope state
     | SSEUnsupportedResponse _
     | Connected
     | Timeout _
-    | StreamIncomplete _ | StreamRepeating _ -> None
+    | StreamIncomplete _ -> None
   in
   match index with
   | None -> None
@@ -881,7 +881,6 @@ let event_channel_conflicts state = function
   | Agent_core.Types.Connected
   | Agent_core.Types.Timeout _
   | Agent_core.Types.StreamIncomplete _
-  | Agent_core.Types.StreamRepeating _
   | Agent_core.Types.ContentBlockStop _ -> false
 
 (* Progress cannot reopen a native occurrence or set an execution outcome. *)
@@ -1593,31 +1592,4 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       { cut with
         chat_events = cut.chat_events
           @ [ protocol_error ~reason:redacted_reason Sse_stream_incomplete ]
-      }
-  | StreamRepeating { repeated; occurrences; bytes_seen; shape } ->
-      (* Same shape as an incomplete stream: the open tool blocks are
-         quarantined, the text already streamed stays deliverable, and the
-         operator is told why. The reason names the repeat rather than a
-         truncation, because the bytes arrived fine and the answer did not. *)
-      let reason =
-        redact_text
-          (Agent_core.Types.repeating_generation_message
-             ~repeated
-             ~occurrences
-             ~bytes_seen
-             shape)
-      in
-      let quarantined =
-        poison_scope ~retire_content:false bridge_state ~kind:Sse_stream_repeating ~reason
-      in
-      { bridge_state =
-          { quarantined.bridge_state with
-            scope_disposition = Scope_cut
-          ; message_open = bridge_state.message_open
-          }
-      ; chat_events =
-          (if tools_in_current_scope bridge_state = []
-           then []
-           else quarantined.chat_events)
-          @ [ protocol_error ~reason Sse_stream_repeating ]
       }

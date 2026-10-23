@@ -155,7 +155,7 @@ let register_skill_export_handler handler = skill_export_handler := Some handler
    request, so a wake raised for an action never schedules a second capture
    of the same state. *)
 type observation_request = Idle | Run_actions | Refresh_sources | Observe_now
-(* Why the last host request cycle stopped before its listing settled. *)
+(* A cycle-wide failure, or the first request-local failure in the last cycle. *)
 type host_issue =
   | Listing_failed of string
   | Listing_refused of string
@@ -583,6 +583,34 @@ let live_reading m access =
       | Unready reason -> (ready, unready_of e reason :: unready)
       | Gone -> (ready, unready)) ([], []) (entries m) in
   { ready = List.rev ready; unready = List.rev unready }
+
+let authorize_captured_exact_dispatch ~store ~declaration_id ~package_id ~configuration_revision =
+  Eio_context.run_on_owner_domain (fun () ->
+    let* m=match Hashtbl.find_opt managers (Lane_addon_store.root store) with
+      | Some m -> Ok m | None -> Error "Original Add-on Runtime owner is unavailable" in
+    (* Host cycles already belong to their entry. Re-entering action_mutex can
+       deadlock an RPC that is awaiting that cycle. The configuration serializer
+       is sufficient for this local admission; release it before provider I/O. *)
+    Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+      let* directory=match m.configuration_status with
+        | Some reading -> Ok reading.directory
+        | None -> Error "Original Add-on configuration has not been observed" in
+      let snapshot=offload (fun () -> Lane_addon_config.load ~directory) in
+      let* ()=if snapshot.complete then Ok ()
+        else Error "Original Exact dispatch requires a complete fresh Add-on configuration" in
+      let* declaration=match List.filter (fun (d : Lane_addon_config.declaration) ->
+          d.id=declaration_id) snapshot.declarations with
+        | [d] when d.enabled && d.revision=configuration_revision && d.package.id=package_id -> Ok d
+        | [] | [_] | _::_::_ -> Error "Original Exact semantic configuration no longer permits dispatch" in
+      let live=List.filter (fun (e : entry) ->
+        not e.stopping && Option.is_some e.connection && e.package=declaration.package
+        && match e.configuration with
+          | Some owner -> owner.id=declaration_id && owner.source_path=declaration.source_path
+            && owner.revision=configuration_revision
+          | None -> false) (entries m) in
+      match live with
+      | [_] -> Eio.Fiber.check (); Ok ()
+      | [] | _::_::_ -> Error "Original Exact configured incarnation is unavailable or ambiguous"))
 let status_coverage e = {
   source_id = e.instance_id; incarnation = e.instance_id;
   cursor = Some (string_of_int e.seq);
@@ -1000,6 +1028,7 @@ type host_attempt = Deliver of Yojson.Safe.t | Restore of Yojson.Safe.t | Wait o
 let run_host_cycle m e (port : host_port) =
   let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
   let waiting = ref [] in
+  let request_issue = ref None in
   let check_live () = if e.stopping then raise Host_cycle_stopped in
   let current_owner () : Lane_addon_host_delivery.owner = {
     instance_id=e.instance_id;
@@ -1163,26 +1192,37 @@ let run_host_cycle m e (port : host_port) =
           if Hashtbl.mem delivered request_id then Error (Relisted_delivered_request request_id)
           else if Hashtbl.mem tried request_id then each delivered_any rest
           else
-            let* attempt = try_request request in
-            match attempt with
-            | Restore arguments ->
-                let* () = deliver_arguments request arguments in
+            let outcome =
+              let* attempt = try_request request in
+              match attempt with
+              | Restore arguments ->
+                  Result.map (fun () -> true) (deliver_arguments request arguments)
+              | Deliver result ->
+                  Result.map (fun () -> true) (deliver request result)
+              | Wait reason ->
+                  waiting := (request_id, reason) :: !waiting;
+                  Ok false in
+            match outcome with
+            | Ok true ->
                 Hashtbl.replace delivered request_id ();
                 each true rest
-            | Deliver result ->
-                let* () = deliver request result in
-                Hashtbl.replace delivered request_id ();
-                each true rest
-            | Wait reason ->
+            | Ok false ->
                 (* Tried at most once per cycle, so it cannot keep a cycle running. *)
                 Hashtbl.replace tried request_id ();
-                waiting := (request_id, reason) :: !waiting;
-                each delivered_any rest in
+                each delivered_any rest
+            | Error ((Exact_record_failed _ | Ask_record_failed _ | Result_delivery_failed _) as issue) ->
+                (* Preserve the failure without delivering a fabricated terminal or
+                   retrying it in this cycle. Other original requests remain independent. *)
+                Hashtbl.replace tried request_id ();
+                (match !request_issue with None -> request_issue := Some issue | Some _ -> ());
+                each delivered_any rest
+            | Error ((Listing_failed _ | Listing_refused _ | Relisted_delivered_request _ | No_exact_runner) as issue) ->
+                Error issue in
     let* delivered_any = each false requests in
     if delivered_any then pass () else Ok () in
   let outcome = try pass () with Host_cycle_stopped -> Ok () in
   e.host_status <- { cycles = e.host_status.cycles + 1; waiting = List.rev !waiting;
-    issue = (match outcome with Ok () -> None | Error issue -> Some issue) }
+    issue = (match outcome with Ok () -> !request_issue | Error issue -> Some issue) }
 
 let run_host_watch ~sw ~cleanup_sw ~backend m e port await_change =
   fork_isolated ~sw (fun () ->

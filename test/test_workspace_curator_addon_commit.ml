@@ -154,7 +154,7 @@ let test_refused_write_and_recovered_intent retry_only ()=with_workspace (fun ba
     (List.exists (function Progress.Commit_retry_observed _ -> true
       | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _ | Commit_intended _
       | Commit_uncertain _ | Commit_observed _ | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _
-      | Observer _ -> false) (Progress.events result.progress));
+      | Preparation_intended _ | Preparation_observed _ | Observer _ -> false) (Progress.events result.progress));
   settle ~save:no_save base_path store result |> accepted |> committed |> ignore)
 let test_changed_or_unreadable_sources ?(on_conflict=fun _ _ _ -> ()) unreadable ()=with_workspace (fun base_path store ->
   let capture,output=classification base_path ["Original selected source"] in
@@ -572,7 +572,8 @@ let test_nested_successor_has_no_root_sibling ()=with_workspace (fun base_path s
   check int "one root, one child, one grandchild only" 3 (List.length (owned (Owner.discover ~store ~scope:Capture.scope))))
 let host_result base_path store capture output =
   let request=get (Server_workspace_memory_addon_validation.request capture) in
-  let runner ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
+  let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
+    get (before_dispatch ());
     match validate output with
     | Ok output -> executed (Exact.Call_ended (Exact.Answered {output;slot="original-host";usage=None}))
     | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output {detail}))) in

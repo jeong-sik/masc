@@ -272,7 +272,8 @@ type call_outcome =
 
 type execution_result = { outcome : call_outcome; receipt : Keeper_exact_walk_receipt.t }
 type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_result
-type runner = admission_class:Agent_core.Llm_provider.Admission_class.t ->
+type dispatch_guard = unit -> (unit, string) result
+type runner = before_dispatch:dispatch_guard -> admission_class:Agent_core.Llm_provider.Admission_class.t ->
   lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
 
 (* One record per declaration and request: the request, its digest, every
@@ -602,9 +603,12 @@ let claim key =
 let release key = Mutex.protect in_flight_lock (fun () -> Hashtbl.remove in_flight key)
 
 type output_validator = Yojson.Safe.t -> (unit, string) result
+type execution_scope = (unit -> (attempt, string) result) -> (attempt, string) result
 type request_authorization = {
   admission_class : Agent_core.Llm_provider.Admission_class.t;
   validate_output : output_validator;
+  before_dispatch : dispatch_guard;
+  with_execution : execution_scope;
 }
 type authority_refusal =
   | Unowned of { reason : string }
@@ -706,9 +710,10 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
         match previous.final, recovered with
         | Some final, (None | Some _) -> Ok (Final (deliver final))
         | None, Some attempt -> Ok attempt
-        | None, None ->
+        | None, None -> authorization.with_execution (fun () ->
           Eio.Fiber.check ();
-          match runner ~admission_class:authorization.admission_class ~lane_key ~schema request with
+          let* ()=authorization.before_dispatch () in
+          match runner ~before_dispatch:authorization.before_dispatch ~admission_class:authorization.admission_class ~lane_key ~schema request with
           | Error unavailable ->
             let reason = Lane_unavailable unavailable in
             let* () = save {previous with attempts = previous.attempts @ [Some (not_final_to_json reason)]} in
@@ -738,4 +743,4 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                 | Not_final reason ->
                     {previous with attempts = previous.attempts @ [Some (not_final_to_json reason)]} in
               let* () = save finished in
-              Ok attempt))
+              Ok attempt)))

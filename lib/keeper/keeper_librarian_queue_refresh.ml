@@ -907,6 +907,14 @@ let run_explicit_admission ~base_path ~keeper_name =
   | Pending detail ->
     clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
     Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending: %s" detail
+  | Addon_unattached {pending} ->
+    (* Off by configuration, not a failure. Say it once per waiting count, so
+       the operator sees the queue grow without a line every pass. *)
+    let detail = Printf.sprintf "addon_unattached:%d" pending in
+    if should_report_problem ~config ~keeper_name ~site:Explicit_admission detail then
+      Log.Keeper.warn ~keeper_name
+        "Librarian explicit admission is off: no keeper-librarian Add-on is attached; %d candidates wait"
+        pending
   | Unavailable detail ->
     if should_report_problem ~config ~keeper_name ~site:Explicit_admission detail then
       Log.Keeper.warn ~keeper_name "Librarian explicit admission unavailable: %s" detail

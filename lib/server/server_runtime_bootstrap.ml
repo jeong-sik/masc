@@ -1434,6 +1434,7 @@ let start_post_ready_owner_lanes
     Server_lane_inventory.browser_presence ~config:(Mcp_server.workspace_config state) ~access
     |> Browser_addon_presence.polling));
   Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
+  Server_librarian_addon_wake.install ~sw ~config:(Mcp_server.workspace_config state);
   let start_authority () =
     start_completion_authority ~sw ~clock state;
     start_goal_verifier ~sw ~clock state;

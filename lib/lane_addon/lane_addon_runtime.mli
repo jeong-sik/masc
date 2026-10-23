@@ -21,6 +21,16 @@ val register_exact_runner : authorize_request:Lane_addon_exact.execution_authori
     request ends its host request cycle with [no_exact_runner]. Retirement
     cancels its current exact call independently of worker cleanup; a pending
     provider outcome is not replayed and no later request is dispatched. *)
+val authorize_captured_exact_dispatch : store:Lane_addon_store.t -> declaration_id:string ->
+  package_id:string -> configuration_revision:string -> (unit, string) result
+(** On the existing Runtime owner, confirm a complete fresh enabled declaration,
+    its semantic revision and the live configured incarnation before a new host
+    Exact provider effect. Inspect under the configuration serializer only;
+    never reacquire the action serializer or hold either across provider work.
+    The runner calls this again after admission/measurement yields and before
+    each dispatch. Does not revalidate or discard a returned provider answer,
+    and is never required for local retained-terminal recovery while Off.
+    Raw source-byte revision is provenance, not this semantic authority. *)
 val register_github_reader : Lane_addon_records.github -> unit
 (** Server-owned GitHub access for [github_pulls] record grants, registered
     before configuration maintenance. Until then such a read waits as
@@ -389,8 +399,12 @@ type host_issue =
   | Exact_record_failed of { request_id : string; detail : string }
   | Ask_record_failed of { request_id : string; detail : string }
   | No_exact_runner
-(** What stopped an instance's last host request cycle (RFC operator-quiz
-    §4.4). A detail is the failure's own text and may be blank. *)
+(** A cycle-wide failure, or the first request-local failure in an instance's
+    last host request cycle (RFC operator-quiz §4.4). Exact, ask and result
+    delivery failures leave that request unresolved and do not suppress other
+    requests. Listing, protocol and missing-runner failures stop the cycle and
+    take precedence in this projection. A detail is the failure's own text and
+    may be blank. This diagnostic grants no execution or result authority. *)
 
 val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)

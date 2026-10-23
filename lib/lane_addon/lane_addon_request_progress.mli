@@ -10,11 +10,15 @@ type commit = { judgment : Yojson.Safe.t; change : change }
 type successor = { request_id : string; request_digest : string }
 (** The child request by its original request ID and the digest its owner
     record names it by; the child's body is stored once, by its own record. *)
+type preparation_intent = { request_id : string; request : Yojson.Safe.t }
+type preparation = Preparation_pending of preparation_intent | Preparation_confirmed of preparation_intent
 type event =
   | Dispatch_intended
   | Admission_declined of Yojson.Safe.t
   | Execution_observed of observation
   | Judgment_retained of Yojson.Safe.t
+  | Preparation_intended of preparation_intent
+  | Preparation_observed of string
   | Commit_intended of change
   | Commit_uncertain of Yojson.Safe.t
   | Commit_retry_observed of Yojson.Safe.t
@@ -33,6 +37,12 @@ type t
 val captured : t
 val phase : t -> phase
 val events : t -> event list
+val preparation : t -> preparation option
+(** Optional immutable prerequisite-publication fact. Its intent and exact ID
+    acknowledgement preserve Judged; they perform no child publication or
+    execution and grant no domain effect. The host separately authenticates
+    the complete original child, parent and physical owner. Pending preparation
+    prevents Commit_intended; consumers without one keep their original policy. *)
 val observer : t -> Lane_addon_request_receipt.t
 (** Orthogonal immutable observer intents/acknowledgements. Execution and commit
     transitions preserve them. Completion intent requires an original Finished,

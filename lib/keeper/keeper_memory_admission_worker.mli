@@ -4,16 +4,21 @@ type judgment_result =
   | Deferred of string
   | Input_size_refused of string
 
-type outcome =
+type outcome = Keeper_librarian_admission_owner.outcome =
   | Disabled
   | Idle
   | Recheck_new_input
   | Settled of { has_more : bool }
   | Pending of string
+  | Addon_unattached of { pending : int }
   | Unavailable of string
 
 val run : base_path:string -> keeper_name:string -> outcome
-(** Runs on the existing serialized Memory lane, first judging the full batch.
+(** Uses the original Addon owner on the existing serialized Memory lane.
+    Pending returns while the common host owns the model execution; accepted
+    output is restored through its original capture and absorption journal.
+    Off keeps completed original Memory/ACK recovery available.
+    First judges the full batch.
     Only an actual input-size refusal partitions it into disjoint whole-input
     halves, and only when the same walk met no failure a smaller range meets
     the same way (a quota, an outage, an operator refusal): such a walk is

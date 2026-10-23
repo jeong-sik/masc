@@ -1777,7 +1777,7 @@ let host_request_lines item = match item.host_requests with
       [""; Printf.sprintf "Host requests · last cycle, %d %s" hr_cycles (if hr_cycles = 1 then "pass" else "passes")]
       @ (if hr_waiting = [] then ["  nothing waiting"]
          else List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) hr_waiting)
-      @ Option.fold ~none:[] ~some:(fun issue -> ["  stopped: " ^ host_issue_text issue]) hr_issue
+      @ Option.fold ~none:[] ~some:(fun issue -> ["  issue: " ^ host_issue_text issue]) hr_issue
 
 let connection_workers (snapshot : snapshot) (item : instance) =
   match item.installation_id with

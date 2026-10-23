@@ -1,10 +1,12 @@
 # Librarian execution as an Addon
 
-This is the next implementation boundary for worklist E03. It is a design based
-on source `db31e62fe17f92aea4919de7765f1ace65914772`, not an implemented package,
-passing runtime scenario or replacement for E03's original completion criteria:
-preserve checkpoint, absorption, Memory lineage and pending work, and verify
-Keeper memory continuity.
+This records the original E03 extraction contract and its current implementation.
+The explicit-candidate production caller now uses the configured Librarian Addon
+for the raw proposal and the original host for absorption, Memory and ACK. This
+candidate has source/parser evidence only; its selected compiled behavior checks
+have not yet run. Checkpoint, official-client, continuity and history purposes
+remain on their original host path. E03 is incomplete until its original memory
+lineage, pending-work and actual Keeper-continuity criteria are verified.
 
 ## Execution must leave authority on the host
 
@@ -48,6 +50,10 @@ Read an existing host Exact terminal or the original worker request before any
 new submission. Retain a dispatch intention before the send. An unknown sent
 outcome does not authorize another model call. Package replacement must not
 transfer an old request to different inputs, installation or schema.
+The Workspace Curator and the Librarian share one submit-once journal
+(`Lane_addon_submit_once`). Its pre-send destination check runs before the
+intent is written. A submit the host refused before sending declines that
+intent, so the next pass reads absence and submits the same request again.
 
 Retain the raw proposal, validate it against that original input, run the
 existing host absorption gate and apply the existing locked Memory disposition.
@@ -58,7 +64,9 @@ receipt instead of generating another judgment.
 
 Off must refuse fresh root/child admission while allowing already retained
 results and confirmed local commit/ACK recovery. This differs from the existing
-global Librarian disabled policy. Preserve the purge fence, sparse deferred
+global Librarian disabled policy. With no attached keeper-librarian Add-on the
+owner reports `Addon_unattached` with the waiting candidate count instead of a
+repeated failure; candidates stay queued. Preserve the purge fence, sparse deferred
 gaps, newly appended candidates and concurrent retirement checks. Unchanged
 deferred, unknown or refused work must not mint a new root on each wake.
 
@@ -79,25 +87,20 @@ does not establish workspace/Keeper/installation authority. The eventual host
 capture must bind those owners and Memory inputs separately. Receipt-backed
 locked disposition and queue ACK remain the sole consumption path.
 
-## Shared execution gaps that must be resolved
+## Shared execution boundaries
 
-**Admission policy:** builtin Librarian resolves to `Background` admission,
-while `Server_lane_addon_exact.execute_http` starts `Standard` flows in the
-inspected source. The host must carry a trusted typed admission policy for the
-new consumer. Do not silently change fairness, let worker input select its own
-priority or add a duplicate operator knob.
+**Admission policy:** builtin Librarian resolves to `Background` admission.
+The Addon host carries that same trusted typed policy for the original
+Librarian consumer. Worker input cannot select priority or add an operator knob.
 
-The next shared-port implementation returns one host `request_authorization`
-containing its pure output validator and typed admission class. The common
+The shared port returns one host `request_authorization` containing its pure
+output validator, typed admission class and execution lifecycle/dispatch guards. The common
 broker passes that mandatory class through its runner to the actual HTTP
-`Exact.start_flow`. The current issuer first performs the existing Curator
-original-binding checks and then grants Standard; a Librarian-looking worker
-name does not grant Background. Worker wire/digests and original retained
-records remain unchanged, and retained delivery obtains fresh authority without
-running another provider. This conduit alone does not implement the Librarian
-original consumer, persist a per-attempt class audit, or change one-shot CLI
-admission. The eventual Background issuer still needs its strict original host
-capture and purpose/destination validation.
+`Exact.start_flow`. The Curator issuer performs its original-binding checks and
+grants Standard; the Librarian issuer grants Background only after strict
+original capture, purpose and destination validation. A worker name grants no
+priority. Worker wire/digests remain unchanged, and retained delivery does not
+run another provider. This does not change one-shot CLI admission.
 
 **Failure evidence:** the existing Librarian `inference_failure` distinguishes
 whole-walk capacity evidence, invalid-output veto, CLI participation and
@@ -119,14 +122,12 @@ refuses without any provider/configuration fallback; observer JSON is not an
 authority format. Original partial failures and judgment-invalid typed answers
 remain unsuccessful rather than becoming permission to commit.
 
-The port does not persist or discover the original records itself, bind the
-physical journal or recover a provider response lost before its after-hook
-write. The eventual owner must retain original input bytes needed to reproduce
-the outbound request digest and strictly restore workspace, inputs and gate
-authority before calling it. Production Librarian still needs that integration;
-a raw Memory proposal or this pure port alone does not establish crash-safe
-gate continuation. Any later reevaluation needs an explicit original decision,
-not an automatic provider retry on a restore error.
+The pure port does not persist or discover records, bind the physical journal
+or recover a provider response lost before its after-hook write. The explicit
+owner below retains the original input bytes and restores workspace, inputs and
+Gate authority before calling it. A raw Memory proposal or this pure port alone
+does not establish crash-safe continuation. Later reevaluation needs an explicit
+original decision; a restore error does not authorize provider retry.
 
 **Validation binding:** compose the new original-consumer validator with the
 existing Curator namespace checks in `Server_lane_addon_exact.authorize_request`.
@@ -208,15 +209,15 @@ selected compiled verification on their own frozen source. Parser checks and
 synthetic broker publication fixtures do not prove real provider capture, UI,
 operator installation or completion of E03 or the original54 work items.
 
-## Explicit-candidate owner implementation in progress
+## Explicit-candidate capture and execution contract
 
-The successor implementation is not a worker cutover yet. The actual production
-trigger remains `Keeper_librarian_queue_refresh.run_explicit_admission` followed
-by `Keeper_memory_admission_worker.run`. Keep that caller intact until its whole
-replacement includes original discovery, worker execution, absorption, locked
-Memory disposition, verified receipt recovery, candidate ACK and both children
-of a whole-input partition. Do not publish the intermediate ports as extraction
-completion.
+The production trigger remains
+`Keeper_librarian_queue_refresh.run_explicit_admission` followed by
+`Keeper_memory_admission_worker.run`. The candidate implementation below replaces
+the latter's execution with original discovery, worker execution, absorption,
+locked Memory disposition, verified receipt recovery, candidate ACK and both
+children of a whole-input partition. Source integration is not execution proof
+or completion of the wider extraction.
 
 The immutable execution capture binds the actual workspace and flat keepers
 root path/device/inode, canonical Keeper ID and existing Memory incarnation
@@ -253,7 +254,7 @@ replace them. A known unsuccessful complete gate may have a separately retained
 successor attempt on an explicit host trigger. Restore errors do not grant that
 successor.
 
-A remaining mandatory boundary is terminal-frontier supersession. Suppose an
+A mandatory boundary is terminal-frontier supersession. Suppose an
 original candidate is semantically deferred, then new candidates or material
 Memory changes arrive. The current worker judges the pending input again; an
 immutable root must not permanently lock those deferred candidates out. The new
@@ -268,5 +269,89 @@ actual MCP frames cover retained submission, full original role/schema listing,
 rebound-input refusal, terminal retention and process restart. Its host result is
 synthetic, so it proves neither semantic authority nor OCaml host execution,
 provider capture, absorption, Memory or ACK. The complete production owner and
-actual Runtime/Store/failure tests remain required before this unit can be called
-implemented and before E03 can advance to end-to-end qualification.
+actual Runtime/Store/failure execution results remain required before this unit
+can advance to end-to-end qualification.
+
+
+## Actual explicit-candidate owner candidate (2026-10-22)
+
+`Keeper_librarian_queue_refresh.run_explicit_admission` still submits through the
+existing `Keeper_memory_lane`; `Keeper_memory_admission_worker.run` now delegates
+to `Keeper_librarian_admission_owner.run`. There is no second scheduler. The
+owner restores the complete original part/execution/gate inventories before
+local recovery, candidate ACK or fresh work. `Queue.read_generation` preserves
+the address of an original request even when a persisted queue becomes empty.
+Scope identity includes the physical workspace/keepers roots, Keeper and that
+original queue generation. The complete capture additionally binds the required
+Memory epoch, so epoch loss or replacement cannot hide an old request by moving
+its lookup address.
+
+Fresh capture uses the real resolved prompt/fragments, ordered original Memory,
+policy values, stable parsing time, complete sparse candidate payloads,
+retirement evidence and actual semantic Addon destination. The worker retains
+or reads that exact request; the shared host Exact runner invokes the full pure
+admission validator. Its execution-only guard checks current configured
+semantic authority before actual measurement/generation dispatch, including
+waiting for a provider permit, while completed originals remain locally readable
+when Off. Lost or uncertain worker admission never grants a resubmit. Worker
+terminal JSON and restored host judgments must equal the retained original host
+terminal; call finals additionally require its latest completed execution proof.
+Absent or open host evidence cannot authorize Memory, ACK or supersession.
+
+New host executions register an inline cancellation scope in the existing
+Keeper Memory-lane entry, from the initial guard through result/proof publication
+and cleanup. Purge fences new registrations, signals the ordinary drain and all
+external scopes before joining any, then waits for their actual exits. Retained
+terminal reads do not register execution. This lifecycle is source-integrated;
+its actual provider-cancellation scenario still needs compiled execution.
+
+Only actual exclusive host input-capacity proof permits two whole-candidate
+children. The existing Owner/Progress journal retains both original children
+and acknowledges their exact publication before either runs. The right child
+captures Memory at its actual turn after any left-side commit. A terminal
+semantic Deferred remains immutable on an unchanged wake. A new tail or
+material fact/provenance change can qualify a new full pending batch, including
+old gaps, through independently verified original terminal/receipt evidence;
+ordinary failure and unknown execution are not supersession grants.
+
+Before the first absorption evaluation, the Judged execution retains a full
+preparation intent containing the immutable Gate root request and authority.
+Local recovery publishes and confirms only that same child, then acknowledges
+publication in the parent. Gate execution and Memory commit cannot precede this
+acknowledgement; a missing acknowledged child is an error. The Memory disposition
+intent is recorded after the Gate completes. Gate requests and returned
+transcripts are host-owned. Known-failed retries retain their exact successor
+before child publication and acknowledge it before execution. Pending successor
+publication can recover only that same child locally; missing acknowledged
+history refuses. Restoring completed gate evidence calls no provider.
+
+`Keeper_librarian_admission_commit` validates the original answer and gate chain,
+then passes the original disposition/support/required destinations and recall
+revision to `Current.apply_disposition`. It merges under the existing Memory
+locks instead of replacing a captured full snapshot. Actual matching committed
+candidate receipts alone authorize a Finished observation and sparse queue ACK.
+Unknown local disposition is reconciled against those same receipts before a
+local retry, without another model or gate evaluation.
+
+`Server_librarian_addon_wake` only subscribes to existing Runtime owner events.
+A switch-owned child restores the original owner after yielding, then signals
+the existing per-Keeper queue wake. Configuration/export hints scan actual
+pending queue names. The callback performs no filesystem or Runtime reentry;
+shutdown fences copied callbacks and removes this exact subscription.
+
+An unresolved original returns Pending without scheduling itself merely because
+a later queue tail exists. Immediate tail recheck requires a completed frontier
+walk. Invalid execution evidence remains Unavailable rather than becoming a
+normal wait or a partial-success result. In the shared worker, request-local
+Exact/ask/delivery errors remain diagnostic and are attempted only once per
+cycle, while other requests can continue. Listing/protocol/global-runner failures
+still stop the cycle. Purged originals are not rewritten as successful results.
+
+The focused production fixture uses actual Runtime, persistent Python worker,
+loopback HTTP/common Exact, serialized Memory lane, original journals, Current
+receipts and queue ACK. Its resource-launch edge is substituted; it does not
+prove Docker, paid-provider execution, installed native binaries, either visible
+UI, other Librarian purposes or the original E03 continuity requirement. The
+server wake case substitutes only the final queue-refresh scheduling callback
+with the same Memory-lane/public-worker consumer. Tests are authored, not yet
+executed; earlier parent execution receipts are not evidence for this candidate.

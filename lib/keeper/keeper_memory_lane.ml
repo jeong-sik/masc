@@ -1,6 +1,7 @@
 (** Per-keeper Librarian execution lane. See keeper_memory_lane.mli (RFC-0257). *)
 
 let lane_label = "librarian"
+let ( let* ) = Result.bind
 
 type librarian_drain =
   { mutable latest : (unit -> unit) option
@@ -9,16 +10,25 @@ type librarian_drain =
   ; owner_lane : Keeper_lane.t
   }
 
+type external_effect = {
+  identity : unit ref;
+  context : Eio.Cancel.t;
+  owner_domain : Domain.id;
+  exited : unit Eio.Promise.t;
+  resolve_exit : unit Eio.Promise.u;
+}
+
 type entry =
   { state_mu : Stdlib.Mutex.t
-    (* Guards [pending], [librarian_drain], and [last_owner_lane]. Critical
-       sections never yield. *)
+    (* Guards the drain, pending counts, purge fence and active external
+       cancellation scopes. Critical sections never yield. *)
   ; mutable pending : int
   ; mutable librarian_drain : librarian_drain option
   ; mutable last_owner_lane : Keeper_lane.t option
     (* The lane of the most recent drain, kept after [librarian_drain] is
        cleared because that lane may still be in its cleanup. A Keeper purge
        waits on it ([cancel_and_await_librarian]). *)
+  ; mutable external_effects : external_effect list
   ; mutable purge_owner : unit ref option
   }
 
@@ -53,6 +63,7 @@ let make_entry () =
   ; pending = 0
   ; librarian_drain = None
   ; last_owner_lane = None
+  ; external_effects = []
   ; purge_owner = None
   }
 ;;
@@ -415,6 +426,39 @@ let submit ~base_path ~keeper_name f =
     submit_librarian ~keeper_name entry sw f
 ;;
 
+type external_effect_error = External_purge_in_progress | External_cancelled_by_purge
+let external_effect_error_to_string = function
+  | External_purge_in_progress -> "Keeper purge excludes a new external Librarian effect"
+  | External_cancelled_by_purge -> "Original external Librarian effect was cancelled and joined for purge"
+exception External_effect_purge of unit ref
+
+let with_external_effect ~base_path ~keeper_name run =
+  let entry=entry_for ~base_path ~keeper_name in
+  let identity=ref () and registered=ref None in
+  Fun.protect ~finally:(fun () ->
+    Eio.Cancel.protect (fun () ->
+      match !registered with
+      | None -> ()
+      | Some active ->
+        Stdlib.Mutex.protect entry.state_mu (fun () ->
+          entry.external_effects <- List.filter (fun current -> current.identity != identity) entry.external_effects);
+        Eio.Promise.resolve active.resolve_exit ()))
+    (fun () ->
+      try Eio.Cancel.sub (fun context ->
+        let exited,resolve_exit=Eio.Promise.create () in
+        let active={identity;context;owner_domain=Domain.self ();exited;resolve_exit} in
+        let acquired=Stdlib.Mutex.protect entry.state_mu (fun () ->
+          if Option.is_some entry.purge_owner then false
+          else (entry.external_effects <- active :: entry.external_effects;true)) in
+        if not acquired then Error External_purge_in_progress
+        else (registered:=Some active;Ok (run ())))
+      with Eio.Cancel.Cancelled (External_effect_purge cancelled) when cancelled == identity ->
+        (* This sub-scope has unwound. Parent/worker cancellation must still
+           propagate; a Keeper purge alone must not kill the shared host loop. *)
+        Eio.Fiber.check ();
+        Error External_cancelled_by_purge)
+;;
+
 type purge_cancel_error =
   | Purge_already_in_progress
   | Purge_cancel_wrong_domain
@@ -436,50 +480,51 @@ let purge_cancel_error_to_string = function
    The read position is written only after a Memory commit, so a round cut
    short here has left nothing half-written. *)
 let cancel_and_await_librarian ~base_path ~keeper_name =
-  (* Looked up without creating: a purge must not leave an entry behind for
-     a Keeper that no longer exists. *)
-  let owner_lane =
-    let key = entry_key ~base_path ~keeper_name in
-    match
-      Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key)
-    with
-    | None -> None
-    | Some entry ->
-      Stdlib.Mutex.protect entry.state_mu (fun () ->
-        match entry.librarian_drain with
-        | Some drain -> Some drain.owner_lane
-        | None -> entry.last_owner_lane)
-  in
-  match owner_lane with
-  | None -> Ok ()
-  | Some owner_lane ->
-    let await () =
-      let exit = Keeper_lane.await_exit owner_lane in
-      (match exit.Keeper_lane.cleanup_error with
-       | None -> ()
-       | Some detail ->
-         Log.Keeper.warn ~keeper_name
-           "Librarian lane exited with a cleanup failure before purge: %s"
-           detail);
-      Ok ()
-    in
-    (match Keeper_lane.peek_exit owner_lane with
-     | Some _ -> Ok ()
-     | None ->
-       (match Keeper_lane.request_cancel owner_lane with
-        | Keeper_lane.Cancel_requested
-        | Keeper_lane.Cancel_already_requested
-        | Keeper_lane.Cancel_already_exiting -> await ()
-        | Keeper_lane.Cancel_committed_with_failure exn ->
-          (* Eio committed the cancellation; a callback raised on the way. The
-             lane is unwinding, so wait for it like any other. *)
-          Log.Keeper.warn ~keeper_name
-            "Librarian cancellation committed with a callback failure: %s"
-            (Printexc.to_string exn);
-          await ()
-        | Keeper_lane.Cancel_wrong_domain -> Error Purge_cancel_wrong_domain
-        | Keeper_lane.Cancel_not_committed exn ->
-          Error (Purge_cancel_not_committed exn)))
+  (* Do not create an entry merely to purge it. with_librarian_purge has already
+     excluded new drain submissions and external registrations. *)
+  let owner_lane,effects =
+    let key=entry_key ~base_path ~keeper_name in
+    match Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key) with
+    | None -> None,[]
+    | Some entry -> Stdlib.Mutex.protect entry.state_mu (fun () ->
+        (match entry.librarian_drain with Some drain -> Some drain.owner_lane
+         | None -> entry.last_owner_lane),entry.external_effects) in
+  let request_lane lane =
+    match Keeper_lane.peek_exit lane with
+    | Some _ -> Ok ()
+    | None -> match Keeper_lane.request_cancel lane with
+      | Keeper_lane.Cancel_requested | Cancel_already_requested | Cancel_already_exiting -> Ok ()
+      | Cancel_committed_with_failure exn ->
+        Log.Keeper.warn ~keeper_name "Librarian cancellation committed with a callback failure: %s"
+          (Printexc.to_string exn);Ok ()
+      | Cancel_wrong_domain -> Error Purge_cancel_wrong_domain
+      | Cancel_not_committed exn -> Error (Purge_cancel_not_committed exn) in
+  let request_effect active =
+    if active.owner_domain <> Domain.self () then Error Purge_cancel_wrong_domain
+    else match Eio.Cancel.get_error active.context with
+    | Some _ -> Ok ()
+    | None ->
+      (try Eio.Cancel.cancel active.context (External_effect_purge active.identity);Ok ()
+       with exn -> (* cancel-guard-ok: cancel does not suspend this fiber; classify committed callback failures. *)
+         match Eio.Cancel.get_error active.context with
+         | Some (Eio.Cancel.Cancelled _) ->
+           Log.Keeper.warn ~keeper_name "External Librarian cancellation committed with a callback failure: %s"
+             (Printexc.to_string exn);Ok ()
+         | None | Some _ -> Error (Purge_cancel_not_committed exn)) in
+  (* Issue every cancellation before any join: a drain may itself be awaiting
+     an external effect's result. A failed signal never authorizes deletion. *)
+  let lane_signal=Option.fold ~none:(Ok ()) ~some:request_lane owner_lane in
+  let effect_signals=List.map request_effect effects in
+  let* ()=List.fold_left (fun first result -> match first with
+    | Error _ -> first | Ok () -> result) lane_signal effect_signals in
+  Option.iter (fun lane ->
+    let exit=Keeper_lane.await_exit lane in
+    match exit.Keeper_lane.cleanup_error with
+    | None -> ()
+    | Some detail -> Log.Keeper.warn ~keeper_name
+      "Librarian lane exited with a cleanup failure before purge: %s" detail) owner_lane;
+  List.iter (fun active -> Eio.Promise.await active.exited) effects;
+  Ok ()
 ;;
 
 let with_librarian_purge ~base_path ~keeper_name action =
@@ -516,6 +561,13 @@ module For_testing = struct
     let key = entry_key ~base_path ~keeper_name in
     Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key)
     |> Option.map (fun e -> Stdlib.Mutex.protect e.state_mu (fun () -> e.pending))
+  ;;
+
+  let external_active ~base_path ~keeper_name =
+    let key=entry_key ~base_path ~keeper_name in
+    match Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key) with
+    | None -> 0
+    | Some entry -> Stdlib.Mutex.protect entry.state_mu (fun () -> List.length entry.external_effects)
   ;;
 
   let await_idle ~base_path ~keeper_name =

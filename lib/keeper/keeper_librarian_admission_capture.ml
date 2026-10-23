@@ -33,7 +33,8 @@ let same_json left right =
 let wire result = Result.map_error Types.wire_error_to_string result
 
 type physical = {path:string;device:int;inode:int}
-type owner = {workspace:physical;keepers:physical;keeper_id:string;epoch:string}
+type owner = {workspace:physical;keepers:physical;keeper_id:string;epoch:string;queue_generation:string}
+type scope_identity = string
 let physical_json physical = `Assoc ["device",`Int physical.device;"inode",`Int physical.inode;"path",`String physical.path]
 let physical_of_json json =
   let* fields=object_fields ["path";"device";"inode"] json in
@@ -42,20 +43,27 @@ let physical_of_json json =
   let* inode=integer (value "inode" fields) in
   if Filename.is_relative path then Error "Original owner path is relative" else Ok {path;device;inode}
 let owner_to_json owner = `Assoc ["epoch",`String owner.epoch;"keeper_id",`String owner.keeper_id;
-  "keepers",physical_json owner.keepers;"workspace",physical_json owner.workspace]
+  "keepers",physical_json owner.keepers;"queue_generation",`String owner.queue_generation;
+  "workspace",physical_json owner.workspace]
+let scope_identity owner = Yojson.Safe.to_string (`Assoc [
+  "keeper_id",`String owner.keeper_id;"keepers",physical_json owner.keepers;
+  "queue_generation",`String owner.queue_generation;"workspace",physical_json owner.workspace])
+let scope_hash identity = Digestif.SHA256.(to_hex (digest_string identity))
 let keeper_id owner = owner.keeper_id
 let base_path owner = owner.workspace.path
 let keepers_dir owner = owner.keepers.path
 let owner_of_json json =
-  let* fields=object_fields ["workspace";"keepers";"keeper_id";"epoch"] json in
+  let* fields=object_fields ["workspace";"keepers";"keeper_id";"epoch";"queue_generation"] json in
   let* workspace=physical_of_json (value "workspace" fields) in
   let* keepers=physical_of_json (value "keepers" fields) in
   let* keeper_id=nonblank (value "keeper_id" fields) in
   let* epoch=nonblank (value "epoch" fields) in
+  let* queue_generation=nonblank (value "queue_generation" fields) in
   let* ()=match Keeper_identity.Keeper_id.of_string keeper_id with
     | Some id when Keeper_identity.Keeper_id.to_string id=keeper_id && Keeper_config_text.validate_name keeper_id -> Ok ()
     | Some _ | None -> Error "Original Librarian owner requires a canonical Keeper ID" in
-  if epoch=String.trim epoch then Ok {workspace;keepers;keeper_id;epoch}
+  if epoch=String.trim epoch && queue_generation=String.trim queue_generation
+  then Ok {workspace;keepers;keeper_id;epoch;queue_generation}
   else Error "Original Memory incarnation epoch is noncanonical"
 let owner_matches_json owner json =
   let* restored=owner_of_json json in
@@ -82,18 +90,24 @@ let observe_owner ~base_path ~keepers_dir ~keeper_id =
               | 0 -> raise End_of_file
               | count -> read (position+count)
               | exception Unix.Unix_error (Unix.EINTR,_,_) -> read position in
-          workspace,keepers_identity,read 0)))
+          let queue_generation=Queue.read_generation ~keepers_dir:keepers_identity.path
+            ~keeper_id:canonical_keeper in
+          workspace,keepers_identity,queue_generation,read 0)))
     |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
-  let* workspace,keepers,bytes=observed in
+  let* workspace,keepers,generation,bytes=observed in
+  let* generation=generation in
+  let* queue_generation=match generation with
+    | Some generation -> Ok generation
+    | None -> Error "Original Librarian owner has no persisted Queue generation" in
   let* json=parse bytes in
   let* fields=object_fields ["schema_version";"epoch"] json in
   let* schema=integer (value "schema_version" fields) in
   let* epoch=nonblank (value "epoch" fields) in
   if schema<>1 || epoch<>String.trim epoch then Error "Invalid original Memory incarnation epoch"
-  else Ok {workspace;keepers;keeper_id=canonical_keeper;epoch}
+  else Ok {workspace;keepers;keeper_id=canonical_keeper;epoch;queue_generation}
 
 type destination = {installation_id:string;package_id:string;tool:string;source_revision:string;configuration_revision:string}
-let owner_hash owner = Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string (owner_to_json owner))))
+let owner_hash owner = scope_hash (scope_identity owner)
 let scope_for_hash hash="keeper-librarian-execution-" ^ hash
 let scope owner=scope_for_hash (owner_hash owner)
 let fresh_request_id owner=Yojson.Safe.to_string (`List [
@@ -300,6 +314,9 @@ let validate capture =
   let* expected_scope=scope_of_request_id capture.id in
   let* ()=if expected_scope=scope capture.owner then Ok ()
     else Error "Original execution ID belongs to another physical Keeper/epoch" in
+  let* ()=if List.for_all (fun (id : Current.explicit_candidate_id) ->
+      id.queue_generation=capture.owner.queue_generation) (Queue.candidate_ids capture.original_batch)
+    then Ok () else Error "Original batch belongs to another Queue generation" in
   let* ()=check_pending_input capture.original_input in
   let* ()=if Keeper_identity.Keeper_id.to_string capture.original_input.keeper_id=capture.owner.keeper_id
     then Ok () else Error "Original execution input belongs to another Keeper" in
@@ -379,3 +396,35 @@ let request capture = Lane_addon_exact.request_of_json (`Assoc [
 let validate_proposal capture output =
   Runtime.validate_admission_proposal ~now:capture.parsing_now ~batch:capture.original_batch
     ~input:capture.original_input output |> Result.map_error L.parse_error_to_string
+
+let confirm_final ~store (capture:t) (final:Lane_addon_exact.final) =
+  let module Exact = Lane_addon_exact in
+  let* actual_owner = observe_owner ~base_path:(base_path capture.owner)
+    ~keepers_dir:(keepers_dir capture.owner) ~keeper_id:(keeper_id capture.owner) in
+  let* () = owner_matches_json actual_owner (owner_to_json capture.owner) in
+  let* original = request capture in
+  let* schema = Option.to_result ~none:"Original admission host proof has no schema" original.Exact.schema in
+  let* installation = Owner.installation_of_id capture.destination.installation_id in
+  let* declaration_id = match installation with
+    | Owner.Configuration id -> Ok id
+    | Manual _ -> Error "Original admission host proof requires its configured installation" in
+  let* observed = Exact.observe_retained ~store ~declaration_id ~schema original in
+  let* () = match observed with
+    | Exact.Retained_absent -> Error "Original admission host terminal is absent"
+    | Retained_open -> Error "Original admission host terminal remains unresolved"
+    | Retained_terminal retained ->
+      let* same = same_json (Exact.final_to_json retained) (Exact.final_to_json final) in
+      if same then Ok () else Error "Admission final differs from its original host terminal" in
+  match final with
+  | Exact.Call_final call_final ->
+    let* latest = Exact.read_latest_original_execution ~store ~declaration_id ~schema original in
+    (match latest with
+     | Exact.No_completed_latest -> Error "Original admission has no completed latest host execution proof"
+     | Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended actual;_}} ->
+       let* same = same_json (Exact.final_to_json (Exact.Call_final actual))
+         (Exact.final_to_json (Exact.Call_final call_final)) in
+       if attempt_ordinal>0 && same then Ok ()
+       else Error "Admission final differs from its latest original host execution proof"
+     | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} ->
+       Error "Original refused execution cannot confirm a completed admission answer")
+  | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok ()

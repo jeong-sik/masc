@@ -67,6 +67,20 @@ val has_waiting : base_path:string -> keeper_name:string -> bool
     unit that loops between rounds reads this to end itself so the waiting
     unit runs next (RFC-0467). Reading it registers nothing. *)
 
+type external_effect_error = External_purge_in_progress | External_cancelled_by_purge
+val external_effect_error_to_string : external_effect_error -> string
+val with_external_effect : base_path:string -> keeper_name:string ->
+  (unit -> 'a) -> ('a, external_effect_error) result
+(** Register this caller's inline cancellation scope in the existing Keeper
+    entry before an external original effect, and retain it through local
+    result/proof publication and cleanup. No fork, scheduler, timer or executor
+    initialization is required. The actual caller domain owns this scope;
+    purge from another domain fails closed through [Purge_cancel_wrong_domain].
+    A purge excludes registration and cancels/awaits these scopes even after
+    the ordinary Memory unit has returned Pending. Only this exact purge
+    cancellation becomes a typed refusal; parent cancellation still propagates.
+    Does not reserve the ordinary drain or block unrelated Memory purposes. *)
+
 type purge_cancel_error =
   | Purge_already_in_progress
   | Purge_cancel_wrong_domain
@@ -82,7 +96,7 @@ val with_librarian_purge
   -> keeper_name:string
   -> (unit -> 'a)
   -> ('a, purge_cancel_error) result
-(** Exclude new submissions, cancel and await existing work, then run the
+(** Exclude new submissions and external registrations, cancel and await existing work, then run the
     deletion callback under the same exclusion. A concurrent purge is refused.
     Exceptions and cancellation release only this caller's exclusion. Call
     from the lane's owner domain after {!init}, as server startup does before
@@ -93,8 +107,9 @@ val cancel_and_await_librarian
   -> keeper_name:string
   -> (unit, purge_cancel_error) result
 (** Cancellation primitive used by {!with_librarian_purge}. Does not exclude
-    new submissions by itself. Request cancellation of the Librarian unit still
-    running for [keeper_name], if any, and wait until its lane has exited.
+    new submissions by itself. Request cancellation of the Librarian unit and every registered external
+    effect for [keeper_name], if any. Signal all scopes before awaiting any
+    exit, including cleanup and original proof/result publication.
     A round moves the read position only after its Memory commit, so cutting
     it short loses nothing (RFC librarian-lifecycle section 4.3). There is no
     time limit: cancellation is requested first, and the wait ends when the
@@ -107,6 +122,9 @@ module For_testing : sig
 
   val pending : base_path:string -> keeper_name:string -> int option
   (** Current pending count for a keeper ([None] if it has no entry). *)
+
+  val external_active : base_path:string -> keeper_name:string -> int
+  (** Count existing registered external effects without creating an entry. *)
 
   val await_idle : base_path:string -> keeper_name:string -> unit
   (** Wait until the keeper's current drain, if any, has exited. Observes

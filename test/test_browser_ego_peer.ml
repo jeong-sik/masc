@@ -1365,6 +1365,7 @@ const fire = (name, failure) => { const armed = waiting; waiting = []; armed.for
 const fail = () => { const armed = waiting; waiting = []; armed.forEach(wait => wait.reject(new Error("Target crashed"))); };
 const close = () => { open = false; const armed = waiting; waiting = []; armed.forEach(wait => wait.reject(new Error("No target with given id found"))); };
 const taskSpace = async () => ({
+  ownership: "agent",
   tabs: async () => open ? [{label: "p1", openedBy: "agent", url: "https://example.test/", title: "Files", targetId: "T1", active: true}] : [],
   page: () => page,
 });

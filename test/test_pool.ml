@@ -390,6 +390,93 @@ let test_close_failure_preserves_request_failure () =
    with Request_failed -> ());
   Alcotest.(check int) "close signal attempted" 1 !attempts
 
+let test_release_failure_before_transfer_closes_client () =
+  Eio_main.run @@ fun _env ->
+  let closed = ref 0 in
+  (try
+     Lease.with_client
+       ~release:(fun _ ~close_only:_ -> raise Request_failed)
+       ~close:(fun () -> incr closed)
+       (fun ~release -> release ~close_only:false)
+   with Request_failed -> ());
+  Alcotest.(check int) "unsettled release retains cleanup obligation" 1 !closed
+
+let test_release_failure_after_transfer_keeps_pool_owner () =
+  Eio_main.run @@ fun _env ->
+  let parked = ref 0 and closed = ref 0 in
+  (try
+     Lease.with_client
+       ~release:(fun lease ~close_only:_ ->
+         Lease.park lease ~publish:(fun () -> incr parked);
+         raise Request_failed)
+       ~close:(fun () -> incr closed)
+       (fun ~release -> release ~close_only:false)
+   with Request_failed -> ());
+  Alcotest.(check int) "queue owns published client" 1 !parked;
+  Alcotest.(check int) "failure cannot reclaim pool-owned client" 0 !closed
+
+let test_cancel_while_waiting_to_park_closes_client () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let mutex = Eio.Mutex.create () in
+  let locked, publish_locked = Eio.Promise.create () in
+  let unlock, publish_unlock = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+      Eio.Promise.resolve publish_locked ();
+      Eio.Promise.await unlock));
+  Eio.Promise.await locked;
+  let parked = ref 0 and closed = ref 0 in
+  let cancellation, publish_cancellation = Eio.Promise.create () in
+  let releasing, publish_releasing = Eio.Promise.create () in
+  let finished, publish_finished = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let cancelled =
+      try
+        Eio.Cancel.sub (fun context ->
+          Eio.Promise.resolve publish_cancellation context;
+          Lease.with_client
+            ~release:(fun lease ~close_only:_ ->
+              Eio.Promise.resolve publish_releasing ();
+              (* No yield between the signal and this mutex acquisition:
+                 observing [releasing] means this request is waiting here. *)
+              Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+                Lease.park lease ~publish:(fun () -> incr parked)))
+            ~close:(fun () -> incr closed)
+            (fun ~release -> release ~close_only:false));
+        false
+      with Eio.Cancel.Cancelled _ -> true
+    in
+    Eio.Promise.resolve publish_finished cancelled);
+  let context = Eio.Promise.await cancellation in
+  Eio.Promise.await releasing;
+  Eio.Cancel.cancel context Request_failed;
+  let cancelled = Eio.Promise.await finished in
+  Eio.Promise.resolve publish_unlock ();
+  Alcotest.(check bool) "release caller remains cancelled" true cancelled;
+  Alcotest.(check int) "cancelled waiter never parks" 0 !parked;
+  Alcotest.(check int) "request closes its client before mutex becomes available" 1 !closed
+
+let test_cancel_after_parking_keeps_pool_owner () =
+  Eio_main.run @@ fun _env ->
+  let parked = ref 0 and closed = ref 0 in
+  let cancelled =
+    try
+      Eio.Cancel.sub (fun context ->
+        Lease.with_client
+          ~release:(fun lease ~close_only:_ ->
+            Lease.park lease ~publish:(fun () -> incr parked);
+            Eio.Cancel.cancel context Request_failed;
+            Eio.Fiber.check ())
+          ~close:(fun () -> incr closed)
+          (fun ~release -> release ~close_only:false));
+      false
+    with Eio.Cancel.Cancelled _ -> true
+  in
+  Alcotest.(check bool) "release caller remains cancelled" true cancelled;
+  Alcotest.(check int) "queue owns published client" 1 !parked;
+  Alcotest.(check int) "cancelled request does not close pool-owned client" 0 !closed
+
 let test_request_timeout_bounds_never_returning_transport () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -542,6 +629,14 @@ let () =
             test_repeated_release_does_not_close_a_parked_client;
           Alcotest.test_case "close failure preserves request failure" `Quick
             test_close_failure_preserves_request_failure;
+          Alcotest.test_case "failure before handoff retains cleanup" `Quick
+            test_release_failure_before_transfer_closes_client;
+          Alcotest.test_case "failure after handoff keeps pool owner" `Quick
+            test_release_failure_after_transfer_keeps_pool_owner;
+          Alcotest.test_case "cancelled mutex waiter closes its client" `Quick
+            test_cancel_while_waiting_to_park_closes_client;
+          Alcotest.test_case "cancellation after handoff keeps pool owner" `Quick
+            test_cancel_after_parking_keeps_pool_owner;
         ] );
       ( "request deadline",
         [

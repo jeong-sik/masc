@@ -113,6 +113,8 @@ type connection = {
   network : context:string -> (Yojson.Safe.t, string) result;
   check : unit -> (unit, string) result;
   command : string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result;
+  block : context:string -> hosts:string list -> (string, string) result;
+  unblock : intercept:string -> (unit, string) result;
   close : unit -> unit;
 }
 type start = session_id:string -> websocket_url:string -> (connection, string) result

@@ -25,6 +25,12 @@ type interaction =
   | Delete_cookie of string
   | Set_emulation of emulation
   | Clear_emulation
+  | Block_requests of string list
+      (** Requests from the tab and its frames to these exact lowercase hosts
+          fail as network errors until [Unblock_requests] lifts every block on
+          the tab or the owned browser session closes. Nothing is answered or
+          changed in their place. *)
+  | Unblock_requests
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
 type t = Open_tab of string | Open_window of string | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }

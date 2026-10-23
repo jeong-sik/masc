@@ -9432,7 +9432,7 @@ let test_composable_outputs_satisfy_declared_schema () =
            read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
            console=(fun ~context:_ -> Ok (`Assoc ["entries",`List [];"dropped",`Int 0]));
            network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
-           check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture"); close=(fun () -> ())}
+           check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture"); block=(fun ~context:_ ~hosts:_ -> Error "no BiDi block in this fixture");unblock=(fun ~intercept:_ -> Error "no BiDi block in this fixture");close=(fun () -> ())}
        in
        let driver = Driver.create ~start_downloads ~request () in
        Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));

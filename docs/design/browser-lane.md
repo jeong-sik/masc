@@ -78,6 +78,19 @@ different origin. Geolocation grants persist until the owned browser session
 closes. Setting or clearing only a locale or time zone does not change any
 geolocation permission.
 
+On automation Firefox, `block_requests` makes every request from the selected
+tab and its frames to the listed hosts fail as a network error. It adds a
+WebDriver BiDi intercept for the tab's context with one `hostname` pattern per
+host, so a host matches only itself: `ads.example.com` does not cover
+`cdn.ads.example.com`. The BiDi connection fails each held request with
+`network.failRequest` from its own fiber, because the reply to that command
+arrives on the event loop that saw the request. Every intercept on that
+session comes from `block_requests`, so the connection fails every held
+request without matching intercept ids; the `addIntercept` reply can arrive
+after the first request it holds. `unblock_requests` removes the tab's
+intercepts. When the session ends, BiDi lets held requests continue. Requests
+are never answered or changed.
+
 `BrowserInteract` requires an observed `tabId` and accepts these closed actions:
 
 | Action | Observed target | Source |

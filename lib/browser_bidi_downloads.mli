@@ -18,4 +18,8 @@ module For_testing : sig
       only when none had. *)
   val reply_within :
     clock:_ Eio.Time.clock -> timeout_s:float -> 'a Eio.Promise.t -> ('a, [ `Timeout ]) result
+
+  (** The request id a network event's params say an intercept holds, which
+      the connection fails; [None] for a request that is not held. *)
+  val held_request : Yojson.Safe.t -> string option
 end

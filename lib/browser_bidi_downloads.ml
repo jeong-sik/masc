@@ -7,6 +7,15 @@ let string key json = match field key json with
   | Some (`String value) when value <> "" -> Ok value
   | _ -> Error ("BiDi missing string: " ^ key)
 
+(* The request a network event says an intercept holds. Every intercept on this
+   session comes from [block], so every held request is one to fail. Its
+   intercept id is not checked: the addIntercept reply can arrive after the
+   first request that intercept holds. *)
+let held_request params =
+  match field "isBlocked" params, Option.bind (field "request" params) (field "request") with
+  | Some (`Bool true), Some (`String request) when request <> "" -> Some request
+  | _ -> None
+
 let verify_file ~root path =
   try
     let root = Unix.realpath root in
@@ -92,6 +101,9 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
           with
           | Ok flow -> flow
           | Error `Timeout -> raise Eio.Time.Timeout in
+        (* Failing a held request is a command whose reply this message loop
+           reads, so the loop only queues it and the fiber below sends it. *)
+        let held = Eio.Stream.create max_int in
         let on_message (message : Message.t) =
           if !failure <> None then () else
           let result = match message.kind with
@@ -106,6 +118,7 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
                    (match field "params" json with
                     | Some params when method_ = Browser_console.subscribed_method -> Ok (Browser_console.event console params)
                     | Some params when List.mem method_ Browser_network.subscribed_methods ->
+                      Option.iter (Eio.Stream.add held) (held_request params);
                       Ok (Browser_network.event network ~method_ params)
                     | Some params -> Browser_downloads.event model ~method_ params
                     | None -> Error "BiDi event lacks params")
@@ -146,6 +159,22 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
              | Ok reply -> reply
              | Error `Timeout ->
                disconnect ("BiDi command timed out: " ^ method_); Error ("BiDi command timed out: " ^ method_)) in
+        Eio.Fiber.fork ~sw:session_sw (fun () ->
+          let rec fail_held () =
+            let request = Eio.Stream.take held in
+            (* BiDi's only error for failing a request held before it was sent
+               is "no such request": it already ended, so nothing is left to
+               fail. A lost connection disconnects the session in [command]. *)
+            ignore (command "network.failRequest" (`Assoc ["request",`String request]) : (Yojson.Safe.t, string) result);
+            fail_held () in
+          fail_held ());
+        let block ~context ~hosts =
+          let* added = command "network.addIntercept" (`Assoc ["phases",`List [`String "beforeRequestSent"];
+            "contexts",`List [`String context];
+            "urlPatterns",`List (List.map (fun host -> `Assoc ["type",`String "pattern";"hostname",`String host]) hosts)]) in
+          string "intercept" added in
+        let unblock ~intercept =
+          Result.map ignore (command "network.removeIntercept" (`Assoc ["intercept",`String intercept])) in
         let* _ = command "session.subscribe" (`Assoc ["events",`List (List.map (fun name -> `String name)
           ((Browser_console.subscribed_method :: Browser_network.subscribed_methods)
            @ List.map snd Browser_downloads.subscribed_methods))]) in
@@ -193,7 +222,7 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
           | other -> Ok other in
         let read_console ~context = with_observation (Browser_console.to_json console ~context) in
         let read_network ~context = with_observation (Browser_network.to_json network ~context) in
-        Ok Browser_downloads.{read;console=read_console;network=read_network;check;command;close=(fun () -> disconnect "Firefox session closed")} in
+        Ok Browser_downloads.{read;console=read_console;network=read_network;check;command;block;unblock;close=(fun () -> disconnect "Firefox session closed")} in
       let result =
         try setup () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -213,4 +242,5 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
 
 module For_testing = struct
   let reply_within = reply_within
+  let held_request = held_request
 end

@@ -8,7 +8,7 @@ let start_downloads ~session_id:_ ~websocket_url:_ =
   Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
     console=(fun ~context:_ -> Ok (`Assoc ["entries",`List [];"dropped",`Int 0]));
     network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
-    check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture");close=(fun () -> ())}
+    check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture");block=(fun ~context:_ ~hosts:_ -> Error "no BiDi block in this fixture");unblock=(fun ~intercept:_ -> Error "no BiDi block in this fixture");close=(fun () -> ())}
 
 let test_session_lifecycle () =
   Eio_main.run (fun _ ->
@@ -534,7 +534,7 @@ let test_emulation_goes_over_bidi_and_clears_to_the_original_values () =
             permissions := (target,state) :: List.remove_assoc target !permissions
           end;
           Ok `Null);
-        close=(fun () -> ())} in
+        block=(fun ~context:_ ~hosts:_ -> Error "no BiDi block in this fixture");unblock=(fun ~intercept:_ -> Error "no BiDi block in this fixture");close=(fun () -> ())} in
     let contains script needle = try ignore (Str.search_forward (Str.regexp_string needle) script 0); true with Not_found -> false in
     let request ~method_ ~path ~body = match method_, path with
       | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
@@ -617,6 +617,76 @@ let test_emulation_goes_over_bidi_and_clears_to_the_original_values () =
       ; "a timezone with a quote", ["timezone",`String "Asia/\"Seoul"] ];
     let round = Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Set_emulation emulation} in
     check bool "emulation survives the wire" true (Lane.Action.parse (Lane.Action.to_json round) = Ok round))
+
+let test_request_blocks_belong_to_their_tab () =
+  Eio_main.run (fun _ ->
+    let calls = ref [] and next = ref 0 and current = ref "tab" in
+    let start_downloads ~session_id:_ ~websocket_url:_ =
+      Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
+        console=(fun ~context:_ -> Ok (`Assoc ["entries",`List [];"dropped",`Int 0]));
+        network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
+        check=(fun () -> Ok ());
+        command=(fun method_ _ -> calls := `Command method_ :: !calls; Ok `Null);
+        block=(fun ~context ~hosts ->
+          incr next;
+          let intercept = Printf.sprintf "intercept-%d" !next in
+          calls := `Block (context, hosts, intercept) :: !calls; Ok intercept);
+        unblock=(fun ~intercept -> calls := `Unblock intercept :: !calls; Ok ());
+        close=(fun () -> ())} in
+    let request ~method_ ~path ~body = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab";`String "other"])
+      | `GET, "/session/owned/window" -> Ok (`String !current)
+      | `POST, "/session/owned/window" ->
+        current := Yojson.Safe.Util.(Option.get body |> member "handle" |> to_string); Ok `Null
+      | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/execute/sync" -> Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture"])
+      | _ -> fail ("unexpected request " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    calls := [];
+    let act tab_id interaction =
+      match Driver.execute driver (Lane.Page_act (Lane.Action.On_tab {tab_id;frame_path=[];interaction})) with
+      | Lane.Answered value -> Yojson.Safe.Util.(value |> member "data" |> member "result")
+      | _ -> fail "the action must answer" in
+    let taken () = let all = List.rev !calls in calls := []; all in
+    let blocked = act 1 (Lane.Action.Block_requests ["ads.example.com";"127.0.0.1"]) in
+    check bool "the reply names the blocked hosts" true
+      (Yojson.Safe.Util.member "blocked" blocked = `List [`String "ads.example.com";`String "127.0.0.1"]);
+    ignore (act 2 (Lane.Action.Block_requests ["tracker.example"]));
+    ignore (act 1 (Lane.Action.Block_requests ["cdn.example.com"]));
+    check bool "each block is one intercept on its own tab's context, never a raw command" true
+      (taken () = [`Block ("tab",["ads.example.com";"127.0.0.1"],"intercept-1");
+                   `Block ("other",["tracker.example"],"intercept-2");
+                   `Block ("tab",["cdn.example.com"],"intercept-3")]);
+    check int "unblocking a tab reports how many blocks it lifted" 2
+      Yojson.Safe.Util.(member "unblocked" (act 1 Lane.Action.Unblock_requests) |> to_int);
+    check bool "only that tab's intercepts are removed" true
+      (List.sort compare (taken ()) = [`Unblock "intercept-1";`Unblock "intercept-3"]);
+    ignore (act 1 Lane.Action.Unblock_requests);
+    check bool "a second unblock has nothing left to remove" true (taken () = []);
+    ignore (act 2 Lane.Action.Unblock_requests);
+    check bool "the other tab kept its block until its own unblock" true (taken () = [`Unblock "intercept-2"]);
+    let parse fields = Lane.Action.parse (`Assoc (["action",`String "block_requests";"tabId",`Int 1] @ fields)) in
+    check bool "a host list parses" true
+      (parse ["hosts",`List [`String "ads.example.com"]]
+       = Ok (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Block_requests ["ads.example.com"]}));
+    List.iter (fun (label, fields) -> check bool label true (Result.is_error (parse fields)))
+      [ "no hosts", []
+      ; "an empty host list, which would hold every request", ["hosts",`List []]
+      ; "an uppercase host", ["hosts",`List [`String "Ads.Example.com"]]
+      ; "a URL instead of a host", ["hosts",`List [`String "https://ads.example.com/"]]
+      ; "a wildcard", ["hosts",`List [`String "*.example.com"]]
+      ; "a host with a port", ["hosts",`List [`String "example.com:8080"]]
+      ; "an empty label", ["hosts",`List [`String "ads..example.com"]]
+      ; "inside a frame", ["hosts",`List [`String "ads.example.com"];"framePath",`List [`String "iframe"]] ];
+    let round = Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Block_requests ["ads.example.com";"10.0.0.1"]} in
+    check bool "a block survives the wire" true (Lane.Action.parse (Lane.Action.to_json round) = Ok round);
+    check bool "unblock_requests parses" true
+      (Lane.Action.parse (`Assoc ["action",`String "unblock_requests";"tabId",`Int 1])
+       = Ok (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Unblock_requests})))
 
 let test_open_window_asks_for_a_window () =
   Eio_main.run (fun _ ->
@@ -848,7 +918,7 @@ let test_console_read_uses_the_tabs_context () =
         console=(fun ~context -> asked := context :: !asked;
           Ok (`Assoc ["entries",`List [`Assoc ["text",`String "hello"]];"dropped",`Int 0]));
         network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
-        check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture");close=(fun () -> ())} in
+        check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture");block=(fun ~context:_ ~hosts:_ -> Error "no BiDi block in this fixture");unblock=(fun ~intercept:_ -> Error "no BiDi block in this fixture");close=(fun () -> ())} in
     let driver = Driver.create ~start_downloads ~request () in
     (match Driver.execute driver (Lane.Page_console {tab_id=1}) with
      | Lane.Refused _ -> () | _ -> fail "a closed session must refuse a console read");
@@ -1095,6 +1165,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "set_viewport resizes the window" `Quick test_set_viewport_resizes_the_window;
   test_case "cookies are set for the page host and never echoed" `Quick test_cookies_are_set_for_the_page_host_and_never_echoed;
   test_case "emulation goes over BiDi and clears to the original values" `Quick test_emulation_goes_over_bidi_and_clears_to_the_original_values;
+  test_case "request blocks belong to their tab" `Quick test_request_blocks_belong_to_their_tab;
   test_case "open_window asks the driver for a window" `Quick test_open_window_asks_for_a_window;
   test_case "framed interaction enters the frame first" `Quick test_interact_enters_frames;
   test_case "pointer release failure recovery" `Quick test_pointer_release_recovery;

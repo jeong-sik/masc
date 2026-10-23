@@ -296,7 +296,10 @@ let support backend operation = match backend with
     | Read_network -> gecko_only backend (invoke ~mode:"network" Read)
         [observed;"Requests since the session opened, for one tab, oldest first; at most 200 are kept and the reply says how many older ones were dropped.";
          "Each row has method, address, state, and status, mimeType and bytesReceived once it completed. Header values, cookies and bodies are never returned, only header names; the address keeps its path and replaces every query value with REDACTED. A path can still carry a token."]
-    | Read_clipboard | Write_clipboard | Intercept_network -> missing
+    | Read_clipboard | Write_clipboard -> missing
+    | Intercept_network -> gecko_only backend (invoke ~action:"block_requests" Act)
+        [observed;"Makes every request from the tab and its frames to the listed hosts fail as a network error. A host is an exact lowercase host name or IPv4 address compared with the request's host, so a subdomain is a host of its own. unblock_requests lifts every block on the tab; closing the session lifts them too.";
+         "Only on an automation browser the Keeper owns. Requests are only failed, never answered or changed."]
     | Read_storage -> gecko_only backend (invoke ~mode:"cookies" Read)
         [observed;"The cookies the tab's page can see, at most 200, with the total. Name, domain, path, secure, httpOnly, sameSite and expiry; the value is never returned.";
          "The reply also lists the page origin's localStorage and sessionStorage key names and its IndexedDB database names (at most 100 each, names cut at 200 characters) under storage, with counts. Storage values are never read."]

@@ -9,7 +9,7 @@ let start_downloads ~session_id:_ ~websocket_url:_ =
   Ok Masc.Browser_downloads.{read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
     console=(fun ~context:_ -> Ok (`Assoc ["entries",`List [];"dropped",`Int 0]));
     network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
-    check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture");close=(fun () -> ())}
+    check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture");block=(fun ~context:_ ~hosts:_ -> Error "no BiDi block in this fixture");unblock=(fun ~intercept:_ -> Error "no BiDi block in this fixture");close=(fun () -> ())}
 
 let make_meta () =
   match Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String "browser-upload"]) with

@@ -20,13 +20,19 @@ val to_json : verify:(string -> (string * int, string) result) -> download -> Yo
 
 (** A session-owned service. [console] reads the tab's console entries ({!Browser_console}) from the
     same event stream. [read] remains available after interruption so
-    callers can inspect the last evidence; [check] refuses further actions. *)
+    callers can inspect the last evidence; [check] refuses further actions.
+    [block] makes every request of a top-level [context] and its frames to one
+    of [hosts] fail and returns the intercept doing it; [unblock] removes one.
+    The connection fails every request held on its session, so intercepts are
+    added through [block] only, never through [command]. *)
 type connection = {
   read : context:string -> (Yojson.Safe.t, string) result;
   console : context:string -> (Yojson.Safe.t, string) result;
   network : context:string -> (Yojson.Safe.t, string) result;
   check : unit -> (unit, string) result;
   command : string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result;
+  block : context:string -> hosts:string list -> (string, string) result;
+  unblock : intercept:string -> (unit, string) result;
   close : unit -> unit;
 }
 type start = session_id:string -> websocket_url:string -> (connection, string) result

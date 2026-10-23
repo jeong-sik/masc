@@ -136,6 +136,19 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
        = `List [`Float 37.5;`Int 127]);
     act first Browser_action.Clear_emulation;
     check "clearing gives the tab its own language and time zone back" (identity () = original);
+    (* The fixture also answers on localhost, a host of its own for a block. *)
+    let port = String.sub fixture_url (String.rindex fixture_url ':') (String.length fixture_url - String.rindex fixture_url ':') in
+    let fetch host =
+      match request ~method_:`POST ~path:("/session/" ^ remote ^ "/execute/async")
+          ~body:(Some (`Assoc ["script",`String "const done = arguments[arguments.length - 1]; fetch(arguments[0], {mode: 'no-cors', cache: 'no-store'}).then(function(){ done('loaded'); }, function(){ done('failed'); });";
+            "args",`List [`String ("http://" ^ host ^ port ^ "/second")]])) with
+      | Ok value -> value | Error error -> failwith (Driver.error_message error) in
+    check "another host loads before a block" (fetch "localhost" = `String "loaded");
+    act first (Browser_action.Block_requests ["localhost"]);
+    check "a request to the blocked host fails" (fetch "localhost" = `String "failed");
+    check "a request to another host still loads" (fetch "127.0.0.1" = `String "loaded");
+    act first Browser_action.Unblock_requests;
+    check "the host loads again once unblocked" (fetch "localhost" = `String "loaded");
     let window_tab = success (run (Browser_lane.Page_act (Browser_action.Open_window (fixture_url ^ "/second")))) |> member "tabId" |> integer in
     check "open_window returns a tab that reads as its own page" (member "url" (read window_tab) = `String (fixture_url ^ "/second"));
     check "the window's tab id is new" (window_tab <> first && window_tab <> second);

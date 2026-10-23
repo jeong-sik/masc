@@ -466,6 +466,21 @@ let test_a_request_with_no_original_is_unowned ()=with_workspace (fun base_path 
     | _ -> fail "an Exact request is an object" in
   check bool "a request that differs from its original is undecided, not unowned" true
     (undecided (authorize_as base_path store changed)))
+(* A settled original leaves the scope the host reads, so a request the
+   worker still lists for it ends like one that has no original. *)
+let test_a_settled_original_is_unowned ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Settled source a";"Settled source b"] in
+  let request=get (Server_workspace_memory_addon_validation.request capture) in
+  ignore (retain_capture store capture);
+  check bool "its original authorizes it" true (Result.is_ok (authorize_as base_path store request));
+  let request_id=Capture.Request_id.to_string (Capture.request_id capture) in
+  let record=match List.find_opt (fun record -> Owner.Record.request_id record=request_id)
+      (owned (Owner.discover ~store ~scope:Capture.scope)) with
+    | Some record -> record | None -> fail "the retained original is not in its scope" in
+  (match Owner.settle ~store ~date:(get (Capture.Request_id.minted_on (Capture.request_id capture))) record with
+   | Ok () -> ()
+   | Error error -> fail (Owner.settle_error_to_string error));
+  check bool "once settled, its request is unowned" true (unowned (authorize_as base_path store request)))
 let test_missing_or_cyclic_parent_refuses missing ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Source a";"Source b"] in
   let parent,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
@@ -1224,6 +1239,7 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "acknowledged child answers and commits only its prefix" `Quick test_child_can_answer_and_commit_only_its_original_prefix;
   test_case "direct Exact authority cannot bypass parent acknowledgement" `Quick test_direct_exact_authority_requires_acknowledged_ancestry;
   test_case "a request with no original is unowned" `Quick test_a_request_with_no_original_is_unowned;
+  test_case "a settled original is unowned" `Quick test_a_settled_original_is_unowned;
   test_case "missing predecessor refuses resume and direct Exact" `Quick (test_missing_or_cyclic_parent_refuses true);
   test_case "cyclic predecessor refuses resume and direct Exact" `Quick (test_missing_or_cyclic_parent_refuses false);
   test_case "nested refusal narrows the child without a root sibling" `Quick test_nested_successor_has_no_root_sibling;

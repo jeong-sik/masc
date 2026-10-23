@@ -306,6 +306,86 @@ let test_next_classification_size_follows_the_last_answer () = with_workspace (f
   Alcotest.check size "refused classifications and answered briefings are not evidence" (R.Up_to 2)
     (classification_size [child,P.Finished commit;refused,P.Rejected refusal;briefing,P.Finished commit]))
 
+(* The last millisecond of 2026-10-22 and the first of 2026-10-23, UTC. *)
+let test_an_id_is_minted_on_the_utc_day_of_its_timestamp () =
+  let day id = get (C.Request_id.minted_on (get (C.Request_id.of_string id))) in
+  Alcotest.(check string) "the last millisecond of a day" "2026-10-22" (day "01a1660e-abff-7000-8000-000000000000");
+  Alcotest.(check string) "the first millisecond of the next" "2026-10-23" (day "01a1660e-ac00-7000-8000-000000000000")
+
+let test_settled_chains_are_the_ones_no_pass_reads () = with_workspace (fun root store ->
+  let module P = Lane_addon_request_progress in
+  let module Receipt = Lane_addon_request_receipt in
+  let workspace = get (C.observe_workspace ~base_path:root) in
+  let classify_render = render Prompt_names.workspace_memory_curator "workspace_memory_changes" classification_prompt in
+  let facts = List.init 2 (fun i -> fact "writer" ("Settled source " ^ string_of_int i)) in
+  let classification () =
+    let batch = some (requested (R.prepare ~neighbor_limit:0 ~render:classify_render ~ledger:L.empty ~current:facts
+        ~pending:facts ~size:R.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0))) in
+    get (C.classification ~request_id:(C.Request_id.fresh ()) ~workspace ~destination
+           ~prompt:classification_prompt ~ledger:L.empty ~batch) in
+  let advance record event =
+    match get (Result.map_error Owner.update_error_to_string (Owner.advance ~store ~expected:record ~event)) with
+    | Owner.Stored record -> record
+    | Owner.Already_stored _ | Owner.Unconfirmed _ -> Alcotest.fail "fixture fact was not stored" in
+  (* Retain [capture] and record [events] after it. *)
+  let original capture events =
+    let request_id = C.Request_id.to_string (C.request_id capture) in
+    owned (Owner.retain ~store ~scope:C.scope ~request_id ~installation_id:destination.installation_id
+      ~package_id:destination.package_id ~tool:destination.tool ~summary:(summary_of capture)
+      ~request:(C.to_json capture));
+    ignore (List.fold_left advance (some (owned (Owner.load ~store ~scope:C.scope ~request_id))) events);
+    request_id in
+  let receipt stage = get (Receipt.make ~observed_at:1. ~payload:(`Assoc ["stage",`String stage])) in
+  let registration = receipt "registration" and completion = receipt "completion" in
+  let registered = [P.Observer (Receipt.Intended (Receipt.Registration,registration));
+                    P.Observer (Receipt.Recorded (Receipt.Registration,registration.Receipt.digest))] in
+  let completion_intended = P.Observer (Receipt.Intended (Receipt.Completion,completion)) in
+  let observed = registered @ [completion_intended;
+                               P.Observer (Receipt.Recorded (Receipt.Completion,completion.Receipt.digest))] in
+  let change : P.change = {before=`Null;after=`Assoc ["committed",`Bool true]} in
+  let finished = [P.Dispatch_intended;P.Judgment_retained `Null;P.Commit_intended change;P.Commit_observed change.after] in
+  let refused = [P.Dispatch_intended;P.Refused {stage=P.Execution;evidence=`Null}] in
+  (* Minted in this order, so [latest] is the last answered classification. *)
+  let older = original (classification ()) (finished @ observed) in
+  let parent_capture = classification () in
+  let child_capture = some (get (C.narrow ~request_id:(C.Request_id.fresh ())
+      ~final:(Lane_addon_exact.Call_final (Input_refused Input_capacity)) parent_capture)) in
+  let child_id = C.Request_id.to_string (C.request_id child_capture) in
+  let link : P.successor = {request_id=child_id;request_digest=get (Owner.request_digest (C.to_json child_capture))} in
+  let parent = original parent_capture
+      (refused @ [P.Successor_intended link;P.Successor_observed child_id] @ observed) in
+  let child = original child_capture (finished @ observed) in
+  let unobserved = original (classification ()) (finished @ registered @ [completion_intended]) in
+  let fenced = original (classification ()) (refused @ observed) in
+  let latest = original (classification ()) (finished @ observed) in
+  let briefing_prompt = prompt "Original briefing: {{workspace_memory_briefing}}" in
+  let briefing_render = render Prompt_names.workspace_memory_briefing "workspace_memory_briefing" briefing_prompt in
+  let source : B.source = {id="a";kind=B.Claim;text="Briefing evidence a"} in
+  let batch = match get (B.prepare ~sources:[source] ~contract:(B.contract ~template:briefing_prompt.effective)
+      ~render:briefing_render B.empty) with
+    | B.Prepared batch -> batch
+    | B.Unchanged | B.Cleanup _ -> Alcotest.fail "expected a briefing pass" in
+  let briefing = original (get (C.briefing ~request_id:(C.Request_id.fresh ()) ~workspace ~destination
+      ~prompt:briefing_prompt ~batch)) (finished @ observed) in
+  let records = owned (Owner.discover ~store ~scope:C.scope)
+    |> List.map (fun record -> record,get (C.Summary.of_json (Owner.Record.summary record))) in
+  let settled settling = C.settled_chains settling records
+    |> List.map (fun (root,leaf_first) -> C.Request_id.to_string root,List.map Owner.Record.request_id leaf_first)
+    |> List.sort compare in
+  let chains = Alcotest.(list (pair string (list string))) in
+  let kept settling =
+    let moved = List.concat_map snd (settled settling) in
+    List.filter_map (fun (record,_) -> let id = Owner.Record.request_id record in
+      if List.mem id moved then None else Some id) records |> List.sort compare in
+  Alcotest.check chains "older answered chains settle, each leaf first"
+    (List.sort compare [older,[older];parent,[child;parent]]) (settled C.Classifications);
+  Alcotest.(check (list string)) "the latest answer, a pending receipt, a refusal and every Briefing stay"
+    (List.sort compare [unobserved;fenced;latest;briefing]) (kept C.Classifications);
+  let prepared = get (C.briefing_state_sha256 (B.prepared_state batch)) in
+  Alcotest.check chains "a Briefing that prepared the current state stays" [] (settled (C.Briefings {state=prepared}));
+  Alcotest.check chains "a Briefing that prepared another state settles, and only Briefing chains do"
+    [briefing,[briefing]] (settled (C.Briefings {state=String.make 64 '0'})))
+
 let () = Alcotest.run "Curator trusted host capture" ["capture",[
   Alcotest.test_case "canonical storage preserves exact original prompt and judgment" `Quick test_canonical_storage_preserves_original_prompt_and_selected_judgment;
   Alcotest.test_case "changed provenance, schema and original owner" `Quick test_changed_capture_provenance_and_owner_are_refused;
@@ -315,4 +395,8 @@ let () = Alcotest.run "Curator trusted host capture" ["capture",[
   Alcotest.test_case "a summary other than its capture" `Quick test_a_restore_refuses_a_summary_other_than_its_capture;
   Alcotest.test_case "descriptor scope rejects a replaced root" `Quick test_descriptor_scope_refuses_replaced_root_before_return;
   Alcotest.test_case "next classification size follows the last answer" `Quick
-    test_next_classification_size_follows_the_last_answer]]
+    test_next_classification_size_follows_the_last_answer;
+  Alcotest.test_case "settled chains are the ones no pass reads" `Quick
+    test_settled_chains_are_the_ones_no_pass_reads;
+  Alcotest.test_case "an ID is minted on the UTC day of its timestamp" `Quick
+    test_an_id_is_minted_on_the_utc_day_of_its_timestamp]]

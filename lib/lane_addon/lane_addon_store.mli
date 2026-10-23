@@ -129,10 +129,35 @@ val save_tool_request_body : t -> scope:string -> request_digest:string -> strin
     Bytes that do not match [request_digest] are refused before writing.
     Writing the same body again publishes the same file. Same serializer and
     durability as record publication. *)
-val load_tool_request_body : t -> scope:string -> request_digest:string -> (string option, string) result
-(** Strict read of one published body with the same owned-descriptor checks
-    as {!load_tool_request_owner}. [None] means no body has that name; the
-    caller compares the bytes with the digest it holds. *)
+val load_tool_request : t -> scope:string -> request_id:string ->
+  name_body:(Yojson.Safe.t -> ('record * string, string) result) ->
+  (('record * string option) option, string) result
+(** One original: its record, decoded by [name_body] into the caller's value
+    and the digest naming its body, and that body's bytes. Both are read under
+    one hold of the scope serializer that publication and
+    {!settle_tool_request} use, so an original is read whole or found gone.
+    The same owned-descriptor checks as {!load_tool_request_owner} apply to
+    both files. [None] means no record; a body that is not there is [None]
+    beside the record, and the caller compares the bytes with its digest. *)
+val tool_request_archive_directory : string
+val tool_request_archive_record_path : scope:string -> date:string -> request_id:string -> string
+val tool_request_archive_body_path : scope:string -> date:string -> request_digest:string -> string
+(** Where a settled original's record and body live, relative to {!root}:
+    [tool-request-owners-settled/<scope digest>/<date>/records|bodies/]. No
+    pass lists or reads this namespace. *)
+val settle_tool_request : t -> scope:string -> date:string -> request_id:string -> request_digest:string ->
+  (unit, string) result
+(** Move one original's record, then its body, from the scope into the settled
+    archive under [date], syncing both directories after each rename. The
+    record leaves first, the reverse of publication, so an interrupted settle
+    leaves a body no record names, never a record without its body. A file
+    already in the archive counts as moved, so settling again completes the
+    move; a file in neither place is an error. Only single-link regular files
+    this process owns are moved. Same scope serializer as publication. The
+    caller checks that the record is the one it means to settle and that no
+    other record names the body. *)
+val tool_request_settled : t -> scope:string -> date:string -> request_id:string -> (bool, string) result
+(** Whether the archive holds the record of [request_id] under [date]. *)
 val tool_request_owner_inventory : t -> scope:string -> ((string * Yojson.Safe.t) list, string) result
 (** Complete sorted published [.json] records in one scope, with filenames for
     the consumer's exact key/schema validation. Missing descendants under an

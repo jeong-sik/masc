@@ -12,6 +12,11 @@ module Request_id = struct
   let of_string = Random_id.parse_uuid_v7
   let to_string value = value
   let compare = String.compare
+  let minted_on value =
+    Result.map (fun time_ms ->
+      let day = Unix.gmtime (Int64.to_float time_ms /. 1000.) in
+      Printf.sprintf "%04d-%02d-%02d" (day.Unix.tm_year + 1900) (day.tm_mon + 1) day.tm_mday)
+      (Random_id.uuid_v7_time_ms value)
 end
 type workspace = { path : string; device : int; inode : int }
 let observe_workspace ~base_path =
@@ -396,6 +401,55 @@ let recoverable_successors ~workspace originals =
         | Progress.Rejected _ -> Ok pending in
       validate pending rest in
   validate [] originals
+(* Chains no pass needs again, each with its root's ID and its records leaf
+   first, the order they move in. A chain stays while any of its originals
+   has observer work, while its leaf is not answered (a Rejected leaf holds
+   its facts back), while it holds the latest answered classification, which
+   sizes the next batch, or while its Briefing prepared the current state. *)
+type settling = Classifications | Briefings of { state : string }
+let settled_chains settling originals =
+  let records = List.fold_left (fun records ((record, _) as original : Owner.Record.t * Summary.t) ->
+      Originals.add (Owner.Record.request_id record) original records) Originals.empty originals in
+  let observed record = match Progress.observer (Owner.Record.progress record) with
+    | {Lane_addon_request_receipt.registration=Acknowledged _; completion=Acknowledged _} -> true
+    | {registration=(Unobserved | Pending _); _}
+    | {registration=Acknowledged _; completion=(Unobserved | Pending _)} -> false in
+  let answered record = match Progress.phase (Owner.Record.progress record) with
+    | Progress.Finished _ | Progress.Conflicted _ -> true
+    | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
+    | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Rejected _ | Progress.Subdividing _
+    | Progress.Subdivided _ -> false in
+  (* The chain from [original] down to its leaf, leaf first. A missing or
+     repeated child is a broken link, which discovery refuses. *)
+  let rec chain below ((record, _) as original : Owner.Record.t * Summary.t) =
+    match Progress.phase (Owner.Record.progress record) with
+    | Progress.Subdivided (_, intent) ->
+      if List.exists (fun (above, _) -> String.equal (Owner.Record.request_id above) intent.request_id) below
+      then None
+      else Option.bind (Originals.find_opt intent.request_id records) (chain (original :: below))
+    | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
+    | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _
+    | Progress.Rejected _ | Progress.Subdividing _ -> Some (original :: below) in
+  let latest_answer = List.fold_left (fun latest ((record, summary) : Owner.Record.t * Summary.t) ->
+      match summary.Summary.batch with
+      | Summary.Classification _ when answered record ->
+        let id = Owner.Record.request_id record in
+        (match latest with
+         | Some newer when Request_id.compare newer id > 0 -> latest
+         | Some _ | None -> Some id)
+      | Summary.Classification _ | Summary.Briefing _ -> latest) None originals in
+  List.filter_map (fun ((root, summary) as original : Owner.Record.t * Summary.t) ->
+    match summary.Summary.predecessor, chain [] original with
+    | Some _, _ | None, (None | Some []) -> None
+    | None, Some ((leaf, leaf_summary) :: _ as leaf_first) ->
+      (* A child is captured with its parent's kind, so the leaf names the
+         chain's domain. *)
+      let unneeded = match settling, leaf_summary.Summary.batch with
+        | Classifications, Summary.Classification _ -> latest_answer <> Some (Owner.Record.request_id leaf)
+        | Briefings {state}, Summary.Briefing {prepared_state; _} -> not (String.equal prepared_state state)
+        | Classifications, Summary.Briefing _ | Briefings _, Summary.Classification _ -> false in
+      if unneeded && answered leaf && List.for_all (fun (record, _) -> observed record) leaf_first
+      then Some (Owner.Record.request_id root, List.map fst leaf_first) else None) originals
 type expected_commit = Classification_commit of Ledger.t | Briefing_commit of Brief.t
 let validate_output t raw = match t.work with
   | Classification {ledger;batch} ->

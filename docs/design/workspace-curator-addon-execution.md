@@ -574,8 +574,28 @@ workspace process lease and serialize the whole operation; a returned
 observation does not replace fresh authority at any later effect edge. This is
 not a cross-process transaction, a worker admission or a new-work grant. The map
 exists only for one pure inventory check; record order is not execution priority.
-Every pass still reads every record of the scope, so its cost grows with the
-retained originals; finished chains stay in the scope.
+
+A finished chain leaves the scope once no pass reads it again. After a domain
+pass observes its originals, it moves each such chain of its domain into
+`tool-request-owners-settled/<scope digest>/<YYYY-MM-DD>/`, under the UTC date
+its root's UUIDv7 was minted: leaf first, each original's record and then its
+body ([original request settle](addon-original-request-discovery.md#settle-an-original-out-of-its-scope)).
+A chain moves when its leaf is Finished or Conflicted and every original in it
+has both observer receipts acknowledged. It stays while it holds the latest
+answered classification, which sizes the next batch, or while its Briefing leaf
+prepared the current Briefing state, which keeps the same pass from being
+prepared again. A Rejected leaf keeps its chain, since it holds its facts or its
+pass back. A pass therefore reads its active work, its refusals and its last
+answer, not every original the workspace ever retained. A settle failure is
+logged and the chain waits for a later pass; it does not stop the domain work.
+
+A settle stopped inside a chain leaves a Subdivided parent whose child is
+already under the root's date. Discovery finds that parent, checks that each
+ancestor holds the one below it as its Subdivided child, settles them and reads
+the records again before the link check. A parent whose child is in neither
+place is still a broken link and refuses the inventory. A worker that still
+lists the request of a settled original finds no original behind it, so the
+host ends that request as `not_allowed` and the worker drops it.
 
 The port uses local original journals and can recover an already stored intent
 without a live worker or model route. New root/new successor admission still

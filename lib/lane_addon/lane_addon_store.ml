@@ -573,33 +573,38 @@ let rec load_exact_request_with ~sync_file ~sync_parent t ~declaration_id ~reque
 let load_exact_request = load_exact_request_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 
 let owned_result value = Result.map_error Fs_compat.owned_regular_file_read_error_to_string value
-(* One scope directory of [namespace] (records or request bodies), held under
-   the same per-scope serializer that publication uses. *)
-let with_tool_request_scope ~namespace ~sync_parent t ~scope fn =
-  let blocking () = protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
-    let* result = Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
-      let result =
-        let owner_uid = Unix.geteuid () in
-        let parent = Fs_compat.owned_inventory_root_path anchor in
-        let root = Filename.concat parent (Filename.basename t.root) in
-        let directory = Filename.concat root (Filename.concat namespace (digest scope)) in
-        let* observed = Fs_compat.with_owned_directory_inventory_if_present ~owner_uid
-          ~inventory_root:anchor ~sync_directory:sync_parent directory (fun held names ->
-            let* value = fn ~owner_uid held names in
-            let* current = Fs_compat.read_owned_directory ~owner_uid ~inventory_root:held
-              ~ownership_root:directory directory |> owned_result in
-            if current <> names then Error "original request directory changed during inventory"
-            else Ok value) |> owned_result in
-        match observed with
-        | None -> Ok None
-        | Some result -> Result.map Option.some result in
-      Ok result) |> owned_result in
-    result)) in
+(* One scope directory of [namespace] (records or request bodies). The caller
+   holds the per-scope serializer that publication uses. *)
+let read_tool_request_scope ~namespace ~sync_parent t ~scope fn =
+  let* result = Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
+    let result =
+      let owner_uid = Unix.geteuid () in
+      let parent = Fs_compat.owned_inventory_root_path anchor in
+      let root = Filename.concat parent (Filename.basename t.root) in
+      let directory = Filename.concat root (Filename.concat namespace (digest scope)) in
+      let* observed = Fs_compat.with_owned_directory_inventory_if_present ~owner_uid
+        ~inventory_root:anchor ~sync_directory:sync_parent directory (fun held names ->
+          let* value = fn ~owner_uid held names in
+          let* current = Fs_compat.read_owned_directory ~owner_uid ~inventory_root:held
+            ~ownership_root:directory directory |> owned_result in
+          if current <> names then Error "original request directory changed during inventory"
+          else Ok value) |> owned_result in
+      match observed with
+      | None -> Ok None
+      | Some result -> Result.map Option.some result in
+    Ok result) |> owned_result in
+  result
+(* Run [work] under the scope serializer, on a system thread for an Eio
+   caller. *)
+let serialized_tool_request_read t ~scope work =
+  let blocking () = protect (fun () -> with_tool_request_owner_serialization t ~scope work) in
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> blocking ()
   | Fs_compat.Eio_fiber ->
     let result = Eio_unix.run_in_systhread ~label:"addon-original-request-read" blocking in
     Eio.Fiber.check (); result
+let with_tool_request_scope ~namespace ~sync_parent t ~scope fn =
+  serialized_tool_request_read t ~scope (fun () -> read_tool_request_scope ~namespace ~sync_parent t ~scope fn)
 let with_tool_request_owner_scope ~sync_parent t ~scope fn =
   with_tool_request_scope ~namespace:tool_request_owners_directory ~sync_parent t ~scope fn
 let read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name =
@@ -614,24 +619,36 @@ let read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name =
 let read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name =
   let* bytes = read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name in
   protect (fun () -> Ok (Yojson.Safe.from_string bytes))
-let load_tool_request_owner t ~scope ~request_id =
+let tool_request_owner_record t ~scope ~request_id =
   let name = digest request_id ^ ".json" in
-  let* result = with_tool_request_owner_scope ~sync_parent:Unix.fsync t ~scope
+  let* result = read_tool_request_scope ~namespace:tool_request_owners_directory ~sync_parent:Unix.fsync t ~scope
     (fun ~owner_uid held names ->
       if not (List.mem name names) then Ok None
       else read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
         |> Result.map Option.some) in
   Ok (Option.join result)
+let load_tool_request_owner t ~scope ~request_id =
+  serialized_tool_request_read t ~scope (fun () -> tool_request_owner_record t ~scope ~request_id)
 let tool_request_body_path ~scope ~request_digest =
   Filename.concat tool_request_bodies_directory (Filename.concat (digest scope) (request_digest ^ ".json"))
-let load_tool_request_body t ~scope ~request_digest =
-  let name = request_digest ^ ".json" in
-  let* result = with_tool_request_scope ~namespace:tool_request_bodies_directory ~sync_parent:Unix.fsync t ~scope
-    (fun ~owner_uid held names ->
-      if not (List.mem name names) then Ok None
-      else read_owned_tool_request_bytes ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
-        |> Result.map Option.some) in
-  Ok (Option.join result)
+(* The record and the body it names under one hold of the serializer that a
+   settle moves both under, so an original is read whole or found gone. *)
+let load_tool_request t ~scope ~request_id ~name_body =
+  serialized_tool_request_read t ~scope (fun () ->
+    let* record = tool_request_owner_record t ~scope ~request_id in
+    match record with
+    | None -> Ok None
+    | Some json ->
+      let* record,request_digest = name_body json in
+      let* () = if String_util.is_lowercase_sha256_hex request_digest then Ok ()
+        else Error "a request body is named by a SHA-256 digest" in
+      let name = request_digest ^ ".json" in
+      let* body = read_tool_request_scope ~namespace:tool_request_bodies_directory ~sync_parent:Unix.fsync t ~scope
+        (fun ~owner_uid held names ->
+          if not (List.mem name names) then Ok None
+          else read_owned_tool_request_bytes ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
+            |> Result.map Option.some) in
+      Ok (Some (record,Option.join body)))
 (* A body is named by the digest of its bytes, so writing it again publishes
    the same file; each write is atomic and synced with its directory. *)
 let save_tool_request_body t ~scope ~request_digest bytes =
@@ -639,6 +656,60 @@ let save_tool_request_body t ~scope ~request_digest bytes =
     else Error "a request body must be named by the digest of its bytes" in
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     write_with ~sync_parent:sync_parent_directory t (tool_request_body_path ~scope ~request_digest) bytes))
+(* Settled originals: each record and the body it names, under the date its
+   chain began. No pass lists or reads this namespace. *)
+let tool_request_archive_directory = "tool-request-owners-settled"
+(* A day names a directory, so only [YYYY-MM-DD] is accepted. *)
+let settled_day date =
+  let digit index = match date.[index] with '0' .. '9' -> true | _ -> false in
+  if String.length date = 10 && date.[4] = '-' && date.[7] = '-'
+     && List.for_all digit [0; 1; 2; 3; 5; 6; 8; 9] then Ok ()
+  else Error "a settled date is written YYYY-MM-DD"
+let tool_request_archive_path ~scope ~date kind name =
+  Filename.concat tool_request_archive_directory
+    (Filename.concat (digest scope) (Filename.concat date (Filename.concat kind name)))
+let tool_request_archive_record_path ~scope ~date ~request_id =
+  tool_request_archive_path ~scope ~date "records" (digest request_id ^ ".json")
+let tool_request_archive_body_path ~scope ~date ~request_digest =
+  tool_request_archive_path ~scope ~date "bodies" (request_digest ^ ".json")
+let owned_regular_file (stat : Unix.stats) =
+  stat.st_kind = Unix.S_REG && stat.st_nlink = 1 && stat.st_uid = Unix.geteuid ()
+(* Move one published file into the archive, or find it already there. Both
+   directories are synced after the rename. *)
+let move_into_archive t ~source ~target =
+  let source = Filename.concat t.root source and target = Filename.concat t.root target in
+  match Unix.lstat source with
+  | stat when owned_regular_file stat ->
+    durable_directory t ~sync_parent:sync_parent_directory (Filename.dirname target);
+    Unix.rename source target;
+    sync_parent_directory (Filename.dirname target);
+    sync_parent_directory (Filename.dirname source);
+    Ok ()
+  | _ -> Error ("an original request file to settle is not a regular file this process owns: " ^ source)
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    match Unix.lstat target with
+    | stat when owned_regular_file stat -> Ok ()
+    | _ -> Error ("a settled original request file is not a regular file this process owns: " ^ target)
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+      Error ("an original request file is in neither its scope nor the settled archive: " ^ source)
+let settle_tool_request t ~scope ~date ~request_id ~request_digest =
+  let* () = settled_day date in
+  protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
+    (* The record first, the reverse of publication: an interrupted settle
+       leaves a body no record names, as an interrupted retain does, never a
+       record without its body. *)
+    let* () = move_into_archive t ~source:(tool_request_owner_path ~scope ~request_id)
+        ~target:(tool_request_archive_record_path ~scope ~date ~request_id) in
+    move_into_archive t ~source:(tool_request_body_path ~scope ~request_digest)
+      ~target:(tool_request_archive_body_path ~scope ~date ~request_digest)))
+let tool_request_settled t ~scope ~date ~request_id =
+  let* () = settled_day date in
+  protect (fun () ->
+  let path = Filename.concat t.root (tool_request_archive_record_path ~scope ~date ~request_id) in
+  match Unix.lstat path with
+  | stat when owned_regular_file stat -> Ok true
+  | _ -> Error ("a settled original request record is not a regular file this process owns: " ^ path)
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false)
 type namespace_entry = Record_entry | Staged_entry | Unknown_entry
 let tool_request_owner_entry name =
   if Fs_compat.is_atomic_orphan_name name then Staged_entry

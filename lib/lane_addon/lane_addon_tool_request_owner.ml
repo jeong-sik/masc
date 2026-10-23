@@ -92,28 +92,30 @@ let request_of_body ~request_digest = function
     let* request = Lane_addon_action.canonical json in
     if String.equal (digest request) request_digest then Ok request
     else Error "original request body is not canonical"
-let load_request ~store ~scope ~request_digest =
-  let* bytes = Lane_addon_store.load_tool_request_body store ~scope ~request_digest in
-  request_of_body ~request_digest bytes
 (* A record names its request by digest, so equal digests are equal requests;
    comparing them never walks the request itself. *)
-let same_record (a : retained) (b : retained) =
+let same_listed (a : Record.t) (b : Record.t) =
   String.equal a.scope b.scope && String.equal a.request_id b.request_id
   && String.equal a.installation_id b.installation_id && String.equal a.package_id b.package_id
   && String.equal a.tool b.tool && String.equal a.request_digest b.request_digest
   && Yojson.Safe.equal a.summary b.summary && a.progress = b.progress
-let restore ~store ~scope ~request_id json =
-  let* record = decode ~scope ~request_id json in
-  let* request = load_request ~store ~scope ~request_digest:record.request_digest in
-  Ok (with_request record request)
+let listed (r : retained) : Record.t =
+  {scope=r.scope; request_id=r.request_id; installation_id=r.installation_id; package_id=r.package_id;
+   tool=r.tool; request_digest=r.request_digest; summary=r.summary; progress=r.progress}
+let same_record a b = same_listed (listed a) (listed b)
 let load ~store ~scope ~request_id =
   let* () = validate_identity ["scope", scope; "request_id", request_id] in
-  let* previous = Lane_addon_store.load_tool_request_owner store ~scope ~request_id
-    |> Result.map_error (fun detail -> Store_unavailable detail) in
-  match previous with
+  let unavailable detail = Store_unavailable detail in
+  (* The record and its body in one read, so a settle between them cannot
+     leave a record whose body looks lost. *)
+  let* read = Lane_addon_store.load_tool_request store ~scope ~request_id ~name_body:(fun json ->
+      Result.map (fun (record : Record.t) -> record,record.request_digest) (decode ~scope ~request_id json))
+    |> Result.map_error unavailable in
+  match read with
   | None -> Ok None
-  | Some json -> restore ~store ~scope ~request_id json
-      |> Result.map Option.some |> Result.map_error (fun detail -> Store_unavailable detail)
+  | Some (record,body) ->
+    let* request = request_of_body ~request_digest:record.request_digest body |> Result.map_error unavailable in
+    Ok (Some (with_request record request))
 let discover ~store ~scope =
   let* () = validate_identity ["scope",scope] in
   let unavailable value = Result.map_error (fun detail -> Store_unavailable detail) value in
@@ -195,6 +197,27 @@ let advance ~store ~(expected : retained) ~event =
         ~scope:expected.scope ~request_id:expected.request_id (to_json next) with
       | Ok () -> Ok (Stored next)
       | Error detail -> Ok (Unconfirmed detail)
+type settle_error = Settle_unavailable of string | Settle_changed
+let settle ~store ~date (expected : Record.t) =
+  let unavailable detail = Settle_unavailable detail in
+  let* stored = Lane_addon_store.load_tool_request_owner store ~scope:expected.scope ~request_id:expected.request_id
+    |> Result.map_error unavailable in
+  (* An absent record was settled already, or is in neither place, which the
+     store reports. *)
+  let* () = match stored with
+    | None -> Ok ()
+    | Some json ->
+      let* stored = decode ~scope:expected.scope ~request_id:expected.request_id json
+        |> Result.map_error unavailable in
+      if same_listed stored expected then Ok () else Error Settle_changed in
+  Lane_addon_store.settle_tool_request store ~scope:expected.scope ~date ~request_id:expected.request_id
+    ~request_digest:expected.request_digest |> Result.map_error unavailable
+let settled ~store ~scope ~date ~request_id =
+  Lane_addon_store.tool_request_settled store ~scope ~date ~request_id
+  |> Result.map_error (fun detail -> Store_unavailable detail)
+let settle_error_to_string = function
+  | Settle_unavailable detail -> "Add-on request ownership unavailable: " ^ detail
+  | Settle_changed -> "Original Add-on request changed before it was settled"
 let error_to_string = function
   | Binding_conflict -> "Original Add-on request is bound to another installation, tool or captured input"
   | Store_unavailable detail -> "Add-on request ownership unavailable: " ^ detail

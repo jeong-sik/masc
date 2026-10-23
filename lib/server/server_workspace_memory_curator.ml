@@ -81,6 +81,22 @@ let observe ~config ~on_observation_failure originals =
       Log.Server.error "workspace curator original observation %s: %s" (id original)
         (Consumer.observation_error_to_string error);
       false) true (List.filter (fun original -> not (observed original)) originals)
+(* Move the chains of [domain] that no pass needs again out of the scope every
+   pass reads. They were fully observed when discovered, so [observe] left
+   them as read. A failure leaves them for a later pass and does not stop this
+   one, which decides from the originals it already read. *)
+let settle ~config domain originals =
+  let settled=
+    let* settling=match domain with
+      | Classification -> Ok Capture.Classifications
+      | Synthesis ->
+        let* state=io (fun () -> Briefing.load ~directory:(Ledger.directory ~base_path:config.Workspace.base_path)) in
+        let* state=Capture.briefing_state_sha256 state in
+        Ok (Capture.Briefings {state}) in
+    Consumer.settle_chains ~config settling originals |> consumer in
+  match settled with
+  | Ok () -> ()
+  | Error detail -> Log.Server.error "workspace curator settle: %s" detail
 let one_active originals=match List.filter (fun original -> active (phase original)) originals with
   | [] -> Ok None | [original] -> Ok (Some original)
   | _::_::_ -> Error "Multiple active Curator originals have no unique domain frontier"
@@ -175,6 +191,7 @@ let run_domain ~config ~on_inventory ~on_observation_failure domain =
   let* originals=Consumer.discover ~config |> consumer in
   on_inventory originals;
   let new_work=observe ~config ~on_observation_failure originals in
+  settle ~config domain originals;
   let selected=leaves originals |> List.filter (fun original -> kind original=domain) in
   let* running=one_active selected in
   match running with

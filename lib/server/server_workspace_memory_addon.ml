@@ -533,10 +533,64 @@ let narrow ~config ~request_id =
     |> Result.map_error runtime_error in
   narrow_with ~admit ~store ~base_path:config.Workspace.base_path ~request_id
 type original = {id:Capture.Request_id.t;record:Owner.Record.t;summary:Capture.Summary.t}
+module Ids = Map.Make (String)
+let settle_original_with ~store ~date record =
+  Eio_unix.run_in_systhread (fun () -> Owner.settle ~store ~date record)
+  |> Result.map_error (function
+    | Owner.Settle_unavailable detail -> Unavailable detail
+    | Owner.Settle_changed as error -> Uncertain (Owner.settle_error_to_string error))
+(* Settle a chain's records in the order given, leaf first, under the day its
+   root was minted. *)
+let settle_chain_with ~store root leaf_first =
+  let* date = rejected (Capture.Request_id.minted_on root) in
+  List.fold_left (fun settled record -> let* () = settled in settle_original_with ~store ~date record)
+    (Ok ()) leaf_first
+(* A chain is settled leaf first, so a settle interrupted between two of its
+   originals leaves a Subdivided parent whose child is already in the archive,
+   under the date of the chain's root. Settle that parent and its ancestors
+   too. A missing child that did not move is left for the link check to
+   refuse. Returns whether anything moved. *)
+let finish_settling ~store originals =
+  let by_id = List.fold_left (fun ids original -> Ids.add (Owner.Record.request_id original.record) original ids)
+      Ids.empty originals in
+  (* [original] and its ancestors, nearest first, so the root is last. Each
+     ancestor must hold the one below it as its Subdivided child. *)
+  let rec upward above original =
+    let above = original :: above in
+    match original.summary.Capture.Summary.predecessor with
+    | None -> Ok (List.rev above)
+    | Some parent ->
+      let child = Owner.Record.request_id original.record in
+      match Ids.find_opt (Capture.Request_id.to_string parent) by_id with
+      | None -> Error (Rejected "original Curator predecessor is absent")
+      | Some parent ->
+        if List.exists (fun seen -> Capture.Request_id.compare seen.id parent.id = 0) above
+        then Error (Rejected "original Curator predecessors form a cycle") else
+        match Progress.phase (Owner.Record.progress parent.record) with
+        | Progress.Subdivided (_,intent) when String.equal intent.request_id child -> upward above parent
+        | Progress.Subdivided _ | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _
+        | Progress.Judged _ | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _
+        | Progress.Conflicted _ | Progress.Rejected _ | Progress.Subdividing _ ->
+          Error (Rejected "original Curator predecessor does not hold this child") in
+  List.fold_left (fun moved original ->
+    let* moved = moved in
+    match Progress.phase (Owner.Record.progress original.record) with
+    | Progress.Subdivided (_,intent) when not (Ids.mem intent.request_id by_id) ->
+      let* chain = upward [] original in
+      let root = List.nth chain (List.length chain - 1) in
+      let* date = rejected (Capture.Request_id.minted_on root.id) in
+      let* child_settled = Eio_unix.run_in_systhread (fun () ->
+        Owner.settled ~store ~scope:Capture.scope ~date ~request_id:intent.request_id) |> owned in
+      if not child_settled then Ok moved else
+      let* () = settle_chain_with ~store root.id (List.map (fun original -> original.record) chain) in
+      Ok true
+    | Progress.Subdivided _ | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _
+    | Progress.Judged _ | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _
+    | Progress.Conflicted _ | Progress.Rejected _ | Progress.Subdividing _ -> Ok moved) (Ok false) originals
 (* Records and their summaries only: no request body is read and no capture
    is restored here. The pass restores only the originals it acts on. *)
 let discover_observed_with ~store ~base_path ~after_inventory =
-  let scan () = Eio_unix.run_in_systhread (fun () ->
+  let read () = Eio_unix.run_in_systhread (fun () ->
     let* workspace = Capture.observe_workspace ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
     let inventory = Owner.discover ~store ~scope:Capture.scope in
     after_inventory ();
@@ -548,9 +602,14 @@ let discover_observed_with ~store ~base_path ~after_inventory =
         let* summary = Capture.Summary.of_json (Owner.Record.summary record) |> rejected in
         summarize ({id;record;summary}::originals) rest in
     let* originals = summarize [] records in
-    let* pending = Capture.recoverable_successors ~workspace
-        (List.map (fun original -> original.record,original.summary) originals) |> rejected in
-    Ok (originals,pending)) in
+    Ok (workspace,originals)) in
+  let scan () =
+    let* workspace,originals = read () in
+    let* moved = finish_settling ~store originals in
+    let* workspace,originals = if moved then read () else Ok (workspace,originals) in
+    let* pending = Eio_unix.run_in_systhread (fun () -> Capture.recoverable_successors ~workspace
+        (List.map (fun original -> original.record,original.summary) originals)) |> rejected in
+    Ok (originals,pending) in
   let* originals,pending = scan () in
   let rec recover = function
     | [] -> Ok ()
@@ -570,6 +629,15 @@ let discover_observed_with ~store ~base_path ~after_inventory =
      | _::_ -> Error (Uncertain "Original successor discovery changed during recovery"))
 let discover_with ~store ~base_path =
   discover_observed_with ~store ~base_path ~after_inventory:(fun () -> ())
+(* A Curator body names its own request ID, so no other record names it. *)
+let settle_chains_with ~store settling originals =
+  let chains = Capture.settled_chains settling
+      (List.map (fun original -> original.record,original.summary) originals) in
+  List.fold_left (fun settled (root,leaf_first) -> let* () = settled in settle_chain_with ~store root leaf_first)
+    (Ok ()) chains
+let settle_chains ~config settling originals =
+  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  settle_chains_with ~store settling originals
 let discover ~config =
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   discover_with ~store ~base_path:config.Workspace.base_path
@@ -677,4 +745,5 @@ module For_testing = struct
   let prepare_observation=prepare_observation_with
   let discover=discover_with
   let discover_observed=discover_observed_with
+  let settle_chains=settle_chains_with
 end

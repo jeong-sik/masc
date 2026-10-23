@@ -167,9 +167,15 @@ class Store:
         if not stat.S_ISDIR(info.st_mode):
             raise InvalidInput("Exact request store is not a directory")
         self.identity = (info.st_dev, info.st_ino)
-        self.failed = False
+        # Why this worker stopped trusting its store. Every later call fails
+        # with it until the worker starts again.
+        self.failure: str | None = None
         # Every record's identity and state by file name, built by the first
-        # inventory and kept current by write: this worker is the only writer.
+        # inventory and kept current by write. The host mounts each state
+        # volume into one worker, so this worker is the only writer. A change
+        # made from outside is noticed only in a pending record that a listing
+        # or submit reads again (pending). A record added, a finished record
+        # removed, damaged or turned pending again shows at the next start.
         self.index: dict[str, Retained] | None = None
         # A first request ACK requires both its directory entry and the new
         # store entry in the installation state root to survive a crash.
@@ -183,6 +189,14 @@ class Store:
             os.fsync(fd)
         finally:
             os.close(fd)
+
+    def trusted(self) -> None:
+        if self.failure is not None:
+            raise InvalidInput(self.failure)
+
+    def stop(self, reason: str) -> InvalidInput:
+        self.failure = reason + "; reopen and inspect the store"
+        return InvalidInput(self.failure)
 
     def check_directory(self) -> None:
         info = self.directory.lstat()
@@ -238,8 +252,7 @@ class Store:
         return record
 
     def read(self, request_id: str) -> dict | None:
-        if self.failed:
-            raise InvalidInput("Exact request persistence is unconfirmed")
+        self.trusted()
         with self.open_directory() as directory_fd:
             try:
                 return self.read_path(self.path(request_id).name, directory_fd)
@@ -248,37 +261,54 @@ class Store:
                 # and its identity is checked again before returning to caller.
                 return None
 
+    def retained(self, name: str, directory_fd: int) -> Retained:
+        """One record's identity and state. Its body is dropped on return."""
+        record = self.read_path(name, directory_fd)
+        return Retained(record_id(record), record["result"] is None)
+
     def inventory(self) -> list[tuple[str, Retained]]:
         """Every record's file name, request id and state, in name order.
 
-        The first call reads and checks each record once, one at a time, so it
-        holds one request body instead of the whole store. Later calls answer
-        from memory; finished bodies are not read again."""
-        if self.failed:
-            raise InvalidInput("Exact request persistence is unconfirmed")
+        The first call after the worker starts reads and checks each record,
+        one at a time, so it holds one request body instead of the whole store.
+        A record it cannot read stops the worker. Later calls answer from
+        memory after checking that the store directory is the one this worker
+        opened; finished bodies are not read again."""
+        self.trusted()
         if self.index is None:
             index = {}
             with self.open_directory() as directory_fd:
                 with os.scandir(directory_fd) as entries:
                     names = sorted(entry.name for entry in entries if entry.name.endswith(".json"))
                 for name in names:
-                    record = self.read_path(name, directory_fd)
-                    index[name] = Retained(record_id(record), record["result"] is None)
+                    try:
+                        index[name] = self.retained(name, directory_fd)
+                    except (FileNotFoundError, ValueError) as error:
+                        raise self.stop(f"Exact request record {name} cannot be read: {error}") from error
             self.index = index
+        else:
+            self.check_directory()
         return sorted(self.index.items())
 
     def pending(self) -> list[dict]:
-        """The pending records in name order, read and checked again."""
+        """The pending records in name order, read and checked again. A pending
+        record that is gone, unreadable or finished changed outside this
+        worker, which stops it."""
         names = [name for name, retained in self.inventory() if retained.pending]
+        records = []
         with self.open_directory() as directory_fd:
-            records = [self.read_path(name, directory_fd) for name in names]
-        if any(record["result"] is not None for record in records):
-            raise InvalidInput("an Exact request record changed outside this worker")
+            for name in names:
+                try:
+                    record = self.read_path(name, directory_fd)
+                except (FileNotFoundError, ValueError) as error:
+                    raise self.stop(f"Exact request record {name} changed outside this worker: {error}") from error
+                if record["result"] is not None:
+                    raise self.stop(f"Exact request record {name} was finished outside this worker")
+                records.append(record)
         return records
 
     def write(self, record: dict) -> None:
-        if self.failed:
-            raise InvalidInput("Exact request persistence is unconfirmed; reopen and inspect the store")
+        self.trusted()
         try:
             with self.open_directory() as directory_fd:
                 temporary = ".exact-" + uuid.uuid4().hex
@@ -299,7 +329,7 @@ class Store:
                     if temporary is not None:
                         os.unlink(temporary, dir_fd=directory_fd)
         except (OSError, InvalidInput):
-            self.failed = True
+            self.failure = "Exact request persistence is unconfirmed; reopen and inspect the store"
             raise
 
 
@@ -391,8 +421,6 @@ class Worker:
 
     def host_requests(self, args) -> dict:
         exact(args, set(), "host listing")
-        if self.store.failed:
-            raise InvalidInput("Exact request persistence is unconfirmed")
         requests = [self.host_request(record["request"]) for record in self.store.pending()]
         if not self.fits({"requests": requests}):
             raise InvalidInput("retained pending requests exceed the current declared reply frame")

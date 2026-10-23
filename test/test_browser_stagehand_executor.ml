@@ -179,7 +179,7 @@ let test_capture_passes_the_surface () =
   let captured =
     match Executor.execute ~tabs ~call:(call fake) (Lane.Page_capture { tab_id = 1 }) with
     | Lane.Answered (`Assoc fields) when List.assoc_opt "ok" fields = Some (`Bool true) ->
-      Masc.Browser_surface.capture_from ~binding ~tab_id:1 ~started:(Mtime_clock.elapsed_ns ())
+      Masc.Browser_surface.capture_from ~binding ~tab_id:1 ~started:0L
         (Option.value (List.assoc_opt "data" fields) ~default:`Null)
     | _ -> Error "the capture was not answered"
   in

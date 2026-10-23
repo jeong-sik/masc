@@ -17,6 +17,7 @@ type session_status =
 type conversation_mode =
   | Turn_based
   | Realtime_bridge of { endpoint : string }
+  | Realtime_unavailable
 
 type session = {
   session_id: string;
@@ -66,14 +67,14 @@ let status_of_string_opt = function
 
 let string_of_conversation_mode = function
   | Turn_based -> "turn_based"
-  | Realtime_bridge _ -> "realtime_bridge"
+  | Realtime_bridge _ | Realtime_unavailable -> "realtime_bridge"
 
 let transport_mode_of_conversation_mode = function
   | Turn_based -> "batch_stt_tts"
-  | Realtime_bridge _ -> "websocket_audio_bridge"
+  | Realtime_bridge _ | Realtime_unavailable -> "websocket_audio_bridge"
 
 let realtime_supported = function
-  | Turn_based -> false
+  | Turn_based | Realtime_unavailable -> false
   | Realtime_bridge _ -> true
 
 let realtime_bridge_env =
@@ -104,6 +105,11 @@ let realtime_bridge_public_json ?endpoint () =
     ]
 
 let session_conversation_mode session = session.conversation_mode
+
+let session_is_active session =
+  match session.status with
+  | Active -> true
+  | Idle | Suspended -> false
 
 let turn_based_voice_loop_json ~session_active =
   `Assoc
@@ -149,26 +155,34 @@ let realtime_bridge_voice_loop_json ~session_active ~endpoint =
           ] )
     ]
 
+let realtime_unavailable_voice_loop_json () =
+  `Assoc
+    [ "mode", `String "realtime_bridge"
+    ; "transport_mode", `String "websocket_audio_bridge"
+    ; "realtime_supported", `Bool false
+    ; "realtime_available", `Bool false
+    ; "session_active", `Bool false
+    ; "protocol", `String "masc.voice.realtime_bridge.v1"
+    ; "realtime_bridge", realtime_bridge_public_json ()
+    ]
+
 let voice_loop_json ~session_active = function
   | Turn_based -> turn_based_voice_loop_json ~session_active
+  | Realtime_unavailable -> realtime_unavailable_voice_loop_json ()
   | Realtime_bridge { endpoint } ->
     realtime_bridge_voice_loop_json ~session_active ~endpoint
 
 let session_to_json session =
-  let session_active =
-    match session.status with
-    | Active -> true
-    | Idle | Suspended -> false
-  in
+  let session_active = session_is_active session in
   let mode = session.conversation_mode in
   let bridge_endpoint =
     match mode with
-    | Turn_based -> `Null
+    | Turn_based | Realtime_unavailable -> `Null
     | Realtime_bridge _ -> `Null
   in
   let realtime_bridge =
     match mode with
-    | Turn_based -> realtime_bridge_public_json ()
+    | Turn_based | Realtime_unavailable -> realtime_bridge_public_json ()
     | Realtime_bridge { endpoint } -> realtime_bridge_public_json ~endpoint ()
   in
   `Assoc [
@@ -189,32 +203,47 @@ let session_to_json session =
 
 let conversation_mode_of_json json =
   match Json_util.get_string json "conversation_mode" with
+  | Some "turn_based" -> Some Turn_based
   | Some "realtime_bridge" | Some "realtime" ->
     (match realtime_bridge_endpoint () with
-     | Some endpoint -> Realtime_bridge { endpoint }
-     | _ -> Turn_based)
-  | _ -> Turn_based
+     | Some endpoint -> Some (Realtime_bridge { endpoint })
+     | None -> Some Realtime_unavailable)
+  | Some _ | None -> None
 
+let status_for_mode mode status =
+  match mode with
+  | Realtime_unavailable -> Suspended
+  | Turn_based | Realtime_bridge _ -> status
+
+(* A persisted realtime session whose bridge endpoint is not configured keeps
+   its desired mode as [Realtime_unavailable] (the endpoint is redacted on
+   disk). It is [Suspended], never a live turn-based session, and persists as
+   "realtime_bridge" so a later restore with the endpoint configured recovers
+   [Realtime_bridge]. *)
 let session_of_json json =
-  {
-    session_id = Json_util.get_string_with_default json ~key:"session_id" ~default:"";
-    agent_id = Json_util.get_string_with_default json ~key:"agent_id" ~default:"";
-    voice = Json_util.get_string_with_default json ~key:"voice" ~default:"";
-    started_at = Json_util.get_float json "started_at" |> Option.value ~default:0.0;
-    last_activity = Json_util.get_float json "last_activity" |> Option.value ~default:0.0;
-    turn_count = Json_util.get_int json "turn_count" |> Option.value ~default:0;
-    (* Issue #8612: a corrupt or mis-versioned status field used to
-       silently decode as [Idle]. We now fail-closed at the boundary:
-       unknown status defaults to [Suspended] so the session is visible
-       to the operator (and won't be skipped by lifecycle GC that treats
-       Idle as "nothing to clean up"). *)
-    status =
-      Json_util.get_string json "status"
-      |> Option.value ~default:""
-      |> status_of_string_opt
-      |> Option.value ~default:Suspended;
-    conversation_mode = conversation_mode_of_json json;
-  }
+  Option.map
+    (fun conversation_mode ->
+      {
+        session_id = Json_util.get_string_with_default json ~key:"session_id" ~default:"";
+        agent_id = Json_util.get_string_with_default json ~key:"agent_id" ~default:"";
+        voice = Json_util.get_string_with_default json ~key:"voice" ~default:"";
+        started_at = Json_util.get_float json "started_at" |> Option.value ~default:0.0;
+        last_activity = Json_util.get_float json "last_activity" |> Option.value ~default:0.0;
+        turn_count = Json_util.get_int json "turn_count" |> Option.value ~default:0;
+        (* Issue #8612: a corrupt or mis-versioned status field used to
+           silently decode as [Idle]. We now fail-closed at the boundary:
+           unknown status defaults to [Suspended] so the session is visible
+           to the operator (and won't be skipped by lifecycle GC that treats
+           Idle as "nothing to clean up"). *)
+        status =
+          Json_util.get_string json "status"
+          |> Option.value ~default:""
+          |> status_of_string_opt
+          |> Option.value ~default:Suspended
+          |> status_for_mode conversation_mode;
+        conversation_mode;
+      })
+    (conversation_mode_of_json json)
 
 (** {1 Creation} *)
 
@@ -250,7 +279,21 @@ let load_session t agent_id =
     try
       let content = Fs_compat.load_file filepath in
       let json = Yojson.Safe.from_string content in
-      Some (session_of_json json)
+      match session_of_json json with
+      | None ->
+        Log.Misc.warn
+          "[voice_session_manager.load_session] invalid conversation mode for agent=%s"
+          agent_id;
+        None
+      | Some session ->
+        (* Validate blankness without rewriting valid identity bytes. *)
+        if String.trim session.session_id = "" || not (String.equal session.agent_id agent_id)
+        then begin
+          Log.Misc.warn
+            "[voice_session_manager.load_session] invalid identity for agent=%s"
+            agent_id;
+          None
+        end else Some session
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | (Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _) as exn ->
@@ -278,7 +321,7 @@ let start_session t ~agent_id ?voice ?(conversation_mode = Turn_based) () =
       let session =
         {
           existing with
-          status = Active;
+          status = status_for_mode conversation_mode Active;
           last_activity = Time_compat.now ();
           conversation_mode;
         }
@@ -302,7 +345,7 @@ let start_session t ~agent_id ?voice ?(conversation_mode = Turn_based) () =
         started_at = now;
         last_activity = now;
         turn_count = 0;
-        status = Active;
+        status = status_for_mode conversation_mode Active;
         conversation_mode;
       } in
       save_session t session;

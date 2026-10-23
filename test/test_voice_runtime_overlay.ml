@@ -819,6 +819,66 @@ let test_keeper_voice_agent_reports_realtime_bridge_capability () =
         end_session ()))
 ;;
 
+let test_keeper_voice_agent_reports_suspended_session_activity () =
+  with_env Masc.Voice_session_manager.realtime_bridge_env None (fun () ->
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
+    let mono_clock = Eio.Stdenv.mono_clock env in
+    Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+      let config = test_config () in
+      let meta = make_keeper_meta "voice-suspended-activity-keeper" in
+      let manager = Masc.Keeper_voice_local.get_session_manager () in
+      let call name args =
+        Masc.Keeper_tool_voice_runtime.handle_voice_tool
+          ~config ~meta ~authorize_external_effect:allow_external_effect ~name ~args ()
+        |> Yojson.Safe.from_string in
+      let end_session () =
+        ignore (Masc.Voice_session_manager.end_session manager ~agent_id:meta.name) in
+      end_session ();
+      Fun.protect ~finally:end_session (fun () ->
+        let session = Masc.Voice_session_manager.start_session manager
+          ~agent_id:meta.name ~voice:"retained-voice"
+          ~conversation_mode:Masc.Voice_session_manager.Realtime_unavailable () in
+        check bool "unavailable lifecycle is inactive" false
+          (Masc.Voice_session_manager.session_is_active session);
+        let session_id = Yojson.Safe.Util.(
+          Masc.Voice_session_manager.session_to_json session
+          |> member "session_id" |> to_string) in
+        Masc.Voice_session_manager.increment_turn manager ~agent_id:meta.name;
+        let check_activity expected status response =
+          check bool "agent activity follows lifecycle" expected
+            Yojson.Safe.Util.(member "session_active" response |> to_bool);
+          check bool "agent loop follows lifecycle" expected
+            Yojson.Safe.Util.(member "voice_loop" response |> member "session_active" |> to_bool);
+          let retained = Yojson.Safe.Util.member "active_session" response in
+          check string "session status" status
+            Yojson.Safe.Util.(member "status" retained |> to_string);
+          check bool "retained loop follows lifecycle" expected
+            Yojson.Safe.Util.(member "voice_loop" retained |> member "session_active" |> to_bool);
+          check string "same session identity" session_id
+            Yojson.Safe.Util.(member "session_id" retained |> to_string);
+          check string "same agent identity" meta.name
+            Yojson.Safe.Util.(member "agent_id" retained |> to_string);
+          check string "same voice" "retained-voice"
+            Yojson.Safe.Util.(member "voice" retained |> to_string);
+          check int "same turn history" 1
+            Yojson.Safe.Util.(member "turn_count" retained |> to_int) in
+        check_activity false "suspended" (call "keeper_voice_agent" (`Assoc []));
+        with_env Masc.Voice_session_manager.realtime_bridge_env
+          (Some "ws://127.0.0.1:9/bridge") (fun () ->
+            (* Endpoint configuration changes capability, not local activity. *)
+            check_activity false "suspended" (call "keeper_voice_agent" (`Assoc []));
+            let started = call "keeper_voice_session_start"
+              (`Assoc ["conversation_mode", `String "realtime_bridge"]) in
+            check string "explicit start changes local status" "active"
+              Yojson.Safe.Util.(member "status" started |> to_string);
+            check string "explicit start retains session" session_id
+              Yojson.Safe.Util.(member "session_id" started |> to_string);
+            check_activity true "active" (call "keeper_voice_agent" (`Assoc []))))))
+;;
+
 let test_playback_timeout_parsers_and_budget () =
   check (option (float 0.001)) "afinfo duration line parses"
     (Some 236.6)
@@ -1409,6 +1469,10 @@ let () =
             "voice_agent reports realtime bridge capability"
             `Quick
             test_keeper_voice_agent_reports_realtime_bridge_capability
+        ; test_case
+            "voice_agent reports suspended session activity"
+            `Quick
+            test_keeper_voice_agent_reports_suspended_session_activity
         ] )
     ; ( "playback_timeout"
       , [ test_case

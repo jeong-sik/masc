@@ -129,6 +129,23 @@ type input =
   | Wss_closed of { reason : string }
   | Backoff_elapsed                (** Reconnect timer fired. *)
 
+(** A host ingress decision for one original event. A transport ACK is permitted
+    only after this receipt. Refusal is retryable by the platform and never
+    enters a process-local seen set. *)
+type ignored_reason =
+  | Unbound_channel
+  | Bot_echo
+  | Observational_event
+  | Empty_message
+  | Oversized_message
+
+type ingress_receipt = Durable_accepted | Intentionally_ignored of ignored_reason
+type ingress_refusal = Retryable_refusal of string
+
+type delivery = { envelope_id : string option; event : slack_event }
+(** Original transport envelope and original event identity travel together.
+    [None] means the incoming envelope carried no ID; it never invents an ACK. *)
+
 (** {1 Output — what the state machine asks the I/O layer to do} *)
 
 (** Side effects the I/O layer must perform. Closed sum.
@@ -140,8 +157,8 @@ type gateway_effect =
   | Close_wss
   | Send_ack of { envelope_id : string }
       (** Ack an envelope — Slack retransmits + eventually drops without it. *)
-  | Emit_event of slack_event      (** Surface to the caller's [on_event]. *)
-  | Emit_ambient of slack_event
+  | Emit_event of delivery      (** Obtain host acceptance before ACK. *)
+  | Emit_ambient of delivery
       (** Record-only delivery (RFC-0226 parity with the Discord FSM): a
           [Message_create] from a human author that failed [trigger_policy],
           or a [Reaction_added] from someone other than the bot itself. The
@@ -192,9 +209,10 @@ val step : t -> now_mono:float -> input -> t * gateway_effect list
     - The effect list may be empty; never raises.
     - Reentrant. No global state.
 
-    Every [Envelope_received] of a kind carrying [envelope_id] produces a
-    [Send_ack] effect alongside any [Emit_event], so the I/O layer cannot forget
-    to ack. *)
+    An emitted event carries its original [envelope_id] in one delivery
+    effect. The I/O layer ACKs it only after host durable acceptance. Control
+    and intentionally unsurfaced envelopes may produce [Send_ack] directly.
+    Refused event delivery has no volatile seen state; a retry is emitted again. *)
 
 (** {1 Envelope parsing — what the I/O layer calls before [step]} *)
 

@@ -8,7 +8,7 @@ let deliver ~base_path ~keeper_name ~event_id ~channel =
     }
   in
   match
-    Keeper_registry_event_queue.enqueue_stimulus_durable_result
+    Keeper_registry_event_queue.enqueue_stimulus_once_durable_result
       ~base_path
       keeper_name
       stimulus
@@ -23,7 +23,8 @@ let deliver ~base_path ~keeper_name ~event_id ~channel =
       "connector attention durable delivery failed (keeper=%s event=%s): %s"
       keeper_name
       event_id
-      detail
+      detail;
+    Error detail
   | Keeper_registry_event_queue.Stimulus_enqueued
   | Keeper_registry_event_queue.Stimulus_already_present ->
     (match
@@ -52,5 +53,6 @@ let deliver ~base_path ~keeper_name ~event_id ~channel =
           (keeper=%s event=%s reason=%s)"
          keeper_name
          event_id
-         (Keeper_lifecycle_admission.autonomous_denial_to_wire denial))
+         (Keeper_lifecycle_admission.autonomous_denial_to_wire denial));
+    Ok ()
 ;;

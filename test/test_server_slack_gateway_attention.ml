@@ -41,13 +41,14 @@ let record ~base_path ?(team_id = Some "T1") ?(thread_ts = None)
     ~keeper_name:"alpha" ~team_id ~channel_id:"C1" ~channel_name ~thread_ts ~ts
     ~user_id:"U1" ~user_name ~content:"hello keeper"
     ~mentions_bot:(urgency = A.Mention) ~route ~urgency
+  |> Result.map (fun item -> item.A.event_id)
 
 let test_triggered_record_is_pending_with_slack_surface () =
   with_temp_base "slack-attention-triggered" @@ fun base_path ->
   match record ~base_path ~ts:"1700000000.000100" ~route:"triggered"
           ~urgency:A.Mention () with
-  | None -> fail "record returned None"
-  | Some event_id -> (
+  | Error detail -> fail detail
+  | Ok event_id -> (
     match pending ~base_path ~keeper_name:"alpha" with
     | [ item ] ->
       check string "event id" event_id item.A.event_id;
@@ -75,8 +76,8 @@ let test_a_missing_author_name_stays_missing () =
     record ~base_path ~user_name:None ~ts:"1700000000.000700"
       ~route:"triggered" ~urgency:A.Mention ()
   with
-  | None -> fail "record returned None"
-  | Some _ -> (
+  | Error detail -> fail detail
+  | Ok _ -> (
     match pending ~base_path ~keeper_name:"alpha" with
     | [] -> fail "no pending item"
     | item :: _ ->
@@ -91,8 +92,8 @@ let test_ambient_record_uses_ambient_urgency () =
   with_temp_base "slack-attention-ambient" @@ fun base_path ->
   match record ~base_path ~ts:"1700000000.000200" ~route:"ambient"
           ~urgency:A.Ambient () with
-  | None -> fail "record returned None"
-  | Some _ -> (
+  | Error detail -> fail detail
+  | Ok _ -> (
     match pending ~base_path ~keeper_name:"alpha" with
     | [ item ] ->
       check string "urgency" "ambient" (A.urgency_to_string item.A.urgency)
@@ -109,7 +110,7 @@ let test_duplicate_wire_delivery_keeps_one_pending () =
     record ~base_path ~ts:"1700000000.000300" ~route:"triggered"
       ~urgency:A.Mention ()
   in
-  check (option string) "same event id" first second;
+  check (result string string) "same event id" first second;
   check int "one pending" 1 (List.length (pending ~base_path ~keeper_name:"alpha"))
 
 (* Inbound identity rendering (issue #28376): the lane-shared mapping

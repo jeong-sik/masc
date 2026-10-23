@@ -20,9 +20,9 @@
      [Apps_connections_open]; this layer fetches the URL via
      [Masc_http_client.post_sync] and feeds
      [Apps_connections_open_succeeded] back into the drive loop.
-   - Per-envelope ack: every envelope carrying [envelope_id] yields a
-     [Send_ack] effect; this layer answers with a JSON text frame, or
-     Slack retransmits and eventually drops the connection.
+   - Event ACK follows the host's durable ingress receipt. The original
+     envelope ID stays with the event; refusal or exception leaves it unacked
+     and a retry reaches the same durable host owner. Control ACK is direct.
    - WSS connect failure maps to [Wss_closed]: the Slack FSM has no
      separate [Connect_failed] input — [Awaiting_hello, Wss_closed] routes
      to [Reconnect_pending] with the same backoff path, so a connect-time
@@ -149,6 +149,21 @@ let step_with_current_policy state ~trigger_policy ~now_mono input =
     input
 ;;
 
+let deliver ~admit ~send_ack (delivery : Slack_gateway_state.delivery) =
+  let accepted =
+    match admit delivery.event with
+    | result -> result
+    | exception (Eio.Cancel.Cancelled _ as error) -> raise error
+    | exception error ->
+      Error (Slack_gateway_state.Retryable_refusal (Printexc.to_string error))
+  in
+  match accepted with
+  | Error _ as error -> error
+  | Ok receipt ->
+    Option.iter send_ack delivery.envelope_id;
+    Ok receipt
+;;
+
 let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
     () =
   if String.equal app_token "" then
@@ -220,6 +235,17 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
       loop ()
     in
 
+    let deliver_to_host admit delivery =
+      let send_ack envelope_id = match !conn_ref with
+        | None -> log_effect `Warn "host accepted Slack event; connection absent before ACK"
+        | Some conn -> Discord_wss_connection.send_text conn (ack_payload envelope_id)
+      in
+      match deliver ~admit ~send_ack delivery with
+      | Ok (Slack_gateway_state.Durable_accepted | Slack_gateway_state.Intentionally_ignored _) -> ()
+      | Error (Slack_gateway_state.Retryable_refusal detail) ->
+        log_effect `Warn ("Slack event not accepted; ACK withheld: " ^ detail)
+    in
+
     let run_effect (eff : Slack_gateway_state.gateway_effect) =
       match eff with
       | Slack_gateway_state.Apps_connections_open ->
@@ -277,8 +303,8 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
           log_effect `Warn "Send_ack while conn_ref is None; dropping"
         | Some conn ->
           Discord_wss_connection.send_text conn (ack_payload envelope_id))
-      | Slack_gateway_state.Emit_event ev -> on_event ev
-      | Slack_gateway_state.Emit_ambient ev -> on_ambient ev
+      | Slack_gateway_state.Emit_event delivery -> deliver_to_host on_event delivery
+      | Slack_gateway_state.Emit_ambient delivery -> deliver_to_host on_ambient delivery
       | Slack_gateway_state.Schedule_backoff { delay_ms } ->
         Eio.Fiber.fork ~sw (fun () ->
             (* ±25% jitter, same shape as Discord_gateway_client. The FSM's
@@ -318,5 +344,6 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
 
 
 module For_testing = struct
+  let deliver = deliver
   let step_with_current_policy = step_with_current_policy
 end

@@ -928,11 +928,11 @@ let handle_ambient ?resolved_keeper_name ~base_dir
            | Ok channel -> channel
            | Error message -> invalid_arg message
          in
-         Server_connector_attention_delivery.deliver
+         ignore (Server_connector_attention_delivery.deliver
            ~base_path:base_dir
            ~keeper_name
            ~event_id
-           ~channel
+           ~channel : (unit, string) result)
        | None -> ());
       Discord_observability.record_ambient
         Discord_observability.Ambient_recorded

@@ -66,6 +66,11 @@ val create : runtime_keepers_dir:string -> extent:Keeper_librarian_range.extent 
     creation and restoration grant no permission to commit that stale input. *)
 val input : t -> Keeper_librarian.input
 val expected_revision : t -> int option
+val with_current : expected_revision:int option -> current:Keeper_librarian.current_selection option ->
+  t -> (t, error) result
+(** Replace only the complete current Memory basis. Every original source,
+    selected range, counterpart, cursor and historical input field is preserved.
+    This pure operation grants no new execution or publication authority. *)
 val range_id : t -> Keeper_memory_os_current.durable_range_id option
 val official_range_id : t -> Keeper_memory_os_current.official_range_id option
 val boundaries : t -> boundary_lines

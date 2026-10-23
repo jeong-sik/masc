@@ -477,6 +477,10 @@ let create ~runtime_keepers_dir ~extent ~boundaries ~positions ~source ~counterp
     before=external_before;prepared=external_prepared;revision=expected_revision;
     atom_receipt=range_id;official_receipt=official_range_id;original_input=input} in
   let+ ()=validate original in original
+let with_current ~expected_revision ~current original =
+  let original={original with revision=expected_revision;
+    original_input={original.original_input with current}} in
+  let+ ()=validate original in original
 let to_json original = `Assoc ["schema",`Int 1;"purpose",`String "durable_history";
   "runtime_keepers_dir",`String original.root;"extent",`String (match original.read_extent with
     | R.All_unread -> "all_unread" | To_first_cut_point -> "first_cut");

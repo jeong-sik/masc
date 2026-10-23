@@ -961,6 +961,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | Viewport_capture -> Page_capture {tab_id=1}
       | Scene_read -> Page_scene {tab_id=1; max_chars=1000; view=Content; scope=None}
       | Accessibility_snapshot -> Page_snapshot {tab_id=1; max_chars=1000; scope=Snapshot_viewport}
+      | Snapshot_target_input -> interact (Click_target (Target_ref 12))
       | Dom_interaction -> interact (Click "#button")
       | Point_click -> interact (Click_at {point;viewport;button=Pointer.Primary})
       | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})

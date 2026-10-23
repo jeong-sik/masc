@@ -470,6 +470,23 @@ let test_malformed_arguments_reach_no_browser () =
   check bool "a well-formed text read goes on to find the browser Add-on" true
     (reaches_the_addon_lookup (read ["mode",`String "text"]))
 
+(* A click or fill on an ego snapshot target goes to a live connection only,
+   with expectedUrl. *)
+let test_a_snapshot_target_is_checked_before_any_browser () =
+  let module Cap = Masc.Browser_capabilities in
+  let interact lane fields = addon_tool Cap.Interact (("lane",`String lane) :: ("tabId",`Int 1) :: fields) in
+  let click = ["action",`String "click";"target",`Assoc ["ref",`Int 12]] in
+  let url = ["expectedUrl",`String "https://example.org/"] in
+  let live fields = interact "live" (("clientId",`String "0c000000-0000-4000-8000-000000000001") :: fields) in
+  List.iter (fun (name, result) -> check bool name true (refused_as_input result))
+    [ "a target on the automation browser", interact "automation" (click @ url)
+    ; "a target on the Stagehand browser", interact "stagehand" (click @ url)
+    ; "a fill target on the automation browser",
+      interact "automation" (["action",`String "fill";"target",`Assoc ["ref",`Int 5];"text",`String "Ada"] @ url)
+    ; "a target without expectedUrl", live click ];
+  check bool "a target click on a live connection goes on to find the browser Add-on" true
+    (reaches_the_addon_lookup (live (click @ url)))
+
 (* An ego snapshot is read over a live connection only, with its scope and
    root given to that mode alone and a root that is a ref. *)
 let test_a_snapshot_read_is_checked_before_any_browser () =
@@ -506,6 +523,7 @@ let () = run "browser surface" ["behavior",[
   test_case "a screenshot needs an owning Keeper" `Quick test_screenshot_requires_an_owning_keeper;
   test_case "malformed tool arguments reach no browser" `Quick test_malformed_arguments_reach_no_browser;
   test_case "a snapshot read is checked before any browser" `Quick test_a_snapshot_read_is_checked_before_any_browser;
+  test_case "a snapshot target is checked before any browser" `Quick test_a_snapshot_target_is_checked_before_any_browser;
   test_case "automatic discovery binds subsequent observations and input" `Quick test_automatic_selection_keeps_observed_browser;
   test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
   test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;

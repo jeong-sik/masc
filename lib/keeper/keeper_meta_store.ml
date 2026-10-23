@@ -244,11 +244,10 @@ let validate_current_meta_file_result path : (unit, current_meta_rejection) resu
      writer lease has to be free — so a rejection holds the plane down until
      the operator repairs the file and redeploys. That downtime is the price
      of keeping the counters the boot-time fail-open would lose. *)
-  match Safe_ops.read_file_result path with
-  | Error (Safe_ops.File_not_found _) -> Ok ()
-  | Error ((Safe_ops.Read_failed _) as error) ->
-    Error (Unreadable (Safe_ops.read_file_error_to_string error))
-  | Ok contents ->
+  match Fs_compat.load_file_opt path with
+  | exception Sys_error detail -> Error (Unreadable detail)
+  | None -> Ok ()
+  | Some contents ->
     match Safe_ops.parse_json_off_fiber ~context:path contents with
     | Error detail -> Error (Invalid_json detail)
     | Ok json ->

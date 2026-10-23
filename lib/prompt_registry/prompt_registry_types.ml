@@ -13,10 +13,14 @@ let operator_surface_of_string = function
   | _ -> None
 ;;
 
+type authoring_issue =
+  | Invalid_operator_surface of { value : string; source_file : string }
+
 type prompt_meta = {
   description : string;
   category : string;
   operator_surface : operator_surface;
+  authoring_issues : authoring_issue list;
   required_file : bool;
   template_variables : string list;
 }

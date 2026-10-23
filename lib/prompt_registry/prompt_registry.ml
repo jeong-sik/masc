@@ -40,6 +40,7 @@ type prompt_meta = Types.prompt_meta = {
   description: string;
   category: string;
   operator_surface: Types.operator_surface;
+  authoring_issues: Types.authoring_issue list;
   required_file: bool;
   template_variables: string list;
 }
@@ -334,7 +335,7 @@ type registration = {
       (** [(group key, marker)] for a slot key; [None] for a file's own key *)
 }
 
-let registration ~key ~description ~category ~operator_surface
+let registration ~key ~description ~category ~operator_surface ~authoring_issues
     ~template_variables ~slot =
   {
     reg_key = key;
@@ -343,6 +344,7 @@ let registration ~key ~description ~category ~operator_surface
         description;
         category;
         operator_surface;
+        authoring_issues;
         required_file = true;
         template_variables = List.sort_uniq String.compare template_variables;
       };
@@ -359,7 +361,7 @@ let key_of_file file =
 (* Registrations one [*.md] file's content yields under [key], slots first
    in file order and then the file's own key. Content without frontmatter
    or without a [description] yields nothing. *)
-let registrations_of_content ~key content =
+let registrations_of_content ~source_file ~key content =
   let meta_pairs, body = parse_frontmatter content in
   match List.assoc_opt "description" meta_pairs with
   | None -> []
@@ -372,17 +374,18 @@ let registrations_of_content ~key content =
         | Some category -> category
         | None -> "general"
       in
-      let operator_surface =
+      let operator_surface, authoring_issues =
         match List.assoc_opt "operator_surface" meta_pairs with
-        | None -> Types.Primary
+        | None -> Types.Primary, []
         | Some value -> (
             match Types.operator_surface_of_string value with
-            | Some surface -> surface
+            | Some surface -> surface, []
             | None ->
                 Log.Misc.warn
-                  "prompt %s has unknown operator_surface=%S; keeping it visible as primary"
-                  key value;
-                Types.Primary)
+                  "prompt file %s has unknown operator_surface=%S; keeping it visible as primary with an authoring issue"
+                  source_file value;
+                Types.Primary,
+                [ Types.Invalid_operator_surface { value; source_file } ])
       in
       let template_variables =
         match List.assoc_opt "template_variables" meta_pairs with
@@ -434,7 +437,7 @@ let registrations_of_content ~key content =
               in
               ( marker :: seen,
                 registration ~key:slot_key ~description:slot_description
-                  ~category ~operator_surface:slot_surface
+                  ~category ~operator_surface:slot_surface ~authoring_issues
                   ~template_variables
                   ~slot:(Some (key, marker))
                 :: slots ))
@@ -444,7 +447,7 @@ let registrations_of_content ~key content =
         if split.slots = [] || split.preamble <> "" then
           [
             registration ~key ~description ~category ~operator_surface
-              ~template_variables ~slot:None;
+              ~authoring_issues ~template_variables ~slot:None;
           ]
         else []
       in
@@ -459,7 +462,7 @@ let registrations_of_file ~dir file =
       let path = Filename.concat dir file in
       try
         In_channel.with_open_text path In_channel.input_all
-        |> registrations_of_content ~key
+        |> registrations_of_content ~source_file:path ~key
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -1205,8 +1208,8 @@ type file_edit_promotion =
    [restore_overrides] will check it. An override already saved with the
    same text is this edit promoted by an earlier pass whose reset did not
    happen, so it counts as promoted. *)
-let single_key_registration ~key content =
-  match registrations_of_content ~key content with
+let single_key_registration ~source_file ~key content =
+  match registrations_of_content ~source_file ~key content with
   | [ { reg_key; reg_meta; reg_slot = None } ] when String.equal reg_key key ->
       Some reg_meta
   | [] | [ _ ] | _ :: _ :: _ -> None
@@ -1219,8 +1222,8 @@ let promote_file_edit ~base_path ~file ~embedded ~edited =
       let embedded_fields, embedded_body = parse_frontmatter embedded in
       let edited_fields, edited_body = parse_frontmatter edited in
       match
-        ( single_key_registration ~key embedded,
-          single_key_registration ~key edited )
+        ( single_key_registration ~source_file:file ~key embedded,
+          single_key_registration ~source_file:file ~key edited )
       with
       | None, _ | _, None ->
           not_promotable

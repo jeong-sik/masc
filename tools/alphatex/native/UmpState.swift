@@ -11,7 +11,7 @@ struct UmpAddress: Hashable {
 }
 struct UmpField: Hashable {
     enum Kind: Hashable {
-        case controller(UInt32), program, bank, bend, pressure
+        case controller(UInt32), program, bank, bend, pressure, tempo, meter
         case poly(UInt32), noteBend(UInt32), noteRegistered(UInt32, UInt32), noteAssignable(UInt32, UInt32)
         case registered(UInt32, UInt32), assignable(UInt32, UInt32), noteReset(UInt32)
         var note: UInt32? {
@@ -51,7 +51,7 @@ struct UmpField: Hashable {
             case .controller, .registered: return UmpField.keptByAttack.contains(kind)
             case .noteRegistered(let note, let index): return note == number && index == UmpField.registeredPitch
             case .noteAssignable(let note, _), .noteReset(let note): return note == number
-            case .bend, .pressure, .poly, .noteBend: return false
+            case .bend, .pressure, .poly, .noteBend, .tempo, .meter: return false
             }
         case .absolute(let kinds) where kinds.contains(.program):
             if case .controller(let index) = kind { return address.dialect == 2 && UmpField.bankSelect.contains(index) }
@@ -80,6 +80,9 @@ enum UmpAction {
     case pedal(UInt32, Bool), kill, release, reset, management(UInt32, detach: Bool, reset: Bool), unsupported(UmpObstacle)
     case stateless
 }
+// A single Clip owner owns its whole output group. Region/capture owners keep
+// group metadata opaque until their shared-group restoration model supports it.
+enum UmpMetadataState { case opaque, tempoAndMeter }
 struct UmpMessage {
     // UMP v1.1.2 Appendix F.1: Utility NOOP, JR Clock and JR Timestamp, and
     // System Real Time Timing Clock and Active Sensing carry timing or link
@@ -88,10 +91,15 @@ struct UmpMessage {
     static let statelessSystem: Set<UInt32> = [0xf8, 0xfe]
     let address: UmpAddress
     let action: UmpAction
-    init(_ event: UmpEvent) {
+    init(_ event: UmpEvent, metadata: UmpMetadataState = .opaque) {
         let word = event.words[0], dialect = word >> 28, status = (word >> 20) & 15
         let number = (word >> 8) & 127, byte = word & 255
         address = UmpAddress(source: event.source, prefix: word & 0xff0f0000)
+        if metadata == .tempoAndMeter && dialect == 13 && (word & 0x00ffffff == 0x00100000 || word & 0x00ffffff == 0x00100001)
+            && event.words.count == 4 && event.words[2] == 0 && event.words[3] == 0 {
+            if word & 255 == 0 && event.words[1] > 0 { action = .absolute([.tempo]); return }
+            if word & 255 == 1 && event.words[1] & 255 == 0 { action = .absolute([.meter]); return }
+        }
         guard dialect == 2 || dialect == 4 else {
             let stateless = dialect == 0 ? UmpMessage.statelessUtility.contains(status) : dialect == 1 && UmpMessage.statelessSystem.contains((word >> 16) & 255)
             action = stateless ? .stateless : .unsupported(.opaque); return
@@ -190,10 +198,10 @@ struct UmpVoiceHistory {
     var footprint = UmpFootprint(), known = Set<UmpField>()
     var channels: [UmpAddress: UmpChannelState] = [:]
     var notes = Set<Int>(), releaseOwners: [Int: Int] = [:], expiredNotes: [Int: Int] = [:]
-    init(_ events: [UmpEvent], prefixCount: Int) throws {
+    init(_ events: [UmpEvent], prefixCount: Int, metadata: UmpMetadataState = .opaque) throws {
         for (ordinal, event) in events.enumerated() {
             guard ordinal < prefixCount else { break }
-            let message = UmpMessage(event), address = message.address
+            let message = UmpMessage(event, metadata: metadata), address = message.address
             footprint.observe(message)
             if case .relative(let kind) = message.action, !UmpField(address: address, kind: kind).covered(by: known) {
                 throw UmpRefusal("captured UMP relative parameter needs an absolute source baseline")
@@ -241,12 +249,12 @@ func umpRestoration(_ events: [UmpEvent], before seconds: Double, replacing prev
     let count = events.firstIndex(where: { $0.seconds >= seconds }) ?? events.count
     return try umpRestoration(events, prefixCount: count, replacing: previous)
 }
-func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int = 0, preambleEndIndex: Int? = nil, dueAdmission: UmpDueAdmission = .reconstructed, excludingNotes: Set<Int> = [], replacing previous: UmpFootprint) throws -> UmpRestoration {
+func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int = 0, preambleEndIndex: Int? = nil, dueAdmission: UmpDueAdmission = .reconstructed, excludingNotes: Set<Int> = [], metadata: UmpMetadataState = .opaque, replacing previous: UmpFootprint) throws -> UmpRestoration {
     guard prefixCount >= 0, prefixCount <= events.count, followingCount >= 0, followingCount <= events.count - prefixCount else { throw MidiFailure("invalid captured UMP prefix") }
     let admissionEnd = preambleEndIndex ?? (prefixCount + followingCount)
     guard admissionEnd >= prefixCount + followingCount, admissionEnd <= events.count else { throw MidiFailure("invalid captured UMP preamble boundary") }
     try previous.requireSupported()
-    let history = try UmpVoiceHistory(events, prefixCount: prefixCount)
+    let history = try UmpVoiceHistory(events, prefixCount: prefixCount, metadata: metadata)
     var footprint = history.footprint, known = history.known
     let channels = history.channels, notes = history.notes, next = prefixCount
     let releaseOwners = history.releaseOwners, expiredNotes = history.expiredNotes
@@ -277,7 +285,7 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
     }
     for (ordinal, event) in zip(prefixCount..<admissionEnd, events[prefixCount..<admissionEnd]) {
         if ordinal == batchEnd { try requireSoundingBaselines() }
-        let message = UmpMessage(event)
+        let message = UmpMessage(event, metadata: metadata)
         // An offline export preserves the original due bytes at their original
         // deadlines. Only its historical prefix is reconstructed. Playback,
         // seek and loop admission retain the stricter reconstructed default.
@@ -304,7 +312,7 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
     known.removeAll()
     var replay: [UmpEvent] = [], sounding: [UmpAddress: Set<UInt32>] = [:]
     for ordinal in 0..<next {
-        let event = events[ordinal], message = UmpMessage(event)
+        let event = events[ordinal], message = UmpMessage(event, metadata: metadata)
         if case .stateless = message.action { continue }
         if notes.contains(ordinal) && !live.contains(ordinal) { continue }
         guard umpKeptFields(message, sounding: sounding[message.address] ?? [], changed: previous).allSatisfy({ $0.covered(by: known) }) else {

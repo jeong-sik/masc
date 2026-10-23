@@ -86,6 +86,15 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
   let final original final =
     let* value = terminal original final in
     Ok (Final value) in
+  let observe_host (original : Owner.retained) =
+    let* installation = rejected (Owner.installation_of_id original.installation_id) in
+    let* declaration_id = match installation with
+      | Owner.Configuration id -> Ok id
+      | Owner.Manual _ ->
+        Error (Rejected ("Original " ^ label ^ " work requires its configured installation")) in
+    Eio_unix.run_in_systhread (fun () ->
+      Exact.observe_retained ~store ~declaration_id ~schema request)
+    |> Result.map_error (fun detail -> Unavailable detail) in
   let observe (original : Owner.retained) reason observation evidence =
     let observation = observation evidence in
     match Progress.phase original.progress with
@@ -100,14 +109,31 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
     observe original Worker_unknown (fun value -> Progress.Outcome_unknown value)
       (`Assoc ["detail", `String (error_to_string error)]) in
   let finish original result =
-    let* _ = terminal original result in
+    let delivered = Exact.delivered result in
+    let* _ = terminal original delivered in
     let event = match result with
-      | Exact.Call_final (Exact.Answered _) -> Progress.Judgment_retained (Exact.final_to_json result)
-      | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
-      | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused ->
-        Progress.Refused {stage = Progress.Execution; evidence = Exact.final_to_json result} in
+      | Exact.Retained_call (Exact.Answered _) ->
+        Progress.Judgment_retained (Exact.retained_final_to_json result)
+      | Exact.Retained_call (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
+      | Exact.Retained_unknown _ | Exact.Retained_not_allowed _ | Exact.Retained_request_id_reused ->
+        Progress.Refused {stage = Progress.Execution; evidence = Exact.retained_final_to_json result} in
     let* published = publish ~store original event in
-    final (record published) result in
+    final (record published) delivered in
+  let finish_worker original = function
+    | Exact.Call_final result -> finish original (Exact.Retained_call result)
+    | Exact.Not_allowed {reason} -> finish original (Exact.Retained_not_allowed {reason})
+    | Exact.Request_id_reused -> finish original Exact.Retained_request_id_reused
+    | Exact.Outcome_unknown ->
+      (* The worker has no authority to name the cause. It can only echo a
+         terminal the host retained before delivery. Re-read that authority
+         after the RPC, including a synchronous submission completion. *)
+      let* retained = observe_host original in
+      (match retained with
+       | Exact.Retained_terminal (Exact.Retained_unknown _ as result) -> finish original result
+       | Exact.Retained_absent | Exact.Retained_open
+       | Exact.Retained_terminal (Exact.Retained_call _ | Exact.Retained_not_allowed _
+                                 | Exact.Retained_request_id_reused) ->
+         Error (Rejected ("Worker outcome_unknown contradicts original " ^ label ^ " host execution"))) in
   let received original ~submission state evidence = match state with
     | Pending -> observe original Worker_pending (fun value -> Progress.Waiting value) evidence
     | Absent -> observe original Missing_after_dispatch (fun value -> Progress.Absent value) evidence
@@ -116,7 +142,7 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
         let* published = publish ~store original (Progress.Admission_declined evidence) in
         Ok (Awaiting (Capacity, record published))
       else Error (Rejected (label ^ " read cannot grant a pre-admission capacity refusal"))
-    | Finished result -> finish original result in
+    | Finished result -> finish_worker original result in
   let invoke arguments =
     match call ~arguments with
     | Error (Not_sent error) -> Error (Unsent error)
@@ -161,7 +187,8 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
   | Progress.Rejected {stage = Progress.Execution; evidence}
   | Progress.Subdividing ({stage = Progress.Execution; evidence}, _)
   | Progress.Subdivided ({stage = Progress.Execution; evidence}, _) ->
-    let* result = rejected (Exact.final_of_json ~schema evidence) in
+    let* retained = rejected (Exact.retained_final_of_json ~schema evidence) in
+    let result = Exact.delivered retained in
     (match result with
      | Exact.Call_final (Exact.Answered _) ->
        Error (Rejected ("Refused original " ^ label ^ " work cannot contain an answered judgment"))
@@ -178,14 +205,7 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
      | Ok ((Pending | Capacity_wait | Finished _), _) ->
        Error (Rejected ("Worker state contradicts original " ^ label ^ " pre-admission progress")))
   | Progress.Dispatch_pending _ ->
-    let* installation = rejected (Owner.installation_of_id original.installation_id) in
-    let* declaration_id = match installation with
-      | Owner.Configuration id -> Ok id
-      | Owner.Manual _ ->
-        Error (Rejected ("Original " ^ label ^ " work requires its configured installation")) in
-    let* retained = Eio_unix.run_in_systhread (fun () ->
-      Exact.observe_retained ~store ~declaration_id ~schema request)
-      |> Result.map_error (fun detail -> Unavailable detail) in
+    let* retained = observe_host original in
     (match retained with
      | Exact.Retained_terminal result -> finish original (Exact.delivered result)
      | Exact.Retained_absent | Exact.Retained_open ->

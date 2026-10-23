@@ -86,7 +86,8 @@ let disposition capture phase = match phase with
   | Progress.Rejected {stage=Execution;evidence}
   | Progress.Subdividing ({stage=Execution;evidence},_)
   | Progress.Subdivided ({stage=Execution;evidence},_) ->
-    let* final = Exact.final_of_json ~schema:(Capture.output_schema capture) evidence in
+    let* retained = Exact.retained_final_of_json ~schema:(Capture.output_schema capture) evidence in
+    let final = Exact.delivered retained in
     (match final with
      | Exact.Call_final (Exact.Answered _) -> Error "An original refusal cannot contain an Answered judgment"
      | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)

@@ -132,17 +132,24 @@ val recoverable_successors : workspace:workspace ->
 type settling = Classifications | Briefings of { state : string }
 (** The domain whose chains to settle. Briefing names its current state's
     revision ({!Workspace_memory_revision.briefing_sha256}). *)
+val refusal_blocks : Summary.t -> Lane_addon_request_progress.refusal -> (bool, string) result
+(** Strictly decode the original refusal. Only a host-confirmed Interrupted
+    outcome releases the selected facts or prepared Briefing state. Cut,
+    Raised and other refusals block. Missing/unknown cause and Answered
+    evidence are errors; before-dispatch refusals remain blocking. *)
 val settled_chains : settling ->
   (Lane_addon_tool_request_owner.Record.t * Summary.t) list ->
-  (Request_id.t * Lane_addon_tool_request_owner.Record.t list) list
+  ((Request_id.t * Lane_addon_tool_request_owner.Record.t list) list, string) result
 (** The chains of the domain that no pass needs again, from the discovered
     forest: each root's ID with the chain's records, leaf first, the order
-    they are settled in. A chain is settled when its leaf is Finished or
-    Conflicted and every original in it has both observer receipts
+    they are settled in. A chain is settled when its leaf is Finished,
+    Conflicted or rejected with Interrupted, and every original has both observer receipts
     acknowledged. It stays while it holds the latest answered classification,
     which sizes the next batch, or while its Briefing leaf prepared the
     current state, which keeps the same pass from being prepared again. A
-    Rejected leaf keeps its chain, since it holds its facts or its pass back.
+    Rejected leaf with any other cause keeps its chain. An Interrupted leaf
+    never sizes the next batch and settles even if it prepared the current
+    Briefing state. Invalid refusal evidence rejects settlement.
     Records and summaries only. *)
 type expected_commit =
   | Classification_commit of Workspace_memory_ledger.t

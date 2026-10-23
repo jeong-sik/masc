@@ -759,14 +759,16 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind 
     let exact=Capture.request capture |> get in
     let schema=match exact.Exact.schema with
       | Some schema -> schema | None -> fail "unknown original has no schema" in
-    let assert_actual_unknown ()=
+    let actual_unknown ()=
       match io (fun () -> Exact.observe_retained ~store:fixture.store
         ~declaration_id:"librarian" ~schema exact |> get) with
-      | Exact.Retained_terminal (Exact.Retained_unknown (Interrupted | Cut | Raised)) -> ()
+      | Exact.Retained_terminal (Exact.Retained_unknown (Interrupted | Cut | Raised) as retained) -> retained
       | Retained_absent | Retained_open
       | Retained_terminal (Retained_call _ | Retained_not_allowed _ | Retained_request_id_reused) ->
         fail "the actual host must retain terminal Outcome_unknown before testing later wakes" in
-    assert_actual_unknown ();
+    let original_host_final=actual_unknown () in
+    let assert_actual_unknown ()=check json "the host's unknown cause stays original"
+      (Exact.retained_final_to_json original_host_final) (Exact.retained_final_to_json (actual_unknown ())) in
     (* First observe the actual terminal through the ordinary owner. The old
        behavior returned Memory_not_committed here, then selected a fresh ID. *)
     assert_pending (run_worker fixture);
@@ -774,7 +776,7 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind 
     (match Progress.phase retained_unknown.Owner.progress with
      | Rejected {stage=Execution;evidence} ->
        check json "original refusal retains the actual host unknown terminal"
-         (Exact.final_to_json Exact.Outcome_unknown) evidence
+         (Exact.retained_final_to_json original_host_final) evidence
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
      | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
        fail "the actual terminal was not retained on its original execution");

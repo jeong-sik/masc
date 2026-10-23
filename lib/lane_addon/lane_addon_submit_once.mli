@@ -69,4 +69,8 @@ val resume : store:Lane_addon_store.t -> label:string ->
 
     [terminal] validates a final result before Judgment_retained or Refused is
     written and again on the published record; [label] names this owner in
-    refusals. No domain save, queue ACK, successor or scheduling runs here. *)
+    refusals. Refusal evidence retains the host's unknown cause. A worker's
+    [Outcome_unknown] is accepted only after an authoritative host observation
+    confirms [Retained_unknown]; missing/open or contradictory host state is
+    rejected. [terminal] still receives the delivered worker-shaped result.
+    No domain save, queue ACK, successor or scheduling runs here. *)

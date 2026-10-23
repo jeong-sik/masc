@@ -320,7 +320,9 @@ let restore_parent ~store ~base_path ~request_id =
   Ok (parent,workspace,original)
 let derive_successor original (refusal : Progress.refusal) child_id =
   let* final = match refusal.stage with
-    | Progress.Execution -> rejected (Exact.final_of_json ~schema:(Capture.output_schema original) refusal.evidence)
+    | Progress.Execution ->
+      rejected (Exact.retained_final_of_json ~schema:(Capture.output_schema original) refusal.evidence)
+      |> Result.map Exact.delivered
     | Progress.Before_dispatch -> Error (Rejected "A pre-dispatch refusal cannot create a Curator successor") in
   rejected (Capture.narrow ~request_id:child_id ~final original)
 (* Complete the successor intent [parent]'s record holds: retain the child
@@ -521,8 +523,8 @@ let discover_with ~store ~base_path =
   discover_observed_with ~store ~base_path ~after_inventory:(fun () -> ())
 (* A Curator body names its own request ID, so no other record names it. *)
 let settle_chains_with ~store settling originals =
-  let chains = Capture.settled_chains settling
-      (List.map (fun original -> original.record,original.summary) originals) in
+  let* chains = Capture.settled_chains settling
+      (List.map (fun original -> original.record,original.summary) originals) |> rejected in
   List.fold_left (fun settled (root,leaf_first) -> let* () = settled in settle_chain_with ~store root leaf_first)
     (Ok ()) chains
 let settle_chains ~config settling originals =

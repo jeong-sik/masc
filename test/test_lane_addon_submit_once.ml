@@ -213,9 +213,102 @@ let test_pre_admission_nonavailability_errors_are_not_waits () = with_store (fun
       (Fs_compat.load_file (journal_path store)))
     [Submit.Rejected "original owner changed";Submit.Uncertain "authority check is unconfirmed"])
 
+let worker_finished final = Ok {
+  (Mcp_protocol.Mcp_types.tool_result_of_text "retained worker terminal") with
+  structured_content = Some (`Assoc ["request_id",`String request_id;
+    "state",`String "finished";"result",Exact.final_to_json final]) }
+let host_record store ~attempt ~final =
+  get (Store.save_exact_request store ~declaration_id:"submit-once-declaration" ~request_id
+    (`Assoc ["declaration_id",`String "submit-once-declaration";"request_id",`String request_id;
+      "digest",`String (Exact.digest request);"request",Exact.request_to_json request;
+      "attempts",`List [attempt];"final",final]))
+let test_worker_unknown_keeps_the_authoritative_host_cause cause = with_store (fun store ->
+  let retained=Exact.Retained_unknown cause in
+  let evidence=Exact.retained_final_to_json retained in
+  let attempt=match cause,evidence with
+    | Exact.Raised,`Assoc fields -> `Assoc (("exception",`String "fixture exception")::fields)
+    | (Exact.Interrupted | Exact.Cut),_ -> evidence
+    | Exact.Raised,_ -> Alcotest.fail "unknown evidence must be an object" in
+  let calls=ref 0 in
+  let call ~arguments=match kind arguments with
+    | "read" -> reply "absent"
+    | "submit" ->
+      incr calls;
+      (* As during synchronous dispatch, the host terminal becomes durable
+         only after the consumer's initial observation and before delivery. *)
+      host_record store ~attempt ~final:(Exact.final_to_json Exact.Outcome_unknown);
+      worker_finished Exact.Outcome_unknown
+    | other -> Alcotest.fail ("unexpected worker command " ^ other) in
+  (match resume store call with
+   | Ok (Submit.Final Exact.Outcome_unknown) -> ()
+   | Ok (Submit.Awaiting _ | Submit.Final _ | Submit.Commit_pending _ | Submit.Settled _) ->
+     Alcotest.fail "host-confirmed unknown did not retain the original refusal"
+   | Error error -> Alcotest.fail (Submit.error_to_string error));
+  (match Progress.phase (load store).progress with
+   | Progress.Rejected {stage=Progress.Execution;evidence=actual} ->
+     Alcotest.check json "host cause survives the worker's cause-free echo" evidence actual
+   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+   | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Alcotest.fail "unknown refusal was not retained");
+  let never_call ~arguments:_ = Alcotest.fail "a retained refusal called an unavailable worker" in
+  (match resume store never_call with
+   | Ok (Submit.Final Exact.Outcome_unknown) -> ()
+   | Ok (Submit.Awaiting _ | Submit.Final _ | Submit.Commit_pending _ | Submit.Settled _) ->
+     Alcotest.fail "retained cause changed its delivered result"
+   | Error error -> Alcotest.fail (Submit.error_to_string error));
+  Alcotest.(check int) "this original was submitted once" 1 !calls)
+type contradictory_host = Absent_host | Open_host | Different_host
+let test_worker_unknown_refuses_a_contradictory_host host = with_store (fun store ->
+  let call ~arguments=match kind arguments with
+    | "read" -> reply "absent"
+    | "submit" ->
+      (match host with
+       | Absent_host -> ()
+       | Open_host -> host_record store
+         ~attempt:(`Assoc ["started",`String (String.make 32 '0')]) ~final:`Null
+       | Different_host ->
+         let denied=Exact.final_to_json (Exact.Not_allowed {reason="original host refusal"}) in
+         host_record store ~attempt:denied ~final:denied);
+      worker_finished Exact.Outcome_unknown
+    | other -> Alcotest.fail ("unexpected worker command " ^ other) in
+  (match resume store call with
+   | Error (Submit.Rejected _) -> ()
+   | Error (Submit.Unavailable _ | Submit.Uncertain _) | Ok _ ->
+     Alcotest.fail "worker unknown cannot replace contradictory host authority");
+  (match Progress.phase (load store).progress with
+   | Progress.Dispatch_pending _ -> ()
+   | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
+   | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+     Alcotest.fail "contradictory worker echo was retained as an authoritative refusal"))
+let test_unknown_refusal_without_a_host_cause_is_not_replayed () = with_store (fun store ->
+  let advance original event=match get (Result.map_error Owner.update_error_to_string
+      (Owner.advance ~store ~expected:original ~event)) with
+    | Owner.Stored record | Owner.Already_stored record -> record
+    | Owner.Unconfirmed detail -> Alcotest.fail detail in
+  let dispatched=advance (load store) Progress.Dispatch_intended in
+  ignore (advance dispatched (Progress.Refused {stage=Progress.Execution;
+    evidence=Exact.final_to_json Exact.Outcome_unknown}));
+  let never_call ~arguments:_ = Alcotest.fail "old refusal must not cause another RPC" in
+  match resume store never_call with
+  | Error (Submit.Rejected _) -> ()
+  | Error (Submit.Unavailable _ | Submit.Uncertain _) | Ok _ -> Alcotest.fail "cause-free old refusal was accepted")
+
 let () =
   Alcotest.run "Lane_addon_submit_once" [
     "admission", [
+      Alcotest.test_case "worker unknown retains Interrupted host cause" `Quick
+        (fun () -> test_worker_unknown_keeps_the_authoritative_host_cause Exact.Interrupted);
+      Alcotest.test_case "worker unknown retains Cut host cause" `Quick
+        (fun () -> test_worker_unknown_keeps_the_authoritative_host_cause Exact.Cut);
+      Alcotest.test_case "worker unknown retains Raised host cause" `Quick
+        (fun () -> test_worker_unknown_keeps_the_authoritative_host_cause Exact.Raised);
+      Alcotest.test_case "worker unknown cannot invent an absent host terminal" `Quick
+        (fun () -> test_worker_unknown_refuses_a_contradictory_host Absent_host);
+      Alcotest.test_case "worker unknown cannot replace an open host call" `Quick
+        (fun () -> test_worker_unknown_refuses_a_contradictory_host Open_host);
+      Alcotest.test_case "worker unknown cannot replace a different host terminal" `Quick
+        (fun () -> test_worker_unknown_refuses_a_contradictory_host Different_host);
+      Alcotest.test_case "old cause-free refusal is rejected without another RPC" `Quick
+        test_unknown_refusal_without_a_host_cause_is_not_replayed;
       Alcotest.test_case "Captured Off read waits unchanged then resumes the exact original" `Quick
         (test_pre_admission_unavailable_preserves_and_resumes_original Fresh_capture Worker_read);
       Alcotest.test_case "Capacity-declined Off read waits unchanged then resumes the exact original" `Quick

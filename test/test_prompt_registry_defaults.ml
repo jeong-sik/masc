@@ -390,6 +390,75 @@ let test_a_slot_declares_its_own_surface () =
         (registered_description "test.surface.row"))
 ;;
 
+let test_operator_surface_authoring_issues () =
+  let open Alcotest in
+  let markdown ?surface body =
+    String.concat "\n"
+      ([ "---"; "description: surface authoring" ]
+       @ (match surface with None -> [] | Some value -> [ "operator_surface: " ^ value ])
+       @ [ "---"; body ])
+  in
+  with_prompts_dir_at
+    [ "surface.absent.md", markdown "Default body."
+    ; "surface.primary.md", markdown ~surface:"primary" "Primary body."
+    ; "surface.fragment.md", markdown ~surface:"fragment" "Fragment body."
+    ; "surface.invalid.md", markdown ~surface:"primray" "Usable body."
+    ; "surface.group.md", markdown ~surface:"fragmnt" "### row\nUsable slot."
+    ]
+    (fun prompts_dir ->
+      let row key =
+        let open Yojson.Safe.Util in
+        Prompt_registry.prompts_json () |> member "prompts" |> to_list
+        |> List.find (fun item -> member "key" item = `String key)
+      in
+      let check_issue key value source_file =
+        let open Yojson.Safe.Util in
+        match row key |> member "authoring_issues" |> to_list with
+        | [ issue ] ->
+          check string "diagnosis names the invalid field" "operator_surface"
+            (issue |> member "field" |> to_string);
+          check string "diagnosis has a stable code" "invalid_operator_surface"
+            (issue |> member "code" |> to_string);
+          check string "diagnosis retains the authored value" value
+            (issue |> member "value" |> to_string);
+          check string "diagnosis retains the path read by the loader"
+            (Filename.concat prompts_dir source_file)
+            (issue |> member "source_file" |> to_string)
+        | _ -> fail "invalid metadata must retain one authoring issue"
+      in
+      List.iter (fun (key, surface) ->
+        let open Yojson.Safe.Util in
+        check string "recognized and absent metadata retain their placement" surface
+          (row key |> member "operator_surface" |> to_string);
+        check int "recognized and absent metadata have no authoring issue" 0
+          (row key |> member "authoring_issues" |> to_list |> List.length))
+        [ "surface.absent", "primary"
+        ; "surface.primary", "primary"
+        ; "surface.fragment", "fragment"
+        ];
+      check_issue "surface.invalid" "primray" "surface.invalid.md";
+      check_issue "surface.group.row" "fragmnt" "surface.group.md";
+      check string "a slot retains its own placement" "fragment"
+        Yojson.Safe.Util.(row "surface.group.row" |> member "operator_surface" |> to_string);
+      check string "metadata does not suppress the prompt body" "Usable body."
+        (String.trim (Prompt_registry.get_prompt "surface.invalid"));
+      check string "a group without a body retains its usable slot" "Usable slot."
+        (Prompt_registry.get_prompt "surface.group.row");
+      (match Prompt_registry.set_override "surface.invalid" "Operator override." with
+       | Ok () -> ()
+       | Error reason -> fail reason);
+      check string "metadata does not suppress an override" "Operator override."
+        (Prompt_registry.get_prompt "surface.invalid");
+      check_issue "surface.invalid" "primray" "surface.invalid.md";
+      write_file (Filename.concat prompts_dir "surface.invalid.md")
+        (markdown ~surface:"fragment" "Corrected body.");
+      Prompt_registry.set_markdown_dir prompts_dir;
+      check int "reloading corrected metadata clears the issue" 0
+        Yojson.Safe.Util.(row "surface.invalid" |> member "authoring_issues" |> to_list |> List.length);
+      check string "corrected metadata replaces fallback placement" "fragment"
+        Yojson.Safe.Util.(row "surface.invalid" |> member "operator_surface" |> to_string))
+;;
+
 let test_heading_only_body_is_prose () =
   let open Alcotest in
   with_prompts_dir
@@ -1166,6 +1235,8 @@ let () =
         ] );
       ( "prompts_json",
         [
+          test_case "invalid surface metadata retains authoring provenance" `Quick
+            test_operator_surface_authoring_issues;
           test_case "prompts_json exposes effective file and override fields" `Quick
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->

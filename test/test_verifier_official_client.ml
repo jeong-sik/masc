@@ -105,7 +105,8 @@ let test_review ?(shadow_lane=false) mode =
   write (Filename.concat proof_root "proof.png") (Base64.decode_exn png);
   let lookup_tools = match VAT.create_goal_proof ~submitted_evidence:[] ~config with
     | Ok tools -> tools | Error detail -> fail detail in
-  let lookup = { AR.schemas = VAT.schemas lookup_tools; dispatch = VAT.dispatch lookup_tools } in
+  let lookup = { AR.schemas = VAT.schemas lookup_tools; dispatch = VAT.dispatch lookup_tools;
+    project_result = VAT.project_result } in
   let command, capture = fixture_script root ~mode in
   let config_path = Filename.concat root "runtime.toml" in
   let forbidden_capture = Filename.concat root "forbidden-client-called" in
@@ -263,7 +264,8 @@ let test_unsafe_slots_refused_before_spawn () =
   let command, capture = fixture_script root ~mode:"must-not-run" in
   let lookup =
     match VAT.create_goal_proof ~submitted_evidence:[] ~config:(Workspace.default_config root) with
-    | Ok tools -> { AR.schemas = VAT.schemas tools; dispatch = VAT.dispatch tools }
+    | Ok tools -> { AR.schemas = VAT.schemas tools; dispatch = VAT.dispatch tools;
+        project_result = VAT.project_result }
     | Error detail -> fail detail
   in
   let config_path = Filename.concat root "runtime.toml" in
@@ -323,7 +325,8 @@ let test_failed_review_leaves_no_failed_attempt_mark () =
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
   let lookup =
     match VAT.create_goal_proof ~submitted_evidence:[] ~config:(Workspace.default_config root) with
-    | Ok tools -> { AR.schemas = VAT.schemas tools; dispatch = VAT.dispatch tools }
+    | Ok tools -> { AR.schemas = VAT.schemas tools; dispatch = VAT.dispatch tools;
+        project_result = VAT.project_result }
     | Error detail -> fail detail
   in
   let slot = "official.verifier" in

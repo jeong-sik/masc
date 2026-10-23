@@ -51,7 +51,8 @@ let schemas =
 
 let dispatch ~name ~args:_ = Tool_result.ok ~tool_name:name ~start_time:(Tool_timing.start ()) ""
 
-let lookup = { AR.schemas; dispatch }
+let lookup = { AR.schemas; dispatch;
+  project_result = Masc.Verification_authority_tools.project_result }
 
 (* The status block inside each lookup section names the slot that rendered.
    It is data, so checking it pins which slot a root chose without pinning a

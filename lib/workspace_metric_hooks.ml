@@ -298,6 +298,7 @@ let install () =
     let verdict_call = ref Task.Anti_rationalization.empty_verdict_call in
     let { Task.Anti_rationalization.schemas = lookup_schemas
         ; dispatch = dispatch_lookup
+        ; project_result = _
         }
       =
       lookup

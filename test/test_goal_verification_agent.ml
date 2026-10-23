@@ -504,7 +504,7 @@ let test_goal_proof_reads_the_workspace_playground () =
   let reviewer =
     fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_
         ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
-      let { AR.schemas; dispatch } = lookup in
+      let { AR.schemas; dispatch; project_result = _ } = lookup in
       check bool "the read tool is advertised" true
         (List.exists
            (fun (schema : Masc_domain.tool_schema) ->

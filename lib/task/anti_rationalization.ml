@@ -37,9 +37,21 @@ type review_request =
   ; evidence_images : evidence_image list
   }
 
+type lookup_projection_error_kind =
+  | Inline_budget_exceeded
+  | Artifact_storage_failure
+
+type lookup_projection =
+  | Lookup_projected of Agent_core.Types.tool_result
+  | Lookup_projection_refused of
+      { kind : lookup_projection_error_kind
+      ; message : string
+      }
+
 type lookup_surface =
   { schemas : Types_core.tool_schema list
   ; dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result
+  ; project_result : base_path:string -> Tool_result.result -> lookup_projection
   }
 
 type lookup_root =
@@ -271,7 +283,7 @@ let lookup_section ~(lookup : lookup_surface) ~lookup_root =
    results stay unchanged, so neither can be mistaken for checked evidence.
    Nothing in MASC parses this projection back or overrides the judge's
    structured verdict. *)
-let lookup_with_evidence_observation { schemas; dispatch } =
+let lookup_with_evidence_observation ({ dispatch; _ } as lookup) =
   let dispatch ~name ~args =
     match dispatch ~name ~args with
     | Tool_result.Completed payload ->
@@ -295,7 +307,7 @@ let lookup_with_evidence_observation { schemas; dispatch } =
         }
     | (Tool_result.Deferred _ | Tool_result.Failed _) as result -> result
   in
-  { schemas; dispatch }
+  { lookup with dispatch }
 ;;
 
 (* The image-evidence section: data lines (reference, hash, size, media
@@ -696,23 +708,16 @@ let run
           under a possibly changed prompt policy or expose host-only metadata. *)
        let lookup_observations = ref [] in
        let capture_lookup evaluator_slot name arguments result =
-         let refusal = ref None in
-         let projected = Tool_bridge.to_agent_core_typed_result
-           ~base_path
-           ~model_projection:(Tool_output.Inline_up_to
-             { maximum_bytes = Tool_shard_limits.verification_evidence_max_bytes })
-           ~on_externalization_error:(fun error -> refusal := Some error)
-           result in
-         let fields, media = match !refusal with
-           | Some { Tool_bridge.kind = Inline_budget_exceeded; message } ->
+         let fields, media = match lookup.project_result ~base_path result with
+           | Lookup_projection_refused { kind = Inline_budget_exceeded; message } ->
              [ "projection_refusal", `Assoc
                  [ "kind", `String "inline_budget_exceeded"
                  ; "message", `String message ] ], []
-           | Some { Tool_bridge.kind = Artifact_storage_failure; message } ->
+           | Lookup_projection_refused { kind = Artifact_storage_failure; message } ->
              [ "projection_refusal", `Assoc
                  [ "kind", `String "artifact_storage_failure"
                  ; "message", `String message ] ], []
-           | None ->
+           | Lookup_projected projected ->
              (match projected with
               | Ok output ->
                 [ "result", `Assoc

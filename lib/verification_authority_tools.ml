@@ -1,5 +1,21 @@
 (** See [verification_authority_tools.mli]. *)
 
+let project_result ~base_path result =
+  let module Review = Task.Anti_rationalization in
+  let refusal = ref None in
+  let projected = Tool_bridge.to_agent_core_typed_result
+    ~base_path
+    ~model_projection:(Tool_output.Inline_up_to
+      { maximum_bytes = Tool_shard_limits.verification_evidence_max_bytes })
+    ~on_externalization_error:(fun error -> refusal := Some error)
+    result in
+  match !refusal with
+  | Some { Tool_bridge.kind = Inline_budget_exceeded; message } ->
+    Review.Lookup_projection_refused { kind = Inline_budget_exceeded; message }
+  | Some { Tool_bridge.kind = Artifact_storage_failure; message } ->
+    Review.Lookup_projection_refused { kind = Artifact_storage_failure; message }
+  | None -> Review.Lookup_projected projected
+
 (* The tool names the evaluator may call. Parsed once at the dispatch boundary
    so the rest of this module matches on a constructor: a name that is not one
    of these cannot reach an implementation, and adding a tool without wiring it

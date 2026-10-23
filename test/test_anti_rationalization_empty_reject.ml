@@ -28,6 +28,7 @@ let lookup : AR.lookup_surface =
            ~data:(`String "artifact body")
            ~content_blocks:[ Llm_provider.Types.Text "artifact body" ]
            ())
+  ; project_result = Masc.Verification_authority_tools.project_result
   }
 ;;
 
@@ -513,7 +514,8 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
         | T.ToolUse _ | T.ToolResult _ | T.Image _ | T.Document _ | T.Audio _ -> None
       in
       let run_review () =
-        let reads = ref 0 and calls = ref [] and results = ref [] and views = ref [] in
+        let reads = ref 0 and projections = ref 0 in
+        let calls = ref [] and results = ref [] and views = ref [] in
         let source_lookup : AR.lookup_surface =
           { lookup with dispatch = (fun ~name ~args:actual ->
               Alcotest.(check string) "actual requested lookup name" "keeper_read_file" name;
@@ -526,13 +528,19 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
                   ~content_blocks:[T.Text body; block_image index] () in
               results := !results @ [result];
               views := !views @ [actual_inline_review_view ~base_path:(Filename.get_temp_dir_name ()) result];
-              result) }
+              result)
+          ; project_result = (fun ~base_path result ->
+              incr projections;
+              Masc.Verification_authority_tools.project_result ~base_path result)
+          }
         in
         with_reviewer
           (fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:actual_prompt
               ?goal_blocks ~report_tool_schema:_ ~lookup:offered_lookup
               ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
             let index = List.length !calls in
+            Alcotest.(check int) "each earlier lookup has exactly one frozen projection"
+              index !projections;
             calls := !calls @ [evaluator_runtime];
             Alcotest.(check string) "every candidate retains the original prompt" prompt actual_prompt;
             let blocks = match goal_blocks with
@@ -583,6 +591,7 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
                 ~base_path:(Filename.get_temp_dir_name ()) () in
             Alcotest.(check (list string)) "declared slot order remains intact" slots !calls;
             Alcotest.(check int) "each failed slot performed a fresh lookup" 2 !reads;
+            Alcotest.(check int) "slot failover never reprojects an earlier result" 2 !projections;
             match result.verdict with
             | Some (AR.Approve "checked") -> ()
             | Some (AR.Approve _) | Some (AR.Reject _) | None -> Alcotest.fail "later evaluator lost its verdict")

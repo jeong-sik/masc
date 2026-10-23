@@ -913,6 +913,7 @@ let process_task_once
               { Task.Anti_rationalization.schemas =
                   Verification_authority_tools.schemas lookup_tools
               ; dispatch = Verification_authority_tools.dispatch lookup_tools
+              ; project_result = Verification_authority_tools.project_result
               }
             in
             (* Human labels close the judge's own loop: where an operator

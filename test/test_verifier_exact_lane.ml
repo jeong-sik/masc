@@ -24,6 +24,7 @@ let lookup : AR.lookup_surface =
   ; dispatch =
       (fun ~name ~args:_ ->
          Alcotest.failf "lookup %s dispatched under a stubbed reviewer" name)
+  ; project_result = Masc.Verification_authority_tools.project_result
   }
 ;;
 

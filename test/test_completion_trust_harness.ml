@@ -128,6 +128,7 @@ let with_ws name fn =
       let lookup =
         { AR.schemas = Masc.Verification_authority_tools.schemas lookup_tools
         ; dispatch = Masc.Verification_authority_tools.dispatch lookup_tools
+        ; project_result = Masc.Verification_authority_tools.project_result
         }
       in
       (* Preflight the same prompt contract as the daemon before waiting for

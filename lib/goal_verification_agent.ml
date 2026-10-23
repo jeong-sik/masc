@@ -294,6 +294,7 @@ let goal_proof_lookup config ~submitted_evidence =
   Ok
     ( { Task.Anti_rationalization.schemas = Verification_authority_tools.schemas tools
       ; dispatch = Verification_authority_tools.dispatch tools
+      ; project_result = Verification_authority_tools.project_result
       }
     , root_layout )
 ;;

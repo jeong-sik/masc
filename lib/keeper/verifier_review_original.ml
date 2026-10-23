@@ -64,6 +64,7 @@ let system_prompt ~lookup_schemas ~question ~lookup_root req =
         List.map
           (fun name -> Types_core.{ name; description = ""; input_schema = `Assoc [] })
           lookup_schemas
+    ; project_result = Verification_authority_tools.project_result
     ; dispatch =
         (fun ~name:_ ~args:_ ->
           Tool_result.error

@@ -25,6 +25,17 @@ type review_request =
   ; evidence_images : evidence_image list
   }
 
+type lookup_projection_error_kind =
+  | Inline_budget_exceeded
+  | Artifact_storage_failure
+
+type lookup_projection =
+  | Lookup_projected of Agent_core.Types.tool_result
+  | Lookup_projection_refused of
+      { kind : lookup_projection_error_kind
+      ; message : string
+      }
+
 (** The read-only tools the evaluator holds besides the submitted evidence
     snapshot (RFC-0361 D1). Every review is handed one: both lanes build the
     surface before the review runs and defer when they cannot, so there is no
@@ -39,7 +50,13 @@ type review_request =
 type lookup_surface =
   { schemas : Types_core.tool_schema list
   ; dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result
+  ; project_result : base_path:string -> Tool_result.result -> lookup_projection
   }
+(** [project_result] is supplied by the upper tool boundary that owns the full
+    model-facing result formatter. The review freezes its result once at each
+    lookup return, retaining either the complete admitted view or the actual
+    typed projection refusal for later evaluator slots. This leaf does not
+    depend on the runtime bridge or reconstruct its formatting policy. *)
 
 (** Where the Task lane's file tools resolve, as the judge is told about it.
     Each case renders its own [verification.lookup.*] slot, so the prose

@@ -56,6 +56,13 @@ val goal_proof_root_layout : t -> (string list, string) result
 
 val schemas : t -> Types_core.tool_schema list
 
+val project_result :
+  base_path:string -> Tool_result.result -> Task.Anti_rationalization.lookup_projection
+(** Freeze the full tool bridge's model-facing view using the completion
+    evidence ceiling, including failure envelopes and artifact refusals.
+    Used at lookup return, before later evaluator slots run. Cancellation
+    propagates; no raw host metadata is used as a projection fallback. *)
+
 val image_delivery_note : string
 (** The sentence [schemas] appends to the read_file descriptor: this surface
     reads images and inspected PDF/PPTX pages as visual input. Exposed so the schema-parity test asserts

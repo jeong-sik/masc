@@ -948,7 +948,8 @@ let test_prompt_states_the_root_and_not_a_repository () =
             ; evidence_posture = AR.Note_only
             ; few_shot_block = ""
             }
-          ~lookup:{ AR.schemas = VAT.schemas surface; dispatch = VAT.dispatch surface }
+          ~lookup:{ AR.schemas = VAT.schemas surface; dispatch = VAT.dispatch surface;
+            project_result = VAT.project_result }
           ~lookup_root:(VAT.root_layout surface |> require_root)
           request
       with
@@ -992,7 +993,8 @@ let render_review_prompt surface =
   match
     AR.build_prompt
       ~question
-      ~lookup:{ AR.schemas = VAT.schemas surface; dispatch = VAT.dispatch surface }
+      ~lookup:{ AR.schemas = VAT.schemas surface; dispatch = VAT.dispatch surface;
+        project_result = VAT.project_result }
       ~lookup_root:(VAT.root_layout surface |> require_root)
       request
   with

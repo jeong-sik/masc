@@ -1,8 +1,6 @@
 name = "masc_get_metrics"
 description = """
-Raw performance metrics for one agent.
-
-Task completion, timing, error rates, and collaboration history."""
+Observed Task performance for one exact agent identity, grouped by Task ID within the Task start-time window. Counts distinguish raw records, completed, successful and failed Tasks. Missing duration or outcome denominators are null. Handoff Task success describes outcomes with observed references, not delivery receipts."""
 additional_properties = false
 
 
@@ -21,7 +19,7 @@ description = "Agent name to get metrics for"
 [[params]]
 name = "days"
 type = "integer"
-description = "Number of days of history (default: 7)"
+description = "Task start-time window in days (default: 7)"
 default = 7
 minimum = 1
 maximum = 90

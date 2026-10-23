@@ -460,6 +460,7 @@ let turn_id_of_fields fields =
            Some (Delivery_identity.Request_id.to_string request_id)
        | Delivery_identity.Fusion_run _
        | Delivery_identity.Workspace_message _
+       | Delivery_identity.Connector_message _
        | Delivery_identity.Approval_lifecycle _ ->
            (* A delivery key proves append identity, not which turn read it.
               Passive broadcasts have no turn. Approval-continuation tools
@@ -485,6 +486,7 @@ let operation_id_of_fields fields =
       (Some
          { Delivery_identity.delivery_key =
              ( Delivery_identity.Fusion_run _ | Delivery_identity.Workspace_message _
+             | Delivery_identity.Connector_message _
              | Delivery_identity.Approval_lifecycle _ )
          ; _
          }) ->
@@ -504,6 +506,7 @@ let execution_source_of_fields fields =
        | Ok (Some { Delivery_identity.delivery_key =
                       (Delivery_identity.Fusion_run _
                       | Delivery_identity.Workspace_message _
+                      | Delivery_identity.Connector_message _
                       | Delivery_identity.Approval_lifecycle _); _ }) ->
            Option.bind (string_field fields "turn_ref") (fun raw ->
              Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)

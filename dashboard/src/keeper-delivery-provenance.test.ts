@@ -4,6 +4,7 @@ import {
   isOperationDeliveryProvenance,
   operationDeliveryProvenance,
   sameDeliveryProvenance,
+  sameDeliveryKey,
 } from './keeper-delivery-provenance'
 import {
   decodeKeeperChatDeliveryProvenance,
@@ -33,11 +34,19 @@ const goalNotificationKey = {
 }
 
 describe('keeper chat delivery provenance', () => {
+  it('keeps original connector events distinct from operations and other events', () => {
+    const key = { kind: 'connector_message', event_id: 'original-event' } as const
+    expect(sameDeliveryKey(key, { ...key })).toBe(true)
+    expect(sameDeliveryKey(key, { kind: 'connector_message', event_id: 'next-event' })).toBe(false)
+    expect(sameDeliveryKey(key, { kind: 'operation', operation_id: 'original-event' })).toBe(false)
+  })
+
   it.each([
     [{ kind: 'operation', operation_id: 'kmsg-1' }, { kind: 'accepted_user' }],
     [checkpointKey, { kind: 'tool_call', execution_id: 'exec-3', ordinal: 0 }],
     [nativeKey, { kind: 'tool_delivery', ordinal: 2 }],
     [{ kind: 'fusion_run', request_id: 'fusion-1' }, { kind: 'terminal_result' }],
+    [{ kind: 'connector_message', event_id: 'original-event-1' }, { kind: 'accepted_user' }],
     [{ kind: 'workspace_message', request_id: 'workspace-message-1' }, {
       kind: 'tool_call',
       execution_id: 'exec-1',
@@ -58,6 +67,8 @@ describe('keeper chat delivery provenance', () => {
   it.each([
     [{ kind: 'operation', operation_id: 'kmsg-1', extra: true }, { kind: 'accepted_user' }],
     [{ kind: 'operation', operation_id: 'bad id' }, { kind: 'accepted_user' }],
+    [{ kind: 'connector_message', event_id: 'bad id' }, { kind: 'accepted_user' }],
+    [{ kind: 'connector_message', event_id: 'original', request_id: 'different' }, { kind: 'accepted_user' }],
     [{ kind: 'operation', operation_id: 'kmsg-1' }, {
       kind: 'tool_call',
       execution_id: 'call-1',

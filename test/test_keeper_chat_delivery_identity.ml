@@ -49,6 +49,19 @@ let test_fusion_roundtrip () =
     (Identity.delivery_key_equal key (Identity.Operation request_id))
 ;;
 
+let test_connector_original_identity () =
+  let event_id = Identity.Request_id.of_string "original-attention-event" |> expect_ok in
+  let key = Identity.Connector_message event_id in
+  let decoded = Identity.delivery_key_to_yojson key |> Identity.delivery_key_of_yojson |> expect_ok in
+  check bool "same original connector event" true (Identity.delivery_key_equal key decoded);
+  List.iter (fun other -> check bool "separate producer authority" false (Identity.delivery_key_equal key other))
+    [Identity.Operation event_id; Identity.Workspace_message event_id; Identity.Fusion_run event_id];
+  match Identity.delivery_key_of_yojson (`Assoc ["kind",`String "connector_message";
+    "event_id",`String "original-attention-event"; "event_id",`String "changed"]) with
+  | Error _ -> ()
+  | Ok _ -> fail "duplicate connector original identity must be refused"
+;;
+
 let test_approval_lifecycle_roundtrip () =
   let approval_id =
     Identity.Request_id.of_string "appr_01typed" |> expect_ok
@@ -186,6 +199,7 @@ let () =
             "Fusion run roundtrip"
             `Quick
             test_fusion_roundtrip
+        ; test_case "connector original identity" `Quick test_connector_original_identity
         ; test_case
             "approval lifecycle roundtrip"
             `Quick

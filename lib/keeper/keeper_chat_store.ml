@@ -2769,6 +2769,7 @@ let existing_approval_lifecycle_at_slot
                 | Operation_native _
                 | Fusion_run _
                 | Workspace_message _
+                | Connector_message _
                 | Approval_lifecycle _ )
             ; _
             } )

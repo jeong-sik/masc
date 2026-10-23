@@ -15,11 +15,16 @@ type delivery_key =
   | Operation_native of { operation_id : Request_id.t; continuation_id : Request_id.t }
   | Fusion_run of Request_id.t
   | Workspace_message of Request_id.t
+  | Connector_message of Request_id.t
   | Approval_lifecycle of Request_id.t
 
 (** [Workspace_message] identifies one producer-minted workspace broadcast.
     It lets a mentioned Keeper append that exact broadcast to its durable
     transcript once without treating the broadcast as a chat operation. *)
+
+(** [Connector_message] names the original event ID minted by the durable
+    connector attention producer. It is not a Keeper operation or a workspace
+    broadcast. The workspace and Keeper remain the transcript store's owner. *)
 
 type transcript_slot =
   | Accepted_user

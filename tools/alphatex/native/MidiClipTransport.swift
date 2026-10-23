@@ -134,8 +134,21 @@ final class MidiClipTransport {
     func reconstruction(at time: UInt64) throws -> UmpRestoration {
         let count = times.firstIndex(where: { $0 >= time }) ?? times.count
         let end = times[count...].firstIndex(where: { $0 > time }) ?? times.count
-        return try umpRestoration(events, prefixCount: count, followingCount: end - count,
+        let restored = try umpRestoration(events, prefixCount: count, followingCount: end - count,
             preambleEndIndex: events.count, dueAdmission: .original, metadata: .tempoAndMeter, replacing: output.footprint)
+        // Future channel baselines may precede future attacks; group timing
+        // cannot be credited as already restored by an event after this cut.
+        let clocks = output.footprint.touched.filter { field in
+            switch field.kind { case .tempo, .meter: return true; default: return false }
+        }
+        var known = Set<UmpField>()
+        for event in restored.events + Array(events[count..<end]) {
+            known.formUnion(UmpMessage(event, metadata: .tempoAndMeter).fields)
+        }
+        guard clocks.allSatisfy({ $0.covered(by: known) }) else {
+            throw UmpRefusal("Clip reconstruction cannot restore group tempo/meter from a future source event")
+        }
+        return restored
     }
     func schedule() throws {
         timer?.cancel(); timer = nil

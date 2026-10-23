@@ -53,6 +53,27 @@ import CoreMIDI
   let tempo=UmpEvent(seconds:0,source:"clip",words:[0xd0100000,50000000,0,0])
   if case .unsupported = UmpMessage(tempo).action {} else {preconditionFailure("capture metadata default changed")}
   if case .absolute = UmpMessage(tempo,metadata:.tempoAndMeter).action {} else {preconditionFailure("Clip metadata not reconstructible")}
+  // A future declaration cannot restore the device's unknown initial tempo.
+  // Metadata at the cut remains a valid due baseline; another group cannot
+  // provide it because UmpField identity includes source and group.
+  let changedTempo:[UInt32]=[0xd0100000,60000000,0,0]
+  func metadataPlan(_ sameGroup:Bool)->MidiClipPlaybackPlan {
+   plan(1200000000,[
+    MidiClipPlaybackPlan.Event(id:"8",section:.sequence,tick:"0",words:[sameGroup ? 0x40903c00 : 0x41903c00,0xffff0000],nanoseconds:exact(0)),
+    MidiClipPlaybackPlan.Event(id:"16",section:.sequence,tick:"1",words:changedTempo,nanoseconds:exact(500000000)),
+    MidiClipPlaybackPlan.Event(id:"32",section:.sequence,tick:"2",words:[sameGroup ? 0x40803c00 : 0x41803c00,0xffff0000],nanoseconds:exact(1100000000))])
+  }
+  for sameGroup in [true,false] {
+   clock=0;let metadataOwner=try MidiClipTransport(plan:metadataPlan(sameGroup));metadataOwner.now={clock}
+   try metadataOwner.prepare();try metadataOwner.start();clock=750000000;metadataOwner.tick()
+   requireFailure {_ = try metadataOwner.reconstruction(at:0)}
+   _ = try metadataOwner.reconstruction(at:500000000)
+   _ = try metadataOwner.reconstruction(at:750000000)
+   let held=metadataOwner.output.held
+   metadataOwner.receive("{\"kind\":\"seek\",\"nanoseconds\":\"0\"}")
+   precondition(metadataOwner.state == .playing && metadataOwner.index==2 && metadataOwner.output.held==held && metadataOwner.terminalFailure==nil,"refused backward seek must retain original owner and held state")
+   metadataOwner.finish(reason:"metadata-probe")
+  }
   print("MIDI_CLIP_CLOCK_PASS: adjacent UInt64 deadlines beyond binary64, no early send, pre-start cancel, empty Clip, overflow cleanup, metadata context isolation and malformed plan refusal")
  }
 }`)

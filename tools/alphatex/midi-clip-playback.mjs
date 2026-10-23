@@ -8,11 +8,15 @@ const uint64Maximum = 0xffffffffffffffffn
 const hash = value => createHash('sha256').update(value).digest('hex')
 const destinationID = value => typeof value === 'string' && /^(0|-?[1-9][0-9]*)$/.test(value)
   && BigInt(value) >= -2147483648n && BigInt(value) <= 2147483647n
+export function validateMidiClipDestination(value) {
+  if (!destinationID(value)) throw new Error('Choose an exact CoreMIDI destination ID')
+  return value
+}
 
 // The source retains musical ticks. This derived native schedule carries exact
 // absolute nanosecond fractions, rounded once by its actual output owner.
 export function midiClipPlaybackPlan(document, { destination, initialTempo } = {}) {
-  if (!destinationID(destination)) throw new Error('Choose an exact CoreMIDI destination ID')
+  validateMidiClipDestination(destination)
   validateMidiClip(document)
   const clock = midiClipClock(document, { initialTempo })
   if (clock.prefix.length) throw new MidiClipPlaybackRefusal('profile-negotiation-required',

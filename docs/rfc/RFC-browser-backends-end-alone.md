@@ -352,8 +352,9 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
 - TERM 과 KILL 사이에는 상태가 필요해요. 정리하는 쪽이 TERM 을 보낸 프로필마다 붙잡은 주인과 KILL 을 보내도 되는 시각을 메모리에 들고 있어요. 잠금 파일 fd 는 들지 않아요.
   - `Held_by` 를 처음 보면 TERM 을 보내고 그 주인을 기록해요.
   - 같은 신원이 유예가 지난 뒤에도 잠금을 쥐고 있으면 KILL 을 보내요. 유예 안에 온 패스는 아무것도 보내지 않아요.
+  - 보낸 TERM 은 그 프로필이 사라질 때까지 기억해요. 어떤 패스가 그 프로필에 닿지 못해도 유예는 이어져요.
   - 서버가 다시 뜨면 상태가 사라지고 TERM 부터 다시 해요.
-- 유예는 70 초예요(`Browser_gecko_sweep.termination_grace_seconds`). Firefox 의 종료 감시는 종료가 멈추면 `toolkit.asyncshutdown.crash_timeout`(기본 60 초)에 `crash_timeout_additional_wait`(10 초)를 더한 뒤 스스로 crash 해요(`toolkit/components/terminator/nsTerminator.cpp`). 그 뒤에도 남아 있으면 끝나는 중이 아니라고 봐요.
+- 유예는 70 초예요(`Browser_gecko_sweep.termination_grace_seconds`). Firefox 의 종료 감시가 종료 단계 하나에 주는 시간과 같아요. 한 단계가 `toolkit.asyncshutdown.crash_timeout`(기본 60 초)에 `crash_timeout_additional_wait`(10 초)를 더한 시간 동안 나아가지 않으면 Firefox 가 스스로 crash 해요(`toolkit/components/terminator/nsTerminator.cpp`). 단계마다 다시 세서, 계속 나아가는 종료는 70 초보다 길 수 있어요. 그래서 70 초는 Firefox 가 보장하는 값이 아니라 masc 가 고른 한도예요.
   - 패스 간격을 유예로 쓰지 않아요. 재촉(nudge)으로 패스가 바로 이어질 수 있어서예요.
   - 이건 masc 가 가진 프로세스를 멈추는 안전 한도예요. native worker 가 자기 그룹을 멈출 때 TERM 뒤 유예를 두고 KILL 하는 것(`lane_addon_native_worker` 의 `grace_seconds`)과 같은 종류예요. 행동을 막는 게이트가 아니에요.
 - 그 프로세스는 masc 전용 0700 폴더 안의 파일에 쓰기 잠금을 쥔 같은 사용자의 프로세스예요. 그래서 그 프로필로 뜬 Gecko 브라우저라고 봐요. 이건 추론이라서, 주인의 실행 파일 경로를 기록에 남겨 사람이 확인할 수 있게 해요. 주인을 끝내면 그 자식도 끝나요(1.3).
@@ -372,13 +373,19 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
   - 운영자가 retain 한 인스턴스의 폴더는 건드리지 않아요. retain 은 운영자가 그 자리를 그대로 두라는 뜻이에요.
   - 폴더의 프로필이 모두 지워지면 `<instance_id>` 폴더도 지워요.
   - 기록과 함께 이 서버가 지금 돌리거나 복구 중인 인스턴스도 빼요. 읽지 못한 기록은 그 기록이 가리키는 인스턴스를 막고, 어느 인스턴스인지 모르면 그 패스는 쓸지 않아요.
-  - 다룰 인스턴스는 owner domain 에서 root 를 한 번 읽고 정해요. 지우기와 신호는 systhread 에서 해요. 인스턴스 id 는 다시 쓰이지 않아서, 정한 뒤 대상이 다시 살아날 일이 없어요. 그 뒤에 생긴 폴더는 그 패스에 없어요.
+  - 다룰 인스턴스는 설정 잠금 안에서 정해요. 그 시점의 binding 전체(실행 중인 것 포함)와 실행 여부를 같이 읽고, root 를 한 번 읽어요. 지우기와 신호는 잠금을 놓은 뒤 systhread 에서 해요. 그래서 Attach·Detach·retain 이 프로필 지우기를 기다리지 않아요.
+  - 인스턴스 id 는 다시 쓰이지 않아서, 정한 뒤 대상이 다시 살아날 일이 없어요. 그 뒤에 생긴 폴더는 그 패스에 없어요.
   - 남긴 항목은 설정 상태의 issue 로 보여요. 매 패스 경고 로그를 찍지 않아요.
 - 두 쪽이 다루는 폴더는 인스턴스가 살아 있는지로 갈라서 겹치지 않아요. worker 가 지우다 멈추면(그룹이 끝나면) 남은 것은 server 가 이어서 지워요. 지우는 함수는 반쯤 지워진 폴더에서 다시 시작해도 돼요.
 - 인스턴스 할당 정리(`Browser_addon_socket.cleanup`)는 더 이상 Gecko 프로필을 보지 않아요. 그래서 빠져나간 브라우저가 있어도 할당은 확인되고 새 인스턴스가 떠요. 빠져나간 브라우저는 server 가 따로 끝내요.
 
 **G6. 세션 권한을 잃은 worker 는 끝나요.**
-- `uncertain` 이 켜지면(2.3) automation worker 는 owner 를 revoke 하고 예외로 끝나요. live Firefox 가 연결을 잃었을 때와 같아요(`browser_addon_live_bidi.ml:290`). 명령 시간 초과가 세션 생성을 끊은 경우도 같아요.
+- 세션을 잃었는지는 WebDriver 클라이언트가 정해요(`Browser_webdriver.create ~lost`). 클라이언트가 스스로 세션 상태를 모른다고 기록하는 자리예요.
+  - 세션 생성이 예외(명령 시간 초과 포함)·전송·프로토콜 오류로 끝났거나, 답에 sessionId 가 없을 때
+  - 지금 세션에 대해 `invalid session id` 답을 받았을 때
+  - WebDriver 오류로 거절된 생성(`session not created` 등)은 브라우저를 띄우지 않았다는 뜻이라 잃은 게 아니에요.
+- serving 중에 세션을 잃거나 드라이버 프로세스가 끝나면, automation worker 는 owner 를 revoke 하고 예외로 끝나요. live Firefox 가 연결을 잃었을 때와 같아요(`browser_addon_live_bidi.ml:290`).
+- admission 이 이미 retire 된 뒤(Retire, SIGTERM)의 손실은 worker 를 끝내는 이유가 아니에요. 정리를 "확인되지 않음" 으로 남기고 멈춤을 이어 가요. 다른 백엔드의 정리를 중간에 끊지 않으려는 거예요.
 - 그러면 runtime 이 그 그룹을 끝내고, #45290 대로 다음 설정 패스에 새로 띄워요. 빠져나간 브라우저는 G5 가 끝내요.
 - 지금처럼 모든 명령을 거절한 채 떠 있는 상태(1.1 의 20:57~21:48)는 없어져요.
 
@@ -434,7 +441,7 @@ native worker 는 자기 프로세스 그룹을 가져요. 멈출 때는 먼저 
 | G-L1 | #45391 | `Private_browser_profile`(등록부로 파일마다 fd 하나, 붙잡기, TERM, KILL, 명시적 놓기)와 공용 프로필 삭제 함수(`.parentlock` 마지막) | 실제 자식 프로세스가 `fcntl` 쓰기 잠금을 쥔 픽스처로 `Held_by`·`Unlocked`·`Changing` 확인. TERM 을 무시하는 픽스처가 KILL 로 끝나는지. 붙잡은 값을 놓아도 masc 쪽 잠금이 그대로인지. 링크·링크 수 2 파일 거절 |
 | G-L2 | #45403 | Lane Add-on store 프로필 root, `-profile`, `--profile-root` 제거, Marionette 포트를 정하지 않음, `moz:profile` 확인, 끝난 세션의 프로필 놓기 (G1) | 세션이 masc 가 만든 프로필로 열리는지. 다른 프로필의 브라우저가 붙으면 세션을 거절하는지. 세션이 어떻게 끝나든 프로필을 정확히 한 번 놓는지 |
 | G-L3 | #45411 | server 의 패스별 정리(G2~G5), 할당 정리에서 프로필 빼기, 영수증 삭제 (G7) | 끝난 인스턴스 폴더의 `.parentlock` 을 쥔 그룹 밖 자식이 TERM 뒤(또는 유예 뒤 KILL 뒤) 끝나고 폴더가 지워지는지. 기록이 retained·실패인 인스턴스의 폴더는 그대로인지. 계획 뒤에 생긴 폴더는 건드리지 않는지 |
-| G-L4 | #45433 | `uncertain` 이면 automation worker 가 끝남 (G6) | sessionId 없는 생성 답, 명령 시간 초과가 끊은 생성으로 worker 가 끝나고, 남긴 프로필을 host 패스가 지우는지 |
+| G-L4 | #45433 | 세션을 잃거나 드라이버가 끝나면 automation worker 가 끝남 (G6) | 생성 결과마다 손실을 세는지. sessionId 없는 답, 시간 초과가 끊은 생성, 준비 뒤 드라이버 종료로 worker 가 끝나는지. 생성 중 Retire 에는 예외 없이 멈추는지. 남긴 프로필을 host 패스가 지우는지 |
 
 **스택 2: 출처마다 worker 하나 (S, H)**
 

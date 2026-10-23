@@ -71,10 +71,14 @@ instance and incarnation; the row subject identifies `candle_appraise`, not a
 worker-supplied authority. Exported tool calls retain their separate admitted
 caller envelope.
 
+Finished worker records retain the request ID, input digest and result without
+the input body. Deploy this revision with the
+[worker state hard cut](../../docs/guides/EXACT-WORKER-STATE-HARD-CUT.md).
+
 Build the optional container from the repository root:
 
 ```sh
-docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.4 addons
+docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.5 addons
 ```
 
 The host mounts the package at `/addon` and its installation-owned persistent

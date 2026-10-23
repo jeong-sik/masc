@@ -11,7 +11,6 @@ import stat
 import sys
 import tempfile
 import tomllib
-import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -255,7 +254,7 @@ class CuratorWorker(unittest.TestCase):
             original = kept.read_text()
             record = json.loads(original)
             changes = {"digest in capitals": {**record, "digest": record["digest"].upper()},
-                       "another result": {**record, "result": {"status": "outcome_unknown"}},
+                       "invalid result": {**record, "result": {"status": "unknown"}},
                        "an extra field": {**record, "extra": True},
                        "no digest": {key: value for key, value in record.items() if key != "digest"}}
             for name, changed in changes.items():
@@ -294,34 +293,80 @@ class CuratorWorker(unittest.TestCase):
             worker.host_result({"request_id": original["request_id"], "result": {"status": "outcome_unknown"}})
         return directory
 
-    def peak(self, directory, *, before=lambda _worker: None, during):
+    def test_finished_record_bytes_do_not_depend_on_input_body_size(self):
+        sizes = []
+        for body in ("small input", "x" * 1_000_000):
+            directory = self.finished_store(1, body)
+            path, = (directory / self.module().CONTRACT.package_id).glob("*.json")
+            record = json.loads(path.read_text())
+            self.assertEqual(set(record), {"version", "request_id", "digest", "result"})
+            self.assertEqual(record["version"], 2)
+            sizes.append(path.stat().st_size)
+        self.assertEqual(sizes[0], sizes[1])
+
+    def test_inventory_reads_terminal_metadata_once(self):
+        directory = self.finished_store(6, "x" * 1_000_000)
         worker = exact_worker.Worker(directory, FRAME, self.module().CONTRACT)
-        before(worker)
-        tracemalloc.start()
-        try:
-            during(worker)
-            return tracemalloc.get_traced_memory()[1]
-        finally:
-            tracemalloc.stop()
-
-    def test_finished_bodies_are_held_one_at_a_time_and_read_once(self):
-        body = "x" * 1_000_000
-        one, six = self.finished_store(1, body), self.finished_store(6, body)
-        listing_of = lambda worker: worker.host_requests({})
-        # The first inventory reads every record, one body at a time (#45456):
-        # five more finished records add far less than one body to its peak.
-        self.assertLess(self.peak(six, during=listing_of) - self.peak(one, during=listing_of), len(body) // 2)
-
-        def later(worker):
-            worker.invoke({"kind": "submit", "request": request("original-new")}, {"kind": "operator"})
-            worker.host_requests({})
+        with patch.object(worker.store, "read_path", wraps=worker.store.read_path) as read_path:
+            self.assertEqual(worker.host_requests({}), {"requests": []})
+            self.assertEqual(read_path.call_count, 6)
+        with patch.object(worker.store, "read_path", side_effect=AssertionError("terminal read again")):
+            self.assertEqual(worker.host_requests({}), {"requests": []})
             worker.observe({"binding": {}, "sources": []})
-        # After it, submits, listings and observations read no finished body.
-        self.assertLess(self.peak(six, before=listing_of, during=later), len(body))
+        self.assertEqual(worker.invoke({"kind": "submit", "request": request("original-new")},
+                                       {"kind": "operator"})["state"], "pending")
+
+    def test_body_free_terminals_preserve_replay_and_input_identity_after_restart(self):
+        terminals = [{"status": "answered", "slot": "original-slot", "output": {"original": "answer"}},
+                     {"status": "invalid_output", "detail": "invalid original answer"},
+                     {"status": "input_refused", "kind": "context_overflow"},
+                     {"status": "output_limit_reached", "detail": "original provider limit"},
+                     {"status": "outcome_unknown"}, {"status": "not_allowed", "reason": "original grant"},
+                     {"status": "request_id_reused"}]
+        for terminal in terminals:
+            with self.subTest(terminal=terminal["status"]), tempfile.TemporaryDirectory() as directory:
+                state = Path(directory)
+                original = {**request(), "system": "original long input" * 4096}
+                replies = self.run_worker(state, [submit(original), deliver(original["request_id"], terminal)])
+                self.assertEqual(self.output(replies[0])["state"], "pending")
+                path, = (state / self.module().CONTRACT.package_id).glob("*.json")
+                retained = json.loads(path.read_text())
+                self.assertNotIn("request", retained)
+                self.assertEqual(retained["digest"], exact_worker.digest(original))
+                self.assertEqual(retained["result"], terminal)
+                changed = {**original, "system": "changed input"}
+                different = {"status": "input_refused", "kind": "invalid_request"}
+                reopened = self.run_worker(state, [read(original["request_id"]), submit(original), submit(changed),
+                                                  deliver(original["request_id"], terminal),
+                                                  deliver(original["request_id"], different), listing()])
+                self.assertEqual([self.output(reply)["result"] for reply in reopened[:2]], [terminal] * 2)
+                self.assertTrue(reopened[2]["isError"])
+                self.assertEqual(self.output(reopened[3]), {"accepted": True})
+                self.assertTrue(reopened[4]["isError"])
+                self.assertEqual(self.output(reopened[5]), {"requests": []})
+                self.assertEqual(json.loads(path.read_text()), retained)
+
+    def test_previous_record_version_and_finished_body_are_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            original = request()
+            self.run_worker(state, [submit(original)])
+            path, = (state / self.module().CONTRACT.package_id).glob("*.json")
+            pending = json.loads(path.read_text())
+            for record in ({**pending, "version": 1},
+                           {**pending, "result": {"status": "outcome_unknown"}},
+                           {"version": 2, "request_id": original["request_id"],
+                            "digest": pending["digest"], "result": None}):
+                with self.subTest(record_fields=set(record)):
+                    path.write_text(json.dumps(record))
+                    replies = self.run_worker(state, [read(original["request_id"]), listing()])
+                    self.assertTrue(all(reply["isError"] for reply in replies))
+                    self.assertEqual(json.loads(path.read_text()), record)
 
     def test_a_pending_record_changed_outside_the_worker_stops_it(self):
         observation = lambda w: w.observe({"binding": {}, "sources": []})["rows"][0]["fields"]
-        finished = lambda record: {**record, "result": {"status": "outcome_unknown"}}
+        finished = lambda record: {"version": 2, "request_id": record["request"]["request_id"],
+                                   "digest": record["digest"], "result": {"status": "outcome_unknown"}}
         for change, finished_after in (("finished", 1), ("removed", 0)):
             with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
                 worker = exact_worker.Worker(Path(directory), FRAME, self.module().CONTRACT)

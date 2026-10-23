@@ -39,6 +39,10 @@ from announcing an unconfirmed result; a new owner must inspect original state.
 Worker absence or an absent record never grants authority to replay an uncertain
 host request. The serialized host owner must make that decision from its journal.
 
+Version 2 stores drop the original input body when retaining any terminal,
+keeping its request ID, digest and result. Deploy this revision with the
+[worker state hard cut](../../docs/guides/EXACT-WORKER-STATE-HARD-CUT.md).
+
 The complete pending listing must fit the manifest's actual reply frame before
 new work is saved. `capacity_wait` leaves a request unadmitted; it does not consume
 host facts or silently omit already pending work. Observation exposes pending and
@@ -49,7 +53,7 @@ does not mean the host committed its ledger or published a complete briefing.
 Build the optional image from the repository root:
 
 ```sh
-docker build -f addons/workspace-curator/Dockerfile -t masc-lane-workspace-curator:0.1.3 addons
+docker build -f addons/workspace-curator/Dockerfile -t masc-lane-workspace-curator:0.1.4 addons
 ```
 
 The image includes `exact_worker.py` and `protocol.py` outside the read-only

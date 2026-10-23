@@ -96,7 +96,7 @@ def is_digest(value) -> bool:
 
 
 def record_id(record: dict) -> str:
-    """A request record names its request; an admission refusal keeps only the id."""
+    """A pending record names its request; a terminal keeps only the id."""
     return record["request"]["request_id"] if "request" in record else record["request_id"]
 
 
@@ -230,7 +230,7 @@ class Store:
                 record = object_value(decode(source.read()), "retained record")
         finally:
             os.close(fd)
-        if type(record.get("version")) is not int or record["version"] != 1:
+        if type(record.get("version")) is not int or record["version"] != 2:
             raise InvalidInput("unknown Exact request record version")
         if set(record) == {"version", "request", "digest", "result"}:
             request = self.contract.parse_request(record["request"])
@@ -238,22 +238,21 @@ class Store:
             if self.path(request["request_id"]).name != name or record["digest"] != digest(request):
                 raise InvalidInput("Exact request record identity or input digest disagrees")
             if record["result"] is not None:
-                final_of_json(record["result"])
+                raise InvalidInput("a finished Exact request must not retain its input body")
         elif set(record) == ({"version", "request_id", "digest", "result", "tool"}
                              if len(self.contract.exported_names()) > 1
                              else {"version", "request_id", "digest", "result"}):
-            # Refused at admission (Worker.invoke): the body was never kept.
-            # A multi-tool worker must retain the destination without that body.
+            # Every terminal retains only its identity, input digest and result.
+            # Multi-tool workers also retain the destination without the body.
             if len(self.contract.exported_names()) > 1:
-                tool = text(record["tool"], "Exact admission refusal tool")
+                tool = text(record["tool"], "Exact terminal tool")
                 if tool not in self.contract.exported_names():
-                    raise InvalidInput("Exact admission refusal has no exported tool")
+                    raise InvalidInput("Exact terminal has no exported tool")
             if self.path(record["request_id"]).name != name or not is_digest(record["digest"]):
-                raise InvalidInput("Exact admission refusal identity or input digest disagrees")
-            if record["result"] != REQUEST_BODY_REFUSED:
-                raise InvalidInput("an admission refusal holds only the request body refusal")
+                raise InvalidInput("Exact terminal identity or input digest disagrees")
+            final_of_json(record["result"])
         else:
-            raise InvalidInput("retained record is neither an Exact request nor an admission refusal")
+            raise InvalidInput("retained record is neither a pending Exact request nor a terminal")
         return record
 
     def read(self, request_id: str) -> dict | None:
@@ -354,6 +353,12 @@ class Worker:
             return self.contract.request_tool(record["request"])
         return record["tool"] if len(self.contract.exported_names()) > 1 else self.contract.tool_name
 
+    def terminal_record(self, request_id: str, request_digest: str, result: dict, tool_name: str) -> dict:
+        record = {"version": 2, "request_id": request_id, "digest": request_digest, "result": result}
+        if len(self.contract.exported_names()) > 1:
+            record["tool"] = tool_name
+        return record
+
     def status(self, request_id: str, record: dict | None) -> dict:
         if record is None:
             return {"request_id": request_id, "state": "absent"}
@@ -399,16 +404,13 @@ class Worker:
                     # No listing reply can carry this request, so it never
                     # becomes an intent. The refusal is kept without the body:
                     # a read after a lost reply gives this answer, not absent.
-                    refused = {"version": 1, "request_id": request_id, "digest": request_digest,
-                               "result": {**REQUEST_BODY_REFUSED}}
-                    if len(self.contract.exported_names()) > 1:
-                        refused["tool"] = tool_name
+                    refused = self.terminal_record(request_id, request_digest, {**REQUEST_BODY_REFUSED}, tool_name)
                     self.store.write(refused)
                     return self.status(request_id, refused)
                 pending = [self.host_request(record["request"]) for record in self.store.pending()]
                 if not self.fits({"requests": pending + listing}):
                     return {"request_id": request_id, "state": "capacity_wait"}
-                accepted = {"version": 1, "request": request, "digest": request_digest, "result": None}
+                accepted = {"version": 2, "request": request, "digest": request_digest, "result": None}
                 self.store.write(accepted)
                 return self.status(request_id, accepted)
             case "read":
@@ -445,7 +447,8 @@ class Worker:
             return {"accepted": True}
         if not self.fits(self.status(request_id, {**record, "result": result})):
             raise InvalidInput("Exact result exceeds the declared worker reply frame")
-        self.store.write({**record, "result": result})
+        terminal = self.terminal_record(request_id, record["digest"], result, self.retained_tool(record))
+        self.store.write(terminal)
         return {"accepted": True}
 
     def observe(self, args) -> dict:

@@ -60,6 +60,23 @@ let commit config ~authority ~verification_id verdict =
   ignore (workspace_ok (W.commit_verdict_r config ~authority ~verdict
                          ~task_id ~verification_id ()))
 
+let submit_repair config =
+  ignore (workspace_ok (W.transition_task_r config ~agent_name:producer ~task_id
+    ~action:D.Submit_for_verification
+    ~prepare_verification_request:(fun ~task ~assignee ~verification_id ~claim:_ ->
+      Masc.Verification.create_request ~base_path:config.W.base_path
+        ~request_id:verification_id ~task_id:task.D.id ~output:(`Assoc [])
+        ~criteria:[] ~worker:assignee () |> Result.map (fun _ -> ()))
+    ~notes:"note:repaired destination and resubmitted evidence" ()));
+  match (ok (Workspace_backlog.read_backlog_r config)).tasks with
+  | [{task_status=D.AwaitingVerification {verification_id;_};_}] -> verification_id
+  | [] | _ :: _ :: _
+  | [{task_status=(D.Todo | D.Claimed _ | D.InProgress _ | D.Done _ | D.Cancelled _);_}] ->
+    Alcotest.fail "resubmission must create a new verification"
+
+let standing config ~verification_id ~authority =
+  Outbox.standing config ~task_id ~verification_id ~producer ~reason ~authority
+
 let pending config = ok (Outbox.pending config)
 let approvals config = ok (Workspace_task_approval_outbox.pending config)
 let queue config =
@@ -194,32 +211,23 @@ let test_rejection_with_no_keeper_returns_the_task_to_todo () =
          (D.task_status_to_string task_status));
     reconcile config ~delivered:0 ~retained:0)
 
-(* A rejection returns work to [InProgress], so that is the state every case
-   above starts from. [Claimed] reaches the same release through the same arm
-   and nothing had walked it: a task claimed but not started, whose claimer is
-   gone, is stuck exactly as hard. *)
-let test_a_claimed_task_is_released_too () =
+(* An exact rejection relation for an impossible Task state is corrupt
+   authority, rather than permission to release a newly claimed Task. *)
+let test_a_claimed_task_conflict_preserves_the_obligation () =
   with_workspace (fun config ->
     let verification_id = "vrf-no-keeper-claimed" in
     prepare_submission config verification_id;
-    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    commit config ~authority:system ~verification_id (D.Verdict_rejected {reason});
     let backlog = ok (Workspace_backlog.read_backlog_r config) in
-    let tasks =
-      List.map
-        (fun (task : D.task) ->
-           { task with
-             task_status =
-               D.Claimed { assignee = producer; claimed_at = "2026-09-09T00:00:00Z" }
-           })
-        backlog.tasks
-    in
-    W.write_backlog config { backlog with tasks };
-    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
-    match only_task config with
-    | { task_status = D.Todo; _ } -> ()
-    | { task_status; _ } ->
-      Alcotest.failf "a claimed task with no actor must be released, found %s"
-        (D.task_status_to_string task_status))
+    let tasks = List.map (fun (task:D.task) -> {task with task_status=
+      D.Claimed {assignee=producer;claimed_at="2026-09-09T00:00:00Z"}}) backlog.tasks in
+    W.write_backlog config {backlog with tasks};
+    let before = only_task config in
+    reconcile config ~delivered:0 ~unroutable:0 ~retained:1;
+    check_pending config 1;
+    Alcotest.(check string) "conflicting claimed Task is untouched" (D.show_task before)
+      (D.show_task (only_task config));
+    Alcotest.(check int) "no delivery from conflicting authority" 0 (List.length (queue config)))
 
 (* The releaser is read off the obligation's authority, and an operator's
    verdict is recorded as an operator's release. A system verdict is what every
@@ -258,8 +266,8 @@ let test_a_task_held_by_someone_else_is_not_released () =
     in
     W.write_backlog config { backlog with tasks };
     let before = only_task config in
-    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
-    check_pending config 0;
+    reconcile config ~delivered:0 ~unroutable:0 ~retained:1;
+    check_pending config 1;
     Alcotest.(check string) "the new holder keeps the task"
       (D.show_task before) (D.show_task (only_task config)))
 
@@ -283,7 +291,9 @@ let test_a_queue_that_appears_before_the_lock_keeps_the_task () =
       Alcotest.(check string) "the task waits for the delivery it can now have"
         (D.show_task before) (D.show_task (only_task config));
       check_pending config 1
-    | Ok _ -> Alcotest.fail "a routable producer must not have its task released"
+    | Ok (W.Released _ | W.Producer_route_unread _
+        | W.Rejection_superseded) ->
+      Alcotest.fail "a routable producer must not have its task released"
     | Error error -> Alcotest.fail (D.masc_error_to_string error))
 
 (* A route that cannot be read under the lock is its own outcome, carrying the
@@ -307,7 +317,9 @@ let test_an_unread_route_under_the_lock_is_its_own_outcome () =
       Alcotest.(check string) "the task is left untouched"
         (D.show_task before) (D.show_task (only_task config));
       check_pending config 1
-    | Ok _ -> Alcotest.fail "an unread route must not release or pass as routable"
+    | Ok (W.Released _ | W.Producer_became_routable
+        | W.Rejection_superseded) ->
+      Alcotest.fail "an unread route must not release or pass as routable"
     | Error error ->
       Alcotest.failf "an unread route was reported as a backlog error: %s"
         (D.masc_error_to_string error))
@@ -332,14 +344,17 @@ let test_an_undecodable_meta_that_appears_before_the_lock_keeps_the_task () =
          ~reason ~authority:system
      with
      | Wake.Unroutable_producer _ -> ()
-     | _ -> Alcotest.fail "the first routing read must find no Keeper");
+     | Wake.Rejection_superseded _ -> Alcotest.fail "current rejection was superseded"
+     | Wake.Signaled _ | Wake.Durable_deferred _ | Wake.Durable_wake_failed _
+     | Wake.Producer_identity_lookup_failed _ | Wake.Durable_queue_failed _ ->
+       Alcotest.fail "the first routing read must find no Keeper");
     let meta_path = Masc.Keeper_types_profile.keeper_meta_path config producer in
     Fs_compat.mkdir_p (Filename.dirname meta_path);
     Out_channel.with_open_text meta_path (fun out -> output_string out "[]");
     let before = only_task config in
     (match Wake.release_unroutable_task ~config item with
      | Error _ -> ()
-     | Ok _ ->
+     | Ok (`Superseded | `Release_refused | `Released _) ->
        Alcotest.fail "a producer whose meta cannot be read must keep its task");
     Alcotest.(check string) "the task is left where the delivery expects it"
       (D.show_task before) (D.show_task (only_task config));
@@ -407,43 +422,50 @@ let test_release_leaves_a_task_that_moved_on () =
     let verification_id = "vrf-no-keeper-resubmitted" in
     prepare_submission config verification_id;
     commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
-    prepare_submission config "vrf-no-keeper-resubmitted-again";
+    ignore (submit_repair config);
     let before = only_task config in
-    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    reconcile config ~delivered:0 ~unroutable:0 ~retained:0;
     check_pending config 0;
     Alcotest.(check string) "the newer submission is left exactly as it stands"
       (D.show_task before) (D.show_task (only_task config)))
 
-(* The Task can be gone by the time the obligation is worked: nothing to
-   release, and retrying can never find it again. *)
-let test_release_discharges_when_the_task_is_gone () =
+(* A vanished Task with a still-current relation is inconsistent authority.
+   Do not turn a failed authoritative join into successful delivery. *)
+let test_missing_task_preserves_the_conflicting_obligation () =
   with_workspace (fun config ->
     let verification_id = "vrf-no-keeper-deleted-task" in
     prepare_submission config verification_id;
     commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
     set_tasks config [];
-    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
-    check_pending config 0)
+    reconcile config ~delivered:0 ~unroutable:0 ~retained:1;
+    check_pending config 1;
+    Alcotest.(check int) "missing Task cannot create a queue row" 0 (List.length (queue config)))
 
-(* Release precedes acknowledgement, so a crash between the two brings the
-   obligation back. The replay reads the status again, finds the Task no longer
-   held by the producer, and ends the obligation without a second mutation. *)
+(* Release retires its relation in the same Task commit. Replaying a held
+   pre-release snapshot after that commit cannot recreate a delivery receipt. *)
 let test_release_before_acknowledgement_replays_idempotently () =
   with_workspace (fun config ->
     let verification_id = "vrf-no-keeper-replay" in
     prepare_submission config verification_id;
-    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
-    let obligation =
-      match pending config with
-      | [ item ] -> item
-      | items -> Alcotest.failf "one obligation, found %d" (List.length items)
-    in
-    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected {reason});
+    let obligation = match pending config with
+      | [item] -> item | items -> Alcotest.failf "one obligation, found %d" (List.length items) in
+    (match Wake.release_unroutable_task ~config obligation with
+     | Ok (`Released _) -> ()
+     | Ok (`Superseded | `Release_refused) ->
+       Alcotest.fail "current unroutable rejection was not released"
+     | Error detail -> Alcotest.fail detail);
     let released = only_task config in
-    let backlog = ok (Workspace_backlog.read_backlog_r config) in
-    W.write_backlog config { backlog with pending_completion_rejections = [ obligation ] };
-    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
     check_pending config 0;
+    (match Wake.release_unroutable_task ~config obligation with
+     | Ok `Superseded -> ()
+     | Ok (`Released _ | `Release_refused) ->
+       Alcotest.fail "released snapshot retained authority"
+     | Error detail -> Alcotest.fail detail);
+    ok (Outbox.acknowledge config ~task_id ~verification_id);
+    check_pending config 0;
+    Alcotest.(check int) "stale release ACK cannot create a receipt" 0
+      (List.length (ok (Workspace_backlog.read_backlog_r config)).delivered_completion_rejections);
     Alcotest.(check string) "the replay leaves the released Task untouched"
       (D.show_task released) (D.show_task (only_task config)))
 
@@ -476,7 +498,10 @@ let test_enqueue_before_ack_is_idempotent () =
     (match Wake.wake_rejected_producer ~config ~producer ~task_id ~verification_id
              ~reason ~authority:system with
      | Wake.Signaled _ | Wake.Durable_deferred _ | Wake.Durable_wake_failed _ -> ()
-     | _ -> Alcotest.fail "fixture failed to durably enqueue rejection");
+     | Wake.Rejection_superseded _ -> Alcotest.fail "current rejection was superseded"
+     | Wake.Unroutable_producer _ | Wake.Producer_identity_lookup_failed _
+     | Wake.Durable_queue_failed _ ->
+       Alcotest.fail "fixture failed to durably enqueue rejection");
     check_pending config 1;
     check_rejection config ~verification_id ~authority:system;
     reconcile (W.default_config config.W.base_path) ~delivered:1 ~retained:0;
@@ -630,19 +655,7 @@ let test_resubmit_supersedes_and_stale_ack_preserves_new_rejection () =
     commit config ~authority:system ~verification_id:old_id
       (D.Verdict_rejected { reason });
     check_pending config 1;
-    ignore (workspace_ok (W.transition_task_r config ~agent_name:producer ~task_id
-                           ~action:D.Submit_for_verification
-                           ~prepare_verification_request:(fun ~task ~assignee
-                               ~verification_id ~claim:_ ->
-                             Masc.Verification.create_request
-                               ~base_path:config.W.base_path ~request_id:verification_id
-                               ~task_id:task.D.id ~output:(`Assoc []) ~criteria:[]
-                               ~worker:assignee () |> Result.map (fun _ -> ()))
-                           ~notes:"note:repaired destination and resubmitted evidence" ()));
-    let new_id = match (ok (Workspace_backlog.read_backlog_r config)).tasks with
-      | [ { task_status = D.AwaitingVerification { verification_id; _ }; _ } ] ->
-        verification_id
-      | _ -> Alcotest.fail "resubmission must create a new verification" in
+    let new_id = submit_repair config in
     Alcotest.(check bool) "new submission identity" true (old_id <> new_id);
     check_pending config 0;
     (match W.commit_verdict_r config ~authority:system
@@ -655,6 +668,154 @@ let test_resubmit_supersedes_and_stale_ack_preserves_new_rejection () =
     check_pending config 1;
     reconcile config ~delivered:1 ~retained:0;
     check_rejection config ~verification_id:new_id ~authority:human)
+
+let expect_superseded ~verification_id = function
+  | Wake.Rejection_superseded {task_id=actual_task;verification_id=actual_verification} ->
+    Alcotest.(check string) "superseded task" task_id actual_task;
+    Alcotest.(check string) "superseded verification" verification_id actual_verification
+  | Wake.Signaled _ | Wake.Durable_deferred _ | Wake.Durable_wake_failed _
+  | Wake.Unroutable_producer _ | Wake.Producer_identity_lookup_failed _
+  | Wake.Durable_queue_failed _ -> Alcotest.fail "old rejection still owned delivery"
+
+let test_snapshot_before_resubmit_cannot_enqueue () =
+  with_workspace (fun config ->
+    persist_producer config;
+    let old_id = "vrf-snapshot-before-resubmit" in
+    prepare_submission config old_id;
+    commit config ~authority:system ~verification_id:old_id (D.Verdict_rejected {reason});
+    let snapshot = match pending config with
+      | [item] -> item | _ -> Alcotest.fail "missing original pending rejection" in
+    let new_id = submit_repair config in
+    expect_superseded ~verification_id:old_id
+      (Wake.wake_rejected_producer ~config ~producer:snapshot.producer
+        ~task_id:snapshot.task_id ~verification_id:snapshot.verification_id
+        ~reason:snapshot.reason ~authority:snapshot.authority);
+    Alcotest.(check int) "old snapshot cannot create a queue row" 0 (List.length (queue config));
+    check_pending config 0;
+    match (only_task config).task_status with
+    | D.AwaitingVerification {verification_id;_} ->
+      Alcotest.(check string) "new submission keeps authority" new_id verification_id
+    | D.Todo | D.Claimed _ | D.InProgress _ | D.Done _ | D.Cancelled _ ->
+      Alcotest.fail "old wake changed the newer submission")
+
+let test_delivered_receipt_remains_current_until_resubmit () =
+  with_workspace (fun config ->
+    persist_producer config;
+    let old_id = "vrf-delivered-before-resubmit" in
+    prepare_submission config old_id;
+    commit config ~authority:system ~verification_id:old_id (D.Verdict_rejected {reason});
+    reconcile config ~delivered:1 ~retained:0;
+    check_pending config 0;
+    Alcotest.(check bool) "ACK retains current rejection authority" true
+      (ok (standing config ~verification_id:old_id ~authority:system) = Outbox.Current);
+    let backlog = ok (Workspace_backlog.read_backlog_r config) in
+    (match backlog.delivered_completion_rejections with
+     | [receipt] ->
+       Alcotest.(check string) "exact delivered receipt" old_id receipt.D.verification_id
+     | _ -> Alcotest.fail "ACK did not preserve the delivered relation");
+    expect_superseded ~verification_id:old_id
+      (Wake.wake_rejected_producer ~config ~producer ~task_id ~verification_id:old_id
+        ~reason ~authority:system);
+    check_rejection config ~verification_id:old_id ~authority:system;
+    let new_id = submit_repair config in
+    Alcotest.(check bool) "resubmission retires delivered authority" true
+      (ok (standing config ~verification_id:old_id ~authority:system) = Outbox.Obsolete);
+    let backlog = ok (Workspace_backlog.read_backlog_r config) in
+    Alcotest.(check int) "resubmission retires old receipt" 0
+      (List.length backlog.delivered_completion_rejections);
+    commit config ~authority:human ~verification_id:new_id (D.Verdict_rejected {reason});
+    ok (Outbox.acknowledge config ~task_id ~verification_id:old_id);
+    check_pending config 1;
+    Alcotest.(check int) "stale ACK cannot install an old receipt" 0
+      (List.length (ok (Workspace_backlog.read_backlog_r config)).delivered_completion_rejections);
+    check_rejection config ~verification_id:old_id ~authority:system)
+
+let test_old_unroutable_snapshot_cannot_release_new_rejection () =
+  with_workspace (fun config ->
+    let old_id = "vrf-release-snapshot" in
+    prepare_submission config old_id;
+    commit config ~authority:system ~verification_id:old_id (D.Verdict_rejected {reason});
+    let snapshot = match pending config with
+      | [item] -> item | _ -> Alcotest.fail "missing original pending rejection" in
+    let new_id = submit_repair config in
+    commit config ~authority:human ~verification_id:new_id (D.Verdict_rejected {reason});
+    let before = only_task config in
+    (match Wake.release_unroutable_task ~config snapshot with
+     | Ok `Superseded -> ()
+     | Ok (`Released _ | `Release_refused) ->
+       Alcotest.fail "old rejection snapshot retained release authority"
+     | Error detail -> Alcotest.fail detail);
+    (match W.release_unroutable_rejected_task_r config ~authority:system ~task_id
+       ~producer ~verification_id:old_id ~reason
+       ~still_unroutable:(fun () -> Alcotest.fail "old identity reached route/effect check") () with
+     | Ok W.Rejection_superseded -> ()
+     | Ok (W.Released _ | W.Producer_became_routable
+         | W.Producer_route_unread _) ->
+       Alcotest.fail "old direct release did not report supersession"
+     | Error error -> Alcotest.fail (D.masc_error_to_string error));
+    Alcotest.(check string) "new rejected work remains held" (D.show_task before)
+      (D.show_task (only_task config));
+    match pending config with
+    | [item] ->
+      Alcotest.(check string) "new pending rejection survives old release" new_id
+        item.D.verification_id;
+      Alcotest.(check bool) "new rejection authority survives" true (item.authority=human)
+    | _ -> Alcotest.fail "old release changed the newer pending rejection")
+
+let test_corrupt_primary_blocks_wake_without_changing_queue () =
+  with_workspace (fun config ->
+    persist_producer config;
+    let verification_id = "vrf-corrupt-primary-before-ack" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected {reason});
+    (match Wake.wake_rejected_producer ~config ~producer ~task_id ~verification_id
+       ~reason ~authority:system with
+     | Wake.Signaled _ | Wake.Durable_deferred _ | Wake.Durable_wake_failed _ -> ()
+     | Wake.Rejection_superseded _ | Wake.Unroutable_producer _
+     | Wake.Producer_identity_lookup_failed _ | Wake.Durable_queue_failed _ ->
+       Alcotest.fail "fixture did not enqueue the current rejection");
+    check_pending config 1;
+    let queue_path = snapshot_path config in
+    let before_queue = In_channel.with_open_text queue_path In_channel.input_all in
+    let backlog_path = Workspace_backlog.backlog_path config in
+    let before_backlog = In_channel.with_open_text backlog_path In_channel.input_all in
+    let corrupt = "{corrupt authoritative backlog" in
+    Out_channel.with_open_text backlog_path (fun out -> output_string out corrupt);
+    (match Wake.wake_rejected_producer ~config ~producer ~task_id ~verification_id
+       ~reason ~authority:system with
+     | Wake.Durable_queue_failed _ -> ()
+     | Wake.Signaled _ | Wake.Durable_deferred _ | Wake.Durable_wake_failed _
+     | Wake.Rejection_superseded _ | Wake.Unroutable_producer _
+     | Wake.Producer_identity_lookup_failed _ ->
+       Alcotest.fail "wake accepted a recovered or corrupt primary backlog");
+    Alcotest.(check bool) "standing never trusts recovered primary" true
+      (Result.is_error (standing config ~verification_id ~authority:system));
+    Alcotest.(check string) "queue unchanged across failed authority read" before_queue
+      (In_channel.with_open_text queue_path In_channel.input_all);
+    Alcotest.(check string) "corrupt primary preserved" corrupt
+      (In_channel.with_open_text backlog_path In_channel.input_all);
+    Out_channel.with_open_text backlog_path (fun out -> output_string out before_backlog);
+    check_pending config 1;
+    reconcile config ~delivered:1 ~retained:0;
+    check_rejection config ~verification_id ~authority:system)
+
+let test_backlog_without_delivered_observations_lists_and_claims () =
+  with_workspace (fun config ->
+    let path = Workspace_backlog.backlog_path config in
+    let fields = Yojson.Safe.from_file path |> Yojson.Safe.Util.to_assoc in
+    let document = `Assoc (List.remove_assoc "delivered_completion_rejections" fields) in
+    Yojson.Safe.to_file path document;
+    let loaded = ok (Workspace_backlog.read_backlog_r config) in
+    Alcotest.(check int) "Task inventory remains readable" 1 (List.length loaded.tasks);
+    Alcotest.(check int) "absent relation supplies no delivered observation" 0
+      (List.length loaded.delivered_completion_rejections);
+    Alcotest.(check bool) "Task list still contains the actual Task" true
+      (Astring.String.is_infix ~affix:task_id (W.list_tasks config));
+    ignore (workspace_ok (W.claim_task_r config ~agent_name:producer ~task_id ()));
+    match only_task config with
+    | {task_status=D.Claimed {assignee; _}; _} ->
+      Alcotest.(check string) "claim commits under the same available backlog" producer assignee
+    | _ -> Alcotest.fail "the readable unclaimed Task must remain claimable")
 
 let test_corrupt_explicit_outbox_is_not_empty () =
   with_workspace (fun config ->
@@ -746,8 +907,8 @@ let () =
           `Quick test_release_leaves_a_task_that_moved_on
       ; Alcotest.test_case "a task held by someone else is left alone"
           `Quick test_a_task_held_by_someone_else_is_not_released
-      ; Alcotest.test_case "a claimed task is released too"
-          `Quick test_a_claimed_task_is_released_too
+      ; Alcotest.test_case "a conflicting claimed task preserves the obligation"
+          `Quick test_a_claimed_task_conflict_preserves_the_obligation
       ; Alcotest.test_case "an operator verdict releases as the operator"
           `Quick test_an_operator_verdict_releases_as_the_operator
       ; Alcotest.test_case "a queue that appears before the lock keeps the task"
@@ -760,8 +921,8 @@ let () =
           `Quick test_a_failed_release_keeps_the_obligation
       ; Alcotest.test_case "a release that can never succeed ends the obligation"
           `Quick test_a_release_that_can_never_succeed_ends_the_obligation
-      ; Alcotest.test_case "a deleted task discharges the obligation"
-          `Quick test_release_discharges_when_the_task_is_gone
+      ; Alcotest.test_case "a missing task preserves the conflicting obligation"
+          `Quick test_missing_task_preserves_the_conflicting_obligation
       ; Alcotest.test_case "release before acknowledgement replays idempotently"
           `Quick test_release_before_acknowledgement_replays_idempotently
       ; Alcotest.test_case "an undecodable producer meta retains the obligation"
@@ -783,5 +944,10 @@ let () =
       ; Alcotest.test_case "approval codec fails closed" `Quick test_approval_codec_fails_closed
       ; Alcotest.test_case "approval creates no repair" `Quick test_approval_has_no_repair_obligation
       ; Alcotest.test_case "resubmission and stale acknowledgement" `Quick test_resubmit_supersedes_and_stale_ack_preserves_new_rejection
+      ; Alcotest.test_case "old snapshot cannot enqueue after resubmission" `Quick test_snapshot_before_resubmit_cannot_enqueue
+      ; Alcotest.test_case "delivered authority retires only on resubmission" `Quick test_delivered_receipt_remains_current_until_resubmit
+      ; Alcotest.test_case "old release cannot retire a newer rejection" `Quick test_old_unroutable_snapshot_cannot_release_new_rejection
+      ; Alcotest.test_case "corrupt primary preserves queue and pending rejection" `Quick test_corrupt_primary_blocks_wake_without_changing_queue
+      ; Alcotest.test_case "absent delivered observations preserve Task list and claim" `Quick test_backlog_without_delivered_observations_lists_and_claims
       ; Alcotest.test_case "corrupt outbox fails closed" `Quick test_corrupt_explicit_outbox_is_not_empty
       ] ]

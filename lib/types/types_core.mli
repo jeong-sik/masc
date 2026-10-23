@@ -476,6 +476,13 @@ type task_creation_receipt = {
 type backlog =
   { tasks : task list
   ; pending_completion_rejections : pending_completion_rejection list
+  ; delivered_completion_rejections : pending_completion_rejection list
+    (** Current relation after delivery ACK. An absent wire field means no
+        delivered observation, as for pending delivery; it does not prove an
+        already queued rejection was retired. Its complete record has the same
+        strict codec as pending delivery. Each Task appears at most once across
+        the two sets; lifecycle changes retire both atomically. Explicitly
+        malformed, duplicate or overlapping state refuses the whole backlog. *)
   ; pending_completion_approvals : pending_completion_approval list
     (** Optional empty delivery set on the wire; an explicitly malformed or
         duplicate field/identity is rejected, never interpreted as empty. *)

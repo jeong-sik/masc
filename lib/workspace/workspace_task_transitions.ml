@@ -444,7 +444,12 @@ let perform_task_transition
                       List.filter
                         (fun (pending : Masc_domain.pending_completion_rejection) ->
                           not (String.equal pending.task_id task_id))
-                        backlog.pending_completion_rejections
+                        backlog.pending_completion_rejections;
+                    delivered_completion_rejections =
+                      List.filter
+                        (fun (delivered : Masc_domain.pending_completion_rejection) ->
+                          not (String.equal delivered.task_id task_id))
+                        backlog.delivered_completion_rejections
                   }
               }
           in
@@ -984,6 +989,12 @@ let commit_verdict_r
                ; committed_at = now
                } :: pending_completion_rejections
            in
+           let delivered_completion_rejections =
+             List.filter
+               (fun (delivered : Masc_domain.pending_completion_rejection) ->
+                 not (String.equal delivered.task_id task_id))
+               backlog.delivered_completion_rejections
+           in
            let pending_completion_approvals =
              match verdict with
              | Masc_domain.Verdict_rejected _ -> backlog.pending_completion_approvals
@@ -994,6 +1005,7 @@ let commit_verdict_r
            let new_backlog =
              { backlog with
                pending_completion_rejections;
+               delivered_completion_rejections;
                pending_completion_approvals;
                tasks =
                  List.map

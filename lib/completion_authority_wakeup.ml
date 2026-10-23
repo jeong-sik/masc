@@ -15,6 +15,7 @@ type delivery =
       detail : string;
     }
   | Durable_queue_failed of { keeper_name : string; detail : string }
+  | Rejection_superseded of { task_id : string; verification_id : string }
 
 let wake_rejected_producer
       ~(config : Workspace_utils_backend_setup.config)
@@ -44,20 +45,28 @@ let wake_rejected_producer
       ; payload = Keeper_event_queue.Completion_authority_rejected rejection
       }
     in
-    (match
-       Keeper_registry_event_queue.enqueue_durable_result
-         ~base_path:config.base_path
-         keeper_name
-         stimulus
-     with
+    let publication, _shutdown =
+      Keeper_shutdown_intake_fence.run_durable_intake_observing
+        ~base_path:config.base_path ~keeper_name
+        (fun intake_token ->
+          Workspace_task_rejection_outbox.deliver_if_pending config
+            ~task_id ~verification_id ~producer ~reason ~authority
+            ~deliver:(fun () ->
+              Keeper_registry_event_queue.enqueue_durable_deferred_notifications_result
+                ~intake_token ~base_path:config.base_path keeper_name stimulus))
+    in
+    (match publication with
      | Error detail -> Durable_queue_failed { keeper_name; detail }
-     | Ok () ->
+     | Ok Workspace_task_rejection_outbox.Superseded ->
+       Rejection_superseded { task_id; verification_id }
+     | Ok (Workspace_task_rejection_outbox.Published notify) ->
        (* The producer Keeper owns current-task projection. Its next cycle
           reconciles that projection from the committed backlog before it
           renders this durable rejection stimulus. Keeping that mutation out
           of the authority-to-queue boundary means a best-effort Keeper
           projection can never prevent durable delivery or the live wake. *)
        (try
+          notify ();
           match
             Keeper_registry.wakeup_running
               ~intent:Keeper_registry.Reactive_signal
@@ -178,8 +187,6 @@ let release_unroutable_task ~config (item : Masc_domain.pending_completion_rejec
     Ok
       (`Released
         (Masc_domain.task_status_to_string previous_status, backlog_version))
-  | Ok (Workspace_task.Not_held_by_producer { task_status }) ->
-    Ok (`Already_moved (Masc_domain.task_status_to_string task_status))
   (* A queue exists after all. Keep the obligation: the next interval routes
      to that Keeper and delivers what this one could not. *)
   | Ok Workspace_task.Producer_became_routable ->
@@ -191,7 +198,7 @@ let release_unroutable_task ~config (item : Masc_domain.pending_completion_rejec
       ("the producer's route could not be read inside the backlog lock; \
         retrying next interval: "
        ^ detail)
-  | Ok Workspace_task.Task_absent -> Ok `Task_absent
+  | Ok Workspace_task.Rejection_superseded -> Ok `Superseded
 ;;
 
 let reconcile_rejections ~config =
@@ -203,6 +210,7 @@ let reconcile_rejections ~config =
         match wake_rejected_producer ~config ~producer:item.producer
                 ~task_id:item.task_id ~verification_id:item.verification_id
                 ~reason:item.reason ~authority:item.authority with
+        | Rejection_superseded _ -> Ok `Superseded
         | Signaled _ -> Ok `Queued
         | Durable_deferred { keeper_name; _ } ->
           Log.Misc.warn
@@ -235,6 +243,7 @@ let reconcile_rejections ~config =
                ~task_id:item.task_id ~verification_id:item.verification_id)
       in
       match acknowledged with
+      | Ok `Superseded -> report
       | Ok `Queued ->
         Log.Misc.info
           "completion repair delivered task_id=%s verification_id=%s producer=%s"
@@ -247,18 +256,6 @@ let reconcile_rejections ~config =
            version=%d"
           item.task_id item.verification_id item.producer previous_status
           backlog_version;
-        { report with unroutable = report.unroutable + 1 }
-      | Ok (`Already_moved task_status) ->
-        Log.Misc.warn
-          "completion rejection has no Keeper to deliver to; the task already \
-           moved on task_id=%s verification_id=%s producer=%s status=%s"
-          item.task_id item.verification_id item.producer task_status;
-        { report with unroutable = report.unroutable + 1 }
-      | Ok `Task_absent ->
-        Log.Misc.warn
-          "completion rejection has no Keeper to deliver to; the task no longer \
-           exists task_id=%s verification_id=%s producer=%s"
-          item.task_id item.verification_id item.producer;
         { report with unroutable = report.unroutable + 1 }
       | Ok `Release_refused ->
         (* Already logged as an error with the reason at the refusal. *)

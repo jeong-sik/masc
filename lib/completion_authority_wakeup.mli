@@ -20,6 +20,7 @@ type delivery =
       detail : string;
     }
   | Durable_queue_failed of { keeper_name : string; detail : string }
+  | Rejection_superseded of { task_id : string; verification_id : string }
 
 val wake_rejected_producer :
   config:Workspace_utils_backend_setup.config ->
@@ -29,14 +30,17 @@ val wake_rejected_producer :
   reason:string ->
   authority:Masc_domain.completion_authority ->
   delivery
+(** Publishes only a still-pending current rejection. The Keeper intake lock
+    precedes the backlog lock and lease fence. Queue observers and the live
+    wake run after both locks are released. Already delivered or superseded
+    identities produce [Rejection_superseded] without a queue write. *)
 
 val release_unroutable_task :
   config:Workspace_utils_backend_setup.config ->
   Masc_domain.pending_completion_rejection ->
-  ( [ `Already_moved of string
+  ( [ `Superseded
     | `Release_refused
     | `Released of string * int
-    | `Task_absent
     ],
     string )
   result

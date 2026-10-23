@@ -139,6 +139,8 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_missing _
    | Keeper_heartbeat_stimulus_intake.Stimulus_job_unavailable _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_completion_rejection_obsolete
+   | Keeper_heartbeat_stimulus_intake.Stimulus_completion_rejection_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_not_answered _ ->
      fail "Board source reported another source's read failure");
   let second_pass =
@@ -158,6 +160,8 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_missing _
    | Keeper_heartbeat_stimulus_intake.Stimulus_job_unavailable _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_completion_rejection_obsolete
+   | Keeper_heartbeat_stimulus_intake.Stimulus_completion_rejection_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_not_answered _ ->
     fail "Board source reported another source's read failure"
 ;;
@@ -316,6 +320,132 @@ let test_permanent_absence_does_not_spend_an_admission_slot () =
   check (list string) "a retired poison does not block a readable source"
     [ readable ] (admitted_ids selected);
   check int "only permanent absence is ACKed during intake" 1 (List.length (pending ()))
+;;
+
+let rejection_ok = function Ok value -> value | Error detail -> fail detail
+
+let rejection_workspace_ok = function
+  | Ok value -> value
+  | Error error -> fail (Masc_domain.masc_error_to_string error)
+
+let prepare_intake_rejection () =
+  let config = Workspace.default_config (Sys.getenv "MASC_BASE_PATH") in
+  let producer = "intake-sources" in
+  let verification_id = "vrf-intake-original" in
+  let reason = "submitted evidence does not prove the requested result" in
+  let authority = Masc_domain.System_llm_agent {agent_run_id="intake-verifier"} in
+  ignore (Workspace.init config ~agent_name:(Some producer));
+  ignore (Workspace.add_task config ~title:"repair rejected work" ~priority:1
+    ~description:"exercise the durable rejection consumer boundary");
+  let backlog = rejection_ok (Workspace_backlog.read_backlog_r config) in
+  let task_id = match backlog.tasks with
+    | [task] -> task.Masc_domain.id
+    | [] | _ :: _ :: _ -> fail "expected one Task" in
+  let tasks = List.map (fun (task : Masc_domain.task) ->
+    {task with task_status=Masc_domain.AwaitingVerification
+      {assignee=producer; started_at="2026-10-23T00:00:00Z";
+       submitted_at=Masc_domain.now_iso (); verification_id}}) backlog.tasks in
+  Workspace.write_backlog config {backlog with tasks};
+  ignore (rejection_workspace_ok (Workspace.commit_verdict_r config ~authority
+    ~verdict:(Masc_domain.Verdict_rejected {reason}) ~task_id ~verification_id ()));
+  let rejection : Keeper_event_queue.completion_authority_rejection =
+    {car_task_id=task_id; car_verification_id=verification_id;
+     car_reason=reason; car_authority=authority} in
+  let stimulus =
+    { (poison_board_signal_stimulus ()) with
+      post_id=Keeper_event_queue.completion_authority_rejection_post_id rejection;
+      payload=Keeper_event_queue.Completion_authority_rejected rejection } in
+  config, task_id, verification_id, stimulus
+;;
+
+let test_delivered_rejection_remains_current_at_intake () =
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board:_ ~intake ~pending ~ack:_ ->
+  let config,task_id,verification_id,stimulus = prepare_intake_rejection () in
+  seed stimulus;
+  rejection_ok (Workspace_task_rejection_outbox.acknowledge config ~task_id ~verification_id);
+  let selected = intake () in
+  check (list string) "delivery ACK retains current consumer authority"
+    [stimulus.post_id] (admitted_ids selected);
+  check int "current rejection is projected" 1 (List.length selected.pending_board_events);
+  check int "current rejection carries its turn trigger" 1 (List.length selected.event_queue_triggers);
+  check int "admission leaves the exact queue source for turn settlement" 1 (List.length (pending ()))
+;;
+
+let test_superseded_rejection_is_retired_before_projection () =
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+  let config,task_id,_verification_id,stimulus = prepare_intake_rejection () in
+  seed stimulus;
+  ignore (rejection_workspace_ok (Workspace.transition_task_r config
+    ~agent_name:"intake-sources" ~task_id ~action:Masc_domain.Submit_for_verification
+    ~prepare_verification_request:(fun ~task ~assignee ~verification_id ~claim:_ ->
+      Verification.create_request ~base_path:config.base_path ~request_id:verification_id
+        ~task_id:task.Masc_domain.id ~output:(`Assoc []) ~criteria:[] ~worker:assignee ()
+      |> Result.map (fun _ -> ()))
+    ~notes:"note:repaired the evidence and resubmitted" ()));
+  let path = Workspace_backlog.backlog_path config in
+  let fields = Yojson.Safe.from_file path |> Yojson.Safe.Util.to_assoc in
+  Yojson.Safe.to_file path (`Assoc (List.remove_assoc "delivered_completion_rejections" fields));
+  let before = rejection_ok (Workspace_backlog.read_backlog_r config) in
+  let readable = seed_board "independent work after superseded rejection" in
+  let selected = intake () in
+  check (list string) "obsolete rejection spends no admission slot" [readable] (admitted_ids selected);
+  check int "obsolete rejection has no turn trigger" 0 (List.length selected.event_queue_triggers);
+  check int "only independent work remains queued" 1 (List.length (pending ()));
+  let after = rejection_ok (Workspace_backlog.read_backlog_r config) in
+  check bool "stale queue ACK cannot change the newer submission" true (before=after)
+;;
+
+let test_missing_or_malformed_delivered_evidence_preserves_active_rejection () =
+  List.iter (fun malformed ->
+    with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+    let config,task_id,verification_id,stimulus = prepare_intake_rejection () in
+    seed stimulus;
+    rejection_ok (Workspace_task_rejection_outbox.acknowledge config ~task_id ~verification_id);
+    let path = Workspace_backlog.backlog_path config in
+    let fields = Yojson.Safe.from_file path |> Yojson.Safe.Util.to_assoc
+      |> List.remove_assoc "delivered_completion_rejections" in
+    let document = `Assoc (if malformed then ("delivered_completion_rejections",`Null)::fields else fields) in
+    Yojson.Safe.to_file path document;
+    let before = In_channel.with_open_text path In_channel.input_all in
+    let readable = seed_board "independent source after uncertain old rejection" in
+    let selected = intake () in
+    check (list string) "uncertain rejection grants no admission but allows independent work"
+      [readable] (admitted_ids selected);
+    check int "uncertain rejection has no trigger" 0 (List.length selected.event_queue_triggers);
+    check int "old A and independent source both remain queued" 2 (List.length (pending ()));
+    check string "missing or corrupt evidence never rewrites authority" before
+      (In_channel.with_open_text path In_channel.input_all);
+    match selected.event_queue_intake_error with
+    | Some (Keeper_heartbeat_stimulus_intake.Completion_rejection_read_failed _ as error) ->
+      check bool "uncertain evidence is typed retry, not cycle failure" false
+        (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
+    | None | Some _ -> fail "uncertain old rejection lost its retry outcome") [false;true]
+;;
+
+let test_unread_rejection_authority_retains_source_and_allows_siblings () =
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+  let config,_task_id,_verification_id,stimulus = prepare_intake_rejection () in
+  seed stimulus;
+  let readable = seed_board "independent work after unread rejection authority" in
+  let path = Workspace_backlog.backlog_path config in
+  let corrupt = "not an authoritative backlog\n" in
+  Out_channel.with_open_text path (fun out -> output_string out corrupt);
+  let selected = intake () in
+  check (list string) "unread authority does not block independent sources" [readable] (admitted_ids selected);
+  check int "unread rejection is not projected" 1 (List.length selected.pending_board_events);
+  check int "unread rejection adds no trigger" 0 (List.length selected.event_queue_triggers);
+  check int "both exact queue sources remain pending" 2 (List.length (pending ()));
+  check string "unread primary bytes are preserved" corrupt (In_channel.with_open_text path In_channel.input_all);
+  match selected.event_queue_intake_error with
+  | Some (Keeper_heartbeat_stimulus_intake.Completion_rejection_read_failed _ as error) ->
+    check bool "authority read failure is retry, not a crashed cycle" false
+      (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
+  | None | Some (Keeper_heartbeat_stimulus_intake.Pending_selection_failed _
+      | Keeper_heartbeat_stimulus_intake.Connector_read_failed _
+      | Keeper_heartbeat_stimulus_intake.Connector_item_missing _
+      | Keeper_heartbeat_stimulus_intake.Ask_read_failed _
+      | Keeper_heartbeat_stimulus_intake.Job_result_unavailable _) ->
+    fail "unread canonical authority lost its typed retry outcome"
 ;;
 
 (* Comments are ordered by [created_at], and by random id when two share it,
@@ -591,6 +721,14 @@ let () =
             test_empty_observation_source_still_spends_an_admission_slot
         ; test_case "permanent absence does not spend an admission slot" `Quick
             test_permanent_absence_does_not_spend_an_admission_slot
+        ; test_case "delivered rejection remains current at intake" `Quick
+            test_delivered_rejection_remains_current_at_intake
+        ; test_case "superseded rejection retires before projection" `Quick
+            test_superseded_rejection_is_retired_before_projection
+        ; test_case "missing or malformed delivered evidence preserves active old rejection" `Quick
+            test_missing_or_malformed_delivered_evidence_preserves_active_rejection
+        ; test_case "unread rejection authority retains source and allows siblings" `Quick
+            test_unread_rejection_authority_retains_source_and_allows_siblings
         ] )
     ; ( "replies after own comment"
       , [ test_case

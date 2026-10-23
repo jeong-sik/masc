@@ -148,7 +148,7 @@ let test_task_backlog_original_bytes exe () = with_workspace (fun root _keepers 
   let tasks = Filename.concat root ".masc/tasks" in
   Fs_compat.mkdir_p tasks;
   let document intent = Printf.sprintf
-    {|{"tasks":[{"id":"task-legacy","title":"fixture","description":"","priority":1,"files":[],"created_at":"2026-07-12T23:59:00Z","status":"awaiting_verification","assignee":"producer","started_at":"2026-07-12T23:59:00Z","submitted_at":"2026-07-13T00:00:00Z","verification_id":"fixture"%s}],"last_updated":"2026-07-13T00:00:00Z","version":1}|}
+    {|{"tasks":[{"id":"task-legacy","title":"fixture","description":"","priority":1,"files":[],"created_at":"2026-07-12T23:59:00Z","status":"awaiting_verification","assignee":"producer","started_at":"2026-07-12T23:59:00Z","submitted_at":"2026-07-13T00:00:00Z","verification_id":"fixture"%s}],"delivered_completion_rejections":[],"last_updated":"2026-07-13T00:00:00Z","version":1}|}
     intent in
   List.iter (fun filename ->
     let path = Filename.concat tasks filename in

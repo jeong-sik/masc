@@ -1559,6 +1559,25 @@ let test_invalid_reference_snapshot_rejects_hidden_payload () =
         (String_util.contains_substring detail "payload-free")
     | _ -> Alcotest.fail "hidden invalid-reference payload was accepted")
 
+(* Routing is exercised with the current rejection that owns delivery, rather
+   than an arbitrary stimulus detached from the authoritative Task. *)
+let commit_rejection_for_delivery config ~producer ~verification_id ~reason ~authority =
+  ignore (W.init config ~agent_name:(Some producer));
+  ignore (W.add_task config ~title:"deliver rejected submission" ~priority:1
+    ~description:"route the current committed rejection to its producer");
+  let backlog = match Workspace_backlog.read_backlog_r config with
+    | Ok backlog -> backlog | Error detail -> Alcotest.fail detail in
+  let task = match backlog.Masc_domain.tasks with
+    | [task] -> task | _ -> Alcotest.fail "delivery fixture requires one Task" in
+  let task = {task with Masc_domain.task_status = Masc_domain.AwaitingVerification
+    {assignee=producer;started_at="2026-09-09T00:00:00Z";
+     submitted_at=Masc_domain.now_iso ();verification_id}} in
+  W.write_backlog config {backlog with tasks=[task]};
+  (match W.commit_verdict_r config ~authority ~task_id:task.id ~verification_id
+    ~verdict:(Masc_domain.Verdict_rejected {reason}) () with
+   | Ok _ -> () | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
+  task.id
+
 let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
@@ -1584,11 +1603,15 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
      with
      | Ok () -> ()
      | Error detail -> Alcotest.fail detail);
+    let task_id = commit_rejection_for_delivery config ~producer
+      ~verification_id:"vrf-rejected"
+      ~reason:"evidence did not demonstrate the required invariant"
+      ~authority:(Masc_domain.System_llm_agent {agent_run_id="system-agent-test"}) in
     let delivery =
       Masc.Completion_authority_wakeup.wake_rejected_producer
         ~config
         ~producer
-        ~task_id:"task-rejected"
+        ~task_id
         ~verification_id:"vrf-rejected"
         ~reason:"evidence did not demonstrate the required invariant"
         ~authority:(Masc_domain.System_llm_agent { agent_run_id = "system-agent-test" })
@@ -1612,6 +1635,8 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
        Alcotest.fail detail
      | Masc.Completion_authority_wakeup.Producer_identity_lookup_failed { detail; _ } ->
        Alcotest.fail detail
+     | Masc.Completion_authority_wakeup.Rejection_superseded _ ->
+       Alcotest.fail "current committed rejection was superseded"
      | Masc.Completion_authority_wakeup.Unroutable_producer { producer; _ } ->
        Alcotest.failf "producer was unexpectedly unroutable: %s" producer);
     match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
@@ -1621,7 +1646,7 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
        | [ { payload = Completion_authority_rejected rejection; _ } ] ->
          Alcotest.(check string)
            "durable rejection preserves task identity"
-           "task-rejected"
+           task_id
            rejection.car_task_id;
          Alcotest.(check string)
            "durable rejection preserves verification identity"
@@ -1663,11 +1688,15 @@ let test_system_llm_rejection_prefers_registered_producer_binding () =
               ~base_path
               keeper_name
               meta);
+         let task_id = commit_rejection_for_delivery config ~producer
+           ~verification_id:"vrf-registered-producer"
+           ~reason:"registered binding must own the rejection queue"
+           ~authority:(Masc_domain.System_llm_agent {agent_run_id="system-agent-registered"}) in
          let delivery =
            Masc.Completion_authority_wakeup.wake_rejected_producer
              ~config
              ~producer
-             ~task_id:"task-registered-producer"
+             ~task_id
              ~verification_id:"vrf-registered-producer"
              ~reason:"registered binding must own the rejection queue"
              ~authority:
@@ -1687,6 +1716,8 @@ let test_system_llm_rejection_prefers_registered_producer_binding () =
             Alcotest.fail detail
           | Masc.Completion_authority_wakeup.Producer_identity_lookup_failed { detail; _ } ->
             Alcotest.fail detail
+          | Masc.Completion_authority_wakeup.Rejection_superseded _ ->
+            Alcotest.fail "current registered rejection was superseded"
           | Masc.Completion_authority_wakeup.Unroutable_producer { producer; _ } ->
             Alcotest.failf "registered producer was unexpectedly unroutable: %s" producer);
          match
@@ -1700,7 +1731,7 @@ let test_system_llm_rejection_prefers_registered_producer_binding () =
             | [ { payload = Completion_authority_rejected rejection; _ } ] ->
               Alcotest.(check string)
                 "registered queue preserves task identity"
-                "task-registered-producer"
+                task_id
                 rejection.car_task_id
             | _ -> Alcotest.fail "registered producer rejection was not queued");
          let discovery =
@@ -1724,11 +1755,15 @@ let test_system_llm_rejection_does_not_derive_unregistered_keeper () =
     Fun.protect
       ~finally:Masc.Keeper_registry.For_testing.clear
       (fun () ->
+         let expected_task_id = commit_rejection_for_delivery config ~producer
+           ~verification_id:"vrf-unregistered-producer"
+           ~reason:"unregistered producer must remain unroutable"
+           ~authority:(Masc_domain.System_llm_agent {agent_run_id="system-agent-unregistered"}) in
          match
            Masc.Completion_authority_wakeup.wake_rejected_producer
              ~config
              ~producer
-             ~task_id:"task-unregistered-producer"
+             ~task_id:expected_task_id
              ~verification_id:"vrf-unregistered-producer"
              ~reason:"unregistered producer must remain unroutable"
              ~authority:
@@ -1740,10 +1775,12 @@ let test_system_llm_rejection_does_not_derive_unregistered_keeper () =
            Alcotest.(check string) "unroutable producer identity" producer actual;
            Alcotest.(check string)
              "unroutable task identity"
-             "task-unregistered-producer"
+             expected_task_id
              task_id
          | Masc.Completion_authority_wakeup.Producer_identity_lookup_failed { detail; _ } ->
            Alcotest.fail detail
+         | Masc.Completion_authority_wakeup.Rejection_superseded _ ->
+           Alcotest.fail "current unroutable rejection was superseded"
          | Masc.Completion_authority_wakeup.Signaled _
          | Masc.Completion_authority_wakeup.Durable_deferred _
          | Masc.Completion_authority_wakeup.Durable_wake_failed _

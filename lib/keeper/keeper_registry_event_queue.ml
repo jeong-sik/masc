@@ -7,12 +7,16 @@
     to that cell only after commit, under the queue owner lock. No coupling to
     the central registry Atomic state primitive. *)
 
-let publish_pending ~base_path name pending =
-  Keeper_event_queue_cells.publish ~base_path name pending;
+let notify_pending ~base_path name =
   Keeper_waiting_inventory_broadcast.changed
     ~keeper_name:name
     ~source:Event_queue;
   Keeper_librarian_queue_signal.changed ~base_path ~keeper_name:name
+;;
+
+let publish_pending ~base_path name pending =
+  Keeper_event_queue_cells.publish ~base_path name pending;
+  notify_pending ~base_path name
 ;;
 
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
@@ -285,6 +289,26 @@ let enqueue_durable_result ?intake_token ~base_path name stimulus =
       ~keeper_name:name
       (fun () -> enqueue_durable_result_unfenced ~base_path name stimulus)
   with
+  | Ok result -> result
+  | Error error -> Error (durable_intake_error_to_string error)
+;;
+
+let enqueue_durable_deferred_notifications_result ~intake_token ~base_path name stimulus =
+  let publish () =
+    let committed_pending = ref None in
+    Keeper_event_queue_persistence.update_checked_result
+      ~base_path ~keeper_name:name
+      ~after_commit:(fun () ->
+        match !committed_pending with
+        | None -> ()
+        | Some pending -> Keeper_event_queue_cells.publish ~base_path name pending)
+      (fun queue ->
+        match enqueue_external_decision queue stimulus with
+        | Error _ as error -> error
+        | Ok pending -> committed_pending := Some pending; Ok pending)
+    |> Result.map (fun () -> fun () -> notify_pending ~base_path name)
+  in
+  match with_durable_intake ~intake_token ~base_path ~keeper_name:name publish with
   | Ok result -> result
   | Error error -> Error (durable_intake_error_to_string error)
 ;;

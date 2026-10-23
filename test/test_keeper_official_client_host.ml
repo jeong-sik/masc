@@ -3173,7 +3173,7 @@ let () =
             `Quick test_a_carried_masc_boundary_error_keeps_no_json
         ; test_case "scope stop preserves exact terminal priority" `Quick
             test_scoped_boundary_preserves_terminal_priority
-        ; test_case "scope callback replaces provider-local counter" `Quick
+        ; test_case "explicit boundary observes every settled call" `Quick
             test_explicit_boundary_observes_each_settled_call
         ; test_case
             "dynamic tool failures do not invent a host stop"

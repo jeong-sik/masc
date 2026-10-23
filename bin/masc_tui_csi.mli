@@ -35,9 +35,9 @@ val name : parameters:string -> final:char -> string option
     uses. *)
 
 val enable_kitty_keyboard : string
-(** The escape that asks the terminal to report modifiers on every key.
-    Terminals that do not know it ignore it, which is why this is written
-    unconditionally rather than behind a capability query. *)
+(** Push the disambiguation flag for modified and ambiguous keys. Ordinary
+    text remains UTF-8. The caller applies its terminal profile before
+    enabling this mode; terminals that do not support it ignore it. *)
 
 val disable_kitty_keyboard : string
 (** Pops what {!enable_kitty_keyboard} pushed. Written on the way out: the

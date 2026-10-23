@@ -1,0 +1,24 @@
+{
+  "returnedRows": 37,
+  "total": 37,
+  "before": {
+    "kind": "schema_error",
+    "paths": [
+      "status",
+      "meta",
+      "board_address",
+      "last_failure",
+      "runtime_lane_observation"
+    ]
+  },
+  "after": {
+    "kind": "success",
+    "keepers": 37,
+    "directoryIssues": 0,
+    "listing": {
+      "total": 37,
+      "limit": 200,
+      "truncated": false
+    }
+  }
+}

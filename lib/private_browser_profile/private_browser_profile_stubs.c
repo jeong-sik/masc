@@ -10,6 +10,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -19,10 +20,10 @@
 #include <sys/syscall.h>
 #endif
 
-/* The captured holder of a write lock on a masc-private profile lock file.
-   It never keeps a descriptor for that lock file: closing any descriptor for
-   a file drops every POSIX record lock this process holds on it, so the lock
-   file's one descriptor stays with the OCaml caller. */
+/* The captured holder of a lock on a masc-private profile lock file. It never
+   keeps a descriptor for that lock file: closing any descriptor for a file
+   drops every POSIX record lock this process holds on it, so the lock file's
+   one descriptor stays with the OCaml caller. */
 struct holder {
   pid_t pid;
 #ifdef __APPLE__
@@ -50,12 +51,20 @@ static struct custom_operations operations = {
   .compare_ext = custom_compare_ext_default,
   .fixed_length = custom_fixed_length_default
 };
+
+#define OWNER_FREE 0
+#define OWNER_FAILED (-1)
+/* Held, but the kernel reports no PID this process can see, as for a holder
+   in another PID namespace. */
+#define OWNER_HIDDEN (-2)
+/* Asks for a whole-file write lock, so any conflicting lock is reported. */
 static pid_t lock_owner(int fd) {
   struct flock lock;
   memset(&lock, 0, sizeof(lock));
   lock.l_type = F_WRLCK; lock.l_whence = SEEK_SET;
-  if (fcntl(fd, F_GETLK, &lock) < 0) return -1;
-  return lock.l_type == F_UNLCK ? 0 : lock.l_pid;
+  if (fcntl(fd, F_GETLK, &lock) < 0) return OWNER_FAILED;
+  if (lock.l_type == F_UNLCK) return OWNER_FREE;
+  return lock.l_pid > 0 ? lock.l_pid : OWNER_HIDDEN;
 }
 
 /* These open without following a final symbolic link. The caller decides the
@@ -68,20 +77,41 @@ CAMLprim value masc_private_profile_open_directory(value path) {
   if (fd < 0) caml_uerror("private profile directory", path);
   CAMLreturn(Val_int(fd));
 }
-CAMLprim value masc_private_profile_open_child(value directory, value name) {
-  CAMLparam2(directory, name);
+static void check_child_name(value name) {
   const char *text = String_val(name);
   if (caml_string_length(name) != strlen(text) || strchr(text, '/') ||
       !strcmp(text, ".") || !strcmp(text, "..") || !*text) {
     errno = EINVAL; caml_uerror("private profile lock name", name);
   }
-  int fd = openat(Int_val(directory), text, O_RDWR | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+}
+/* (device, inode) of a direct child, without following a symbolic link, or
+   None when it does not exist. */
+CAMLprim value masc_private_profile_stat_child(value directory, value name) {
+  CAMLparam2(directory, name); CAMLlocal1(identity);
+  check_child_name(name);
+  struct stat info;
+  if (fstatat(Int_val(directory), String_val(name), &info, AT_SYMLINK_NOFOLLOW) < 0) {
+    if (errno == ENOENT) CAMLreturn(Val_none);
+    caml_uerror("private profile lock fstatat", name);
+  }
+  identity = caml_alloc_tuple(2);
+  Store_field(identity, 0, Val_long(info.st_dev));
+  Store_field(identity, 1, Val_long(info.st_ino));
+  CAMLreturn(caml_alloc_some(identity));
+}
+/* Opens or creates (mode 0600) a direct child read-write. */
+CAMLprim value masc_private_profile_open_child(value directory, value name) {
+  CAMLparam2(directory, name);
+  check_child_name(name);
+  int fd = openat(Int_val(directory), String_val(name),
+    O_RDWR | O_CREAT | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC, 0600);
   if (fd < 0) caml_uerror("private profile lock openat", name);
   CAMLreturn(Val_int(fd));
 }
 
 /* Returns (code, holder): 0 captured, 1 no holder, 2 the holder ended or
-   changed during capture, 3 unsupported platform, 4 unavailable. */
+   changed during capture, 3 unsupported platform, 4 unavailable, 5 held by a
+   process this one cannot see. */
 CAMLprim value masc_private_profile_capture(value lock) {
   CAMLparam1(lock); CAMLlocal2(raw, result);
   struct holder captured;
@@ -89,12 +119,13 @@ CAMLprim value masc_private_profile_capture(value lock) {
 #ifdef __linux__
   captured.pidfd = -1;
 #endif
-  raw = caml_alloc_custom(&operations, sizeof(struct holder), 0, 1);
+  raw = caml_alloc_custom_mem(&operations, sizeof(struct holder), sizeof(struct holder));
   memcpy(Data_custom_val(raw), &captured, sizeof(captured));
   int fd = Int_val(lock), outcome = 4;
   caml_enter_blocking_section();
   pid_t pid = lock_owner(fd);
-  if (pid == 0) outcome = 1;
+  if (pid == OWNER_FREE) outcome = 1;
+  else if (pid == OWNER_HIDDEN) outcome = 5;
   else if (pid > 1 && pid != getpid()) {
 #ifdef __APPLE__
     mach_port_t task = MACH_PORT_NULL;
@@ -113,8 +144,9 @@ CAMLprim value masc_private_profile_capture(value lock) {
     outcome = 3;
 #endif
     /* A lock released or taken over during capture must not authorize a
-       later signal, even if the numeric PID is reused. */
-    if (outcome == 0 && lock_owner(fd) != pid) outcome = 2;
+       later signal, even if the numeric PID is reused; a holder that ended
+       before its identity was read is the same case. */
+    if ((outcome == 0 || outcome == 4) && lock_owner(fd) != pid) outcome = 2;
     if (outcome == 0) captured.pid = pid;
   }
   if (outcome != 0) release_holder(&captured);
@@ -153,7 +185,7 @@ CAMLprim value masc_private_profile_signal(value raw, value lock, value kill) {
   CAMLreturn(Val_int(outcome));
 }
 
-/* True when two captures name the same process incarnation. */
+/* True when two unreleased captures name the same process incarnation. */
 CAMLprim value masc_private_profile_same(value left, value right) {
   CAMLparam2(left, right);
   struct holder a, b;
@@ -163,9 +195,11 @@ CAMLprim value masc_private_profile_same(value left, value right) {
 #ifdef __APPLE__
   same = same && memcmp(&a.token, &b.token, sizeof(a.token)) == 0;
 #elif defined(__linux__) && defined(SYS_pidfd_send_signal)
-  /* A PID is not reused while the process it names is alive, and the older
-     capture's pidfd answers ESRCH once that process has ended. */
-  same = same && a.pidfd >= 0 && syscall(SYS_pidfd_send_signal, a.pidfd, 0, NULL, 0) == 0;
+  /* Two live processes never share a PID, and a pidfd answers ESRCH once its
+     process has ended, so two live pidfds for one PID name one process. */
+  same = same && a.pidfd >= 0 && b.pidfd >= 0
+    && syscall(SYS_pidfd_send_signal, a.pidfd, 0, NULL, 0) == 0
+    && syscall(SYS_pidfd_send_signal, b.pidfd, 0, NULL, 0) == 0;
 #else
   same = 0;
 #endif

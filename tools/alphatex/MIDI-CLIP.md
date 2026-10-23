@@ -52,11 +52,42 @@ No 120 BPM, 960 PPQ or MIDI1 conversion is invented. Unknown/nonstandard meter
 codes remain raw source data. Untimed SysEx setup is retained opaquely; import
 does not perform a MIDI-CI/Profile negotiation with a device.
 
-Imported Clip playback, arrangement placement and physical MIDI2 endpoint
-verification remain follow-up work in
-[#45643](https://github.com/jeong-sik/masc/issues/45643). This editor does not
-fabricate a recorded session or WAV to reuse capture playback. Existing phrase,
-SMF audition and recorded UMP workflows keep their own transports.
+## Native MIDI2 audition
+
+Press `o` to choose an output, or open with `--midi-output=ID`. MIDI1-only
+destinations are identified in the chooser and refused for native Clip playback.
+Sound comes from the selected MIDI2 receiver. Space starts, pauses or resumes;
+`.` stops and releases owned notes/pedals. `0` retires the current child and
+restarts its admitted immutable full-Clip plan, including configuration delays.
+Changing an output or editing the document stops the old owner before another
+plan can open an output.
+
+`:play`, `:pause`, `:resume` and `:stop` expose the same controls.
+`:seek-event [ID]` seeks the current or named source event in a playing/paused
+snapshot, using its exact native nanoseconds. A paused seek stays silent.
+Reconstruction preserves raw note attributes, release dynamics and expression
+order; missing source state or already-reached opaque device state can refuse
+a pause/seek without changing the current playback. Future tempo/meter messages
+cannot stand in for missing state at a backward cut.
+
+If elapsed source ticks have no initial tempo, `:initial-tempo 50000000` supplies
+an explicit session value in10ns/quarter (120BPM). `:initial-tempo` clears it.
+This fills only unresolved time before a source tempo declaration and does not
+change the saved document. No default tempo is inserted.
+
+The native owner first acquires and reports its selected protocol/device/source
+and exact setup/duration. Only after the parent verifies those against the
+admitted plan does it send Start. Cancelling before that admission sends no
+source messages. Source times remain rational until their absolute deadlines
+are rounded up once; metadata and sequence time are added before rounding.
+Stop/close waits for the child and releases its notes, pedals, port and client.
+
+Profile setup needing MIDI-CI negotiation and embedded JR clocks are explicit
+playback refusals. Native Clip looping, local audio synthesis, arrangement
+placement and physical MIDI2 endpoint verification remain follow-up work in
+[#45643](https://github.com/jeong-sik/masc/issues/45643). The editor plays a Clip
+directly; it does not fabricate a recorded session or WAV to reuse capture
+playback. Phrase, SMF and recorded UMP workflows retain their own transports.
 
 Format references: [MIDI Association Clip specification](https://midi.org/midi-clip-file-specification-smf-midi-2-0)
 and [UMP 1.1.2](https://amei-music.github.io/midi2.0-docs/amei-pdf/M2-104-UM_v1-1-2_UMP_and_MIDI_2-0_Protocol_Specification.pdf).

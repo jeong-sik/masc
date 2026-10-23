@@ -748,8 +748,9 @@ notes, candidates, scope and clock units as JSON, refusing an existing file.
 
 Native `.midi2` Clip files use a separate original-clock UMP editor through the
 same `--midi-file` entrypoint. See [MIDI2 Clip experiments](MIDI-CLIP.md) for
-editing, grouped timing, save/reopen and export. Imported Clip playback remains
-follow-up work; the SMF audition described below applies to SMF sources.
+editing, grouped timing, save/reopen, export and native MIDI2 output audition.
+Clip playback requires a native MIDI2 receiver; the SMF audition below applies
+to SMF sources.
 
 Open an existing SMF or RIFF RMID without changing it:
 

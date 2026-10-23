@@ -207,8 +207,7 @@ let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
       Ok (annotate data)
   | Screenshot tab_id ->
       let* keeper_name=Option.to_result ~none:"screenshot requires an owning Keeper" keeper_name in
-      let* data=Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data
-        |> Result.map_error Browser_surface.failure_message in
+      let* data=Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data in
       Browser_screenshot.persist ~base_path ~keeper_name data
 let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool ~tool_name ~start_time json =
   let started=Mtime_clock.elapsed_ns () in

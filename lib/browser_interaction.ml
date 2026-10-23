@@ -290,26 +290,6 @@ let parse = function
     Ok { route = base.route; tab_id; frame_path; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
-let perform request =
-  let verb = Browser_lane.Page_interact {tab_id=request.tab_id; frame_path=request.frame_path;
-    expected_url=request.expected_url; action=request.action} in
-  let* selected = Browser_selection.resolve ~verb ~bound:true request.route
-    |> Result.map_error Browser_selection.error_message in
-  let* target = Browser_lane.resolve_target ~verb selected.route
-    |> Result.map_error Browser_lane.selection_error_message in
-  let* answer = Browser_lane.issue_for ~target
-    ~verb
-    ~timeout_sec:20.
-    |> Result.map_error Browser_lane.selection_error_message in
-  let selected = Browser_selection.bind_target selected target in
-  Browser_surface.decode_answer ~lane:(Browser_lane.target_lane target) answer
-  |> Result.map (function
-    | `Assoc fields -> `Assoc (["browserSelection",Browser_selection.to_json selected;
-        "lane",`String (Browser_lane.Lane_name.to_wire (Browser_lane.target_lane target))]
-        @ Browser_lane.with_connection_fields target
-            (List.filter (fun (key,_) -> not (List.mem key ["lane";"browserSelection"])) fields))
-    | value -> value)
-
 let script = {js|function interactInPage(args) {
   let effectStarted = false;
   let selectedValues;

@@ -24,26 +24,29 @@ let hook_contract () =
     | `Assoc fields -> `Assoc (("actor",`String "forged")::fields) | _ -> assert false in
   check bool "selected input hook rejects undeclared identity" true
     (Result.is_error (Hooks.before_call hooks closed_extra));
+  let automation fields=`Assoc (("lane",`String "automation")::fields) in
+  ignore (ok (Hooks.before_call hooks (automation ["command",B.verb_json B.Tabs_list])));
   check bool "command fields stay closed" true
-    (Result.is_error (Hooks.before_call hooks (`Assoc ["command",`Assoc [
+    (Result.is_error (Hooks.before_call hooks (automation ["command",`Assoc [
       "verb",`String "tabs.list";"args",`Assoc [];"other",`Bool true]])));
-  ignore (ok (Hooks.before_call hooks (`Assoc ["requiredActions",`List [`String "hover"];
-    "command",B.verb_json B.Tabs_list])));
+  (* The host chooses the browser, so the worker takes neither an automatic
+     choice nor the actions a choice must cover. *)
+  check bool "the worker needs the lane the host chose" true
+    (Result.is_error (Hooks.before_call hooks (`Assoc ["command",B.verb_json B.Tabs_list])));
+  check bool "the worker takes no requiredActions" true
+    (Result.is_error (Hooks.before_call hooks (automation ["requiredActions",`List [`String "hover"];
+      "command",B.verb_json B.Tabs_list])));
   check bool "open args still require an object" true
-    (Result.is_error (Hooks.before_call hooks (`Assoc ["command",`Assoc [
+    (Result.is_error (Hooks.before_call hooks (automation ["command",`Assoc [
       "verb",`String "page.read";"args",`List []]])));
   check bool "nested duplicate JSON fields stay invalid" true
-    (Result.is_error (Hooks.before_call hooks (`Assoc ["command",`Assoc [
+    (Result.is_error (Hooks.before_call hooks (automation ["command",`Assoc [
       "verb",`String "page.read";"args",`Assoc ["tabId",`Int 7;"tabId",`Int 8]]])));
   let no_hooks=ok (Hooks.prepare ~hooks:[] Tool.definition) in
   ignore (ok (Hooks.before_call no_hooks closed_extra));
   let reply payload : Mcp_protocol.Mcp_types.tool_result =
     {content=[];is_error=Some false;_meta=None;structured_content=Some (`Assoc [
-      "reply",`String "issue";"answer",`Assoc ["status",`String "answered";"payload",payload];
-      "browserSelection",`Assoc ["lane",`String "live";"reason",`String "explicit_browser";
-        "clientId",`String (B.client_id_to_string client_id)];
-      "browserConnection",`Assoc ["clientId",`String (B.client_id_to_string client_id);
-        "transport",`String "webdriver_bidi"]])} in
+      "reply",`String "issue";"answer",`Assoc ["status",`String "answered";"payload",payload]])} in
   ignore (ok (Hooks.after_call hooks (reply (`Assoc ["ok",`Bool true;
     "data",`Assoc ["arbitrary_browser_result",`List [`String "kept"]]]))));
   check bool "successful output must affirm ok" true
@@ -120,13 +123,19 @@ let scenario () = Eio_main.run (fun env ->
     registered ();
     let anonymous=Tool.invoke ~owner ~principal:Context.Anonymous (arguments hover) in
     check (option bool) "direct model call cannot impersonate host" (Some true) anonymous.is_error;
-    let unnamed_tab=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester")
+    let unnamed=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester")
       (`Assoc ["lane",`String "live";"command",B.verb_json (B.Page_act (B.Action.Open_tab "https://example.org/"))]) in
-    check (option bool) "explicit live open-tab must name its observed client" (Some true) unnamed_tab.is_error;
-    let unsupported=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester")
-      (`Assoc ["lane",`String "live";"clientId",`String (B.client_id_to_string client_id);
-        "requiredActions",`List [`String "touch"];"command",B.verb_json B.Tabs_list]) in
-    check (option bool) "explicit client also checks required capabilities before dispatch" (Some true) unsupported.is_error;
+    check (option bool) "a live route names the client the host chose" (Some true) unnamed.is_error;
+    let automatic=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester")
+      (`Assoc ["command",B.verb_json B.Tabs_list]) in
+    check (option bool) "the worker makes no automatic choice" (Some true) automatic.is_error;
+    let other_client=ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000009") in
+    let absent=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester")
+      (`Assoc ["lane",`String "live";"clientId",`String (B.client_id_to_string other_client);
+        "command",B.verb_json B.Tabs_list]) in
+    check bool "a client not connected here is refused before dispatch" true
+      (absent.is_error=Some true
+       && Lane_addon_tool_result.failure absent=(Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect));
     let pending=Eio.Fiber.fork_promise ~sw (fun () ->
       Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") (arguments hover)) in
     let issued=match Eio.Promise.await_exn poll with
@@ -148,10 +157,13 @@ let scenario () = Eio_main.run (fun env ->
     check bool "result accepted while tool waits" true
       (send (W.Deliver {client_id;id=issued.id;payload})=W.Receipt);
     let result=Eio.Promise.await_exn pending in
-    let binding=match result.structured_content with
-      | Some (`Assoc fields) -> ok (Masc.Browser_binding.of_json (`Assoc
-          (List.filter (fun (key,_) -> List.mem key ["browserSelection";"browserConnection"]) fields)))
-      | None|Some _ -> fail "receipt must retain its connection" in
+    check bool "the worker states no browser identity; the host adds it" true
+      (match result.structured_content with
+       | Some (`Assoc fields) -> not (List.mem_assoc "browserSelection" fields || List.mem_assoc "browserConnection" fields)
+       | None|Some _ -> false);
+    let binding=Masc.Browser_binding.of_browser
+      {Masc.Browser_selection.route=B.Live_route (Some client_id);reason=Masc.Browser_selection.Explicit_browser}
+      (Masc.Browser_selection.Connected client) in
     let projected=Masc.Browser_binding.annotate binding (`Assoc [
       "clientId",`String "forged";"clientId",`String "forged-again";
       "transport",`String "web_extension";"lane",`String "automation"]) in

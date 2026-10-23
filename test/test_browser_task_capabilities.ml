@@ -7,7 +7,11 @@ module Worker = Masc.Browser_addon_tool
 
 let test_bound_request_keeps_its_browser () =
   check bool "bound automatic request cannot be reselected by capabilities" true
-    (Selection.resolve ~required_actions:[Cap.Type_text] ~verb:Lane.Tabs_list ~bound:true Selection.Automatic
+    (Selection.choose ~required_actions:[Cap.Type_text] ~verb:Lane.Tabs_list ~bound:true
+       ~snapshot:{live_activity=Lane.Enabled;live_clients=[];
+         automation={activity=Lane.Enabled;registered=true;session=Lane.Browser_open;locate=true};
+         stagehand={activity=Lane.Enabled;registered=true;session=Lane.Browser_open;locate=true}}
+       Selection.Automatic
       = Error Selection.Binding_required)
 
 let operations names = List.map (fun name -> match Cap.operation_of_wire name with
@@ -16,10 +20,10 @@ let client transport : Lane.client_info =
   {client_id=Uuidm.v4_gen (Random.State.make_self_init ()) ();transport;browser=Lane.Firefox;
    version="0.8.0";engine_version="fixture"}
 
-(* What the browser Add-on worker chooses from (lib/browser_addon_tool.ml):
-   a connected extension host and a connected BiDi host beside an owned
-   Chromium and an owned Firefox. Their executors count every command, and
-   choosing must send none. *)
+(* What a browser Add-on worker reports in its snapshot and the host chooses
+   from (lib/browser_addon_host.ml): a connected extension host and a
+   connected BiDi host beside an owned Chromium and an owned Firefox. Their
+   executors count every command, and choosing must send none. *)
 let with_browsers ?(models=true) ?(sessions=Lane.Browser_open) run = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   let dispatched=ref 0 in
@@ -40,7 +44,8 @@ let with_browsers ?(models=true) ?(sessions=Lane.Browser_open) run = Eio_main.ru
     run ~extension ~bidi;
     check int "choosing a browser sends it no command" 0 !dispatched))
 let automatic ?(verb=Lane.Tabs_list) names =
-  Selection.resolve ~required_actions:(operations names) ~verb ~bound:false Selection.Automatic
+  Selection.choose ~required_actions:(operations names) ~verb ~bound:false
+    ~snapshot:(Masc.Browser_addon_inventory.observe ()) Selection.Automatic
 let chosen = function
   | Ok (selected : Selection.selected) -> Some selected.route
   | Error (_ : Selection.error) -> None
@@ -49,17 +54,18 @@ let none_serves = function
   | Error (Selection.Required_actions_unavailable _) -> true
   | Ok _ | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _
     | Unsupported_required_actions _) -> false
-(* The worker admits an explicit browser, then checks the target it resolved,
-   in this order (lib/browser_addon_tool.ml). The scripted Add-on the other
-   browser tests use answers commands itself, so it never runs this. *)
+(* The host admits an explicit browser, then checks the browser the snapshot
+   names, in this order (lib/browser_addon_host.ml). The scripted Add-on the
+   other browser tests use answers commands itself, so it never runs this. *)
 let admitted names route =
-  match Selection.resolve ~required_actions:(operations names) ~verb:Lane.Tabs_list ~bound:false
+  let snapshot=Masc.Browser_addon_inventory.observe () in
+  match Selection.choose ~required_actions:(operations names) ~verb:Lane.Tabs_list ~bound:false ~snapshot
           (Selection.Exact route) with
   | Error error -> Error error
   | Ok selected ->
-    (match Lane.resolve_target ~verb:Lane.Tabs_list selected.route with
+    (match Selection.target ~verb:Lane.Tabs_list ~snapshot selected.route with
      | Error _ -> fail "the explicit browser is connected"
-     | Ok target -> Selection.require_target (operations names) target)
+     | Ok browser -> Selection.require ~snapshot (operations names) browser)
 let unsupported = function
   | Error (Selection.Unsupported_required_actions _) -> true
   | Ok () | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _
@@ -128,16 +134,14 @@ let test_invalid_required_actions_reach_no_browser () =
   check bool "an accepted list goes on to find the browser Add-on" true
     (Tool_result.failure_class (invoke Cap.Tabs ["requiredActions",`List [`String "hover"]])
      = Some Tool_result.Dependency_unavailable);
+  (* The host checks requirements while it chooses; the worker runs the
+     route it was given and takes none. *)
   let command fields = Worker.command (`Assoc fields) in
-  check bool "the worker refuses a repeated requiredActions field" true
-    (Result.is_error (command ["requiredActions",`List [];"requiredActions",`List [`String "hover"];
+  check bool "the worker refuses requirements even on discovery" true
+    (Result.is_error (command ["lane",`String "automation";"requiredActions",`List [`String "hover"];
                                "command",Lane.verb_json Lane.Tabs_list]));
-  check bool "the worker refuses requirements on a status" true
-    (Result.is_error (command ["requiredActions",`List [`String "hover"];
-                               "command",Lane.verb_json Lane.Session_status]));
-  check bool "the worker accepts them on discovery" true
-    (command ["requiredActions",`List [`String "hover"];"command",Lane.verb_json Lane.Tabs_list]
-     = Ok Lane.Tabs_list)
+  check bool "the worker accepts the chosen route alone" true
+    (command ["lane",`String "automation";"command",Lane.verb_json Lane.Tabs_list] = Ok Lane.Tabs_list)
 
 let test_button_click_table () =
   let reaches backend operation = match Cap.support backend operation with

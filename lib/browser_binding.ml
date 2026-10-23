@@ -7,8 +7,11 @@ let connection_fields t=t.connection_fields
 let backend t=t.backend
 let same_connection left right = left.selected.route=right.selected.route
   && left.connection_fields=right.connection_fields
-let of_target selected target = {selected=Browser_selection.bind_target selected target;
-  connection_fields=B.target_connection_fields target;backend=Browser_capabilities.backend_of_target target}
+let of_browser selected browser = {selected=Browser_selection.bind selected browser;
+  connection_fields=(match browser with
+    | Browser_selection.Connected info -> B.live_connection_fields ~client_id:info.client_id ~transport:info.transport
+    | Owned_automation | Owned_stagehand -> [B.client_id_field,`Null]);
+  backend=Browser_selection.backend_of_browser browser}
 let object_ keys = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=List.sort String.compare keys -> Ok fields
   | _ -> Error "invalid or duplicate browser binding fields"

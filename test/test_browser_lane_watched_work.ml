@@ -67,7 +67,7 @@ let test_an_answer_delivered_as_the_timeout_passed_is_the_answer () =
   let client = connect ~sw ~clock Lane.Firefox in
   let issued =
     Eio.Fiber.fork_promise ~sw (fun () ->
-      Lane.issue_for ~target:(live client) ~verb:Lane.Tabs_list ~timeout_sec:window_s)
+      Lane.issue_for_actor ~actor:None ~target:(live client) ~verb:Lane.Tabs_list ~timeout_sec:window_s)
   in
   let command =
     match Lane.take_command ~client_info:client ~window_sec:window_s with
@@ -101,7 +101,7 @@ let test_a_command_taken_as_the_window_passed_is_delivered () =
   Eio_mock.Clock.set_time clock (Eio.Time.now clock +. window_s);
   let issued =
     Eio.Fiber.fork_promise ~sw (fun () ->
-      Lane.issue_for ~target:(live client) ~verb:Lane.Tabs_list ~timeout_sec:(window_s *. 10.0))
+      Lane.issue_for_actor ~actor:None ~target:(live client) ~verb:Lane.Tabs_list ~timeout_sec:(window_s *. 10.0))
   in
   let command =
     match Eio.Promise.await_exn taken with

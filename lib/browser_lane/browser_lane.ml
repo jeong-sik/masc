@@ -602,15 +602,18 @@ let activity_rejection_message = function
   | Lane_off lane -> "browser." ^ Lane_name.to_wire lane ^ " is off; enable it before issuing new browser work"
   | Activity_unavailable -> "Browser activity configuration is unavailable"
 
-let activity_rejection lane = function
+(* The same check against an activity the caller observed, such as the one a
+   worker reported in its snapshot. *)
+let activity_rejection_with ~activity lane = function
   | Session_close | Session_status -> None
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
   | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Page_goto _ | Page_elements _
   | Page_act _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ ->
-    match activity lane with
+    match activity with
     | Enabled -> None
     | Disabled -> Some (Lane_off lane)
     | Unobserved -> Some Activity_unavailable
+let activity_rejection lane verb = activity_rejection_with ~activity:(activity lane) lane verb
 
 let activity_refusal lane verb =
   Option.map (fun rejection -> Rejected_before_effect (activity_rejection_message rejection))
@@ -801,10 +804,6 @@ let connection_fields_of_json fields =
 let with_connection_fields target fields =
   target_connection_fields target
   @ List.filter (fun (key, _) -> not (List.mem key connection_field_names)) fields
-let target_lane = function
-  | Automation -> Lane_name.Automation
-  | Live_client _ -> Lane_name.Live
-  | Stagehand -> Lane_name.Stagehand
 ;;
 
 (* Which backend a request names. A browser client id belongs to the live
@@ -815,21 +814,6 @@ let route_lane_name = function
   | Automation_route -> Lane_name.Automation
   | Live_route _ -> Lane_name.Live
   | Stagehand_route -> Lane_name.Stagehand
-;;
-
-(* What an absent backend means on each lane, and where the operator looks. *)
-let lane_absent_message = function
-  | Lane_name.Live ->
-    Printf.sprintf
-      "no browser lane connected: the live lane needs the operator's browser running with the \
-       browser-lane extension and host (%s)"
-      (live_transport_setup_doc Web_extension)
-  | Lane_name.Automation ->
-    "the automation lane has no WebDriver: configure browser.automation.geckodriver, or \
-     read the server log for why it did not start"
-  | Lane_name.Stagehand ->
-    "the stagehand lane has no browser: configure [browser.stagehand], or \
-     read the server log for why it did not start"
 ;;
 
 (* Why a live request names no browser to send its command to. Each case has
@@ -1211,34 +1195,6 @@ let issue_for_actor ~actor ~target ~verb ~timeout_sec =
   | Automation -> Ok (issue_automation ~verb ~timeout_sec)
   | Stagehand -> Ok (issue_stagehand_with ~actor ~activity_check:(activity_refusal Lane_name.Stagehand) ~verb
       ~timeout_sec:(stagehand_server_deadline verb ~timeout_sec))
-
-let issue_for ~target ~verb ~timeout_sec =
-  issue_for_actor ~actor:None ~target ~verb ~timeout_sec
-
-(* A compound surface read owns one admission and one selected browser.
-   The closed command type cannot authorize navigation or a new request. *)
-module Read_admission : sig
-  type t
-  type command = Tabs | Page of {tab_id:int; max_chars:int option} | Capture of {tab_id:int}
-  val acquire : route -> (t, selection_error) result
-  val target : t -> target
-  val issue : t -> command -> timeout_sec:float -> (answer, selection_error) result
-end = struct
-  type t = target
-  type command = Tabs | Page of {tab_id:int; max_chars:int option} | Capture of {tab_id:int}
-  let acquire route = resolve_target ~verb:Tabs_list route
-  let target admitted = admitted
-  let issue admitted command ~timeout_sec =
-    let verb = match command with
-      | Tabs -> Tabs_list
-      | Page {tab_id;max_chars} -> Page_read {tab_id=Some tab_id;max_chars}
-      | Capture {tab_id} -> Page_capture {tab_id} in
-    let activity_check _ = None in
-    match admitted with
-    | Live_client client -> issue_live_with ~activity_check client ~verb ~timeout_sec
-    | Automation -> Ok (issue_automation_with ~activity_check ~verb ~timeout_sec)
-    | Stagehand -> Ok (issue_stagehand_with ~actor:None ~activity_check ~verb ~timeout_sec:(Some timeout_sec))
-end
 
 (** Additional observations never queue behind an existing browser command.
     Busy or missing browsers leave this optional source unavailable. The caller

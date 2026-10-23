@@ -19,10 +19,6 @@ type support = Available of invocation
   | Unsupported of string
 type entry = { operation : operation; support : support }
 
-let backend_of_target = function
-  | Browser_lane.Live_client client -> Connected client.info.transport
-  | Browser_lane.Automation -> Owned_gecko
-  | Browser_lane.Stagehand -> Owned_chromium
 let operations = [List_tabs;Open_tab;Close_tab;Activate_tab;List_windows;Create_window;Close_window;
   Navigate;Follow_link;Back;Forward;Reload;Session_lifecycle;
   Read_text;Read_html;Read_elements;Read_scene;Read_regions;Read_snapshot;Screenshot;

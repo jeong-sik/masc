@@ -8,6 +8,15 @@ let session_to_json = function
 let work_to_json (work:Browser_selection.work_browser) = `Assoc [
   "activity",activity_to_json work.activity;"registered",`Bool work.registered;
   "session",session_to_json work.session;"locate",`Bool work.locate]
+let observe () : Browser_selection.snapshot =
+  let work lane : Browser_selection.work_browser =
+    let observed = B.inventory_observation (B.server_lane_name lane) in
+    let registered = match observed.backend with B.Executor_registered value -> value | B.Live_clients _ -> false in
+    let locate=match lane with B.Server_automation -> B.automation_locate_available ()
+      | B.Server_stagehand -> B.stagehand_models_available () in
+    {activity=observed.activity;registered;session=B.server_session_observation lane;locate} in
+  {live_activity=B.activity B.Lane_name.Live;live_clients=B.connected_clients ();
+   automation=work B.Server_automation;stagehand=work B.Server_stagehand}
 let owned_to_json (snapshot:Browser_selection.snapshot) = `Assoc [
   "automation",work_to_json snapshot.automation;"stagehand",work_to_json snapshot.stagehand]
 let fields expected = function

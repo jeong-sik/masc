@@ -346,7 +346,7 @@ for line in sys.stdin:
             with open(os.path.join(a.root,"toolcalls-"+a.incarnation),"a") as out: out.write("once\n")
             event.wait();running=False
             failed=not payload["ok"]
-            value={"reply":"issue","answer":{"status":"answered","payload":payload},"browserSelection":{"lane":"live","clientId":"0c000000-0000-4000-8000-000000000001","reason":"explicit_browser"},"browserConnection":{"clientId":"0c000000-0000-4000-8000-000000000001","transport":"webdriver_bidi"}}
+            value={"reply":"issue","answer":{"status":"answered","payload":payload}}
             if os.path.exists(os.path.join(a.root,"reject-tool-output-"+a.incarnation)): value={}
             result={"content":[],"structuredContent":value,"isError":failed}
             if failed:
@@ -536,7 +536,7 @@ hooks = ["validate_input", "validate_output"]
     let view=Browser_addon_view.read host (`Assoc []) in
     check bool "view reads the original active page" true (Tool_result.is_success view);
     let data=Tool_result.data view in
-    check string "view retains worker-selected client" (Browser_lane.client_id_to_string client_id) (text "clientId" data);
+    check string "view names the client the host chose" (Browser_lane.client_id_to_string client_id) (text "clientId" data);
     check string "view projection retains page text" "hello" (text "text" (member "page" data)))
     (fun () ->
       wait clock (fun () -> calls "once\nonce\n");

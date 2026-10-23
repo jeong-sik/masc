@@ -62,7 +62,7 @@ let scenario manifest =
         ~document:(fun ~tab_id -> Driver.observe_document_if_idle driver ~tab_id)
         ~cleanup:(fun () -> Driver.close driver |> Result.map_error Driver.error_message) |> ok;
       check bool "inventory observes selected consumer, independently of provider readiness" true
-        ((Browser_selection.snapshot ()).automation.locate);
+        ((Masc.Browser_addon_inventory.observe ()).automation.locate);
       let invoke ()=Browser_addon_tool.invoke ~owner ~principal:(Lane_addon_call_context.Host_actor "reader")
         (`Assoc ["lane",`String "automation";"command",B.verb_json (B.Page_locate {tab_id=1;instruction=Some "Find Menu"})]) in
       let start ()=
@@ -115,7 +115,7 @@ let scenario manifest =
         (Owner.dispatch owner {W.incarnation;command=W.Retire}=W.Receipt);
       check bool "retirement cannot report a successful browser result" true
         ((Eio.Promise.await_exn pending).is_error=Some true);
-      check bool "retirement withdraws locate availability" false (Browser_selection.snapshot ()).automation.locate;
+      check bool "retirement withdraws locate availability" false (Masc.Browser_addon_inventory.observe ()).automation.locate;
       check int "all locate scenarios issued zero browser input" 0 !inputs)))))
 let ()=Mirage_crypto_rng_unix.use_default ();
   (* The dune stanza passes the manifest it depends on, but the targeted-suite

@@ -71,7 +71,7 @@ let test_off_and_close () = with_lane (fun _ current ->
   refused (Lane.issue_automation ~verb:Tabs_list ~timeout_sec:1.);
   refused (Lane.issue_server_lane Server_automation ~verb:(Session_open {headless=None}) ~timeout_sec:1.);
   refused (Lane.issue_stagehand ~verb:Tabs_list ~timeout_sec:None);
-  (match Lane.issue_for ~target:Stagehand ~verb:Tabs_list ~timeout_sec:1. with Ok value -> refused value | Error _ -> fail "route");
+  (match Lane.issue_for_actor ~actor:None ~target:Stagehand ~verb:Tabs_list ~timeout_sec:1. with Ok value -> refused value | Error _ -> fail "route");
   (match Lane.issue_document_if_idle ~target:Automation ~tab_id:1 ~timeout_sec:1. with Ok value -> refused value | Error _ -> fail "route");
   check int "off executes nothing" 0 (List.length !calls);
   List.iter (fun lane -> List.iter (fun verb ->
@@ -116,7 +116,7 @@ let test_off_preselected_stale () = with_lane (fun sw current ->
     | Ok (Lane.Rejected_before_effect message) -> check string "off is the stale-target remedy"
         "browser.live is off; enable it before issuing new browser work" message
     | _ -> fail "off must precede the stale-client diagnostic" in
-  check (Lane.issue_for ~target ~verb:Tabs_list ~timeout_sec:1.);
+  check (Lane.issue_for_actor ~actor:None ~target ~verb:Tabs_list ~timeout_sec:1.);
   check (Lane.issue_document_if_idle ~target ~tab_id:1 ~timeout_sec:1.))
 
 let test_accepted_finishes () = with_lane (fun sw current ->
@@ -137,10 +137,10 @@ let test_live_retains_accepted () = with_lane (fun sw current ->
   ignore (Lane.take_command ~client_info ~window_sec:0.001);
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id));
   let target = match Lane.resolve_target ~verb:Lane.Tabs_list (Live_route (Some client_id)) with Ok target -> target | Error _ -> fail "target" in
-  let work = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for ~target ~verb:Tabs_list ~timeout_sec:1.) in
+  let work = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None ~target ~verb:Tabs_list ~timeout_sec:1.) in
   let issued = match Lane.take_command ~client_info ~window_sec:1. with Ok (Some command) -> command | _ -> fail "command" in
   current := Disabled;
-  (match Lane.issue_for ~target ~verb:Tabs_list ~timeout_sec:1. with Ok value -> refused value | Error _ -> fail "route");
+  (match Lane.issue_for_actor ~actor:None ~target ~verb:Tabs_list ~timeout_sec:1. with Ok value -> refused value | Error _ -> fail "route");
   (match Lane.issue_document_if_idle ~target ~tab_id:1 ~timeout_sec:1. with Ok value -> refused value | Error _ -> fail "route");
   check bool "off does not disconnect live client" true
     (Lane.inventory_observation Lane.Lane_name.Live = {activity=Disabled;backend=Live_clients 1});

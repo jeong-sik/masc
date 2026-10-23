@@ -783,3 +783,33 @@ test('explicit FluidSynth picker selection binds its sound before rendering; a f
     assert.equal(rejected.observed.workers[0].requests.length, 0)
   } finally { rejected.signal.abort(); await rejected.done }
 })
+
+
+test('direct transport keys seek/resume the owned player, stop preparation and reject obsolete completion', async () => {
+  const requests = [], calls = [], closers = []
+  const initial = { ...editor.editorCommand(editor.newEditor(), 'note C4 0 1').editor.project, sound: { kind: 'soundfont' } }
+  const view = await controller({ initialDocument: initial, playback(request) {
+    requests.push(request)
+    let end; const completion = new Promise(resolve => { end = resolve }); closers.push(end)
+    return { ready: Promise.resolve(), completion, status() {},
+      pause() { calls.push('pause') }, resume() { calls.push('resume') }, seek(value) { calls.push(['seek', value]) },
+      stop() { calls.push('stop'); end() }, terminate() { calls.push('terminate'); end() } }
+  } })
+  try {
+    view.key('space'); await flush()
+    const worker = view.observed.workers[0], first = worker.requests.at(-1)
+    worker.emit('message', { id: first.id, ok: true, result: { path: '/synthetic/phrase.wav', clippedSamples: 0 } }); await flush()
+    requests[0].onEvent({ kind: 'playing', currentTime: 3, duration: 10 })
+    view.key('0'); await flush(); assert.deepEqual(calls, [['seek', 0]])
+    requests[0].onEvent({ kind: 'paused', currentTime: 2, duration: 10 })
+    view.key('0'); await flush(); assert.deepEqual(calls.slice(-2), [['seek', 0], 'resume'])
+    view.key(undefined, '.'); await flush(); assert.ok(calls.includes('stop'))
+    view.key('space'); await flush(); const cancelled = worker.requests.at(-1)
+    view.key(undefined, '.'); await flush(); assert.equal(Atomics.load(new Int32Array(cancelled.cancel), 0), 1)
+    worker.emit('message', { id: cancelled.id, ok: true, result: { path: '/synthetic/obsolete.wav' } }); await flush()
+    assert.equal(requests.length, 1)
+    view.key('0'); await flush(); const restart = worker.requests.at(-1)
+    assert.notEqual(restart.id, cancelled.id)
+    view.key('q'); await view.done; assert.deepEqual(view.observed.saved.at(-1), initial)
+  } finally { for (const close of closers) close(); view.signal.abort(); await view.done }
+})

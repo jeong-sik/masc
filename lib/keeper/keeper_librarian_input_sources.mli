@@ -21,6 +21,14 @@ val counterpart_snapshot_matches_selection : counterpart_snapshot -> external_af
   after:float option -> before:float -> bool
 val counterpart_snapshot_to_json : counterpart_snapshot -> Yojson.Safe.t
 val counterpart_snapshot_of_json : Yojson.Safe.t -> (counterpart_snapshot, string) result
+val snapshot_extends : original:counterpart_snapshot -> current:counterpart_snapshot -> (unit, string) result
+val validate_original_selection : counterpart_snapshot -> base_dir:string -> keeper_name:string ->
+  (unit, read_error) result
+(** Compare the original complete external log and selected raw chat rows as
+    ordered prefixes under the same original interval/offset. Later appends do
+    not extend the original frontier or recompute its dedup/projection. The
+    caller holds the actual source serialization through publication; this read
+    alone does not establish a source lock or any commit/ACK authority. *)
 (** Strict, complete data codec. Does not reread current stores. *)
 
 (** Complete counterpart evidence after [after] through [before], inclusive of

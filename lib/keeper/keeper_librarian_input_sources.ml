@@ -158,6 +158,27 @@ let capture_counterparts ~external_after ~base_dir ~keeper_name ~after ~before =
     |> Result.map_error (fun detail -> External_cursor_failed detail) in
   Ok snapshot
 
+let snapshot_extends ~(original : counterpart_snapshot) ~(current : counterpart_snapshot) =
+  let rec prefix same original current = match original, current with
+    | [], ([] | _::_) -> true
+    | _::_, [] -> false
+    | first::rest, next::tail -> same first next && prefix same rest tail in
+  if original.keeper_name <> current.keeper_name || original.after <> current.after
+     || original.before <> current.before || original.external_after <> current.external_after
+  then Error "Current counterpart selection differs from its original coordinates"
+  else if not (prefix (fun (left : Attention.item) right -> left=right) original.external_log current.external_log)
+  then Error "Original external counterpart prefix changed or disappeared"
+  else if not (prefix Chat.captured_row_same_source original.chat_rows current.chat_rows)
+  then Error "Original selected chat counterpart prefix changed or disappeared"
+  else Ok ()
+
+let validate_original_selection (original : counterpart_snapshot) ~base_dir ~keeper_name =
+  if original.keeper_name <> keeper_name then Error (External_cursor_failed "Original counterpart Keeper differs")
+  else
+    let* current = capture_counterparts_read ?external_after:original.external_after
+      ~base_dir ~keeper_name ~after:original.after ~before:original.before () in
+    snapshot_extends ~original ~current |> Result.map_error (fun detail -> External_cursor_failed detail)
+
 let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
   capture_counterparts_read ~base_dir ~keeper_name ~after ~before ()
   |> Result.map counterpart_observations

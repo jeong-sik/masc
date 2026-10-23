@@ -102,6 +102,10 @@ type package = {
   operator_asks : bool;
   (** [[world.asks] operator = true]: the package may ask the operator
       questions through its host requests (RFC operator-quiz §4.6). *)
+  web_search : bool;
+  (** [[world.web_search] = true]: the package may list secret-free
+      web-search requests through its host requests; the host runs its
+      existing provider chain and delivers the search envelope. *)
 }
 val host_requests_tool : string
 (** [lane_host_requests]: the worker lists every request it waits for
@@ -111,8 +115,9 @@ val host_result_tool : string
 (** [lane_host_result]: the host delivers one final result. *)
 
 val uses_host_requests : package -> bool
-(** A package that declares an exact output or may ask the operator waits on
-    the host, so its worker must advertise both host request tools. *)
+(** A package that declares an exact output, may ask the operator, or
+    declares [world.web_search] waits on the host, so its worker must
+    advertise both host request tools. *)
 
 val max_reply_bytes : package -> int
 (** Transport/data envelope, independent of execution isolation. *)

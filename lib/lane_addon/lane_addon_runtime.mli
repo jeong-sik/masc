@@ -12,8 +12,7 @@ val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
-val register_exact_runner : authorize_request:Lane_addon_exact.execution_authority -> Lane_addon_exact.runner -> unit
-(** Server-owned runner and mandatory host execution authority for packages'
+val register_exact_runner : authorize_request:Lane_addon_exact.execution_authority -> Lane_addon_exact.runner -> unit(** Server-owned runner and mandatory host execution authority for packages'
     exact-output requests, registered together before
     configuration maintenance. The authority binds the pure output validator
     and typed admission class to the original request; worker data cannot select
@@ -21,6 +20,14 @@ val register_exact_runner : authorize_request:Lane_addon_exact.execution_authori
     request ends its host request cycle with [no_exact_runner]. Retirement
     cancels its current exact call independently of worker cleanup; a pending
     provider outcome is not replayed and no later request is dispatched. *)
+val register_web_search_runner :
+  (query:string -> limit:int option -> (Lane_addon_search_result.result, string) result) -> unit
+(** Server-owned secret-free web-search runner for packages' [web_search]
+    requests, registered before configuration maintenance. The runner wraps
+    the host tool's provider chain — credentials, cache identity and rate
+    limit stay host-side; the envelope the port carries has no secret.
+    Without it a declared installation's web-search request ends its cycle
+    with [no_web_search_runner]. *)
 val authorize_captured_exact_dispatch : store:Lane_addon_store.t -> declaration_id:string ->
   package_id:string -> configuration_revision:string -> (unit, string) result
 (** On the existing Runtime owner, confirm a complete fresh enabled declaration,
@@ -399,6 +406,7 @@ type host_issue =
   | Exact_record_failed of { request_id : string; detail : string }
   | Ask_record_failed of { request_id : string; detail : string }
   | No_exact_runner
+  | No_web_search_runner
 (** A cycle-wide failure, or the first request-local failure in an instance's
     last host request cycle (RFC operator-quiz §4.4). Exact, ask and result
     delivery failures leave that request unresolved and do not suppress other

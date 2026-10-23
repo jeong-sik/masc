@@ -68,13 +68,14 @@ type package = {
   binding_schema : Yojson.Safe.t option;
   presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option;
-  exact_outputs : exact_output list; operator_asks : bool;
+  exact_outputs : exact_output list; operator_asks : bool; web_search : bool;
 }
 let host_requests_tool = "lane_host_requests"
 let same_execution_package left right =
   {left with ui_category=None} = {right with ui_category=None}
 let host_result_tool = "lane_host_result"
 let uses_host_requests package = package.exact_outputs <> [] || package.operator_asks
+  || package.web_search
 let max_reply_bytes (package : package) = match package.execution with
   | Container container -> container.resources.max_reply_bytes
   | Host_process specification -> specification.max_reply_bytes
@@ -245,6 +246,7 @@ let package_to_json (p : package) =
           `Assoc ["schema",output.schema;"request_schema",`Bool (match output.request_schema with
             | Package_schema_only -> false | Consumer_request_schema -> true)]) outputs)])
     @ (if p.operator_asks then ["operator_asks", `Bool true] else [])
+    @ (if p.web_search then ["web_search", `Bool true] else [])
     @ ["id", string p.id; "revision", string p.revision; "title", string p.title;
     "contributions", strings (List.map (function Observe -> "observe" | Derive -> "derive" | Act -> "act") p.contributions);
     ] @ image @ ["command", strings p.command; "directory", string p.directory;

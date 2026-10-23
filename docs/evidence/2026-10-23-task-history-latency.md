@@ -79,7 +79,10 @@ network sandbox; rerunning the same executable with loopback access passed.
 This is not a clean candidate build or exact-head CI result. Minimal CI run
 `39915980810` was separately requested on source head
 `f179140e7f67b455aa4ca0f66df551a74be1a809` for `test_h2_journal` and
-`test_tui_io_domain`; its outcome is not claimed here.
+`test_tui_io_domain`. It stopped during compilation at the unrelated Plugin
+`current_category` fragile match. The independent repair is #45426,
+merged as `123f2f821a60f5c6d2250d6dbea7f049aec1faae`; the whole history
+stack must include that fix before rerunning these selected scenarios.
 
 This checks withdrawal of an owned observation, not server progress while
 the operator remains on the same view. An unanswered peer stays pending

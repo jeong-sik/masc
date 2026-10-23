@@ -64,7 +64,8 @@ local server. The installed before-page showed Command's Gate/HITL filter;
 the candidate showed All, Intervene, Questions and Inspector without that
 filter. Clicking the real Intervene Gate shortcut changed the URL to
 `#approvals`. After lazy loading completed, the Gate surface displayed its
-empty queue, mode controls and Always rules. No decision, mode change,
+empty queue, mode controls and Always rules. The retained Lab memory page
+also rendered actual workspace memory for 40 Keepers. No decision, mode change,
 broadcast or keeper message was sent during observation.
 
 Private screenshots and local execution logs were retained outside the

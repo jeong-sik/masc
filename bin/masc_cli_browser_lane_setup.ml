@@ -3,15 +3,17 @@ module Setup = Masc.Browser_lane_setup
 module Bidi_setup = Masc.Browser_lane_bidi_setup
 module Automation_setup = Masc.Browser_lane_automation_setup
 module Addon_setup = Masc.Browser_addon_setup
+module Ego_setup = Masc.Browser_lane_ego_setup
 
-type mode = Addon | Extension | Bidi | Host | Automation
+type mode = Addon | Extension | Bidi | Ego | Host | Automation
 
-let all_modes = [ Addon; Extension; Bidi; Host; Automation ]
+let all_modes = [ Addon; Extension; Bidi; Ego; Host; Automation ]
 
 let mode_name = function
   | Addon -> "addon"
   | Extension -> "extension"
   | Bidi -> "bidi"
+  | Ego -> "ego"
   | Host -> "host"
   | Automation -> "automation"
 
@@ -108,6 +110,16 @@ let automation_plan ~modes ~runtime_config_path ~geckodriver ~browser =
       { Automation_setup.runtime_config_path; geckodriver; browser }
     |> Result.map Option.some
     |> Result.map_error Automation_setup.error_message
+
+let ego_plan ~modes ~runtime_config_path ~ego_command ~ego_space =
+  if not (List.mem Ego modes)
+  then Ok None
+  else
+    Ego_setup.plan
+      ~find_ego:Ego_setup.installed_ego
+      { Ego_setup.runtime_config_path; command = ego_command; space = ego_space }
+    |> Result.map Option.some
+    |> Result.map_error Ego_setup.error_message
 
 let print_installed ~base_path (installed : Setup.installed) =
   Printf.printf "Installed the browser lane host for %s\n" base_path;
@@ -229,6 +241,44 @@ let print_automation ~runtime_config_path plan =
   print_endline
     "  A browser that needs a login is another route: --mode bidi or --mode extension."
 
+let ego_key_names keys = String.concat ", " (List.map Ego_setup.key_name keys)
+
+let print_ego ~runtime_config_path plan =
+  let { Browser_configuration.command; space } = Ego_setup.table plan in
+  print_endline "";
+  (match Ego_setup.change plan with
+   | Ego_setup.Created -> Printf.printf "Wrote [browser.live.ego] to %s:\n" runtime_config_path
+   | Ego_setup.Updated keys ->
+     Printf.printf "Changed %s in [browser.live.ego] of %s:\n" (ego_key_names keys) runtime_config_path
+   | Ego_setup.Unchanged ->
+     Printf.printf
+       "[browser.live.ego] in %s was already there and is left as it is. To change a value, \
+        name it with --ego-command or --ego-space:\n"
+       runtime_config_path);
+  Printf.printf "  command  %s\n" command;
+  Printf.printf "  space    %s\n" space;
+  Option.iter (fun (version, engine) -> Printf.printf "  answered ego lite %s, Chromium %s\n" version engine)
+    (Ego_setup.versions plan);
+  print_endline "";
+  print_endline "Next, for the ego lite task space:";
+  if not (Ego_setup.lane_enabled plan)
+  then
+    print_endline
+      "  [browser.live] enabled = false in runtime.toml keeps the live lane off, so the \
+       connection takes no command. Turn it on first.";
+  print_endline
+    "  Restart the MASC server to load runtime.toml. A browser Add-on that was attached \
+     before keeps its old settings until it is detached; the server attaches its declaration \
+     again on the next maintenance pass. The Add-on then opens the task space and lists it as \
+     ego lite among the live connections. Detaching ends the space.";
+  Printf.printf
+    "  If ego lite holds a task space named %s that you opened yourself, the Add-on does not \
+     start; name another with --ego-space.\n"
+    space;
+  print_endline
+    "Keepers act only on the pages the space opens, with the cookies of your ego lite \
+     profile: they can read and post as you on the sites you are logged in to there."
+
 (* Every route runs in the browser Add-on, so every mode declares it. *)
 let print_addon (installed : Addon_setup.installed) =
   Printf.printf "Browser Add-on package  %s (%s)\n" installed.package_directory
@@ -326,6 +376,8 @@ let install
       ~port
       ~geckodriver
       ~browser
+      ~ego_command
+      ~ego_space
   =
   (* Every refusal of the modes' own steps comes before the first write. The
      browser Add-on step refuses what it can there too, and the rest after it
@@ -338,11 +390,12 @@ let install
     let* automation =
       refused (automation_plan ~modes ~runtime_config_path ~geckodriver ~browser)
     in
-    Ok (addon, extension, bidi, automation)
+    let* ego = refused (ego_plan ~modes ~runtime_config_path ~ego_command ~ego_space) in
+    Ok (addon, extension, bidi, automation, ego)
   in
   match planned with
   | Error (status, message) -> refuse_with status message
-  | Ok (addon, extension, bidi, automation) ->
+  | Ok (addon, extension, bidi, automation, ego) ->
     (* Install the requested host assets, then the browser Add-on package and
        its declaration, before writing configuration tables. A later refusal
        retains those completed assets. Setup does not attach the browser
@@ -402,17 +455,36 @@ let install
               |> Result.map_error Automation_setup.error_message
             | None, _ | _, None -> Ok automation
           in
-          (match
-             Result.bind automation (fun plan ->
-               match plan with
-               | None -> Ok None
-               | Some plan ->
-                 Automation_setup.apply plan
-                 |> Result.map (fun () -> Some plan)
-                 |> Result.map_error Automation_setup.error_message)
-           with
+          let automation =
+            Result.bind automation (fun plan ->
+              match plan with
+              | None -> Ok None
+              | Some plan ->
+                Automation_setup.apply plan
+                |> Result.map (fun () -> Some plan)
+                |> Result.map_error Automation_setup.error_message)
+          in
+          (* The ego table was planned against the file before the bidi and
+             automation tables were written, so it takes the revision of what
+             the file holds now, as the automation plan does. *)
+          let ego =
+            Result.bind automation (fun automation ->
+              let written = Option.is_some tabled || Option.is_some automation in
+              match ego with
+              | None -> Ok None
+              | Some plan ->
+                let* plan =
+                  if written
+                  then Ego_setup.replan plan |> Result.map_error Ego_setup.error_message
+                  else Ok plan
+                in
+                Ego_setup.apply plan
+                |> Result.map (fun () -> Some plan)
+                |> Result.map_error Ego_setup.error_message)
+          in
+          (match Result.bind ego (fun ego -> Result.map (fun automation -> automation, ego) automation) with
            | Error message -> refuse message
-           | Ok automation ->
+           | Ok (automation, ego) ->
              Option.iter
                (fun (installed : Setup.installed) ->
                   Option.iter print_extension_steps installed.extension)
@@ -423,6 +495,7 @@ let install
                   print_bidi_steps plan)
                tabled;
              Option.iter (print_automation ~runtime_config_path) automation;
+             Option.iter (print_ego ~runtime_config_path) ego;
              if modes = [ Host ] then (print_endline ""; print_endline print_host_only);
              if List.mem Extension modes && List.mem Bidi modes
              then (print_endline ""; print_endline print_both_routes);
@@ -451,6 +524,8 @@ let run
       ~port
       ~geckodriver
       ~browser
+      ~ego_command
+      ~ego_space
   =
   let modes = List.filter (fun mode -> List.mem mode requested) all_modes in
   match
@@ -465,7 +540,9 @@ let run
       ; "--port", Option.is_some port, [ Bidi ]
       ; "--geckodriver", Option.is_some geckodriver, [ Automation ]
       ; "--browser", Option.is_some browser, [ Automation ]
-      ; "--no-addon", no_addon, [ Extension; Bidi; Host; Automation ]
+      ; "--ego-command", Option.is_some ego_command, [ Ego ]
+      ; "--ego-space", Option.is_some ego_space, [ Ego ]
+      ; "--no-addon", no_addon, [ Extension; Bidi; Ego; Host; Automation ]
       ]
   with
   | Some message -> refuse message
@@ -491,4 +568,6 @@ let run
          ~profile
          ~port
          ~geckodriver
-         ~browser)
+         ~browser
+         ~ego_command
+         ~ego_space)

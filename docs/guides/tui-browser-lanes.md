@@ -101,8 +101,11 @@ observation reports its owned Firefox and in-process peer
 ([how](../design/browser-bidi-live-host.md)). The external host record remains
 independent of that worker. Rows refresh with the connection list (`r`).
 
-An ego lite connection also belongs to the attached browser Add-on. The
-operator names it in `runtime.toml` and attaches the Add-on again:
+An ego lite connection also belongs to the attached browser Add-on. On a Mac
+with ego lite installed and its onboarding finished,
+`masc browser-lane-setup --mode ego --base-path <workspace>` finds `ego-browser`,
+checks that it answers, and writes the table into `runtime.toml`. Restart the
+server afterwards. Written by hand, the table is:
 
 ```toml
 [browser.live.ego]

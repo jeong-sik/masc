@@ -2,7 +2,7 @@
     connecting or a page being read: it says a program answers, not that
     runtime.toml names it or that the server has restarted since. *)
 
-type program = Geckodriver | Firefox
+type program = Geckodriver | Firefox | Ego_browser
 
 val name : program -> string
 (** The name the program carries in the readiness JSON and in
@@ -11,8 +11,9 @@ val name : program -> string
 val candidates : program -> string list
 (** Executables tried in order. A bare name is looked up on [PATH]; a path is
     used as written. Firefox on macOS lives inside its application bundle and
-    is on no [PATH], so its bundle locations are listed. A [HOME] that is not an
-    absolute path contributes no bundle location. *)
+    is on no [PATH], so its bundle locations are listed. ego lite's onboarding
+    links [ego-browser] into [~/.local/bin], which is listed after [PATH]. A
+    [HOME] that is not an absolute path contributes no location. *)
 
 type check =
   | Missing of string
@@ -45,6 +46,16 @@ val probe : string -> check
     found on [PATH]. A program that needs a variable the scrub drops (such as
     [DISPLAY]) to print its version reports [Failed]. *)
 
+val ego_versions : string -> (string * string, string) result
+(** ego lite's version and its Chromium's, read from what
+    [ego-browser --version] printed. *)
+
+val probe_program : program -> string -> check
+(** {!probe}, and what [program]'s answer must say. geckodriver and Firefox
+    answer by exiting 0. An [ego-browser] must also name ego lite's and
+    Chromium's versions ({!ego_versions}); one that exits 0 without them is
+    [Failed], as an ego lite whose onboarding is not finished is. *)
+
 val first_answer : label:string -> string list -> check
 (** Walk the executables in order and stop at the first that {!probe} reports
     [Started]; a later one is never started. When none answers, the first
@@ -52,7 +63,8 @@ val first_answer : label:string -> string list -> check
     [Missing] for an empty list. *)
 
 val observe : program -> check
-(** {!first_answer} over {!candidates}. *)
+(** {!first_answer} over {!candidates}, with {!probe_program}'s rule for
+    what counts as an answer. *)
 
 val available : check -> bool
 val path : check -> string option

@@ -59,18 +59,6 @@ let run_failure_message = function
 
 let result_marker = "masc-ego-result "
 
-(* ego-browser 0.6.0.16 prints its version on the first line and Chromium's
-   on an indented "chromium" line. *)
-let version_of_output output =
-  let lines = List.map String.trim (String.split_on_char '\n' output) in
-  let after prefix = List.find_map (fun line ->
-    if String.starts_with ~prefix line
-    then Some (String.trim (String.sub line (String.length prefix) (String.length line - String.length prefix)))
-    else None) lines in
-  match after "ego-browser ", after "chromium " with
-  | Some version, Some engine when version <> "" && engine <> "" -> Ok (version, engine)
-  | _ -> Error ("ego-browser --version named no ego lite and Chromium versions: " ^ tail output)
-
 (* A page the space manages has a label, p1, p2 and on, that names it for
    the life of the space. A tab the operator opened there has no label until
    it is adopted, only Chromium's target id. ego says not to keep a target id

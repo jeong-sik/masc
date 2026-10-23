@@ -144,6 +144,21 @@ let test_browser_tools_use_the_selected_package_manager () =
       (List.length (P.catalog ~host:S.Unsupported ~distribution:P.Other dependency)))
     [P.Geckodriver; P.Firefox]
 
+(* ego lite installs as a macOS app whose onboarding puts ego-browser on PATH,
+   so a mac gets its download page and nothing to run; it has no Linux build. *)
+let test_ego_lite_is_a_download_page_on_a_mac_only () =
+  (match P.catalog ~host:(mac S.Arm64 26) ~distribution:P.Other P.Ego_browser with
+   | [action] ->
+     check string "the download page" "ego_lite_download" action.id;
+     check bool "opening a page needs no administrator" false action.requires_admin;
+     (match action.action_effect with
+      | P.Open_official_installer {url; _} -> check string "ego lite's own site" "https://lite.ego.app/" url
+      | _ -> fail "a mac opens ego lite's page")
+   | actions -> failf "a mac offers %d actions for ego-browser" (List.length actions));
+  List.iter (fun host ->
+    check int "nothing elsewhere" 0 (List.length (P.catalog ~host ~distribution:P.Ubuntu P.Ego_browser)))
+    [S.Linux S.X64; S.Unsupported]
+
 (* An install action for these never writes runtime.toml: naming the executable
    there needs the path the install leaves behind. *)
 let test_browser_tool_actions_write_no_file () =
@@ -153,7 +168,7 @@ let test_browser_tool_actions_write_no_file () =
         check (option string) "no file is left behind" None action.writes)
         (P.catalog ~host ~distribution:P.Ubuntu dependency))
       [mac S.Arm64 26; S.Linux S.X64])
-    [P.Geckodriver; P.Firefox]
+    [P.Geckodriver; P.Firefox; P.Ego_browser]
 
 module B = Masc.Browser_runtime_dependencies
 
@@ -329,7 +344,52 @@ let test_firefox_bundle_locations_follow_an_absolute_home () =
         (List.for_all (fun c -> String.equal c "firefox" || not (Filename.is_relative c))
            (B.candidates B.Firefox))))
     [""; "relative/home"];
-  check (list string) "geckodriver is a bare name" ["geckodriver"] (B.candidates B.Geckodriver)
+  check (list string) "geckodriver is a bare name" ["geckodriver"] (B.candidates B.Geckodriver);
+  with_env "HOME" "/Users/fixture" (fun () ->
+    check (list string) "ego-browser on PATH, then where ego lite's onboarding links it"
+      ["ego-browser"; "/Users/fixture/.local/bin/ego-browser"] (B.candidates B.Ego_browser));
+  List.iter (fun home ->
+    with_env "HOME" home (fun () ->
+      check (list string) "no relative place for ego-browser" ["ego-browser"] (B.candidates B.Ego_browser)))
+    [""; "relative/home"]
+
+let finished_ego = "#!/bin/sh\necho 'ego-browser 0.6.0.16'\necho '  chromium 154.0.8037.44'\n"
+(* What an ego lite whose onboarding is not finished is taken to print. *)
+let unfinished_ego = "#!/bin/sh\necho 'ego-browser 0.6.0.16'\n"
+
+(* An ego-browser answers only by naming ego lite's and Chromium's versions:
+   the setup checklist, [--mode ego] and the worker read the same rule. One
+   that exits 0 without them is Failed, and the walk goes on past it. *)
+let test_an_ego_browser_answers_only_with_its_versions () =
+  (match B.ego_versions "ego-browser 0.6.0.16\n  chromium 154.0.8037.44\n  node v24.21.0\n" with
+   | Ok (version, engine) ->
+     check string "ego lite" "0.6.0.16" version; check string "Chromium" "154.0.8037.44" engine
+   | Error detail -> fail detail);
+  check bool "an answer naming no Chromium is refused" true
+    (Result.is_error (B.ego_versions "ego-browser 0.6.0.16\n"));
+  with_directory (fun path_dir ->
+    let unfinished = write_program path_dir "ego-browser" unfinished_ego in
+    (match B.probe_program B.Ego_browser unfinished with
+     | B.Failed {status = Unix.WEXITED 0; detail; _} ->
+       check bool "it says which versions were missing" true
+         (String.starts_with ~prefix:"ego-browser --version named no ego lite" detail)
+     | B.Started _ | B.Failed _ | B.Missing _ -> fail "an ego-browser without its versions answered");
+    check bool "the same output answers for geckodriver" true
+      (B.available (B.probe_program B.Geckodriver unfinished));
+    with_directory (fun home ->
+      let local = Filename.concat home ".local" in
+      let bin = Filename.concat local "bin" in
+      Unix.mkdir local 0o700; Unix.mkdir bin 0o700;
+      let finished = write_program bin "ego-browser" finished_ego in
+      Fun.protect ~finally:(fun () -> Sys.remove finished; Unix.rmdir bin; Unix.rmdir local) (fun () ->
+        with_env "PATH" path_dir (fun () ->
+          with_env "HOME" home (fun () ->
+            match B.observe B.Ego_browser with
+            | B.Started {path; _} -> check string "the walk goes on past the unfinished one" finished path
+            | B.Failed _ | B.Missing _ -> fail "the finished ego-browser in ~/.local/bin was not found");
+          with_env "HOME" "" (fun () ->
+            check bool "the unfinished one alone is not available" false
+              (B.available (B.observe B.Ego_browser)))))))
 
 (* Same words as the PDF and presentation checks, because one reader walks all
    three. *)
@@ -986,6 +1046,10 @@ let () = run "prerequisite actions" ["user-selected plans",[
     test_the_first_program_that_answers_ends_the_walk;
   test_case "Firefox bundle locations follow an absolute HOME" `Quick
     test_firefox_bundle_locations_follow_an_absolute_home;
+  test_case "ego lite is a download page on a mac only" `Quick
+    test_ego_lite_is_a_download_page_on_a_mac_only;
+  test_case "an ego-browser answers only with its versions" `Quick
+    test_an_ego_browser_answers_only_with_its_versions;
   test_case "the readiness JSON uses the shared status words" `Quick
     test_the_readiness_json_uses_the_shared_status_words;
   test_case "effects are not readiness" `Quick test_completion_never_means_ready;

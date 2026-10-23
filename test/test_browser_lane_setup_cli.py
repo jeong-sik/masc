@@ -73,6 +73,18 @@ def fake_firefox(root):
     return path
 
 
+# What ego lite 0.6.0.16 prints for --version once its onboarding is done.
+EGO_VERSION = "ego-browser 0.6.0.16\n  chromium 154.0.8037.44\n  node v24.21.0"
+
+
+def fake_ego(directory, script=None):
+    path = directory / "ego-browser"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n" + (script or "printf '%s\\n' '" + EGO_VERSION.replace("\n", "' '") + "'") + "\n")
+    path.chmod(0o755)
+    return path
+
+
 class BrowserLaneSetupCommand(unittest.TestCase):
     def scratch(self):
         temporary = tempfile.TemporaryDirectory(prefix="lane cli ' ")
@@ -348,6 +360,68 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         second = masc(root, *arguments)
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual([path.read_bytes() for path in files], before)
+
+    # Three tables of one command: each later one is planned again against
+    # the file the earlier ones wrote.
+    def test_ego_beside_bidi_and_automation_writes_all_three_tables(self):
+        root = self.scratch()
+        base = workspace(root)
+        driver, firefox, ego = fake_geckodriver(root), fake_firefox(root), fake_ego(root / "ego")
+        arguments = ("--mode", "automation", "--mode", "bidi", "--mode", "ego", "--binary", str(HOST),
+                     "--base-path", str(base), "--geckodriver", str(driver), "--firefox", str(firefox),
+                     "--profile", str(root / "keeper profile"), "--ego-command", str(ego), "--ego-space", "work")
+        first = masc(root, *arguments)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        text = runtime_toml(base).read_text()
+        for header in ("[browser.automation]", "[browser.live.bidi]", "[browser.live.ego]"):
+            self.assertIn(header, text.splitlines())
+        self.assertIn('command = "' + str(ego) + '"', text)
+        self.assertIn('space = "work"', text)
+        self.assertIn("answered ego lite 0.6.0.16, Chromium 154.0.8037.44", first.stdout)
+        before = runtime_toml(base).read_bytes()
+        second = masc(root, *arguments)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(runtime_toml(base).read_bytes(), before)
+
+    # ego lite's onboarding links ego-browser into ~/.local/bin, which a
+    # setup started from another shell may not have on PATH.
+    def test_ego_is_found_where_its_onboarding_links_it(self):
+        root = self.scratch()
+        base = workspace(root)
+        ego = fake_ego(root / "home/.local/bin")
+        result = masc(root, "--mode", "ego", "--base-path", str(base))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = runtime_toml(base).read_text()
+        self.assertIn('command = "' + str(ego) + '"', text)
+        self.assertIn('space = "masc"', text)
+        self.assertFalse(lane(base).exists(), "ego installs no host")
+        self.assertTrue((base / ".masc/packages/browser").is_dir(), "every route declares the browser Add-on")
+
+    def test_an_ego_whose_onboarding_is_not_finished_writes_nothing(self):
+        root = self.scratch()
+        base = workspace(root)
+        before = runtime_toml(base).read_text()
+        ego = fake_ego(root / "ego", script="echo 'ego-browser: not signed in'; exit 3")
+        result = masc(root, "--mode", "ego", "--base-path", str(base), "--ego-command", str(ego))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("Finish ego lite's onboarding", result.stderr)
+        self.assertEqual(runtime_toml(base).read_text(), before)
+        self.assertFalse((base / ".masc/packages/browser").exists(), "nothing was written first")
+
+    def test_ego_options_are_refused_with_the_other_modes(self):
+        root = self.scratch()
+        base = workspace(root)
+        before = runtime_toml(base).read_text()
+        for arguments, sentence in (
+            (("--mode", "bidi", "--ego-space", "work"), "--ego-space only applies with --mode ego"),
+            (("--mode", "automation", "--ego-command", "/bin/sh"), "--ego-command only applies with --mode ego"),
+            (("--mode", "ego", "--firefox", "/bin/sh"), "--firefox only applies with --mode bidi"),
+        ):
+            with self.subTest(arguments):
+                result = masc(root, "--base-path", str(base), *arguments)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(sentence, result.stderr)
+                self.assertEqual(runtime_toml(base).read_text(), before)
 
     def test_automation_that_cannot_be_planned_installs_nothing_for_the_other_route(self):
         root = self.scratch()

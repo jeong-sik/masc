@@ -120,7 +120,7 @@ space = "masc"
 ```
 
 - 경로는 코드에 적지 않는다. 운영자가 적는다.
-- `browser-lane-setup` 은 `ego-browser --version` 이 답하는지만 확인하고 이 표를 쓴다.
+- `masc browser-lane-setup --mode ego` 가 이 표를 쓴다. `ego-browser` 를 PATH, 그다음 `~/.local/bin`(ego lite 첫 실행이 링크를 두는 곳)에서 찾고, `--version` 이 ego lite 와 Chromium 버전을 답할 때만 쓴다. 답하지 않는 ego 를 적으면 browser Add-on worker 가 뜨지 못해서다.
 - live 를 끄면(`[browser.live] enabled = false`) ego 연결도 새 명령을 받지 않는다.
 - `[browser.live]` 표가 받는 키(`enabled`, `bidi`)에 `ego` 를 더한다.
 

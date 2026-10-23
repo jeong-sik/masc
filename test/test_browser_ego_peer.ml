@@ -66,14 +66,6 @@ let before_effect name = function
   | Ok _ -> failf "%s was served" name
   | Error (Live.Partial_failure _ | Live.Outcome_unknown _) -> failf "%s failed after an effect" name
 
-let test_version () =
-  (match Peer.version_of_output "ego-browser 0.6.0.16\n  chromium 154.0.8037.44\n  node v24.21.0\n" with
-   | Ok (version, engine) ->
-     check string "ego lite" "0.6.0.16" version; check string "Chromium" "154.0.8037.44" engine
-   | Error detail -> fail detail);
-  check bool "an answer naming no Chromium is refused" true
-    (Result.is_error (Peer.version_of_output "ego-browser 0.6.0.16\n"))
-
 let test_the_space_opens_by_name_and_is_held_by_number () =
   let spaces = ref [] in
   let run ~window_s script = let sent = sent_of ~window_s script in
@@ -592,7 +584,6 @@ let test_the_peer_serves_what_the_lane_table_says () =
 let () =
   run "browser_ego_peer" [
     "ego", [
-      test_case "the version line names ego lite and Chromium" `Quick test_version;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
       test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;

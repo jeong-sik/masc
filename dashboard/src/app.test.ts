@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
-import { act, fireEvent, waitFor } from '@testing-library/preact'
+import { act, fireEvent } from '@testing-library/preact'
 import {
   App,
   shouldBootstrapCommandPaletteShortcut,
@@ -115,7 +115,6 @@ describe('App v2 header chrome', () => {
     expect(health.style.display).toBe('none')
     expect(shouldShowDashboardHealthStrip('overview')).toBe(false)
     expect(shouldShowDashboardHealthStrip('keepers')).toBe(false)
-    expect(shouldShowDashboardHealthStrip('cockpit')).toBe(true)
   })
 
   it('renders v2 header structural classes', () => {
@@ -267,14 +266,6 @@ describe('App v2 header chrome', () => {
     expect(main?.style.overflowY).toBe('auto')
   })
 
-  it('renders health chips with the shared chip class on non-primary diagnostics', () => {
-    route.value = { tab: 'cockpit', params: {}, postId: null }
-    renderApp()
-    const chip = container.querySelector('.dashboard-health-chip')
-    expect(chip).not.toBeNull()
-    expect((container.querySelector('[data-testid="dashboard-health-strip"]') as HTMLElement).style.display).not.toBe('none')
-  })
-
   it('sets data-mobile based on the viewport width', () => {
     window.innerWidth = 900
     renderApp()
@@ -369,56 +360,6 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).toBeNull()
   })
 
-  it('keeps floating status and focus chrome on non-rail surfaces', () => {
-    window.innerWidth = 1280
-    // `command` and `lab` joined V2_PRIMARY_SURFACE_IDS in #29798 (the
-    // prototype rail carries the 명령·Lab group), so they render the v2 shell
-    // and suppress floating chrome. `cockpit` stays off the rail.
-    window.location.hash = '#cockpit'
-    route.value = { tab: 'cockpit', params: {}, postId: null }
-    renderApp()
-
-    expect(container.querySelector('[data-testid="dashboard-status-tray"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).not.toBeNull()
-
-    // On the now-primary 명령 surface the v2 rail renders and the floating
-    // chrome is gone (the top bar carries the operational facts there).
-    window.location.hash = '#command/operations'
-    route.value = { tab: 'command', params: { section: 'operations' }, postId: null }
-    renderApp()
-    expect(container.querySelector('nav.v2-nav')).not.toBeNull()
-    expect(container.querySelector('[data-testid="dashboard-status-tray"]')).toBeNull()
-  })
-
-  it('focus mode does not permanently hide the rail', async () => {
-    window.innerWidth = 1280
-    // The focus toggle rides the floating chrome, so exercise it on `cockpit`;
-    // `command` became a rail surface in #29798 and no longer carries the toggle.
-    window.location.hash = '#cockpit'
-    route.value = { tab: 'cockpit', params: {}, postId: null }
-    renderApp()
-
-    // Rail (now `nav.v2-nav`) should be visible initially.
-    expect(container.querySelector('nav.v2-nav')).not.toBeNull()
-
-    const focusButton = container.querySelector('[data-testid="dashboard-focus-mode-toggle"]') as HTMLElement | null
-    expect(focusButton).not.toBeNull()
-    focusButton!.click()
-
-    // Wait for Preact to re-render after the persistent signal update. Focus mode
-    // (compact chrome) omits the rail entirely.
-    await waitFor(() => {
-      expect(container.querySelector('nav.v2-nav')).toBeNull()
-    })
-    expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).not.toBeNull()
-
-    // Toggling back restores the rail.
-    focusButton!.click()
-    await waitFor(() => {
-      expect(container.querySelector('nav.v2-nav')).not.toBeNull()
-    })
-  })
-
   it('keeps the command palette chunk out of the initial dashboard render', () => {
     renderApp()
 
@@ -494,12 +435,7 @@ describe('shouldSuppressFloatingChrome', () => {
       mobileDrawerOpen: false,
     })).toBe(true)
     expect(shouldSuppressFloatingChrome({
-      currentTab: 'cockpit',
-      keeperDetailMode: false,
-      mobileDrawerOpen: false,
-    })).toBe(false)
-    expect(shouldSuppressFloatingChrome({
-      currentTab: 'cockpit',
+      currentTab: 'overview',
       keeperDetailMode: false,
       mobileDrawerOpen: true,
     })).toBe(true)

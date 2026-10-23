@@ -16,9 +16,6 @@ async function loadLab() {
   vi.doMock('./harness-health', () => ({
     HarnessHealth: () => html`<div data-testid="lab-harness">Harness</div>`,
   }))
-  vi.doMock('./lab-perf', () => ({
-    LabPerf: () => html`<div data-testid="lab-performance">Performance</div>`,
-  }))
   vi.doMock('./memory-subsystems', () => ({
   }))
   vi.doMock('./memory/keeper-memory-health', () => ({
@@ -47,7 +44,6 @@ describe('Lab', () => {
     vi.doUnmock('../router')
     vi.doUnmock('./tools/tools-main')
     vi.doUnmock('./harness-health')
-    vi.doUnmock('./lab-perf')
     vi.doUnmock('./memory/keeper-memory-health')
     vi.doUnmock('./common/surface-header')
   })
@@ -67,14 +63,6 @@ describe('Lab', () => {
 
     render(html`<${Lab} />`, container)
     expect(container.querySelector('[data-testid="lab-harness"]')).not.toBeNull()
-  })
-
-  it('renders performance section', async () => {
-    route.value.params = { section: 'performance' }
-    const { Lab } = await loadLab()
-
-    render(html`<${Lab} />`, container)
-    expect(container.querySelector('[data-testid="lab-performance"]')).not.toBeNull()
   })
 
   it('renders keeper memory health section', async () => {

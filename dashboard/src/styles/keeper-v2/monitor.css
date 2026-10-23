@@ -170,7 +170,6 @@
 .lab-srcline .dim { color: var(--text-dim); }
 .lab-x { margin-left: 6px; font-family: var(--font-mono); font-size: var(--fs-9); letter-spacing: 0.08em; text-transform: uppercase; color: var(--status-warn); }
 .lab-fb { margin-top: 3px; font-size: 9.5px; color: var(--status-bad); }
-.lab-perf-ctl { display: flex; align-items: center; gap: 12px; }
 
 .cmd-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
 .cmd-actions { display: flex; align-items: center; gap: 12px; }

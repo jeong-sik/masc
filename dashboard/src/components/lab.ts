@@ -2,7 +2,6 @@ import { html } from 'htm/preact'
 import { route } from '../router'
 import { Tools } from './tools/tools-main'
 import { HarnessHealth } from './harness-health'
-import { LabPerf } from './lab-perf'
 import { KeeperMemoryHealth } from './memory/keeper-memory-health'
 import { WorkspaceMemoryContextPanel } from './memory/workspace-memory-context'
 import { WorkspaceMemoryLedgerPanel } from './memory/workspace-memory-ledger'
@@ -12,14 +11,12 @@ import { SurfaceHeader } from './common/surface-header'
 type LabSection =
   | 'tools'
   | 'harness'
-  | 'performance'
   | 'keeper-memory-health'
 
 function currentSection(): LabSection {
   const section = route.value.params.section
   if (
     section === 'harness'
-    || section === 'performance'
     || section === 'keeper-memory-health'
   ) {
     return section
@@ -40,10 +37,6 @@ export function Lab() {
 
       ${section === 'harness' ? html`
         <${HarnessHealth} />
-      ` : null}
-
-      ${section === 'performance' ? html`
-        <${LabPerf} />
       ` : null}
 
       ${section === 'keeper-memory-health' ? html`

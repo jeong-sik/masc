@@ -7,7 +7,7 @@ import { SurfaceHeader } from './common/surface-header'
 import { Ops } from './ops'
 import { ApprovalsSurface } from './approvals/approvals-surface'
 import { KeeperAsksSurface } from './keeper-asks/keeper-asks-surface'
-import { LabInspector } from './lab-inspector'
+import { ServerConfig } from './server-config'
 import { replaceRoute, route } from '../router'
 
 type OpsView = 'default' | 'ops' | 'gate' | 'asks' | 'inspector'
@@ -60,7 +60,7 @@ export function OperationsPanel() {
       : view === 'asks'
         ? html`<${KeeperAsksSurface} />`
       : view === 'inspector'
-        ? html`<${LabInspector} />`
+        ? html`<${ServerConfig} />`
       : html`
             <${Ops} />
             <div class="mt-4">

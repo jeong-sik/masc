@@ -78,7 +78,6 @@ const LazyConnectors = lazy(async () => ({ default: (await import('./connector-s
 const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab }))
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell')).IdeShell }))
-const LazyCockpit = lazy(async () => ({ default: (await import('./cockpit/cockpit')).Cockpit }))
 const LazySettingsSurface = lazy(async () => ({ default: (await import('./settings-surface')).SettingsSurface }))
 const LazyApprovals = lazy(async () => ({ default: (await import('./approvals/approvals-surface')).ApprovalsSurface }))
 const LazyRegistrySurface = lazy(async () => ({ default: (await import('./registry/registry-surface')).RegistrySurface }))
@@ -853,7 +852,6 @@ function dashboardRouteBoundaryKey(routeState: RouteState): string {
 export const TAB_SURFACE: Readonly<
   Record<TabId, { readonly label: string; readonly Component: ComponentType }>
 > = {
-  cockpit: { label: 'Cockpit', Component: LazyCockpit },
   overview: { label: 'Overview', Component: LazyOverview },
   monitoring: { label: 'Monitor', Component: LazyStatus },
   keepers: { label: 'Keepers', Component: LazyKeeperDetailPage },
@@ -1009,7 +1007,6 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
 //   fusion     → fusion-surface.ts     <header class="ov-head fus-head"> <h1>Fusion</h1>
 //   workspace  → work.ts               <header class="wk-head">      <h1>작업 · 목표</h1>
 //   logs       → logs.ts               <header class="v2-logs-head">  <h1>이벤트 로그</h1>
-//   cockpit    → cockpit/cockpit.ts    <header class="cp-head">      <h1>Cockpit</h1>
 //   settings   → settings-surface.ts   <header class="set-content-h"> <h1>…</h1>
 //   connectors → connector-status.ts   (prototype surface, own header)
 //
@@ -1045,7 +1042,6 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
 // the last of them is #34094; until then the classification is at least
 // complete and each row is true.
 const SURFACE_LEAD_SOURCE: Record<TabId, 'own' | 'none' | 'shell'> = {
-  cockpit: 'own',
   overview: 'own',
   monitoring: 'own',
   keepers: 'own',

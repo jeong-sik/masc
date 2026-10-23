@@ -61,7 +61,6 @@ const SURFACE_LABEL = Object.fromEntries(
 ) as Readonly<Record<RailTabId, string>>
 
 const NON_RAIL_SURFACE_LABEL: Readonly<Record<NonRailTabId, string>> = {
-  cockpit: 'MASC Cockpit',
   settings: '설정',
 }
 

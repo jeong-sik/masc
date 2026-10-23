@@ -3,6 +3,7 @@
 open Alcotest
 open Masc
 module Capture = Workspace_memory_execution_capture
+module Revision = Workspace_memory_revision
 module Binding = Server_workspace_memory_addon_validation
 module Exact = Lane_addon_exact
 module Owner = Lane_addon_tool_request_owner
@@ -42,7 +43,8 @@ let capture ~base_path domain =
         ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0)
       |> Result.map_error Request.error_to_string |> get with
       | Some batch -> batch | None -> fail "expected an original classification batch" in
-    let capture=get (Capture.classification ~request_id ~workspace ~destination ~prompt ~ledger:Ledger.empty ~batch) in
+    let capture=get (Capture.classification ~request_id ~workspace ~destination ~prompt ~ledger:Ledger.empty
+      ~stored_ledger:(get (Revision.write_ledger ~base_path Ledger.empty |> Result.map_error Revision.write_error_to_string)) ~batch) in
     let local=match Request.selected_ids batch with [(id,_)] -> id | [] | _::_::_ -> fail "one original selection" in
     let good=`Assoc ["decisions",`List [`Assoc ["fact_id",`String local;
       "kind",`String "create_claim";"value",`String "An original host-validated claim"]]] in
@@ -404,6 +406,7 @@ let test_a_submit_the_worker_cannot_list_is_a_typed_refusal_the_host_narrows () 
       package_id=Binding.package_id;tool=Binding.tool;
       source_revision="actual-contract-fixture";configuration_revision="original-selection"} in
     let original=get (Capture.classification ~request_id ~workspace ~destination ~prompt ~ledger:Ledger.empty
+        ~stored_ledger:(get (Revision.write_ledger ~base_path Ledger.empty |> Result.map_error Revision.write_error_to_string))
         ~batch:(batch length)) in
     check bool "the submit reaches the frame" true (bytes length >= frame - 1);
     check bool "and the host frame check admits it" true

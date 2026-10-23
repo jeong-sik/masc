@@ -431,6 +431,7 @@ let test_requested_shape_advances_http_without_replacing_baseline () =
     check int "second candidate dispatched once" 1 (F.post_count right))
 
 module Capture = Workspace_memory_execution_capture
+module Revision = Workspace_memory_revision
 module Curator = Server_workspace_memory_addon_validation
 module Ledger = Workspace_memory_ledger
 module Request = Workspace_memory_request
@@ -468,7 +469,8 @@ let classification_capture ~base_path =
     |> Result.map_error Request.error_to_string |> get with
     | Some batch -> batch | None -> fail "one original fact needs classification" in
   let capture=Capture.classification ~request_id:(Capture.Request_id.fresh ()) ~workspace ~destination
-    ~prompt ~ledger:Ledger.empty ~batch |> get in
+    ~prompt ~ledger:Ledger.empty
+    ~stored_ledger:(get (Revision.write_ledger ~base_path Ledger.empty |> Result.map_error Revision.write_error_to_string)) ~batch |> get in
   let local=match Request.selected_ids batch with [(id,_)] -> id | [] | _::_::_ -> fail "one original selection" in
   let good=`Assoc ["decisions",`List [`Assoc ["fact_id",`String local;
     "kind",`String "create_claim";"value",`String "A host-validated claim"]]] in

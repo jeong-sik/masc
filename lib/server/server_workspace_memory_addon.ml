@@ -55,9 +55,12 @@ let capture ~config ~request_id make =
       let* summary=Capture.summary capture in
       Ok (capture,Capture.to_json capture,Capture.Summary.to_json summary)) |> Result.map_error runtime_error
 let capture_classification ~config ~request_id ~prompt ~ledger ~batch =
+  let* stored_ledger=Eio_unix.run_in_systhread (fun () ->
+    Workspace_memory_revision.write_ledger ~base_path:config.Workspace.base_path ledger)
+    |> Result.map_error (fun error -> Unavailable (Workspace_memory_revision.write_error_to_string error)) in
   capture ~config ~request_id (fun ~workspace ~destination ->
     let* capture=Capture.classification ~request_id ~workspace ~destination:(captured_destination destination)
-      ~prompt ~ledger ~batch in
+      ~prompt ~ledger ~stored_ledger ~batch in
     (* The batch was sized against this destination's frame before capture.
        A package changed since then is refused here; the next pass sizes again. *)
     let* ()=Binding.check_frame ~max_reply_bytes:destination.max_reply_bytes capture in
@@ -180,7 +183,7 @@ let classification_current ~base_path ~ledger ~selected =
   Ok (Yojson.Safe.equal (Ledger.to_json current.ledger) (Ledger.to_json ledger)
       && List.for_all (fun pending -> List.mem pending current.current_facts) selected)
 let eligible ~base_path ~briefing_contract capture = match Capture.work capture with
-  | Capture.Classification {ledger;batch} ->
+  | Capture.Classification {ledger;batch;_} ->
     Eio_unix.run_in_systhread (fun () -> classification_current ~base_path ~ledger ~selected:batch.selected)
   | Capture.Briefing batch ->
     (* Resolve live authority on the original caller, at this eligibility check.

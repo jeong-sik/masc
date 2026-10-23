@@ -47,7 +47,17 @@ type read_error =
 
 val read_error_to_string : read_error -> string
 
-val write_ledger : base_path:string -> Workspace_memory_ledger.t -> (ledger, write_error) result
+type stored_ledger
+(** Evidence that [write_ledger] completed in the observed physical workspace.
+    A computed or decoded revision cannot construct this receipt. It does not
+    authorize later effects or prevent external deletion after the write. *)
+val stored_ledger_revision : stored_ledger -> ledger
+val stored_ledger_workspace : stored_ledger -> string * int * int
+(** Canonical workspace path, device and inode checked across the write. *)
+
+val write_ledger : base_path:string -> Workspace_memory_ledger.t -> (stored_ledger, write_error) result
+(** Performs the durable revision write described below and returns its receipt
+    only after the physical workspace is checked again. *)
 
 val write_briefing : base_path:string -> Workspace_memory_briefing.t -> (briefing, write_error) result
 (** Writes the state's revision bytes with

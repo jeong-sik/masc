@@ -67,7 +67,8 @@ let batch =
 let building = Briefing.prepared_state batch
 let briefing = get (Briefing.accept batch ~text:"The report is complete.")
 
-let ledger_revision base_path = written (Revision.write_ledger ~base_path ledger)
+let ledger_revision base_path =
+  Revision.stored_ledger_revision (written (Revision.write_ledger ~base_path ledger))
 
 let named kind digest = get (Revision.of_json (`Assoc ["kind", str kind; "sha256", str digest]))
 let named_ledger digest = match named "ledger" digest with
@@ -109,6 +110,17 @@ let test_ledger_revision_is_the_bytes_save_writes () = with_base (fun base_path 
   Alcotest.(check string) "the revision file holds the bytes ledger.json holds"
     (read_file (Filename.concat (Ledger.directory ~base_path) "ledger.json")) file;
   Alcotest.(check string) "its SHA-256 is its name" (Revision.ledger_sha256 revision) (sha file))
+
+let test_write_receipt_binds_the_physical_workspace () = with_base (fun base_path ->
+  let stored = written (Revision.write_ledger ~base_path ledger) in
+  let path, device, inode = Revision.stored_ledger_workspace stored in
+  let stat = Unix.stat base_path in
+  Alcotest.(check string) "receipt uses the canonical observed workspace" (Unix.realpath base_path) path;
+  Alcotest.(check int) "receipt binds its device" stat.Unix.st_dev device;
+  Alcotest.(check int) "receipt binds its directory inode" stat.Unix.st_ino inode;
+  Alcotest.check json "the receipt names a file already readable in that workspace"
+    (Ledger.to_json ledger)
+    (Ledger.to_json (read_back (Revision.read_ledger ~base_path (Revision.stored_ledger_revision stored)))))
 
 let test_one_state_is_one_file_written_every_time () = with_base (fun base_path ->
   let first = ledger_revision base_path in
@@ -265,6 +277,8 @@ let () =
     [ ( "store"
       , [ Alcotest.test_case "a ledger revision is the bytes save writes" `Quick
             test_ledger_revision_is_the_bytes_save_writes
+        ; Alcotest.test_case "write receipt binds the physical workspace" `Quick
+            test_write_receipt_binds_the_physical_workspace
         ; Alcotest.test_case "one state is one file, written every time" `Quick
             test_one_state_is_one_file_written_every_time
         ; Alcotest.test_case "states read back" `Quick test_states_read_back

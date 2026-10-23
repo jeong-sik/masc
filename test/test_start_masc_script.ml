@@ -1466,6 +1466,7 @@ let test_supervisor_control_starts_reports_and_stops_the_supervisor () =
           let base_path = Filename.concat repo_root "workspace" in
           let listener_pid_file = Filename.concat repo_root "listener-pid" in
           let capture_file = Filename.concat repo_root "supervisor-capture" in
+          let ready_file = Filename.concat repo_root "ready" in
           let pid_file = Filename.concat repo_root "supervisor.pid" in
           let event_log = Filename.concat repo_root "supervisor.log" in
           let output_log = Filename.concat repo_root "supervisor.out.log" in
@@ -1508,9 +1509,19 @@ if [ -f "${FAKE_LISTENER_PID_FILE:?}" ]; then
 fi
 |};
           write_executable (Filename.concat fake_bin "curl")
-            "#!/bin/sh\nexit 0\n";
+            {|#!/bin/sh
+set -eu
+url=""
+for argument do url="$argument"; done
+case "$url" in
+  http://127.0.0.1:8935/health) exit 0 ;;
+  http://127.0.0.1:8935/health/ready) [ -f "${FAKE_READY_FILE:?}" ] ;;
+  *) exit 2 ;;
+esac
+|};
           let env =
             [ ("FAKE_LISTENER_PID_FILE", listener_pid_file)
+            ; ("FAKE_READY_FILE", ready_file)
             ; ("MASC_BASE_PATH", base_path)
             ; ("MASC_SUPERVISOR_PID_FILE", pid_file)
             ; ("MASC_SUPERVISOR_LOG", event_log)
@@ -1540,6 +1551,15 @@ fi
                    (Printf.sprintf
                       "args=--http --host 127.0.0.1 --port 8935 --base-path %s"
                       base_path));
+
+              let pending_code, pending_stdout, _pending_stderr =
+                run_script ~cwd:repo_root control_script ~env [ "status" ]
+              in
+              check bool "liveness alone cannot report a healthy child" true
+                (pending_code <> 0);
+              check bool "unready status never reports healthy" false
+                (String_util.contains_substring pending_stdout "state=healthy");
+              write_file ready_file "ready\n";
 
               let status_code, status_stdout, status_stderr =
                 run_script ~cwd:repo_root control_script ~env [ "status" ]
@@ -1624,6 +1644,105 @@ hash="$(${MASC_RUNTIME_ARTIFACT_CONTRACT:?} hash "$0")"
     ~publish_candidate:true
     ~terminal_message:"lacks an exact PID-bound health proof"
 
+let test_supervisor_liveness_without_readiness_preserves_terminal_failure () =
+  with_temp_dir "start-masc-supervisor-unready" (fun repo_root ->
+      let scripts_dir = Filename.concat repo_root "scripts" in
+      let lib_dir = Filename.concat scripts_dir "lib" in
+      let fake_bin = Filename.concat repo_root "fake-bin" in
+      let supervisor_script = Filename.concat scripts_dir "start-masc-supervised.sh" in
+      let child_script = Filename.concat repo_root "start-masc.sh" in
+      let listener_pid_file = Filename.concat repo_root "listener-pid" in
+      let invocation_count = Filename.concat repo_root "invocation-count" in
+      let curl_capture = Filename.concat repo_root "curl-capture" in
+      let proof_path_file = Filename.concat repo_root "proof-path" in
+      let lkg_file = Filename.concat repo_root "last-known-good.v2" in
+      let log_file = Filename.concat repo_root "supervisor.log" in
+      mkdir_p lib_dir;
+      mkdir_p fake_bin;
+      copy_script (supervised_script_path ()) supervisor_script;
+      copy_script (runtime_artifact_contract_path ())
+        (Filename.concat lib_dir "runtime-artifact-contract.sh");
+      write_executable (Filename.concat fake_bin "lsof")
+        {|#!/bin/sh
+set -eu
+if [ -f "${FAKE_LISTENER_PID_FILE:?}" ]; then
+  cat "$FAKE_LISTENER_PID_FILE"
+fi
+|};
+      let fake_curl = Filename.concat fake_bin "curl" in
+      write_executable fake_curl
+        {|#!/bin/sh
+set -eu
+url=""
+for argument do url="$argument"; done
+printf '%s\n' "$url" > "${FAKE_CURL_CAPTURE:?}"
+case "$url" in
+  http://127.0.0.1:9999/health) exit 0 ;;
+  http://127.0.0.1:9999/health/ready) exit 22 ;;
+  *) exit 2 ;;
+esac
+|};
+      let curl_env = ["FAKE_CURL_CAPTURE",curl_capture] in
+      let live_code, _, _ = run_process ~cwd:repo_root ~env:curl_env fake_curl
+        [|fake_curl; "--url"; "http://127.0.0.1:9999/health"|] in
+      check int "the frontend liveness probe succeeds" 0 live_code;
+      Sys.remove curl_capture;
+      write_executable child_script
+        (Printf.sprintf
+           {|#!/bin/bash
+set -eu
+printf '1\n' >> %s
+# Bound a broken supervisor fixture by its second actual launch, not a timer.
+if [ "$(wc -l < %s)" -gt 1 ]; then
+  kill -TERM "$PPID"
+  exit 73
+fi
+printf '%%s\n' "$$" > %s
+proof="$(dirname "${MASC_RUNTIME_LKG_FILE:?}")/masc-runtime-health-proof.${PPID}.v2"
+printf '%%s\n' "$proof" > %s
+hash="$("${MASC_RUNTIME_ARTIFACT_CONTRACT:?}" hash "$0")"
+"$MASC_RUNTIME_ARTIFACT_CONTRACT" write \
+  "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 127.0.0.1 9999
+attempts=0
+while [ ! -s "${FAKE_CURL_CAPTURE:?}" ]; do
+  attempts=$((attempts + 1))
+  [ "$attempts" -lt 250 ] || exit 71
+  sleep 0.02
+done
+# The old liveness-only path must finish its promotion before the child exits,
+# so the negative fixture also exposes the resulting restart amplification.
+if [ "$(cat "$FAKE_CURL_CAPTURE")" = "http://127.0.0.1:9999/health" ]; then
+  attempts=0
+  while [ ! -f "$proof" ]; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 250 ] || exit 72
+    sleep 0.02
+  done
+fi
+exit 23
+|}
+           (quote invocation_count) (quote invocation_count)
+           (quote listener_pid_file) (quote proof_path_file));
+      let code, stdout, _stderr = run_script ~cwd:repo_root supervisor_script
+        ~env:[
+          "FAKE_LISTENER_PID_FILE",listener_pid_file;
+          "FAKE_CURL_CAPTURE",curl_capture;
+          "MASC_RUNTIME_LKG_FILE",lkg_file;
+          "MASC_SUPERVISOR_LOG",log_file;
+          "MASC_RESTART_COOLDOWN_SEC","0";
+          "MASC_SUPERVISOR_HEALTH_PROBE_SEC","1";
+          "PATH",fake_bin ^ ":" ^ Sys.getenv "PATH";
+        ] [] in
+      check int "unready child preserves its real terminal exit" 23 code;
+      check string "unready startup is launched exactly once" "1\n"
+        (read_file invocation_count);
+      check string "the monitor checks readiness rather than liveness"
+        "http://127.0.0.1:9999/health/ready\n" (read_file curl_capture);
+      check bool "liveness does not promote an LKG" false (Sys.file_exists lkg_file);
+      check bool "liveness does not publish a health proof" false
+        (Sys.file_exists (String.trim (read_file proof_path_file)));
+      check string "supervisor writes no stdout" "" stdout)
+
 let test_supervisor_promotes_pid_bound_healthy_candidate () =
   with_temp_dir "start-masc-supervisor-lkg" (fun repo_root ->
       with_temp_dir "start-masc-supervisor-lkg-bin" (fun fake_bin ->
@@ -1651,7 +1770,13 @@ if [ -f "${FAKE_LISTENER_PID_FILE:?}" ]; then
 fi
 |};
           write_executable (Filename.concat fake_bin "curl")
-            "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" > \"${FAKE_CURL_CAPTURE:?}\"\nexit 0\n";
+            {|#!/bin/sh
+set -eu
+url=""
+for argument do url="$argument"; done
+printf '%s\n' "$url" > "${FAKE_CURL_CAPTURE:?}"
+[ "$url" = "http://192.0.2.10:9999/health/ready" ]
+|};
           write_executable child_script
             (Printf.sprintf
                {|
@@ -1695,9 +1820,8 @@ exit 72
           let expected_hash = artifact_hash ~cwd:repo_root child_script in
           check bool "promoted descriptor retains exact artifact hash" true
             (String_util.contains_substring (read_file lkg_file) expected_hash);
-          check bool "configured bind host determines health probe" true
-            (String_util.contains_substring (read_file curl_capture)
-               "http://192.0.2.10:9999/health");
+          check string "configured bind host uses the exact readiness endpoint"
+            "http://192.0.2.10:9999/health/ready\n" (read_file curl_capture);
           check bool "promotion is operator-visible" true
             (String_util.contains_substring stderr
                "health-verified runtime artifact promoted")))
@@ -1923,6 +2047,8 @@ let () =
             test_supervisor_control_starts_reports_and_stops_the_supervisor;
           test_case "supervisor zero exit without health proof fails closed"
             `Quick test_supervisor_zero_exit_without_health_proof_fails_closed;
+          test_case "supervisor liveness without readiness preserves terminal failure"
+            `Quick test_supervisor_liveness_without_readiness_preserves_terminal_failure;
           test_case "supervisor promotes PID-bound healthy candidate" `Quick
             test_supervisor_promotes_pid_bound_healthy_candidate;
           test_case "supervisor rejects malformed health proof" `Quick

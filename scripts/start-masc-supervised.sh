@@ -21,7 +21,8 @@
 #
 # Restart contract:
 #   Every child exit is logged with its real exit status and uptime.
-#   A PID-bound healthy runtime keeps continuous restart responsibility.
+#   A PID-bound runtime that passes /health/ready keeps continuous restart
+#   responsibility. Liveness alone is not proof of owner/store initialization.
 #   A startup that never publishes a candidate or never reaches PID-bound
 #   health is terminal, so deterministic startup failures are not amplified.
 #   A zero child status without that proof is supervisor failure (EX_SOFTWARE),
@@ -176,7 +177,7 @@ monitor_runtime_candidate() {
       probe_host="$(masc_runtime_artifact_probe_host "$MASC_ARTIFACT_BIND_HOST")" || return
       if [ "$listener_pid" = "$child_pid" ] \
         && curl -fsS --max-time 1 \
-          --url "http://$probe_host:$MASC_ARTIFACT_PORT/health" >/dev/null 2>&1
+          --url "http://$probe_host:$MASC_ARTIFACT_PORT/health/ready" >/dev/null 2>&1
       then
         actual_hash="$(masc_runtime_artifact_hash "$MASC_ARTIFACT_PATH")" || return
         if [ "$actual_hash" != "$MASC_ARTIFACT_SHA256" ]; then

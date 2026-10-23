@@ -15,7 +15,7 @@ Usage: MASC_BASE_PATH=<workspace> scripts/masc-supervisor-control.sh <start|stat
 
 Commands:
   start   Start the process supervisor in the background.
-  status  Check the supervisor PID, its listener child, and /health.
+  status  Check the supervisor PID, its listener child, and /health/ready.
   stop    Send TERM to the supervisor and wait for its child to shut down.
 
 Environment:
@@ -128,10 +128,10 @@ cmd_status() {
   [ "$child_parent" = "$pid" ] \
     || die "port $PORT listener pid=$child_pid is not owned by supervisor pid=$pid"
 
-  if curl -fsS --max-time 2 --url "http://$HOST:$PORT/health" >/dev/null; then
+  if curl -fsS --max-time 2 --url "http://$HOST:$PORT/health/ready" >/dev/null; then
     echo "[masc-supervisor-control] supervisor pid=$pid child=$child_pid state=healthy port=$PORT"
   else
-    die "supervisor child pid=$child_pid owns port $PORT but /health failed"
+    die "supervisor child pid=$child_pid owns port $PORT but /health/ready failed"
   fi
 }
 

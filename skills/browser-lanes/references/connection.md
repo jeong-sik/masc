@@ -28,10 +28,13 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     (ego 자신의 접근성 트리와 ref)과 click·fill 의 `target`(그 ref, 또는 role·이름이나
     보이는 글로 고른 대상)은 `ego_task_space` 연결만 한다. `ego_task_space`
     연결은 읽기, `open_tab`, `close_tab`, `back`·`forward`·`reload`, `accept_dialog`·`dismiss_dialog`,
-    `hand_off`·`take_over`, `BrowserGoto`,
+    `hand_off`·`take_over`, `upload`(`selector` 의 파일 입력, 또는 `opener` 로 뜨는 파일 선택 창),
+    `mode=downloads`, `BrowserGoto`,
     그리고 click·`click_at`·`double_click`·hover·drag·`scroll`·`scroll_at`·fill·
-    `select_option`·`follow_link`·`type_text`·`press_key` 를 한다. 터치·
-    `set_zoom`·`set_viewport`·`activate_tab`·frame 안 입력은 하지 않는다. `press_key` 는
+    `select_option`·`follow_link`·`type_text`·`press_key` 를 한다. 프레임은 `framePath`
+    없이 다룬다: snapshot 이 iframe 내용을 ref 와 함께 담고, 그 ref 나 role·글 `target` 으로
+    프레임 안을 누르고 채운다. 터치·`set_zoom`·`set_viewport`·`activate_tab` 은 하지
+    않는다. `press_key` 는
     이름 있는 키와 ASCII 문자만 누르고, 다른 글자는 `type_text` 로 친다. 이동·닫기·
     입력은 그 공간에서 에이전트가 연 페이지만 한다(첫 페이지 `p1` 포함). 그 공간에서
     운영자가 연 탭은 목록에는 나오지만 읽거나 옮기거나 누르면 거절된다. 로그인이

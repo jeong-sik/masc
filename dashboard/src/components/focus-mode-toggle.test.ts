@@ -65,6 +65,12 @@ describe('DashboardFocusModeToggle', () => {
     render(h(FocusModeShortcutHarness, {}))
 
     fireEvent.keyDown(document, { key: '\\', metaKey: true, ctrlKey: true })
+    expect(dashboardFocusMode.value).toBe(false)
+
+    const mod = globalShortcutManager.formatChord({ key: '\\', modifiers: ['Mod'] }).startsWith('⌘')
+      ? { metaKey: true }
+      : { ctrlKey: true }
+    fireEvent.keyDown(document, { key: '\\', ...mod })
 
     expect(dashboardFocusMode.value).toBe(true)
   })

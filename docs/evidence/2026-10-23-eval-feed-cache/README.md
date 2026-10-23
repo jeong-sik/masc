@@ -42,7 +42,9 @@ retained reader, TTL, auth and response schemas keep their existing meaning.
 The fixture has two agents (`-`, `eval-other`) with two real retained JSON
 snapshots each. Both warmup orders, agent names, snapshot ordering, exact row
 counts and preparation counts are checked through the actual HTTP router/cache.
-No key substitute is used. The old handler fails two cases and passes the
+No key substitute is used. The two individual baseline logs retain their
+original trailing blank line; `git diff --check` reports those two raw-log
+EOF whitespace warnings. The old handler fails two cases and passes the
 exact-agent control. The candidate passes all three plus eight parent checks:
 **11 focused PASS**. Raw failure/candidate logs and SHA-256 bindings are included.
 

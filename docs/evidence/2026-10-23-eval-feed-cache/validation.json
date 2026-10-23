@@ -56,5 +56,6 @@
   "full_regression": "not run; latest full regression run identity not inspected",
   "ci": "not run",
   "installation": "candidate not installed",
-  "latency": "no candidate endpoint latency or UI speedup measured"
+  "latency": "no candidate endpoint latency or UI speedup measured",
+  "raw_log_whitespace": "Two original baseline-case logs retain EOF blank lines; diff --check warns on those verbatim output files."
 }

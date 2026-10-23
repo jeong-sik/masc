@@ -19,7 +19,8 @@ val write_blob : t -> string -> (Lane_addon_types.evidence, string) result
 val write_sampling_blob : t -> string -> (Lane_addon_types.evidence, string) result
 (** Publish a terminal sampling blob, using an independently writable recovery
     directory if the ordinary blob location fails. Both readers resolve the
-    same immutable address. Success requires a durable write. *)
+    same immutable address. Success requires a durable write. Canonical and
+    recovery publication use the same digest of this call's original bytes. *)
 val read_blob : ?max_bytes:int -> t -> Lane_addon_types.evidence -> (string, string) result
 (** [max_bytes] rejects a retained file before allocating its complete body. *)
 type blob_slice = { content : string; snapshot : Fs_compat.owned_regular_file_snapshot }

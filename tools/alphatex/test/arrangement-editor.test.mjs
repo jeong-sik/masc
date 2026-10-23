@@ -538,7 +538,7 @@ test('MIDI asset bindings survive prepare and own pause/seek/resume; route chang
     const player=view.observed.players[0];assert.equal(player.options.midiOutput,'42');assert.equal(player.options.output,undefined)
     assert.deepEqual(player.options.midiBindings,[{port:0,destination:'42'}])
     view.key('space');await flush();view.command('seek .5');await flush();view.key('space');await flush()
-    assert.deepEqual(player.commands.slice(0,3),['pause',['seek',.3],'resume'])
+    assert.deepEqual(player.commands.filter(command=>command!=='status'),['pause',['seek',.3],'resume'])
     view.command('midi-output 43');await flush();assert.ok(player.commands.includes('stop'))
   } finally { await closeController(view) }
 })
@@ -562,8 +562,9 @@ test('mixed controller pins paired outputs and owns one player through pause, se
     view.worker.emit('message',{id:job.id,ok:true,result});await flush()
     const player=view.observed.players[0]
     assert.equal(player.options.output,'explicit-audio');assert.equal(player.options.midiOutput,'42');assert.equal(player.options.format,'mixed-arrangement')
+    player.handle.status()
     view.key('space');await flush();view.command('seek .5');await flush();view.key('space');await flush()
-    assert.deepEqual(player.commands.slice(0,3),['pause',['seek',.3],'resume'])
+    assert.deepEqual(player.commands.filter(command=>command!=='status'),['pause',['seek',.3],'resume'])
     view.command('midi-output 43');await flush();assert.ok(player.commands.includes('stop'))
     player.finish();view.key('space');await flush()
     const next=view.observed.requests.filter(job=>job.kind==='prepare-mixed').at(-1)

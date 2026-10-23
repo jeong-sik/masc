@@ -59,8 +59,14 @@ val space_id : t -> int
     before any effect. [open_tab], [goto], [back], [forward], [reload] and
     [close_tab] act only on pages an agent opened in the space, and so does
     [page.interact]. [back] and [forward] move one entry in the tab's own
-    history and are refused before acting when there is none: a refusal
-    the script makes before acting is [Before_effect], a load that failed
+    history and are refused before acting when there is none.
+    [accept_dialog] and [dismiss_dialog] answer the JavaScript dialog such a
+    page is blocked on; a listed row of a managed page carries the dialog
+    blocking it, and while one is open, reads, moves and input on that page
+    are refused before any effect. A pointer or key input that opens a
+    dialog answers with it; a DOM input the dialog stopped is a
+    [Partial_failure] with the dialog. A refusal the script makes before
+    acting is [Before_effect], a load that failed
     after it started is a [Partial_failure] with where the tab is now, and a
     run that was stopped or failed where the script cannot say is
     [Outcome_unknown]. Input finds its target, checks the observed page and

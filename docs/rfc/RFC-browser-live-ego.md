@@ -93,6 +93,7 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 | `tab_navigation` | `page.goto` (agent 페이지만) | 한다 |
 | `tab_closing` | `page.close()` (agent 페이지만) | 한다 |
 | `tab_history` | 새로고침은 `page.reload()`. 뒤로·앞으로는 `page.cdp()` 로 `Page.getNavigationHistory` 를 읽고 `Page.navigateToHistoryEntry` 로 한 칸 옮긴 뒤, 그 탭의 현재 항목이 그 칸이 되고 문서가 다 불러와질 때까지 기다린다 (agent 페이지만) | 한다. 그 쪽에 항목이 없으면 행동 전에 거절한다 |
+| `dialog_answer` | `page.info()` 가 페이지를 막은 대화상자를 알려 주고, `acceptDialog(text?)`·`dismissDialog()` 로 답한다 (agent 페이지만) | 한다. 탭 목록의 행에 `dialog` 가 실린다. 클릭·키 입력이 대화상자를 열면 그 영수증에 담고, 페이지 스크립트가 막히면 부분 효과다. 열린 동안 그 페이지의 읽기·이동·입력은 행동 전에 거절하고, 탭 닫기는 받는다. 연결의 프로세스가 하나라서(4절) 다음 명령도 그 대화상자에 닿는다 |
 | `tab_activation` | CDP `Target.activateTarget` | 다음 단계 |
 | 드래그, 터치, 줌, 뷰포트 | `page.mouse.down`·`up` 등 | 다음 단계 |
 

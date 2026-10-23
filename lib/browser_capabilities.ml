@@ -263,18 +263,26 @@ let support backend operation = match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional Tabs
           ["Each list_tabs row of a tab blocked on a dialog carries dialog: type (alert, confirm, prompt or beforeunload), message and, for a prompt, defaultValue. It comes from the browser's own events since this connection began, so a dialog that was already open then is not listed.";
            "The message is whatever the page wrote, and a page can write anything."]
-      | Owned_gecko | Owned_chromium | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable ->
+      | Connected Browser_lane.Ego_task_space -> conditional Tabs
+          ["Each list_tabs row of a page blocked on a dialog carries dialog: type (alert, confirm, prompt or beforeunload), message and, for a prompt, defaultValue, as ego reads the page now.";
+           "An input that opens a dialog answers with it in the receipt; while it is open, reads, moves and input on that page are refused before any effect.";
+           "The message is whatever the page wrote, and a page can write anything.";ego_pages]
+      | Owned_gecko | Owned_chromium | Connected Browser_lane.Web_extension | Safari_unavailable ->
           gecko_only backend (invoke ~mode:"dialog" Read) [observed])
     | Accept_dialog -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"accept_dialog" Act
           [observed;"Only a tab this connection opened with open_tab; the person using the browser answers a dialog on their own tab.";
            "Optional text applies only to a prompt. The receipt names the dialog that was answered."]
-      | Owned_gecko | Owned_chromium | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable ->
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"accept_dialog" Act
+          [observed;"Optional text applies only to a prompt. The receipt names the dialog that was answered; with none open it is refused before any effect.";ego_agent_pages]
+      | Owned_gecko | Owned_chromium | Connected Browser_lane.Web_extension | Safari_unavailable ->
           gecko_only backend (invoke ~action:"accept_dialog" Act) [observed;"Optional text applies only to an observed prompt."])
     | Dismiss_dialog -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"dismiss_dialog" Act
           [observed;"Only a tab this connection opened with open_tab; the person using the browser answers a dialog on their own tab."]
-      | Owned_gecko | Owned_chromium | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable ->
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"dismiss_dialog" Act
+          [observed;"The receipt names the dialog that was dismissed; with none open it is refused before any effect.";ego_agent_pages]
+      | Owned_gecko | Owned_chromium | Connected Browser_lane.Web_extension | Safari_unavailable ->
           gecko_only backend (invoke ~action:"dismiss_dialog" Act) [observed])
     | Upload_file -> gecko_only backend (invoke ~action:"upload" Act)
         [observed;"Requires an owning Keeper, an observed file input and sandbox-authorized file paths; 16 MiB per file."]

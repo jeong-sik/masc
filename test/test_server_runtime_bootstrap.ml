@@ -2300,6 +2300,20 @@ let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
           (owner |> member "task_id" |> to_string);
         Alcotest.(check string) "advisory row owner kind" "non_keeper_client"
           (owner |> member "owner_kind" |> to_string);
+        Alcotest.(check (list string)) "advisory actions come from the lifecycle"
+          [ "cancel"; "release"; "submit_for_verification" ]
+          (owner |> member "valid_next_actions" |> to_list |> List.map to_string);
+        let submission = owner |> member "completion_submission" in
+        Alcotest.(check string) "completion guidance uses the public transition schema"
+          "masc_transition"
+          (submission |> member "tool" |> to_string);
+        Alcotest.(check string) "completion guidance names the actual task"
+          "task-external-owner" (submission |> member "task_id" |> to_string);
+        Alcotest.(check string) "completion guidance preserves the authenticated owner"
+          assignee (submission |> member "authenticated_agent" |> to_string);
+        Alcotest.(check string) "completion guidance submits for an independent verdict"
+          (Masc_domain.task_action_to_string Masc_domain.Submit_for_verification)
+          (submission |> member "action" |> to_string);
         Alcotest.(check bool) "advisory row does not block fleet" false
           (owner |> member "fleet_blocking" |> to_bool);
         Alcotest.(check (list string)) "health has no blocked keeper names"

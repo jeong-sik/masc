@@ -431,10 +431,10 @@ val snapshot_sha256 : t -> string
 
 val epoch_path : keepers_dir:string -> keeper_id:string -> string
 
-val ensure_epoch : keepers_dir:string -> keeper_id:string -> (unit, unit) result
+val ensure_epoch : keepers_dir:string -> keeper_id:string -> (string, string) result
 (** Idempotently materialize the keeper's Memory incarnation epoch file so a
-    first [observe_owner] does not fault on a missing owned file. Returns
-    [Error ()] when creation failed. *)
+    first [observe_owner] does not fault on a missing owned file. Returns the
+    epoch string, or the error detail when creation or reading failed. *)
 
 type program_anchor
 val capture_program_anchor :

@@ -67,8 +67,8 @@ let with_fixture f =
         let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
         let () =
           match Memory.ensure_epoch ~keepers_dir ~keeper_id with
-          | Ok () -> ()
-          | Error () -> fail "the Memory epoch could not be created" in
+          | Ok _ -> ()
+          | Error detail -> fail ("the Memory epoch could not be created: " ^ detail) in
         let owner =
           M.observe_owner ~base_path
             ~keepers_dir

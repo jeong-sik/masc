@@ -70,10 +70,10 @@ test('native Clip edit, revoice, grouped timing, Undo, save/reread and .midi2 ex
 })
 
 test('failed native edits preserve the complete revision; raw configuration and profile setup remain distinct', () => {
-  const project = importMidiDocument(fixture()), editor = midiClipEditor(project), before = structuredClone(editor)
+  const project = importMidiDocument(fixture()), editor = midiClipEditor(project), before = JSON.stringify(editor)
   for (const command of ['velocity 65536', 'time -1', 'pitch-absolute 60.001', 'select unknown',
     'value32 4294967296', `select-events ${editor.selected} ${editor.selected}`, 'shift-events-ticks 1']) {
-    assert.throws(() => midiClipCommand(editor, command)); assert.deepEqual(editor, before)
+    assert.throws(() => midiClipCommand(editor, command)); assert.equal(JSON.stringify(editor), before)
   }
   const empty = new JZZ.MIDI.Clip()
   let view = midiClipEditor(importMidiDocument(empty.toUint8Array()))

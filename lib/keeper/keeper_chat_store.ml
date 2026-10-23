@@ -570,7 +570,7 @@ let validate_delivery_role ~role_label
   match provenance.transcript_slot, role_label with
   | Keeper_chat_delivery_identity.Accepted_user, "user"
   | Keeper_chat_delivery_identity.Terminal_result, ("assistant" | "request_failure")
-  | Keeper_chat_delivery_identity.Settled_failure, ("assistant" | "request_failure")
+  | Keeper_chat_delivery_identity.Settled_failure, "request_failure"
   | ( Keeper_chat_delivery_identity.Approval_request
     | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay

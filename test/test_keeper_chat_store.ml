@@ -3268,6 +3268,9 @@ let test_persisted_tool_execution_identity_is_one_ssot () =
         ; row ~id:"accepted-user-tool-role"
             ~operation_id:"kmsg-accepted-user-tool-role"
             accepted_user_slot
+        ; row ~role:"assistant" ~id:"settled-failure-assistant-role"
+            ~operation_id:"kmsg-settled-failure-assistant-role"
+            (`Assoc ["kind", `String "settled_failure"])
         ]
       in
       let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
@@ -3276,8 +3279,16 @@ let test_persisted_tool_execution_identity_is_one_ssot () =
         (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n");
       Alcotest.(check int) "all inconsistent rows are dropped" 0
         (List.length (K.load ~base_dir ~keeper_name));
-      Alcotest.(check (float 0.001)) "each inconsistency is reported" 6.0
+      Alcotest.(check (float 0.001)) "each inconsistency is reported" 7.0
         (drop_value invalid_payload -. before);
+      let before_repair = read_file path in
+      (match K.append_settled_failure_once ~base_dir ~keeper_name
+          ~delivery_key:(operation_delivery_key "kmsg-settled-failure-assistant-role")
+          ~content:"authoritative failed settlement" ~route:(lazy K.Row_route.none) () with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "an assistant row acknowledged a settled failure");
+      Alcotest.(check string) "invalid failure provenance is preserved for repair"
+        before_repair (read_file path);
       let delivery_key = operation_delivery_key "kmsg-exec-mismatch" in
       (match
         K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key

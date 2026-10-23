@@ -7,9 +7,7 @@ module Schema = Keeper_structured_output_schema
 
 let lane_id = Standalone_lane.to_id Standalone_lane.Hitl_auto_judge
 
-let system_prompt () =
-  Prompt_registry.render_prompt_template Prompt_names.judge_effect []
-;;
+let system_prompt = Hitl_judge_original.system_prompt
 
 let ( let* ) = Result.bind
 
@@ -121,34 +119,13 @@ let record_outcome outcome =
 
 (* ── Immutable MASC request ─────────────────────── *)
 
-let message role text = Agent_core.Types.text_message role text
-
-(* The contract sentence lives in the keeper.hitl_summary.output_contract
-   template; this function only supplies the canonical schema as data. A
-   template that does not render is logged and falls back to the bare schema
-   JSON, never to instruction prose written here. *)
-let canonical_output_contract () =
-  let schema_json = Yojson.Safe.to_string Schema.hitl_context_summary_schema in
-  match
-    Prompt_registry.render_prompt_template
-      Prompt_names.judge_effect_output_contract
-      [ "schema_json", schema_json ]
-  with
-  | Ok text -> String.trim text
-  | Error detail ->
-    Log.Keeper.error
-      "hitl summary output-contract prompt %s did not render, falling back to the bare \
-       schema: %s"
-      Prompt_names.judge_effect_output_contract
-      detail;
-    schema_json
-;;
-
+(* The three messages of the judgment request are spelled once, in
+   [Hitl_judge_original], so a prepared original and this request cannot drift. *)
 let messages_for_summary ~system_prompt ~context_bundle =
-  [ message Agent_core.Types.System system_prompt
-  ; message Agent_core.Types.User (canonical_output_contract ())
-  ; message Agent_core.Types.User (Yojson.Safe.to_string context_bundle)
-  ]
+  Hitl_judge_original.messages_of
+    ~system_prompt
+    ~output_contract:(Hitl_judge_original.canonical_output_contract ())
+    ~context_bundle
 ;;
 
 let output_requirement =

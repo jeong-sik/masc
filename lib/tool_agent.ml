@@ -145,6 +145,9 @@ let handle_agent_fitness ?(tool_name = Tool_schemas_agent.tool_name Agent_fitnes
           in
           let* workspace_agents =
             try Ok (Workspace.get_agents_raw ctx.config) with
+            | Workspace.Not_initialized ->
+                Error (error_result_typed ~tool_name ~start_time ~code:Internal_error
+                  "Workspace agent listing is not initialized.")
             | (Unix.Unix_error _ | Sys_error _ | Eio.Io _) as error ->
                 Log.Metrics.error "workspace agent listing failed: %s" (Printexc.to_string error);
                 Error (error_result_typed ~tool_name ~start_time ~code:Internal_error

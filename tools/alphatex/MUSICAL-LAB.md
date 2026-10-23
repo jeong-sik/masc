@@ -36,8 +36,9 @@ After analysis completes, `:harmony-export /absolute/path/keys-harmony.json`
 saves all rows. Esc returns to the piano roll.
 
 Choose `:soundfont-fluid` to bind the bundled SF2 and installed FluidSynth
-engine. Wait for selection to finish before saving: a new save/stop action can
-cancel an unfinished instrument capture. Then save the phrase, use
+engine. Wait for selection to finish before saving: saving does not wait for a
+pending sound selection and can retain the earlier sound state. Stop, route
+changes, reselection and close can cancel an unfinished capture. Then save the phrase, use
 `:export /absolute/path/keys.mid` and `:wave /absolute/path/keys.wav`, and return
 to the arrangement with `q`. The stored font and engine identity travel with
 the editable draft. See [SoundFont requirements and timing](README.md#bound-fluidsynth-soundfont-audition).

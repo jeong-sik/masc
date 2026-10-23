@@ -727,6 +727,15 @@ let unexpected_template_variables meta template =
   extract_variables template
   |> List.filter (fun variable -> not (List.mem variable expected))
 
+let authoring_issue_json = function
+  | Types.Invalid_operator_surface { value; source_file } ->
+      `Assoc
+        [ "code", `String "invalid_operator_surface"
+        ; "field", `String "operator_surface"
+        ; "value", `String value
+        ; "source_file", `String source_file
+        ]
+
 (* Variant that takes a pre-computed [resolved] record.  Used by the
    batch listing paths that read files outside the mutex. *)
 let prompt_item_json_of_resolved ~override_default_moved key (meta : prompt_meta)
@@ -741,6 +750,8 @@ let prompt_item_json_of_resolved ~override_default_moved key (meta : prompt_meta
       ("category", `String meta.category);
       ( "operator_surface",
         `String (Types.operator_surface_to_string meta.operator_surface) );
+      ( "authoring_issues",
+        `List (List.map authoring_issue_json meta.authoring_issues) );
       ("description", `String meta.description);
       ("current", `String resolved.effective);
       ("effective", `String resolved.effective);

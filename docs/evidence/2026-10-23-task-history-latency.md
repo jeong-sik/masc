@@ -53,3 +53,29 @@ than three blocks, UTF-8, forward continuation anchors and changed anchors.
   separate from GitHub approval, CI, merge and installed-runtime verification.
 - The live server/TUI were not replaced. Candidate server, live API and
   visible TUI timings remain unverified.
+
+## Review follow-up
+
+Run `39912714570`, on the earlier stack top
+`e645a96c60d354124466e7bf0cac993ee66156c5`, compiled its selected target but
+failed during test initialization: `masc_browser_act`'s `latitude.minimum`
+was encoded as an integer where the schema requires a float. No history
+scenario ran, so this run is neither a history regression nor a passing
+history test. The current rebased stack includes the independent float-bound
+repair `fa641e57e2a` from main.
+
+The upper-layer review requested evidence that an unanswered read really
+stops when the owner leaves. `test_tui_io_domain` now sends a real loopback
+GET without an overall timeout, waits for the server to receive it without
+answering, then cancels the caller. It awaits the actual request worker's
+cleanup, checks that the pool's inflight count returns to its original
+value, and checks a subsequent request on the same origin/domain. The full
+test module passes focused typechecking against existing dependency
+interfaces; execution of this new scenario remains pending.
+
+This checks withdrawal of an owned observation, not server progress while
+the operator remains on the same view. An unanswered peer stays pending
+until withdrawal, transport failure or shutdown. An idle/first-byte timer
+would also reject a legitimate scan that has not produced response bytes.
+The independent reader probe above is not an end-to-end claim that every
+production history scan now finishes below ten seconds.

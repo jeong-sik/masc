@@ -65,7 +65,14 @@ type state =
   | Browser_executor of browser_activity * bool browser_reading
   | Machine_state of machine_activity * machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
-type row = { id : string; label : string; purpose : string; selection : selection; state : state }
+type row = {
+  id : string; label : string; purpose : string;
+  ui_category : Lane_addon_category.t option;
+  (** Server-authored display role for built-in routes. [None] means no role
+      was supplied; clients never infer one from an ID or label. Package rows
+      independently use their current declaration or original manual worker. *)
+  selection : selection; state : state;
+}
 type package_read = {
   directory : string; complete : bool; owner_present : bool;
   issues : (string * string) list;

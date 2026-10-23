@@ -1,7 +1,7 @@
 (** Plain, unwrapped display text. The renderer sanitizes terminal text and
     measures/wraps cells. These functions perform no I/O or state mutation. *)
 val row_category : Masc.Tui_decode_lane_inventory.row -> Masc.Lane_addon_category.t option
-(** Built-ins use their closed typed role. A configured package uses only its
+(** Built-ins read the server-authored role. A configured package uses only its
     current valid declaration; a manual row uses its exact original instance.
     Invalid, absent and unobserved declarations never borrow worker metadata.
     [None] is unclassified display metadata, not an activity permission. *)

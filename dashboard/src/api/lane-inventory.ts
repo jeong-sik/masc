@@ -50,7 +50,7 @@ const browserClientsAddon = Schema.Union(
   Schema.Struct({ kind: Schema.Literal('observed'), connected_clients: count }), browserAddonUnobserved, browserAddonUnavailable)
 const browserExecutorAddon = Schema.Union(
   Schema.Struct({ kind: Schema.Literal('observed'), registered: Schema.Boolean }), browserAddonUnobserved, browserAddonUnavailable)
-const common = { id: text, label: text, purpose: text }
+const common = { id: text, label: text, purpose: text, ui_category: optionalLaneAddonCategory }
 const row = Schema.Union(
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('exact'), lane_id: Schema.Literal(...LANE_IDS) }),
     state: Schema.Struct({ kind: Schema.Literal('exact'), configuration }) }),

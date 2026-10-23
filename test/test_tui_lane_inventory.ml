@@ -68,6 +68,27 @@ let complete_inventory () =
   Alcotest.(check string) "registration is not session health" "on; executor registered"
     (Display.row_summary (find "browser/automation" snapshot))
 
+let builtin_role_is_server_metadata () =
+  let original = ok (Decode.decode (snapshot [])) in
+  let first = List.hd original.rows in
+  let changed = snapshot [] |> replace_first (set "ui_category" (str "analysis"))
+      |> Decode.decode |> ok in
+  let classified = find first.id changed in
+  Alcotest.(check bool) "the server role, not the builtin technical ID, determines display" true
+    (Display.row_category classified=Some Lane_addon_category.Analysis);
+  Alcotest.(check bool) "a display role cannot change the original action identity or state" true
+    (Display.identity first=Display.identity classified && first.selection=classified.selection
+     && first.state=classified.state);
+  Alcotest.(check bool) "omitted server role is not guessed from the builtin ID" true
+    (Display.row_category first=None);
+  List.iter (fun value -> rejects "malformed builtin role is refused"
+    (snapshot [] |> replace_first (set "ui_category" value)))
+    [`Null; str "unknown"; `Int 1];
+  rejects "duplicate builtin role is refused"
+    (snapshot [] |> replace_first (function
+      | `Assoc fields -> `Assoc (("ui_category",str "browser") :: ("ui_category",str "analysis") :: fields)
+      | value -> value))
+
 let browser_activity_and_backend_are_independent () =
   let make activity = snapshot [] |> set "rows" (`List (List.map (fun row ->
     match get "id" row with
@@ -269,7 +290,7 @@ let exact_outputs_wire_is_strict () =
 let standing_reads_what_the_row_says () =
   let module S = Masc_tui_lane_standing in
   let standing = Alcotest.testable (fun f value -> Format.pp_print_string f (S.word value)) ( = ) in
-  let row_of state = { Decode.id = "row"; label = "row"; purpose = "fixture purpose";
+  let row_of state = { Decode.id = "row"; label = "row"; purpose = "fixture purpose"; ui_category = None;
     selection = Decode.Declaration "/config/lane-addons/browser-work.toml"; state } in
   let worker ?(presence = Decode.Live) phase = { Decode.instance_id = "worker"; incarnation = "worker"; run_id = "browser-work";
     package_id = "browser"; title = "Browser connections"; package_revision = "0.1.0"; ui_category = None;
@@ -379,6 +400,7 @@ let categories_are_strict_metadata () =
       Alcotest.fail "unclassified original worker was removed"
 
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
+  Alcotest.test_case "builtin role comes from the server without changing its target" `Quick builtin_role_is_server_metadata;
   Alcotest.test_case "category metadata is strict and preserves both owners" `Quick categories_are_strict_metadata;
   Alcotest.test_case "machine activity and publication remain independent" `Quick machine_activity_and_publication_are_independent;
   Alcotest.test_case "standing reads what the row says" `Quick standing_reads_what_the_row_says;

@@ -53,7 +53,8 @@ type state =
   | Browser_executor of browser_activity * bool browser_reading
   | Machine_state of machine_activity * machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
-type row = { id : string; label : string; purpose : string; selection : selection; state : state }
+type row = { id : string; label : string; purpose : string;
+  ui_category : Lane_addon_category.t option; selection : selection; state : state }
 type package_read = {
   directory : string; complete : bool; owner_present : bool;
   issues : (string * string) list;
@@ -287,12 +288,12 @@ let compatible selection state = match selection,state with
                       | Package_state {declaration=Some _;_}
                       | Package_state {declaration=None;instances=([] | _ :: _ :: _)}) -> false
 let row json =
-  let* f = fields ["id";"label";"purpose";"selection";"state"] json in
+  let* ui_category,f = fields_with_category ["id";"label";"purpose";"selection";"state"] json in
   let* id = get nonblank "id" f in let* label = get nonblank "label" f in let* purpose = get string "purpose" f in
   let* selection = get selection "selection" f in let* state = get state "state" f in
   if id <> selection_id selection then error "row id disagrees with selection"
   else if not (compatible selection state) then error "row state disagrees with selection"
-  else Ok {id;label;purpose;selection;state}
+  else Ok {id;label;purpose;ui_category;selection;state}
 let package_read json =
   let* f = fields ["directory";"complete";"owner_present";"issues"] json in
   let* directory = get nonblank "directory" f in let* complete = get bool "complete" f in

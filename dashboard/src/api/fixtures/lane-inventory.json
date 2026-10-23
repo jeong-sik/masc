@@ -6,6 +6,7 @@
       "id": "exact/board_attention_exact",
       "label": "Board Attention",
       "purpose": "Judges one durable Board candidate for Keeper attention.",
+      "ui_category": "memory_judgment",
       "selection": {
         "kind": "exact",
         "lane_id": "board_attention_exact"
@@ -31,6 +32,7 @@
       "id": "exact/hitl_auto_judge",
       "label": "HITL Auto Judge",
       "purpose": "Produces the structured judgment for one held approval.",
+      "ui_category": "memory_judgment",
       "selection": {
         "kind": "exact",
         "lane_id": "hitl_auto_judge"
@@ -56,6 +58,7 @@
       "id": "exact/librarian_exact",
       "label": "Librarian",
       "purpose": "Selects the next Memory OS snapshot from immutable Keeper history.",
+      "ui_category": "memory_judgment",
       "selection": {
         "kind": "exact",
         "lane_id": "librarian_exact"
@@ -81,6 +84,7 @@
       "id": "exact/verifier_exact",
       "label": "Verifier",
       "purpose": "Reviews Task completion and Goal proof evidence.",
+      "ui_category": "memory_judgment",
       "selection": {
         "kind": "exact",
         "lane_id": "verifier_exact"
@@ -106,6 +110,7 @@
       "id": "exact/browser_stagehand_exact",
       "label": "Browser Stagehand",
       "purpose": "Answers structured model requests from the Stagehand browser lane; run records are not retained yet.",
+      "ui_category": "browser",
       "selection": {
         "kind": "exact",
         "lane_id": "browser_stagehand_exact"
@@ -131,6 +136,7 @@
       "id": "exact/candle_appraiser",
       "label": "Candle Appraiser",
       "purpose": "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights.",
+      "ui_category": "memory_judgment",
       "selection": {
         "kind": "exact",
         "lane_id": "candle_appraiser"
@@ -156,6 +162,7 @@
       "id": "browser/live",
       "label": "Live browser",
       "purpose": "Browser backend observation.",
+      "ui_category": "browser",
       "selection": {
         "kind": "browser",
         "lane": "live"
@@ -173,6 +180,7 @@
       "id": "browser/automation",
       "label": "Browser automation",
       "purpose": "Browser backend observation.",
+      "ui_category": "browser",
       "selection": {
         "kind": "browser",
         "lane": "automation"
@@ -190,6 +198,7 @@
       "id": "browser/stagehand",
       "label": "Browser Stagehand",
       "purpose": "Browser backend observation.",
+      "ui_category": "browser",
       "selection": {
         "kind": "browser",
         "lane": "stagehand"
@@ -207,6 +216,7 @@
       "id": "machine/msx",
       "label": "MSX",
       "purpose": "Published machine state.",
+      "ui_category": "execution_environment",
       "selection": {
         "kind": "machine",
         "machine": "msx"
@@ -221,6 +231,7 @@
       "id": "machine/dos",
       "label": "DOS",
       "purpose": "Published machine state.",
+      "ui_category": "execution_environment",
       "selection": {
         "kind": "machine",
         "machine": "dos"

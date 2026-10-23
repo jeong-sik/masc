@@ -59,6 +59,17 @@ let before_reconcile () = with_fixture (fun _env _sw config root directory ->
   let before = files root in
   let json = Inventory.snapshot ~config |> Inventory.to_json in
   let rows = values "rows" json in
+  let decoded = match Tui_decode_lane_inventory.decode json with
+    | Ok value -> value | Error detail -> fail detail in
+  List.iter (fun (row : Tui_decode_lane_inventory.row) ->
+    match row.selection with
+    | Exact _ | Browser _ | Machine _ ->
+        let encoded = List.find (fun value -> text "id" value=row.id) rows in
+        let expected = match Lane_addon_category.of_json (member "ui_category" encoded) with
+          | Ok value -> value | Error detail -> fail detail in
+        check bool "actual server role reaches the TUI category consumer" true
+          (Masc_tui_lane_inventory.row_category row=Some expected)
+    | Declaration _ | Manual_instance _ -> ()) decoded.rows;
   let builtin = rows |> List.filter (fun row -> match text "kind" (member "selection" row) with
     | "exact" | "browser" | "machine" -> true | _ -> false) |> List.map (text "id") in
   check (list string) "every derived builtin, in its own order"

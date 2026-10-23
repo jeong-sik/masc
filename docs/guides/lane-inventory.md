@@ -85,7 +85,15 @@ configuration-preserving control and incomplete-read behavior.
 
 ## TUI
 
-All Lanes groups rows by product role: memory and judgment, browser, external
+Features is the operator-facing inventory of built-in capabilities and installed
+plugins. Plugin (Addon in the package/API contract) means an installable feature
+package. Lane names describe the internal execution or observation paths and
+remain in technical details, retained runs and API identities. A listed feature
+is not necessarily a separately installed plugin or a running worker. The
+command palette offers **Features** for the shared inventory and **Plugins**
+for package installation and management.
+
+Features groups rows by product role: memory and judgment, browser, external
 communications, voice and media, execution environment, analysis, and
 unclassified. Group headings are not selectable; keyboard navigation and search
 visit the Lane rows. Exact-output and worker families remain in the detail
@@ -101,8 +109,10 @@ Refresh retains the selected row's original ID and target, including a
 declaration's installation ID or a manual worker's incarnation. Category changes
 and inserted rows do not move settings or activity actions to another target.
 If that original disappears or is replaced at the same path, no target is
-selected until explicit navigation selects a current row. A mouse press from an
-old frame cannot select a replacement installation or incarnation.
+selected until explicit navigation selects a current row. The inventory keeps
+a visible absence/replacement notice until the operator selects a current target.
+A mouse press from an old frame cannot select a replacement installation or
+incarnation.
 
 ## Dashboard
 

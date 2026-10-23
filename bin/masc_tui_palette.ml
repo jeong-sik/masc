@@ -191,7 +191,7 @@ let palette_entries (state : state) =
      nearer half look like the only one there is. *)
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Task Verdicts", Palette_goto Harness ]
-  @ [ "go Lanes", Palette_goto Lanes ]
+  @ [ "go Features", Palette_goto Lanes ]
   @ List.map (fun lane ->
       ("go " ^ Lane_run_identity.label lane ^ " history", Palette_lane_history lane))
       Lane_run_identity.all
@@ -219,7 +219,7 @@ let palette_entries (state : state) =
   @ [ "go Collab", Palette_collab; "go Play links", Palette_collab ]
   @ [ "go MSX", Palette_msx ]
   @ [ "go DOS", Palette_dos ]
-  @ [ "go Lane Add-ons", Palette_lane_addons ]
+  @ [ "go Plugins", Palette_lane_addons ]
   @ List.map (fun (id, title) -> ("go " ^ title ^ " Results", Palette_addon_results id))
       (addon_result_targets state)
   @ [ "go Logs", Palette_goto System_logs ]

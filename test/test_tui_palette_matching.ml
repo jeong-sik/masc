@@ -508,10 +508,14 @@ let test_addons_do_not_require_a_keeper () =
   in
   Alcotest.(check int) "no Keeper needs to be created" 0
     (List.length state.keepers);
-  state.palette_query <- "lane add-ons";
+  state.palette_query <- "plugins";
   (match palette_matches state with
-   | ("go Lane Add-ons", Palette_lane_addons) :: _ -> ()
-   | _ -> Alcotest.fail "an empty workspace must offer the Add-ons inspector")
+   | (_, Palette_lane_addons) :: _ -> ()
+   | _ -> Alcotest.fail "an empty workspace must offer the plugin inspector");
+  state.palette_query <- "features";
+  (match palette_matches state with
+   | (_, Palette_goto Lanes) :: _ -> ()
+   | _ -> Alcotest.fail "an empty workspace must offer the feature inventory")
 ;;
 
 (* An installation the TUI has seen ask a question gets one Results row,

@@ -473,15 +473,15 @@ let render_lanes_overview (state : state) =
     match state.lane_inventory with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Lanes") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
+          (screen_title " MASC Features") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Lanes")
+          (screen_title " MASC Features")
           (tab_strip
              ~width:
                (tab_strip_width ~cols
-                  ~before:(screen_title " MASC Lanes" ^ tab_strip_gap)
+                  ~before:(screen_title " MASC Features" ^ tab_strip_gap)
                   ~after:("  " ^ timestamp ^ "  " ^ connection_badge state))
              ~press:pressable
              [ ( tab_entry_label "Candidate orders" lane_reading
@@ -490,9 +490,9 @@ let render_lanes_overview (state : state) =
              ; ( tab_entry_label "All runtimes" all_reading
                , false
                , Press_runtime_mode Masc_tui_types.Runtime_all )
-             ; ( tab_entry_label "Lanes"
+             ; ( tab_entry_label "Features"
                    (Some
-                      (Masc_tui_message_layout.count_noun lane_count "lane"))
+                      (Masc_tui_message_layout.count_noun lane_count "feature"))
                , true
                , Press_standalone_lanes )
              ])
@@ -502,13 +502,13 @@ let render_lanes_overview (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   let observed_heading = match state.lane_inventory with
-    | None -> "  All lanes"
+    | None -> "  All features"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.Masc.Tui_decode_lane_inventory.observed_at in
         let standings = Masc_tui_lane_standing.counts
             (List.map (Masc_tui_lane_inventory.row_standing_in snapshot)
                snapshot.Masc.Tui_decode_lane_inventory.rows) in
-        Printf.sprintf "  All lanes · observed %02d:%02d:%02d%s"
+        Printf.sprintf "  All features · observed %02d:%02d:%02d%s"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
           (if standings = "" then "" else " · " ^ standings) in
   box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) observed_heading;
@@ -540,7 +540,7 @@ let render_lanes_overview (state : state) =
   let mark_width = 2 in
   let label_width = max 1 (inner - mark_width - status_width - 2) in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (String.make mark_width ' ' ^ fit_width "LANE" label_width ^ "  " ^ fit_width "STATE" status_width);
+    (String.make mark_width ' ' ^ fit_width "FEATURE" label_width ^ "  " ^ fit_width "STATE" status_width);
   let window = Rows.of_list ~first:scroll ~height entries in
   for offset = 0 to height - 1 do
     let index = scroll + offset in
@@ -548,7 +548,7 @@ let render_lanes_overview (state : state) =
     | None when offset = 0 && Option.is_none state.lane_inventory ->
         box_line_styled buf cols ~style:(Theme.recede ())
           (if Option.is_some state.standalone_lanes_error then "  r: retry inventory"
-           else "  reading all lanes…")
+           else "  reading features…")
     | None -> box_empty buf cols
     | Some (Masc_tui_lane_inventory.Category_header category) ->
         box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ())
@@ -795,7 +795,7 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
     count ^ continuation in
   let header =
     Printf.sprintf "%s · %s (%s)  %s"
-      (screen_title " MASC Lanes")
+      (screen_title " MASC Features")
       (fit_width
          (Terminal_text.single_line (observed_lane_label lane))
          20)

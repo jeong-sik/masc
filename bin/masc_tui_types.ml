@@ -17676,7 +17676,13 @@ let lane_inventory_notice_lines ~cols state =
   let notices = match state.lane_inventory with
     | None -> []
     | Some snapshot -> Masc_tui_lane_inventory.overview_notices snapshot in
-  let notices = notices @ (match state.standalone_lanes_error with
+  let selection_notice = match state.lane_inventory, state.lanes_selection with
+    | Some _, Some _ ->
+        if Option.is_none (selected_inventory_lane state) then
+          ["Selected feature is absent or replaced in this reading. Use the arrow keys to select a current feature."]
+        else []
+    | None, None | None, Some _ | Some _, None -> [] in
+  let notices = notices @ selection_notice @ (match state.standalone_lanes_error with
     | None -> []
     | Some detail -> [(if Option.is_some state.lane_inventory then "STALE · " else "") ^ detail]) in
   List.concat_map (fun line -> Masc.Tui_terminal_text.sanitize_terminal_text line

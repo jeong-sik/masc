@@ -462,10 +462,10 @@ let test_lanes_is_a_main_destination () =
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
   Alcotest.(check int) "Lanes highlights System"
     (ring_stop Config) (ring_stop Lanes);
-  Alcotest.(check bool) "help sheet names Lanes directly" true
+  Alcotest.(check bool) "help sheet reaches the feature inventory surface" true
     (List.exists
-       (fun (label, _) -> String.equal label "Lanes")
-       (Masc_tui_keys.help_sections ()));
+       (fun (_, surface) -> surface = Lanes)
+       Masc_tui_keys.help_surfaces);
   let lanes_keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)

@@ -1,0 +1,36 @@
+{
+  "observed_at": "2026-10-23T06:07:50.664091+00:00",
+  "stack": 45397,
+  "heads": {
+    "45394": "b4281f114f8c729052470ae5fc0dd3ab94c9a4b8",
+    "45395": "70f438d054df3c0fe4eaf51853d4775cc42bab81"
+  },
+  "workflow": "test.yml",
+  "ref": "feat/addon-tui-role-groups-ui-20261023",
+  "suites": [
+    "test_tui_keys",
+    "test_tui_lane_inventory"
+  ],
+  "minimal": true,
+  "status": "completed",
+  "run_id": 39908551071,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39908551071",
+  "conclusion": "success",
+  "execution_head": "70f438d054df3c0fe4eaf51853d4775cc42bab81",
+  "suite_results": [
+    {
+      "suite": "test_tui_keys",
+      "passed": 56
+    },
+    {
+      "suite": "test_tui_lane_inventory",
+      "passed": 17
+    }
+  ],
+  "log_sha256": "9ca2f624720f2526b12f0bbbcaef7657d66f32e49184834656b8744eae0e5c82",
+  "limits": [
+    "Not four-executable compile proof",
+    "Not visible installed TUI proof",
+    "Not execution proof for subsequent followup deltas"
+  ]
+}

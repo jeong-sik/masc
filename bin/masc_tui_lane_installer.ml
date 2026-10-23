@@ -61,11 +61,11 @@ let accept_preview json =
   Ok (Some (Binding ({path;title;revision;execution},form)))
 (* The refusal names the key that works where the preview returns. Only the
    package browser answers n; a text input takes it as a letter, and Esc leads
-   from each input back to the Add-ons list, where n also opens the editor. *)
+   from each input back to the Plugins list, where n also opens the editor. *)
 let missing_binding_schema = function
   | Catalog _ -> "Package has no binding schema; use n for an advanced TOML declaration."
   | Path _ | Pending _ | Binding _ | Catalog_pending _ | Directory _ ->
-      "Package has no binding schema; Esc back to the Add-ons list, then n for an advanced TOML declaration."
+      "Package has no binding schema; Esc back to the Plugins list, then n for an advanced TOML declaration."
 let begin_preview ~request_id ~path = function
   | Path form as previous ->
       let* json = Form.value form in let* selected = text "manifest_path" json in

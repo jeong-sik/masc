@@ -4,7 +4,7 @@ This candidate connects original-resolution Clip editing to native MIDI2 output.
 It does not create a captured-session clock or WAV. The immutable execution
 identity is private installed runtime
 `127bed9ad6d00307df3cf5aa2710304dfb801efc29a5ab5eff9b9b72ad7953fb`.
-All126 runtime inputs and8 native helpers were read back; their hashes and the
+All 126 runtime inputs and 8 native helpers were read back; their hashes and the
 matching source commit are in the [receipt](receipt.json). Source commit
 matching is a byte comparison, separate from the actual installation/execution.
 
@@ -13,8 +13,8 @@ matching is a byte comparison, separate from the actual installation/execution.
 An isolated PTY opened a generated PPQ1000 Clip with a private native MIDI2
 destination. The receiver was a separate CoreMIDI process. Both its endpoint
 and every native playback process were owned by this QA; existing outputs were
-not opened. The Clip had0.1s configuration and a10.1s sequence, two groups,
-Pitch7.9 at60.5 with Note Index17 and velocity0, a second attack at velocity65535,
+not opened. The Clip had 0.1s configuration and a 10.1s sequence, two groups,
+Pitch7.9 at 60.5 with Note Index17 and velocity 0, a second attack at velocity 65535,
 a UInt32 per-note controller and a hold pedal.
 
 The actual installed launcher ran with `--midi-file`, `--project-root` and
@@ -28,11 +28,11 @@ The actual installed launcher ran with `--midi-file`, `--project-root` and
 6. Export and `q`; observe exit0, an unedited saved source document and a
    byte-identical source/export file.
 
-The receiving endpoint collected72 UMP words over the three starts and their
+The receiving endpoint collected 72 UMP words over the three starts and their
 cleanup. Pause/seek/resume used one child; restart replaced it after retirement.
 This controlled scenario exercises cleanup releases. Original source release
 dynamics were separately checked by the natural-completion native wire harness.
-Both the TUI and receiver exited0. No user project or live Ghostty session was
+Both the TUI and receiver exited 0. No user project or live Ghostty session was
 used. The default launcher remained byte identical.
 
 ![Paused native Clip audition](paused.png)
@@ -46,15 +46,15 @@ request/receive/file scenario also passed with the private installed runtime.
 
 ## Other checked boundaries
 
-- The60 focused JavaScript checks in the receipt passed, covering source clocks,
+- The 60 focused JavaScript checks in the receipt passed, covering source clocks,
   editing/readback, exact native admission, owned player lifecycle and existing
   transport/save/library boundaries. They are not the full suite.
 - `test-midi-clip-clock.mjs` uses the production owner, a controlled monotonic
-  clock and a private endpoint. Adjacent deadlines beyond2^53 nanoseconds stay
+  clock and a private endpoint. Adjacent deadlines beyond 2^53 nanoseconds stay
   separate; no early sends, pre-start cancellation, empty clips, overflow cleanup
   and malformed plans are checked.
 - `test-midi-clip-wire.mjs` compiles and runs the real helper against private
-  CoreMIDI endpoints. Full raw words/order, two groups, velocity0/full16,
+  CoreMIDI endpoints. Full raw words/order, two groups, velocity 0/full16,
   Attribute3, PN32, original releases, pause/seek/resume, cleanup and native1
   refusal passed. A Ready-only cancellation sends no source messages.
 - Existing UMP transport/state decision checks passed with the capture/region
@@ -67,7 +67,7 @@ request/receive/file scenario also passed with the private installed runtime.
 
 The official auxiliary installer built the changed native Clip/arrangement/live
 helpers in a private prefix. Five other helpers were reused only after source
-input identity checks. A subsequent help-text-only runtime reused all8 with the
+input identity checks. A subsequent help-text-only runtime reused all 8 with the
 same input checks. No repository Dune build or CI watch was run.
 
 ## Remaining scope

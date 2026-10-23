@@ -71,7 +71,7 @@ a pause/seek without changing the current playback. Future tempo/meter messages
 cannot stand in for missing state at a backward cut.
 
 If elapsed source ticks have no initial tempo, `:initial-tempo 50000000` supplies
-an explicit session value in10ns/quarter (120BPM). `:initial-tempo` clears it.
+an explicit session value in 10ns/quarter (120BPM). `:initial-tempo` clears it.
 This fills only unresolved time before a source tempo declaration and does not
 change the saved document. No default tempo is inserted.
 

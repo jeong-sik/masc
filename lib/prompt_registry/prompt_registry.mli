@@ -280,6 +280,9 @@ val set_restore_failure_observer : (unit -> unit) -> unit
 
 val list_prompts : unit -> Yojson.Safe.t list
 (** Returns one JSON entry per registered prompt.
+    Every entry includes [authoring_issues] as a JSON array. An empty array
+    reports no authoring issues; the field is never omitted.
+    {!prompts_json} carries these entries unchanged in its prompt list.
     Snapshots key / meta / override / default under the
     mutex, releases the lock, then reads the markdown
     files and builds the [resolved] record outside the

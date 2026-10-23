@@ -603,7 +603,7 @@ let acquire_base_path_lock ~run_dir base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
-let run_cmd ?(record_default = false) host port cli_base_path accept_store_quarantine =
+let run_cmd ?(record_default = false) ~executable_path host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
   let workspace =
     Server_base_path_guard.exit_on_no_workspace
@@ -652,9 +652,35 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
   in
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
   let lease_dir = (Host_config.host ()).base_path_lease_dir in
-  let _base_path_lease =
+  let base_path_lease =
     acquire_base_path_lock ~run_dir:lease_dir canonical_base_path
   in
+  (* The lease has established the canonical .masc boundary. OCaml read its
+     event-directory environment before entering ML, so the default needs a
+     same-process exec before any PID lock, thread, sampler, or scheduler.
+     Reuse the deployment handoff capability rather than release ownership
+     while the replacement runtime reacquires its process-lifetime handle. *)
+  let event_startup =
+    match Masc_runtime_events.prepare_process
+        ~base_path:canonical_base_path ~executable_path ~argv:Sys.argv
+        ~before_exec:(fun () ->
+          Server_startup_takeover.prepare_base_path_lease_exec_handoff base_path_lease)
+    with
+    | result -> result
+    | exception error ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      Server_startup_takeover.release_base_path_lease base_path_lease;
+      Printexc.raise_with_backtrace error backtrace
+  in
+  (match event_startup with
+   | Ok () -> ()
+   | Error error ->
+     Server_startup_takeover.release_base_path_lease base_path_lease;
+     Printf.eprintf "%s\n"
+       (Masc_runtime_events.startup_error_to_string
+          ~handoff_error_to_string:Server_startup_takeover.base_path_lock_rejection_to_string
+          error);
+     exit 1);
   acquire_pid_lock port;
   Log.init_from_env ();
   (* Report a fresh takeover breadcrumb at boot: after a SIGKILL escalation
@@ -1024,12 +1050,12 @@ let run_cmd_exit host port base_path accept_store_quarantine provenance_path pro
     ~binary_commit:identity.binary_commit;
   match provenance_path, provenance_sha256, provenance_device, provenance_inode with
   | None, None, None, None ->
-    run_cmd ~record_default host port base_path accept_store_quarantine;
+    run_cmd ~record_default ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
     Cmd.Exit.ok
   | Some path, Some sha256, Some device, Some inode ->
     (match Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode with
      | Ok () ->
-       run_cmd ~record_default host port base_path accept_store_quarantine;
+       run_cmd ~record_default ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
        Cmd.Exit.ok
      | Error message ->
        Printf.eprintf "invalid build provenance: %s\n" message;

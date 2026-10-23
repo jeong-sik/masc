@@ -135,7 +135,148 @@ let test_prune_survives_missing_dir () =
   (* Must log and return, not raise: pruning cannot block the listener. *)
   Masc_runtime_events.prune_stale_dumps ~dir
 
+(* A fresh process is necessary: OCaml snapshots the event directory before
+   ML starts. These probes exercise the real exec and lease handoff rather
+   than replacing either effect with a successful callback. *)
+let startup_probe ~base_path ~run_dir ~token ~missing_executable =
+  let lease = match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    | Server_startup_takeover.Base_path_acquired lease -> lease
+    | Server_startup_takeover.Base_path_already_owned _ -> failwith "probe lease contended"
+    | Server_startup_takeover.Base_path_rejected error ->
+      failwith (Server_startup_takeover.base_path_lock_rejection_to_string error) in
+  let executable_path = if missing_executable then Filename.concat base_path "missing-executable"
+    else Unix.realpath Sys.executable_name in
+  let emit stage fields =
+    print_endline (Yojson.Safe.to_string
+      (`Assoc (("stage", `String stage) :: ("pid", `Int (Unix.getpid ())) :: fields)));
+    flush stdout in
+  let result = Masc_runtime_events.prepare_process ~base_path ~executable_path ~argv:Sys.argv
+      ~before_exec:(fun () ->
+        emit "handoff" [];
+        Server_startup_takeover.prepare_base_path_lease_exec_handoff lease) in
+  let outcome = match result with
+    | Error (Masc_runtime_events.Handoff_failed _) -> "handoff_failed"
+    | Error (Masc_runtime_events.Directory_unavailable _) -> "directory_unavailable"
+    | Error (Masc_runtime_events.Exec_failed _) -> "exec_failed"
+    | Ok () ->
+      (* Empty is an explicit runtime override whose opening semantics belong
+         to OCaml. This probe observes preparation without opening /<pid>.events. *)
+      if Sys.getenv_opt "OCAML_RUNTIME_EVENTS_DIR" <> Some "" then
+        Masc_runtime_events.start_listener ();
+      "ready" in
+  emit "result"
+    [ "outcome", `String outcome; "token", `String token
+    ; "directory", (match Sys.getenv_opt "OCAML_RUNTIME_EVENTS_DIR" with
+        | None -> `Null | Some directory -> `String directory)
+    ; "ring", (match Runtime_events.path () with None -> `Null | Some path -> `String path) ];
+  Server_startup_takeover.release_base_path_lease lease
+
+let rec remove_startup_tree path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+    Array.iter (fun name -> remove_startup_tree (Filename.concat path name)) (Sys.readdir path);
+    Unix.rmdir path
+  | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Unix.unlink path
+
+let with_startup_workspace f =
+  let root = Unix.realpath (Filename.temp_dir "masc-event-startup-" "") in
+  let base_path = Filename.concat root "workspace" in
+  let run_dir = Filename.concat root "host-run" in
+  Unix.mkdir base_path 0o700;
+  Unix.mkdir run_dir 0o700;
+  Fun.protect ~finally:(fun () -> remove_startup_tree root) (fun () -> f root base_path run_dir)
+
+let run_startup_probe ~root ~base_path ~run_dir ?(enabled="1") ?directory ?(missing_executable=false) () =
+  let excluded =
+    [ "MASC_RUNTIME_EVENTS"; "OCAML_RUNTIME_EVENTS_DIR"; "OCAML_RUNTIME_EVENTS_START"
+    ; "OCAML_RUNTIME_EVENTS_PRESERVE" ] in
+  let inherited = Unix.environment () |> Array.to_list |> List.filter (fun binding ->
+    let name = match String.index_opt binding '=' with
+      | Some separator -> String.sub binding 0 separator
+      | None -> binding in
+    not (List.mem name excluded)) in
+  let environment = Array.of_list
+      (inherited @ [ "MASC_RUNTIME_EVENTS=" ^ enabled ]
+       @ (match directory with None -> [] | Some path -> [ "OCAML_RUNTIME_EVENTS_DIR=" ^ path ])) in
+  let token = "argv survives exec with spaces" in
+  let executable = Unix.realpath Sys.executable_name in
+  let args = [| executable; "--startup-probe"; base_path; run_dir; token
+              ; string_of_bool missing_executable |] in
+  let output = Filename.concat root "probe-output" in
+  let descriptor = Unix.openfile output [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
+  let pid = Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+    Unix.create_process_env executable args environment Unix.stdin descriptor Unix.stderr) in
+  let _, status = Unix.waitpid [] pid in
+  Alcotest.(check bool) "probe exits successfully" true (status = Unix.WEXITED 0);
+  let input = open_in output in
+  let lines = Fun.protect ~finally:(fun () -> close_in input) (fun () ->
+    let rec read acc = match input_line input with
+      | line -> read (Yojson.Safe.from_string line :: acc)
+      | exception End_of_file -> List.rev acc in
+    read []) in
+  let result = List.hd (List.rev lines) in
+  let open Yojson.Safe.Util in
+  Alcotest.(check int) "exec preserves process identity" pid (result |> member "pid" |> to_int);
+  Alcotest.(check string) "exec preserves argv" token (result |> member "token" |> to_string);
+  let handoffs = List.filter (fun row -> (row |> member "stage" |> to_string) = "handoff") lines in
+  List.iter (fun row -> Alcotest.(check int) "handoff has the original PID" pid
+    (row |> member "pid" |> to_int)) handoffs;
+  List.length handoffs, result
+
+let test_default_directory_survives_real_exec () =
+  with_startup_workspace (fun root base_path run_dir ->
+    let handoffs, result = run_startup_probe ~root ~base_path ~run_dir () in
+    let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path) "runtime/events" in
+    let open Yojson.Safe.Util in
+    Alcotest.(check int) "one lease-preserving exec" 1 handoffs;
+    Alcotest.(check string) "ready after exec" "ready" (result |> member "outcome" |> to_string);
+    Alcotest.(check string) "runtime received the workspace directory" directory
+      (result |> member "directory" |> to_string);
+    Alcotest.(check string) "ring uses the workspace directory" directory
+      (result |> member "ring" |> to_string |> Filename.dirname))
+
+let test_explicit_and_disabled_directory_authority () =
+  with_startup_workspace (fun root base_path run_dir ->
+    let explicit = Filename.concat root "operator-events" in
+    Unix.mkdir explicit 0o700;
+    let open Yojson.Safe.Util in
+    List.iter (fun (enabled, directory) ->
+      let handoffs, result = run_startup_probe ~root ~base_path ~run_dir ~enabled ?directory () in
+      Alcotest.(check int) "no default exec" 0 handoffs;
+      Alcotest.(check string) "preparation succeeded" "ready" (result |> member "outcome" |> to_string);
+      Alcotest.(check bool) "no default directory was created" false
+        (Sys.file_exists (Filename.concat (Common.masc_dir_from_base_path ~base_path) "runtime"));
+      match directory with
+      | None -> Alcotest.(check bool) "disabled events have no ring" true ((result |> member "ring") = `Null)
+      | Some expected -> Alcotest.(check string) "override retained exactly" expected
+          (result |> member "directory" |> to_string))
+      ["1", Some explicit; "1", Some ""; "0", None])
+
+let test_startup_refuses_unusable_directory_and_exec () =
+  with_startup_workspace (fun root base_path run_dir ->
+    let runtime = Filename.concat (Common.masc_dir_from_base_path ~base_path) "runtime" in
+    Fs_compat.mkdir_p (Filename.dirname runtime);
+    let retained = Filename.concat root "outside" in
+    Unix.mkdir retained 0o700;
+    Unix.symlink retained runtime;
+    let handoffs, result = run_startup_probe ~root ~base_path ~run_dir () in
+    let open Yojson.Safe.Util in
+    Alcotest.(check int) "handoff is prepared before directory effects" 1 handoffs;
+    Alcotest.(check string) "symlink refuses startup" "directory_unavailable"
+      (result |> member "outcome" |> to_string);
+    Alcotest.(check int) "outside directory stayed empty" 0 (Array.length (Sys.readdir retained));
+    Unix.unlink runtime;
+    let _, result = run_startup_probe ~root ~base_path ~run_dir ~missing_executable:true () in
+    Alcotest.(check string) "exec failure refuses startup" "exec_failed"
+      (result |> member "outcome" |> to_string);
+    Alcotest.(check bool) "failed exec leaves environment unchanged" true
+      ((result |> member "directory") = `Null))
+
 let () =
+  match Sys.argv with
+  | [| _; "--startup-probe"; base_path; run_dir; token; missing_executable |] ->
+    startup_probe ~base_path ~run_dir ~token ~missing_executable:(bool_of_string missing_executable)
+  | _ ->
   Alcotest.run "masc_runtime_events"
     [ ( "span-roundtrip"
       , [ Alcotest.test_case
@@ -159,6 +300,14 @@ let () =
             test_with_turn_span_returns_body
         ; Alcotest.test_case "propagates body exception" `Quick
             test_with_turn_span_propagates_exn
+        ] )
+    ; ( "startup-directory"
+      , [ Alcotest.test_case "workspace default reaches OCaml through exec" `Quick
+            test_default_directory_survives_real_exec
+        ; Alcotest.test_case "operator directory and disabled events retain authority" `Quick
+            test_explicit_and_disabled_directory_authority
+        ; Alcotest.test_case "unsafe directory and failed exec refuse startup" `Quick
+            test_startup_refuses_unusable_directory_and_exec
         ] )
       (* Last group on purpose: it sets OCAML_RUNTIME_EVENTS_PRESERVE and the
          stdlib cannot unset it, so any prune case after this would be skipped

@@ -162,6 +162,7 @@ let keeper_claim config trace_id keeper_name =
       let detail =
         match rejection with
         | Keeper_meta_store.Unreadable detail
+        | Keeper_meta_store.Invalid_json detail
         | Keeper_meta_store.Not_current detail -> detail
       in
       None, [ Keeper_meta_unavailable { keeper_name; detail } ]

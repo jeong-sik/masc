@@ -215,6 +215,7 @@ let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string)
 
 type current_meta_rejection =
   | Unreadable of string
+  | Invalid_json of string
   | Not_current of string
 
 let read_meta_file_path_read_only ~ownership_root path =
@@ -224,7 +225,7 @@ let read_meta_file_path_read_only ~ownership_root path =
   | Ok None -> Ok None
   | Ok (Some contents) ->
     (match Yojson.Safe.from_string contents with
-     | exception Yojson.Json_error detail -> Error (Unreadable detail)
+     | exception Yojson.Json_error detail -> Error (Invalid_json detail)
      | json ->
        (match meta_of_json json with
         | Ok meta -> Ok (Some meta)
@@ -236,17 +237,20 @@ let validate_current_meta_file_result path : (unit, current_meta_rejection) resu
      ([meta_of_json]) minus the fail-open. [Not_current] fires exactly when
      the runtime would read the file as absent and re-materialise the Keeper
      from its declaration (#29610), losing the accumulated counters and the
-     persisted task binding; [Unreadable] when [read_meta_file_path] itself returns [Error]
-     and the boot path refuses the keeper. The deployment preflight runs this
+     persisted task binding. [Unreadable] preserves a file I/O failure and
+     [Invalid_json] a parse failure, both of which the ordinary runtime read
+     returns as [Error]. The deployment preflight runs this
      between the previous runtime's stop and the next one's start — the
      writer lease has to be free — so a rejection holds the plane down until
      the operator repairs the file and redeploys. That downtime is the price
      of keeping the counters the boot-time fail-open would lose. *)
-  if not (Fs_compat.file_exists path)
-  then Ok ()
-  else
-    match Safe_ops.read_json_file_safe path with
-    | Error detail -> Error (Unreadable detail)
+  match Safe_ops.read_file_result path with
+  | Error (Safe_ops.File_not_found _) -> Ok ()
+  | Error ((Safe_ops.Read_failed _) as error) ->
+    Error (Unreadable (Safe_ops.read_file_error_to_string error))
+  | Ok contents ->
+    match Safe_ops.parse_json_off_fiber ~context:path contents with
+    | Error detail -> Error (Invalid_json detail)
     | Ok json ->
       (match meta_of_json json with
        | Ok _ -> Ok ()

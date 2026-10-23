@@ -67,19 +67,28 @@ let validate_current_meta path =
     | Masc.Keeper_meta_store.Unreadable detail ->
       `Msg
         (Printf.sprintf
-           "current keeper meta is unreadable class=unreadable_json path=%s \
+           "current keeper meta is unreadable class=unreadable_file path=%s \
             (on boot the runtime refuses this keeper instead of \
-            re-materialising it; restore the file from backup): %s"
+            re-materialising it; repair file access or file kind; \
+            quarantine cannot bypass this I/O failure): %s"
+           path
+           detail)
+    | Masc.Keeper_meta_store.Invalid_json detail ->
+      `Msg
+        (Printf.sprintf
+           "current keeper meta is invalid JSON class=invalid_json path=%s \
+            (repair the content or explicitly accept boot quarantine and \
+            the loss of this Keeper's persisted state): %s"
            path
            detail)
     | Masc.Keeper_meta_store.Not_current detail ->
       `Msg
         (Printf.sprintf
            "current keeper meta production validation rejected \
-            class=not_current_schema path=%s (on boot the runtime reads this \
-            meta as absent and re-materialises the keeper from its \
-            declaration, losing the accumulated counters and the task \
-            binding; strip retired fields or fill missing ones): %s"
+            class=not_current_schema path=%s (boot refuses this content \
+            unless quarantine is explicitly accepted, losing accumulated \
+            counters and the task binding; strip retired fields or fill \
+            missing ones): %s"
            path
            detail))
 ;;

@@ -157,6 +157,7 @@ let keeper_meta_store =
                 |> Result.map (fun _ -> ())
                 |> Result.map_error (function
                   | Keeper_meta_store.Unreadable detail
+                  | Keeper_meta_store.Invalid_json detail
                   | Keeper_meta_store.Not_current detail -> detail))))
   }
 ;;

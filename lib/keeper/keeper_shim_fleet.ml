@@ -21,7 +21,7 @@ let row ~config keeper : (Yojson.Safe.t, error) result =
     Keeper_meta_store.read_meta_file_path_read_only
       ~ownership_root:config.Workspace.base_path path
     |> Result.map_error (function
-      | Keeper_meta_store.Unreadable detail | Not_current detail -> unread detail)
+      | Keeper_meta_store.Unreadable detail | Invalid_json detail | Not_current detail -> unread detail)
   in
   let* meta =
     match meta with

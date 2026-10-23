@@ -40,15 +40,21 @@ val read_meta_file_path_presence : string -> (meta_presence, string) result
     detail text. *)
 type current_meta_rejection =
   | Unreadable of string
-      (** The file cannot be read or is not JSON.  [read_meta_file_path]
+      (** The file cannot be read. [read_meta_file_path]
           returns [Error] for it and the boot path refuses the Keeper
-          outright.  The lossless fix is restoring the file from backup. *)
+          outright. Boot quarantine cannot bypass an I/O failure; repair
+          file access or the file kind before restarting. *)
+  | Invalid_json of string
+      (** The bytes were read but are not JSON. [read_meta_file_path]
+          returns [Error]; boot may quarantine the rejected bytes only
+          after the operator accepts that loss of persisted state. *)
   | Not_current of string
-      (** The JSON does not decode as the current schema.  The boot path
-          reads it as absent and re-materialises the Keeper from its
-          declaration (#29610), losing the accumulated counters and the
-          persisted task binding.  The lossless fix is stripping fields
-          outside the current schema or filling missing ones. *)
+      (** The JSON does not decode as the current schema. The ordinary
+          runtime read treats it as absent (#29610), so boot reconciliation
+          refuses it until it is repaired or explicitly accepted for
+          quarantine. Re-materialising from the declaration loses the
+          accumulated counters and persisted task binding. The lossless
+          fix is stripping retired fields or filling missing ones. *)
 
 val read_meta_file_path_read_only :
   ownership_root:string ->
@@ -59,7 +65,8 @@ val read_meta_file_path_read_only :
 
 (** Deploy-gate twin of [read_meta_file_path]: the same exact decode,
     shared with the runtime read so the two cannot drift, minus the
-    fail-open.  [Ok ()] when the runtime would keep the snapshot, or when
+    fail-open, retaining I/O and JSON parse failures as separate constructors.
+    [Ok ()] when the runtime would keep the snapshot, or when
     there is no file at [path]; [Error] carries the class above and the same
     detail the runtime logs.  The deployment preflight runs this between the
     previous runtime's stop and the next one's start, so a rejection holds

@@ -19,7 +19,7 @@ let metadata_evidence ~config path =
       ~ownership_root:config.Workspace.base_path path with
   | Ok None -> Metadata_absent
   | Ok (Some _) -> Metadata_current
-  | Error (Keeper_meta_store.Unreadable detail | Keeper_meta_store.Not_current detail) ->
+  | Error (Keeper_meta_store.Unreadable detail | Keeper_meta_store.Invalid_json detail | Keeper_meta_store.Not_current detail) ->
     Metadata_unavailable detail
 
 let metadata_stamp = function

@@ -249,9 +249,10 @@ let test_examine_is_silent_on_a_goal_store_that_is_absent_or_reads () =
 ;;
 
 let test_admit_refuses_only_undecodable_without_the_flag () =
-  let clean = { R.readable = 3; undecodable = []; discovery_failures = [] } in
+  let clean = { R.readable = 3; undecodable = []; unreadable = []; discovery_failures = [] } in
   let broken =
     { R.readable = 1
+    ; unreadable = []
     ; discovery_failures = []
     ; undecodable =
         [ { R.store = D.Refusing.Memory_current
@@ -267,7 +268,7 @@ let test_admit_refuses_only_undecodable_without_the_flag () =
    | Error _ -> fail "a clean examination was refused");
   (match R.admit ~accept_quarantine:false broken with
    | Error refused ->
-     check (list string) "the refusal names the store" [ "memory_current" ] (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Discovery_failed _ | R.Quarantine_failed _ -> None) refused))
+     check (list string) "the refusal names the store" [ "memory_current" ] (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Unreadable _ | R.Discovery_failed _ | R.Quarantine_failed _ -> None) refused))
    | Ok _ -> fail "an undecodable store passed without the flag");
   match R.admit ~accept_quarantine:true broken with
   | Ok admitted ->
@@ -433,7 +434,7 @@ let test_preparation_refuses_then_moves_aside_with_the_flag () =
         | Error (B.Store_quarantine_refused undecodable) ->
           check (list string) "the refusal names both stores"
             [ "keeper_meta"; "memory_current" ]
-            (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Discovery_failed _ | R.Quarantine_failed _ -> None) undecodable));
+            (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Unreadable _ | R.Discovery_failed _ | R.Quarantine_failed _ -> None) undecodable));
           check bool "the broken snapshot is untouched" true
             (Sys.file_exists fixture.broken_snapshot);
           check bool "the broken meta is untouched" true (Sys.file_exists fixture.broken_meta);
@@ -1300,7 +1301,7 @@ let test_queue_inventory_inspection_failure_preserves_partial_discovery () =
       check bool "queue inventory refuses even accepted quarantine" true
         (List.exists (function
           | R.Discovery_failed {store = D.Refusing.Event_queue; _} -> true
-          | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
+          | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
     [false; true];
   (match D.reader D.Id.Keeper_event_queue with
    | D.Refuse_boot (_, scan) ->
@@ -1326,11 +1327,11 @@ let test_unreadable_session_inventory_refuses_even_with_quarantine () =
         check bool "official-client inventory failure remains explicit" true
           (List.exists (function
             | R.Discovery_failed { store = D.Refusing.Official_client_session; _ } -> true
-            | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures);
+            | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures);
         check bool "the earlier metadata scan also retains its inventory failure" true
           (List.exists (function
             | R.Discovery_failed { store = D.Refusing.Keeper_meta; _ } -> true
-            | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
+            | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
       [ false; true ];
     check string "the unread inventory was not renamed" "not a directory"
       (let channel = open_in path in
@@ -1353,7 +1354,7 @@ let test_event_queue_discovery_failure_refuses_quarantine () =
         check bool "queue discovery failure remains explicit" true
           (List.exists (function
             | R.Discovery_failed { store = D.Refusing.Event_queue; _ } -> true
-            | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
+            | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
       [ false; true ];
     check bool "discovery never moved the queue" true (Sys.file_exists path))
 ;;
@@ -1381,7 +1382,7 @@ let test_blocked_session_directory_refuses_even_with_quarantine () =
         check bool "blocked session directory cannot be quarantined" true
           (List.exists (function
             | R.Discovery_failed { store = D.Refusing.Official_client_session; _ } -> true
-            | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false)
+            | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false)
             failures))
       [ false; true ];
     check string "blocked directory was not changed" "not a directory"

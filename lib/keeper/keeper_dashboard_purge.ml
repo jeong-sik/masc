@@ -111,7 +111,7 @@ let resolve (config : Workspace.config) requested_name =
       in
       (match Keeper_meta_store.read_meta_file_path_read_only
          ~ownership_root:config.base_path metadata_path with
-       | Error (Keeper_meta_store.Unreadable detail | Not_current detail) ->
+       | Error (Keeper_meta_store.Unreadable detail | Invalid_json detail | Not_current detail) ->
          Error
            (Keeper_metadata_unreadable { keeper_name; metadata_path; detail })
        | Ok (Some meta) when String.equal meta.name keeper_name ->

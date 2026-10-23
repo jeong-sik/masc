@@ -61,7 +61,9 @@ let control_identity ~sw ~owner =
       transport=B.Ego_task_space} in
     let poll ()=Eio.Fiber.fork_promise ~sw (fun () -> send (W.Poll {client;window_sec=2.})) in
     let first_poll=poll () in
-    let rec registered ()=if B.connected_clients ()=[] then (Eio.Fiber.yield ();registered ()) in
+    let rec registered ()=
+      if not (List.exists (fun (seen : B.client_info) -> seen.client_id=client_id) (B.connected_clients ()))
+      then (Eio.Fiber.yield ();registered ()) in
     registered ();
     List.iteri (fun index control ->
       let verb=B.Page_act (B.Action.Control control) in

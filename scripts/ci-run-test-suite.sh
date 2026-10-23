@@ -9,8 +9,9 @@ alias_target="@runtest"
 
 # task-2499: the full regression links ~1000 test executables whose debug
 # symbols exhaust the ubuntu-24.04 runner disk. Build under the ci profile
-# (declared in dune and dune-workspace) so ocamlopt strips debug symbols;
-# local dev and release builds keep them for backtraces.
+# (declared in dune) which links test executables with -ccopt -s so the C
+# linker strips symbols and DWARF; local dev and release builds keep them
+# for backtraces.
 if [ -z "${DUNE_PROFILE:-}" ] && [ -z "${TARGET_SUITES:-}" ]; then
   export DUNE_PROFILE=ci
 fi

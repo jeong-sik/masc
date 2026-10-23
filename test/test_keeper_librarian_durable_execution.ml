@@ -762,9 +762,9 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind 
     let assert_actual_unknown ()=
       match io (fun () -> Exact.observe_retained ~store:fixture.store
         ~declaration_id:"librarian" ~schema exact |> get) with
-      | Exact.Retained_terminal Exact.Outcome_unknown -> ()
+      | Exact.Retained_terminal (Exact.Retained_unknown (Interrupted | Cut | Raised)) -> ()
       | Retained_absent | Retained_open
-      | Retained_terminal (Call_final _ | Not_allowed _ | Request_id_reused) ->
+      | Retained_terminal (Retained_call _ | Retained_not_allowed _ | Retained_request_id_reused) ->
         fail "the actual host must retain terminal Outcome_unknown before testing later wakes" in
     assert_actual_unknown ();
     (* First observe the actual terminal through the ordinary owner. The old

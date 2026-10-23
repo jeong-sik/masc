@@ -371,7 +371,7 @@ let confirm_final ~store (capture:t) (final:Lane_addon_exact.final) =
     | Exact.Retained_absent -> Error "Original admission host terminal is absent"
     | Retained_open -> Error "Original admission host terminal remains unresolved"
     | Retained_terminal retained ->
-      let* same = same_json (Exact.final_to_json retained) (Exact.final_to_json final) in
+      let* same = same_json (Exact.final_to_json (Exact.delivered retained)) (Exact.final_to_json final) in
       if same then Ok () else Error "Admission final differs from its original host terminal" in
   match final with
   | Exact.Call_final call_final ->

@@ -315,7 +315,7 @@ let confirm_final ~store capture final =
   let* ()=match observed with
     | Exact.Retained_absent -> Error "Original history host terminal is absent"
     | Retained_open -> Error "Original history host terminal is unresolved"
-    | Retained_terminal actual -> equal (Exact.final_to_json actual) (Exact.final_to_json final)
+    | Retained_terminal actual -> equal (Exact.final_to_json (Exact.delivered actual)) (Exact.final_to_json final)
       "Original history final differs from the actual host terminal" in
   match final with
   | Exact.Call_final expected ->

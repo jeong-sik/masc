@@ -1,3 +1,4 @@
+defer_loading = true
 name = "keeper_skill_publish"
 description = """
 Publish a new Skill package into the workspace's project-agents Skill source. \

@@ -1,3 +1,4 @@
+defer_loading = true
 name = "masc_schedule_list"
 description = """
 List schedule summary rows; masc_schedule_get reads one in full. Rows follow \

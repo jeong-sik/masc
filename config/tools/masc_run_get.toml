@@ -1,3 +1,4 @@
+defer_loading = true
 name = "masc_run_get"
 description = """
 Retrieve the run record and execution plan for a task. \\nIf the task has no \

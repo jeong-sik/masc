@@ -1,3 +1,4 @@
+defer_loading = true
 name = "masc_plan_get_task"
 title = "Get Current Task"
 description = """

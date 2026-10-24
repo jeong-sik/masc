@@ -1,3 +1,4 @@
+defer_loading = true
 name = "keeper_memory_select"
 description = """
 Select this Keeper's ordinary and source-bound current memories for an explicit purpose.

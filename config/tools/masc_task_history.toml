@@ -1,3 +1,4 @@
+defer_loading = true
 name = "masc_task_history"
 title = "Task Event History"
 description = """

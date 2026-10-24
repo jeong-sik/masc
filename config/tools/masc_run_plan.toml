@@ -1,3 +1,4 @@
+defer_loading = true
 name = "masc_run_plan"
 description = """
 Set or update the execution plan (markdown) for a task run; each update \

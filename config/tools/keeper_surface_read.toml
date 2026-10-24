@@ -1,3 +1,4 @@
+defer_loading = true
 name = "keeper_surface_read"
 description = """
 Read recent messages from one conversation endpoint (dashboard, discord, \

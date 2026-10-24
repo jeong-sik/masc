@@ -1,3 +1,4 @@
+defer_loading = true
 name = "keeper_image_read"
 description = """
 Read an image's original pixels into the current model, without calling another \

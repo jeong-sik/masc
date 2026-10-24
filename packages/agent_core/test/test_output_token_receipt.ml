@@ -497,7 +497,7 @@ let test_anthropic_zero_is_explicit () =
 (* The completion serializer used to return only codec/body and discard the
    receipt. Exercise its final sync/stream boundary, not a second resolver. *)
 let test_completion_serialization_preserves_receipt () =
-  let cases =
+  let cases : (PC.provider_kind * string * output_token_envelope * string list) list =
     [ OpenAI_compat, "/v1/chat/completions", Openai_chat_max_tokens, ["max_tokens"]
     ; OpenAI_compat, "/v1/responses", Openai_responses_max_output_tokens, ["max_output_tokens"]
     ; Anthropic, "/v1/messages", Anthropic_messages_max_tokens, ["max_tokens"]

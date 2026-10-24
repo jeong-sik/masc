@@ -530,8 +530,8 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
         in
         with_reviewer
           (fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:actual_prompt
-              ?goal_blocks ~report_tool_schema:_ ~lookup:offered_lookup
-              ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+              ?system_prompt:_ ?goal_blocks ~report_tool_schema:_ ~lookup:offered_lookup
+              ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
             let index = List.length !calls in
             calls := !calls @ [evaluator_runtime];
             Alcotest.(check string) "every candidate retains the original prompt" prompt actual_prompt;
@@ -623,8 +623,8 @@ let test_oversized_lookup_handoff_preserves_the_inline_refusal () =
         raw) } in
       with_reviewer
         (fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:actual_prompt
-            ?goal_blocks ~report_tool_schema:_ ~lookup:offered_lookup
-            ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+            ?system_prompt:_ ?goal_blocks ~report_tool_schema:_ ~lookup:offered_lookup
+            ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
           let first = !calls = [] in
           calls := !calls @ [evaluator_runtime];
           Alcotest.(check string) "the original prompt remains unchanged" prompt actual_prompt;
@@ -714,8 +714,8 @@ let test_failed_lookup_handoff_uses_the_full_bridge_envelope () =
           raw) } in
         with_reviewer
           (fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:actual_prompt
-              ?goal_blocks ~report_tool_schema:_ ~lookup:offered_lookup
-              ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+              ?system_prompt:_ ?goal_blocks ~report_tool_schema:_ ~lookup:offered_lookup
+              ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
             let first = !calls = [] in
             calls := !calls @ [evaluator_runtime];
             Alcotest.(check string) "failure does not replace the original prompt" prompt actual_prompt;

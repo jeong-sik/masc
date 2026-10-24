@@ -192,8 +192,8 @@ let through_complete ~stream response =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync = (fun _ -> { response = Ok response; latency_ms = None })
-    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok response) }
+    Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> { response = Ok response; latency_ms = None })
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok response) })
   in
   let config = Llm_provider.Provider_config.make
       ~kind:OpenAI_compat ~model_id:"fixture"

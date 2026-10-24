@@ -85,7 +85,7 @@ type stream_result = (Types.api_response, Http_client.http_error) result
     suffixes only when explicitly typed as [TextSnapshot], ordinary [TextDelta]
     values always append, and invalid raw input becomes one typed failure rather
     than an accepted content callback. *)
-type t =
+type callbacks =
   { complete_sync : completion_request -> sync_result
   ; complete_stream :
       ?on_telemetry:(Telemetry_event.t -> unit)
@@ -93,3 +93,19 @@ type t =
       -> completion_request
       -> stream_result
   }
+
+(** Native/observed transport invocations carry their outcome unchanged.
+    Wrappers must forward the outcome, not unwrap and rebuild its provenance. *)
+type t =
+  { invoke_sync : completion_request -> sync_result Completion_outcome.t
+  ; invoke_stream :
+      ?on_telemetry:(Telemetry_event.t -> unit)
+      -> on_event:(Types.sse_event -> unit)
+      -> completion_request
+      -> stream_result Completion_outcome.t
+  }
+
+(** Construct an injected transport from simple callbacks. Its returned values
+    are explicitly unobserved: neither config nor provider response is used to
+    fabricate a native output-token receipt. *)
+val custom : callbacks -> t

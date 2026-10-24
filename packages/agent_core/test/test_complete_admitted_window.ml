@@ -133,7 +133,7 @@ let complete_admitted_under_a_spent_window ~stream =
     in
     let reached = ref false in
     let transport =
-      { Llm_transport.complete_sync =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
           (fun _ ->
             reached := true;
             { Llm_transport.response = Ok response; latency_ms = None })
@@ -141,7 +141,7 @@ let complete_admitted_under_a_spent_window ~stream =
           (fun ?on_telemetry:_ ~on_event:_ _ ->
             reached := true;
             Ok response)
-      }
+      })
     in
     let result =
       if stream

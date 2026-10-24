@@ -177,14 +177,14 @@ let provider_resource_observation_transport
     ~(kind : Fd_accountant.kind)
     (transport : Llm_provider.Llm_transport.t)
   : Llm_provider.Llm_transport.t =
-  { complete_sync =
+  { invoke_sync =
       (fun req ->
         Fd_accountant.observe ~kind (fun () ->
-          transport.complete_sync req));
-    complete_stream =
+          transport.invoke_sync req));
+    invoke_stream =
       (fun ?on_telemetry ~on_event req ->
         Fd_accountant.observe ~kind (fun () ->
-          transport.complete_stream ?on_telemetry ~on_event req));
+          transport.invoke_stream ?on_telemetry ~on_event req));
   }
 
 let provider_http_observation_transport transport =
@@ -213,20 +213,20 @@ let observed_http_transport
       ()
   in
   provider_http_observation_transport
-    { complete_sync =
+    { invoke_sync =
       (fun req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Runtime_agent.debug
-          "rfc0095-trace: runtime_runner http_transport.complete_sync invoked";
-        http_transport.complete_sync req);
-      complete_stream =
+          "rfc0095-trace: runtime_runner http_transport.invoke_sync invoked";
+        http_transport.invoke_sync req);
+      invoke_stream =
       (fun ?on_telemetry ~on_event req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Runtime_agent.debug
-          "rfc0095-trace: runtime_runner http_transport.complete_stream invoked";
-        http_transport.complete_stream
+          "rfc0095-trace: runtime_runner http_transport.invoke_stream invoked";
+        http_transport.invoke_stream
           ?on_telemetry
           ~on_event
           req);

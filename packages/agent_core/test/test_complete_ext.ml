@@ -97,13 +97,13 @@ let metrics_of_probe probe =
 ;;
 
 let transport_of_sync sync_response =
-  { Llm_transport.complete_sync = (fun _request -> sync_response ())
+  Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync = (fun _request -> sync_response ())
   ; complete_stream =
       (fun ?on_telemetry:_ ~on_event:_ _request ->
         match sync_response () with
         | { response = Ok resp; _ } -> Ok resp
         | { response = Error err; _ } -> Error err)
-  }
+  })
 ;;
 
 let string_of_http_error = function
@@ -244,7 +244,7 @@ let test_complete_transport_bypasses_cache_with_metrics_and_trace_headers () =
   in
   let response = make_response ~content ~usage:(make_usage ()) () in
   let transport =
-    { Llm_transport.complete_sync =
+    Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
         (fun request ->
           incr calls;
           check
@@ -264,7 +264,7 @@ let test_complete_transport_bypasses_cache_with_metrics_and_trace_headers () =
             (List.mem ("x-base", "base") request.config.headers);
           { Llm_transport.response = Ok response; latency_ms = Some 42 })
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok response)
-    }
+    })
   in
   let messages = [ Types.user_msg "hello" ] in
   let first =
@@ -523,7 +523,7 @@ let test_complete_stream_transport_success_metrics_and_telemetry () =
       ()
   in
   let transport =
-    { Llm_transport.complete_sync =
+    Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
         (fun _request -> { Llm_transport.response = Ok response; latency_ms = Some 1 })
     ; complete_stream =
         (fun ?on_telemetry ~on_event request ->
@@ -550,7 +550,7 @@ let test_complete_stream_transport_success_metrics_and_telemetry () =
                   })
            | None -> ());
           Ok response)
-    }
+    })
   in
   (match
      Complete.complete_stream
@@ -616,7 +616,7 @@ let test_custom_stream_wire_rejection_is_typed_nonfatal () =
   let observations = ref [] in
   let telemetry = ref [] in
   let transport =
-    { Llm_transport.complete_sync =
+    Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
         (fun _ -> { Llm_transport.response = Ok response; latency_ms = None })
     ; complete_stream =
         (fun ?on_telemetry:_ ~on_event:_ request ->
@@ -625,7 +625,7 @@ let test_custom_stream_wire_rejection_is_typed_nonfatal () =
            | Some observe ->
              observe ~provider:"custom" ~model:request.config.model_id ~chunk:token);
           Ok response)
-    }
+    })
   in
   let result =
     Complete.complete_stream
@@ -677,7 +677,7 @@ let test_custom_stream_wire_observer_and_telemetry_exceptions_are_nonfatal () =
        @@ fun sw ->
        let response = make_response ~content:[ Types.Text "preserved" ] () in
        let transport =
-         { Llm_transport.complete_sync =
+         Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
              (fun _ -> { Llm_transport.response = Ok response; latency_ms = None })
          ; complete_stream =
              (fun ?on_telemetry:_ ~on_event:_ request ->
@@ -689,7 +689,7 @@ let test_custom_stream_wire_observer_and_telemetry_exceptions_are_nonfatal () =
                     ~model:request.config.model_id
                     ~chunk:"raw chunk");
                Ok response)
-         }
+         })
        in
        let result =
          Complete.complete_stream

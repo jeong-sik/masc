@@ -216,7 +216,7 @@ let test_with_transport () =
   with_net
   @@ fun net ->
   let mock_transport : Llm_provider.Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun _req ->
           { response =
               Error
@@ -228,7 +228,7 @@ let test_with_transport () =
         (fun ?on_telemetry:_ ~on_event:_ _req ->
           Error
             (Llm_provider.Http_client.NetworkError { message = "mock"; kind = Unknown }))
-    }
+    })
   in
   let agent =
     Builder.create ~net ~model:"claude-sonnet-5"
@@ -319,12 +319,12 @@ let test_with_provider_config_reaches_dispatch_losslessly () =
     }
   in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun request ->
           observed := Some request.Llm_provider.Llm_transport.config;
           { response = Ok response; latency_ms = Some 0 })
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok response)
-    }
+    })
   in
   let provider_config = exact_provider_config () in
   let agent =
@@ -429,7 +429,7 @@ let test_missing_provider_config_is_rejected_at_dispatch () =
     }
   in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun _request ->
           transport_called := true;
           { response = Ok response; latency_ms = Some 0 })
@@ -437,7 +437,7 @@ let test_missing_provider_config_is_rejected_at_dispatch () =
         (fun ?on_telemetry:_ ~on_event:_ _request ->
           transport_called := true;
           Ok response)
-    }
+    })
   in
   let agent =
     Builder.create ~net ~model:"missing-provider-config"
@@ -492,7 +492,7 @@ let test_handoff_inherits_injected_transport () =
       { message = "scripted transport exhausted"; kind = Unknown }
   in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun _request ->
           incr calls;
           match !responses with
@@ -502,7 +502,7 @@ let test_handoff_inherits_injected_transport () =
           | [] -> { response = Error (transport_error ()); latency_ms = Some 0 })
     ; complete_stream =
         (fun ?on_telemetry:_ ~on_event:_ _request -> Error (transport_error ()))
-    }
+    })
   in
   let target =
     let parent_config = Types.default_config ~model:"parent-model" in

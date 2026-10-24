@@ -7,6 +7,8 @@ type serialized_request =
 type request_provenance =
   | Not_serialized
   | Serialized of serialized_request
+  | External_unobserved
+  | Interrupted_unobserved
 
 type 'a t =
   { result : 'a
@@ -23,4 +25,16 @@ let after_serialization ~(request : Complete_common.serialized_http_request) res
     }
   in
   { result; request_provenance = Serialized serialized }
+;;
+
+let map_result transform outcome =
+  { outcome with result = transform outcome.result }
+;;
+
+let external_unobserved result =
+  { result; request_provenance = External_unobserved }
+;;
+
+let interrupted_unobserved result =
+  { result; request_provenance = Interrupted_unobserved }
 ;;

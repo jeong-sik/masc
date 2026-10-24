@@ -221,7 +221,7 @@ let complete_prepared_sync
        let dispatch () =
          match transport with
          | Some t ->
-           let run_transport () = t.complete_sync request in
+           let run_transport () = t.invoke_sync request in
            (match body_deadline with
             | Http_client.Unbounded ->
               Http_client.with_explicit_deadline body_deadline run_transport
@@ -231,7 +231,8 @@ let complete_prepared_sync
                with
                | Ok result -> result
                | Error `Timeout ->
-                 { Llm_transport.response =
+                 Completion_outcome.interrupted_unobserved
+                   { Llm_transport.response =
                      Error
                        (Http_client.TimeoutError
                           { message =
@@ -244,7 +245,6 @@ let complete_prepared_sync
                  ; latency_ms = None
                  }))
          | None ->
-           let resp, lat =
              complete_http
                ~sw
                ~net
@@ -259,11 +259,10 @@ let complete_prepared_sync
                ~messages
                ~tools
                ()
-             |> fun outcome -> outcome.Completion_outcome.result
-           in
-           { Llm_transport.response = resp; latency_ms = lat }
+             |> Completion_outcome.map_result (fun (response, latency_ms) ->
+                  { Llm_transport.response; latency_ms })
        in
-       let { Llm_transport.response = result; latency_ms } =
+       let transport_outcome =
          (* The permit spans the full provider round-trip; cache hits above
             never take one. Waiting for a permit is queueing, not part of the
             provider interaction, so body_timeout_s does not cover it.
@@ -277,8 +276,8 @@ let complete_prepared_sync
            Provider_admission.with_admission ~config:request_config dispatch
          | Deadline_window.Bounded
              { clock = call_clock; timeout_s = call_timeout_s; deadline_at } ->
-           let call_deadline_exceeded ~phase ~stage =
-             { Llm_transport.response =
+           let call_deadline_exceeded ~wrap ~phase ~stage =
+             wrap { Llm_transport.response =
                  Error
                    (Http_client.TimeoutError
                       { message =
@@ -302,19 +301,24 @@ let complete_prepared_sync
             | Ok transport_result -> transport_result
             | Error Provider_admission.Permit_wait_expired ->
               call_deadline_exceeded
+                ~wrap:Completion_outcome.before_serialization
                 ~phase:Http_client.Queue
                 ~stage:"before a provider admission permit was granted"
             | Error Provider_admission.Permit_granted_as_deadline_passed ->
               (* Nothing was sent, and the permit went straight back. Still
                  the queue phase, said as what happened. *)
               call_deadline_exceeded
+                ~wrap:Completion_outcome.before_serialization
                 ~phase:Http_client.Queue
                 ~stage:"with a provider admission permit granted as the deadline passed"
             | Error Provider_admission.Work_expired ->
               call_deadline_exceeded
+                ~wrap:Completion_outcome.interrupted_unobserved
                 ~phase:Http_client.Non_streaming_body
                 ~stage:"during the provider round trip")
        in
+       let { Llm_transport.response = result; latency_ms } =
+         transport_outcome.Completion_outcome.result in
        (* HTTP-backed transports bypass complete_http, so emit the status
          here using the transport result. Non-HTTP CLI transports must
          stay silent because they never observed an HTTP status code. *)
@@ -617,7 +621,7 @@ let complete_prepared_stream
     let request = { request with observe_http_status = Some metrics.on_http_status } in
     let dispatch () =
       match transport with
-      | Some t -> t.complete_stream ?on_telemetry:transport_on_telemetry ~on_event request
+      | Some t -> t.invoke_stream ?on_telemetry:transport_on_telemetry ~on_event request
       | None ->
         complete_stream_http
           ~sw
@@ -640,9 +644,8 @@ let complete_prepared_stream
           ~tools
           ~on_event
           ()
-        |> fun outcome -> outcome.Completion_outcome.result
     in
-    let result =
+    let transport_outcome =
       (* The permit spans the entire stream: the provider holds the
          connection open until the final SSE event, so concurrency
          accounting must too. The wait for the permit is the one part of
@@ -674,8 +677,9 @@ let complete_prepared_stream
                  " admission_snapshot=after_wait max_slots=%d active=%d available=%d queue_length=%d"
                  snapshot.max_slots snapshot.active snapshot.available snapshot.queue_length
            in
-           Error
-             (Http_client.TimeoutError
+           Completion_outcome.before_serialization
+             (Error
+               (Http_client.TimeoutError
                 { message =
                     Printf.sprintf
                       "admission_timeout_s deadline exceeded after %.17gs before a \
@@ -683,7 +687,7 @@ let complete_prepared_stream
                       admission_timeout_s
                       admission_snapshot
                 ; phase = Http_client.Queue
-                }))
+                })))
     in
     Result.map
       (fun resp ->
@@ -709,7 +713,7 @@ let complete_prepared_stream
            ~model_id:config.model_id
            resp;
          resp)
-      (ensure_nonempty_completion result)
+      (ensure_nonempty_completion transport_outcome.Completion_outcome.result)
 ;;
 
 let complete_stream
@@ -843,9 +847,8 @@ let make_http_transport
       ()
   : Llm_transport.t
   =
-  { complete_sync =
+  { invoke_sync =
       (fun (req : Llm_transport.completion_request) ->
-        let response, latency_ms =
           complete_http
             ~sw
             ~net
@@ -858,10 +861,9 @@ let make_http_transport
             ~messages:req.messages
             ~tools:req.tools
             ()
-          |> fun outcome -> outcome.Completion_outcome.result
-        in
-        { Llm_transport.response; latency_ms })
-  ; complete_stream =
+          |> Completion_outcome.map_result (fun (response, latency_ms) ->
+               { Llm_transport.response; latency_ms }))
+  ; invoke_stream =
       (fun ?on_telemetry ~on_event (req : Llm_transport.completion_request) ->
         complete_stream_http
           ~sw
@@ -881,7 +883,6 @@ let make_http_transport
           ~tools:req.tools
           ~on_event
           ?on_telemetry
-          ()
-        |> fun outcome -> outcome.Completion_outcome.result)
+          ())
   }
 ;;

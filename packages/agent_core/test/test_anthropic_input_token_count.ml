@@ -805,8 +805,8 @@ reasoning_replay = "%s"
           Ok response
         in
         let transport : Llm_transport.t =
-          { complete_sync = (fun request -> { response = invoke request; latency_ms = None })
-          ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ request -> invoke request) } in
+          Llm_provider.Llm_transport.custom ({ complete_sync = (fun request -> { response = invoke request; latency_ms = None })
+          ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ request -> invoke request) }) in
         let result = if stream then
             Complete.complete_stream ~sw ~net ~transport ~config:cfg
               ~messages:[msg User [Text "hello"]] ~on_event:(fun _ -> ()) ()
@@ -1025,13 +1025,13 @@ let test_prepared_measure_admit_dispatch () =
     let fit = Complete.admitted_fit admitted in
     let dispatched = ref None in
     let transport =
-      { Llm_transport.complete_sync =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
           (fun request ->
             dispatched := Some request;
             { Llm_transport.response = Ok response; latency_ms = Some 1 })
       ; complete_stream =
           (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
-      }
+      })
     in
     let result =
       Complete.complete_admitted ~sw ~net ~transport admitted ~call_window:unbounded_window ()
@@ -1153,7 +1153,7 @@ let with_post_counter f =
 (* Transport that flips [dispatched] if the completion is ever dispatched. An
    unknown context limit must fail admission before either path runs. *)
 let dispatch_tripwire dispatched =
-  { Llm_transport.complete_sync =
+  Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
       (fun _ ->
         dispatched := true;
         { Llm_transport.response = Ok response; latency_ms = None })
@@ -1161,7 +1161,7 @@ let dispatch_tripwire dispatched =
       (fun ?on_telemetry:_ ~on_event:_ _ ->
         dispatched := true;
         Ok response)
-  }
+  })
 ;;
 
 let serving_constraint ?expires_at_unix_s () =
@@ -1434,7 +1434,7 @@ let test_agent_route_uses_prepared_admission () =
     let provider_config = config ~max_context:512 base_url in
     let dispatched = ref None in
     let transport =
-      { Llm_transport.complete_sync =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
           (fun request ->
             dispatched := Some request;
             { Llm_transport.response = Ok response; latency_ms = Some 1 })
@@ -1442,7 +1442,7 @@ let test_agent_route_uses_prepared_admission () =
           (fun ?on_telemetry:_ ~on_event:_ request ->
             dispatched := Some request;
             Ok response)
-      }
+      })
     in
     let agent = build_admission_agent ~net ~provider_config ~transport () in
     let result = Agent_core.Agent.run ~sw agent "measure this exact turn" in
@@ -1466,12 +1466,12 @@ let test_agent_stream_route_uses_prepared_admission () =
     let provider_config = config ~max_context:512 base_url in
     let dispatched = ref None in
     let transport =
-      { Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
       ; complete_stream =
           (fun ?on_telemetry:_ ~on_event:_ request ->
             dispatched := Some request;
             Ok response)
-      }
+      })
     in
     let agent = build_admission_agent ~net ~provider_config ~transport () in
     let result = Agent_core.Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "stream" in
@@ -1539,13 +1539,13 @@ let test_agent_projection_is_shared_by_measurement_and_dispatch () =
     let provider_config = config ~max_context:512 base_url in
     let dispatched = ref None in
     let transport =
-      { Llm_transport.complete_sync =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
           (fun request ->
             dispatched := Some request;
             { Llm_transport.response = Ok response; latency_ms = Some 1 })
       ; complete_stream =
           (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
-      }
+      })
     in
     let hydrated = msg User [ Text "hydrated artifact payload" ] in
     let agent =
@@ -1585,10 +1585,10 @@ let run_failing_projection projection =
   @@ fun sw ->
   let provider_config = config ~max_context:512 unreachable_base_url in
   let transport =
-    { Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
+    Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
     ; complete_stream =
         (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
-    }
+    })
   in
   let agent =
     build_admission_agent
@@ -1638,13 +1638,13 @@ let test_agent_count_preflight_uses_completion_timeout () =
     let provider_config = config ~max_context:512 base_url in
     let dispatched = ref false in
     let transport =
-      { Llm_transport.complete_sync =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
           (fun _ ->
             dispatched := true;
             { Llm_transport.response = Ok response; latency_ms = Some 1 })
       ; complete_stream =
           (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
-      }
+      })
     in
     let agent =
       build_admission_agent ~body_timeout_s:0.02 ~net ~provider_config ~transport ()
@@ -1678,13 +1678,13 @@ let test_agent_overflow_blocks_dispatch () =
     let provider_config = config ~max_context:512 base_url in
     let dispatched = ref false in
     let transport =
-      { Llm_transport.complete_sync =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
           (fun _ ->
             dispatched := true;
             { Llm_transport.response = Ok response; latency_ms = None })
       ; complete_stream =
           (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected stream dispatch")
-      }
+      })
     in
     let agent = build_admission_agent ~net ~provider_config ~transport () in
     let result = Agent_core.Agent.run ~sw agent "overflow" in
@@ -1704,13 +1704,13 @@ let test_kimi_agent_overflow_blocks_dispatch () =
     let provider_config = kimi_config ~max_context:512 base_url in
     let dispatched = ref false in
     let transport =
-      { Llm_transport.complete_sync =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
           (fun _ ->
             dispatched := true;
             { Llm_transport.response = Ok response; latency_ms = None })
       ; complete_stream =
           (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected stream dispatch")
-      }
+      })
     in
     let agent = build_admission_agent ~net ~provider_config ~transport () in
     let result = Agent_core.Agent.run ~sw agent "overflow" in
@@ -1729,12 +1729,12 @@ let test_invalid_count_response_is_provider_parse_failure () =
     @@ fun ~sw ~net ~base_url ->
     let provider_config = config ~max_context:512 base_url in
     let transport =
-      { Llm_transport.complete_sync =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
           (fun _ -> fail "malformed count response must block completion dispatch")
       ; complete_stream =
           (fun ?on_telemetry:_ ~on_event:_ _ ->
             fail "malformed count response must block streaming dispatch")
-      }
+      })
     in
     let agent = build_admission_agent ~net ~provider_config ~transport () in
     Agent_core.Agent.run_detailed ~sw agent "malformed count response"
@@ -1768,13 +1768,13 @@ let test_unsupported_provider_blocks_sync_dispatch () =
   in
   let dispatched = ref false in
   let transport =
-    { Llm_transport.complete_sync =
+    Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
         (fun _ ->
           dispatched := true;
           { Llm_transport.response = Ok response; latency_ms = None })
     ; complete_stream =
         (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected stream dispatch")
-    }
+    })
   in
   let agent = build_admission_agent ~net ~provider_config ~transport () in
   match Agent_core.Agent.run ~sw agent "require exact fit" with
@@ -1797,12 +1797,12 @@ let test_unsupported_provider_blocks_stream_dispatch () =
   in
   let dispatched = ref false in
   let transport =
-    { Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
+    Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
     ; complete_stream =
         (fun ?on_telemetry:_ ~on_event:_ _ ->
           dispatched := true;
           Ok response)
-    }
+    })
   in
   let agent = build_admission_agent ~net ~provider_config ~transport () in
   match Agent_core.Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "require exact fit" with

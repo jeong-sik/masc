@@ -43,7 +43,7 @@ type sync_result =
 
 type stream_result = (Types.api_response, Http_client.http_error) result
 
-type t =
+type callbacks =
   { complete_sync : completion_request -> sync_result
   ; complete_stream :
       ?on_telemetry:(Telemetry_event.t -> unit)
@@ -51,3 +51,23 @@ type t =
       -> completion_request
       -> stream_result
   }
+
+(** Native/observed transport invocations carry their outcome unchanged.
+    Wrappers must forward the outcome, not unwrap and rebuild its provenance. *)
+type t =
+  { invoke_sync : completion_request -> sync_result Completion_outcome.t
+  ; invoke_stream :
+      ?on_telemetry:(Telemetry_event.t -> unit)
+      -> on_event:(Types.sse_event -> unit)
+      -> completion_request
+      -> stream_result Completion_outcome.t
+  }
+
+let custom (callbacks : callbacks) : t =
+  { invoke_sync = (fun request ->
+      Completion_outcome.external_unobserved (callbacks.complete_sync request))
+  ; invoke_stream = (fun ?on_telemetry ~on_event request ->
+      Completion_outcome.external_unobserved
+        (callbacks.complete_stream ?on_telemetry ~on_event request))
+  }
+;;

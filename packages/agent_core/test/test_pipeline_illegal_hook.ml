@@ -17,11 +17,11 @@ let mock_response : Types.api_response =
 ;;
 
 let mock_transport : Llm_provider.Llm_transport.t =
-  { complete_sync =
+  Llm_provider.Llm_transport.custom ({ complete_sync =
       (fun _req ->
         { Llm_provider.Llm_transport.response = Ok mock_response; latency_ms = None })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _req -> Ok mock_response)
-  }
+  })
 ;;
 
 let mock_provider =

@@ -231,9 +231,9 @@ let mock_transport_response text =
 ;;
 
 let make_transport response : Llm_transport.t =
-  { complete_sync = (fun _ -> { Llm_transport.response; latency_ms = Some 7 })
+  Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> { Llm_transport.response; latency_ms = Some 7 })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> response)
-  }
+  })
 ;;
 
 let check_typed_empty_completion expected = function
@@ -2813,11 +2813,12 @@ let test_complete_stream_transport_on_event_exception_is_nonfatal () =
   let calls = ref 0 in
   let transport =
     { (make_transport (Ok (mock_transport_response "transport streamed"))) with
-      complete_stream =
+      invoke_stream =
         (fun ?on_telemetry:_ ~on_event _req ->
           on_event
             (Types.ContentBlockDelta { index = 0; delta = Types.TextDelta "ignored" });
-          Ok (mock_transport_response "transport streamed"))
+          Completion_outcome.external_unobserved
+            (Ok (mock_transport_response "transport streamed")))
     }
   in
   let on_event _evt =
@@ -3913,10 +3914,11 @@ let test_complete_injected_transport_without_timeout_is_unbounded () =
   let response = mock_transport_response "injected unbounded" in
   let transport =
     { (make_transport (Ok response)) with
-      complete_sync =
+      invoke_sync =
         (fun _ ->
           incr calls;
-          { Llm_transport.response = Ok response; latency_ms = Some 1 })
+          Completion_outcome.external_unobserved
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
     }
   in
   match
@@ -3941,10 +3943,11 @@ let test_complete_injected_transport_rejects_invalid_deadlines_before_call () =
   let response = mock_transport_response "must not run" in
   let transport =
     { (make_transport (Ok response)) with
-      complete_sync =
+      invoke_sync =
         (fun _ ->
           incr calls;
-          { Llm_transport.response = Ok response; latency_ms = Some 1 })
+          Completion_outcome.external_unobserved
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
     }
   in
   let config = make_config "" in
@@ -3998,10 +4001,11 @@ let test_complete_injected_transport_positive_timeout_succeeds () =
   let response = mock_transport_response "injected bounded" in
   let transport =
     { (make_transport (Ok response)) with
-      complete_sync =
+      invoke_sync =
         (fun _ ->
           incr calls;
-          { Llm_transport.response = Ok response; latency_ms = Some 1 })
+          Completion_outcome.external_unobserved
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
     }
   in
   match
@@ -4030,11 +4034,12 @@ let test_complete_injected_transport_timeout_is_typed () =
   let response = mock_transport_response "must time out" in
   let transport =
     { (make_transport (Ok response)) with
-      complete_sync =
+      invoke_sync =
         (fun _ ->
           incr calls;
           Eio.Time.sleep env#clock 1.0;
-          { Llm_transport.response = Ok response; latency_ms = Some 1 })
+          Completion_outcome.external_unobserved
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
     }
   in
   match
@@ -4070,7 +4075,7 @@ let test_complete_injected_transport_inner_timeout_is_not_relabelled () =
   let response = mock_transport_response "must raise" in
   let transport =
     { (make_transport (Ok response)) with
-      complete_sync =
+      invoke_sync =
         (fun _ ->
           incr calls;
           raise Eio.Time.Timeout)
@@ -4543,7 +4548,13 @@ let test_vertex_native_transport () =
       with Exit -> ())) [false; true]
 ;;
 
-let test_native_completion_outcome () =
+let transport_request config observer : Llm_transport.completion_request =
+  { config; messages; tools=[]; capture_id=None; observe_http_status=None
+  ; observe_wire_chunk=None; request_wire_observer=observer
+  ; stream_idle_timeout_s=None; first_event_timeout_s=None; body_timeout_s=None }
+;;
+
+let test_native_completion_outcome ~via_transport () =
   Eio_main.run @@ fun env ->
   try Eio.Switch.run @@ fun sw ->
     List.iter (fun stream ->
@@ -4564,7 +4575,16 @@ let test_native_completion_outcome () =
               ~request_path:"/v1/messages" ~base_url:url ~max_tokens:200
               ~model_capabilities_override:capabilities () in
           let response, provenance =
-            if stream then
+            if via_transport then
+              let transport = Complete.make_http_transport ~sw ~net:env#net () in
+              let request = transport_request config observer in
+              if stream then
+                let outcome = transport.invoke_stream ~on_event:(fun _ -> ()) request in
+                outcome.result, outcome.request_provenance
+              else
+                let outcome = transport.invoke_sync request in
+                outcome.result.response, outcome.request_provenance
+            else if stream then
               let outcome = Complete_stream.complete_stream_http ~sw ~net:env#net
                   ?request_wire_observer:observer ~config ~messages ~tools:[]
                   ~on_event:(fun _ -> ()) () in
@@ -4581,7 +4601,9 @@ let test_native_completion_outcome () =
           let body = match !captured with Some body -> body
             | None -> fail "peer did not receive the generation body" in
           match provenance with
-          | Completion_outcome.Not_serialized -> fail "serialized evidence was lost"
+          | Completion_outcome.Not_serialized
+          | Completion_outcome.External_unobserved
+          | Completion_outcome.Interrupted_unobserved -> fail "serialized evidence was lost"
           | Completion_outcome.Serialized actual ->
             check int "actual peer body length" (String.length body) actual.body_bytes;
             check string "actual peer body digest"
@@ -4600,13 +4622,33 @@ let test_native_completion_outcome () =
   with Exit -> ()
 ;;
 
+let test_custom_transport_outcome () =
+  let response = Ok (mock_transport_response "custom") in
+  let transport = make_transport response in
+  let request = transport_request (make_config "http://not-observed.invalid") None in
+  let sync = transport.invoke_sync request in
+  let stream = transport.invoke_stream ~on_event:(fun _ -> ()) request in
+  let check_unobserved = function
+    | Completion_outcome.External_unobserved -> ()
+    | Completion_outcome.Not_serialized | Completion_outcome.Serialized _
+    | Completion_outcome.Interrupted_unobserved ->
+      fail "custom callback invented a native serialization fact"
+  in
+  check_unobserved sync.request_provenance;
+  check_unobserved stream.request_provenance;
+  check bool "custom sync result unchanged" true (sync.result.response = response);
+  check bool "custom stream result unchanged" true (stream.result = response)
+;;
+
 let test_native_completion_before_serialization () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let config = Provider_config.make ~kind:Anthropic
       ~model_id:"receipt-required-missing" ~base_url:"http://127.0.0.1:1" () in
   let check_provenance = function
     | Completion_outcome.Not_serialized -> ()
-    | Completion_outcome.Serialized _ -> fail "failed serializer invented a receipt"
+    | Completion_outcome.Serialized _
+    | Completion_outcome.External_unobserved
+    | Completion_outcome.Interrupted_unobserved -> fail "failed serializer invented a receipt"
   in
   let sync = Complete_sync.complete_http ~sw ~net:env#net
       ~config ~messages ~tools:[] () in
@@ -4627,7 +4669,11 @@ let () =
     "complete_http"
     [ ( "native_request_provenance"
       , [ test_case "success/error retain receipt without observer delivery"
-            `Quick test_native_completion_outcome
+            `Quick (test_native_completion_outcome ~via_transport:false)
+        ; test_case "native transport factory preserves the received wire evidence"
+            `Quick (test_native_completion_outcome ~via_transport:true)
+        ; test_case "custom callbacks explicitly leave native wire unobserved"
+            `Quick test_custom_transport_outcome
         ; test_case "failed serialization invents no receipt"
             `Quick test_native_completion_before_serialization ] )
     ; ( "Vertex native", [test_case "OAuth native sync and streaming tool response" `Quick test_vertex_native_transport; test_case "refresh failure blocks HTTP" `Quick test_refresh_failure_prevents_http] )

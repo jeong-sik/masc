@@ -457,9 +457,9 @@ let transport_error : Http.http_error =
 ;;
 
 let failing_transport error : Llm_provider.Llm_transport.t =
-  { complete_sync = (fun _ -> { response = Error error; latency_ms = None })
+  Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> { response = Error error; latency_ms = None })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Error error)
-  }
+  })
 ;;
 
 let empty_response : Types.api_response =
@@ -473,9 +473,9 @@ let empty_response : Types.api_response =
 ;;
 
 let empty_transport : Llm_provider.Llm_transport.t =
-  { complete_sync = (fun _ -> { response = Ok empty_response; latency_ms = None })
+  Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> { response = Ok empty_response; latency_ms = None })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok empty_response)
-  }
+  })
 ;;
 
 let make_agent ~net ~transport name =

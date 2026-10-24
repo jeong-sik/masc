@@ -53,11 +53,11 @@ let child_response : Types.api_response =
 ;;
 
 let child_transport : Llm_provider.Llm_transport.t =
-  { complete_sync =
+  Llm_provider.Llm_transport.custom ({ complete_sync =
       (fun _request ->
         { Llm_provider.Llm_transport.response = Ok child_response; latency_ms = Some 0 })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok child_response)
-  }
+  })
 ;;
 
 let child_agent ~net =

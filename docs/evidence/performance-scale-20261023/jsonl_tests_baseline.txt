@@ -1,0 +1,35 @@
+Testing `jsonl_incremental_projection'.
+This run has ID `JSU6CO3U'.
+
+  [OK]          incremental          0   seeds from the tail.
+  [OK]          incremental          1   unchanged file re-folds nothing.
+  [OK]          incremental          2   append folds only new lines.
+  [OK]          incremental          3   same path distinct keys keep indepen...
+  [OK]          incremental          4   partial trailing line is held.
+  [OK]          incremental          5   truncation reseeds from tail.
+> [FAIL]        incremental          6   rewrite during fold reseeds.
+  [OK]          incremental          7   rotation during fold reseeds.
+  [OK]          incremental          8   failed fold preserves previous proje...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        incremental          6   rewrite during fold reseeds.          │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT fold uses the bytes it already read
+ASSERT new bytes do not validate the old accumulator
+File "fun.ml", line 34, character 8:
+FAIL new bytes do not validate the old accumulator
+
+   Expected: `["y"; "x"]'
+   Received: `["b"; "a"]'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `/private/tmp/masc-perf-scale-20261023/_build/_tests/jsonl_incremental_projection/incremental.006.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/private/tmp/masc-perf-scale-20261023/_build/_tests/jsonl_incremental_projection'.
+1 failure! in 0.094s. 9 tests run.

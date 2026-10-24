@@ -32,7 +32,7 @@ let sample_schemas = [ "lookup_read"; "lookup_list" ]
 
 let make_original ~verification_id ~attempt =
   match
-    V.prepare
+    V.prepare ~generator_runtime:(Some "captured-producer")
       ~verification_id
       ~attempt
       ~question:sample_question
@@ -50,6 +50,8 @@ let test_round_trip_preserves_lookup_and_image () =
     | Ok value -> value
     | Error detail -> failwith ("of_json failed: " ^ detail)
   in
+  assert (V.generator_runtime restored = Some "captured-producer");
+  assert (V.generator_runtime (match V.successor restored with Ok v -> v | Error e -> failwith e) = Some "captured-producer");
   (* lookup grants survive the round trip *)
   (match V.lookup_root restored with
    | AR.Producer_tree paths -> assert (paths = [ "repos/masc/lib"; "repos/masc/test" ])
@@ -98,7 +100,7 @@ let test_round_trip_with_blank_notes () =
   let blank_request : AR.review_request = { sample_request with completion_notes = "" } in
   let original =
     match
-      V.prepare
+      V.prepare ~generator_runtime:None
         ~verification_id:"vrf-blank"
         ~attempt:0
         ~question:sample_question
@@ -137,7 +139,7 @@ let test_missing_field_rejected () =
 
 let test_empty_lookup_schemas_rejected () =
   match
-    V.prepare
+    V.prepare ~generator_runtime:None
       ~verification_id:"vrf-eeee"
       ~attempt:0
       ~question:sample_question

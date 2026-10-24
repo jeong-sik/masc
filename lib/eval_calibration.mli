@@ -31,6 +31,8 @@ type verdict_record = {
   gate : Task.Anti_rationalization.gate;
   evaluator_runtime : string;
   generator_runtime : string option;
+  producer_execution : Runtime_response_identity.t option;
+  evaluator_execution : Runtime_response_identity.t option;
   fallback_reason : string option;
   timestamp : float;
 }
@@ -77,6 +79,7 @@ val notes_hash : task_title:string -> notes:string -> string
 (** {1 Recording} *)
 
 val record_verdict :
+  ?producer_execution:Runtime_response_identity.t ->
   task_id:string ->
   req:Task.Anti_rationalization.review_request ->
   result:Task.Anti_rationalization.review_result ->
@@ -117,6 +120,7 @@ val calibration_stats :
 (** Compute summary statistics: verdict counts, gate distribution,
     false positive/negative rates, agreement rate. [distinct_runtime_rate]
     compares recorded runtime identifiers and is [null] when no pair was
-    recorded. It does not establish distinct models: current verdict rows
-    carry no submission-bound producer and judge model identities, so
-    [model_identity_observation] reports unobserved verdict coverage. *)
+    recorded. [model_identity_observation] separately compares the captured
+    producer/judge provider and reported-model identities, retaining observed
+    and unobserved coverage and causes. Its rate is [null] without a complete
+    pair; identity diversity does not establish statistical independence. *)

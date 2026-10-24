@@ -193,9 +193,11 @@ let result_to_json (result:AR.review_result) =
   let verdict = match result.verdict with None -> `Null
     | Some (AR.Approve reason) -> `Assoc ["decision",`String "approve";"reason",`String reason]
     | Some (AR.Reject reason) -> `Assoc ["decision",`String "reject";"reason",`String reason] in
-  `Assoc ["schema",`String "verifier_review_result/v1";"verdict",verdict;
+  `Assoc ["schema",`String "verifier_review_result/v2";"verdict",verdict;
     "evaluator_runtime",`String result.evaluator_runtime;
     "generator_runtime",optional result.generator_runtime;
+    "evaluator_execution",(match result.evaluator_execution with None -> `Null
+      | Some identity -> Runtime_response_identity.to_yojson identity);
     "gate",`String (AR.gate_to_string result.gate);
     "fallback_reason",optional result.fallback_reason;
     "retryable_runtimes",`List (List.map (fun x -> `String x) result.retryable_runtimes);
@@ -206,9 +208,9 @@ let result_of_json json =
   let decode () =
     let fields = to_assoc json in
     let* () = if List.sort String.compare (List.map fst fields) =
-      ["evaluator_runtime";"fallback_reason";"gate";"generator_runtime";
+      ["evaluator_execution";"evaluator_runtime";"fallback_reason";"gate";"generator_runtime";
        "model_absent_runtimes";"retryable_runtimes";"schema";"verdict"]
-      && member "schema" json = `String "verifier_review_result/v1"
+      && member "schema" json = `String "verifier_review_result/v2"
       then Ok () else Error "invalid retained verifier result fields" in
     let optional = function `Null -> None | value -> Some (to_string value) in
     let verdict = match member "verdict" json with
@@ -229,9 +231,12 @@ let result_of_json json =
       | Some _,AR.Structured_tool | None,(AR.Invalid_verdict | AR.Evaluator_unavailable) -> Ok ()
       | Some _,(AR.Invalid_verdict | AR.Evaluator_unavailable) | None,AR.Structured_tool ->
         Error "retained verifier decision and gate disagree" in
+    let* evaluator_execution = match member "evaluator_execution" json with
+      | `Null -> Ok None
+      | json -> Runtime_response_identity.of_yojson json |> Result.map Option.some in
     let strings key = member key json |> to_list |> List.map to_string in
     Ok {AR.verdict;evaluator_runtime=member "evaluator_runtime" json |> to_string;
-      generator_runtime=optional (member "generator_runtime" json);gate;
+      generator_runtime=optional (member "generator_runtime" json);evaluator_execution;gate;
       fallback_reason=optional (member "fallback_reason" json);
       retryable_runtimes=strings "retryable_runtimes";
       model_absent_runtimes=strings "model_absent_runtimes"} in

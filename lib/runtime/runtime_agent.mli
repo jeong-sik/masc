@@ -123,6 +123,7 @@ type config = Runtime_agent_context.config = {
       (** Human-facing display text only. Runtime logic must not parse identity
           or capability policy out of this field. *)
   runtime_id : string option;
+  execution_actor : string option;
       (** Typed catalog identity used by runtime logic. [None] means the caller
           did not supply a catalog identity, so [name] is used. *)
   initial_messages : Agent_core.Types.message list;

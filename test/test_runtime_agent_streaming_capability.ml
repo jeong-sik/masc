@@ -216,7 +216,7 @@ let run_case ?(callbacks = Persist_callbacks) ?(observer_failure = false)
    text-only observer delivery as proof of a working tool loop. The rejected
    call precedes the admitted one: synthesizing the filtered AfterTurn
    response would lose its original inventory and assign the wrong block. *)
-let completed_media_and_tools entry () =
+let completed_media_and_tools ?(execution_actor = Some "actual-keeper") entry () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -295,13 +295,24 @@ let completed_media_and_tools entry () =
     | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _ ->
       Agent_core.Hooks.Continue) } in
   let executions = ref 0 in
+  let submitting_response = ref None in
   let tool = Agent_core.Tool.create ~name:"fixture_effect"
     ~description:"Return a synthetic effect receipt" ~parameters:[] (fun _ ->
       incr executions;
+      submitting_response := Runtime_response_identity_scope.current ();
+      Runtime_response_identity_scope.without_identity (fun () ->
+        check bool "an uncaptured nested runtime cannot borrow the invoking model" true
+          (Option.is_none (Runtime_response_identity_scope.current ())));
+      Runtime_response_identity_scope.with_scope ~actor:(Some "nested") ~runtime_id:"nested-alias"
+        ~provider_id:None (fun ~hooks:_ ~wrap_tool:_ ->
+          check bool "a nested native run starts without its parent's identity" true
+            (Option.is_none (Runtime_response_identity_scope.current ())));
+      check bool "the submitting invocation retains its original identity" true
+        (Runtime_response_identity_scope.current () = !submitting_response);
       Ok {Agent_core.Types.content="fixture effect"; content_blocks=None; _meta=None}) in
-  let config = Runtime_agent.default_config ~name:"completed-progress"
+  let config = Runtime_agent.default_config ~name:"agent_core-fixture-runtime"
       ~provider_cfg ~system_prompt ~tools:[tool] in
-  let config = {config with hooks=Some hooks} in
+  let config = {config with hooks=Some hooks; execution_actor} in
   let result = Eio.Time.with_timeout_exn env#clock
     Exact_output_fixture.fixture_wait_seconds (fun () ->
       match entry with
@@ -322,6 +333,19 @@ let completed_media_and_tools entry () =
     | Ok completed -> completed
     | Error error -> fail (Agent_core.Error.to_string error) in
   check int "one admitted effect executes" 1 !executions;
+  (match execution_actor, !submitting_response with
+   | None, None -> ()
+   | None, Some _ -> fail "a synthetic agent name must not invent a host actor"
+   | Some _, None -> fail "the native tool must retain its actual provider response identity"
+   | Some actor, Some identity ->
+     check string "the tool belongs to the earlier response, not the final one"
+       "media-tools" identity.response_id;
+     check string "the admitted invocation owns the identity" "accepted-call" identity.tool_use_id;
+     check string "actual provider identity is retained" "fixture" identity.provider_id;
+     check string "the host actor is independent of its synthetic agent name" actor identity.actor;
+     check string "actual reported model is retained" model_id identity.model_id);
+  check bool "the completed native scope does not leak into its caller" true
+    (Option.is_none (Runtime_response_identity_scope.current ()));
   check int "completed response preserves the Keeper stream contract" 0
     (List.length !protocol_errors);
   check int "both provider responses reach collection" 2 !collections;
@@ -388,6 +412,9 @@ let () =
            (completed_media_and_tools entry))
            ["fresh", Fresh; "cooperative", Cooperative; "checkpoint", Checkpoint;
             "cooperative checkpoint", Cooperative_checkpoint]
+       ; "response identity gaps",
+         [test_case "a synthetic agent name cannot replace a missing host actor" `Quick
+           (completed_media_and_tools ~execution_actor:None Fresh)]
        ; "callback persistence failures",
          [ test_case "fresh JSON scope failure admits no provider request" `Quick
              (run_case ~callbacks:Fail_scope_sink Fresh

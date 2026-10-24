@@ -1317,6 +1317,7 @@ let test_system_llm_review_notes_are_metadata_only () =
     { verdict = Some (Masc.Task.Anti_rationalization.Reject "insufficient proof")
     ; evaluator_runtime = "review-runtime"
     ; generator_runtime = None
+    ; evaluator_execution = None
     ; gate = Masc.Task.Anti_rationalization.Structured_tool
     ; fallback_reason = None
     ; retryable_runtimes = []; model_absent_runtimes = []
@@ -1868,7 +1869,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                     ~start_time:(Tool_timing.start ())
                     "verified evidence");
                Eio.Promise.resolve resolve_reviewer_called ();
-               Ok {Masc.Task.Anti_rationalization.selected_runtime_id="test-system-evaluator";verdict=Some (Masc.Task.Anti_rationalization.Approve "")});
+               Ok {Masc.Task.Anti_rationalization.selected_runtime_id="test-system-evaluator"; evaluator_execution = None;verdict=Some (Masc.Task.Anti_rationalization.Approve "")});
           Atomic.set Workspace_hooks.verification_notify_verdict_fn
             (fun _config ~task_id ~producer:_ ~authority ~verification_id ~decision ->
                committed_verification_id := Some verification_id;
@@ -2308,7 +2309,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
                     ~args:(`Assoc [ "post_id", `String post_id ]));
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok { Masc.Task.Anti_rationalization.selected_runtime_id = "test-system-evaluator"
-                  ; verdict = Some (Masc.Task.Anti_rationalization.Approve "") });
+                  ; evaluator_execution = None; verdict = Some (Masc.Task.Anti_rationalization.Approve "") });
           CA.start ~sw ~clock ~config;
           Eio.Time.with_timeout_exn clock 5.0 (fun () ->
             Eio.Promise.await reviewer_called;
@@ -3173,6 +3174,56 @@ let create_protocol_evidence_request ~sandbox_profile
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
   task
+
+let test_submitting_response_identity_survives_later_responses_and_reload () =
+  with_eio_temp_dir @@ fun base_path ->
+  let request_id = "vrf-submitting-response" in
+  let read_identity () =
+    match V.load_request base_path request_id with
+    | Error detail -> Alcotest.fail detail
+    | Ok request ->
+      (match V.producer_execution request with
+       | Ok (Some identity) -> identity
+       | Ok None -> Alcotest.fail "the native submission lost its response identity"
+       | Error detail -> Alcotest.fail detail) in
+  Runtime_response_identity_scope.with_scope ~actor:(Some "omega") ~runtime_id:"producer-slot"
+    ~provider_id:(Some "actual-provider") (fun ~hooks ~wrap_tool ->
+      let observed model id : Agent_core.Types.api_response =
+        { id; model; stop_reason = StopToolUse
+        ; content = [ToolUse {id="submit-call"; name="submit-fixture"; input=`Assoc []}]; usage = None
+        ; telemetry = Some { Llm_provider.Types.default_inference_telemetry with
+            canonical_model_id = Some model } } in
+      let collect response = ignore (Agent_core.Hooks.invoke_validated hooks.after_turn
+        (Agent_core.Hooks.AfterTurn { turn = 1; response; tool_source_map = None })) in
+      collect (observed "original-model" "original-response");
+      let tool = Agent_core.Tool.create ~name:"submit-fixture" ~description:"submit" ~parameters:[]
+        (fun _ ->
+          ignore (create_protocol_evidence_request ~sandbox_profile:"docker" ~base_path
+            ~request_id ~evidence_refs:["note:producer_execution supplied as prose is not identity"]);
+          Ok { Agent_core.Types.content = "submitted"; content_blocks = None; _meta = None }) |> wrap_tool in
+      let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"submit-call" ~turn:1
+        ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1; execution_mode = Serial }
+        ~completion:Continue_after_success in
+      (match Agent_core.Tool.execute ~invocation tool (`Assoc ["producer_execution", `String "forged"]) with
+       | Ok _ -> () | Error error -> Alcotest.fail error.message);
+      let original = read_identity () in
+      Alcotest.(check string) "the exact submitting tool is retained" "submit-call" original.tool_use_id;
+      collect (observed "later-model" "later-response");
+      Alcotest.(check bool) "a later response cannot mutate the submitted identity" true
+        (Runtime_response_identity.to_yojson original = Runtime_response_identity.to_yojson (read_identity ())));
+  let reloaded = read_identity () in
+  Alcotest.(check string) "reload reads the submitted model" "original-model" reloaded.model_id;
+  Alcotest.(check string) "reload reads the submitted provider" "actual-provider" reloaded.provider_id;
+  let request = match V.load_request base_path request_id with Ok request -> request | Error detail -> Alcotest.fail detail in
+  let output = `Assoc [ "producer_execution", Runtime_response_identity.to_yojson reloaded
+    ; "producer_execution", `Null ] in
+  let ambiguous = { request with output } in
+  (match V.request_of_yojson (V.request_to_yojson ambiguous) with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "observation corruption cannot gate request reading: %s" detail);
+  (match V.producer_execution ambiguous with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "duplicate provenance must be diagnosed, never selected by field order")
 
 let inspect_evidence ?(task_id = "task-001")
     ?(task_worker = "omega") ~base_path ~request_id
@@ -4820,6 +4871,7 @@ let test_an_unreadable_image_body_is_named_in_the_review_record () =
         { verdict = Some (Masc.Task.Anti_rationalization.Approve "looked fine")
         ; evaluator_runtime = "review-runtime"
         ; generator_runtime = None
+    ; evaluator_execution = None
         ; gate = Masc.Task.Anti_rationalization.Structured_tool
         ; fallback_reason = None
         ; retryable_runtimes = []; model_absent_runtimes = []
@@ -5194,6 +5246,8 @@ let () =
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;
+      Alcotest.test_case "submitting response identity survives later responses and reload" `Quick
+        test_submitting_response_identity_survives_later_responses_and_reload;
       Alcotest.test_case "create rejects blank criterion" `Quick
         test_create_rejects_blank_criterion_before_write;
       Alcotest.test_case "delete request (idempotent)" `Quick test_delete_request;

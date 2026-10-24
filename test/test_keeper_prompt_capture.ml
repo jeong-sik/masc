@@ -196,8 +196,8 @@ let test_rarely_changing_blocks_come_first () =
   before Block_id.Skill_compositions Block_id.Temporal_summary
 ;;
 
-(* [Operator_note] is someone speaking mid-turn and the only block that rides a
-   post-tool round; it is the newest thing in the assembly, so it stays last. *)
+(* [Operator_note] is someone speaking mid-turn. It follows the retained Goal
+   snapshot and every other block, so it stays last in the assembly. *)
 let test_the_operator_note_stays_last () =
   let latest =
     List.fold_left

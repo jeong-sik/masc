@@ -759,9 +759,8 @@ let run_keeper_invocation_turn_admitted_inner
               { dynamic_context = Keeper_direct_turn_context.project prepared_context
                     ~workspace_memory_access:None;
                 dynamic_context_for_tools = Some (fun access ->
-                  Keeper_context_layers.unattributed Direct_turn
-                    (Keeper_direct_turn_context.project prepared_context
-                       ~workspace_memory_access:(Some access))) }
+                  Keeper_direct_turn_context.project_partition prepared_context
+                    ~workspace_memory_access:(Some access)) }
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();

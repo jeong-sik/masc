@@ -32,7 +32,7 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
         when String.equal text (Keeper_context_layers.text rendered) ->
         Issued (Keeper_context_layers.receipt_to_json rendered)
       | Block Prompt_block_id.Dynamic_context, _ -> Unavailable
-      | ((Block (Prompt_block_id.Keeper_instructions) | Unattributed _), _)
+      | ((Block (Prompt_block_id.Keeper_instructions | Prompt_block_id.Active_goals) | Unattributed _), _)
       | (Block (Prompt_block_id.Temporal_summary), _)
       | (Block (Prompt_block_id.Memory_os_recall), _)
       | (Block (Prompt_block_id.Librarian_working_context), _)

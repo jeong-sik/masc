@@ -10325,7 +10325,8 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   if state.image_open then begin
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
-    state.image_open <- false
+    state.image_open <- false;
+    state.image_inspection <- None
   end;
   observe_msx_frame ~clear_notice:true state ~mailbox;
   observe_msx_carts state ~mailbox;
@@ -10345,7 +10346,8 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
   if state.image_open then begin
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
-    state.image_open <- false
+    state.image_open <- false;
+    state.image_inspection <- None
   end;
   state.machine_source <- Masc.Machine_lane.Msx;
   state.msx_open <- true;
@@ -10369,7 +10371,8 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
   if state.image_open then begin
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
-    state.image_open <- false
+    state.image_open <- false;
+    state.image_inspection <- None
   end;
   state.machine_source <- Masc.Machine_lane.Dos;
   state.msx_open <- true;
@@ -25035,7 +25038,8 @@ and is loaded on demand through keeper_skill.
            (match state.browser_viewport with
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
             | None -> ());
-           Option.iter (draw_inspected_image state) state.image_inspection
+           if state.image_open && not state.msx_open then
+             Option.iter (draw_inspected_image state) state.image_inspection
        | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
       reconcile_chat_focus ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
@@ -25139,7 +25143,8 @@ and is loaded on demand through keeper_skill.
       let inspection_owned_input = state.image_open && Option.is_some state.image_inspection
         && Option.is_some input in
       (match state.image_inspection, input, !image_cell_pixels with
-       | Some (title,data,viewport), Some event, Some cell_pixels ->
+       | Some (title,data,viewport), Some event, Some cell_pixels
+           when state.image_open && not state.msx_open ->
          let close () = close_image state;
            invalidate_frame_for_resize frame_presenter render_schedule in
          let action = match event with
@@ -25153,6 +25158,7 @@ and is loaded on demand through keeper_skill.
            | Key ("esc" | "q") -> close (); None
            | Key "v" when state.view=Resources ->
                state.resource_presentation <- Masc_tui_resource_catalog.Source;
+               state.resource_scroll <- Masc_tui_scroll.Position.first;
                state.resource_search_position <- Masc_tui_resource_reading.first;
                close (); None
            | Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _

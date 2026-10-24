@@ -1,0 +1,107 @@
+{
+  "scope": "Production Upgrade ML/MLI and CLI component linked with real Eio/Yojson. HTTP, auth, lease capture and signal effects are substituted; not real service termination or full host build.",
+  "rows": [
+    {
+      "source": "before",
+      "scenario": "unavailable",
+      "exit": 1,
+      "receipt": {
+        "schema": "masc.setup_server_error.v1",
+        "error": "The running workspace owner could not be verified. No process was stopped."
+      },
+      "stderr": "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.\nfixture_signals=1\n"
+    },
+    {
+      "source": "before",
+      "scenario": "pending",
+      "exit": 0,
+      "receipt": {
+        "schema": "masc.setup_server_stopped.v1",
+        "owner_stopped": true,
+        "port_available": false
+      },
+      "stderr": "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.\nfixture_signals=1\n"
+    },
+    {
+      "source": "before",
+      "scenario": "cleanup",
+      "exit": 1,
+      "receipt": {
+        "schema": "masc.setup_server_error.v1",
+        "error": "The running workspace owner could not be verified. No process was stopped."
+      },
+      "stderr": "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.\nfixture_signals=1\n"
+    },
+    {
+      "source": "before",
+      "scenario": "denied",
+      "exit": 1,
+      "receipt": {
+        "schema": "masc.setup_server_error.v1",
+        "error": "The running workspace rejected local operator access. Sign in before restarting it."
+      },
+      "stderr": "fixture_signals=0\n"
+    },
+    {
+      "source": "after",
+      "scenario": "unavailable",
+      "exit": 0,
+      "receipt": {
+        "schema": "masc.setup_server_shutdown.v1",
+        "termination_requested": true,
+        "readiness": "observation_failed",
+        "observation_error": "The running workspace owner could not be verified."
+      },
+      "stderr": "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.\nfixture_signals=1\n"
+    },
+    {
+      "source": "after",
+      "scenario": "pending",
+      "exit": 0,
+      "receipt": {
+        "schema": "masc.setup_server_shutdown.v1",
+        "termination_requested": true,
+        "readiness": "owner_draining"
+      },
+      "stderr": "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.\nfixture_signals=1\n"
+    },
+    {
+      "source": "after",
+      "scenario": "cleanup",
+      "exit": 0,
+      "receipt": {
+        "schema": "masc.setup_server_shutdown.v1",
+        "termination_requested": true,
+        "readiness": "observation_failed",
+        "observation_error": "The running workspace owner could not be verified."
+      },
+      "stderr": "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.\nfixture_signals=1\n"
+    },
+    {
+      "source": "after",
+      "scenario": "denied",
+      "exit": 1,
+      "receipt": {
+        "schema": "masc.setup_server_error.v1",
+        "termination_requested": false,
+        "error": "The running workspace rejected local operator access. Sign in before restarting it."
+      },
+      "stderr": "fixture_signals=0\n"
+    }
+  ],
+  "baseline": "be5b701e33811e65bcd748763741bf947a1fc81c",
+  "source_sha256": {
+    "bin/masc_cli_owner_upgrade.ml": "c4e570b2a8f3496749f6b6624dcb2ba863e9d9a1cf094a2426c292dfc6ef1e0a",
+    "lib/server/server_upgrade_preparation.ml": "70f0bdf35f5580db96c331745138b7d247212bae5db27d9f0f6898916c021825",
+    "lib/server/server_upgrade_preparation.mli": "2314c6db098e413413be48b304f8ab7f18fb905c2c5d76b175bef85a17359ab2",
+    "scripts/install-runtime-setup.py": "424a268d37862e7fbef1e5f75e54f5dbe34e4a166fdd2fb87ba16d309ad88a6a"
+  },
+  "component_existing_tests": {
+    "passed": 7,
+    "scope": "real production preparation module; platform owner capture/signal substituted"
+  },
+  "python_existing_focused_tests": {
+    "passed": 7,
+    "scope": "production select_setup_server with substituted subprocess replies; no server started/stopped"
+  }
+}

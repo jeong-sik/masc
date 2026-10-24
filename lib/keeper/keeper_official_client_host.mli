@@ -16,9 +16,19 @@ val internal_error : string -> Agent_core.Error.t
 type prepared_turn =
   { messages : Agent_core.Types.message list
   ; system_prompt : string
+  ; start_context : Keeper_context_submission_link.t
+    (** Current-turn User observations kept out of the vendor's standing System
+        and the canonical history. Each Start adapter must use [start_prompt]. *)
+  ; composed_context : Keeper_context_assembly.t option
+    (** The issuer snapshot read once after the hook, shared by Start and Resume.
+        A stale issued System invalidates the snapshot for both projections. *)
   ; tools : Agent_core.Tool.t list
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
+
+val start_prompt : prepared_turn -> string -> Keeper_context_submission_link.t
+(** Prepend the prepared current-turn User observations to the adapter's Start
+    prompt, once. Does not change messages, history, Goal or pending events. *)
 
 (** What an official-client lane can say about one turn's input handoff.
 
@@ -682,7 +692,12 @@ val prepare_turn :
     read after the hook publishes its assembly. When the selected System
     bytes are that exact issued carrier, its underlying [base_text] must also
     be nonblank: a Goal observation does not supply Keeper instructions. A
-    stale assembly cannot substitute for a different selected override.
+    stale assembly cannot substitute for a different selected override. The
+    issuer is read once and retained in [prepared_turn.composed_context]. For
+    an exact issued System, only Completion Authority moves to [start_context]
+    as a User observation; Goal remains in [system_prompt]. A missing or stale
+    issuer leaves the selected System unchanged and cannot attest a new User
+    observation. Ordinary HTTP assembly is unaffected.
 
     The hook's [extra_system_context] is appended as a raw [System] message
     carrying [origin = System_context]. Official

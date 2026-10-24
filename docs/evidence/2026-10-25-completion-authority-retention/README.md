@@ -40,7 +40,7 @@ The repair keeps that producer and its exact partition. The request assembler
 extracts only uniquely attributed Goal and Completion Authority sections with
 matching renderer bytes. A closed `system_observation` type admits these two
 kinds. The private issued System record owns their immutable list, effective
-bytes and physical partition. This replaces the Goal-only field; it adds no
+bytes and canonical partition. This replaces the Goal-only field; it adds no
 event store, mutable mirror, source-text classifier or permission authority.
 Later tool requests reuse only this turn's issued observations. A fresh turn,
 missing/mismatched partition or duplicate Dynamic IDs cannot borrow them.
@@ -62,9 +62,11 @@ Executed checks (no local Dune):
   combinations, repeated tool rounds, fresh-turn reset, unknown/duplicate
   partition controls, overrides and physical span hashes.
 - `python3 docs/evidence/2026-10-25-completion-authority-retention/probe_official_retention.py`:
-  24 actual-source projection/codec/source-binding checks. Explicit unreachable
-  notice/log dependency ports are listed in the receipt. This does not run
-  Host preparation, SDK, vendor process or a transport.
+  55 actual-source Start/Resume projection/codec/source-binding checks,
+  including the exact `Host.start_prompt` and selected Host issuer-snapshot
+  and blank-base guard statements. Explicit typed ports and unreachable
+  notice/log dependencies are listed in the receipt. This does not run full
+  Host preparation/hooks, SDK, vendor process or a transport.
 - Dashboard turn-record decoder: 127 tests passed.
 - Changed OCaml files: parse-only checks; see `parse-check.json`.
 
@@ -80,3 +82,44 @@ The existing Host fixture additionally checks held authority retransmission
 and exact System-derived source binding. These native fixtures were authored
 but not run locally. Full native typing/linking, the actual production hook
 path and post-fix model behavior remain for the parent integration session.
+
+## Follow-up: keep current events out of a vendor's standing System
+
+Independent review rejected `e9f72f1c985761e032e0fef878ce1dc6d0111ad2`
+with P2: an Official Start containing approval or rejection put the event in
+the first System. Claude's System snapshot and Codex's delayed developer
+instruction updates could retain it after a later owner turn had no event.
+The independent source reproduction submitted `BASE + Goal + Approved` at
+Start, then only `NEXT OWNER` on the event-free Resume. Correctly sending
+present events on every Resume could not remove the first standing event.
+
+The follow-up projects only the closed Completion Authority variant from an
+exact canonical issuer to a first-turn User observation. Goal's Start System
+and held policy remain unchanged. All four official adapters (Claude, Codex,
+Antigravity and Muse) call the shared Start-prompt composer. Host preparation
+reads its post-hook issuer once; a stale issued System cannot lend an old
+event to either Start or Resume. Events never enter the prepared history or
+pending-event store through this projection. Ordinary HTTP retains the
+canonical System observations during this turn's tool loop.
+
+`official-resume-check.json` records the complete fixture canonical System,
+submitted Start System/User, same-event Resume, event-free next Resume and
+changed-event Start. The submitted Start System is `BASE + Goal`; its User
+contains the exact event once. Source binding explicitly labels the source
+as `canonical_issued_system_prompt` and the target as
+`official_start_user_prompt` or `official_resume_user_prompt`. The source
+receipt is not claimed to hash the submitted standing System. The actual
+Codex completed-write consumer binds the Start projection to its `Turn_text`
+slot; no Claude/Antigravity/Muse completed-write binding is inferred from it.
+Missing/stale Start issuer checks remain unavailable rather than verified.
+
+The native Host fixture now checks preparation and Start/Resume transitions,
+changed verification keys, Goal preservation, one issuer read, blank base,
+and missing/stale sources. A Claude process fixture captures actual System
+files and stdin for Start → same event Resume → absent event → changed event.
+These native fixtures are authored, not locally executed. The previous
+candidate's remote native run `40114401559` stopped before executing its six
+suites at an unqualified `Text` constructor in the HTTP fixture; the
+follow-up qualifies it as `Agent_core.Types.Text`. Parse checks do not prove
+the complete native compilation now passes. No vendor process, runtime
+canary or successful model/Goal outcome is claimed by these pure checks.

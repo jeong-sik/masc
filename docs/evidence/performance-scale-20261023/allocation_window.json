@@ -1,0 +1,204 @@
+{
+  "seconds": 60.21501166606322,
+  "runtime": [
+    "107c58401723313611f7c599bbe15225de5910da",
+    "01a1686c-45de-7000-ac1e-3d8569e594c8"
+  ],
+  "dropped_samples_delta": 0,
+  "allocation_bytes_estimate": 52132000000,
+  "major_bytes_estimate": 33179200000,
+  "scope": "Allocation estimates for this interval; site deltas only for stacks present in both cumulative top30 tables; live samples exclude allocations dropped before the interval.",
+  "allocated_common_sites": [
+    {
+      "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 623, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.tool_request_owner_record.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 629, characters 11-101\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 589, characters 23-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1220, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1294-1296, characters 2-71\n",
+      "delta_bytes": 1812000000
+    },
+    {
+      "callstack": "Raised by primitive operation at Stdlib__Bytes.to_string in file \"bytes.ml\" (inlined), line 61, characters 35-43\nCalled from Masc__Lane_addon_store.record_bytes.end_of_record in file \"lib/lane_addon/lane_addon_store.ml\", line 490, characters 14-38\nRaised by primitive operation at Masc__Lane_addon_store.verify_record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 504, characters 16-49\nRaised by primitive operation at Masc__Lane_addon_store.settle_verified_record in file \"lib/lane_addon/lane_addon_store.ml\", line 514, characters 14-52\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 618, characters 18-92\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1579, characters 12-36\n",
+      "delta_bytes": 1592800008
+    },
+    {
+      "callstack": "Raised by primitive operation at Stdlib__Bytes.to_string in file \"bytes.ml\" (inlined), line 61, characters 35-43\nCalled from Masc__Lane_addon_store.record_bytes.end_of_record in file \"lib/lane_addon/lane_addon_store.ml\", line 490, characters 14-38\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 617, characters 19-54\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1579, characters 12-36\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1537, characters 25-42\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry in file \"lib/fs_compat/fs_compat.ml\", lines 1515-1540, characters 6-12\n",
+      "delta_bytes": 1575200008
+    },
+    {
+      "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 480, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.verify_record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 504, characters 16-49\nRaised by primitive operation at Masc__Lane_addon_store.settle_verified_record in file \"lib/lane_addon/lane_addon_store.ml\", line 514, characters 14-52\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 618, characters 18-92\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1579, characters 12-36\n",
+      "delta_bytes": 1568000008
+    },
+    {
+      "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 480, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 617, characters 19-54\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1579, characters 12-36\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1537, characters 25-42\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry in file \"lib/fs_compat/fs_compat.ml\", lines 1515-1540, characters 6-12\n",
+      "delta_bytes": 1567200008
+    },
+    {
+      "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.retain in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 199, characters 14-43\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n",
+      "delta_bytes": 1525600000
+    },
+    {
+      "callstack": "Raised by primitive operation at Masc__Keeper_memory_os_current.decode_program_journal.decode in file \"lib/keeper/keeper_memory_os_current.ml\", line 1832, characters 13-41\nRaised by primitive operation at Masc__Keeper_memory_os_current.capture_program_anchor.(fun) in file \"lib/keeper/keeper_memory_os_current.ml\", line 1858, characters 15-43\nRaised by primitive operation at Common.protect in file \"lib/core/common.ml\", line 21, characters 8-12\nRaised by primitive operation at Common.protect in file \"lib/core/common.ml\", line 21, characters 8-12\nRaised by primitive operation at Common.protect in file \"lib/core/common.ml\", line 21, characters 8-12\nRaised by primitive operation at Common.protect in file \"lib/core/common.ml\", line 21, characters 8-12\n",
+      "delta_bytes": 1420800000
+    },
+    {
+      "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.digest in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 43, characters 45-76\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-36\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.retain in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 202, characters 18-48\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n",
+      "delta_bytes": 1408000000
+    }
+  ],
+  "major_common_sites": [
+    {
+      "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 623, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.tool_request_owner_record.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 629, characters 11-101\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 589, characters 23-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1220, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1294-1296, characters 2-71\n",
+      "delta_bytes": 1808000000
+    },
+    {
+      "callstack": "Raised by primitive operation at Stdlib__Bytes.to_string in file \"bytes.ml\" (inlined), line 61, characters 35-43\nCalled from Masc__Lane_addon_store.record_bytes.end_of_record in file \"lib/lane_addon/lane_addon_store.ml\", line 490, characters 14-38\nRaised by primitive operation at Masc__Lane_addon_store.verify_record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 504, characters 16-49\nRaised by primitive operation at Masc__Lane_addon_store.settle_verified_record in file \"lib/lane_addon/lane_addon_store.ml\", line 514, characters 14-52\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 618, characters 18-92\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1579, characters 12-36\n",
+      "delta_bytes": 1592800008
+    },
+    {
+      "callstack": "Raised by primitive operation at Stdlib__Bytes.to_string in file \"bytes.ml\" (inlined), line 61, characters 35-43\nCalled from Masc__Lane_addon_store.record_bytes.end_of_record in file \"lib/lane_addon/lane_addon_store.ml\", line 490, characters 14-38\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 617, characters 19-54\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1579, characters 12-36\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1537, characters 25-42\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry in file \"lib/fs_compat/fs_compat.ml\", lines 1515-1540, characters 6-12\n",
+      "delta_bytes": 1575200008
+    },
+    {
+      "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 480, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.verify_record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 504, characters 16-49\nRaised by primitive operation at Masc__Lane_addon_store.settle_verified_record in file \"lib/lane_addon/lane_addon_store.ml\", line 514, characters 14-52\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 618, characters 18-92\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1579, characters 12-36\n",
+      "delta_bytes": 1568000008
+    },
+    {
+      "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 480, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 617, characters 19-54\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1579, characters 12-36\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1537, characters 25-42\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry in file \"lib/fs_compat/fs_compat.ml\", lines 1515-1540, characters 6-12\n",
+      "delta_bytes": 1567200008
+    },
+    {
+      "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.retain in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 199, characters 14-43\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n",
+      "delta_bytes": 1525600000
+    },
+    {
+      "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.digest in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 43, characters 45-76\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-36\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.retain in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 202, characters 18-48\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n",
+      "delta_bytes": 1408000000
+    },
+    {
+      "callstack": "Raised by primitive operation at Masc__Keeper_memory_os_current.decode_program_journal.decode in file \"lib/keeper/keeper_memory_os_current.ml\", line 1832, characters 13-41\nRaised by primitive operation at Masc__Keeper_memory_os_current.capture_program_anchor.(fun) in file \"lib/keeper/keeper_memory_os_current.ml\", line 1858, characters 15-43\nRaised by primitive operation at Common.protect in file \"lib/core/common.ml\", line 21, characters 8-12\nRaised by primitive operation at Common.protect in file \"lib/core/common.ml\", line 21, characters 8-12\nRaised by primitive operation at Common.protect in file \"lib/core/common.ml\", line 21, characters 8-12\nRaised by primitive operation at Common.protect in file \"lib/core/common.ml\", line 21, characters 8-12\n",
+      "delta_bytes": 1257600000
+    }
+  ],
+  "observations": [
+    {
+      "at": "2026-10-23T13:20:28.985566+00:00",
+      "elapsed_s": 0.17528908303938806,
+      "raw_sha256": "9967b5cbd8ffae1588041684c94f30f183887fb9b62983ca4717442db58e20e5",
+      "profile_totals": {
+        "sampling_rate": 1e-05,
+        "sampling": true,
+        "live_samples": 6603,
+        "live_bytes": 5282400000,
+        "allocated_samples": 970875,
+        "allocated_bytes": 776699999992,
+        "major_samples": 600492,
+        "major_bytes": 480393599992,
+        "direct_major_samples": 524227,
+        "dropped_samples": 8527554,
+        "pending_events": 11,
+        "sites": 23884,
+        "site_bound": 50000,
+        "overflow_site_key": "<sites past the table bound>"
+      },
+      "gc": {
+        "compactions": 0,
+        "heap_words": 1314945711,
+        "live_words": 1186253982,
+        "minor_heap_size": 4194304,
+        "space_overhead": 100,
+        "minor_collections": 64805,
+        "major_collections": 1055,
+        "forced_major_collections": 0,
+        "minor_words": 389504697439.0,
+        "promoted_words": 63206507858.0,
+        "major_words": 646747973051.0
+      },
+      "process_memory": {
+        "status": "measured",
+        "pid": 94835,
+        "resident_bytes": 15877914624,
+        "source": "mach_task_info",
+        "approximate": false
+      }
+    },
+    {
+      "at": "2026-10-23T13:20:59.019099+00:00",
+      "elapsed_s": 0.026812250027433038,
+      "raw_sha256": "88759db3ddf0d9986158025f55e206913a37d8a8d2699eee2fb7c227cf7b700d",
+      "profile_totals": {
+        "sampling_rate": 1e-05,
+        "sampling": true,
+        "live_samples": 7339,
+        "live_bytes": 5871199992,
+        "allocated_samples": 1011991,
+        "allocated_bytes": 809592799992,
+        "major_samples": 628449,
+        "major_bytes": 502759199992,
+        "direct_major_samples": 549662,
+        "dropped_samples": 8527554,
+        "pending_events": 21,
+        "sites": 24352,
+        "site_bound": 50000,
+        "overflow_site_key": "<sites past the table bound>"
+      },
+      "gc": {
+        "compactions": 0,
+        "heap_words": 1071602263,
+        "live_words": 960676311,
+        "minor_heap_size": 4194304,
+        "space_overhead": 100,
+        "minor_collections": 65116,
+        "major_collections": 1061,
+        "forced_major_collections": 0,
+        "minor_words": 391169557819.0,
+        "promoted_words": 63456408056.0,
+        "major_words": 649522350264.0
+      },
+      "process_memory": {
+        "status": "measured",
+        "pid": 94835,
+        "resident_bytes": 13623902208,
+        "source": "mach_task_info",
+        "approximate": false
+      }
+    },
+    {
+      "at": "2026-10-23T13:21:29.060878+00:00",
+      "elapsed_s": 0.03561879205517471,
+      "raw_sha256": "203c82cb989a2734d9f3298b67f5e9faff0fe537bc0c9d5caa110c72eec68f65",
+      "profile_totals": {
+        "sampling_rate": 1e-05,
+        "sampling": true,
+        "live_samples": 6502,
+        "live_bytes": 5201600000,
+        "allocated_samples": 1036040,
+        "allocated_bytes": 828831999992,
+        "major_samples": 641966,
+        "major_bytes": 513572799992,
+        "direct_major_samples": 560856,
+        "dropped_samples": 8527554,
+        "pending_events": 48,
+        "sites": 24748,
+        "site_bound": 50000,
+        "overflow_site_key": "<sites past the table bound>"
+      },
+      "gc": {
+        "compactions": 0,
+        "heap_words": 812816643,
+        "live_words": 707493147,
+        "minor_heap_size": 4194304,
+        "space_overhead": 100,
+        "minor_collections": 65365,
+        "major_collections": 1065,
+        "forced_major_collections": 0,
+        "minor_words": 392546988728.0,
+        "promoted_words": 63680326265.0,
+        "major_words": 650866083797.0
+      },
+      "process_memory": {
+        "status": "measured",
+        "pid": 94835,
+        "resident_bytes": 12006359040,
+        "source": "mach_task_info",
+        "approximate": false
+      }
+    }
+  ]
+}

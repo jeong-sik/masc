@@ -427,3 +427,47 @@ speedup or attainment of 0.1 ms. The raw 80 measurements are in
 `native_meta_key_http.csv`; `native_meta_key_http.json` binds them to the
 source, binary, driver, runtime and cleanup receipts. No candidate was deployed
 to the operating workspace, and no active 350-agent or TUI-render claim follows.
+
+## Retained record buffer transfer
+
+A 60.215-second read-only Memprof window on operating source
+`107c58401723313611f7c599bbe15225de5910da`, instance
+`01a1686c-45de-7000-ac1e-3d8569e594c8`, recorded no new dropped samples and
+estimated 52.132 GB allocated, including 33.179 GB reaching the major heap.
+The final whole-buffer copies in the first and verification reads accounted
+for approximately 1.593 and 1.575 GB in stacks present in both cumulative
+Top 30 tables. These are sampled allocation estimates, not elapsed-time
+attribution or an exhaustive subsystem split. Earlier dropped samples limit
+whole-live-heap attribution. The GC live size fell during this window;
+this observation does not establish a monotonic leak. See
+`allocation_window.json` for timestamps, counters and source identities.
+
+`Lane_addon_store.record_bytes` owns its fresh byte buffer exclusively. After
+reading exactly the expected length and confirming EOF, it transfers that
+buffer to the immutable string result with `Bytes.unsafe_to_string`. It makes
+no later write and exposes no mutable alias. Each verification read still
+allocates its own buffer. Both complete reads, file/parent sync, shrink/growth
+errors and descriptor/path identity checks remain in place.
+
+`run_retained_read_probe.py` interprets the actual selected reader helpers
+before and after the change. The 46 checks compare complete binary bytes and
+errors, retain earlier results across subsequent file changes/reads, and
+exercise same-inode rewrite, shrink, growth and replacement during sync.
+Nine alternating before/after repetitions measure durable double reads of the
+same warm private regular file, including actual file/parent `fsync`:
+The timed loop also compares every returned byte with the expected payload.
+
+| Record size | Reads | Before median ms | After median ms | Before allocated bytes | After allocated bytes |
+|---|---:|---:|---:|---:|---:|
+| 64 KiB | 35 | 7.858 | 5.156 | 9,241,368 | 4,652,728 |
+| 64 KiB | 350 | 69.620 | 39.518 | 92,411,448 | 46,525,048 |
+| 1 MiB | 35 | 73.880 | 41.451 | 146,866,968 | 73,465,528 |
+| 1 MiB | 350 | 766.122 | 412.416 | 1,468,667,448 | 734,653,048 |
+
+The before source is `19eded8bc18c890e058dfc34123803431fcdb683`; complete
+file/selected-helper hashes are in `retained_read_sources.json`, with all
+72 timing rows in `retained_read_probe.csv` and checks in
+`retained_read_checks.txt`. This is OCaml 5.5.1 interpreter evidence for the
+reader boundary, excluding JSON decode, caller scheduling and HTTP. Counts
+are record reads, not active Keepers. It is not a full-module native test,
+installed-runtime improvement or proof of the 0.1 ms target.

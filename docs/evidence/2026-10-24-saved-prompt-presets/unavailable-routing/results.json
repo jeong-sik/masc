@@ -1,0 +1,74 @@
+{
+  "recorded_at": "2026-10-24T07:47:12.671277+00:00",
+  "scope": "Isolated native candidate modules linked against existing dependency artifacts; actual saved operator data copied to private temporary bases. Browser used the production panel/API module and a native-candidate subprocess adapter. Not an installed server/TUI proof.",
+  "installed_api": {
+    "binary_commit": "8eac5c07c290d134a9ef6acb1e298584bf9a1366",
+    "readable": 0,
+    "unreadable": 2,
+    "show_status": 404,
+    "error": "lane verifier_exact has no max_output_tokens"
+  },
+  "copy_restore": {
+    "results": [
+      {
+        "preset": "default",
+        "elapsed_ms": 905.473,
+        "runtime_status": "committed",
+        "runtime_error": null,
+        "skipped_assignments": 11,
+        "skipped_lanes": 4,
+        "instructions_applied": 28,
+        "instructions_skipped": 0,
+        "preserved_lane_settings": 14
+      },
+      {
+        "preset": "before-keeper-instructions-20261007",
+        "elapsed_ms": 797.217,
+        "runtime_status": "committed",
+        "runtime_error": null,
+        "skipped_assignments": 14,
+        "skipped_lanes": 4,
+        "instructions_applied": 29,
+        "instructions_skipped": 0,
+        "preserved_lane_settings": 14
+      }
+    ],
+    "operator_files_unchanged": true,
+    "operator_file_count": 63
+  },
+  "focused_checks": {
+    "core": {
+      "passed": 37,
+      "seconds": 0.312
+    },
+    "web": {
+      "passed": 12,
+      "seconds": 1.39
+    },
+    "tui_decoder_and_result_state": {
+      "passed": 4,
+      "seconds": 0.001
+    },
+    "dashboard_typecheck": {
+      "result": "BASELINE_FAILURE",
+      "unchanged_diagnostics": [
+        "src/keeper-stream.test.ts:1862",
+        "src/keeper-stream.test.ts:1873"
+      ],
+      "changed_file_diagnostics": 0
+    },
+    "eslint": "PASS"
+  },
+  "source_sha256": {
+    "lib/prompt_preset.ml": "8ac9142ef196cb6b32583629b925a99cd48ffedea77968b7ebb32be3b39acdb4",
+    "lib/prompt_preset.mli": "de11d6bb1d49581153dafe60c4fdc6e12021efb13ccf573c01763081831d63f7",
+    "lib/tui_decode.ml": "f9a0cbb4a0773ecc6d835579d824b07a4784b5bf26c5dcfe89d83fc83f445cd2",
+    "lib/tui_decode.mli": "ed2512d3110dc34949b2109c4ad17bd4f7203d92ec7c194d878943eb752f6e3d",
+    "bin/masc_tui_preset_text.ml": "0db5c8214d3264a0014cf68f83815594872e1799035b4880cc8219c84a558002",
+    "dashboard/src/api/prompt-presets.ts": "f4698f8e9fa303fdc863f1382a42b10797a47cc007d5f0be833f1012b6977ef2",
+    "dashboard/src/components/tools/prompt-saved-presets-panel.ts": "0387a76a47250633d8679a7cf5bf6a05778124a9fdec1454458c5df4e65e7d66",
+    "test/test_prompt_preset.ml": "aaf60aa3dbd3b5b6f6fe279518e0c95b1652a9b2e95d2f9767b09c4ed32ba413",
+    "test/test_tui_preset_text.ml": "48d24532363672229691ff9ea29f338e8373a20c9313de12a636a1a5d48a5771",
+    "dashboard/src/api/prompt-presets.test.ts": "bb7215857f0c8c5ffbbd6a03af2e001ef18c75a4e3833ff08a33cb3f5c3e3bbc"
+  }
+}

@@ -46,9 +46,16 @@ a recorded value restores that value. A lane unavailable in the current runtime
 stays visible in the saved contents but is excluded from runtime writes. Neither
 inspection nor restoration rewrites the original saved snapshot.
 
-Old Runtime identifiers may also be absent from the current catalog. That Runtime
-part is reported as failed instead of choosing another model. Prompt overrides
-and Keeper instructions have their own application results; inspect all of them.
+An assignment unavailable under the current capability catalog, or an assignment
+or complete lane declaration the current Runtime writer refuses, keeps its
+current value. This includes saved Runtime IDs that are no longer configured.
+Other accepted settings can still restore. Review the
+reported exclusions: no replacement model is selected and lane candidate lists
+are not shortened to make them pass. A restore with exclusions is partial.
+
+If the final Runtime write itself fails, its part is reported as failed. Prompt
+overrides and Keeper instructions have their own application results; inspect
+all of them.
 Overrides apply immediately, Keeper instructions take effect at the next up/turn,
 and the Runtime commit receipt separately describes file durability and running
 lane publication. Restoring `_autosave` applies the settings it captured, subject

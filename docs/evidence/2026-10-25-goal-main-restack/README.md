@@ -4,7 +4,7 @@ This is a local 16-layer source candidate over main
 `98a1508e6ecbda1d38d33aa7d0eb7f366b420ddf`. It preserves the public Goal14
 head `895df663fb303ee2fa95c38bbd28b571db9abb62`, the complete latest Draft
 measurement-receipt head `177219da10c1b27b606c10af70b4bf6ea39211da`, and new
-Draft observation-retention head `2be9d21697fb4c9da9aafd769f5fa691bae2e757`.
+Draft observation-retention head `0606ece9b17f076c87926b92f39a373b26a11a5a`.
 All latest author production and raw evidence files are preserved, apart from
 explicitly documented conflict/consumer repairs and own-fragment citations.
 Preserving raw runtime reports is not an independent audit or a claim to have
@@ -143,3 +143,18 @@ The actual source constants/functions, transpiled by TypeScript and executed
 in Node, fail for a positive-byte `prompt.completion_authority` before the
 one-line introducing-layer mapping and preserve its label and byte total
 afterward. No layout assertion, browser render or visible UI success is claimed.
+
+## Remaining top-layer HOLD
+
+The latest author documentation at 0606 preserves a separate current-source
+P2: a turn-local Completion Authority event in the Official Start standing
+System can outlive the local turn. An absent next-turn event creates no new
+carried observation. The author independent counterexample and source FAIL
+are preserved verbatim. Our Goal-empty projection checks address a different
+observation and do not clear this event-lifetime defect. A separately reviewed
+carrier repair is still needed; no whole-stack source PASS is claimed.
+
+The author's completed native run 40114401559 at 2be9 also reports an
+unqualified Text constructor compilation error before any selected suite ran.
+This local candidate preserves the original direct fixture and does not claim
+that failure was repaired or that the six suites executed.

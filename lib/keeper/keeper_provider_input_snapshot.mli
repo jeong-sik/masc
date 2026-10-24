@@ -102,8 +102,14 @@ val write_best_effort :
   messages:Agent_core.Types.message list ->
   tools:Agent_core.Tool.t list ->
   unit
-(** Persist one immutable snapshot. Cancellation propagates; storage failures
-    are logged and do not fail the Keeper turn. *)
+(** Persist one immutable snapshot. Payload preparation uses the shared CPU
+    pool; each artifact reuse miss uses the shared IO pool for its content
+    addressing and strict durable put. Reuse lookup, map updates and the
+    snapshot append remain on the caller. The pool adapters retain their
+    inline policy when no pool is available, outside Eio, or when the caller is
+    already a worker.
+    Cancellation propagates; storage failures are logged and do not fail the
+    Keeper turn. Accepted work is never retried inline. *)
 
 val read_manifest :
   config:Workspace.config ->

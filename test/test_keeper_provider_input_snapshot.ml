@@ -28,7 +28,7 @@ let rec rm_rf path =
   | exception Unix.Unix_error _ -> ()
 ;;
 
-let with_workspace f =
+let with_workspace_env f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -38,7 +38,11 @@ let with_workspace f =
   Eio.Switch.on_release sw (fun () -> rm_rf dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
-  f config
+  f env sw config
+;;
+
+let with_workspace f =
+  with_workspace_env (fun _env _sw config -> f config)
 ;;
 
 let wire : Wire.observation =
@@ -154,6 +158,53 @@ let test_exact_turn_round_trip () =
              ])
            (Yojson.Safe.from_string content.pc_text))
     | Error error -> failf "%s" (Snapshot.read_error_to_string error))
+;;
+
+let test_shared_pool_and_nested_worker_round_trip () =
+  with_workspace_env (fun env sw config ->
+    let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+    let previous = Domain_pool_ref.get () in
+    Domain_pool_ref.set pool;
+    let restore_pool () =
+      match previous with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous
+    in
+    Fun.protect ~finally:restore_pool (fun () ->
+      let check_turn absolute_turn expected_prompt =
+        let manifest = read config absolute_turn in
+        check int "all parts retained" 3 (List.length manifest.mf_parts);
+        List.iter
+          (fun (part : Snapshot.part) ->
+             match read_part config absolute_turn part.part_index with
+             | Error error -> failf "%s" (Snapshot.read_error_to_string error)
+             | Ok content ->
+               check int "part byte count" part.part_bytes (String.length content.pc_text);
+               check string "part digest" part.part_sha256
+                 Digestif.SHA256.(digest_string content.pc_text |> to_hex);
+               if part.part_index = 0 then
+                 check string "system prompt" expected_prompt content.pc_text)
+          manifest.mf_parts
+      in
+      write config 7;
+      check_turn 7 "exact system prompt";
+      let caller_domain = (Domain.self () :> int) in
+      (* Occupy the one worker's full capacity. Both snapshot pool adapters
+         must run inline here instead of submitting back to that worker. *)
+      Domain_pool.submit_cpu pool (fun () ->
+        check bool "the enclosing job runs on the worker" true
+          ((Domain.self () :> int) <> caller_domain);
+        Snapshot.write_best_effort
+          ~config
+          ~keeper
+          ~trace_id:"trace-provider-input"
+          ~absolute_turn:8
+          ~runtime_profile:"local"
+          ~wire
+          ~system_prompt:"new prompt from the worker"
+          ~messages:[ message ]
+          ~tools:[ tool ]);
+      check_turn 8 "new prompt from the worker"))
 ;;
 
 (* The list answers from the row alone. With every blob gone the parts are
@@ -324,6 +375,10 @@ let () =
     "keeper provider input snapshot"
     [ ( "round trip"
       , [ test_case "exact turn lists and reads every part" `Quick test_exact_turn_round_trip
+        ; test_case
+            "shared pool and nested worker preserve exact parts"
+            `Quick
+            test_shared_pool_and_nested_worker_round_trip
         ; test_case "the list reads no blob" `Quick test_the_list_reads_no_blob
         ; test_case
             "a part the row does not list is refused"

@@ -18,7 +18,13 @@ let test_route_roundtrip_and_topics () =
   check bool "different bot route never aliases" false (Route.same_conversation route other_bot);
   let json=match Route.to_yojson route with `Assoc fields -> `Assoc(("chat_id",`Int 3)::fields) | _ -> fail "object" in
   check bool "duplicate route coordinate rejected" true (Result.is_error(Route.of_yojson json))
-let test_producer_exact_route_and_receipt () =
+let with_claim_root run =
+  Eio_main.run (fun env ->
+    if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let root=Filename.temp_file "telegram-claim" "" in
+    Sys.remove root;
+    Fun.protect ~finally:(fun()->if Sys.file_exists root then Fs_compat.remove_tree root) (fun()->run root))
+let test_producer_exact_route_and_receipt () = with_claim_root (fun claim_root ->
   let observed=ref None in
   let dispatch_for_delivery (delivery:Gate_keeper_backend.connector_delivery)
       ~channel ~channel_user_id ~channel_user_name:_ ~channel_workspace_id ~keeper_name ~idempotency_key ~metadata:_ ~content =
@@ -26,7 +32,7 @@ let test_producer_exact_route_and_receipt () =
     Gate_protocol.Reply{content="queued";structured=None;stats=None;message_request=Some {
       request_id=idempotency_key;destination_type="keeper";destination_id=keeper_name;channel;actor_id=Some channel_user_id;
       status=Queued;modalities=["text"];transport=Some channel;metadata=[]}} in
-  let result=Gateway.accept_update ~resolve:(fun ~channel_id -> check string "binding uses signed chat id" "-1001234567890" channel_id;Ok(Some "k"))
+  let result=Gateway.accept_update ~claim_root ~resolve:(fun ~channel_id -> check string "binding uses signed chat id" "-1001234567890" channel_id;Ok(Some "k"))
     ~dispatch_for_delivery ~bot_user_id:777L ~operation_id:"telegram-exact-update90" (parsed inbound) |> ok in
   (match result with Telegram_poll_custody.Accepted {message_request=Some receipt;_} -> check string "receipt conserved" "telegram-exact-update90" receipt.request_id
    | Accepted _ | Intentionally_ignored _ -> fail "missing original receipt");
@@ -59,15 +65,15 @@ let test_producer_exact_route_and_receipt () =
      | _ -> fail "Telegram surface must be Gate");
     check bool "tampered generic surface cannot replace typed topic" true
       (Result.is_error(make(Keeper_telegram_coordinates.surface ~bot_user_id:777L ~chat_id:(-1001234567890L)
-        ~message_thread_id:(Some 8) ~direct_messages_topic_id:None ~reply_to_message_id:(Some 8))))
-let test_unreadable_binding_is_not_ignored () =
+        ~message_thread_id:(Some 8) ~direct_messages_topic_id:None ~reply_to_message_id:(Some 8)))))
+let test_unreadable_binding_is_not_ignored () = with_claim_root (fun claim_root ->
   let called=ref false in
   let dispatch_for_delivery _ ~channel:_ ~channel_user_id:_ ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
     called:=true;Gate_protocol.Unavailable_result in
   check bool "binding failure refuses acceptance" true
-    (Result.is_error(Gateway.accept_update ~resolve:(fun ~channel_id:_ -> Error "binding unreadable") ~dispatch_for_delivery
+    (Result.is_error(Gateway.accept_update ~claim_root ~resolve:(fun ~channel_id:_ -> Error "binding unreadable") ~dispatch_for_delivery
       ~bot_user_id:777L ~operation_id:"op" (parsed inbound)));
-  check bool "no dispatch on unknown binding" false !called
+  check bool "no dispatch on unknown binding" false !called)
 let with_token f =
   let previous=Sys.getenv_opt "TELEGRAM_BOT_TOKEN" in
   Fun.protect ~finally:(fun()->match previous with None -> Unix.unsetenv "TELEGRAM_BOT_TOKEN" | Some value -> Unix.putenv "TELEGRAM_BOT_TOKEN" value)
@@ -157,7 +163,73 @@ let test_binding_path_authority () =
         Unix.putenv "TELEGRAM_BINDING_STORE_PATH" "";
         Unix.putenv "MASC_TELEGRAM_BINDING_STORE_PATH" path;
         check string "existing alias used when primary blank" path (Env_config_telegram.binding_store_path ())))
+let test_prepared_claim_conflicts_and_uncertain_write () = with_claim_root (fun claim_root ->
+  let module Claim = Keeper_telegram_ingress_claim in
+  let delivered=ref [] in
+  let recipient=ref (Some "A") in
+  let dispatch_for_delivery _ ~channel ~channel_user_id ~channel_user_name:_ ~channel_workspace_id:_
+      ~keeper_name ~idempotency_key ~metadata:_ ~content:_ =
+    delivered:=keeper_name::!delivered;
+    Gate_protocol.Reply {content="queued";structured=None;stats=None;message_request=Some {
+      request_id=idempotency_key;destination_type="keeper";destination_id=keeper_name;channel;
+      actor_id=Some channel_user_id;status=Queued;modalities=["text"];transport=Some channel;metadata=[]}} in
+  let accept update=Gateway.accept_update ~claim_root ~resolve:(fun ~channel_id:_ -> Ok !recipient)
+    ~dispatch_for_delivery ~bot_user_id:777L ~operation_id:"telegram-bot-777-generation-0-update-90" update in
+  let update=parsed inbound in
+  ignore(accept update |> ok);
+  recipient:=Some "B";
+  check bool "changed Keeper refuses original update" true (Result.is_error(accept update));
+  recipient:=None;
+  check bool "claimed update cannot become an unbound ignore" true (Result.is_error(accept update));
+  recipient:=Some "A";
+  let changed=match update.kind with
+    | Api.Message message -> {update with kind=Api.Message {message with text=Some "changed"}}
+    | Edited_message _ | Unsupported -> fail "message" in
+  check bool "same identity cannot change model input" true (Result.is_error(accept changed));
+  check (list string) "only original recipient dispatched" ["A"] !delivered;
+  ignore(accept update |> ok);
+  check (list string) "exact retry returns to original Keeper" ["A";"A"] !delivered;
+  let identity=`Assoc["recipient",`String "A";"content",`String "original"] in
+  let writes=ref 0 and written_path=ref None in
+  let write path body=incr writes;written_path:=Some path;
+    match Fs_compat.save_file_atomic_strict path body with
+    | Error _ as error -> error | Ok () -> Error "injected uncertain parent sync" in
+  let ensure ~sync identity=Claim.For_testing.ensure_with_io ~write ~sync ~root:claim_root
+    ~operation_id:"telegram-bot-777-generation-0-update-91" ~identity in
+  check bool "visible uncertain claim cannot authorize dispatch" true
+    (Result.is_error(ensure ~sync:Fs_compat.sync_file_and_parent_strict identity));
+  check bool "unproven resync still refuses" true
+    (Result.is_error(ensure ~sync:(fun _->Error "injected sync refusal") identity));
+  check bool "different request cannot replace uncertain claim" true
+    (Result.is_error(ensure ~sync:Fs_compat.sync_file_and_parent_strict (`Assoc["recipient",`String "B"])));
+  check bool "same exact claim is usable after actual resync" true
+    (Result.is_ok(ensure ~sync:Fs_compat.sync_file_and_parent_strict identity));
+  check int "existing claim is never overwritten" 1 !writes;
+  Fs_compat.save_file_atomic_strict (Option.get !written_path)
+    {|{"schema_version":1,"schema_version":1,"operation_id":"changed","identity":{}}|} |> ok;
+  check bool "corrupt claim cannot be replaced by current recipient" true
+    (match ensure ~sync:Fs_compat.sync_file_and_parent_strict identity with
+     | Error Claim.Invalid_claim->true | _->false);
+  let unicode_identity=`Assoc["recipient",`String "A";"content",`String "�"] in
+  let unicode_path=ref None in
+  Claim.For_testing.ensure_with_io ~root:claim_root ~operation_id:"telegram-bot-777-generation-0-update-92"
+    ~identity:unicode_identity ~sync:Fs_compat.sync_file_and_parent_strict
+    ~write:(fun path body->unicode_path:=Some path;Fs_compat.save_file_atomic_strict path body)
+    |> (function Ok ()->() | Error _->fail "valid Unicode claim");
+  let malformed=Printf.sprintf
+    {|{"schema_version":1,"operation_id":"telegram-bot-777-generation-0-update-92","identity":{"recipient":"A","content":"%s"}}|} "\255" in
+  Fs_compat.save_file_atomic_strict (Option.get !unicode_path) malformed |> ok;
+  check bool "invalid durable UTF-8 cannot normalize into an admitted identity" true
+    (match Claim.ensure ~root:claim_root ~operation_id:"telegram-bot-777-generation-0-update-92"
+      ~identity:unicode_identity with Error Claim.Invalid_claim->true | _->false);
+  let output=open_out(Filename.concat claim_root "not-a-directory") in close_out output;
+  let blocked=Gateway.accept_update ~claim_root:(Filename.concat claim_root "not-a-directory")
+    ~resolve:(fun ~channel_id:_ -> Ok(Some "B")) ~dispatch_for_delivery ~bot_user_id:777L ~operation_id:"blocked" update in
+  check bool "claim storage failure prevents Gate" true (Result.is_error blocked);
+  check (list string) "failed persistence did not dispatch another Keeper" ["A";"A"] !delivered)
+
 let ()=run "Telegram native gateway" ["continuity",[
+  test_case "prepared claims survive retry and uncertain write" `Quick test_prepared_claim_conflicts_and_uncertain_write;
   test_case "strict route and topic separation" `Quick test_route_roundtrip_and_topics;
   test_case "producer exact source and original receipt" `Quick test_producer_exact_route_and_receipt;
   test_case "unreadable binding stays owed" `Quick test_unreadable_binding_is_not_ignored;

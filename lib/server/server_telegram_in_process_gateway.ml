@@ -2,8 +2,11 @@ module Api=Telegram_rest_client
 module Custody=Telegram_poll_custody
 module State=Channel_gate_telegram_state
 let ( let* )=Result.bind
-let accept_update ~resolve ~dispatch_for_delivery ~bot_user_id ~operation_id (update:Api.update) =
-  let ignore reason = Ok(Custody.Intentionally_ignored reason) in
+let accept_update ~claim_root ~resolve ~dispatch_for_delivery ~bot_user_id ~operation_id (update:Api.update) =
+  let ignore reason =
+    let* () = Keeper_telegram_ingress_claim.ensure_unclaimed ~root:claim_root ~operation_id
+      |> Result.map_error Keeper_telegram_ingress_claim.error_to_string in
+    Ok(Custody.Intentionally_ignored reason) in
   match update.kind with
   | Api.Unsupported -> ignore Custody.Unsupported_update
   | Message message | Edited_message message ->
@@ -35,15 +38,41 @@ let accept_update ~resolve ~dispatch_for_delivery ~bot_user_id ~operation_id (up
             channel_workspace_id="";keeper_name;content;idempotency_key=operation_id;
             metadata=["conversation_id",conversation_id;"external_message_id",external_message_id;
               "telegram.update_id",Int64.to_string update.update_id;"telegram.event_kind",kind;"mentions_bound_keeper","true"]} in
-          match Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) inbound with
-          | Ok outbound -> Ok(Custody.Accepted outbound)
-          | Error(Channel_gate.Validation Gate_protocol.Empty_content) -> ignore Custody.Empty_message
-          | Error(Channel_gate.Validation (Gate_protocol.Content_too_long _)) ->
-            Log.Server.warn "telegram: update %Ld rejected by Gate content limit" update.update_id;
-            ignore Custody.Oversized_message
-          | Error ((Channel_gate.Validation (Gate_protocol.Empty_keeper_name | Empty_channel_user_id | Empty_idempotency_key)
-                   | Keeper_error _ | Dispatch_unavailable | Internal _) as error) ->
-            Error(Channel_gate.gate_error_to_string error)
+          let submit () =
+            let optional value = function None -> `Null | Some v -> value v in
+            let string value = `String value in
+            let identity = `Assoc [
+              "bot_user_id",`Intlit(Int64.to_string bot_user_id);
+              "update_id",`Intlit(Int64.to_string update.update_id);
+              "inbound",`Assoc ["channel",string inbound.channel;
+                "channel_user_id",string inbound.channel_user_id;"channel_user_name",string inbound.channel_user_name;
+                "channel_workspace_id",string inbound.channel_workspace_id;"keeper_name",string inbound.keeper_name;
+                "content",string inbound.content;"idempotency_key",string inbound.idempotency_key;
+                "metadata",`List(List.map(fun(k,v)->`List[string k;string v]) inbound.metadata)];
+              "delivery",`Assoc ["continuation_channel",Keeper_continuation_channel.to_yojson delivery.continuation_channel;
+                "surface",Surface_ref.to_json delivery.surface;
+                "conversation_id",optional string delivery.conversation_id;
+                "external_message_id",optional string delivery.external_message_id;
+                "workspace_id",optional string delivery.workspace_id]] in
+            let* () = Keeper_telegram_ingress_claim.ensure ~root:claim_root ~operation_id ~identity
+              |> Result.map_error Keeper_telegram_ingress_claim.error_to_string in
+            match Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) inbound with
+            | Ok outbound -> Ok(Custody.Accepted outbound)
+            | Error(Channel_gate.Validation Gate_protocol.Empty_content) -> ignore Custody.Empty_message
+            | Error(Channel_gate.Validation (Gate_protocol.Content_too_long _)) ->
+              Log.Server.warn "telegram: update %Ld rejected by Gate content limit" update.update_id;
+              ignore Custody.Oversized_message
+            | Error ((Channel_gate.Validation (Gate_protocol.Empty_keeper_name | Empty_channel_user_id | Empty_idempotency_key)
+                     | Keeper_error _ | Dispatch_unavailable | Internal _) as error) ->
+              Error(Channel_gate.gate_error_to_string error)
+          in
+          match Channel_gate.validate inbound with
+          | Ok () -> submit ()
+          | Error Gate_protocol.Empty_content -> ignore Custody.Empty_message
+          | Error (Gate_protocol.Content_too_long _) -> ignore Custody.Oversized_message
+          | Error ((Gate_protocol.Empty_keeper_name | Empty_channel_user_id | Empty_idempotency_key) as error) ->
+            Error (Channel_gate.gate_error_to_string (Channel_gate.Validation error))
+
 module For_testing = struct let accept_update=accept_update end
 let start ~sw ~env ~state =
   let clock=Eio.Stdenv.clock env in
@@ -60,12 +89,14 @@ let start ~sw ~env ~state =
       | Some token ->
         let result =
           let* client=Api.create ~token |> Result.map_error (fun e->Custody.Api e) in
-          let path ~bot_user_id = Filename.concat config.base_path
-            (Printf.sprintf ".gate/runtime/telegram/%Ld/cursor.json" bot_user_id) in
+          let bot_root ~bot_user_id = Filename.concat config.base_path
+            (Printf.sprintf ".gate/runtime/telegram/%Ld" bot_user_id) in
+          let path ~bot_user_id = Filename.concat (bot_root ~bot_user_id) "cursor.json" in
           let* custody=Custody.open_cursor ~clock ~client ~path () in
           let bot_user_id=Custody.bot_user_id custody in
           let* report=Custody.step ~clock custody ~now:(fun()->Eio.Time.now clock) ~poll_timeout_sec:30
-            ~accept:(accept_update ~resolve ~dispatch_for_delivery ~bot_user_id) () in
+            ~accept:(accept_update ~claim_root:(Filename.concat (bot_root ~bot_user_id) "claims")
+              ~resolve ~dispatch_for_delivery ~bot_user_id) () in
           Ok(bot_user_id,report) in
         (match result with
          | Ok(bot_user_id,report) -> State.record_poll_ok ~bot_user_id ~next_offset:report.next_offset

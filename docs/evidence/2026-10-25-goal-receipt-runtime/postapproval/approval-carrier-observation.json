@@ -1,0 +1,68 @@
+{
+  "scope": "Actual serialized message presence only. This does not prove that omission caused model choices.",
+  "requests": [
+    {
+      "request_id": "request-000021",
+      "sha256": "86ae740f7163adc5d3cc21e939ee9b2fdeec0b92db88c1772d7edb9235b3ee75",
+      "approval_notice_present": true,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000022",
+      "sha256": "0ec35201074f98808d1d290604083467abd01dfc5046d769f5d7d429c009d06d",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000023",
+      "sha256": "4d208f0a489b302db330195cc4cd46ee4599e4312ea138c8e1edf0fac070e2ff",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000024",
+      "sha256": "c179b9f38217e6f1de11ac468703df9de3993d86c13456923427d0790110e528",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000025",
+      "sha256": "b60e2af911abcc595fa7050e046af09f6f955776b3f5a23e7e26a05173a7364b",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000026",
+      "sha256": "c4bd3902dc861579b634e938baf88a1540de28238145349175f1f0b05cdec770",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000027",
+      "sha256": "53dd669a2c1d8804656a945a591e5570bf06b7f4ba32942a7f0917f8c66b8122",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000028",
+      "sha256": "41864f3050717dee51744e20c027bd4bc1249a9d83fc23440434cf5c5d52c74d",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000029",
+      "sha256": "6a42002e32347db1c976614f3cff5276d8ff479c0876e6424fb888c85b2893ab",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    }
+  ]
+}

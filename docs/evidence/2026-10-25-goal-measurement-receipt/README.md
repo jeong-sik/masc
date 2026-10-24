@@ -143,3 +143,15 @@ with Executing, not every lifecycle or model compliance. The driver's two local
 fixture-shape mistakes are disclosed in the summary/preflight record; the final
 projection correction was read-only and did not repeat measurement effects.
 The separate HTTP-only server was stopped after capture.
+
+## Latest actual Keeper result
+
+The [new 3014 Qwen cohort](../2026-10-25-goal-receipt-runtime/README.md)
+completed with G2 and G3 failed. It omitted the Goal link; after separately
+controlled link/approval it reworked alpha and resubmitted the Done Task,
+without measuring the Goal or doing beta/gamma work. The new measurement
+receipt was therefore not invoked. Its actual model interpretation remains
+unmeasured. The latest campaign ledger is 9/11, with previous 10/11 coverage
+kept as history. A separate source repair addresses loss of the completion
+authority observation after the first tool request; no model success is
+inferred from that input defect or repair.

@@ -260,7 +260,7 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       ~files:[Filename.basename source_path,read_upload] (fun paths ->
         staged_paths := paths;
         check "upload uses a private snapshot instead of caller source" (List.hd paths <> source_path);
-        act upload (Browser_action.Upload {selector="#upload";paths})) with
+        act upload (Browser_action.Upload {target=Browser_action.File_input "#upload";paths})) with
      | Ok () -> ()
      | Error (Browser_lane.Upload_lease.Read_failed error
              | Browser_lane.Upload_lease.Snapshot_failed error) -> failwith error);

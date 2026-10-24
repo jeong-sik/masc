@@ -219,7 +219,7 @@ let test_native_effort_requires_reasoning_support () =
           [ "id_prefix", `String "native-effort-fixture"
           ; "supports_reasoning", `Bool supports_reasoning
           ; "accepted_reasoning_efforts", `List [ `String "high" ] ] ] ] in
-    let capabilities = match Capability_manifest.of_json manifest with
+    let capabilities = match Capability_manifest.of_json manifest |> Result.map Capability_manifest.entries with
       | Ok [ entry ] -> Capabilities.apply_manifest_entry entry
       | Ok _ -> fail "expected one capability declaration"
       | Error detail -> fail detail in

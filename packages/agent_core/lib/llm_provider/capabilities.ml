@@ -1300,6 +1300,7 @@ let%test "apply_manifest_entry applies thinking_control_format (Agent Core contr
     Capability_manifest.of_json
       (Yojson.Safe.from_string
          {|{"schema_version":1,"models":[{"id_prefix":"m","thinking_control_format":"chat_template_kwargs"}]}|})
+  |> Result.map Capability_manifest.entries
   with
   | Ok [ entry ] ->
     (apply_manifest_entry entry).thinking_control_format = Chat_template_kwargs
@@ -1310,6 +1311,7 @@ let%test "apply_manifest_entry without thinking_control_format keeps base format
   match
     Capability_manifest.of_json
       (Yojson.Safe.from_string {|{"schema_version":1,"models":[{"id_prefix":"m"}]}|})
+  |> Result.map Capability_manifest.entries
   with
   | Ok [ entry ] ->
     (apply_manifest_entry entry).thinking_control_format = No_thinking_control
@@ -1321,6 +1323,7 @@ let%test "apply_manifest_entry applies reasoning_replay preserve_always" =
     Capability_manifest.of_json
       (Yojson.Safe.from_string
          {|{"schema_version":1,"models":[{"id_prefix":"m","reasoning_replay":"preserve_always"}]}|})
+  |> Result.map Capability_manifest.entries
   with
   | Ok [ entry ] ->
     (apply_manifest_entry entry).reasoning_replay_override = Force_preserve_always
@@ -1332,6 +1335,7 @@ let%test "apply_manifest_entry applies assistant_tool_content_format" =
     Capability_manifest.of_json
       (Yojson.Safe.from_string
          {|{"schema_version":1,"models":[{"id_prefix":"m","assistant_tool_content_format":"empty_string"}]}|})
+  |> Result.map Capability_manifest.entries
   with
   | Ok [ entry ] ->
     (apply_manifest_entry entry).assistant_tool_content_format
@@ -1343,6 +1347,7 @@ let%test "apply_manifest_entry without reasoning_replay keeps base default" =
   match
     Capability_manifest.of_json
       (Yojson.Safe.from_string {|{"schema_version":1,"models":[{"id_prefix":"m"}]}|})
+  |> Result.map Capability_manifest.entries
   with
   | Ok [ entry ] ->
     (apply_manifest_entry entry).reasoning_replay_override = Default_reasoning_replay
@@ -1712,49 +1717,6 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
   }
 ;;
 
-let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
-  { id_prefix = Model_identifiers.Id_prefix.of_string_exn id_prefix
-  ; base_label = None
-  ; max_context_tokens = None
-  ; max_output_tokens = None
-  ; supports_tools = None
-  ; supports_tool_choice = None
-  ; supports_required_tool_choice = None
-  ; supports_named_tool_choice = None
-  ; supports_parallel_tool_calls = None
-  ; assistant_tool_content_format = None
-  ; chat_output_budget_field = None
-  ; tool_schema_conformance = None
-  ; supports_reasoning = None
-  ; accepted_reasoning_efforts = None
-  ; supports_response_format_json = None
-  ; supports_structured_output = None
-  ; supports_multimodal_inputs = None
-  ; supports_image_input = None
-  ; supports_audio_input = None
-  ; supports_video_input = None
-  ; supports_document_input = None
-  ; modality_priority = None
-  ; supports_native_streaming = None
-  ; supports_system_prompt = None
-  ; supports_assistant_prefill = None
-  ; supports_prompt_caching = None
-  ; supports_top_k = None
-  ; supports_min_p = None
-  ; supports_seed = None
-  ; ignored_sampling_parameters = None
-  ; thinking_control_format = None
-  ; anthropic_thinking_control = None
-  ; preserve_thinking_control_format = None
-  ; content_inline_reasoning = None
-  ; reasoning_output_format = None
-  ; reasoning_streaming_format = None
-  ; reasoning_replay = None
-  ; emits_usage_tokens = None
-  ; supported_models = None
-  }
-;;
-
 let%test "named tool choice needs its own declaration, not a sibling override" =
   (* A row that turns tool_choice on and says nothing about named choice used
      to be answered `true`, so the record advertised a capability the catalog
@@ -2074,12 +2036,10 @@ let%test "Anthropic thinking policy resolves from the model catalog declaration"
 
 let%test "Anthropic thinking policy falls back to manifest when catalog has no row" =
   Model_catalog.set_global Model_catalog.empty;
-  Capability_manifest.set_global
-    [ { (test_manifest_entry "manifest-anthropic-model") with
-        anthropic_thinking_control =
-          Some Capability_vocab.Adaptive_disabled_through_high
-      }
-    ];
+  let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
+    {|{"schema_version":1,"models":[{"id_prefix":"manifest-anthropic-model","anthropic_thinking_control":"adaptive_disabled_through_high"}]}|})
+    |> Result.get_ok in
+  Capability_manifest.set_global manifest;
   Fun.protect
     ~finally:(fun () ->
       Model_catalog.clear_global ();

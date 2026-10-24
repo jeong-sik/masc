@@ -133,10 +133,17 @@ type entry =
         and blank, padded, or duplicate ids. *)
   }
 
-(** A parsed capability manifest: an ordered list of model entries.
+(** A validated immutable capability manifest. Only the strict parser and
+    {!empty} construct this value; raw entry lists cannot bypass admission.
+    Declaration order is retained for distinct prefixes. *)
+type t
 
-    Earlier entries take priority in {!lookup}. *)
-type t = entry list
+val empty : t
+(** Explicit declaration of no manifest overrides. *)
+
+val entries : t -> entry list
+(** Read-only declaration-order view. Changing this list or a copied entry
+    does not construct an admitted manifest. *)
 
 (** [of_json json] parses a manifest from a [Yojson.Safe.t] value.
 
@@ -146,7 +153,8 @@ type t = entry list
     [int] range, [id_prefix] is missing, empty, or padded with whitespace,
     [base] or another closed-vocabulary field (e.g. [modality_priority]) names
     an unknown value, or [supported_models] is empty or holds a blank, padded,
-    or duplicate id. The non-operational [_comment]
+    or duplicate id. Duplicate model declarations are rejected by the same
+    ASCII case-insensitive identity used by lookup. The non-operational [_comment]
     field is accepted at the root and entry levels. *)
 val of_json : Yojson.Safe.t -> (t, string) result
 

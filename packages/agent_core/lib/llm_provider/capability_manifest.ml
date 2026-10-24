@@ -100,6 +100,9 @@ type entry =
 (** A parsed capability manifest. *)
 type t = entry list
 
+let empty = []
+let entries (manifest : t) = manifest
+
 (* Local result-syntax bindings so this file can use [let*] / [let+]
    without depending on [agent_core.base] (which would create a circular
    library dependency). *)
@@ -570,6 +573,27 @@ let parse_entry json =
     }
 ;;
 
+module Model_ids = Map.Make (Model_identifiers.Equality_key)
+
+let validate_unique_model_ids entries =
+  let rec loop index seen = function
+    | [] -> Ok entries
+    | (entry : entry) :: rest ->
+      let key = Model_identifiers.Id_prefix.equality_key entry.id_prefix in
+      (match Model_ids.find_opt key seen with
+       | None -> loop (index + 1) (Model_ids.add key (index, entry.id_prefix) seen) rest
+       | Some (first_index, first) ->
+         Error
+           (Printf.sprintf
+              "duplicate manifest id_prefix %S at entry %d conflicts with %S at entry %d"
+              (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+              index
+              (Model_identifiers.Id_prefix.to_string first)
+              first_index))
+  in
+  loop 0 Model_ids.empty entries
+;;
+
 let of_json json =
   let open Result_syntax in
   let* () = validate_closed_object ~scope:"manifest" ~known:known_manifest_keys json in
@@ -603,7 +627,7 @@ let of_json json =
           | Error e -> Right e)
         results
     in
-    if errors <> [] then Error (String.concat "; " errors) else Ok oks
+    if errors <> [] then Error (String.concat "; " errors) else validate_unique_model_ids oks
 ;;
 
 let load_file path =
@@ -745,17 +769,11 @@ let%test "lookup: no match returns None" =
   | Error _ -> false
 ;;
 
-let%test "lookup: first matching entry wins" =
-  let json =
-    Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"model","max_context_tokens":8192},{"id_prefix":"model","max_context_tokens":4096}]}|}
-  in
-  match of_json json with
-  | Ok manifest ->
-    (match lookup manifest (Model_identifiers.Model_id.of_string_exn "model-v1") with
-     | Some entry -> entry.max_context_tokens = Some 8192
-     | None -> false)
-  | Error _ -> false
+let%test "of_json: duplicate model identity is rejected" =
+  match of_json (Yojson.Safe.from_string
+    {|{"schema_version":1,"models":[{"id_prefix":"model","supports_tools":true},{"id_prefix":"MODEL","supports_tools":false}]}|}) with
+  | Error _ -> true
+  | Ok _ -> false
 ;;
 
 let%test "lookup: exact prefix match" =

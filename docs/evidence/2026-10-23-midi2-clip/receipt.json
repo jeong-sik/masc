@@ -1,0 +1,40 @@
+{
+  "source_candidate": "38258f867ea0c34bb7915ecc8c0a045100a1b33b",
+  "base": "fe30ef2297f86879812dcf9d6660310fed28d951",
+  "recordedAtUtc": "2026-10-23T11:41:23.874431+00:00",
+  "sourceOriginalSha256": "a22840202b6ed63417228f25a804f437d3a8c45335fdef0a53342051741f1fd7",
+  "ppq": 1001,
+  "originalNoteIndices": [
+    60,
+    64,
+    67,
+    71
+  ],
+  "editedAbsolutePitches": [
+    55,
+    60,
+    64,
+    71
+  ],
+  "firstEditedVelocity16": 65534,
+  "editedExpression32": 4294967294,
+  "sequenceTicks": "3003",
+  "exactNanoseconds": {
+    "numerator": "1501500000000",
+    "denominator": "1001"
+  },
+  "exportSha256": "0580f9b28b211e73dfb6c2905068cc39b342514c078b70465e92d20bf87315be",
+  "sourceUnchanged": true,
+  "reopenedJsonUnchanged": true,
+  "exportRereadByteIdentical": true,
+  "tuiExitCodes": [
+    0,
+    0
+  ],
+  "checks": {
+    "passed": 28,
+    "failed": 0,
+    "command": "node --test tools/alphatex/test/midi-clip-workflow.test.mjs tools/alphatex/test/midi-clip-source.test.mjs tools/alphatex/test/session.test.mjs tools/alphatex/test/ump-source.test.mjs tools/alphatex/test/sequencer-save.test.mjs tools/alphatex/test/music-library-info.test.mjs"
+  },
+  "scope": "Actual source-candidate CLI/TUI in isolated PTYs, real saved JSON and MIDI2 exports. PNGs are renderings of the captured terminal bytes, not Ghostty screenshots. No default install, playback, MIDI-CI or physical MIDI2 endpoint verification."
+}

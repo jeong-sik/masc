@@ -2966,9 +2966,8 @@ max-concurrent = 1
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> () | Error detail -> failwith detail);
   let observation =
-    let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
-    Runtime_observation.runtime_observation_with_metrics
-      ~runtime_id:answering_runtime ~selected_model:None ~capture ()
+    let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates ~runtime_id:answering_runtime () in
+    Runtime_observation.runtime_observation_with_metrics ~selected_model:None ~capture ()
   in
   let prompt_metrics =
     Masc.Keeper_agent_prompt_metrics.build_prompt_metrics

@@ -226,7 +226,7 @@ let host_stop_result
        "unmapped_runtime_state". The vendor loop ran exactly one attempt to
        get here, so record that attempt the same way the in-loop terminal
        does. *)
-    let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
+    let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates ~runtime_id () in
     Runtime_observation.record_attempt_terminal
       capture
       ~model_id:model
@@ -234,7 +234,6 @@ let host_stop_result
       ~error:None;
     let runtime_observation =
       Runtime_observation.runtime_observation_with_metrics
-        ~runtime_id
         ~selected_model:(Some model)
         ~capture
         ~attempt_details_source:"official_client_host_stop"

@@ -258,6 +258,8 @@ let test_task_request_persists_snapshot () = with_fixture (fun config ->
   let p = post ~author:"producer" ~visibility:Board.Internal "Submitted body" in
   ignore (Workspace.add_task config ~title:"Submission source" ~priority:1 ~description:"");
   let task = List.hd (Workspace.read_backlog config).tasks in
+  check bool "fixture has no contract" true (Option.is_none task.contract);
+  let since_seq = (Log.Ring.bounds ()).total - 1 in
   Verification_protocol.create_submit_request ~config ~task ~assignee:"producer"
     ~verification_id:"snapshot-request" ~claim:(Masc_domain.Completion_evidence {evidence_refs=[board_ref p]})
     |> require "submit request";
@@ -265,6 +267,19 @@ let test_task_request_persists_snapshot () = with_fixture (fun config ->
   let items = match Yojson.Safe.Util.member "submitted_evidence" request.output with
     | `List rows -> List.map (fun row -> Store.submitted_evidence_item_of_yojson row |> require "decode request item") rows
     | _ -> fail "missing submission snapshot" in
+  check bool "evidence persists without a completion contract" true (items <> []);
+  let diagnostic = Log.Ring.recent ~since_seq ~module_filter:"Task" ()
+    |> List.find_opt (fun (row : Log.Ring.entry) ->
+      Yojson.Safe.Util.member "event" row.details = `String "verification_contract_gap") in
+  (match diagnostic with
+   | None -> fail "no structured contract-gap diagnostic"
+   | Some row ->
+     check bool "task id is not misreported as a Keeper" true (Option.is_none row.keeper_name);
+     check bool "contract absence is separate from evidence" true
+       (Yojson.Safe.Util.member "contract_present" row.details = `Bool false);
+     check int "diagnostic counts submitted evidence independently"
+       (List.length items)
+       Yojson.Safe.Util.(member "submitted_reference_count" row.details |> to_int));
   let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:items |> require "request-bound surface" in
   Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string p.id) |> require_durable_deletion "remove source";
   ignore (read surface "masc_board_post_get" (post_args p));

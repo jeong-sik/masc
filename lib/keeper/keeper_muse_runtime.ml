@@ -1726,7 +1726,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
             |> Result.map_error (fun detail ->
               internal_error ("Muse Code session settlement failed: " ^ detail))
           in
-          let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
+          let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name () in
           Runtime_observation.record_attempt_terminal
             capture
             ~model_id:model
@@ -1734,7 +1734,6 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
             ~error:None;
           let runtime_observation =
             Runtime_observation.runtime_observation_with_metrics
-              ~runtime_id
               ~selected_model:turn.model
               ~capture
               ~attempt_details_source:provider_name

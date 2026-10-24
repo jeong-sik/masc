@@ -62,6 +62,9 @@ let redacted_runtime_observation_to_json
   in
   `Assoc
     [ "runtime_id", `String runtime_id
+    ; "observation_id", `String obs.observation_id
+    ; "host_acceptance", Runtime_observation.host_acceptance_to_json obs.host_acceptance
+    ; "execution_evidence", Runtime_observation.execution_evidence_to_json obs.execution_evidence
     ; "selected_model", `Null
     ; ( "attempts"
       , `List (List.map redacted_runtime_attempt_to_json obs.attempts) )

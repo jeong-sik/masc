@@ -517,6 +517,42 @@ let test_a_turn_frame_names_its_keeper_turn () =
   check (option int) "same ordinal, next keeper turn" (Some 42)
     (int_of_field (member "keeper_turn_id" second))
 
+let test_native_log_preserves_producer_attribution () =
+  Eio_main.run @@ fun _env ->
+  Log.set_level Log.Info;
+  let base_bus = Agent_core.Event_bus.create () in
+  let observe ~bus ~expected_turn =
+    let config = Agent_core.Event_bus.subscription_config ~capacity:4
+      ~overflow:Agent_core.Event_bus.Drop_oldest |> Result.get_ok in
+    let subscription = Agent_core.Event_bus.subscribe ~config bus in
+    Agent_core.Event_bus.publish bus
+      (Agent_core.Event_bus.mk_event
+         (Agent_core.Event_bus.AgentStarted
+            { agent_name = "keeper-log-attribution"; task_id = "run-attribution" }));
+    let event = match Agent_core.Event_bus.drain subscription with
+      | [ event ] -> event
+      | _ -> fail "expected one producer event" in
+    Agent_core.Event_bus.unsubscribe bus subscription;
+    let json = Bridge.native_event_to_json event |> Option.get in
+    let since_seq = (Log.Ring.bounds ()).total - 1 in
+    Bridge.For_testing.emit_native_event_log event json;
+    let row = match Log.Ring.recent ~since_seq ~module_filter:"agent_core:event" () with
+      | [ row ] -> Log.Ring.entry_to_json row
+      | _ -> fail "expected one native event log" in
+    check (option string) "payload agent reaches the common log identity"
+      (Some "keeper-log-attribution") (string_of_field (member "keeper_name" row));
+    check (option int) "only the producer Keeper scope supplies the turn"
+      expected_turn (int_of_field (member "turn_id" row));
+    check bool "canonical event evidence is retained" true
+      (member "details" row = Some json)
+  in
+  observe
+    ~bus:(Masc.Keeper_turn_scope.bus base_bus
+      ~scope:(Masc.Keeper_turn_scope.create ~keeper_turn_id:41))
+    ~expected_turn:(Some 41);
+  observe ~bus:base_bus ~expected_turn:None
+;;
+
 let test_keeper_scope_rejects_ambiguous_identity () =
   List.iter (fun encoded ->
     let caller_scope = match Agent_core.Caller_scope.of_string encoded with
@@ -790,6 +826,8 @@ let () =
             test_publish_to_bridge_preserves_one_producer_identity
         ; test_case "a turn frame names its keeper turn" `Quick
             test_a_turn_frame_names_its_keeper_turn
+        ; test_case "native log preserves producer agent and Keeper turn" `Quick
+            test_native_log_preserves_producer_attribution
         ; test_case "keeper scope rejects ambiguous identity" `Quick
             test_keeper_scope_rejects_ambiguous_identity
         ; test_case "a frame off a turn names no keeper turn" `Quick

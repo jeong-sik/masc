@@ -1986,7 +1986,7 @@ let test_runtime_agent_terminal_observation_uses_runtime_identity () =
   check string "attempt detail source" "runtime_agent_terminal"
     observation.attempt_details_source
 
-let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
+let test_runtime_agent_terminal_error_preserves_uncaptured_failure () =
   let config =
     Runtime_agent.default_config
       ~name:"agent_core-runpod_mtp.qwen"
@@ -2005,21 +2005,19 @@ let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
       config
   in
   check string "runtime id" "runpod_mtp.qwen" observation.runtime_id;
-  check (option string) "selected model" (Some "qwen")
+  check (option string) "no unobserved answerer is selected" None
     observation.selected_model;
-  check int "attempt count" 1 (List.length observation.attempts);
-  check string "attempt detail source" "runtime_agent_terminal_error"
-    observation.attempt_details_source;
-  (match observation.attempts with
-   | [ attempt ] ->
-     check (option string) "attempt error" (Some error) attempt.error
-   | _ -> fail "expected one terminal attempt");
+  check int "missing capture invents no attempt" 0 (List.length observation.attempts);
+  check bool "attempt details unavailable" false observation.attempt_details_available;
+  (match observation.execution_evidence with
+   | Runtime_observation.Uncaptured_failure actual -> check string "runtime error" error actual
+   | Captured_execution -> fail "raw error cannot supply a capture");
   check string "runtime outcome" "failed"
     (Keeper_execution_receipt.runtime_outcome_to_string
        (Keeper_agent_error.runtime_outcome_of_observation
           ~lane_failover_applied:false
           (Some observation)));
-  (* The failed-attempt observation is unchanged, but a lane walk that
+  (* The boundary failure is unchanged, but a lane walk that
      landed this attempt on a later candidate (lane_failover_applied)
      always reports the turn as passed-to-next-model — that signal comes
      from the lane walk, not from anything on the observation. *)
@@ -3342,9 +3340,9 @@ let () =
             `Quick
             test_runtime_agent_terminal_observation_uses_runtime_identity
         ; test_case
-            "runtime agent terminal error observation marks failed attempt"
+            "runtime agent terminal error preserves missing capture and failure"
             `Quick
-            test_runtime_agent_terminal_error_observation_marks_failed_attempt
+            test_runtime_agent_terminal_error_preserves_uncaptured_failure
         ; test_case
             "runtime agent context preserves max_tokens intent"
             `Quick

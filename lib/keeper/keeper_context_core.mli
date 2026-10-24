@@ -147,7 +147,9 @@ val save_agent_core_checkpoint_classified :
 val context_of_agent_core_checkpoint :
   Agent_core.Checkpoint.t -> working_context
 
-(** What a checkpoint load found. *)
+(** What a checkpoint load found. Load diagnostics describe only this AGENT_CORE checkpoint. They do not
+    assert that an official-client session was reset or that a later save
+    will occur. Each non-absent failure is logged once. *)
 type checkpoint_load =
   | Checkpoint_loaded of working_context
   | Checkpoint_absent  (** No checkpoint is saved for the trace. *)

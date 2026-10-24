@@ -335,12 +335,16 @@ let runtime_outcome_of_observation
       Keeper_execution_receipt.runtime_outcome = function
   | Some _ when lane_failover_applied ->
     Keeper_execution_receipt.Runtime_passed_to_next_model
-  | Some obs
-    when List.exists
-           (fun (attempt : Runtime_observation.runtime_attempt) ->
-              Option.is_some attempt.error)
-           obs.attempts ->
-    Keeper_execution_receipt.Runtime_failed
-  | Some _ -> Keeper_execution_receipt.Runtime_completed
+  | Some obs ->
+    (match obs.execution_evidence with
+     | Runtime_observation.Uncaptured_failure _ -> Keeper_execution_receipt.Runtime_failed
+     | Runtime_observation.Captured_execution ->
+       match obs.host_acceptance with
+       | Some (Runtime_observation.Rejected _) -> Keeper_execution_receipt.Runtime_failed
+       | None | Some Runtime_observation.Accepted ->
+         if List.exists (fun (attempt : Runtime_observation.runtime_attempt) ->
+           Option.is_some attempt.error) obs.attempts
+         then Keeper_execution_receipt.Runtime_failed
+         else Keeper_execution_receipt.Runtime_completed)
   | None -> Keeper_execution_receipt.Runtime_not_observed
 ;;

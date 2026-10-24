@@ -22,6 +22,11 @@ on:
         required: true
         type: string
         default: '158.0.1'
+      companion_checks:
+        description: 'Also build the server and run original-session companion/package protocol fixtures (no 1Password account)'
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 
@@ -58,6 +63,20 @@ jobs:
         with:
           ref: ${{ inputs.candidate_sha }}
 
+      - name: Bind the selected source and proof scope
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PROOF_WORKFLOW_COMMIT: ${{ github.sha }}
+          PROOF_BROWSER: ${{ inputs.browser }}
+          COMPANION_CHECKS: ${{ inputs.companion_checks }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          mkdir -p proof/native-browser
+          git rev-parse HEAD > proof/native-browser/SOURCE_COMMIT
+          printf '%s\n' "$PROOF_WORKFLOW_COMMIT" > proof/native-browser/WORKFLOW_COMMIT
+          printf '%s\n' "$PROOF_BROWSER" > proof/native-browser/BROWSER
+          printf '%s\n' "$COMPANION_CHECKS" > proof/native-browser/COMPANION_CHECKS
+
       - name: Setup OCaml
         uses: ./.github/actions/setup-ocaml-toolchain
 
@@ -89,13 +108,33 @@ jobs:
       - name: Build the native browser Add-on proof inputs
         env:
           PROOF_BROWSER: ${{ inputs.browser }}
+          COMPANION_CHECKS: ${{ inputs.companion_checks }}
         run: |
+          set -euo pipefail
           targets=("test/$PROBE_TARGET.exe" bin/masc_native_addon_launcher.exe
             bin/masc_browser_process_owner.exe bin/masc_browser_addon_worker.exe)
           if [[ "$PROOF_BROWSER" == webextension ]]; then
             targets+=(bin/masc_browser_host.exe)
           fi
+          : > proof/native-browser/companion-tests.txt
+          if [[ "$COMPANION_CHECKS" == true ]]; then
+            tests=(test_browser_stagehand_backend test_browser_extension_companion
+              test_lane_addon_companion_broker test_lane_addon_companion_allocation
+              test_lane_addon_worker_protocol)
+            printf '%s\n' "${tests[@]}" > proof/native-browser/companion-tests.txt
+            targets+=(bin/main_eio.exe)
+            for name in "${tests[@]}"; do targets+=("test/$name.exe"); done
+          fi
+          printf '%s\n' "${targets[@]}" > proof/native-browser/build-targets.txt
           opam exec -- dune build --release "${targets[@]}"
+
+      - name: Exercise the selected original-session companion fixtures
+        if: inputs.companion_checks
+        run: |
+          set -euo pipefail
+          while IFS= read -r name; do
+            opam exec -- "_build/default/test/$name.exe" 2>&1 | tee "proof/native-browser/$name.log"
+          done < proof/native-browser/companion-tests.txt
 
       # Chrome for Testing, not branded Chrome: branded builds refuse
       # --load-extension from 137, and 154 is the build the CDP extension load
@@ -171,19 +210,19 @@ jobs:
 
       - name: Retain the exact proof inputs
         env:
-          PROOF_WORKFLOW_COMMIT: ${{ github.sha }}
           PROOF_BROWSER: ${{ inputs.browser }}
+          COMPANION_CHECKS: ${{ inputs.companion_checks }}
         run: |
           mkdir -p proof/native-browser/binaries
-          git rev-parse HEAD > proof/native-browser/SOURCE_COMMIT
-          printf '%s\n' "$PROOF_WORKFLOW_COMMIT" > proof/native-browser/WORKFLOW_COMMIT
-          printf '%s\n' "$PROOF_BROWSER" > proof/native-browser/BROWSER
           cp "_build/default/test/$PROBE_TARGET.exe" proof/native-browser/binaries/
           cp _build/default/bin/masc_native_addon_launcher.exe proof/native-browser/binaries/
           cp _build/default/bin/masc_browser_process_owner.exe proof/native-browser/binaries/
           cp _build/default/bin/masc_browser_addon_worker.exe proof/native-browser/binaries/
           if [[ "$PROOF_BROWSER" == webextension ]]; then
             cp _build/default/bin/masc_browser_host.exe proof/native-browser/binaries/
+          fi
+          if [[ "$COMPANION_CHECKS" == true ]]; then
+            cp _build/default/bin/main_eio.exe proof/native-browser/binaries/
           fi
           (cd proof/native-browser && shasum -a 256 binaries/*.exe > SHA256SUMS)
           if [[ "$PROOF_BROWSER" == firefox || "$PROOF_BROWSER" == gecko || "$PROOF_BROWSER" == webextension ]]; then

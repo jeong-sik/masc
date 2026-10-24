@@ -13,12 +13,12 @@ Record server source/binary, shim protocol/release, endpoint, Keeper, operation,
 artifact and provenance separately. Preserve current pinned trust and explicit
 endpoint authority; no local/Docker fallback on SSH failure.
 
-| Requirement | Authoritative completion evidence | Initial state |
+| Requirement | Authoritative completion evidence | Progress and remaining evidence |
 | --- | --- | --- |
 | Bootstrap without a GitHub token; preserve work on rerun | Actual CLI creates workspace and reruns with retained file | Implementing |
 | Preserve endpoint tool environment on upgrade | Config roundtrip and real endpoint probe using retained path/env_file/scratch root | Implementing |
-| Discover registered endpoints and diagnose readiness | Current runtime registry projection; named probe results and UI selection | Missing |
-| Change profiles with endpoint/network fields together | Actual TUI/Dashboard request, persisted TOML reread, rejected/uncertain save recovery | Missing |
+| Discover registered endpoints and diagnose readiness | Current runtime registry projection; named probe results and UI selection | Actual registry/probe projection and browser endpoint selection measured at a317; native TUI unverified |
+| Change profiles with endpoint/network fields together | Actual TUI/Dashboard request, persisted TOML reread, rejected/uncertain save recovery | Browser endpoint save and TOML readback passed at a317; full profile transition and native TUI unverified |
 | Keeper can Execute, Read, Grep, Write, Edit and enumerate files | Keeper tool records and endpoint-side reread/hash; enumeration uses the exposed Execute tool | Actual baseline and exact-source a317 candidate workflows measured; scripted model |
 | Path/root/cwd semantics agree across tools, scripts and receipts | Same nested file accessed through each surface, declared roots and sibling refusal scenarios | Audit required; #37324, #38593, #38895 |
 | Typed stdin/stdout/stderr redirects work remotely | Actual typed redirect workflow including append and split streams; host path never opened | Gap; #31442 |

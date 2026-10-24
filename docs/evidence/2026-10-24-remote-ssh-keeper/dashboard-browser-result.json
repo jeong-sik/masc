@@ -1,0 +1,9 @@
+{
+  "source_commit": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+  "space_id": 27,
+  "url": "http://127.0.0.1:61188/dashboard/#keepers?keeper=ssh-proof-20261025-a",
+  "state": {
+    "endpoint": "proof_alt",
+    "profile": "remote_ssh"
+  }
+}

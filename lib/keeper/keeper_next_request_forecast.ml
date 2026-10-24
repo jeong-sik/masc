@@ -506,6 +506,9 @@ let boundary_forecast ~config ~keeper_name ~meta ~trace_id ~(boundary : atom_bou
   let messages = [ wake ] in
   let _labelled, history_atoms = Runtime_model_input_tail_window.annotate messages in
   let digest_at = Some boundary.last_atom_digest in
+  (* [candidate] asks for the digest of an atom opening; the boundary line
+     already states the newest one, so every question gets that same answer. *)
+  let digest_at_fn _ = digest_at in
   let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta in
   (* NDT-OK: one wall-clock read at the boundary, compared with stored expiries. *)
   let now = Unix.gettimeofday () in
@@ -531,7 +534,7 @@ let boundary_forecast ~config ~keeper_name ~meta ~trace_id ~(boundary : atom_bou
                ~keeper_name
                ~trace_id
                ~messages
-               ~digest_at
+               ~digest_at:digest_at_fn
                ~history_atoms
                ~wake_bytes:wake_line_bytes
                ~readings

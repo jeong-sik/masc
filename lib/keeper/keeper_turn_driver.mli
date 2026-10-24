@@ -267,7 +267,13 @@ type attempt_input =
     the same turn. *)
 
 (** [raw_trace] must be passed explicitly. Keeper turns supply their prepared
-    sink; [None] records a deliberate untraced dispatch, including sink failure. *)
+    sink; [None] records a deliberate untraced dispatch, including sink failure.
+    [on_request_observation] enables canonical journals for outer native calls
+    without a direct-operation binding. Such calls require the application
+    execution runtime, filesystem and a valid [keeper_name]. Journal setup or
+    locator publication failure aborts before provider effects; readback failure
+    is explicit evidence rather than synthesized wire settings. Official-client
+    calls remain unobserved. This is not a nested Agent-call entry point. *)
 val run_named :
   ?input_policy:Keeper_input_policy.t ->
   runtime_id:string ->

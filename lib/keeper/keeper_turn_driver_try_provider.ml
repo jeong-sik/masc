@@ -2415,7 +2415,6 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           let boundary = match ctx.native_binding, ctx.on_request_evidence with
             | Some binding, Some _ -> Some (Native.capture_request_boundary binding)
             | None, _ | Some _, None -> None in
-          let result =
           let input, checkpoint = match continuation_checkpoint with
             | Some checkpoint -> Native.Continue_from_checkpoint, Some checkpoint
             | None ->
@@ -2423,22 +2422,27 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 | Some blocks -> blocks
                 | None -> [Agent_core.Types.Text ctx.goal] in
               Native.New_input { blocks; metadata = ctx.goal_metadata }, ctx.agent_core_checkpoint in
-          let prepared = match ctx.native_binding with
-            | None -> Ok (config, checkpoint, input)
-            | Some binding ->
-              Native.prepare ~binding ~runtime_id:ctx.runtime_id ~config
+          let prepared, request_execution = match ctx.native_binding, ctx.on_request_evidence with
+            | None, None -> Ok (config, checkpoint, input), None
+            | None, Some _ ->
+              (match Keeper_request_execution.prepare ~base_path:ctx.base_path
+                  ~keeper_name:ctx.keeper_name ~config () with
+               | Ok (execution, config) -> Ok (config, checkpoint, input), Some (Ok execution)
+               | Error detail -> Error (Agent_core.Error.Internal detail), Some (Error detail))
+            | Some binding, _ ->
+              (Native.prepare ~binding ~runtime_id:ctx.runtime_id ~config
                 ~agent_core_checkpoint:checkpoint ~input ~agent_ref:attempt_agent_ref
                 ?retired_history_cut:ctx.native_retired_history_cut ()
               |> Result.map (fun prepared ->
                 Native.config prepared, Native.prepared_checkpoint prepared,
                 Native.prepared_input prepared)
-              |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in
+              |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)), None in
           let prepared = Result.map
             (fun (config, checkpoint, input) ->
               observed_provider_turn_ordinal := None;
               capture_provider_ordinal config, checkpoint, input)
             prepared in
-          match prepared with
+          let result = match prepared with
           | Error _ as error -> error
           | Ok (config, checkpoint, Native.Continue_from_checkpoint) ->
             (match checkpoint with
@@ -2470,14 +2474,18 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 blocks
 
           in
-          (match ctx.on_request_evidence, ctx.native_binding with
-           | Some observe, Some binding ->
+          (match ctx.on_request_evidence, ctx.native_binding, request_execution with
+           | Some observe, Some binding, _ ->
              let evidence = match boundary with
                | Some (Ok boundary) -> Native.request_evidence binding ~boundary ~runtime_id:ctx.runtime_id
                | Some (Error detail) -> Request_observation.Read_failed detail
                | None -> Request_observation.Read_failed "native request boundary was not captured" in
              observe evidence
-           | None, _ | Some _, None -> ());
+           | Some observe, None, Some (Ok execution) ->
+             observe (Keeper_request_execution.request_evidence execution)
+           | Some observe, None, Some (Error detail) ->
+             observe (Request_observation.Read_failed detail)
+           | None, _, _ | Some _, None, None -> ());
           result
         in
         run_fn ())

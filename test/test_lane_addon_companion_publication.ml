@@ -99,8 +99,10 @@ let durable_queue_and_consumption fs config origin =
   let preview=Yojson.Safe.from_string observed.preview in
   check bool "observation contains only committed public event" true
     (Yojson.Safe.Util.member "publication" preview=P.event_json event);
-  let fields=Keeper_unified_prompt.For_testing.board_event_fields observed in
+  let fields=Keeper_unified_prompt.For_testing.board_event_fields {observed with preview=""} in
   check string "prompt metadata preserves original publication" publication_id (List.assoc "publication_id" fields);
+  check bool "full public state survives ordinary preview shortening" true
+    (Yojson.Safe.from_string (List.assoc "publication" fields)=P.event_json event);
   check bool "prompt source is the canonical original" true
     (Yojson.Safe.from_string (List.assoc "source" fields)=Keeper_owned_job_identity.source_to_json change.ao_source);
   Keeper_reaction_ledger.record_event_queue_stimulus ~base_path:config.base_path ~keeper_name:keeper selection.source;

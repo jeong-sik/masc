@@ -107,7 +107,9 @@ must retain its exact original provider/caller scope throughout delivery.
 
 Keeper intake strictly rereads both the origin and publication before rendering
 public output into the prompt. A different Task, Keeper or route cannot borrow
-the record. Unavailable/corrupt source reads retain the queued stimulus and do
+the record. The validated event is carried as typed in-memory observation data
+and rendered in a lossless `publication` prompt field; shortening the ordinary
+display preview must not discard the operation ID or public state. Unavailable/corrupt source reads retain the queued stimulus and do
 not advance cycle failure state or manufacture an empty consumed result. The new
 type is explicit through queue persistence, reaction/disposition kinds, routing,
 paused-source handling, lifecycle selection and waiting inventory projections.

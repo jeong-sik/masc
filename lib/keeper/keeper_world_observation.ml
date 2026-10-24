@@ -43,7 +43,10 @@ type pending_board_event_kind =
           content is a wake it cannot act on. *)
   | Composition_completed
   | Owned_job_completed of Keeper_event_queue.owned_job_completion
-  | Addon_operation_changed of Keeper_event_queue.addon_operation_change
+  | Addon_operation_changed of {
+      source:Keeper_event_queue.addon_operation_change;
+      publication:Lane_addon_companion_publication.event;
+    }
   | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention of Keeper_counterpart_observation.t
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
@@ -822,7 +825,7 @@ let pending_board_event_of_addon_operation_change ~base_path ~keeper_name ~arriv
     "source",Keeper_owned_job_identity.source_to_json change.ao_source;
     "channel",Keeper_continuation_channel.to_yojson change.ao_channel;
     "tool",`String record.origin.destination.tool;"publication",P.event_json record.event] in
-  Ok {event_kind=Addon_operation_changed change;
+  Ok {event_kind=Addon_operation_changed {source=change;publication=record.event};
     post_id=Keeper_event_queue.addon_operation_change_post_id change;author=keeper_name;
     title="Add-on " ^ record.origin.destination.tool ^ " state";
     preview=Yojson.Safe.to_string preview;hearth=None;post_kind=Board.System_post;

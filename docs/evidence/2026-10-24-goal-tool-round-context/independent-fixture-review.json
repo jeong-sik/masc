@@ -1,0 +1,16 @@
+{
+  "reviewer": "repair_evidence_integrity separate coding-agent session",
+  "head": "484899b514777f9efb18e00d2af023783a570952",
+  "base": "e2e0c16c62094633b5c6bfae8accfc92b95353ad",
+  "root_cherry_pick": "9f024959528a5c0ea12ce59f0c1a63b2a364695d",
+  "verdict": "PASS no P0-P2 found",
+  "test_file_sha256": "60e560153b5b2eb3a0f3583243b3189c1cc7992fe3c682795dda597cb440b8c5",
+  "raw_delta_sha256": "9c957dce32e85ef4567344311ab6a0a65e54256044ac863aea30d3a203874e9c",
+  "checked": [
+    "real Workspace init resolves state/backlog and producer session",
+    "exact one correlated ToolResult, typed success and real payload",
+    "authoritative exact-one Goal link assertion retained",
+    "empty product diff1eef to9f024959"
+  ],
+  "scope": "source review; no Dune/native rerun, GitHub approval or merge"
+}

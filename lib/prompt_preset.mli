@@ -6,17 +6,28 @@
     Prompt overrides are the surface a preset carries, not the managed
     prompt files: boot re-syncs those from the binary. *)
 
+type 'a saved_setting =
+  | Unrecorded
+      (** The snapshot did not record this setting. Restore keeps the current
+          declaration, including its absence, and does not invent a value. *)
+  | Recorded of 'a option
+      (** [Recorded None] explicitly removes the declaration; [Recorded (Some v)]
+          restores [v]. Newly captured snapshots always record both settings. *)
+
+type lane_owner =
+  | Current_lane of Runtime_schema.exact_lane_owner
+  | Unavailable_lane of string
+      (** Preserved for inspection and re-saving, never written to runtime.toml. *)
+
+val lane_key : lane_owner -> string
+
 type lane =
-  { owner : Runtime_schema.exact_lane_owner
+  { owner : lane_owner
   ; enabled : bool
   ; slots : string list
   ; cli_slots : string list
-  ; max_output_tokens : int option
-        (** The lane's declared output budget; [None] declares none, and
-            restoring [None] removes the key from the lane table. *)
-  ; thinking : bool option
-        (** The lane's declared [enable_thinking]; [None] declares none, and
-            restoring [None] removes the key from the lane table. *)
+  ; max_output_tokens : int saved_setting
+  ; thinking : bool saved_setting
   }
 
 type snapshot =
@@ -76,6 +87,10 @@ type restore_report =
   ; instructions_result : part_result  (** takes effect at each keeper's next up *)
   ; runtime_result : runtime_result
   ; default_comparison : default_comparison
+  ; preserved_lane_settings : (string * string) list
+      (** Lane id and setting not recorded in the target, kept as currently declared. *)
+  ; skipped_lanes : (string * string) list
+      (** Lanes unavailable in this runtime. Their saved contents remain intact. *)
   }
 
 val autosave_name : string
@@ -94,6 +109,19 @@ val capture :
 
 val save : base_path:string -> snapshot -> (unit, string) result
 (** Writes the preset directory, replacing a preset of the same name. *)
+
+type create_error =
+  | Invalid_name of string
+  | Already_exists of string
+  | Failed of { name : string; reason : string }
+
+val create : base_path:string -> snapshot -> (unit, create_error) result
+(** Publishes a new complete preset atomically only when its name is absent.
+    An existing path, including an empty directory or dangling symlink, is
+    preserved and reported as [Already_exists]. Does not replace a preset
+    that appeared after a caller listed names or captured its snapshot. *)
+
+val create_error_to_string : create_error -> string
 
 val load : base_path:string -> string -> (snapshot, string) result
 val list : base_path:string -> listing
@@ -147,7 +175,8 @@ val runtime_text_with :
     [assignments] are removed) and the [enabled] / [slots] / [cli_slots] /
     [max_output_tokens] / [thinking] of every lane whose values differ from
     [current_lanes] rewritten. A request setting the preset declares none of is
-    removed from the lane table, and one that already holds is not rewritten. Every other line is
+    removed from the lane table; an [Unrecorded] setting is kept unchanged.
+    Unavailable lanes are skipped. A setting that already holds is not rewritten. Every other line is
     kept, including comment lines inside the arrays of lanes left alone.
     Exposed for tests. *)
 
@@ -167,6 +196,13 @@ val snapshot_to_json : snapshot -> Yojson.Safe.t
 val report_to_json : restore_report -> Yojson.Safe.t
 
 val same_settings : snapshot -> snapshot -> bool
+(** [same_settings saved current] compares the saved restore intent on the left
+    with the current captured declarations on the right. An [Unrecorded]
+    setting in [saved] accepts the current declaration; all other settings,
+    including the complete set of currently supported lanes, must match.
+    Unavailable lanes are excluded from comparison and reported as skipped.
+    This is directional when
+    the saved snapshot contains unrecorded settings. Snapshot metadata is ignored. *)
 val source_directory : base_path:string -> snapshot -> string
 val matches_saved_settings : base_path:string -> snapshot -> (bool, string) result
 (** Compare fresh durable override, Keeper TOML and runtime files. An unreadable

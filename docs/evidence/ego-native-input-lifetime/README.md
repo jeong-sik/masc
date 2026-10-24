@@ -11,9 +11,10 @@ Native selector/ref click, fill, hover, double-click, selection and plain
 selector-to-selector drag now use the native session runner. The lane chooses
 the execution policy from its authenticated client's actual transport and the
 closed interaction type. Other browsers and scene/coordinate/custom-waypoint
-adapters retain their existing worker-side policy. The outer Add-on client
-cannot infer transport from a UUID; for potential native inputs it waits for
-the worker's transport-specific answer rather than adding a second clock.
+adapters retain their existing worker-side policy. The private Add-on client
+keeps its shared reply policy: an opaque live UUID does not authorize Ego-only
+waiting. The host/worker path selects native waits from its authenticated
+concrete transport independently of that private channel.
 
 The independent audit also found a poll-lifetime boundary. Ego polls between
 SDK commands. A legitimate long command could outlive the idle 120-second

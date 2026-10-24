@@ -66,7 +66,13 @@ Keeper store acceptance test, actual multiprocess test or live Telegram call.
 
 The first selected CI40104116658 at568c73d26ab45919b14ac92cd7b23a8422eb1315
 failed compiling the Root fixture because its direct Unix dependency was absent.
-The stanza now explicitly declares Unix/Eio. Repaired source execution is linked
-on the PR when observed. OCaml parser and whitespace checks passed. No local
+The stanza now explicitly declares Unix/Eio. [Repaired CI40104873977](https://github.com/jeong-sik/masc/actions/runs/40104873977)
+completed SUCCESS at exact code head e10399db446cb90f2865981084787af32bf7f0a4.
+Completed logs directly confirm the actual Gate build, six API protocol tests
+and ten custody tests PASS. After parent #45813 merged externally as
+f31033df4d45a2ee97ec7f86ce149a6a33cff6a1, gh-stack rebased this layer onto main.
+The custody/API implementation, interfaces and fixture sources are unchanged;
+that run remains evidence at its recorded pre-rebase head. No new-base build
+or rerun was claimed from source equivalence alone. OCaml parser and whitespace checks passed. No local
 Dune/full regression, installed runtime, actual server ingress/continuation,
 sidecar deletion or dashboard proof. #24497 remains open.

@@ -567,7 +567,7 @@ let test_complete_stream_final_wire_injection_grows_the_body () =
           ~tools:[]
       with
       | Error _ -> fail "fixture serialization failed"
-      | Ok (_, body) -> String.length body
+      | Ok serialized -> String.length serialized.Complete_common.body
     in
     let final_bytes =
       match

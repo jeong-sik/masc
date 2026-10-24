@@ -1,8 +1,7 @@
 type t = { request : Llm_transport.completion_request }
 
 type admitted_body =
-  { http_codec : Provider_http_codec.t
-  ; body : string
+  { serialized_request : Complete_common.serialized_http_request
   ; evidence : Request_wire_observer.observation
   }
 
@@ -89,7 +88,7 @@ let admit_serialized_body ~stream prepared =
   let config = request.Llm_transport.config in
   let ( let* ) = Result.bind in
   let* () = Complete_common.validate_all config in
-  let* http_codec, body =
+  let* serialized_request =
     Complete_common.serialize_final_http_request_unadmitted
       ~stream
       ~config
@@ -101,11 +100,11 @@ let admit_serialized_body ~stream prepared =
       ~capture_id:request.capture_id
       ~provider:(Provider_registry.provider_name_of_config config)
       ~model:config.model_id
-      ~http_codec:(Provider_http_codec.fingerprint_tag http_codec)
+      ~http_codec:(Provider_http_codec.fingerprint_tag serialized_request.http_codec)
       ~stream
-      ~body
+      ~body:serialized_request.body
   in
-  Ok { prepared; admitted_body = { http_codec; body; evidence } }
+  Ok { prepared; admitted_body = { serialized_request; evidence } }
 ;;
 
 let transport_failure error =
@@ -307,7 +306,16 @@ let measure
   =
   let prepared = serialized.prepared in
   Result.map
-    (fun measured -> { measured with admitted_body = Some serialized.admitted_body })
+    (fun measured ->
+       { measured with
+         admitted_body = Some serialized.admitted_body
+       (* The input count describes this request's prompt; its independent
+          reservation resolver must not replace the generation body's receipt. *)
+       ; measurement =
+           { measured.measurement with
+             output_token_receipt =
+               serialized.admitted_body.serialized_request.output_token_receipt }
+       })
     (measure_prepared
        ?connection_cache
        ?clock
@@ -401,6 +409,5 @@ let with_first_event_timeout_s first_event_timeout_s (admitted : admitted) =
 let admitted_body admitted = admitted.measured.admitted_body
 let serialized_request (serialized : serialized) = serialized.prepared
 let serialized_admitted_body (serialized : serialized) = serialized.admitted_body
-let admitted_body_http_codec admitted_body = admitted_body.http_codec
-let admitted_body_contents admitted_body = admitted_body.body
+let admitted_body_request admitted_body = admitted_body.serialized_request
 let admitted_body_evidence admitted_body = admitted_body.evidence

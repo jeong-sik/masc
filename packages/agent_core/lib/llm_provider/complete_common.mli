@@ -93,27 +93,37 @@ val retained_prefix_reasoning_indices
   -> Types.message list
   -> (int list option, Reasoning_history_projection.error) result
 
+(** A single backend-built generation artifact. The output-token decision is
+    extracted from the same opaque backend artifact as [body], never recomputed
+    from config. Stream-field injection preserves that decision. This proves
+    serialization, not dispatch or provider acceptance. *)
+type serialized_http_request = private
+  { http_codec : Provider_http_codec.t
+  ; body : string
+  ; output_token_receipt : Types.output_token_receipt
+  }
+
 val serialize_http_request_with_thinking_control
   :  stream:bool
   -> anthropic_thinking_control:Capabilities.anthropic_thinking_control option
   -> config:Provider_config.t
   -> messages:Types.message list
   -> tools:Yojson.Safe.t list
-  -> (Provider_http_codec.t * string, Http_client.http_error) result
+  -> (serialized_http_request, Http_client.http_error) result
 
 val serialize_http_request
   :  stream:bool
   -> config:Provider_config.t
   -> messages:Types.message list
   -> tools:Yojson.Safe.t list
-  -> (Provider_http_codec.t * string, Http_client.http_error) result
+  -> (serialized_http_request, Http_client.http_error) result
 
 val serialize_final_http_request_unadmitted
   :  stream:bool
   -> config:Provider_config.t
   -> messages:Types.message list
   -> tools:Yojson.Safe.t list
-  -> (Provider_http_codec.t * string, Http_client.http_error) result
+  -> (serialized_http_request, Http_client.http_error) result
 
 val config_with_trace_context
   :  Provider_config.t

@@ -386,8 +386,7 @@ let complete_stream_http
     match validation with
     | Error _ as error -> error
     | Ok () ->
-      Result.bind
-        (match admitted_body with
+      (match admitted_body with
          | None ->
            serialize_final_http_request_unadmitted ~stream:true ~config ~messages ~tools
          | Some admitted_body ->
@@ -396,20 +395,19 @@ let complete_stream_http
            in
            if evidence.stream
            then
-             Ok
-               ( Prepared_completion_request.admitted_body_http_codec admitted_body
-               , Prepared_completion_request.admitted_body_contents admitted_body )
+             Ok (Prepared_completion_request.admitted_body_request admitted_body)
            else
              Error
                (Http_client.AcceptRejected
                   { reason =
                       "sync admitted body cannot be dispatched through the streaming path"
                   }))
-        (fun (http_codec, body_str) -> Ok (http_codec, body_str))
   in
   match request with
   | Error err -> Error err
-  | Ok (http_codec, body_with_stream) ->
+  | Ok serialized ->
+    let http_codec = serialized.Complete_common.http_codec in
+    let body_with_stream = serialized.body in
     if requires_non_http_transport config.kind
     then
       Error

@@ -731,6 +731,12 @@ let retained_prefix_reasoning_indices ~(config : Provider_config.t) ~tools messa
   | Provider_http_codec.Glm_chat -> Ok None
 ;;
 
+type serialized_http_request =
+  { http_codec : Provider_http_codec.t
+  ; body : string
+  ; output_token_receipt : Types.output_token_receipt
+  }
+
 let serialize_http_request_with_policy
       ~stream
       ~anthropic_serialization_policy
@@ -756,7 +762,9 @@ let serialize_http_request_with_policy
            | Resolve_nonexact_anthropic_thinking_control ->
              Backend_anthropic.build_request_artifact ~stream ~config ~messages ~tools ()
          with
-         | Ok artifact -> Ok (Backend_anthropic.request_payload artifact)
+         | Ok artifact ->
+           Ok (Backend_anthropic.request_payload artifact,
+               Backend_anthropic.request_output_token_receipt artifact)
          | Error rejection ->
            Error
              (Http_client.AcceptRejected
@@ -764,19 +772,35 @@ let serialize_http_request_with_policy
                     Backend_anthropic.required_output_token_error_message config rejection
                 }))
       | Provider_http_codec.Ollama_chat ->
-        Ok (Backend_ollama.build_request ~stream ~config ~messages ~tools ())
+        let artifact = Backend_ollama.build_request_artifact
+            ~stream ~config ~messages ~tools () in
+        Ok (Backend_ollama.request_payload artifact,
+            Backend_ollama.request_output_token_receipt artifact)
       | Provider_http_codec.Openai_responses ->
-        Ok (Backend_openai_responses.build_request ~stream ~config ~messages ~tools ())
+        let artifact = Backend_openai_responses.build_request_artifact
+            ~stream ~config ~messages ~tools () in
+        Ok (Backend_openai_responses.request_payload artifact,
+            Backend_openai_responses.request_output_token_receipt artifact)
       | Provider_http_codec.Openai_chat ->
-        Ok (Backend_openai.build_request ~stream ~config ~messages ~tools ())
+        let artifact = Backend_openai.build_request_artifact
+            ~stream ~config ~messages ~tools () in
+        Ok (Backend_openai.request_payload artifact,
+            Backend_openai.request_output_token_receipt artifact)
       | Provider_http_codec.Gemini_generate_content ->
-        Ok (Backend_gemini.build_request ~stream ~config ~messages ~tools ())
+        let artifact = Backend_gemini.build_request_artifact
+            ~stream ~config ~messages ~tools () in
+        Ok (Backend_gemini.request_payload artifact,
+            Backend_gemini.request_output_token_receipt artifact)
       | Provider_http_codec.Glm_chat ->
-        Ok (Backend_glm.build_request ~stream ~config ~messages ~tools ())
+        let artifact = Backend_glm.build_request_artifact
+            ~stream ~config ~messages ~tools () in
+        Ok (Backend_glm.request_payload artifact,
+            Backend_glm.request_output_token_receipt artifact)
     with
     | Invalid_argument reason -> Error (Http_client.AcceptRejected { reason })
   in
-  Result.map (fun body -> http_codec, body) body_result
+  Result.map (fun (body, output_token_receipt) ->
+    { http_codec; body; output_token_receipt }) body_result
 ;;
 
 let serialize_http_request_with_thinking_control
@@ -855,10 +879,11 @@ let serialize_final_http_request_unadmitted
   =
   Result.bind
     (serialize_http_request ~stream ~config ~messages ~tools)
-    (fun (http_codec, body) ->
+    (fun serialized ->
        if stream
-       then Result.map (fun body -> http_codec, body) (finalize_stream_body ~http_codec body)
-       else Ok (http_codec, body))
+       then Result.map (fun body -> { serialized with body })
+           (finalize_stream_body ~http_codec:serialized.http_codec serialized.body)
+       else Ok serialized)
 ;;
 
 let with_request_metadata ~body run =

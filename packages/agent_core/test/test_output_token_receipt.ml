@@ -494,10 +494,70 @@ let test_anthropic_zero_is_explicit () =
     (Anthropic.request_output_token_receipt artifact)
 ;;
 
+(* The completion serializer used to return only codec/body and discard the
+   receipt. Exercise its final sync/stream boundary, not a second resolver. *)
+let test_completion_serialization_preserves_receipt () =
+  let cases =
+    [ OpenAI_compat, "/v1/chat/completions", Openai_chat_max_tokens, ["max_tokens"]
+    ; OpenAI_compat, "/v1/responses", Openai_responses_max_output_tokens, ["max_output_tokens"]
+    ; Anthropic, "/v1/messages", Anthropic_messages_max_tokens, ["max_tokens"]
+    ; Kimi, "/v1/messages", Anthropic_messages_max_tokens, ["max_tokens"]
+    ; Gemini, "/v1beta/models/m:generateContent", Gemini_generation_config_max_output_tokens,
+        ["generationConfig"; "maxOutputTokens"]
+    ; Ollama, "/api/chat", Ollama_options_num_predict, ["options"; "num_predict"]
+    ; Glm, "/v1/chat/completions", Openai_chat_max_tokens, ["max_tokens"]
+    ]
+  in
+  List.iter (fun (kind, request_path, envelope, path) ->
+    let config = PC.make ~kind ~model_id:"receipt-completion" ~request_path
+        ~base_url:"https://provider.invalid" ~max_tokens:200
+        ~model_capabilities_override:(declared_capabilities 100) () in
+    List.iter (fun stream ->
+      match Complete_common.serialize_final_http_request_unadmitted
+              ~stream ~config ~messages:[user_msg "hi"] ~tools:[] with
+      | Error _ -> Alcotest.fail "final generation serialization failed"
+      | Ok serialized ->
+        Alcotest.(check int) "final wire value" 100 (wire_int serialized.body path);
+        check_receipt ~envelope ~requested:(Some 200) ~effective:(Some 100)
+          ~policy:Explicit_clamped ~ceiling:(Some 100)
+          ~ceiling_source:(Some Declared_capability_override)
+          serialized.output_token_receipt)
+      [false; true]) cases
+;;
+
+let test_completion_optional_omission_and_required_fallback () =
+  List.iter (fun stream ->
+    List.iter (fun (kind, request_path, envelope, effective, policy) ->
+      let config = PC.make ~kind ~model_id:"receipt-no-requested-value"
+          ~base_url:"https://provider.invalid" ~request_path
+          ~model_capabilities_override:(declared_capabilities 100) () in
+      match Complete_common.serialize_final_http_request_unadmitted
+              ~stream ~config ~messages:[user_msg "hi"] ~tools:[] with
+      | Error _ -> Alcotest.fail "final generation serialization failed"
+      | Ok serialized ->
+        (match effective with
+         | None -> Alcotest.(check bool) "optional wire member absent" true
+             (top_level_field_absent serialized.body "max_tokens")
+         | Some value -> Alcotest.(check int) "required wire member present"
+             value (wire_int serialized.body ["max_tokens"]));
+        check_receipt ~envelope ~requested:None ~effective ~policy
+          ~ceiling:(Some 100) ~ceiling_source:(Some Declared_capability_override)
+          serialized.output_token_receipt)
+      [ OpenAI_compat, "/v1/chat/completions", Openai_chat_max_tokens, None, Omitted
+      ; Anthropic, "/v1/messages", Anthropic_messages_max_tokens, Some 100,
+          Required_capability_override_fallback ])
+    [false; true]
+;;
+
 let () =
   Alcotest.run
     "output_token_receipt"
-    [ ( "wire_codec"
+    [ ( "completion_serialization"
+      , [ Alcotest.test_case "all codecs retain final wire decision" `Quick
+            test_completion_serialization_preserves_receipt
+        ; Alcotest.test_case "optional omission and required fallback" `Quick
+            test_completion_optional_omission_and_required_fallback ] )
+    ; ( "wire_codec"
       , [ Alcotest.test_case
             "stable scalar vocabulary"
             `Quick

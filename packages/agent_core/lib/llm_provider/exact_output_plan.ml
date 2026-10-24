@@ -443,8 +443,9 @@ let freeze_serialization
         ~tools:request.tools
     with
     | Error error -> Error (Request_serialization_rejected error)
-    | Ok (response_codec, body) ->
-      Ok { response_codec; body; exact_completion_artifact = None })
+    | Ok serialized ->
+      Ok { response_codec = serialized.Complete_common.http_codec
+         ; body = serialized.body; exact_completion_artifact = None })
 ;;
 
 let preflight

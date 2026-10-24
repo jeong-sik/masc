@@ -63,14 +63,14 @@ let inspect_serialized_request
   =
   Result.bind (validate_all config) (fun () ->
     Result.map
-      (fun (http_codec, body) ->
+      (fun (serialized : Complete_common.serialized_http_request) ->
          Request_wire_observer.observation
            ~capture_id:None
            ~provider:(Provider_registry.provider_name_of_config config)
            ~model:config.model_id
-           ~http_codec:(Provider_http_codec.fingerprint_tag http_codec)
+           ~http_codec:(Provider_http_codec.fingerprint_tag serialized.http_codec)
            ~stream
-           ~body)
+           ~body:serialized.body)
       (serialize_final_http_request_unadmitted ~stream ~config ~messages ~tools))
 ;;
 
@@ -165,10 +165,10 @@ let complete_prepared_sync
             |> Result.map Prepared_completion_request.serialized_admitted_body
         in
         Result.map (fun (body : Prepared_completion_request.admitted_body) ->
+          let serialized = Prepared_completion_request.admitted_body_request body in
           let key = Cache.http_request_fingerprint
               ~config ~messages ~tools
-              ~http_codec:(Prepared_completion_request.admitted_body_http_codec body)
-              ~body:(Prepared_completion_request.admitted_body_contents body) () in
+              ~http_codec:serialized.http_codec ~body:serialized.body () in
           body_deadline, call_window, Some body, Some key) body)
   in
   match preflight with

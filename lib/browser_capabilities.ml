@@ -326,9 +326,9 @@ let support backend operation = match backend with
           Unsupported "Only an ego connection takes its task space back from the operator.")
     | Upload_file -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"upload" Act
-          [observed;"Requires an owning Keeper, an explicit ego browser, one CSS-matched file input (multiple for more than one file) and sandbox-authorized file paths; 16 MiB per file.";
-           "The receipt lists the files the input now holds; the page reads them later, so this connection keeps the copies until its space ends.";
-           "For a page that makes its file input only on a click, give opener instead of selector: one CSS-matched control. The click is the effect, ego hands its file chooser the copies, and the receipt's chosen lists them.";ego_agent_pages]
+          [observed;"Requires an owning Keeper, an explicit ego browser, a native Ego file-input locator or snapshot ref and sandbox-authorized file paths; 16 MiB per file.";
+           "The receipt's chosen lists staged files handed to the SDK, not observed input.files; the page reads them later, so this connection keeps the copies until its space ends.";
+           "For a page that makes its file input only on a click, give opener instead of selector: one native Ego control locator. The SDK owns the chooser wait; the click is the effect, ego hands its file chooser the copies, and the receipt's chosen lists them.";ego_agent_pages]
       | Owned_gecko | Owned_chromium | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable ->
           gecko_only backend (invoke ~action:"upload" Act)
             [observed;"Requires an owning Keeper, an observed file input and sandbox-authorized file paths; 16 MiB per file. opener is refused before any effect: name the file input with selector."])

@@ -505,6 +505,15 @@ let test_selector_input_uses_ego_sdk () =
        | Lane.Hover_target _ | Lane.Double_click_target _ -> ())
     | other -> failf "native selector was %s" (failure_kind other)) actions;
   check int "one native run per input" (List.length actions) (List.length !asked);
+  let drag = Lane.Drag_to {source=Lane.Selector "@12";destination=Lane.Selector "loc=css:#destination";via=[];duration_ms=0} in
+  (match dispatch peer Live.Page_interact (interact_args drag) with
+   | Ok receipt ->
+     let sent=List.hd !asked in
+     check string "native drag uses the SDK" "drag_to" (text (field "action" sent.args));
+     check string "native drag source unchanged" "@12" (text (field "target" sent.args));
+     check string "native drag destination unchanged" "loc=css:#destination" (text (field "destination" sent.args));
+     check string "native drag receipt action" "drag_to" (text (field "action" receipt))
+   | other -> failf "native drag was %s" (failure_kind other));
   native_error := str "native input reply lost";
   let before = List.length !asked in
   check string "a native failure is uncertain" "unknown"
@@ -589,7 +598,7 @@ let test_the_scripts_parse_as_modules () =
     | "page.target_input" -> answered (obj ["urlBefore",str observed_url;"receipt",obj [];"error",`Null;
         "tab",obj ["url",str observed_url;"title",str "Slack"]])
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
-    | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null;"after",in_page (obj ["files",`List []])])
+    | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.choose_files" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
@@ -691,8 +700,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.dialog" -> answered (obj ["dialog",ego_dialog "alert" "hello"])
     | "space.hand_off" -> answered `Null
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
-    | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null;
-        "after",in_page (obj ["url",str "https://app.slack.com/";"title",str "Slack";"files",`List []])])
+    | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.target" -> answered resolved
     | "page.pointer" | "page.keyboard" | "page.drag" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
@@ -1487,8 +1495,8 @@ let test_the_download_wait_runs_in_node () =
     check string "says why" "network failed" (text (field "reason" failed))
   | other -> failf "the listing has %d rows" (List.length other)
 
-(* An upload sets the worker's copies on one file input and answers what the
-   input holds. The page reads the files later, so the copies outlive the
+(* An upload hands the worker's copies to the native SDK and records the
+   chosen metadata. The page reads the files later, so the copies outlive the
    upload's own scope and go only once the space has ended. *)
 let test_an_upload_keeps_its_files_until_the_space_ends () =
   let directory = Unix.realpath (capture_directory ()) in
@@ -1506,11 +1514,10 @@ let test_an_upload_keeps_its_files_until_the_space_ends () =
   let upload ?(selector="#file") paths = dispatch peer Live.Page_act
       (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.File_input selector;paths}})) in
   let row = obj ["url",str "https://app.slack.com/";"title",str "Slack"] in
-  let held = in_page (obj ["url",str "https://app.slack.com/";"title",str "Slack";"files",`List [obj ["name",str "note.txt";"size",`Int 5]]]) in
-  reply := (fun _ -> answered (obj ["error",`Null;"dialog",`Null;"after",held;"tab",row]));
+  reply := (fun _ -> answered (obj ["error",`Null;"dialog",`Null;"tab",row]));
   (match upload paths with
-   | Ok receipt -> check string "the files the input holds"
-       {|{"tabId":1,"action":"upload","url":"https://app.slack.com/","title":"Slack","files":[{"name":"note.txt","size":5}]}|}
+   | Ok receipt -> check string "the staged files handed to the SDK"
+       {|{"tabId":1,"action":"upload","chosen":[{"name":"note.txt","size":5}],"url":"https://app.slack.com/","title":"Slack"}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "the upload was %s" (failure_kind other));
   check (list string) "ego was given the copies" paths
@@ -1518,16 +1525,16 @@ let test_an_upload_keeps_its_files_until_the_space_ends () =
   check string "and the selector as given" "#file" (text (field "selector" (List.hd !asked)));
   Lane.Upload_lease.release snapshot;
   check bool "the copies outlive the upload's own scope" true (List.for_all Sys.file_exists paths);
-  reply := (fun _ -> answered (obj ["error",`Null;"dialog",ego_dialog "alert" "uploaded";"after",`Null;"tab",row]));
+  reply := (fun _ -> answered (obj ["error",`Null;"dialog",ego_dialog "alert" "uploaded";"tab",row]));
   (match upload paths with
    | Ok receipt -> check string "an upload that opened a dialog answers with it"
-       {|{"tabId":1,"action":"upload","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"alert","message":"uploaded"}}|}
+       {|{"tabId":1,"action":"upload","chosen":[{"name":"note.txt","size":5}],"url":"https://app.slack.com/","title":"Slack","dialog":{"type":"alert","message":"uploaded"}}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "an upload that opened a dialog was %s" (failure_kind other));
-  reply := (fun _ -> answered (obj ["error",str "Target closed";"dialog",`Null;"after",`Null;"tab",row]));
+  reply := (fun _ -> answered (obj ["error",str "Target closed";"dialog",`Null;"tab",row]));
   check string "a failed setInputFiles leaves the input unknown" "unknown" (failure_kind (upload paths));
-  reply := (fun _ -> refused "upload requires a file input");
-  check string "a refused input" "before effect" (failure_kind (upload ~selector:"#text" paths));
+  reply := (fun _ -> answered (obj ["error",str "SDK could not resolve the file input";"dialog",`Null;"tab",row]));
+  check string "a native input failure is uncertain" "unknown" (failure_kind (upload ~selector:"#none" paths));
   let runs = List.length !asked in
   check bool "a missing file is refused" true
     (String_util.contains_substring (before_effect "a missing file" (upload [Filename.concat directory "absent.txt"])) "absent.txt");
@@ -1582,8 +1589,8 @@ let test_an_upload_through_a_file_chooser_answers_what_it_handed () =
    | Error (Live.Outcome_unknown detail) ->
      check bool "a chooser that did not open is reported after the click" true (String_util.contains_substring detail "opened no file chooser")
    | other -> failf "a click that opened no chooser was %s" (failure_kind other));
-  reply := (fun _ -> refused "no element matches the upload opener");
-  check string "an opener that names nothing" "before effect" (failure_kind (choose ~opener:"#none" paths));
+  reply := (fun _ -> answered (obj ["error",str "ego did not click the opener: native selector not found";"dialog",`Null;"tab",row]));
+  check string "a native opener failure is uncertain" "unknown" (failure_kind (choose ~opener:"#none" paths));
   let runs = List.length !asked in
   check bool "a missing file is refused" true
     (String_util.contains_substring (before_effect "a missing file" (choose [Filename.concat directory "absent.txt"])) "absent.txt");
@@ -1591,28 +1598,20 @@ let test_an_upload_through_a_file_chooser_answers_what_it_handed () =
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check bool "the space's end lets the copies go" false (List.exists Sys.file_exists paths)
 
-(* The upload script in node, against a stand-in for ego with one agent page
-   whose document has a file input #file, a text input #text, and two
-   elements matching "input". The page scripts run as they would in a page,
-   against that document. [opens] is the dialog the upload opens. *)
-let upload_stand_in ~opens = Printf.sprintf {js|
-const fs = await import("node:fs");
-const nodePath = await import("node:path");
+(* The stand-in exposes only the SDK upload boundary. No DOM evaluator is
+   available: selector resolution and file-input validation belong to Ego. *)
+let upload_stand_in ~opens ~fails = Printf.sprintf {js|
 const opens = %s;
 let open = null;
 const seen = [];
 process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
-const file = {localName: "input", type: "file", multiple: false, files: []};
-const elements = {"#file": [file], "#text": [{localName: "input", type: "text", multiple: false, files: null}], "input": [file, file]};
-globalThis.document = {title: "Form", querySelectorAll: selector => elements[selector] ?? []};
-globalThis.location = {href: "https://example.test/"};
 const page = {
   info: async () => open === null ? {url: "https://example.test/", title: "Form", w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600} : {dialog: open},
-  evaluate: async expression => { seen.push("evaluate"); return (0, eval)(expression); },
   setInputFiles: async (selector, paths) => {
     seen.push("set " + selector + " " + paths.length);
-    file.files = paths.map(path => ({name: nodePath.basename(path), size: fs.statSync(path).size}));
+    if (%b) throw new Error("native selector not found");
     open = opens;
+    return {};
   },
 };
 const taskSpace = async () => ({
@@ -1620,20 +1619,20 @@ const taskSpace = async () => ({
   tabs: async () => [{label: "p1", openedBy: "agent", url: "https://example.test/", title: "Form", targetId: "T1", active: true}],
   page: () => page,
 });
-|js} (Yojson.Safe.to_string opens)
+|js} (Yojson.Safe.to_string opens) fails
 
 let test_the_upload_script_runs_in_node () =
   let directory = Unix.realpath (capture_directory ()) in
   let path = Filename.concat directory "note.txt" and other = Filename.concat directory "two.txt" in
   Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel "hello");
   Out_channel.with_open_bin other (fun channel -> Out_channel.output_string channel "second");
-  let opens = ref `Null and output = ref "" in
+  let opens = ref `Null and fails = ref false and output = ref "" in
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
     | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
     | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Form" ~url:"https://example.test/" ~active:true ()])
-    | "page.upload" -> output := in_node (upload_stand_in ~opens:!opens ^ script); Ok !output
+    | "page.upload" -> output := in_node (upload_stand_in ~opens:!opens ~fails:!fails ^ script); Ok !output
     | other -> failf "unexpected step %s" other in
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -1644,19 +1643,23 @@ let test_the_upload_script_runs_in_node () =
   let upload ?(selector="#file") paths = dispatch peer Live.Page_act
       (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.File_input selector;paths}})) in
   (match upload [path] with
-   | Ok receipt -> check string "what the input now holds" {|[{"name":"note.txt","size":5}]|} (Yojson.Safe.to_string (field "files" receipt))
+   | Ok receipt -> check string "the staged files handed to the SDK" {|[{"name":"note.txt","size":5}]|} (Yojson.Safe.to_string (field "chosen" receipt))
    | other -> failf "the upload was %s" (failure_kind other));
-  check (list string) "checked in the page, set as CSS, then read back" ["evaluate";"set loc=css:#file 1";"evaluate"] (seen ());
-  check string "a text input is refused" "upload requires a file input" (before_effect "an upload to a text input" (upload ~selector:"#text" [path]));
-  check (list string) "and nothing is set" ["evaluate"] (seen ());
-  check string "two files need a multiple input" "this file input takes one file" (before_effect "two files" (upload [path; other]));
-  check string "a selector must match one element" "the upload selector matches 2 elements" (before_effect "two matches" (upload ~selector:"input" [path]));
-  check string "or any" "no element matches the upload selector" (before_effect "no match" (upload ~selector:"#none" [path]));
+  check (list string) "one native call preserves the CSS selector" ["set #file 1"] (seen ());
+  ignore (upload ~selector:"@file-ref" [path]);
+  check (list string) "a snapshot ref reaches the SDK unchanged" ["set @file-ref 1"] (seen ());
+  ignore (upload ~selector:"loc=label:Attachment" [path; other]);
+  check (list string) "semantic locator and both paths reach the SDK unchanged"
+    ["set loc=label:Attachment 2"] (seen ());
+  fails := true;
+  check string "a native selector failure is uncertain" "unknown" (failure_kind (upload ~selector:"#none" [path]));
+  check (list string) "the failed native call is not retried" ["set #none 1"] (seen ());
+  fails := false;
   opens := ego_dialog "alert" "too big";
   (match upload [path] with
    | Ok receipt -> check string "the dialog it opened" {|{"type":"alert","message":"too big"}|} (Yojson.Safe.to_string (field "dialog" receipt))
    | other -> failf "an upload that opened a dialog was %s" (failure_kind other));
-  check (list string) "no page script after the dialog opened" ["evaluate";"set loc=css:#file 1"] (seen ())
+  check (list string) "the dialog requires no DOM readback" ["set #file 1"] (seen ())
 
 (* Input and upload frame paths reach the peer and are refused before any
    effect. Frame_read is refused by the live transport gate, so a direct
@@ -1670,12 +1673,11 @@ let test_input_frame_paths_are_refused_with_the_way_that_works () =
     check bool label true (String_util.contains_substring (before_effect label result) needle) in
   says "frame input names target" "acts inside frames through target"
     (dispatch peer Live.Page_interact (interact_args ~frame_path:["#frame"] (Lane.Click_node {document_id="d1";node_id="send"})));
-  says "an upload into a frame names the top document" "top document"
+  says "an upload frame path names the native route" "without framePath"
     (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=["#frame"];
       interaction=Lane.Action.Upload {target=Lane.Action.File_input "#file";paths=["/tmp/note.txt"]}})))
 
-(* The chooser script in node, against a stand-in for ego whose page has one
-   #attach button and two elements matching "button". The stand-in's click
+(* The chooser SDK stand-in has no DOM evaluator. Its native click
    opens a file chooser when [opens] holds, one that takes several files when
    [multiple] does; its setFiles answers [set], or throws when [fails] holds.
    setFiles([]) closes the chooser. *)
@@ -1684,9 +1686,6 @@ const fs = await import("node:fs");
 const nodePath = await import("node:path");
 const seen = [];
 process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
-const elements = {"#attach": [{localName: "button"}], "button": [{localName: "button"}, {localName: "button"}]};
-globalThis.document = {title: "Form", querySelectorAll: selector => elements[selector] ?? []};
-globalThis.location = {href: "https://example.test/"};
 let waiting = null;
 let activeChooser = false;
 let clickFails = %b;
@@ -1701,14 +1700,14 @@ const chooser = {
 };
 const page = {
   info: async () => ({url: "https://example.test/", title: "Form", w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600}),
-  evaluate: async expression => { seen.push("evaluate"); return (0, eval)(expression); },
   waitForFileChooser: options => {
     if (activeChooser) throw new Error("this Page is already waiting for a file chooser");
-    seen.push("wait " + options.timeout); return new Promise((resolve, reject) => { waiting = {resolve, reject}; });
+    seen.push(options === undefined ? "wait native" : "wait custom"); return new Promise((resolve, reject) => { waiting = {resolve, reject}; });
   },
   click: async (selector, options) => {
     seen.push("click " + selector + " " + options.label);
     if (waiting !== null) { if (%b) { activeChooser = true; waiting.resolve(chooser); } else waiting.reject(new Error("page.waitForFileChooser timed out after 5000ms")); }
+    if (selector === "#none") throw new Error("native selector not found");
     if (clickFails) throw new Error("click response lost");
     return {};
   },
@@ -1754,8 +1753,8 @@ let test_the_chooser_script_runs_in_node () =
   (match choose [path] with
    | Ok receipt -> check string "what the chooser was handed" {|[{"name":"note.txt","size":5}]|} (Yojson.Safe.to_string (field "chosen" receipt))
    | other -> failf "the upload was %s" (failure_kind other));
-  check (list string) "checked in the page, armed, clicked with its label, then chosen"
-    ["evaluate";"wait 5000";"click loc=css:#attach MASC · agent · upload";"chosen note.txt/5"] (seen ());
+  check (list string) "armed with native wait, clicked with its label, then chosen"
+    ["wait native";"click #attach MASC · agent · upload";"chosen note.txt/5"] (seen ());
   check bool "a chooser that takes one file gets none of two" true
     (String_util.contains_substring (unknown "two files" (choose [path; other])) "takes one file");
   check bool "and nothing was chosen" false (List.exists (String.starts_with ~prefix:"chosen") (seen ()));
@@ -1774,9 +1773,16 @@ let test_the_chooser_script_runs_in_node () =
   multiple := true;
   ignore (choose [path; other]);
   check bool "a multiple chooser gets both" true (List.mem "chosen note.txt/5,two.txt/6" (seen ()));
-  check string "an opener must match one element" "the upload opener matches 2 elements" (before_effect "two matches" (choose ~opener:"button" [path]));
-  check (list string) "and nothing is clicked" ["evaluate"] (seen ());
-  check string "or any" "no element matches the upload opener" (before_effect "no match" (choose ~opener:"#none" [path]));
+  ignore (choose ~opener:"@attach-ref" [path]);
+  check bool "a snapshot opener ref reaches the SDK unchanged" true
+    (List.mem "click @attach-ref MASC · agent · upload" (seen ()));
+  ignore (choose ~opener:"loc=label:Attach" [path]);
+  check bool "a semantic opener reaches the SDK unchanged" true
+    (List.mem "click loc=label:Attach MASC · agent · upload" (seen ()));
+  check bool "a native opener failure remains uncertain" true
+    (String_util.contains_substring (unknown "native selector failure" (choose ~opener:"#none" [path])) "native selector not found");
+  check (list string) "the SDK failure is dispatched once and any opened chooser is closed"
+    ["wait native";"click #none MASC · agent · upload";"closed"] (seen ());
   set := obj ["dialog",ego_dialog "alert" "too big"];
   (match choose [path] with
    | Ok receipt -> check string "the dialog the files opened" {|{"type":"alert","message":"too big"}|} (Yojson.Safe.to_string (field "dialog" receipt))

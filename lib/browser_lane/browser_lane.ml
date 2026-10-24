@@ -134,7 +134,8 @@ let reply_timeout_sec = function
 
 type reply_policy = Reply_window | Executor_owned
 let reply_policy = function
-  | Page_native_workflow _ -> Executor_owned
+  | Page_native_workflow _
+  | Page_act (Action.On_tab {interaction=Action.Upload _;_}) -> Executor_owned
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
   | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Session_close | Session_status
   | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ -> Reply_window

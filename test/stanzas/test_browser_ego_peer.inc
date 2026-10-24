@@ -7,3 +7,8 @@
  (alias runtest)
  (deps test_browser_ego_target.cjs ../lib/browser_ego_peer.ml)
  (action (run node %{dep:test_browser_ego_target.cjs})))
+
+(rule
+ (alias runtest)
+ (deps test_browser_ego_upload.cjs ../lib/browser_ego_peer.ml)
+ (action (run node %{dep:test_browser_ego_upload.cjs})))

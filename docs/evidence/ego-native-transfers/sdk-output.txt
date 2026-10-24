@@ -1,0 +1,41 @@
+[p1 "Native transfers" | space "masc-ego-native-sdk-20261024"(4): 1 managed, 0 untracked — p1* "Native transfers"]
+root
+  container
+    text "Attach note"
+    textbox [ref=34]
+      button [ref=35]
+        text "파일 선택"
+      text "선택된 파일 없음"
+  textbox [ref=36]
+    button [ref=37]
+      text "파일 선택"
+    text "선택된 파일 없음"
+  textbox [ref=38]
+    button [ref=39]
+      text "파일 선택"
+    text "선택된 파일 없음"
+  text "Drag source"
+  text "Drop target"
+
+[p1 "Native transfers" | space "masc-ego-native-sdk-20261024"(4): 1 managed, 0 untracked — p1* "Native transfers"]
+root
+  container
+    text "Attach note"
+    textbox [ref=34]
+      button [ref=35]
+        text "파일 선택"
+      text "note.txt"
+  textbox [ref=36]
+    button [ref=37]
+      text "파일 선택"
+    text "note.txt"
+  textbox [ref=38]
+    button [ref=39]
+      text "파일 선택"
+    text "note.txt"
+  text "Drag source"
+  text "Drop target"
+  text "Native drop completed"
+
+MASC_TRANSFER_PROOF {"spaceId":4,"finished":false,"observations":[{"selector":"loc=css:#file","result":{"receipt":{},"error":null}},{"selector":"loc=css:#label","result":{"receipt":{},"error":null}},{"selector":"loc=css:#wrapper","result":{"receipt":{},"error":null}},{"selector":"loc=css:#shadowfile","result":{"receipt":{},"error":null}},{"selector":"@34","result":{"receipt":{},"error":null}}],"drag":{"urlBefore":"http://localhost:61992/","receipt":{},"error":null},"state":{"events":[{"id":"file","files":[{"name":"note.txt","size":19}]},{"id":"child","files":[{"name":"note.txt","size":19}]},{"drop":true,"trusted":true}],"files":[[{"name":"note.txt","size":19}],[{"name":"note.txt","size":19}]],"shadow":[{"name":"note.txt","size":19}]},"snapshot":"[p1 \"Native transfers\" | space \"masc-ego-native-sdk-20261024\"(4): 1 managed, 0 untracked — p1* \"Native transfers\"]\nroot\n  container\n    text \"Attach note\"\n    textbox [ref=34]\n      button [ref=35]\n        text \"파일 선택\"\n      text \"note.txt\"\n  textbox [ref=36]\n    button [ref=37]\n      text \"파일 선택\"\n    text \"note.txt\"\n  textbox [ref=38]\n    button [ref=39]\n      text \"파일 선택\"\n    text \"note.txt\"\n  text \"Drag source\"\n  text \"Drop target\"\n  text \"Native drop completed\"\n"}
+

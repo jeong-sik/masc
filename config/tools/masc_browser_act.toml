@@ -32,12 +32,12 @@ description = "Required except open_tab, open_window, hand_off and take_over."
 [[params]]
 name = "selector"
 type = "string"
-description = "upload: one observed file input; preserve decoded CSS including > and escapes, not JSON escape notation."
+description = "upload: one observed file input. Ego uses native locator/ref syntax, including a label or wrapper with one compatible input; other backends use decoded CSS."
 
 [[params]]
 name = "opener"
 type = "string"
-description = "upload on an ego browser instead of selector: one observed control whose click opens the page's file chooser. The click is the effect; the receipt's chosen lists the files handed to the chooser."
+description = "upload on an ego browser instead of selector: one observed native locator/ref for the control whose click opens the page's file chooser. The click is the effect; the receipt's chosen lists the files handed to the chooser."
 
 [[params]]
 name = "text"

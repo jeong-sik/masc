@@ -102,7 +102,7 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 | `tab_history` | 새로고침은 `page.reload()`. 뒤로·앞으로는 `page.cdp()` 로 `Page.getNavigationHistory` 를 읽고 `Page.navigateToHistoryEntry` 로 한 칸 옮긴 뒤, 그 탭의 현재 항목이 그 칸이 되고 문서가 다 불러와질 때까지 기다린다 (agent 페이지만) | 한다. 그 쪽에 항목이 없으면 행동 전에 거절한다 |
 | `dialog_answer` | `page.info()` 가 페이지를 막은 대화상자를 알려 주고, `acceptDialog(text?)`·`dismissDialog()` 로 답한다 (agent 페이지만) | 한다. 탭 목록의 행에 `dialog` 가 실린다. 클릭·키 입력이 대화상자를 열면 그 영수증에 담고, 페이지 스크립트가 막히면 부분 효과다. 열린 동안 그 페이지의 읽기·이동·입력은 행동 전에 거절하고, 탭 닫기는 받는다. 연결의 프로세스가 하나라서(4절) 다음 명령도 그 대화상자에 닿는다 |
 | `download_listing` | agent 페이지를 건드리는 단계가 그 페이지에 `page.waitForEvent("download")` 대기를 하나 걸어 둔다. 잡힌 다운로드는 `saveAs` 로 worker 의 다운로드 폴더 아래 `ego/<id>` 에 저장하고, ego 의 임시 파일은 `delete()` 로 지운다. 대기는 다운로드마다 다시 걸린다. 대기가 실패하면(페이지가 닫힌 경우 포함) 멈추고, 그 페이지의 다음 단계가 다시 건다 | 한다(BrowserRead `mode=downloads`, 탭 하나). 행은 Gecko 와 같은 모양(대기 중·끝남·중단)이고, 끝난 파일은 Gecko 와 같은 broker 로 publish 해 `artifact` 로 돌려준다. 목록은 ego 프로세스 안에 있어서, 멈춘 명령 뒤 새 프로세스는 그때부터 본 것만 안다. `watchingSince` 가 그 시점이다. 운영자의 다운로드 폴더에는 남는 것이 없다. ego 의 브라우저가 다운로드하는 동안 그 폴더를 건드리기는 한다 |
-| `file_upload` | 페이지 안에서 선택자가 CSS 로 정확히 하나, 파일 입력 자체(파일이 둘 이상이면 `multiple`)인지 먼저 보고, `page.setInputFiles("loc=css:" + selector, paths)` 로 worker 의 업로드 사본을 넣는다 (agent 페이지만) | 한다(BrowserAct `upload`, 명시적 ego 브라우저). 영수증에 입력이 지금 가진 파일(이름·크기)이 실린다. 업로드가 대화상자를 열면 그 영수증에 담는다. 각 경로는 실행 전에 파일인지 본다. 이 연결이 사본의 lease 를 업로드 전부터 공간이 끝날 때까지 든다. `selector` 대신 `opener` 를 주면, 클릭해야 입력이 생기는 페이지에 쓴다: `opener` 가 CSS 로 정확히 하나인지 먼저 보고, `waitForFileChooser` 를 건 뒤 `page.click("loc=css:" + opener, {label})` 로 누르고, 선택 창에 사본을 넘긴다. 클릭이 효과라서, 선택 창이 5초 안에 안 뜨거나 한 파일만 받는 선택 창에 여러 개를 주면 결과를 모름으로 알린다. 채우지 못한 선택 창은 `setFiles([])` 로 닫는다. 한 프로세스가 이 연결을 맡아서, 열린 선택 창이 남으면 이 연결의 다음 선택 창 업로드가 모두 막히기 때문이다. 그 입력은 문서에 없을 수 있어서, 영수증의 `chosen` 은 선택 창에 넘긴 파일(이름·크기)이다 |
+| `file_upload` | `page.setInputFiles(selector, paths)`에 native locator/ref와 worker 사본을 그대로 전달한다. label·container·shadow 해소는 SDK가 맡는다 | 영수증 `chosen`은 SDK에 넘긴 staged 파일 메타데이터이며 페이지의 파일 목록을 다시 관측한 값이 아니다. 파일 확인·sandbox 전달·공간 종료까지 lease는 MASC가 맡는다. `opener`는 native locator로 클릭하고 `waitForFileChooser()`의 SDK 대기를 쓴다. 실패한 chooser의 `setFiles([])` 정리는 보존한다 |
 | `tab_activation` | CDP `Target.activateTarget` | 다음 단계 |
 | 드래그, 터치, 줌, 뷰포트 | `page.mouse.down`·`up` 등 | 다음 단계 |
 
@@ -168,3 +168,20 @@ space = "masc"
 3. worker 의 ego 연결: 공간 열기·닫기, `tabs.list`, 읽기 세 가지, 캡처.
 4. 입력: click·fill·hover·키보드, `open_tab`·`goto`·`close_tab`.
 5. 실제 ego 증거와 Keeper 스킬 안내.
+
+### Native input adapter audit
+
+- selector-to-selector `drag_to` without `via` delegates to `page.dragAndDrop`.
+  Scene identity, explicit coordinates and custom waypoint drags retain the
+  observed MASC pointer adapter because the SDK has no waypoint-list parameter.
+- Upload selectors and chooser openers use native Ego locator/ref syntax. MASC
+  does not resolve them with top-document CSS before or after the SDK call.
+  `chosen` describes staged files handed to the SDK; reread the application to
+  confirm upload/submission. Regular-file validation, sandbox transfer and the
+  connection's file lease remain MASC responsibilities.
+- `waitForFileChooser()` owns its native default wait. Live uploads and workflows
+  use the existing cancellation boundary rather than an outer command deadline.
+- Document-window scroll and observed direct-href navigation retain their
+  different behavior from wheel-under-pointer and clicking a link. Dialogs and
+  downloads already call native SDK methods; their remaining adapters maintain
+  MASC receipts, artifact publication and process/file lifetime.

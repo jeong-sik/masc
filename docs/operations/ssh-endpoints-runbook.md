@@ -11,7 +11,10 @@ The lane is fail-closed: do not recover an SSH failure by silently switching
 - Non-interactive sudo (`sudo -n`) for installing the shim/config and creating
   keeper roots. The bootstrap fails instead of opening a PTY or waiting for a
   sudo password.
-- `git`, `gh`, and enough free disk on the remote host.
+- `git`, `rg`, `python3`, and enough free disk on the remote host. Install `gh`
+  when provisioning a GitHub identity. Bootstrap uses Python's directory file
+  descriptors under non-interactive sudo to prepare workspaces without
+  following symbolic links.
 - Docker locally when building the static shim or running the live fixture.
 
 Do not put private keys, token files, or generated `artifacts/` in git.
@@ -85,7 +88,9 @@ masc-exec-ssh-bootstrap \
 ```
 
 Repeat `--keeper` for each Keeper. This creates its private directory without
-removing existing work. GitHub login is optional for commands and file tools;
+removing existing work. The endpoint root, workspace, and their directory
+ancestors must be actual directories: bootstrap refuses symbolic links before
+changing their permissions or owner. GitHub login is optional for commands and file tools;
 preflight skips identity validation only when the endpoint confirms that the
 Keeper has no `hosts.yml`. An unavailable probe remains a failure.
 

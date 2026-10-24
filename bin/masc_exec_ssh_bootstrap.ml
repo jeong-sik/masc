@@ -382,6 +382,56 @@ let endpoint_shim_config ssh (endpoint : Exec_ssh_endpoint.t) =
        ; env_allowlist = endpoint.env_allowlist })
 ;;
 
+(* Resolve each directory through a no-follow descriptor before changing it.
+   A Keeper can own its workspace, so a path check followed by install/chown
+   would let a renamed symlink redirect the privileged operation. *)
+let prepare_directory_script = {|
+import os
+import pwd
+import sys
+
+try:
+    path = sys.argv[1]
+    mode = int(sys.argv[2], 8)
+    owner = pwd.getpwnam(sys.argv[3]).pw_uid if len(sys.argv) == 4 else None
+    parts = path.split("/")
+    if not os.path.isabs(path) or any(part in (".", "..") for part in parts):
+        raise ValueError("directory must be an absolute path without dot segments")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    directory = os.open("/", flags)
+    try:
+        for part in parts:
+            if not part:
+                continue
+            try:
+                child = os.open(part, flags, dir_fd=directory)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(part, 0o755, dir_fd=directory)
+                except FileExistsError:
+                    pass
+                child = os.open(part, flags, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        os.fchmod(directory, mode)
+        if owner is not None:
+            os.fchown(directory, owner, -1)
+    finally:
+        os.close(directory)
+except (OSError, KeyError, ValueError) as error:
+    print("remote_ssh_directory_prepare_failed:", error, file=sys.stderr)
+    sys.exit(1)
+|}
+;;
+
+let prepare_directory_command ?owner ~path ~mode () =
+  String.concat " "
+    ([ "sudo"; "-n"; "python3"; "-c"; shell_quote prepare_directory_script
+     ; shell_quote path; Printf.sprintf "%o" mode
+     ]
+     @ (match owner with None -> [] | Some user -> [ shell_quote user ]))
+;;
+
 let install_shim ssh endpoint shim_path =
   let* stat =
     try Ok (Unix.lstat shim_path) with
@@ -394,6 +444,11 @@ let install_shim ssh endpoint shim_path =
   then Error (Printf.sprintf "shim artifact is not a regular file: %s" shim_path)
   else
     let* config = endpoint_shim_config ssh endpoint in
+    let* () =
+      run_inherited
+        (pinned_ssh ssh
+           (prepare_directory_command ~path:endpoint.remote_root ~mode:0o755 ()))
+    in
     let remote_temp = Printf.sprintf "/tmp/masc-exec-shim.%d" (Unix.getpid ()) in
     let upload = "umask 077; cat > " ^ shell_quote remote_temp in
     let* () = run_with_file_stdin (pinned_ssh ssh upload) shim_path in
@@ -408,7 +463,6 @@ let install_shim ssh endpoint shim_path =
           ^ " /usr/local/bin/masc-exec-shim"
         ; "rm -f " ^ shell_quote remote_temp
         ; "sudo -n mv -f \"$config_temp\" /etc/masc-exec-shim.conf"
-        ; "sudo -n install -d -m 0755 " ^ shell_quote endpoint.remote_root
         ; "sudo -n install -d -m 0755 /usr/local/share/masc"
         ; "probe=$(masc-exec-shim --probe)"
         ; "printf '%s\\n' \"$probe\" | sudo -n tee /usr/local/share/masc/exec-shim.version >/dev/null"
@@ -430,10 +484,8 @@ let provision_keeper_workspace ssh (endpoint : Exec_ssh_endpoint.t) keeper =
   let keeper_root = Filename.concat endpoint.remote_root keeper in
   run_inherited
     (pinned_ssh ssh
-       (String.concat " && "
-          [ "sudo -n install -d -m 0700 " ^ shell_quote keeper_root
-          ; "sudo -n chown " ^ shell_quote endpoint.user ^ " " ^ shell_quote keeper_root
-          ]))
+       (prepare_directory_command ~owner:endpoint.user
+          ~path:keeper_root ~mode:0o700 ()))
 ;;
 
 let provision_keeper_identity ssh endpoint ~base_path (keeper, token_file) =

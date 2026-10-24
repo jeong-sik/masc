@@ -21,7 +21,7 @@ class BootstrapTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="masc-ssh-bootstrap-")
         self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
+        self.root = Path(self.directory.name).resolve()
         self.remote = self.root / "remote"
         self.remote.mkdir()
         self.bin = self.root / "bin"
@@ -133,6 +133,38 @@ sys.exit(subprocess.run(["/bin/sh", "-c", command]).returncode)
         result = self.run_bootstrap("--keeper", "keeper-a")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("provisioned.", result.stdout)
+
+    def assert_directory_alias_refused(self, link):
+        outside = self.root / "outside"
+        outside.mkdir(mode=0o755)
+        receipt = outside / "receipt.txt"
+        receipt.write_text("untouched outside work")
+        before = outside.stat()
+        link.symlink_to(outside, target_is_directory=True)
+        result = self.run_bootstrap("--keeper", "keeper-a")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("remote_ssh_directory_prepare_failed", result.stderr)
+        self.assertNotIn("provisioned.", result.stdout)
+        after = outside.stat()
+        self.assertEqual(after.st_mode, before.st_mode)
+        self.assertEqual(after.st_uid, before.st_uid)
+        self.assertEqual(after.st_gid, before.st_gid)
+        self.assertEqual(receipt.read_text(), "untouched outside work")
+        self.assertEqual(sorted(p.name for p in outside.iterdir()), ["receipt.txt"])
+
+    def test_existing_keeper_symlink_does_not_change_its_target(self):
+        self.workspace.mkdir()
+        self.assert_directory_alias_refused(self.workspace / "keeper-a")
+
+    def test_endpoint_root_symlink_does_not_change_its_target(self):
+        self.assert_directory_alias_refused(self.workspace)
+
+    def test_endpoint_root_symlink_ancestor_does_not_change_its_target(self):
+        original = self.workspace
+        self.workspace = self.workspace / "nested"
+        config = self.root / ".masc/config/runtime.toml"
+        config.write_text(config.read_text().replace(str(original), str(self.workspace)))
+        self.assert_directory_alias_refused(original)
 
 
 if __name__ == "__main__":

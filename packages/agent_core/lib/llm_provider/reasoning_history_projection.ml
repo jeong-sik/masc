@@ -152,7 +152,12 @@ let validate_replay_continuity_for_provider_config (config : Provider_config.t) 
       let rec check = function
         | [] -> Ok {capability=replay_capability; disposition}
         | (message_index, (message : Types.message), classification) :: rest ->
-          if not (content_has_reasoning message.content) then check rest
+          let ( let* ) = Result.bind in
+          let* inline_replay = Inline_content_replay.of_metadata
+              ~content:message.content message.metadata
+            |> Result.map_error (fun detail -> Invalid_response_replay {message_index;detail}) in
+          if not (content_has_reasoning message.content || Option.is_some inline_replay)
+          then check rest
           else match message.role with
           | System | User | Tool -> Error (Invalid_reasoning_artifact_role {message_index})
           | Assistant ->

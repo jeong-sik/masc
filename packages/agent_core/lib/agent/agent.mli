@@ -650,8 +650,10 @@ val run_with_handoffs_blocks
     provider-message projection, and pre-dispatch serialization evidence.
     An exact provider target is frozen after the effective config overlay.
     Incompatible stored reasoning returns a typed error before construction;
-    no history is projected or dropped. Explicit caller replay exclusion and
-    provider-unconfigured non-dispatch restoration remain supported. *)
+    no history is projected or dropped. Explicit caller replay exclusion is
+    admitted only when the resolved dialect actually excludes replay. Dispatch
+    revalidates the effective messages and target after hooks. Provider-unconfigured
+    non-dispatch restoration remains supported. *)
 val resume
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> checkpoint:Checkpoint.t

@@ -622,6 +622,34 @@ let test_binding_missing_and_corrupt_source () = with_net (fun net ->
    | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
    | Ok _ -> Alcotest.fail "caller replay exclusion cannot admit an invalid reasoning role"))
 ;;
+let test_binding_inline_carrier_producers () = with_net (fun net ->
+  let original=binding_provider "https://original.example" in
+  let target=binding_provider ~kind:Binding_provider.Kimi "https://other.example" in
+  List.iter (fun (content,raw_content,block_indices) ->
+    let replay=Types.Inline_content_replay.make ~content ~raw_content ~block_indices |> Result.get_ok in
+    let carrier_metadata=[Types.Inline_content_replay.metadata replay] in
+    let message={ (Types.assistant_msg "") with content;
+      metadata=carrier_metadata @ Binding_source.metadata(binding_source original)} in
+    let cp=binding_checkpoint original [message] in
+    Alcotest.(check int) "metadata-only carrier has a checked producer" 0
+      (expect_binding_incompatible(Agent.resume ~net ~checkpoint:cp ~options:(binding_options target) ()));
+    let unbound={cp with messages=[{message with metadata=carrier_metadata}]} in
+    (match Agent.resume ~net ~checkpoint:unbound ~options:(binding_options target) () with
+     | Error (Agent_checkpoint.Replay_rejected (Binding_projection.Unbound_reasoning_artifact {message_index=0})) -> ()
+     | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
+     | Ok _ -> Alcotest.fail "inline carrier borrowed the session producer");
+    let exact=Agent.resume ~net ~checkpoint:cp ~options:(binding_options original) () |> binding_resume_ok in
+    Alcotest.(check bool) "exact carrier retained" true ((Agent.state exact).messages==cp.messages);
+    Agent.close exact;
+    let excluded=binding_provider ~replay:Llm_provider.Capabilities.Force_no_replay
+      ~kind:Binding_provider.Kimi "https://other.example" in
+    let config={ (Types.default_config ~model:excluded.model_id) with preserve_thinking=Some false} in
+    let agent=Agent.resume ~net ~checkpoint:unbound ~config ~options:(binding_options excluded) () |> binding_resume_ok in
+    Alcotest.(check bool) "explicit exclusion preserves canonical carrier" true
+      ((Agent.state agent).messages==unbound.messages);
+    Agent.close agent)
+    [[],"",[]; [],"<think></think>",[]; [Types.Text "answer"],"answer",[0]])
+;;
 let test_binding_non_dispatch_restore () = with_net (fun net ->
   let provider=binding_provider "https://same.example" in
   let cp=binding_checkpoint provider [{ (binding_message(binding_source provider)) with Types.metadata=[]}] in
@@ -699,6 +727,7 @@ let () =
         test_case "text-only source change" `Quick test_binding_text_only_rebind;
         test_case "explicit caller replay exclusion" `Quick test_binding_explicit_disable;
         test_case "missing and corrupt artifact provenance" `Quick test_binding_missing_and_corrupt_source;
+        test_case "inline Chat carrier producers" `Quick test_binding_inline_carrier_producers;
         test_case "non-dispatch restoration" `Quick test_binding_non_dispatch_restore;
         test_case "direct old and invalid checkpoint" `Quick test_binding_direct_old_or_invalid_checkpoint;
         test_case "hook cannot silently re-enable incompatible replay" `Quick test_binding_hook_cannot_reenable_incompatible_replay]

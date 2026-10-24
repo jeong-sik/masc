@@ -78,7 +78,8 @@ val validate_replay_continuity_for_provider_config
 (** Validate canonical history and admit its stored reasoning producers before
     restoring a provider-bound Agent and again before dispatch after hooks and
     caller input projection. Uses the target's declared rotation rule,
-    including every reasoning-bearing message in mixed-producer history. A
+    including every reasoning-bearing message and validated inline Chat carrier
+    in mixed-producer history. A
     target that cannot replay the old source does not silently discard it.
     Explicit [preserve_thinking = Some false] admits caller-owned exclusion only
     when the resolved dialect actually declares [No_replay]. A wire that ignores

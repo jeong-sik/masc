@@ -16,7 +16,7 @@ class MemoryRecords:
 
 
 def active_slot(store):
-    return json.loads((store.directory / "connection.reference.json").read_text())["slot"]
+    return json.loads((store.directory / store._reference_name).read_text())["slot"]
 
 
 def active_raw(store):

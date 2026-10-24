@@ -632,7 +632,8 @@ let test_claimable_title_does_not_reach_system_context () =
              (Masc.Workspace.add_task_error_to_string error)
        in
        let observation =
-         Eio_main.run (fun _env -> WO.observe_direct_keeper_msg ~config ~meta)
+         Eio_main.run (fun _env ->
+           WO.observe_direct_keeper_msg ~config ~meta ~active_goals:(Ok []))
        in
        let user = user_message observation in
        check bool "typed task id reaches the frame" true

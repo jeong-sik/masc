@@ -512,10 +512,13 @@ val observe :
     cursor updates. Direct operator messages should not advance autonomous
     cursors, inherit unrelated workspace chatter, or synthesize scheduled
     scheduled timer signals, but they must still see the durable work
-    signals that drive tool-use contracts. *)
+    signals that drive tool-use contracts. [active_goals] is the projection of
+    the same captured Goal summaries supplied to this turn's prompt. This
+    function does not reread the Goal store or infer empty state on failure. *)
 val observe_direct_keeper_msg :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  active_goals:(string list, Goal_store.unavailable) result ->
   world_observation
 
 (** Structured work signal present in the observation itself. *)

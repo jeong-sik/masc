@@ -172,7 +172,7 @@ type latency_counter = Complete_common.latency_counter
     counter for the direct-HTTP path; this parameter is useful when
     constructing a transport that should also share a counter with
     its caller. Arbitrary non-HTTP transports still use their own
-    latency measurement because [Llm_transport.t.complete_stream]
+    latency measurement because [Llm_transport.t.invoke_stream]
     does not accept a counter.
 
     Streaming idle deadlines are request-owned. Configure them through
@@ -309,7 +309,7 @@ val complete_serialized
     With no injected [transport], the built-in HTTP path owns the single
     deadline around [Http_client.post_sync]; [config.connect_timeout_s] is not
     added as a nested sync deadline. With an injected [transport], [complete] applies the resolved
-    deadline around [Llm_transport.t.complete_sync]. On expiry the result is
+    deadline around [Llm_transport.t.invoke_sync]. On expiry the result is
     [Error (TimeoutError { phase = Non_streaming_body; _ })] with a
     message that identifies the body deadline. The typed failure is returned
     unchanged so the caller can schedule any later attempt independently.

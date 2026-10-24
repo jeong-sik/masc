@@ -23,11 +23,13 @@
 type item =
   | Held_without_actor of
       { task_id : string
+      ; title : string
       ; assignee : string
       ; since : string
       }
   | Producer_record_unreadable of
       { task_id : string
+      ; title : string
       ; producer : string
       ; since : string
       ; detail : string
@@ -41,6 +43,8 @@ val project :
     name that delivery cannot reach. *)
 
 val task_id : item -> string
+
+val title : item -> string
 
 val waiting_since : item -> string
 (** When the task started waiting on the operator: the claim/start time of

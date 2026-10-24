@@ -22,6 +22,28 @@ six-digit RGB hex strings. Without an observed palette, the standalone preview
 uses Pele's light defaults. Failure writes diagnostics to stderr and exits
 nonzero without an image. The caller retains source and owns preview selection.
 
+Optional `fontSize` is a positive safe integer (default `16`) passed to Pele as
+a layout input, so a document can use the terminal's measured text size.
+`maxWidth`, `fontSize` and `colors` stay fixed while inspecting one diagram.
+Optional `raster` requests a display surface independently of that layout:
+
+```json
+{"format":"mermaid","source":"flowchart LR\n A --> B","maxWidth":640,"fontSize":24,"raster":{"width":1200,"height":800,"crop":{"left":0.25,"top":0.25,"right":0.75,"bottom":0.75}}}
+```
+
+Raster width and height are positive safe integer pixel bounds. Omit `crop`
+for the full diagram; otherwise all four corners must be finite numbers with
+`0 <= left < right <= 1` and `0 <= top < bottom <= 1`. Both source formats
+support explicit raster requests. The helper changes the SVG root viewBox,
+including its original nonzero origin, and rasterizes only that visible window
+at an aspect-preserving size inside the requested bounds. It does not allocate
+a full zoomed bitmap before cropping. Without a viewBox, the original intrinsic
+SVG dimensions define the coordinate system. `renderDocument` retains natural
+layout width/height metadata while its returned SVG and PNG describe the
+requested window. The original SVG viewport remains nested inside that window,
+so percentage lengths retain their original layout. Without `raster`, static
+SVG retains its exact source bytes and existing no-upscale behavior.
+
 Observed terminal colours seed separate node and group surfaces, muted labels
 and borders instead of flattening every fill into the background. Derived text
 and borders retain 4.5:1 and 3:1 contrast respectively; if a tint cannot retain
@@ -35,8 +57,9 @@ publishable Markdown artifact with coloured states, shapes, grouped flow,
 sequence, Gantt, mindmap, pie and bar chart fences. The controls below work with
 each prepared diagram; the original Mermaid source stays available.
 
-SVG keeps its authored colours and aspect ratio, scales down to the available
-width, and is not enlarged. It requires a well-formed SVG document, without a
+SVG keeps its authored colours. Without explicit `raster`, it preserves its
+aspect ratio, scales down to the available width, and is not enlarged.
+It requires a well-formed SVG document, without a
 DOCTYPE, processing instruction, foreign namespace, script, embedded image,
 HTML content or external href. Fragment references within the SVG are allowed.
 It renders static SVG using resvg, not a browser or the surrounding HTML/CSS.

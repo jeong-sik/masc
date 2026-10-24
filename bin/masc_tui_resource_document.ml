@@ -130,6 +130,8 @@ let pretty_resource_text ~mime text =
   | None -> text
 
 type piece = Markdown_text of string | Html_text of string
+type origin = Metadata | Selection | Part_heading of int | Part_body of int
+  | Read_status | Progress | Failure of int
 
 let resource_document entry
     (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation =
@@ -187,12 +189,12 @@ let resource_document entry
           part_mime (String.length base64)) in
     match contents with
     | Some (_ :: _ :: _) ->
-      [Markdown_text (Printf.sprintf "### Part %d · %s" index part_mime); body]
-    | Some (_ :: []) | Some [] | None -> [body] in
+      [Part_heading index, Markdown_text (Printf.sprintf "### Part %d · %s" index part_mime); Part_body index, body]
+    | Some (_ :: []) | Some [] | None -> [Part_body index, body] in
   let body = match error, contents with
-    | Some detail, _ -> [Markdown_text detail]
-    | None, None when requested -> [Markdown_text "(reading resource…)"]
-    | None, None -> [Markdown_text "(Enter reads the selected resource.)"]
+    | Some detail, _ -> [Read_status, Markdown_text detail]
+    | None, None when requested -> [Read_status, Markdown_text "(reading resource…)"]
+    | None, None -> [Read_status, Markdown_text "(Enter reads the selected resource.)"]
     | None, Some parts ->
       let texts = text_parts parts in
       let text_selection = match selected_text_part texts text_cursor with
@@ -204,12 +206,12 @@ let resource_document entry
         | Some (part, _) -> Printf.sprintf "Image %d/%d · part %d · ,/.: select · Ctrl-O: preview"
             (image_cursor + 1) (List.length images) part
         | None -> "" in
-      [Markdown_text (text_selection ^ "\n\n" ^ selection)]
+      [Selection, Markdown_text (text_selection ^ "\n\n" ^ selection)]
         @ List.concat (List.mapi (fun index part -> part_document (index + 1) part) parts) in
   let confirmation = match confirmation with
     | None -> ""
     | Some status -> "\n\n**Confirmation:** " ^ Masc_tui_artifact_checks.description status in
-  Markdown_text (metadata ^ confirmation ^ "\n\n---") :: body
+  (Metadata, Markdown_text (metadata ^ confirmation ^ "\n\n---")) :: body
 
 type diagram = {
   first_row : int;
@@ -218,7 +220,10 @@ type diagram = {
   image : Masc_tui_resource_diagrams.image;
 }
 
-let layout ~cols (reading : t) =
+type block = { origin : origin; source : Masc_tui_markdown.source_block }
+type document_layout = { lines : string list; pictures : diagram list; blocks : block list }
+
+let anchored_layout ~cols (reading : t) =
   let width = max 1 (framed_inner_width cols - 4) in
   let diagram_size image diagrams =
     let cw,ch = Masc_tui_resource_diagrams.cell_pixels diagrams in
@@ -227,7 +232,7 @@ let layout ~cols (reading : t) =
       (float_of_int image.height *. float_of_int (columns*cw)
        /. float_of_int image.width /. float_of_int ch))) in
     columns,rows in
-  let offset = ref 0 and pictures = ref [] in
+  let offset = ref 0 and pictures = ref [] and blocks = ref [] in
   let pieces = resource_document reading.entry reading.contents ~error:reading.error
     ~requested:reading.requested ~image_cursor:reading.image_cursor
     ~text_cursor:reading.text_cursor ~revisions:reading.revisions
@@ -238,12 +243,15 @@ let layout ~cols (reading : t) =
     | Some diagrams ->
       let completed,total = Masc_tui_resource_diagrams.progress diagrams in
       let progress = if completed < total then
-        [Markdown_text (Printf.sprintf "Preparing diagrams · %d/%d" completed total)] else [] in
-      let failures = Masc_tui_resource_diagrams.failures diagrams
-        |> List.map (fun detail -> Markdown_text ("Diagram preview unavailable: " ^ detail
-            ^ " · r: reread and retry · Ctrl-O: preview selected diagram")) in
+        [Progress, Markdown_text (Printf.sprintf "Preparing diagrams · %d/%d" completed total)] else [] in
+      let failures = Masc_tui_resource_diagrams.sources (Masc_tui_resource_diagrams.request diagrams)
+        |> List.mapi (fun index source ->
+          Option.map (fun detail -> Failure index, Markdown_text ("Diagram preview unavailable: " ^ detail
+            ^ " · r: reread and retry · Ctrl-O: preview selected diagram"))
+            (Masc_tui_resource_diagrams.failure ~source diagrams))
+        |> List.filter_map Fun.id in
       progress @ failures @ pieces in
-  let rows = List.concat_map (fun piece ->
+  let rows = List.concat_map (fun (origin,piece) ->
     let rows = match piece with
     | Markdown_text document ->
       (match reading.diagrams with
@@ -252,24 +260,39 @@ let layout ~cols (reading : t) =
        | Some diagrams ->
          let diagram_rows source = Option.map (fun image -> snd (diagram_size image diagrams))
            (Masc_tui_resource_diagrams.image_for_display ~source diagrams) in
-         let rows,slots = Masc_tui_markdown.render_with_diagrams
+         let rendered = Masc_tui_markdown.render_with_blocks
            ~palette:(Masc_tui_markdown_theme.palette ~closing:Ansi.reset)
            ~width ~diagram_rows (String.split_on_char '\n' document
              |> List.map Terminal_text.single_line |> String.concat "\n") in
+         List.iter (fun (source : Masc_tui_markdown.source_block) ->
+           blocks := {origin; source={source with first_row= !offset + source.first_row}} :: !blocks)
+           rendered.source_blocks;
          List.iter (fun (slot : Masc_tui_markdown.diagram_slot) ->
            match Masc_tui_resource_diagrams.image_for_display ~source:slot.source diagrams with
            | Some image ->
                let columns,_ = diagram_size image diagrams in
                pictures := {first_row= !offset + slot.first_row;
                  row_count=slot.row_count;columns;image} :: !pictures
-           | None -> ()) slots;
-         rows) @ [""]
+           | None -> ()) rendered.layout_diagrams;
+         rendered.layout_rows) @ [""]
     | Html_text source ->
       Masc_tui_artifact_html.project source
       |> Masc_tui_artifact_html_rows.render ~width in
+    (* HTML has no Mermaid replacement, but remains a stable part when earlier
+       Markdown preparations alter the prefix. Its own rows keep their offset. *)
+    (match piece with
+     | Html_text _ when rows <> [] ->
+         let source : Masc_tui_markdown.source_block =
+           {source_offset=0;first_row= !offset;row_count=List.length rows;kind=Source_block} in
+         blocks := {origin;source} :: !blocks
+     | Html_text _ | Markdown_text _ -> ());
     offset := !offset + List.length rows;
     rows) pieces in
-  rows,List.rev !pictures
+  {lines=rows;pictures=List.rev !pictures;blocks=List.rev !blocks}
+
+let layout ~cols reading =
+  let rendered = anchored_layout ~cols reading in
+  rendered.lines,rendered.pictures
 
 let rows ~cols reading = fst (layout ~cols reading)
 
@@ -295,3 +318,92 @@ let layout_with_search ~cols state (reading : t) =
   marked,pictures
 
 let rows_with_search ~cols state reading = fst (layout_with_search ~cols state reading)
+
+type within_block = Row of int | Diagram_progress of { row : int; extent : int }
+type location = Top | End | Block of origin * int * within_block
+type anchor = {
+  key : Catalog.key;
+  contents : Masc_tui_mcp.resource_content list;
+  location : location;
+}
+
+let anchor_reading (state : state) =
+  if state.view <> Resources || state.resource_focus <> Right_pane
+     || Option.value state.search ~default:state.search_last <> "" then None
+  else match current state with
+    | Some ({contents=Some _;error=None;requested=false;
+             presentation=Catalog.Document;diagrams=Some _;_} as reading) -> Some reading
+    | Some _ | None -> None
+
+let capture_anchor ~cols ~height state =
+  Option.bind (anchor_reading state) (fun reading ->
+    Option.bind reading.contents (fun contents ->
+      let rendered = anchored_layout ~cols reading in
+      let offset = Masc_tui_scroll.Position.offset ~count:(List.length rendered.lines)
+        ~height state.resource_scroll in
+      let location =
+        if Masc_tui_scroll.Position.is_end state.resource_scroll then Some End
+        else if offset = 0 then Some Top
+        else
+          (* A separator belongs to the preceding source block. Boundaries are
+             produced by the canonical walker, never inferred from row text. *)
+          let rec preceding previous = function
+            | block :: rest when block.source.first_row <= offset -> preceding (Some block) rest
+            | _ -> previous in
+          Option.map (fun block ->
+            let row = offset - block.source.first_row in
+            let within = match block.source.kind with
+              | Masc_tui_markdown.Source_block -> Row row
+              | Diagram_block -> Diagram_progress {row;extent=block.source.row_count} in
+            Block (block.origin,block.source.source_offset,within))
+            (preceding None rendered.blocks) in
+      Option.map (fun location -> {key=Catalog.key reading.entry;contents;location}) location))
+
+let source_position anchor = match anchor.location with
+  | Block (Part_body part,source_start,_) -> Some (part,source_start)
+  | Top | End | Block ((Metadata | Selection | Part_heading _ | Read_status | Progress | Failure _),_,_) -> None
+
+let restore_anchor ~cols ~height state anchor =
+  match anchor_reading state with
+  | Some reading when Catalog.equal_key (Catalog.key reading.entry) anchor.key
+      && (match reading.contents with Some parts -> parts == anchor.contents | None -> false) ->
+      let rendered = anchored_layout ~cols reading in
+      let position = match anchor.location with
+        | Top -> Some Masc_tui_scroll.Position.first
+        | End -> Some (Masc_tui_scroll.Position.move ~count:(List.length rendered.lines)
+            ~height Last state.resource_scroll)
+        | Block (origin,source_start,within) ->
+            let block = List.find_opt (fun block -> block.origin=origin
+              && block.source.source_offset=source_start) rendered.blocks in
+            (* Preparation chrome can disappear entirely. Its semantic successor
+               is metadata, regardless of how many failures were inserted. *)
+            let block = match block,origin with
+              | None,(Progress | Failure _) ->
+                  List.find_opt (fun block -> block.origin=Metadata) rendered.blocks
+              | (Some _ | None),(Metadata | Selection | Part_heading _ | Part_body _ | Read_status)
+              | Some _,(Progress | Failure _) -> block in
+            Option.map (fun block ->
+              let last = max 0 (block.source.row_count-1) in
+              let row = match within with
+                | Row row -> min last row
+                | Diagram_progress {row;extent} ->
+                    (* Preserve progress through an expanding/replaced block;
+                       the first and last rows remain its first and last. *)
+                    if extent <= 1 then 0
+                    else min last (int_of_float (float_of_int row *. float_of_int last
+                      /. float_of_int (extent-1))) in
+              Masc_tui_scroll.Position.at (block.source.first_row+row)) block in
+      Option.iter (fun position -> state.resource_scroll <-
+        Masc_tui_scroll.Position.clamp ~count:(List.length rendered.lines) ~height position) position
+  | Some _ | None -> ()
+
+let settle_diagram ~cols ~height state ~request ~source result =
+  match state.resource_diagrams with
+  | Some diagrams when Masc_tui_resource_diagrams.request diagrams == request ->
+      let settled = Masc_tui_resource_diagrams.settle request ~source result diagrams in
+      if Masc_tui_resource_diagrams.progress settled <> Masc_tui_resource_diagrams.progress diagrams then begin
+        let anchor = capture_anchor ~cols ~height state in
+        state.resource_diagrams <- Some settled;
+        Option.iter (restore_anchor ~cols ~height state) anchor
+      end
+  | Some _ | None -> ()

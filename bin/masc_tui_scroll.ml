@@ -7,6 +7,7 @@ module Position = struct
   type t = Offset of int | End
   type movement = First | Last | By of int
   let first = Offset 0
+  let is_end = function End -> true | Offset _ -> false
   let at value = Offset (max 0 value)
   let offset ~count ~height = function
     | Offset value -> normalize ~count ~height value

@@ -498,7 +498,7 @@ type async_msg =
       keeper_name : string option;
       name : string;
       skill_reference : Skill_reference.t option;
-      result : (Masc_tui_image_cache.presentation, string) result;
+      result : (Masc_tui_image_cache.presentation * Masc_tui_pele.scene option, string) result;
     }
   | Image_render_ready of {
       title : string;

@@ -8086,7 +8086,26 @@ type sent_image_read =
   ; sir_name : string
   ; sir_owner : image_read_owner
   ; sir_resource : (Masc_tui_resource_catalog.key * Masc_tui_mcp.resource_content list) option
+  ; sir_purpose : image_read_purpose
   }
+and image_read_purpose =
+  | Open_image
+  | Inspect_image of { identity : unit ref; window : Masc_tui_image_viewport.window }
+
+type image_inspection_frame =
+  | Original_image
+  | Raster_image of Masc_tui_image_viewport.window * string
+  | Raster_unavailable of Masc_tui_image_viewport.window * string
+
+type image_inspection = {
+  ii_identity : unit ref;
+  ii_title : string;
+  ii_data : string;
+  ii_viewport : Masc_tui_image_viewport.t;
+  ii_scene : Masc_tui_pele.scene option;
+  ii_origin : sent_image_read option;
+  ii_frame : image_inspection_frame;
+}
 
 type lane_nested_read =
   | Lane_subscriptions_read
@@ -8388,7 +8407,7 @@ type state = {
      record of what was drawn -- the title line above the picture is drawn by
      [draw_image] from its own parameter, and nothing reads the rest. *)
   mutable image_open: bool;
-  mutable image_inspection : (string * string * Masc_tui_image_viewport.t) option;
+  mutable image_inspection : image_inspection option;
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   mutable image_catalog: image_catalog option;

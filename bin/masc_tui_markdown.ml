@@ -1230,8 +1230,15 @@ let original_positions base positions =
   Array.map (Option.map (fun byte -> Original {start_byte=base + byte; end_byte=base + byte + 1})) positions
 
 type diagram_slot = { source : string; first_row : int; row_count : int }
+type block_kind = Source_block | Diagram_block
+type source_block = { source_offset : int; first_row : int; row_count : int; kind : block_kind }
+type block_layout = {
+  layout_rows : string list;
+  layout_diagrams : diagram_slot list;
+  source_blocks : source_block list;
+}
 
-let render_streaming_internal ?on_diagram ?on_semantic ?on_unmapped ~palette ~width text =
+let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped ~palette ~width text =
   let width = max 1 width in
   let rows = ref [] in
   let rendered_rows = ref 0 in
@@ -1286,8 +1293,9 @@ let render_streaming_internal ?on_diagram ?on_semantic ?on_unmapped ~palette ~wi
      [String.split_on_char]. It is still rendered -- [render] has always kept
      that row -- but it cannot close the preceding block: another delta can
      append a table row or fence content immediately after that newline. *)
-  let begin_block ~can_absorb_terminal line =
+  let begin_block ?(kind=Source_block) ~can_absorb_terminal line =
     if not line.synthetic_terminal then begin
+      Option.iter (fun emit -> emit ~source_start:line.source_start ~row:!rendered_rows ~kind) on_block;
       previous_source_start := !mutable_source_start;
       previous_row_start := !mutable_row_start;
       previous_can_absorb_terminal := !mutable_can_absorb_terminal;
@@ -1417,8 +1425,10 @@ let render_streaming_internal ?on_diagram ?on_semantic ?on_unmapped ~palette ~wi
             match fence_marker line.source_text with
             | Some marker ->
                 previous_inline:=false;
-                begin_block ~can_absorb_terminal:true line;
                 let language = fence_language line.source_text in
+                let kind = match language with Some "mermaid" -> Diagram_block
+                  | Some _ | None -> Source_block in
+                begin_block ~kind ~can_absorb_terminal:true line;
                 (* An alphatex tag may carry the rhythm word after the tag;
                    the lexer picks by the tag's first word, the way the fence
                    arm reads the whole header. *)
@@ -1486,15 +1496,31 @@ let render_streaming_internal ?on_diagram ?on_semantic ?on_unmapped ~palette ~wi
 let render_streaming ~palette ~width text =
   render_streaming_internal ~palette ~width text
 
-let render_with_diagrams ~palette ~width ~diagram_rows text =
-  let slots = ref [] in
+let render_with_blocks ~palette ~width ~diagram_rows text =
+  let slots = ref [] and blocks = ref [] in
+  let on_block ~source_start ~row ~kind = blocks := (source_start,row,kind) :: !blocks in
   let on_diagram ~row source = match diagram_rows source with
     | Some height when height > 0 ->
         slots := {source;first_row=row;row_count=height} :: !slots;
         Some height
     | Some _ | None -> None in
-  let rendered = render_streaming_internal ~on_diagram ~palette ~width text in
-  rendered.rows, List.rev !slots
+  let rendered = render_streaming_internal ~on_block ~on_diagram ~palette ~width text in
+  let total = List.length rendered.rows in
+  let rec extents accumulated = function
+    | [] -> List.rev accumulated
+    | (source_start,first_row,kind) :: rest ->
+        let stop = match rest with (_,row,_) :: _ -> row | [] -> total in
+        let row_count = stop-first_row in
+        let accumulated = if row_count > 0 then
+          {source_offset=source_start;first_row;row_count;kind} :: accumulated
+          else accumulated in
+        extents accumulated rest in
+  {layout_rows=rendered.rows;layout_diagrams=List.rev !slots;
+   source_blocks=extents [] (List.rev !blocks)}
+
+let render_with_diagrams ~palette ~width ~diagram_rows text =
+  let rendered = render_with_blocks ~palette ~width ~diagram_rows text in
+  rendered.layout_rows, rendered.layout_diagrams
 
 let render_document_with_spans ~palette ~width text =
   let runs=ref [] and unmapped=ref [] in

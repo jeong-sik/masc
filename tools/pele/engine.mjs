@@ -151,11 +151,75 @@ function retainedSvg(source) {
   return source;
 }
 
+function positiveInteger(value, name) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${name} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function rasterRequest(value) {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('raster must contain width and height');
+  }
+  const width = positiveInteger(value.width, 'raster.width');
+  const height = positiveInteger(value.height, 'raster.height');
+  const crop = value.crop === undefined ? { left: 0, top: 0, right: 1, bottom: 1 } : value.crop;
+  if (crop === null || typeof crop !== 'object' || Array.isArray(crop)
+      || ![crop.left, crop.top, crop.right, crop.bottom].every(Number.isFinite)
+      || crop.left < 0 || crop.top < 0 || crop.right > 1 || crop.bottom > 1
+      || crop.left >= crop.right || crop.top >= crop.bottom) {
+    throw new TypeError('raster.crop must be finite normalized left/top/right/bottom corners');
+  }
+  return { width, height, crop };
+}
+
+function rasterWindow(svg, raster, natural) {
+  const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const root = document.documentElement;
+  const original = root.hasAttribute('viewBox')
+    ? root.getAttribute('viewBox').trim().split(/[\s,]+/).map(Number)
+    : [0, 0, natural.width, natural.height];
+  if (original.length !== 4 || !original.every(Number.isFinite)
+      || original[2] <= 0 || original[3] <= 0) {
+    throw new TypeError('SVG viewBox must contain finite coordinates and positive dimensions');
+  }
+  const [x, y, width, height] = original;
+  const { left, top, right, bottom } = raster.crop;
+  const visible = [x + width * left, y + height * top, width * (right - left), height * (bottom - top)];
+  if (!visible.every(Number.isFinite) || visible[2] <= 0 || visible[3] <= 0) {
+    throw new TypeError('raster.crop cannot be represented in the SVG coordinate system');
+  }
+  // Only the requested source window becomes a raster surface. Keeping the
+  // layout untouched makes repeated pan/zoom requests share one coordinate system.
+  const aspect = visible[2] / visible[3];
+  const output = aspect >= raster.width / raster.height
+    ? [raster.width, Math.max(1, Math.floor(raster.width / aspect))]
+    : [Math.max(1, Math.floor(raster.height * aspect)), raster.height];
+  // Keep the original viewport inside the display window. Changing its viewBox
+  // directly would reflow percentage lengths and nested SVG viewport units.
+  const window = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  window.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  window.setAttribute('viewBox', visible.join(' '));
+  window.setAttribute('width', String(output[0]));
+  window.setAttribute('height', String(output[1]));
+  window.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  document.replaceChild(window, root);
+  window.appendChild(root);
+  root.setAttribute('x', String(x));
+  root.setAttribute('y', String(y));
+  root.setAttribute('width', String(width));
+  root.setAttribute('height', String(height));
+  root.setAttribute('viewBox', original.join(' '));
+  return new XMLSerializer().serializeToString(document);
+}
+
 export function renderDocument(request) {
   if (typeof request?.source !== 'string') throw new TypeError('source must be a string');
-  if (!Number.isSafeInteger(request.maxWidth) || request.maxWidth <= 0) {
-    throw new TypeError('maxWidth must be a positive pixel width');
-  }
+  positiveInteger(request.maxWidth, 'maxWidth');
+  const fontSize = request.fontSize === undefined ? 16 : positiveInteger(request.fontSize, 'fontSize');
+  const raster = rasterRequest(request.raster);
   let colors = new Map();
   let background;
   if (request.colors !== undefined) {
@@ -168,25 +232,31 @@ export function renderDocument(request) {
     case 'mermaid':
       result = render(request.source, {
         maxWidth: request.maxWidth, images: false, links: false,
-        responsive: false, fontFamily: 'sans-serif',
+        responsive: false, fontFamily: 'sans-serif', fontSize,
       });
       svg = concreteSvg(result.svg, colors);
-      renderer = new Resvg(svg, {
-        background: background ?? '#ffffff',
-        fitTo: { mode: 'width', value: Math.min(Math.ceil(result.width), request.maxWidth) },
-      });
+      if (raster === undefined) {
+        renderer = new Resvg(svg, {
+          background: background ?? '#ffffff',
+          fitTo: { mode: 'width', value: Math.min(Math.ceil(result.width), request.maxWidth) },
+        });
+      }
       break;
     case 'svg': {
       svg = retainedSvg(request.source);
       const original = new Resvg(svg, { background });
       result = { width: original.width, height: original.height };
-      renderer = original.width <= request.maxWidth ? original : new Resvg(svg, {
+      renderer = raster !== undefined || original.width <= request.maxWidth ? original : new Resvg(svg, {
         background, fitTo: { mode: 'width', value: request.maxWidth },
       });
       break;
     }
     default:
       throw new TypeError('format must be mermaid or svg');
+  }
+  if (raster !== undefined) {
+    svg = rasterWindow(svg, raster, result);
+    renderer = new Resvg(svg, { background: background ?? (request.format === 'mermaid' ? '#ffffff' : undefined) });
   }
   if (renderer.imagesToResolve().length) throw new Error('Diagram contains unresolved images');
   return { ...result, svg, png: renderer.render().asPng() };

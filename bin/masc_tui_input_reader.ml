@@ -409,6 +409,8 @@ let input_kind = function
       Some Startup.Pointer
   | Graphics_reply _ -> None
 
+let is_operator_input event = Option.is_some (input_kind event)
+
 let observe_input_received reader event =
   Option.iter (fun kind -> observe_installed reader (Startup.First_input_received kind)) (input_kind event)
 

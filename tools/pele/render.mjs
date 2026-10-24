@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { renderDocument } from './engine.mjs';
 
 if (process.argv.length === 3 && process.argv[2] === '--help') {
-  console.log('masc-pele: read {format:mermaid|svg,source,maxWidth,colors?} JSON from stdin; write PNG to stdout');
+  console.log('masc-pele: read {format:mermaid|svg,source,maxWidth,fontSize?,colors?,raster?:{width,height,crop?:{left,top,right,bottom}}} JSON from stdin; write PNG to stdout');
 } else {
   try {
     const result = renderDocument(JSON.parse(readFileSync(0, 'utf8')));

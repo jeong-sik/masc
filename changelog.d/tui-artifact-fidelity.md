@@ -1,0 +1,3 @@
+### Fixed
+
+- Rasterize vector artifact previews at the visible terminal resolution, preserve source pixels at Fit, retain the document source anchor while diagrams settle, and keep terminal graphics replies from cancelling image reads.

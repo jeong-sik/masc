@@ -44,3 +44,21 @@ val search_rows : cols:int -> Masc_tui_types.state -> string list option
 (** Search only the currently displayed admitted content. Metadata-only,
     loading another key, failures and withdrawn inventory return [None].
     Terminal styling is removed from copies; source contents stay immutable. *)
+
+type anchor
+val capture_anchor : cols:int -> height:int -> Masc_tui_types.state -> anchor option
+(** Capture the source block at the top of an admitted document reader.
+    Source mode, literal search, list focus and unread/failed bodies return
+    [None]. The retained content observation is part of anchor ownership. *)
+val source_position : anchor -> (int * int) option
+(** Original one-based part and canonical reading-input block offset when the
+    anchor belongs to body source; generated document chrome returns [None]. *)
+val restore_anchor : cols:int -> height:int -> Masc_tui_types.state -> anchor -> unit
+(** Preserve the same source block after layout changes. Mermaid interiors
+    preserve fractional block progress; explicit top and End stay explicit.
+    Another content observation or reading mode cannot consume this anchor. *)
+val settle_diagram : cols:int -> height:int -> Masc_tui_types.state ->
+  request:Masc_tui_resource_diagrams.request -> source:string ->
+  (string, string) result -> unit
+(** Settle only the current preparation, preserving the reader's source anchor
+    across diagram and progress/failure-header changes. *)

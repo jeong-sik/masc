@@ -6523,7 +6523,7 @@
 (test
  (name test_tui_resource_image_admission)
  (modules test_tui_resource_image_admission)
- (libraries masc_tui_resource_diagrams masc_tui_keeper_chat_projection masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images
+ (libraries masc_tui_input_reader masc_tui_resource_diagrams masc_tui_keeper_chat_projection masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images
   masc_tui_image_preview masc_tui_resources_updates))
 
 (test
@@ -6541,8 +6541,8 @@
 
 (test
  (name test_tui_resource_document_search)
- (modules test_tui_resource_document_search)
- (libraries masc_tui_resource_reading masc_tui_scroll alcotest masc_tui_types masc_tui_resource_document
+ (modules test_tui_resource_document_search test_tui_resource_document_anchor)
+ (libraries base64 masc_tui_resource_diagrams masc_tui_resource_reading masc_tui_scroll alcotest masc_tui_types masc_tui_resource_document
   masc_tui_resource_catalog masc_tui_resources_updates masc_tui_mcp))
 
 (test

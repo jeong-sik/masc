@@ -244,6 +244,16 @@ let test_source_pixel_viewport () =
     exercise 1600 enlarged) [Left;Right;Up;Down;Zoom_in;Zoom_out];
   let reset = window (apply Fit (apply Down enlarged)) in
   check (pair int int) "fit restores full source after pan" (1600,800) (reset.width,reset.height);
+  List.iter (fun (width,height) ->
+    let original = create width height in
+    let fit viewport = Viewport.window ~cell_pixels:(17,37) ~columns:130 ~rows:45 viewport in
+    let shown = fit original in
+    check (pair int int) "fit cannot round away a source border" (width,height)
+      (shown.width,shown.height);
+    check (pair int int) "fit starts at original origin" (0,0) (shown.x,shown.y);
+    let reset = fit (apply Fit (apply Down (apply Zoom_in original))) in
+    check (pair int int) "reset retains irregular full source" (width,height)
+      (reset.width,reset.height)) [(480,212);(641,359);(1,1000);(1000,1)];
   check bool "nonpositive source is refused" true (Option.is_none (Viewport.create ~width:0 ~height:10))
 
 let () = run "resource image sources" ["source decisions", [

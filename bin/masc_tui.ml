@@ -10567,19 +10567,41 @@ let clamp_planning_cursor state =
    about why -- the picture that never arrives looks exactly like the picture
    that did. The sniff is the composer's, so both surfaces read bytes by one
    rule. *)
-let draw_inspected_image ?(fresh=true) state (title,data,viewport) =
+let inspection_window ~cell_pixels viewport =
+  let rows,columns = Masc_tui_ansi.get_terminal_size () in
+  Masc_tui_image_viewport.window ~cell_pixels
+    ~columns:(max 1 (columns-2)) ~rows:(max 1 (rows-3)) viewport
+
+let draw_inspected_image ?(fresh=true) state inspected =
   match !active_graphics_protocol, !image_cell_pixels with
   | Masc_tui_graphics.Kitty_protocol, Some cell_pixels ->
     let rows,columns = Masc_tui_ansi.get_terminal_size () in
-    let window = Masc_tui_image_viewport.window ~cell_pixels
-      ~columns:(max 1 (columns-2)) ~rows:(max 1 (rows-3)) viewport in
-    let title = Keeper_chat.terminal_safe_text ~preserve_newlines:false title in
-    let footer = Printf.sprintf "  +/− zoom · arrows/hjkl pan · 0 fit · %sEsc back · %.0f%%"
+    let window = inspection_window ~cell_pixels inspected.ii_viewport in
+    let frame = match inspected.ii_frame with
+      | (Raster_image (shown,_) | Raster_unavailable (shown,_)) as frame when shown=window -> frame
+      | Original_image | Raster_image _ | Raster_unavailable _ -> Original_image in
+    let data,placement = match frame with
+      | Raster_image (_,data) ->
+        (match Masc.Keeper_image_dimensions.image_dimensions data with
+         | Some (width,height) -> data,{window with x=0;y=0;width;height}
+         | None -> inspected.ii_data,window)
+      | Original_image | Raster_unavailable _ -> inspected.ii_data,window in
+    let fresh = fresh || frame != inspected.ii_frame in
+    let title = Keeper_chat.terminal_safe_text ~preserve_newlines:false inspected.ii_title in
+    let rendering = Option.exists (fun pending -> match pending.sir_purpose with
+      | Inspect_image {identity;_} -> identity == inspected.ii_identity
+      | Open_image -> false) state.sent_image_read in
+    let status = match frame with
+      | Raster_unavailable (_,detail) -> " · render failed (r retry): " ^
+          Keeper_chat.terminal_safe_text ~preserve_newlines:false detail
+      | Original_image | Raster_image _ -> if rendering then " · rendering" else "" in
+    let footer = Printf.sprintf "  +/− zoom · arrows/hjkl pan · 0 fit · %sEsc back · %.0f%%%s"
       (if state.view=Resources then "v source · " else "")
-      (100.*.Masc_tui_image_viewport.zoom viewport) in
+      (100.*.Masc_tui_image_viewport.zoom inspected.ii_viewport)
+      status in
     Masc_tui_msx.invalidate ();
-    let image = if fresh then Masc_tui_graphics.place_viewport ~data window
-      else Masc_tui_graphics.put_viewport window in
+    let image = if fresh then Masc_tui_graphics.place_viewport ~data placement
+      else Masc_tui_graphics.put_viewport placement in
     let retire = if fresh then Ansi.clear ^ Masc_tui_graphics.delete_all
       else Masc_tui_graphics.delete_placement
         ~image_id:(Masc_tui_graphics.image_id Image_inspection) ~placement_id:1 in
@@ -10588,12 +10610,12 @@ let draw_inspected_image ?(fresh=true) state (title,data,viewport) =
       ^ "\027[2;1H" ^ image
       ^ Printf.sprintf "\027[%d;1H\027[2K%s" rows
           (Message_layout.fit_width footer (max 1 (columns-1))));
-    state.image_inspection <- Some (title,data,viewport);
+    state.image_inspection <- Some {inspected with ii_frame=frame};
     state.image_open <- true
   | (Masc_tui_graphics.Kitty_protocol | ITerm2_protocol | Unsupported_protocol),
     (Some _ | None) -> ()
 
-let draw_image state ?(inspect=false) ?(caption = []) ?(footer = "  any key: back") ~refuse ~title data =
+let draw_image state ?(inspect=false) ?scene ?origin ?(caption = []) ?(footer = "  any key: back") ~refuse ~title data =
   if state.msx_open then refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
   else begin
   state.browser_viewport <- None;
@@ -10645,7 +10667,9 @@ let draw_image state ?(inspect=false) ?(caption = []) ?(footer = "  any key: bac
        | (true | false), (Masc_tui_graphics.Kitty_protocol | ITerm2_protocol | Unsupported_protocol),
          (Some _ | None), (Some _ | None) -> None in
       (match inspection with
-       | Some viewport -> draw_inspected_image state (title,data,viewport)
+       | Some viewport -> draw_inspected_image state
+           {ii_identity=ref ();ii_title=title;ii_data=data;ii_viewport=viewport;
+            ii_scene=scene;ii_origin=origin;ii_frame=Original_image}
        | None ->
       let img_escape =
         match !active_graphics_protocol with
@@ -10683,8 +10707,8 @@ let character_images_available () =
      | Masc_tui_terminal_palette.True_color | Ansi256 -> true
      | Ansi16 | Unknown -> false
 
-let draw_prepared_image state ~refuse ~title = function
-  | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ~refuse ~title png
+let draw_prepared_image ?scene ?origin state ~refuse ~title = function
+  | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ?scene ?origin ~refuse ~title png
   | Rgba {columns=image_columns;pixel_rows;bytes} ->
     let rows, columns = Masc_tui_ansi.get_terminal_size () in
     if state.msx_open then
@@ -11003,7 +11027,8 @@ let open_preview_image ?skill_reference state ~mailbox ~notice ~name source =
     let view = state.view in
     state.sent_image_read <- Some {sir_generation=generation; sir_view=view;
       sir_keeper=keeper_name; sir_name=name; sir_owner=owner;
-      sir_resource=(if view = Resources then state.resource_content else None)};
+      sir_resource=(if view = Resources then state.resource_content else None);
+      sir_purpose=Open_image};
     (* When the terminal supplies no pixel geometry, use the half-em advance
        of Pele's 16px default font as a logical layout width. The existing
        image presenter still fits the resulting PNG to the actual cells. *)
@@ -11011,6 +11036,9 @@ let open_preview_image ?skill_reference state ~mailbox ~notice ~name source =
       | Some (width, _) -> width
       | None -> 8 in
     let diagram_width = max 1 (columns - 2) * cell_width in
+    let cell_height = match !image_cell_pixels with Some (_,height) -> height | None -> 16 in
+    let diagram_height = max 1 (rows-3) * cell_height in
+    let diagram_font_size = max 1 (cell_width*2) in
     let palette = Masc_tui_terminal_palette.snapshot () in
     let hex color =
       Printf.sprintf "#%02x%02x%02x"
@@ -11023,7 +11051,8 @@ let open_preview_image ?skill_reference state ~mailbox ~notice ~name source =
       (Masc_tui_terminal_palette.snapshot_palette palette) in
     let run () =
       let result = Masc_tui_image_requests.load ~host:server_peer_host ~port
-        ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_colors ~display source in
+        ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_height ~diagram_font_size
+        ~diagram_colors ~display source in
       enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; skill_reference; result })
     in
     match Eio_context.get_switch_opt () with
@@ -11031,6 +11060,57 @@ let open_preview_image ?skill_reference state ~mailbox ~notice ~name source =
     | None ->
         state.sent_image_read <- None;
         notice ~kind:Notice_failure "image preview requires an active background session"
+
+(* One vector raster worker per inspection. Input changes the desired viewport;
+   completion retires the old job and the next loop renders only the latest
+   window. All windows use the original full-scene PNG coordinate system. *)
+let prepare_inspected_frame state ~mailbox =
+  match state.image_open, state.image_inspection, state.sent_image_read,
+      !active_graphics_protocol, !image_cell_pixels, Eio_context.get_switch_opt () with
+  | true, Some inspected, None, Masc_tui_graphics.Kitty_protocol,
+      Some ((cw,ch) as cell_pixels), Some sw when not state.msx_open ->
+    (match inspected.ii_scene, inspected.ii_origin,
+        Masc.Keeper_image_dimensions.image_dimensions inspected.ii_data with
+     | Some scene, Some origin, Some (width,height)
+         when origin.sir_view=state.view
+           && (state.view=Resources || origin.sir_keeper=state.msg_target_keeper_name)
+           && image_reading_is_current state origin ->
+       let window = inspection_window ~cell_pixels inspected.ii_viewport in
+       let current_frame = match inspected.ii_frame with
+         | Raster_image (shown,_) | Raster_unavailable (shown,_) -> shown=window
+         | Original_image -> false in
+       if not current_frame
+          && (window.width < window.columns*cw || window.height < window.rows*ch) then begin
+         let generation = state.image_request_generation in
+         let pending = {origin with sir_generation=generation;
+           sir_purpose=Inspect_image {identity=inspected.ii_identity;window}} in
+         state.sent_image_read <- Some pending;
+         let crop = {Masc_tui_pele.left=float_of_int window.x /. float_of_int width;
+           top=float_of_int window.y /. float_of_int height;
+           right=float_of_int (window.x+window.width) /. float_of_int width;
+           bottom=float_of_int (window.y+window.height) /. float_of_int height} in
+         let raster = {Masc_tui_pele.width=window.columns*cw;
+           height=window.rows*ch;crop=Some crop} in
+         let deliver = match pending.sir_owner with
+           | Local_file_image_read _ | Draft_image_read _ -> enqueue_async
+           | Peer_image_read _ -> workspace_enqueue state in
+         draw_inspected_image ~fresh:false state inspected;
+         Eio.Fiber.fork_daemon ~sw (fun () ->
+           Eio.Fiber.yield ();
+           let result = Eio_guard.run_in_systhread ~label:"tui-vector-window" (fun () ->
+             let ( let* ) = Result.bind in
+             let* png = Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~raster scene in
+             let* prepared = Masc_tui_image_cache.prepare_presentation ~run:Unix.system
+               ~cache_dir:(ensure_img_cache_dir ()) Masc_tui_image_cache.Pixel_graphics png in
+             Ok (prepared,Some scene)) in
+           deliver mailbox (Sent_image_ready {generation;view=pending.sir_view;
+             keeper_name=pending.sir_keeper;name=pending.sir_name;skill_reference=None;result});
+           `Stop_daemon)
+       end
+     | (Some _ | None), (Some _ | None), (Some _ | None) -> ())
+  | (true | false), (Some _ | None), (Some _ | None),
+    (Masc_tui_graphics.Kitty_protocol | ITerm2_protocol | Unsupported_protocol),
+    (Some _ | None), (Some _ | None) -> ()
 
 (* Only parsed HTTP(S) references use the explicit browser/download path.
    All other selected paths keep their local file meaning. *)
@@ -11094,9 +11174,11 @@ let prepare_resource_diagrams state ~mailbox =
                | (Some _ | None), (Some _ | None) -> false in
              if current then begin
              let result = Eio_guard.run_in_systhread ~label:"tui-artifact-diagram" (fun () ->
-               Masc_tui_pele.render ~format:Mermaid ~cache_dir:(ensure_img_cache_dir ())
+               let scene = Masc_tui_pele.scene ~format:Mermaid
                  ~max_width:(Masc_tui_resource_diagrams.width request)
-                 ~colors:(Masc_tui_resource_diagrams.colors request) source) in
+                 ~font_size:(max 1 (cell_width*2))
+                 ~colors:(Masc_tui_resource_diagrams.colors request) source in
+               Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) scene) in
              deliver mailbox (Resource_diagram_ready (request,source,result))
              end)
              (Masc_tui_resource_diagrams.sources request);
@@ -20022,8 +20104,11 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
   | Resource_read (request, result) ->
       Masc_tui_resources_updates.read_done state ~request result
   | Resource_diagram_ready (request,source,result) ->
-      state.resource_diagrams <- Option.map
-        (Masc_tui_resource_diagrams.settle request ~source result) state.resource_diagrams
+      let _,cols = get_terminal_size () in
+      let _,height = Masc_tui_render_resources.document_viewport state
+        ~rows:(surface_rows state) ~cols in
+      Masc_tui_resource_document.settle_diagram
+        ~cols:(resource_content_cols state ~cols) ~height state ~request ~source result
   | Github_identity_view_loaded (request, result) ->
       Masc_tui_identity_updates.github_view_loaded state request result
   | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
@@ -20622,29 +20707,51 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                      | Error detail -> notice ~kind:Notice_failure ("/music midi: " ^ detail))
       end
   | Sent_image_ready { generation; view; keeper_name; name; skill_reference; result } ->
-      let owned = match state.sent_image_read with
+      let pending = match state.sent_image_read with
        | Some pending when pending.sir_generation = generation
            && pending.sir_view = view && pending.sir_keeper = keeper_name
            && pending.sir_name = name ->
          state.sent_image_read <- None;
-         image_reading_is_current state pending
-       | Some _ | None -> false in
+         if image_reading_is_current state pending then Some pending else None
+       | Some _ | None -> None in
       let same_skill = match skill_reference with
         | None -> true
         | Some reference ->
             (match selected_tools_skill_profile state with
              | Some profile -> Skill_reference.equal reference profile.esp_reference
              | None -> false) in
-      if owned && not state.msx_open && generation = state.image_request_generation
-         && view = state.view && (view = Resources || keeper_name = state.msg_target_keeper_name) && same_skill then begin
+      (match pending with
+       | Some {sir_purpose=Inspect_image {identity;window};_}
+           when state.image_open && not state.msx_open && view=state.view
+             && (view=Resources || keeper_name=state.msg_target_keeper_name) ->
+         (match state.image_inspection, !image_cell_pixels with
+          | Some inspected, Some cell_pixels
+              when identity == inspected.ii_identity
+                && window=inspection_window ~cell_pixels inspected.ii_viewport ->
+            let frame = match result with
+              | Ok (Masc_tui_image_cache.Png png,_) ->
+                (match Masc.Keeper_vision_tool.sniff_image_media_type png,
+                    Masc.Keeper_image_dimensions.image_dimensions png with
+                 | Ok "image/png", Some (width,height) when width>0 && height>0 ->
+                     Raster_image (window,png)
+                 | (Ok _ | Error _), (Some _ | None) ->
+                     Raster_unavailable (window,"renderer did not return PNG"))
+              | Ok (Rgba _,_) -> Raster_unavailable (window,"renderer did not return pixel graphics")
+              | Error detail -> Raster_unavailable (window,detail) in
+            draw_inspected_image state {inspected with ii_frame=frame}
+          | (Some _ | None), (Some _ | None) -> ())
+       | Some ({sir_purpose=Open_image;_} as origin)
+           when not state.msx_open && generation = state.image_request_generation
+         && view = state.view && (view = Resources || keeper_name = state.msg_target_keeper_name) && same_skill -> begin
         let notice = image_notice state ~view ~keeper_name in
         let refuse reason =
           notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" name reason)
         in
         match result with
         | Error reason -> refuse reason
-        | Ok presentation -> draw_prepared_image state ~refuse ~title:name presentation
+        | Ok (presentation,scene) -> draw_prepared_image ?scene ~origin state ~refuse ~title:name presentation
       end
+       | Some _ | None -> ())
   | Image_render_ready { title; caption; page_url; image_url; result } ->
       if not state.msx_open then begin
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
@@ -24792,6 +24899,7 @@ and is loaded on demand through keeper_skill.
           ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
       prepare_resource_diagrams state ~mailbox:async_messages;
+      prepare_inspected_frame state ~mailbox:async_messages;
       (match state.lane_addons with
        | Some view when view.editor_ready -> handle_lane_document_editor ()
        | Some _ | None -> ());
@@ -25045,7 +25153,7 @@ and is loaded on demand through keeper_skill.
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
-      if Option.is_some input then begin
+      if Option.exists Masc_tui_input_reader.is_operator_input input then begin
         Masc_tui_exit_signals.withdraw_interrupt exit_signals;
         (* A refused gesture stays on screen until the next input. The input
            that is refused sets it below, after this. *)
@@ -25143,7 +25251,7 @@ and is loaded on demand through keeper_skill.
       let inspection_owned_input = state.image_open && Option.is_some state.image_inspection
         && Option.is_some input in
       (match state.image_inspection, input, !image_cell_pixels with
-       | Some (title,data,viewport), Some event, Some cell_pixels
+       | Some inspected, Some event, Some cell_pixels
            when state.image_open && not state.msx_open ->
          let close () = close_image state;
            invalidate_frame_for_resize frame_presenter render_schedule in
@@ -25151,6 +25259,8 @@ and is loaded on demand through keeper_skill.
            | Key ("+" | "=") -> Some Masc_tui_image_viewport.Zoom_in
            | Key "-" -> Some Zoom_out
            | Key "0" -> Some Fit
+           | Key "r" ->
+               draw_inspected_image state {inspected with ii_frame=Original_image}; None
            | Key ("h" | "left") -> Some Left
            | Key ("l" | "right") -> Some Right
            | Key ("k" | "up") | Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_up,_,_) -> Some Up
@@ -25166,12 +25276,15 @@ and is loaded on demand through keeper_skill.
          Option.iter (fun action ->
            let rows,columns = Masc_tui_ansi.get_terminal_size () in
            let viewport = Masc_tui_image_viewport.apply ~cell_pixels
-             ~columns:(max 1 (columns-2)) ~rows:(max 1 (rows-3)) action viewport in
-           draw_inspected_image ~fresh:false state (title,data,viewport)) action
+             ~columns:(max 1 (columns-2)) ~rows:(max 1 (rows-3)) action inspected.ii_viewport in
+           let fresh = match inspected.ii_frame with Raster_image _ -> true
+             | Original_image | Raster_unavailable _ -> false in
+           draw_inspected_image ~fresh state
+             {inspected with ii_viewport=viewport;ii_frame=Original_image}) action
        | (Some _ | None), (Some _ | None), (Some _ | None) -> ());
       let input = if inspection_owned_input then None else input in
       let dismissed_image =
-        state.image_open && Option.is_some input
+        state.image_open && Option.exists Masc_tui_input_reader.is_operator_input input
       in
       if dismissed_image then begin
         close_image state;

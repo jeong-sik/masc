@@ -108,7 +108,9 @@ let send_message ?post ~clock ~bot_user_id ~chat_id ~message_thread_id ~direct_m
       let rec attempt () = match Api.send_message ?post ~clock client ~chat_id
           ?message_thread_id ?direct_messages_topic_id ?reply_to_message_id ~html ~text () with
         | Error(Api.Api_error {retry_after=Some seconds;_}) -> Eio.Time.sleep clock (float_of_int seconds);attempt ()
-        | Error _ as e -> e | Ok message -> Ok message in
+        | Error ((Api.Invalid_request _ | Invalid_response _ | Transport_failed | Http_status _
+                 | Api_error {retry_after=None;_}) as error) -> Error error
+        | Ok message -> Ok message in
       match attempt () with
       | Error cause -> failed sent cause
       | Ok delivered ->

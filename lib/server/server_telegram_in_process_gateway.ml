@@ -41,7 +41,9 @@ let accept_update ~resolve ~dispatch_for_delivery ~bot_user_id ~operation_id (up
           | Error(Channel_gate.Validation (Gate_protocol.Content_too_long _)) ->
             Log.Server.warn "telegram: update %Ld rejected by Gate content limit" update.update_id;
             ignore Custody.Oversized_message
-          | Error error -> Error(Channel_gate.gate_error_to_string error)
+          | Error ((Channel_gate.Validation (Gate_protocol.Empty_keeper_name | Empty_channel_user_id | Empty_idempotency_key)
+                   | Keeper_error _ | Dispatch_unavailable | Internal _) as error) ->
+            Error(Channel_gate.gate_error_to_string error)
 module For_testing = struct let accept_update=accept_update end
 let start ~sw ~env ~state =
   let clock=Eio.Stdenv.clock env in

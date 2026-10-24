@@ -3294,7 +3294,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                fork_adapter (fun () ->
                  let load_blocks turn_ref =
                    let select (row:Keeper_chat_store.chat_message) =
-                     row.role = Role.Assistant
+                     row.role = Keeper_chat_store.Role.Assistant
                      && Option.fold ~none:false ~some:(Ids.Turn_ref.equal turn_ref) row.turn_ref in
                    Keeper_chat_store.load_captured_result ~select
                      ~base_dir:(Mcp_server.workspace_config state).base_path ~keeper_name

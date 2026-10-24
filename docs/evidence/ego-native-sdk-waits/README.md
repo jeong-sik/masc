@@ -65,8 +65,8 @@ not prove this branch's complete host binary, current real Keeper dispatch,
 production installation or release. Earlier candidate Keeper evidence remains
 bound to its own exact source.
 
-Ordinary selector/ref input already delegates locator/actionability to Ego,
-but its existing `native_input` path still uses the normal transport reply
-window; `Page_interact` retains `Reply_window`. This change does not claim to
-remove every MASC transport deadline. That boundary needs its own audit against
-host cancellation and the scene/coordinate and other-browser contracts.
+At this layer, ordinary selector/ref input still used the normal transport
+reply window. The [input lifetime follow-up](../ego-native-input-lifetime/)
+audits and repairs that execution boundary separately, preserving scene,
+coordinate and other-browser policies. Neither component proof substitutes
+for the current combined host/Keeper execution.

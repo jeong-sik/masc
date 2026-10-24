@@ -1,0 +1,35 @@
+INITIAL [p1 "SDK chooser lifecycle" | space "masc-ego-native-sdk-20261024"(25): 1 managed, 0 untracked — p1* "SDK chooser lifecycle"]
+root
+  container
+    text "Attach fixture"
+    textbox [ref=3]
+      button [ref=4]
+        text "파일 선택"
+      text "선택된 파일 없음"
+  paragraph
+    text "ready"
+
+FIRST {"failure":"ego did not click the opener: ElementResolutionError: Invalid locator: loc=role:textbox. Expected loc=role:<role>[name=\"<exact name>\"], loc=role:<role>[name*=\"<name part>\"], loc=css:<selector>, loc=href:<substring>, text=..., css=..., a terminal :has-text(...) or :text-is(...), or a terminal >> nth=N","set":null}
+RECOVERED [p1 "SDK chooser lifecycle" | space "masc-ego-native-sdk-20261024"(25): 1 managed, 0 untracked — p1* "SDK chooser lifecycle"]
+root
+  container
+    text "Attach fixture"
+    textbox [ref=3]
+      button [ref=4]
+        text "파일 선택"
+      text "선택된 파일 없음"
+  paragraph
+    text "ready"
+
+SECOND {"failure":"ego did not click the opener: ElementResolutionError: Invalid locator: loc=role:textbox. Expected loc=role:<role>[name=\"<exact name>\"], loc=role:<role>[name*=\"<name part>\"], loc=css:<selector>, loc=href:<substring>, text=..., css=..., a terminal :has-text(...) or :text-is(...), or a terminal >> nth=N","set":null}
+ASSIGNMENTS []
+FINAL [p1 "SDK chooser lifecycle" | space "masc-ego-native-sdk-20261024"(25): 1 managed, 0 untracked — p1* "SDK chooser lifecycle"]
+root
+  container
+    text "Attach fixture"
+    textbox [ref=3]
+      button [ref=4]
+        text "파일 선택"
+      text "선택된 파일 없음"
+  paragraph
+    text "ready"

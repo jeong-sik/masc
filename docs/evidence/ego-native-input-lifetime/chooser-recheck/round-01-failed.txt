@@ -1,0 +1,35 @@
+INITIAL [p1 "SDK chooser lifecycle" | space "masc-ego-native-sdk-20261024"(25): 1 managed, 0 untracked — p1* "SDK chooser lifecycle"]
+root
+  container
+    text "Attach fixture"
+    textbox [ref=1]
+      button [ref=2]
+        text "파일 선택"
+      text "선택된 파일 없음"
+  paragraph
+    text "ready"
+
+FIRST {"failure":"ego did not click the opener: ElementResolutionError: page.click timed out after 3000ms: Locator loc=role:textbox[name=\"Attach fixture\"] matched 0 elements","set":null}
+RECOVERED [p1 "SDK chooser lifecycle" | space "masc-ego-native-sdk-20261024"(25): 1 managed, 0 untracked — p1* "SDK chooser lifecycle"]
+root
+  container
+    text "Attach fixture"
+    textbox [ref=1]
+      button [ref=2]
+        text "파일 선택"
+      text "선택된 파일 없음"
+  paragraph
+    text "ready"
+
+SECOND {"failure":"ego did not click the opener: ElementResolutionError: page.click timed out after 3000ms: Locator loc=role:textbox[name=\"Attach fixture\"] matched 0 elements","set":null}
+ASSIGNMENTS []
+FINAL [p1 "SDK chooser lifecycle" | space "masc-ego-native-sdk-20261024"(25): 1 managed, 0 untracked — p1* "SDK chooser lifecycle"]
+root
+  container
+    text "Attach fixture"
+    textbox [ref=1]
+      button [ref=2]
+        text "파일 선택"
+      text "선택된 파일 없음"
+  paragraph
+    text "ready"

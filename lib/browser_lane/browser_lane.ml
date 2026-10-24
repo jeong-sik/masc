@@ -147,6 +147,30 @@ let reply_policy = function
   | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Session_close | Session_status
   | Page_goto _ | Page_elements _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ -> Reply_window
 
+(* SDK-native selector/ref input needs no MASC execution clock. Scene,
+   coordinate and custom-waypoint adapters retain their existing guards. *)
+let ego_reply_policy = function
+  | Page_interact {action;_} ->
+    (match action with
+     | Click _ | Fill _ | Select_option _ | Click_target _ | Fill_target _
+     | Hover_target _ | Double_click_target _ -> Executor_owned
+     | Hover (Selector _) | Double_click (Selector _) -> Executor_owned
+     | Drag_to {source;destination;via;duration_ms} ->
+       (match source,destination with
+        | Selector _,Selector _ ->
+          (match via with [] when duration_ms=0 -> Executor_owned
+           | [] | _::_ -> Reply_window)
+        | Scene_node _,(Selector _|Scene_node _) | Selector _,Scene_node _ -> Reply_window)
+     | Hover (Scene_node _) | Double_click (Scene_node _)
+     | Activate_tab | Set_zoom _ | Set_viewport _ | Double_click_at _ | Type_text _
+     | Press_key _ | Scroll _ | Hover_at _ | Tap_at _ | Swipe _ | Click_at _
+     | Scroll_at _ | Drag _ | Follow_link _ | Click_node _ | Fill_node _ -> Reply_window)
+  | (Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _
+    | Page_network _ | Page_cookies _ | Page_capture _ | Page_scene _ | Page_snapshot _
+    | Page_native_workflow _ | Session_open _ | Session_close | Session_status
+    | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
+    | Page_locate _ | Page_extract _) as verb -> reply_policy verb
+
 (* The CSS scope an elements read carries, top-level or in a frame. Every
    caller that relays such a read checks the answer against it. *)
 let elements_filter = function
@@ -656,6 +680,9 @@ let client_id_of_string value =
   | Some id when String.equal (Uuidm.to_string id) value -> Ok id
   | _ -> Error "invalid_client_id"
 type live_transport = Web_extension | Webdriver_bidi | Ego_task_space [@@deriving enumerate]
+let live_reply_policy transport verb = match transport with
+  | Ego_task_space -> ego_reply_policy verb
+  | Web_extension | Webdriver_bidi -> reply_policy verb
 let live_transport_to_string = function
   | Web_extension -> "web_extension"
   | Webdriver_bidi -> "webdriver_bidi"
@@ -747,6 +774,7 @@ type client = { info : client_info; commands : issued Eio.Stream.t;
   mutex : Eio.Mutex.t;
   waiters : (string, Yojson.Safe.t Eio.Promise.u) Hashtbl.t;
   interactions : (string, interaction_activity) Hashtbl.t;
+  executor_work : (string, interaction_phase) Hashtbl.t;
   mutable last_delivered_result : (string * Yojson.Safe.t) option;
   mutable connected_until : Monotonic_deadline.t; mutable closed : bool }
 type target = Automation | Live_client of client | Stagehand
@@ -756,18 +784,27 @@ let clients_mutex = Eio.Mutex.create ()
 let retired_clients : (string, unit) Hashtbl.t = Hashtbl.create 4
 let command_uuid = Uuidm.v4_gen (Random.State.make_self_init ())
 let lane_connected_window_sec = 120.
-let connected client = not client.closed && not (Monotonic_deadline.passed client.connected_until)
+(* A delivered executor-owned request is still using this connection while its
+   SDK owns the wait. Queued requests do not prove a client is executing them;
+   explicit disconnect always wins, and settlement releases this ownership. *)
+let connected client = Eio.Mutex.use_ro client.mutex (fun () ->
+  not client.closed &&
+  (not (Monotonic_deadline.passed client.connected_until)
+   || Hashtbl.fold (fun _ phase running -> match phase with
+        | Interaction_running -> true | Interaction_queued -> running)
+        client.executor_work false))
 let same_info left right = left.browser = right.browser
   && left.transport = right.transport
   && String.equal left.version right.version && String.equal left.engine_version right.engine_version
 let retire_unlocked key client =
-  client.closed <- true;
   Hashtbl.remove clients key;
   Hashtbl.replace retired_clients key ();
   Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+    client.closed <- true;
     Hashtbl.iter (fun _ resolver -> Eio.Promise.resolve resolver
       (`Assoc ["ok", `Bool false; "error", `String "client_disconnected"])) client.waiters;
-    Hashtbl.clear client.waiters; Hashtbl.clear client.interactions);
+    Hashtbl.clear client.waiters; Hashtbl.clear client.interactions;
+    Hashtbl.clear client.executor_work);
   while Option.is_some (Eio.Stream.take_nonblocking client.commands) do () done
 let prune_unlocked () =
   Hashtbl.fold (fun key client acc -> if connected client then acc else (key,client)::acc) clients []
@@ -944,7 +981,8 @@ let resolve_target ~verb route =
              |> List.sort (fun left right ->
                   String.compare (client_id_to_string left) (client_id_to_string right)))))
 (* Why the lane turns a poll's client away. [Client_retired]: the lane ended
-   this connection, after [lane_connected_window_sec] without a poll or on the
+   this connection, after [lane_connected_window_sec] without a poll or running
+   executor-owned work, or on the
    client's own disconnect, and its ID is never served again; a client that
    is still there registers under a new one. [Client_identity_changed]: the
    ID is connected as another browser or transport, and asking again gets
@@ -966,11 +1004,13 @@ let register info =
     | Some client when client.closed -> Error Client_retired
     | Some client when not (same_info client.info info) -> Error Client_identity_changed
     | Some client ->
-      client.connected_until <- Monotonic_deadline.after ~seconds:lane_connected_window_sec;
+      Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+        client.connected_until <- Monotonic_deadline.after ~seconds:lane_connected_window_sec);
       Ok client
     | None ->
       let client = {info; commands=Eio.Stream.create 16; mutex=Eio.Mutex.create ();
-        waiters=Hashtbl.create 8; interactions=Hashtbl.create 8; last_delivered_result=None; closed=false;
+        waiters=Hashtbl.create 8; interactions=Hashtbl.create 8; executor_work=Hashtbl.create 8;
+        last_delivered_result=None; closed=false;
         connected_until=Monotonic_deadline.after ~seconds:lane_connected_window_sec} in
       Hashtbl.add clients key client; Ok client)
 let take_registered_command ~client ~window_sec =
@@ -981,6 +1021,8 @@ let take_registered_command ~client ~window_sec =
         match Hashtbl.find_opt client.waiters issued.id with
         | None -> false
         | Some _ ->
+          Option.iter (fun _ -> Hashtbl.replace client.executor_work issued.id Interaction_running)
+            (Hashtbl.find_opt client.executor_work issued.id);
           Option.iter (fun work -> Hashtbl.replace client.interactions issued.id
             {work with phase=Interaction_running}) (Hashtbl.find_opt client.interactions issued.id);
           true)
@@ -1005,6 +1047,8 @@ let deliver_result ~client_id ~id ~payload =
       | Some resolver ->
         Hashtbl.remove client.waiters id;
         Hashtbl.remove client.interactions id;
+        Hashtbl.remove client.executor_work id;
+        client.connected_until <- Monotonic_deadline.after ~seconds:lane_connected_window_sec;
         client.last_delivered_result <- Some (id, payload);
         Eio.Promise.resolve resolver payload;
         Ok ()
@@ -1038,6 +1082,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
       { client_id = client.info.client_id; transport = client.info.transport; capability })
   | Some _ ->
     Ok (Eio.Switch.run (fun sw ->
+      let policy = live_reply_policy client.info.transport verb in
       let id = Uuidm.to_string (command_uuid ()) in
       let promise, resolver = Eio.Promise.create () in
       let accepted = Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
@@ -1047,6 +1092,9 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
            (Hashtbl.length client.waiters <> 0 || Eio.Stream.length client.commands <> 0)
         then Error (Refused "optional_document_observation_busy")
         else (Hashtbl.add client.waiters id resolver;
+          (match policy with
+           | Executor_owned -> Hashtbl.add client.executor_work id Interaction_queued
+           | Reply_window -> ());
           (match verb with
            | Page_native_workflow workflow -> Hashtbl.add client.interactions id
                {request_id=id;actor;action="workflow";tab_id=workflow.tab_id;phase=Interaction_queued}
@@ -1056,7 +1104,8 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
            | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _ | Page_snapshot _|Page_goto _|Page_elements _|Page_act _
            | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> ()); Ok ())) in
       Eio.Switch.on_release sw (fun () ->
-        Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id; Hashtbl.remove client.interactions id));
+        Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id;
+          Hashtbl.remove client.interactions id; Hashtbl.remove client.executor_work id));
       match accepted with
       | Error refusal -> refusal
       | Ok () ->
@@ -1067,7 +1116,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
             | payload, Some _ -> payload in
           Eio.Stream.add client.commands {id; verb_json=payload};
           Answered (Eio.Promise.await promise) in
-        match reply_policy verb with
+        match policy with
         | Executor_owned -> execute ()
         | Reply_window -> Watched_work.run execute
             ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)))

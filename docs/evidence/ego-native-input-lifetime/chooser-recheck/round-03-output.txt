@@ -1,0 +1,36 @@
+INITIAL [p1 "SDK chooser lifecycle" | space "masc-ego-native-sdk-20261024"(25): 1 managed, 0 untracked — p1* "SDK chooser lifecycle"]
+root
+  container
+    text "Attach fixture"
+    textbox [ref=5]
+      button [ref=6]
+        text "파일 선택"
+      text "선택된 파일 없음"
+  paragraph
+    text "ready"
+
+INPUT <input id="attach" type="file">
+FIRST {"failure":"ego did not set the files: Error: Node is not a file input element","set":null}
+RECOVERED [p1 "SDK chooser lifecycle" | space "masc-ego-native-sdk-20261024"(25): 1 managed, 0 untracked — p1* "SDK chooser lifecycle"]
+root
+  container
+    text "Attach fixture"
+    textbox [ref=5]
+      button [ref=7]
+        text "파일 선택"
+      text "선택된 파일 없음"
+  paragraph
+    text "ready"
+
+SECOND {"failure":null,"set":{}}
+ASSIGNMENTS [["/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-sdk-waits-20261024/docs/evidence/ego-native-input-lifetime/chooser-recheck/note.txt"],["/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-sdk-waits-20261024/docs/evidence/ego-native-input-lifetime/chooser-recheck/note.txt"]]
+FINAL [p1 "SDK chooser lifecycle" | space "masc-ego-native-sdk-20261024"(25): 1 managed, 0 untracked — p1* "SDK chooser lifecycle"]
+root
+  container
+    text "Attach fixture"
+    textbox [ref=5]
+      button [ref=7]
+        text "파일 선택"
+      text "note.txt"
+  paragraph
+    text "note.txt"

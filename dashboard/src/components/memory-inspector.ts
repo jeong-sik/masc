@@ -120,6 +120,7 @@ const INPUT_COMPONENT_META: Readonly<Record<TurnInputComponentId, BlockMeta>> = 
   'prompt.keeper_instructions': PROMPT_BLOCK_META.keeper_instructions,
   'prompt.dynamic_context': PROMPT_BLOCK_META.dynamic_context,
   'prompt.active_goals': PROMPT_BLOCK_META.active_goals,
+  'prompt.completion_authority': PROMPT_BLOCK_META.completion_authority,
   'prompt.temporal_summary': PROMPT_BLOCK_META.temporal_summary,
   'prompt.memory_os_recall': PROMPT_BLOCK_META.memory_os_recall,
   'prompt.librarian_working_context': PROMPT_BLOCK_META.librarian_working_context,

@@ -44,6 +44,8 @@ let failure_message = function
   | Session.Detached -> "the Stagehand service worker went away"
   | Session.Connection_gone reason -> "the Stagehand connection ended: " ^ reason
   | Session.Abandoned_call_pending -> "a Stagehand call whose caller left has not answered yet"
+  | Session.Delivery_unsettled ->
+    "an earlier Stagehand delivery has an unknown outcome; explicitly close the original browser before new work"
   | Session.Not_delivered detail -> "the call did not reach Stagehand: " ^ detail
   | Session.Rejected { code; message } -> Printf.sprintf "Stagehand refused the call (%d): %s" code message
   | Session.Lost detail -> "Stagehand did not answer: " ^ detail
@@ -63,7 +65,7 @@ let rec traverse f = function
 let answer_before_effect failure =
   match failure with
   | Session.Not_attached | Session.Detached | Session.Connection_gone _ | Session.Abandoned_call_pending
-  | Session.Not_delivered _ -> Browser_lane.Rejected_before_effect (failure_message failure)
+  | Session.Delivery_unsettled | Session.Not_delivered _ -> Browser_lane.Rejected_before_effect (failure_message failure)
   | Session.Rejected _ | Session.Lost _ -> Browser_lane.Refused (failure_message failure)
 ;;
 

@@ -12,6 +12,12 @@
     first call after that, with the reply still out, ends the session, so
     an extension stuck on the abandoned call does not refuse calls forever.
 
+    Delivery whose outcome is unknown leaves a separate unsettled barrier:
+    the receiver may have started input before throwing. No new call or private
+    companion is admitted, including after a late reply or elapsed abandoned
+    deadline. The owner must explicitly close or retire the original browser;
+    its shutdown must not depend on a successful runtime close call.
+
     An answer to the extension that cannot be delivered ends the session:
     the extension would wait for it, and the call in flight with it. *)
 
@@ -44,6 +50,11 @@ and call_failure =
   | Abandoned_call_pending
       (** Refused before any effect. The abandoned call is still inside its
           [abandoned_answer_s]. *)
+  | Delivery_unsettled
+      (** Refused before any effect. An earlier delivery may have started
+          extension input and its settlement is unconfirmed. The original
+          browser must be explicitly closed or retired; a late reply cannot
+          remove this barrier. *)
   | Not_delivered of string  (** The message never reached the extension. *)
   | Rejected of Wire.rpc_error  (** The extension answered with an error. *)
   | Lost of string
@@ -111,5 +122,14 @@ val attach :
   t -> Browser_cdp.t -> extension_dir:string -> browser_cdp_url:string -> (Yojson.Safe.t, attach_error) result
 
 (** Sends one call once the previous one has ended, and waits for its reply
-    with no deadline of its own: the caller bounds it. *)
+    with no deadline of its own: the caller bounds it. An attached session with
+    an unknown delivery refuses all later calls, including [Wire.Close], with
+    [Delivery_unsettled]. The browser owner's explicit close still shuts down
+    its original resources. *)
 val call : t -> Wire.call -> (Yojson.Safe.t, call_failure) result
+val quiescent : t -> bool
+(** Nonblocking observation: attached, transport alive and no in-flight,
+    abandoned or delivery-unsettled Stagehand call. A private companion must
+    check this under the backend's page serializer immediately before using the
+    original transport; releasing a cancelled public verb's slot alone does not
+    establish that its extension input has settled. *)

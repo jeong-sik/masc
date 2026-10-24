@@ -45,6 +45,7 @@ type act_behaviour = Ask_the_model | Ask_the_model_without_params | Hold | Answe
 (* How the fake browser answers the [Runtime.evaluate] that delivers the next
    message to the extension. *)
 type delivery = Deliver | Hold_delivery | Receiver_throws
+  | Receiver_starts_then_throws | Refuse_delivery
 
 type fake =
   { inbox : string Eio.Stream.t
@@ -63,6 +64,7 @@ type fake =
   ; mutable held_act : Yojson.Safe.t option
   ; mutable waiting_on_model : (Yojson.Safe.t * Yojson.Safe.t) option
   ; mutable answers_from_host : Yojson.Safe.t list
+  ; mutable received_calls : Yojson.Safe.t list
   ; later : float -> (unit -> unit) -> unit
   }
 
@@ -84,6 +86,7 @@ let rpc_request id method_ params = obj [ "jsonrpc", str "2.0"; "id", str id; "m
 let rpc_request_without_params id method_ = obj [ "jsonrpc", str "2.0"; "id", str id; "method", str method_ ]
 
 let extension_receives fake message =
+  fake.received_calls <- message :: fake.received_calls;
   let member = Yojson.Safe.Util.member in
   match member "method" message, member "id" message with
   | `String "stagehand.init", id ->
@@ -198,15 +201,18 @@ let browser_receives fake frame =
         in
         let how = fake.next_delivery in
         fake.next_delivery <- Deliver;
+        let receiver_threw () =
+          answer
+            (obj
+               [ "result", obj [ "type", str "object" ]
+               ; "exceptionDetails", obj [ "text", str "Uncaught"; "exception", obj [ "description", str "SyntaxError: Unexpected end of JSON input" ] ]
+               ]) in
         (match how with
          | Deliver -> deliver ()
          | Hold_delivery -> fake.held_delivery <- Some deliver
-         | Receiver_throws ->
-           answer
-             (obj
-                [ "result", obj [ "type", str "object" ]
-                ; "exceptionDetails", obj [ "text", str "Uncaught"; "exception", obj [ "description", str "SyntaxError: Unexpected end of JSON input" ] ]
-                ]))
+         | Receiver_throws -> receiver_threw ()
+         | Receiver_starts_then_throws -> extension_receives fake message; receiver_threw ()
+         | Refuse_delivery -> refuse "Execution context was destroyed.")
       | None -> failf "unexpected expression %s" expression)
   | other -> failf "the fake browser got %s" other
 ;;
@@ -245,6 +251,7 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
     ; held_act = None
     ; waiting_on_model = None
     ; answers_from_host = []
+    ; received_calls = []
     ; later =
         (fun seconds k ->
           Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -292,7 +299,7 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
           |> Result.map (fun init -> session, init)
           |> Result.map_error (fun _ -> Backend.Not_opened "fixture attach failed")
         in
-        let backend = Backend.create ~sw ~clock ~open_session ~call:Session.call ~shutdown:(fun _ -> Ok ())
+        let backend = Backend.create ~sw ~clock ~open_session ~call:Session.call ~private_ready:Session.quiescent ~shutdown:(fun _ -> Ok ())
           ~pid:(fun _ -> 42) ~log:ignore in
         test backend stopped)
     }
@@ -499,7 +506,10 @@ let test_abandoned_call () =
   with_session ~configure:(fun fake -> fake.act <- Hold)
   @@ fun h ->
   attached h;
+  check bool "attached idle session admits a private companion" true (Session.quiescent h.session);
   cancel_waiting_caller h act;
+  check bool "returned public verb slot does not settle abandoned extension input" false
+    (Session.quiescent h.session);
   (match Session.call h.session goto with
    | Error Session.Abandoned_call_pending -> ()
    | _ -> fail "a new call waits for the abandoned one");
@@ -511,6 +521,7 @@ let test_abandoned_call () =
   h.settle ();
   check bool "the abandoned call's reply is logged" true
     (logged h (function Session.Abandoned_call_ended { method_ = "stagehand.act"; rejected = false } -> true | _ -> false));
+  check bool "confirmed extension settlement admits a private companion" true (Session.quiescent h.session);
   goto_succeeds h
 ;;
 
@@ -709,7 +720,91 @@ let test_receiver_threw () =
    | Error (Session.Lost detail) ->
      check string "the thrown cause" "the extension's receiver threw: SyntaxError: Unexpected end of JSON input" detail
    | _ -> fail "a call whose receiver threw may have taken effect");
+  check bool "a live CDP transport does not settle an unknown receiver effect" false
+    (Session.quiescent h.session);
+  check bool "the CDP transport is still alive" true (Option.is_none (Cdp.lost_reason h.cdp));
+  check bool "further input is refused before effect" true
+    (Session.call h.session goto = Error Session.Delivery_unsettled)
+;;
+
+let test_receiver_input_stays_unsettled_after_late_reply () =
+  with_session ~configure:(fun fake -> fake.act <- Hold)
+  @@ fun h ->
+  attached h;
+  h.fake.next_delivery <- Receiver_starts_then_throws;
+  (match Session.call h.session act with
+   | Error (Session.Lost _) -> ()
+   | _ -> fail "input that started before its receiver threw has an unknown effect");
+  let id = match h.fake.held_act with
+    | Some id -> id
+    | None -> fail "the receiver must have started ordinary input before throwing" in
+  let received = List.length h.fake.received_calls in
+  List.iter (fun call ->
+    check bool "unsettled delivery refuses every later runtime call" true
+      (Session.call h.session call = Error Session.Delivery_unsettled)) [goto; Wire.Close];
+  check int "refused calls never reach the extension" received (List.length h.fake.received_calls);
+  to_host h.fake (rpc_result id (obj [ "success", `Bool true ]));
+  h.settle ();
+  check bool "a late reply cannot release delivery uncertainty" false (Session.quiescent h.session);
+  check bool "a late reply is not an abandoned-call settlement" false
+    (logged h (function Session.Abandoned_call_ended _ -> true | _ -> false));
+  to_host h.fake (rpc_request "g-late" "llm.generate" (obj []));
+  h.settle ();
+  check int "unknown input receives no model execution" 0 !(h.model_calls);
+  check int "a model request after unknown delivery is refused" Wire.host_refused
+    (error_code (only_answer h));
+  h.wait (abandoned_answer_s +. settle_s);
+  check bool "elapsed abandoned deadline does not clear the delivery barrier" false (Session.quiescent h.session);
+  check bool "unknown delivery does not auto-retire an unsaved browser" true
+    (Option.is_none (Cdp.lost_reason h.cdp));
+  check bool "input remains refused until explicit retirement" true
+    (Session.call h.session goto = Error Session.Delivery_unsettled)
+;;
+
+let test_refused_delivery_keeps_session_quiescent () =
+  with_session
+  @@ fun h ->
+  attached h;
+  let received = List.length h.fake.received_calls in
+  h.fake.next_delivery <- Refuse_delivery;
+  (match Session.call h.session goto with
+   | Error (Session.Not_delivered _) -> ()
+   | _ -> fail "a CDP delivery refusal occurs before receiver input");
+  check int "the refused delivery never reaches the receiver" received (List.length h.fake.received_calls);
+  check bool "before-effect refusal preserves private quiescence" true (Session.quiescent h.session);
   goto_succeeds h
+;;
+
+let test_backend_private_readiness_and_close_after_unknown_delivery () =
+  with_session ~configure:(fun fake -> fake.act <- Hold)
+  @@ fun h -> h.with_backend (fun backend stopped ->
+    let served = function Browser_lane.Answered _ -> () | _ -> fail "backend lifecycle or page call refused" in
+    served (Backend.execute backend (Browser_lane.Session_open {headless=Some true}));
+    served (Backend.execute backend Browser_lane.Tabs_list);
+    let original = match Backend.capture_private_session backend with
+      | Ok session -> session
+      | Error _ -> fail "idle original session must be privately capturable" in
+    h.fake.next_delivery <- Receiver_starts_then_throws;
+    (match Session.call h.session act with
+     | Error (Session.Lost _) -> ()
+     | _ -> fail "the started ordinary input must remain unknown");
+    check bool "unknown delivery does not silently stop its original browser" false !stopped;
+    check bool "private capture cannot admit unknown ordinary input" true
+      (Backend.capture_private_session backend = Error Backend.Private_not_started);
+    let private_calls = ref 0 in
+    check bool "a previously captured pin still requires fresh quiescence" true
+      (Backend.execute_private backend ~session:original ~tab_id:0
+        ~run:(fun _ ~page_id:_ -> incr private_calls; Ok (`Assoc [])) = Error Backend.Private_not_started);
+    check int "no private input follows the unknown ordinary input" 0 !private_calls;
+    (match Backend.execute backend Browser_lane.Tabs_list with
+     | Browser_lane.Rejected_before_effect _ -> ()
+     | _ -> fail "delivery-unsettled public calls must be classified before effect");
+    let received = List.length h.fake.received_calls in
+    served (Backend.execute backend Browser_lane.Session_close);
+    check bool "explicit close still joins the original browser" true !stopped;
+    check int "explicit close does not reenter the unsettled runtime" received (List.length h.fake.received_calls);
+    check bool "confirmed original retirement is observed closed" true
+      (Backend.session_observation backend = Browser_lane.Browser_closed))
 ;;
 
 let test_malformed_response () =
@@ -816,6 +911,11 @@ let () =
       test_case "an unsupported request is refused by name" `Quick test_unsupported_request;
       test_case "a caller cancelled during delivery abandons the call" `Quick test_cancelled_during_delivery;
       test_case "a receiver that threw loses the call" `Quick test_receiver_threw;
+      test_case "started receiver input remains unsettled after late replies" `Quick
+        test_receiver_input_stays_unsettled_after_late_reply;
+      test_case "before-effect delivery refusal preserves quiescence" `Quick test_refused_delivery_keeps_session_quiescent;
+      test_case "unknown delivery blocks private readiness until explicit close" `Quick
+        test_backend_private_readiness_and_close_after_unknown_delivery;
       test_case "a malformed response loses the call" `Quick test_malformed_response;
       test_case "an undelivered model answer ends the session" `Quick test_answer_not_delivered;
     ];

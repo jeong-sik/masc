@@ -130,7 +130,7 @@ let test_failed_send_ends_every_command () =
     Cdp.create
       ~send:(fun _ ->
         incr sends;
-        if !sends = 2 then failwith "socket closed while sending")
+        if !sends = 2 then failwith "PRIVATE_SEND_FRAME_MARKER")
       ~close:(fun () -> incr closes)
       ~clock ~command_deadline_s:deadline_s
       ~on_event:(fun event -> events := event :: !events)
@@ -143,8 +143,8 @@ let test_failed_send_ends_every_command () =
     | Error (Cdp.Connection_lost reason) -> reason
     | _ -> fail "send failure did not return Connection_lost"
   in
-  check bool "the send failure is reported" true
-    (String.starts_with ~prefix:"CDP command send failed:" reason);
+  check string "send exception text cannot enter public connection state"
+    "CDP command send failed" reason;
   check reply "an earlier command also ends" (Error (Cdp.Connection_lost reason))
     (Eio.Promise.await_exn waiting);
   check reply "a later command does not write" (Error (Cdp.Connection_lost reason))
@@ -205,6 +205,19 @@ let test_protocol_violations_end_the_connection () =
   check (option string) "a reply nobody asked for" (Some "CDP reply for unknown command 99") (Cdp.lost_reason t)
 ;;
 
+let test_private_frame_parse_failure_is_erased () =
+  with_connection @@ fun ~sw ~clock:_ ~t ~sent:_ ~events ~closes ->
+  let waiting=Eio.Fiber.fork_promise ~sw (fun () -> Cdp.command t "Runtime.evaluate"
+    (`Assoc ["expression",`String "PRIVATE_REQUEST_MARKER"])) in
+  Cdp.receive t {|{"id":1,"result":PRIVATE_RESPONSE_MARKER}|};
+  check reply "waiting private command receives a fixed failure"
+    (Error (Cdp.Connection_lost "invalid CDP JSON")) (Eio.Promise.await_exn waiting);
+  check (option string) "no raw response fragment enters retained connection state"
+    (Some "invalid CDP JSON") (Cdp.lost_reason t);
+  check int "malformed response closes original transport once" 1 !closes;
+  check bool "connection event contains no raw frame/parser prose" true
+    (!events=[Cdp.Connection_ended {reason="invalid CDP JSON"}])
+
 let () =
   run "browser_cdp" [
     "wire", [
@@ -216,6 +229,7 @@ let () =
       test_case "replies reach their commands" `Quick test_replies_reach_their_commands;
       test_case "an ended connection ends every command" `Quick test_lost_ends_every_command;
       test_case "a failed send ends every command" `Quick test_failed_send_ends_every_command;
+      test_case "private response parse errors cannot enter public status or logs" `Quick test_private_frame_parse_failure_is_erased;
       test_case "a missed deadline ends the connection" `Quick test_deadline_ends_the_connection;
       test_case "a reply at the deadline keeps it" `Quick test_a_reply_at_the_deadline_keeps_the_connection;
       test_case "a cancelled caller ends it" `Quick test_a_cancelled_caller_ends_the_connection;

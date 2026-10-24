@@ -44,7 +44,7 @@ let summary =
   `Assoc [ "value", `String {|{"url":"http://127.0.0.1:1/","title":"Shop","viewport":null}|} ]
 ;;
 
-let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None)
+let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) ?(private_ready = fun _ -> true)
     ?(shutdown = fun _ -> Ok ()) f =
   Eio_mock.Backend.run_full
   @@ fun env ->
@@ -98,7 +98,7 @@ let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None)
          failf "the backend sent %s" (Wire.method_name request))
 
   in
-  let backend = Backend.create ~sw ~clock ~open_session ~call ~shutdown ~pid:(fun _ -> 42) ~log:ignore in
+  let backend = Backend.create ~sw ~clock ~open_session ~call ~private_ready ~shutdown ~pid:(fun _ -> 42) ~log:ignore in
   f
     { backend
     ; sessions
@@ -646,7 +646,7 @@ let test_parent_stop_keeps_shutdown_transport () =
           Eio.Fiber.await_cancel ());
         Ok ((),`Null) in
       let backend=Backend.create ~sw ~clock:env#clock ~open_session
-        ~call:(fun () _ -> fail "no runtime request expected") ~pid:(fun () -> 42) ~log:ignore
+        ~call:(fun () _ -> fail "no runtime request expected") ~private_ready:(fun () -> false) ~pid:(fun () -> 42) ~log:ignore
         ~shutdown:(fun () ->
           incr shutdowns;
           check bool "parent stop leaves transport open for shutdown" false !released;
@@ -671,7 +671,7 @@ let test_parent_stop_cancels_opening () =
         | () -> fail "startup must not survive its parent"
         | exception (Eio.Cancel.Cancelled _ as exn) -> cancelled:=true;raise exn in
       let backend=Backend.create ~sw ~clock:env#clock ~open_session
-        ~call:(fun () _ -> fail "startup sent a runtime command") ~pid:(fun () -> 42) ~log:ignore
+        ~call:(fun () _ -> fail "startup sent a runtime command") ~private_ready:(fun () -> false) ~pid:(fun () -> 42) ~log:ignore
         ~shutdown:(fun () -> incr shutdowns;Ok ()) in
       Eio.Fiber.fork_daemon ~sw (fun () -> ignore (Backend.execute backend open_);`Stop_daemon);
       Eio.Promise.await entered);
@@ -679,8 +679,198 @@ let test_parent_stop_cancels_opening () =
     check bool "partial resource scope is joined" true !released;
     check int "no completed session is invented" 0 !shutdowns)
 
+let private_ok = function Ok value -> value | Error _ -> fail "private browser operation refused"
+
+let test_private_original_session_and_tab () = with_backend (fun h ->
+  check bool "private capture does not open a browser" true
+    (Backend.capture_private_session h.backend=Error Backend.Private_not_started);
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  let session=private_ok (Backend.capture_private_session h.backend) in
+  let dispatched=ref 0 in
+  let run original ~page_id =
+    incr dispatched;
+    check bool "callback receives the original owned session" true (original == the_session h);
+    check string "MASC tab resolves to exact CDP target, not a Chrome numeric tab" "P" page_id;
+    Ok (`Assoc ["private",`String "PRIVATE_MARKER"]) in
+  check bool "unknown tab is rejected before callback" true
+    (Backend.execute_private h.backend ~session ~tab_id:42 ~run=Error Backend.Private_not_started);
+  check int "invalid tab sent no private request" 0 !dispatched;
+  check bool "private result returns through the private caller only" true
+    (Backend.execute_private h.backend ~session ~tab_id:0 ~run=Ok (`Assoc ["private",`String "PRIVATE_MARKER"]));
+  check int "one explicit dispatch" 1 !dispatched;
+  check bool "settled private work preserves ordinary page reads" true
+    (match Backend.execute h.backend Lane.Tabs_list with Lane.Answered _ -> true | _ -> false))
+
+let test_private_read_exclusion () = with_backend (fun h -> Eio.Switch.run (fun sw ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  let session=private_ok (Backend.capture_private_session h.backend) in
+  let entered,enter=Eio.Promise.create () and completed,complete=Eio.Promise.create () in
+  let operation=Eio.Fiber.fork_promise ~sw (fun () ->
+    Backend.execute_private h.backend ~session ~tab_id:0 ~run:(fun _ ~page_id:_ ->
+      Eio.Promise.resolve enter ();Eio.Promise.await completed;Ok (`Assoc []))) in
+  Eio.Promise.await entered;
+  let reading=Eio.Fiber.fork_promise ~sw (fun () -> Backend.execute h.backend Lane.Tabs_list) in
+  h.settle ();
+  check bool "private input retains the existing whole-verb slot" false (Eio.Promise.is_resolved reading);
+  (* Status is host lifecycle data and remains available without exposing a page. *)
+  check bool "status does not block behind a private effect" true (is_open h);
+  Eio.Promise.resolve complete ();
+  ignore (private_ok (Eio.Promise.await_exn operation));
+  ignore (data (Eio.Promise.await_exn reading))))
+
+let test_private_unknown_fences_and_never_rebinds () = with_backend (fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  let first=the_session h in
+  let session=private_ok (Backend.capture_private_session h.backend) in
+  check bool "callback exception cannot echo private exception text" true
+    (Backend.execute_private h.backend ~session ~tab_id:0
+      ~run:(fun _ ~page_id:_ -> failwith "PRIVATE_EXCEPTION_MARKER")=Error Backend.Private_outcome_unknown);
+  check bool "unknown private work fences public page reads" true
+    (match Backend.execute h.backend Lane.Tabs_list with Lane.Rejected_before_effect _ -> true | _ -> false);
+  check bool "fenced session cannot be recaptured" true
+    (Backend.capture_private_session h.backend=Error Backend.Private_session_fenced);
+  let calls=ref 0 in
+  let run _ ~page_id:_ = incr calls;Ok (`Assoc []) in
+  check bool "unknown operation is never retried" true
+    (Backend.execute_private h.backend ~session ~tab_id:0 ~run=Error Backend.Private_session_fenced);
+  check bool "open cannot silently replace an unsettled session" true
+    (match Backend.execute h.backend open_ with Lane.Rejected_before_effect _ -> true | _ -> false);
+  check bool "no automatic shutdown hides the unknown effect" false first.stopped;
+  ignore (data (Backend.execute h.backend Lane.Session_close));
+  check bool "explicit close settles the original browser" true first.stopped;
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  check bool "old pin cannot follow a freshly opened browser" true
+    (Backend.execute_private h.backend ~session ~tab_id:1 ~run=Error Backend.Private_not_started);
+  check int "refused and stale calls never reach the adapter" 0 !calls)
+
+let test_private_cancel_after_dispatch_fences () = with_backend (fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  let session=private_ok (Backend.capture_private_session h.backend) in
+  let entered,enter=Eio.Promise.create () and never,_=Eio.Promise.create () in
+  let cancelled=ref false in
+  ignore (Eio.Fiber.first
+    (fun () -> ignore (Backend.execute_private h.backend ~session ~tab_id:0
+      ~run:(fun _ ~page_id:_ -> Eio.Promise.resolve enter ();
+        match Eio.Promise.await never with
+        | () -> Ok (`Assoc [])
+        | exception (Eio.Cancel.Cancelled _ as exn) -> cancelled:=true;raise exn)))
+    (fun () -> Eio.Promise.await entered));
+  h.settle ();
+  check bool "caller cancellation reaches original private work" true !cancelled;
+  check bool "cancellation does not just return the page semaphore" true
+    (Backend.capture_private_session h.backend=Error Backend.Private_session_fenced);
+  check bool "page readers cannot run while extension input may continue" true
+    (match Backend.execute h.backend Lane.Tabs_list with Lane.Rejected_before_effect _ -> true | _ -> false))
+
+let test_private_cancel_before_dispatch_preserves_session () = with_backend (fun h -> Eio.Switch.run (fun sw ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  let session=private_ok (Backend.capture_private_session h.backend) in
+  let entered,enter=Eio.Promise.create () and ended,finish=Eio.Promise.create () in
+  let first=Eio.Fiber.fork_promise ~sw (fun () -> Backend.execute_private h.backend ~session ~tab_id:0
+    ~run:(fun _ ~page_id:_ -> Eio.Promise.resolve enter ();Eio.Promise.await ended;Ok (`Assoc []))) in
+  Eio.Promise.await entered;
+  let calls=ref 0 in
+  ignore (Eio.Fiber.first
+    (fun () -> ignore (Backend.execute_private h.backend ~session ~tab_id:0
+      ~run:(fun _ ~page_id:_ -> incr calls;Ok (`Assoc []))))
+    (fun () -> h.settle ()));
+  Eio.Promise.resolve finish ();ignore (private_ok (Eio.Promise.await_exn first));
+  h.settle ();
+  check int "cancelled queued private operation never ran" 0 !calls;
+  ignore (private_ok (Backend.capture_private_session h.backend));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list))))
+
+let test_private_close_joins_callback_and_releases_reopened_pages () =
+  with_backend (fun h -> Eio.Switch.run (fun sw ->
+    ignore (data (Backend.execute h.backend open_));
+    ignore (data (Backend.execute h.backend Lane.Tabs_list));
+    let original = the_session h in
+    let session = private_ok (Backend.capture_private_session h.backend) in
+    let entered, enter = Eio.Promise.create () in
+    let broker_reply, _ = Eio.Promise.create () in
+    let cleanup_allowed, allow_cleanup = Eio.Promise.create () in
+    let cancelled = ref false and joined = ref false and resumed = ref false in
+    let operation = Eio.Fiber.fork_promise ~sw (fun () ->
+      Backend.execute_private h.backend ~session ~tab_id:0 ~run:(fun owned ~page_id:_ ->
+        check bool "private work stays with the original browser" true (owned == original);
+        Eio.Promise.resolve enter ();
+        match Eio.Promise.await broker_reply with
+        | () -> resumed := true; Ok (`Assoc [])
+        | exception (Eio.Cancel.Cancelled _ as exn) ->
+          check bool "only confirmed original retirement cancels this wait" true original.stopped;
+          cancelled := true;
+          Eio.Cancel.protect (fun () -> Eio.Promise.await cleanup_allowed);
+          joined := true;
+          raise exn)) in
+    (* Resolving this promise cannot suspend. Release protected cleanup even
+       if an assertion fails, so the regression fails instead of hanging. *)
+    Fun.protect
+      ~finally:(fun () -> ignore (Eio.Promise.try_resolve allow_cleanup ()))
+      (fun () ->
+        Eio.Promise.await entered;
+        let queued_page = Eio.Fiber.fork_promise ~sw (fun () ->
+          Backend.execute h.backend Lane.Tabs_list) in
+        h.settle ();
+        check bool "active private work excludes page observations" false
+          (Eio.Promise.is_resolved queued_page);
+        ignore (data (Backend.execute h.backend Lane.Session_close));
+        check bool "explicit close confirms the original browser stopped" true original.stopped;
+        ignore (data (Backend.execute h.backend open_));
+        check int "a distinct browser was opened" 2 (List.length !(h.sessions));
+        let next_page = Eio.Fiber.fork_promise ~sw (fun () ->
+          Backend.execute h.backend Lane.Tabs_list) in
+        h.settle ();
+        check bool "original shutdown cancels a broker wait outside its transport" true !cancelled;
+        check bool "callback cleanup remains joined before slot release" false !joined;
+        check bool "new page waits for original callback cleanup" false
+          (Eio.Promise.is_resolved next_page);
+        Eio.Promise.resolve allow_cleanup ();
+        check bool "terminated private work has a fixed unknown outcome" true
+          (Eio.Promise.await_exn operation = Error Backend.Private_outcome_unknown);
+        check bool "original callback cleanup has finished" true !joined;
+        check bool "the broker wait never resumes on the successor" false !resumed;
+        ignore (data (Eio.Promise.await_exn queued_page));
+        ignore (data (Eio.Promise.await_exn next_page));
+        check bool "late original cleanup never fences the successor" true
+          (Backend.session_observation h.backend = Lane.Browser_open);
+        ignore (private_ok (Backend.capture_private_session h.backend)))))
+
+let test_private_requires_settled_public_input () =
+  let settled=ref true in
+  with_backend ~private_ready:(fun _ -> !settled) (fun h ->
+    ignore (data (Backend.execute h.backend open_));
+    ignore (data (Backend.execute h.backend Lane.Tabs_list));
+    let session=private_ok (Backend.capture_private_session h.backend) in
+    settled:=false;
+    check bool "capture refuses an abandoned public extension call" true
+      (Backend.capture_private_session h.backend=Error Backend.Private_not_started);
+    let calls=ref 0 in
+    let run _ ~page_id:_ = incr calls;Ok (`Assoc []) in
+    check bool "a previously captured pin must recheck public settlement" true
+      (Backend.execute_private h.backend ~session ~tab_id:0 ~run=Error Backend.Private_not_started);
+    check int "unsettled public input admits no companion effect" 0 !calls;
+    settled:=true;
+    ignore (private_ok (Backend.execute_private h.backend ~session ~tab_id:0 ~run));
+    check int "the exact original session remains usable after settlement" 1 !calls)
+
 let () =
   run "browser_stagehand_backend" [
+    "private companion", [
+      test_case "private work waits for public extension settlement" `Quick test_private_requires_settled_public_input;
+      test_case "original session and CDP target are pinned" `Quick test_private_original_session_and_tab;
+      test_case "private operations exclude page observations" `Quick test_private_read_exclusion;
+      test_case "unknown private effect fences until original retirement" `Quick test_private_unknown_fences_and_never_rebinds;
+      test_case "private cancellation after dispatch fences reads" `Quick test_private_cancel_after_dispatch_fences;
+      test_case "private cancellation while queued sends nothing" `Quick test_private_cancel_before_dispatch_preserves_session;
+      test_case "explicit close joins private work and releases reopened pages" `Quick
+        test_private_close_joins_callback_and_releases_reopened_pages;
+    ];
     "lifecycle", [
       test_case "uncertain partial opening retains original failure" `Quick test_uncertain_opening_is_retained;
       test_case "shutdown failure remains uncertain without replay" `Quick test_shutdown_failure_is_retained;

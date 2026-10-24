@@ -9,7 +9,8 @@ val serve :
     unlinked or reused. [max_message_bytes] is the installation's existing native
     reply bound, applied also to this private channel. No global execution lock
     is held during request handling. The service owns a nested switch for its listener and every accepted flow;
-    cancellation joins their cleanup. *)
+    cancellation joins their cleanup. Invalid JSON and unexpected failures use
+    fixed replies/log messages; private frame or exception text is not echoed. *)
 val mcp : Browser_addon_owner.t -> Mcp_protocol_eio.Server.t
 (** Snapshot observation, the browser command tool and, when selected, the
     two private model request/result ports. Execution requires the

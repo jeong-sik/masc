@@ -264,6 +264,14 @@ def run(script,answer):
     elif step=='page.target':
         answer({'answer':json.dumps({'url':'https://fixture.test/','point':{'x':0.25,'y':0.5},
             'viewport':{'documentId':'d1','width':800,'height':600,'scrollX':0,'scrollY':0}})})
+    elif step=='page.target_input':
+        (root/'clicked').write_text(json.dumps([args['target'],args['cursor']]))
+        answer({'urlBefore':'https://fixture.test/','receipt':{},'error':None,
+            'tab':{'url':'https://fixture.test/','title':'Fixture'}})
+    elif step=='page.native_workflow':
+        time.sleep(0.03)
+        answer({'completed':[],'effectStarted':False,'completedEffect':False,'failure':None,
+            'urlBefore':'https://fixture.test/','url':'https://fixture.test/','title':'Fixture','snapshot':'root','truncated':False,'chars':4})
     elif step=='page.pointer':
         page={'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','scrollX':0,'scrollY':0})}
         (root/'clicked').write_text(json.dumps([args['x'],args['y'],args['button'],args['cursor']]))
@@ -360,10 +368,19 @@ let scenario mode =
           (Yojson.Safe.to_string (answered (issue (B.Page_act (B.Action.Open_tab "https://fixture.test/channel")))));
         check string "a move on it" {|{"ok":true,"data":{"tabId":2,"action":"goto","url":"https://fixture.test/next","title":"Moved"}}|}
           (Yojson.Safe.to_string (answered (issue (B.Page_goto {url="https://fixture.test/next";tab_id=Some 2}))));
-        check string "a click" {|{"ok":true,"data":{"tabId":1,"action":"click","urlBefore":"https://fixture.test/","url":"https://fixture.test/","title":"Fixture","scrollX":0,"scrollY":0}}|}
+        check string "a click" {|{"ok":true,"data":{"tabId":1,"action":"click","selector":"#send","urlBefore":"https://fixture.test/","url":"https://fixture.test/","title":"Fixture"}}|}
           (Yojson.Safe.to_string (answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Click "#send"}))));
         check string "where ego clicked, and the label beside its cursor names the actor"
-          {|[200, 300, "left", "MASC \u00b7 keeper/live-fixture \u00b7 click"]|} (read (Filename.concat root "clicked"));
+          {|["#send", "MASC \u00b7 keeper/live-fixture \u00b7 click"]|} (read (Filename.concat root "clicked"));
+        let workflow=ok (B.Native_workflow.of_json (`Assoc ["tabId",`Int 1;
+          "expectedUrl",`String "https://fixture.test/";"steps",`List [];"maxChars",`Int 1000])) in
+        let receipt=answered (issue ~timeout_sec:0.001 (B.Page_native_workflow workflow)) in
+        check string "SDK-owned wait outlives the transport reply window" "root"
+          Yojson.Safe.Util.(receipt |> member "data" |> member "snapshot" |> to_string);
+        check string "composition action contract" "workflow"
+          Yojson.Safe.Util.(receipt |> member "data" |> member "action" |> to_string);
+        check string "composition starting URL contract" "https://fixture.test/"
+          Yojson.Safe.Util.(receipt |> member "data" |> member "urlBefore" |> to_string);
         (* A download the page saved reaches the caller as a grant of this
            connection's route, never as a path, and is published from it. *)
         let actor = "keeper/live-fixture" and route = B.Live_route (Some client.client_id)

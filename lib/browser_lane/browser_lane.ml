@@ -1,3 +1,4 @@
+module Native_workflow = Browser_native_workflow
 (** Browser_lane — the in-process state of the masc ↔ browser lanes
     (docs/design/browser-lane.md, task-1382).
 
@@ -99,6 +100,7 @@ type verb =
   (* The connection's own accessibility snapshot of a page, with the refs its
      element actions accept (an ego task space; RFC-browser-live-ego). *)
   | Page_snapshot of { tab_id : int; max_chars : int; scope : snapshot_scope }
+  | Page_native_workflow of Native_workflow.t
   | Page_interact of { tab_id : int; frame_path : string list; expected_url : string option; action : interaction }
   | Session_open of { headless : bool option }
   | Session_close
@@ -126,8 +128,15 @@ let reply_timeout_sec = function
   | Page_goto _ -> 45.
   | Page_act action -> Action.reply_timeout_sec action
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
-  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_elements _ | Page_context _
+  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Page_elements _ | Page_context _
   | Page_instruct _ | Page_locate _ | Page_extract _ -> default_timeout_sec
+
+type reply_policy = Reply_window | Executor_owned
+let reply_policy = function
+  | Page_native_workflow _ -> Executor_owned
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
+  | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Session_close | Session_status
+  | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ -> Reply_window
 
 (* The CSS scope an elements read carries, top-level or in a frame. Every
    caller that relays such a read checks the answer against it. *)
@@ -136,7 +145,7 @@ let elements_filter = function
   | Page_context { mode = `Elements filter; _ } -> filter
   | Page_context { mode = (`Text _ | `Frames | `Dialog); _ }
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _
-  | Page_cookies _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Session_close
+  | Page_cookies _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Session_open _ | Session_close
   | Session_status | Page_goto _ | Page_act _ | Page_instruct _ | Page_locate _ | Page_extract _ -> unfiltered_elements
 ;;
 
@@ -152,6 +161,7 @@ let verb_to_string = function
   | Page_scene _ -> "page.scene"
   | Page_snapshot _ -> "page.snapshot"
   | Page_interact _ -> "page.interact"
+  | Page_native_workflow _ -> "page.native_workflow"
   | Session_open _ -> "session.open"
   | Session_close -> "session.close"
   | Session_status -> "session.status"
@@ -355,6 +365,8 @@ let verb_json = function
     `Assoc ["verb",`String "page.snapshot";"args",snapshot_args ~tab_id ~max_chars ~scope]
   | Page_capture { tab_id } ->
     `Assoc ["verb", `String "page.capture"; "args", `Assoc ["tabId", `Int tab_id]]
+  | Page_native_workflow workflow ->
+    `Assoc ["verb",`String "page.native_workflow";"args",Native_workflow.to_json workflow]
   | Page_interact { tab_id; frame_path; expected_url; action } ->
     `Assoc ["verb", `String "page.interact"; "args", interaction_args ~tab_id ~frame_path ~expected_url action]
   | Session_open { headless } ->
@@ -403,12 +415,12 @@ let verb_json = function
 let verb_is_read = function
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
   | Session_status | Page_locate _ | Page_extract _ -> true
-  | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ | Page_instruct _ -> false
+  | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ | Page_native_workflow _ | Page_instruct _ -> false
 let verb_uses_model = function
   | Page_instruct _ | Page_locate _ | Page_extract _ -> true
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _
   | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Session_open _ | Session_close | Session_status
-  | Page_goto _ | Page_act _ | Page_interact _ -> false
+  | Page_goto _ | Page_act _ | Page_interact _ | Page_native_workflow _ -> false
 ;;
 
 (* What the live lane asks of the operator's browser, named by what the
@@ -424,6 +436,7 @@ type live_capability =
   | Scene_read
   | Accessibility_snapshot
   | Snapshot_target_input
+  | Native_workflow
   | Dom_interaction
   | Point_click
   | Point_scroll
@@ -456,6 +469,7 @@ let live_capability_to_wire = function
   | Scene_read -> "scene_read"
   | Accessibility_snapshot -> "accessibility_snapshot"
   | Snapshot_target_input -> "snapshot_target_input"
+  | Native_workflow -> "native_workflow"
   | Operator_handoff -> "operator_handoff"
   | Dom_interaction -> "dom_interaction"
   | Point_click -> "point_click"
@@ -508,6 +522,7 @@ let live_capability = function
   | Page_elements _ -> Some Element_inventory
   | Page_capture _ -> Some Viewport_capture
   | Page_scene _ -> Some Scene_read
+  | Page_native_workflow _ -> Some Native_workflow
   | Page_snapshot _ -> Some Accessibility_snapshot
   | Page_interact { action; _ } -> Some (live_capability_of_interaction action)
   | Page_act (Action.Open_tab _ | Action.Open_window _) -> Some Tab_creation
@@ -538,6 +553,7 @@ let handoff_refused = "hand_off and take_over apply only to an ego connection on
 (* Why the automation lane does not serve a verb, if it does not.
    Model-assisted locate is admitted separately by the installed executor. *)
 let automation_refusal = function
+  | Page_native_workflow _ -> Some "native workflows require an ego connection"
   | Page_interact {action; _} when acts_on_snapshot_target action -> Some snapshot_target_refused
   | Page_act (Action.Control (Action.Hand_off | Action.Take_over)) -> Some handoff_refused
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _
@@ -556,6 +572,7 @@ let verb_allowed_on_automation verb = Option.is_none (automation_refusal verb)
    are served; frames, dialogs, downloads, the idle document observer and
    other BrowserAct actions are not served. *)
 let verb_allowed_on_stagehand = function
+  | Page_native_workflow _ -> false
   | Page_interact {action; _} when acts_on_snapshot_target action -> false
   | Session_open _ | Session_close | Session_status | Tabs_list | Page_goto _ | Page_capture _
   | Page_read _ | Page_elements _ | Page_scene _ | Page_interact _ | Page_instruct _ | Page_locate _
@@ -607,7 +624,7 @@ let activity_rejection_message = function
 let activity_rejection_with ~activity lane = function
   | Session_close | Session_status -> None
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
-  | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Page_goto _ | Page_elements _
+  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Session_open _ | Page_goto _ | Page_elements _
   | Page_act _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ ->
     match activity with
     | Enabled -> None
@@ -668,18 +685,18 @@ let live_transport_serves transport capability =
   | Web_extension, Browser_zoom -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input
+                    | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input | Native_workflow
                     | Operator_handoff | Download_listing | File_upload) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read) -> true
-  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Operator_handoff | Download_listing
+  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Operator_handoff | Download_listing
                     | File_upload) -> false
   | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_answer
-                    | Snapshot_target_input | Operator_handoff | Download_listing | File_upload) -> true
+                    | Snapshot_target_input | Native_workflow | Operator_handoff | Download_listing | File_upload) -> true
   | Ego_task_space, (Document_source | Touch_input | Browser_zoom | Viewport_resize
                     | Tab_activation | Frame_read) -> false
 ;;
@@ -1022,6 +1039,8 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
         then Error (Refused "optional_document_observation_busy")
         else (Hashtbl.add client.waiters id resolver;
           (match verb with
+           | Page_native_workflow workflow -> Hashtbl.add client.interactions id
+               {request_id=id;actor;action="workflow";tab_id=workflow.tab_id;phase=Interaction_queued}
            | Page_interact {tab_id;action;_} -> Hashtbl.add client.interactions id
                {request_id=id;actor;action=interaction_verb action;tab_id;phase=Interaction_queued}
            | Session_open _|Session_close|Session_status|Tabs_list|Page_read _|Page_document _
@@ -1031,15 +1050,18 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
         Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id; Hashtbl.remove client.interactions id));
       match accepted with
       | Error refusal -> refusal
-      | Ok () -> Watched_work.run
-        (fun () ->
+      | Ok () ->
+        let execute () =
           let payload = match verb_json verb, actor with
             | `Assoc fields, Some actor -> `Assoc (("actor",`String actor)::fields)
             | payload, None -> payload
             | payload, Some _ -> payload in
           Eio.Stream.add client.commands {id; verb_json=payload};
-          Answered (Eio.Promise.await promise))
-        ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)))
+          Answered (Eio.Promise.await promise) in
+        match reply_policy verb with
+        | Executor_owned -> execute ()
+        | Reply_window -> Watched_work.run execute
+            ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)))
 let issue_live ?only_if_idle client ~verb ~timeout_sec =
   issue_live_with ~activity_check:(activity_refusal Lane_name.Live) ?only_if_idle client ~verb ~timeout_sec
 (* The port this process serves the browser-lane routes on: the port its HTTP
@@ -1071,7 +1093,7 @@ let issue_automation_with ~activity_check ~verb ~timeout_sec =
        | Page_locate _ when not backend.locate -> Rejected_before_effect "browser locate Exact Output is not selected"
        | Page_locate _ -> backend.execute verb
        | Tabs_list|Page_read _|Page_document _|Page_elements _|Page_capture _|Page_scene _ | Page_snapshot _|Page_context _
-       | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_interact _|Session_open _|Session_close|Session_status|Page_goto _|Page_act _
+       | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_interact _ | Page_native_workflow _|Session_open _|Session_close|Session_status|Page_goto _|Page_act _
        | Page_instruct _|Page_extract _ ->
            Watched_work.run (fun () -> backend.execute verb)
              ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
@@ -1179,7 +1201,7 @@ let stagehand_server_deadline verb ~timeout_sec =
   match verb with
   | Session_open _ -> None
   | Session_close | Session_status | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
-  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
+  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
   | Page_locate _ | Page_extract _ -> Some timeout_sec
 ;;
 

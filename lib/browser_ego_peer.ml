@@ -69,7 +69,7 @@ type pointer_state = Released | Release_uncertain
 
 type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
 
-type t = { run : runner; now : unit -> float; space_id : int; version : string; capture_directory : string;
+type t = { run : runner; run_native : string -> (string, run_failure) result; now : unit -> float; space_id : int; version : string; capture_directory : string;
   downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t; uploads : Browser_lane.Upload_lease.owner;
   mutable pointer_state : pointer_state; mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
@@ -161,7 +161,7 @@ let run_step t ~window_s ~step ~args body =
 let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
 
-let open_space ~run ~now ~space ~version ~capture_directory ~downloads =
+let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloads =
   let* () = if String.trim space = "" then Error "the ego task space needs a name" else Ok () in
   let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:(str space) ~holder:Either_holds ~args:`Null
       "  emit({ok: true, value: {spaceId: task.spaceId, ownership: task.ownership}});"
@@ -172,7 +172,7 @@ let open_space ~run ~now ~space ~version ~capture_directory ~downloads =
   match field "spaceId" opened, field "ownership" opened with
   | Some (`Int space_id), Some (`String ownership)
     when String.equal ownership agent_ownership || String.equal ownership delegated_ownership ->
-    Ok {run; now; space_id; version; capture_directory; downloads; published = Hashtbl.create 16;
+    Ok {run; run_native; now; space_id; version; capture_directory; downloads; published = Hashtbl.create 16;
       uploads = Browser_lane.Upload_lease.create_owner ();
       pointer_state=Released; pages=[]; next_tab=0; captures=0}
   | Some (`Int _), Some (`String ownership) ->
@@ -1342,6 +1342,41 @@ let act ?actor t args =
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
     Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off and take_over only")
 
+let workflow ?actor t args =
+  let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in
+  let* request = pre (Browser_lane.Native_workflow.of_json args) in
+  let* _ = pre (Browser_page_script.text_cap (Some request.max_chars)) in
+  let* label = label_of t request.tab_id in
+  let* () = match t.pointer_state with Released -> Ok ()
+    | Release_uncertain -> Error (Live.Before_effect "ego pointer release is unconfirmed; inspect and end this task space before more input") in
+  let arguments = match Browser_lane.Native_workflow.to_json request with
+    | `Assoc fields -> obj (("label",str label)::("cursor",str (cursor_label ~actor ~verb:"workflow"))::fields)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
+  let source = script ~step:"page.native_workflow" ~space:(`Int t.space_id) ~holder:Agent_holds
+      ~args:(with_download_root t arguments)
+      (String.concat "\n" [Browser_ego_workflow.script;unblocked_agent_page;
+        "    const outcome = await nativeWorkflow(task.page(args.label), args);";
+        "    emit({ok: true, value: outcome});";"  }"]) in
+  let result = match t.run_native source with
+    | Error error -> Error (Unanswered error)
+    | Ok output -> answer output in
+  match result with
+  | Error error -> Error (effect_failure ~unknown:"native workflow result is unknown; read the same tab before another step; never replay the workflow" error)
+  | Ok value ->
+    let unknown detail = Live.Outcome_unknown (detail ^ "; read the same tab and do not replay the workflow") in
+    let* outcome=Browser_ego_workflow.decode request value |> Result.map_error unknown in
+    let receipt_of value=match value with
+      | `Assoc fields -> Ok (obj (("tabId",`Int request.tab_id)::("action",str "workflow")::fields))
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (unknown "workflow receipt is not an object") in
+    match outcome with
+    | Browser_ego_workflow.Completed value -> receipt_of value
+    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect} ->
+      let message=head detail ^ "; read the same tab before continuing; never replay the workflow" in
+      if completed_effect then
+        let* receipt=receipt_of value in Error (Live.Partial_failure {tab_id=request.tab_id;receipt;message})
+      else if effect_started then Error (Live.Outcome_unknown message)
+      else Error (Live.Before_effect message)
+
 let dispatch ?actor t ~verb args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in
   match (verb : Live.verb) with
@@ -1357,3 +1392,4 @@ let dispatch ?actor t ~verb args =
   | Page_downloads -> pre (downloads t args)
   | Page_act -> act ?actor t args
   | Page_interact -> interact ?actor t args
+  | Page_native_workflow -> workflow ?actor t args

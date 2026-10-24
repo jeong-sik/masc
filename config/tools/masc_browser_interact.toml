@@ -1,6 +1,7 @@
 name = "masc_browser_interact"
 description = """
 Click, fill, scroll, hover, drag, follow a link, activate a browser tab, set the page viewport size, or set actual browser zoom. tap_at and swipe send a touch pointer (not a mouse) on a live BiDi connection or the owned Firefox: tap_at presses and releases at an observed point, swipe holds the touch from one observed point to another; Stagehand and a connected WebExtension refuse them before any effect. set_viewport takes width and height together in CSS pixels (100–4096) on a live BiDi connection, an automation Firefox or Stagehand; on a live BiDi connection or an automation Firefox, giving neither restores the browser's own size. An automation Firefox resizes its window and keeps at least about 500 x 120 outer pixels, so a smaller request is refused with the size the page kept. Read scene/screenshot geometry again afterward. set_zoom requires an exact WebExtension client/tab, expectedUrl and factor 0.3–5. It measures the resulting zoomFactor and zoomScope; Firefox per-origin zoom can affect same-site tabs. Read scene/screenshot geometry again afterward. hover/drag_to accept observed elements (selector or scene reference) without guessing screenshot coordinates. On connections other than ego they resolve visible, unobstructed targets in the current viewport; scroll and re-read offscreen targets first. Ego selector hover uses SDK resolution and auto-scrolling. hover_at (no click) and drag move a trusted pointer. automation, Stagehand Chromium, live webdriver_bidi and ego task spaces serve these actions; Stagehand and ego support custom drag paths but require durationMs=0. activate_tab is live-only, on a web_extension connection (>=0.6.0): it verifies active=true without window focus or navigation. A live request its connection cannot serve is refused before input as live_transport_unsupported; servingClients are the connected browsers that can. List that connection's tabs first: tab IDs are per connection.
+On an ego task space action=workflow runs known native Page calls in steps, then returns a final native snapshot. Each step names method (click, dblclick, hover, fill, press, selectOption, goto, waitForURL, waitForSelector, waitForLoadState) with its SDK arguments. SDK methods own resolution and waits. A step failure stops the sequence and retains completed steps; inspect before continuing and never replay the workflow. expectedUrl guards the initial page only; later navigation is allowed. Use separate workflows when an intermediate observation requires new judgment. No host JavaScript is accepted.
 On an ego task space, selector click/fill/hover/double_click/select_option use ego native Page methods. The selector follows ego SDK syntax (snapshot refs, semantic locators, CSS, iframe/shadow traversal); ego owns target resolution, actionability and auto-scrolling. Prefer BrowserRead mode=snapshot and its refs. Ego selectOption follows native programmatic selection semantics, including disabled options. TUI documentId/nodeId actions retain their scene adapter.
 The tab is explicit; no arbitrary JavaScript. drag/drag_to issue trusted pointer input; a receipt does not prove the application accepted a drop. HTML5 DataTransfer/drop is not guaranteed by Firefox and has no synthetic fallback. Read again after success or failure before retrying: page handlers can change external state. click/fill require an inspected target; ego applies its native actionability rules. On automation, Stagehand Chromium and live webdriver_bidi, click resolves an unobstructed selector or scene node and sends native pointerDown/pointerUp, supporting trusted pointerdown/mousedown menus; disabled and aria-disabled targets are refused. On those three connections click captures the current URL when expectedUrl is omitted, then checks it before input. Ego reads the URL before entering its SDK method, which can itself wait; this is not an atomic navigation guard. WebExtension retains DOM click. Ego fill follows its native SDK input behavior; other connections fill text inputs/textarea with input/change events. Fill does not press Enter or submit. scroll_at scrolls the pane under the point. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence."""
 additional_properties = false
@@ -38,7 +39,7 @@ description = "Observed URL guard; required for explicit pointer actions, hover/
 name = "action"
 type = "string"
 required = true
-enum = ["set_zoom", "set_viewport", "tap_at", "swipe", "activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "select_option", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
+enum = ["workflow", "set_zoom", "set_viewport", "tap_at", "swipe", "activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "select_option", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
 
 [[params]]
 name = "selector"
@@ -315,3 +316,29 @@ type = "number"
 minimum = 0.3
 maximum = 5.0
 description = "set_zoom only: actual browser zoom factor (0.3–5), requires exact clientId/tabId and expectedUrl on a WebExtension >=0.8.0. Receipt measures zoomFactor and actual zoomScope; Firefox per-origin zoom can affect/persist for same-site tabs. Re-read scene/screenshot geometry afterward. Other adapters refuse before input."
+
+[[params]]
+name = "steps"
+type = "array"
+items = { type = "object", additional_properties = false, params = [
+  { name = "method", type = "string", required = true, enum = ["click", "dblclick", "hover", "fill", "press", "selectOption", "goto", "waitForURL", "waitForSelector", "waitForLoadState"] },
+  { name = "selector", type = "string" }, { name = "text", type = "string" },
+  { name = "key", type = "string" }, { name = "url", type = "string" },
+  { name = "value", type = "string" }, { name = "values", type = "array", items = { type = "string" } },
+  { name = "state", type = "string", enum = ["attached", "detached", "visible", "hidden", "domcontentloaded", "load", "networkidle"] },
+  { name = "timeoutMs", type = "integer", minimum = 0 }
+] }
+description = "workflow only: native Page calls in order. click/dblclick/hover take selector; fill takes selector,text; press takes selector,key; selectOption takes selector and value or distinct values ([] clears); goto takes an absolute HTTP(S) url; waitForURL takes a native string/glob url; waitForSelector takes selector,state (attached/detached/visible/hidden); waitForLoadState takes state (domcontentloaded/load/networkidle). Optional timeoutMs is forwarded to that SDK method; omission uses its default. No cumulative step/time limit or injected script. Locators come from observations; no new intermediate judgment inside this call."
+
+[[params]]
+name = "snapshotScope"
+type = "string"
+enum = ["viewport", "full_page"]
+description = "workflow only: scope of the final native snapshot, viewport by default."
+
+[[params]]
+name = "maxChars"
+type = "integer"
+minimum = 1
+maximum = 100000
+description = "workflow only: final snapshot character limit, following the existing BrowserRead size policy. A cut reports truncated and preserves surrogate pairs."

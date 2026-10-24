@@ -5932,6 +5932,7 @@ module Browser_lane_view = struct
     | Scene_read -> "scene"
     | Accessibility_snapshot -> "snapshot"
     | Snapshot_target_input -> "snapshot target"
+    | Native_workflow -> "native workflow"
     | Dom_interaction -> "click/fill"
     | Point_click -> "point click"
     | Point_scroll -> "point scroll"

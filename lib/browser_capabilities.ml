@@ -4,6 +4,7 @@ type operation =
   | List_tabs | Open_tab | Close_tab | Activate_tab | List_windows | Create_window | Close_window
   | Navigate | Follow_link | Back | Forward | Reload | Session_lifecycle
   | Read_text | Read_html | Read_elements | Read_scene | Read_regions | Read_snapshot | Screenshot
+  | Native_workflow
   | Click_snapshot_target | Fill_snapshot_target | Hover_snapshot_target | Double_click_snapshot_target
   | Click | Double_click | Right_click | Middle_click | Pointer_down | Pointer_up | Hover | Pointer_drag | Html5_drop
   | Scroll_page | Scroll_at | Fill | Type_text | Press_key | Key_chord | Select_option
@@ -22,7 +23,7 @@ type entry = { operation : operation; support : support }
 let operations = [List_tabs;Open_tab;Close_tab;Activate_tab;List_windows;Create_window;Close_window;
   Navigate;Follow_link;Back;Forward;Reload;Session_lifecycle;
   Read_text;Read_html;Read_elements;Read_scene;Read_regions;Read_snapshot;Screenshot;
-  Click_snapshot_target;Fill_snapshot_target;Hover_snapshot_target;Double_click_snapshot_target;
+  Native_workflow;Click_snapshot_target;Fill_snapshot_target;Hover_snapshot_target;Double_click_snapshot_target;
   Click;Double_click;Right_click;Middle_click;Pointer_down;Pointer_up;Hover;Pointer_drag;Html5_drop;Scroll_page;Scroll_at;
   Fill;Type_text;Press_key;Key_chord;Select_option;Read_frames;Frame_interaction;
   Read_dialog;Accept_dialog;Dismiss_dialog;Hand_off;Take_over;Upload_file;List_downloads;Page_zoom;
@@ -217,6 +218,11 @@ let support backend operation = match backend with
       | Safari_unavailable -> missing)
     | Scroll_page -> dom_input backend (conditional ~action:"scroll" Interact [observed;"Scrolls the page; use scroll_at for a nested pane."])
     | Scroll_at -> dom_input backend (conditional ~action:"scroll_at" Interact [observed;geometry;"Scrolls the pane at the observed viewport point."])
+    | Native_workflow -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"workflow" Interact
+          [observed;ego_agent_pages;"Known native Page calls run serially with SDK waits and one final snapshot. expectedUrl checks the starting page; navigation can change it afterward. No cumulative command window; SDK defaults or explicit per-step timeoutMs own waits. Failures retain completed steps; never replay the sequence."]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
+          Unsupported "Native workflows require an ego connection.")
     | Click_snapshot_target -> snapshot_target backend ~action:"click"
     | Fill_snapshot_target -> snapshot_target backend ~action:"fill"
     | Hover_snapshot_target -> snapshot_target backend ~action:"hover"
@@ -386,6 +392,7 @@ let operation_name = function
   | Reload -> "reload" | Session_lifecycle -> "session_lifecycle" | Read_text -> "read_text"
   | Read_html -> "read_html" | Read_elements -> "read_elements" | Read_scene -> "read_scene"
   | Read_regions -> "read_regions" | Read_snapshot -> "read_snapshot" | Screenshot -> "screenshot"
+  | Native_workflow -> "native_workflow"
   | Click_snapshot_target -> "click_snapshot_target" | Fill_snapshot_target -> "fill_snapshot_target"
   | Hover_snapshot_target -> "hover_snapshot_target" | Double_click_snapshot_target -> "double_click_snapshot_target" | Click -> "click"
   | Double_click -> "double_click" | Right_click -> "right_click" | Middle_click -> "middle_click"

@@ -55,7 +55,9 @@ let exchange t ~settlement ~on_cancel_after_dispatch command =
           let owned_startup=match route with
             | Browser_lane.Stagehand_route -> Option.is_none (Browser_lane.stagehand_server_deadline verb ~timeout_sec)
             | Browser_lane.Automation_route | Browser_lane.Live_route _ -> false in
-          if owned_startup || Browser_lane.verb_uses_model verb then exchange ()
+          let executor_owned = match Browser_lane.reply_policy verb with
+            | Executor_owned -> true | Reply_window -> false in
+          if owned_startup || executor_owned || Browser_lane.verb_uses_model verb then exchange ()
           else Eio.Time.with_timeout_exn clock allowance exchange
         | Snapshot|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Poll _|Deliver _|Disconnect _ -> Eio.Time.with_timeout_exn clock allowance exchange)
       with

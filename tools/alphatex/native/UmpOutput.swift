@@ -125,12 +125,15 @@ final class UmpOutput {
     var selected: [String: Destination] = [:]
     var nativeProtocols: [String: UmpNativeProtocol] = [:]
     let compatibleEvents: [UmpEvent]?
+    let metadata: UmpMetadataState
     // Keys include physical endpoint, group, channel, message dialect and note.
     // Retain uncertain acquisitions/releases until a successful cleanup send.
     struct Key: Hashable { let source: String; let prefix: UInt32; let number: UInt32 }
     var held: [Key: Int] = [:], pedals = Set<Key>()
     var exclusive = Set<Key>()
-    init(bindings: [UmpBinding], compatibleEvents: [UmpEvent]? = nil) { self.bindings = bindings; self.compatibleEvents = compatibleEvents }
+    init(bindings: [UmpBinding], compatibleEvents: [UmpEvent]? = nil, metadata: UmpMetadataState = .opaque) {
+        self.bindings = bindings; self.compatibleEvents = compatibleEvents; self.metadata = metadata
+    }
     func prepare() throws {
         guard Thread.isMainThread else { throw MidiFailure("UMP preparation requires the main lifecycle") }
         do {
@@ -186,7 +189,7 @@ final class UmpOutput {
         }
     }
     func apply(_ event: UmpEvent) throws {
-        footprint.observe(UmpMessage(event))
+        footprint.observe(UmpMessage(event, metadata: metadata))
         let word = event.words[0], type = word >> 28, status = (word >> 20) & 15, number = (word >> 8) & 127
         let key = Key(source: event.source, prefix: word & 0xff0f0000, number: number)
         let channel = type == 2 || type == 4
@@ -216,7 +219,7 @@ final class UmpOutput {
         for event in events {
             let word = event.words[0]
             let key = Key(source: event.source, prefix: word & 0xff0f0000, number: (word >> 8) & 127)
-            switch UmpMessage(event).action {
+            switch UmpMessage(event, metadata: metadata).action {
             case .on:
                 voices[key, default: []].append(false)
             case .off:

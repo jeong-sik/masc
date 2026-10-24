@@ -2197,6 +2197,7 @@ def workspace_port(binary, base_path, requested=None, save=False):
 
 
 def select_setup_server(binary, base_path, port, require_new_owner=False, resume_existing=False):
+    termination_requested = False
     while True:
         response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base_path), '--port', str(port)],
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -2206,12 +2207,19 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
             if response.returncode or observed.get('schema') != 'masc.setup_server.v1' or observed.get('read_only') is not True:
                 raise ValueError('invalid server observation')
         except (TypeError, ValueError):
+            if termination_requested:
+                raise SetupError('Graceful shutdown was requested; the follow-up workspace inspection failed. Inspect it before restarting.')
             raise SetupError('The setup port could not be inspected. Existing servers were preserved.')
         state = observed.get('status')
         if state == 'free':
             return port
         if state == 'same_workspace':
             server_version = observed['server_version']
+            if termination_requested:
+                print('Graceful shutdown was requested, but this workspace is still answering. No second shutdown request will be sent.', file=sys.stderr)
+                if pick('Workspace shutdown', ['Check shutdown again', 'Finish later'])[0]:
+                    raise SetupError('Shutdown was requested; its completion remains unconfirmed. Inspect this workspace before restarting it.')
+                continue
             if resume_existing and not require_new_owner and server_version == observed['installed_version']:
                 return port
             choices = [('use', 'Continue with this running workspace'),
@@ -2236,16 +2244,26 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
             try:
                 receipt = json.loads(result.stdout)
                 if result.returncode:
-                    if receipt.get('schema') == 'masc.setup_server_error.v1':
+                    if (receipt.get('schema') == 'masc.setup_server_error.v1'
+                            and receipt.get('termination_requested') is False):
                         print(terminal_text(receipt['error']), file=sys.stderr)
                         return None
                     raise ValueError('invalid error')
-                if receipt.get('schema') != 'masc.setup_server_stopped.v1' or receipt.get('owner_stopped') is not True:
+                if (receipt.get('schema') != 'masc.setup_server_shutdown.v1'
+                        or receipt.get('termination_requested') is not True
+                        or receipt.get('readiness') not in ('owner_draining', 'port_busy', 'replacement_can_start', 'observation_failed')):
                     raise ValueError('invalid shutdown receipt')
+                if (receipt['readiness'] == 'observation_failed'
+                        and not isinstance(receipt.get('observation_error'), str)):
+                    raise ValueError('missing shutdown observation error')
             except (TypeError, KeyError, ValueError):
                 raise SetupError('The server shutdown result was not confirmed. Inspect the workspace before retrying.')
-            if receipt.get('port_available') is True:
+            termination_requested = True
+            if receipt['readiness'] == 'replacement_can_start':
                 return port
+            if receipt['readiness'] == 'observation_failed':
+                print('Graceful shutdown was requested. Its follow-up observation failed: '
+                      + terminal_text(receipt['observation_error']) + ' Rechecking the workspace without sending another shutdown request.', file=sys.stderr)
             continue  # server or port might have changed during graceful drain
         if state not in ('other_workspace', 'unknown_server'):
             raise SetupError('MASC returned an unknown server observation')
@@ -2257,8 +2275,11 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
         if not positive_integer(suggested) or suggested > 65535:
             raise SetupError('MASC could not find an unused local port')
         if pick('Choose this workspace’s port', ['Use available port ' + str(suggested), 'Finish later'])[0]:
+            if termination_requested:
+                raise SetupError('Setup paused after graceful shutdown was requested. Its completion remains unconfirmed.')
             raise SetupError('setup paused; existing services were preserved')
         port = suggested
+        termination_requested = False
 SANDBOX_NAMES = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerdctl_kata': 'Kata (nerdctl)',
                  'microsandbox': 'microsandbox', 'remote_ssh': 'Remote SSH'}
 

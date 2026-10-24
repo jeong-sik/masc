@@ -94,7 +94,7 @@ class Journey(StepByStep):
             return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
         same = dict(status='same_workspace', read_only=True, installed_version='0.35.5', server_version='0.35.5')
         replies = [receipt('masc.setup_server.v1', **same),
-                   receipt('masc.setup_server_stopped.v1', owner_stopped=True),
+                   receipt('masc.setup_server_shutdown.v1', termination_requested=True, readiness='owner_draining'),
                    receipt('masc.setup_server.v1', status='free', read_only=True)]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
                 patch.object(SETUP, 'pick', return_value=[0]) as pick, contextlib.redirect_stderr(io.StringIO()):
@@ -110,7 +110,7 @@ class Journey(StepByStep):
             return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
         same = dict(status='same_workspace', read_only=True, installed_version='0.35.5', server_version='0.35.5')
         replies = [receipt('masc.setup_server.v1', **same),
-                   receipt('masc.setup_server_stopped.v1', owner_stopped=True, port_available=True)]
+                   receipt('masc.setup_server_shutdown.v1', termination_requested=True, readiness='replacement_can_start')]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
                 patch.object(SETUP, 'pick', return_value=[0]) as pick, contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True), 9123)
@@ -122,13 +122,68 @@ class Journey(StepByStep):
             return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
         same = dict(status='same_workspace', read_only=True, installed_version='0.35.5', server_version='0.35.5')
         replies = [receipt('masc.setup_server.v1', **same),
-                   receipt('masc.setup_server_stopped.v1', owner_stopped=True, port_available=False),
+                   receipt('masc.setup_server_shutdown.v1', termination_requested=True, readiness='port_busy'),
                    receipt('masc.setup_server.v1', status='free', read_only=True)]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
                 patch.object(SETUP, 'pick', return_value=[0]) as pick, contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True), 9123)
         self.assertEqual([call.args[0][1] for call in run.call_args_list],
                          ['setup-server', 'setup-stop-previous-owner', 'setup-server'])
+
+    def test_shutdown_observation_failure_rechecks_without_resending_termination(self):
+        def receipt(schema, **values):
+            return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
+        replies = [receipt('masc.setup_server.v1', status='same_workspace', read_only=True,
+                           installed_version='fixture', server_version='fixture'),
+                   receipt('masc.setup_server_shutdown.v1', termination_requested=True,
+                           readiness='observation_failed', observation_error='Owner observation unavailable'),
+                   receipt('masc.setup_server.v1', status='free', read_only=True)]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()) as output:
+            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True), 9123)
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ['setup-server', 'setup-stop-previous-owner', 'setup-server'])
+        self.assertIn('shutdown was requested', output.getvalue())
+
+    def test_pending_shutdown_reinspection_never_sends_a_second_signal(self):
+        def receipt(schema, **values):
+            return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
+        same = receipt('masc.setup_server.v1', status='same_workspace', read_only=True,
+                       installed_version='fixture', server_version='fixture')
+        replies = [same, receipt('masc.setup_server_shutdown.v1', termination_requested=True,
+                                readiness='owner_draining'), same,
+                   receipt('masc.setup_server.v1', status='free', read_only=True)]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', side_effect=[[0], [0]]), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True), 9123)
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ['setup-server', 'setup-stop-previous-owner', 'setup-server', 'setup-server'])
+
+    def test_shutdown_reinspection_failure_keeps_the_confirmed_request(self):
+        same = subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server.v1',
+            status='same_workspace', read_only=True, installed_version='fixture', server_version='fixture')))
+        requested = subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server_shutdown.v1',
+            termination_requested=True, readiness='observation_failed', observation_error='Unavailable')))
+        with patch.object(SETUP.subprocess, 'run', side_effect=[same, requested, subprocess.CompletedProcess([], 1, '')]) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaisesRegex(SETUP.SetupError, 'shutdown was requested'):
+                SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True)
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ['setup-server', 'setup-stop-previous-owner', 'setup-server'])
+
+    def test_shutdown_requires_a_confirmed_request_and_closed_readiness(self):
+        for fields in (dict(termination_requested=False, readiness='replacement_can_start'),
+                       dict(termination_requested=True, readiness='unknown'),
+                       dict(termination_requested=True, readiness='observation_failed')):
+            with self.subTest(fields=fields):
+                same = subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server.v1',
+                    status='same_workspace', read_only=True, installed_version='fixture', server_version='fixture')))
+                stopped = subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server_shutdown.v1', **fields)))
+                with patch.object(SETUP.subprocess, 'run', side_effect=[same, stopped]) as run, \
+                        patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaisesRegex(SETUP.SetupError, 'shutdown result was not confirmed'):
+                        SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True)
+                self.assertEqual(run.call_count, 2)
 
     def test_group_session_owner_pause_never_prepares_or_reselects_models(self):
         with patch.object(SETUP, 'select_setup_server', return_value=None) as owner, \

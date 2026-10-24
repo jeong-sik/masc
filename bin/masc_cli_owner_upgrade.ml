@@ -4,7 +4,7 @@ let error_message = function
   | Upgrade.Admin_required -> "The running workspace rejected local operator access. Sign in before restarting it."
   | Different_workspace -> "This server belongs to another workspace. Choose a different port."
   | Incumbent_changed -> "The running server changed after inspection. Refresh setup before restarting it."
-  | Owner_unavailable -> "The running workspace owner could not be verified. No process was stopped."
+  | Owner_unavailable -> "The running workspace owner could not be verified."
   | Invalid_health -> "The selected port did not return a valid workspace identity."
   | Already_requested -> "A graceful shutdown was already requested."
   | Closed -> "This server inspection is no longer active. Refresh setup."
@@ -44,7 +44,9 @@ let inspect ~base_path ~port =
       (match Upgrade.suggest_loopback_port () with Ok port -> ["suggested_port", `Int port] | Error _ -> []) in
   emit (`Assoc (["schema", `String "masc.setup_server.v1"; "read_only", `Bool true;
     "installed_version", `String Runtime_build_version.current] @ fields @ alternative)); 0
+type request_phase = Request_not_confirmed | Request_confirmed
 let stop ~base_path ~port ~agent ~expected_version ~login =
+  let phase = ref Request_not_confirmed in
   let result = try
     let base_path = Unix.realpath (Env_config.normalize_masc_base_path_input base_path) in
     with_http (fun sw clock ->
@@ -61,21 +63,32 @@ let stop ~base_path ~port ~agent ~expected_version ~login =
       let* owner = Upgrade.prepare ~sw ~clock ~headers ~run_dir ~base_path ~port in
       Fun.protect ~finally:(fun () -> Upgrade.close owner) (fun () ->
         if (Upgrade.incumbent owner).version <> expected_version then Error Upgrade.Incumbent_changed else
-        let* () = Upgrade.request_termination owner in
-        prerr_endline "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.";
-        let rec wait attempts =
-          let* state = Upgrade.replacement_readiness ~run_dir ~base_path ~port in
-          match state with
-          | Owner_draining when attempts > 0 ->
-            Eio.Time.sleep clock 0.2; wait (attempts - 1)
-          | Port_busy when attempts > 0 ->
-            Eio.Time.sleep clock 0.2; wait (attempts - 1)
-          | Owner_draining | Port_busy -> Ok false
-          | Replacement_can_start -> Ok true in
-        wait 25))
-    with Unix.Unix_error _ | Sys_error _ -> Error Upgrade.Owner_unavailable in
+        match Upgrade.request_termination_and_observe owner ~observe:(fun () ->
+          phase := Request_confirmed;
+          prerr_endline "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.";
+          let rec wait attempts =
+            let* state = Upgrade.replacement_readiness ~run_dir ~base_path ~port in
+            match state with
+            | Owner_draining when attempts > 0 ->
+              Eio.Time.sleep clock 0.2; wait (attempts - 1)
+            | Port_busy when attempts > 0 ->
+              Eio.Time.sleep clock 0.2; wait (attempts - 1)
+            | (Owner_draining | Port_busy | Replacement_can_start) as state -> Ok state in
+          wait 25) with
+        | Not_requested error -> Error error
+        | Requested observation -> Ok observation))
+    with Unix.Unix_error _ | Sys_error _ ->
+      (match !phase with
+       | Request_not_confirmed -> Error Upgrade.Owner_unavailable
+       | Request_confirmed -> Ok (Error Upgrade.Owner_unavailable)) in
   match result with
   | Error error -> emit (`Assoc ["schema", `String "masc.setup_server_error.v1";
-    "error", `String (error_message error)]); 1
-  | Ok port_available -> emit (`Assoc ["schema", `String "masc.setup_server_stopped.v1";
-    "owner_stopped", `Bool true; "port_available", `Bool port_available]); 0
+    "termination_requested", `Bool false; "error", `String (error_message error)]); 1
+  | Ok observation ->
+    let readiness, detail = match observation with
+      | Ok Upgrade.Owner_draining -> "owner_draining", []
+      | Ok Port_busy -> "port_busy", []
+      | Ok Replacement_can_start -> "replacement_can_start", []
+      | Error error -> "observation_failed", ["observation_error", `String (error_message error)] in
+    emit (`Assoc (["schema", `String "masc.setup_server_shutdown.v1";
+      "termination_requested", `Bool true; "readiness", `String readiness] @ detail)); 0

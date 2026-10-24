@@ -1,0 +1,40 @@
+[
+  {
+    "case": "sync: inline reasoning",
+    "returned_content": "<think>check forecast</think>",
+    "replayed_message": {
+      "tool_calls": [
+        {
+          "id": "weather-call",
+          "type": "function",
+          "function": {
+            "name": "weather",
+            "arguments": "{\"city\":\"Seoul\"}"
+          }
+        }
+      ],
+      "reasoning_content": "check forecast",
+      "role": "assistant",
+      "content": null
+    }
+  },
+  {
+    "case": "stream: inline reasoning",
+    "returned_content": "<think>check forecast</think>",
+    "replayed_message": {
+      "tool_calls": [
+        {
+          "id": "weather-call",
+          "type": "function",
+          "function": {
+            "name": "weather",
+            "arguments": "{\"city\":\"Seoul\"}"
+          }
+        }
+      ],
+      "reasoning_content": "check forecast",
+      "role": "assistant",
+      "content": null
+    }
+  }
+]

@@ -128,7 +128,7 @@ let test_finalization_preserves_reasoning_source_through_restore () =
   List.iter (fun (kind, policy, artifact) ->
     let contract : Provider.Reasoning_replay_contract.t =
       { replay_policy = policy; streaming = No_streaming_reasoning;
-        output_wire = No_output_control } in
+        output_wire = No_output_control; content_carrier = Canonical_blocks } in
     let source base_url =
       Types.Reasoning_source.create ~provider_kind:kind
         ~provider_instance:(Types.Reasoning_source.provider_instance

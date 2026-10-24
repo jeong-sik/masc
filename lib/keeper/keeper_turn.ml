@@ -388,7 +388,7 @@ let run_keeper_invocation_turn_admitted_inner
              match evt with
              | Agent_core.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
              | Agent_core.Types.ContentBlockDelta { delta = (Agent_core.Types.TextSnapshot _ | (Agent_core.Types.ThinkingDelta _ | (Agent_core.Types.ThinkingSignatureDelta _ | (Agent_core.Types.RedactedThinkingSnapshot _ | (Agent_core.Types.ReasoningDetailsDelta _ | (Agent_core.Types.InputJsonDelta _ | (Agent_core.Types.InputJsonSnapshot _ | Agent_core.Types.MediaDelta _)))))));_}
-             | Agent_core.Types.MessageStop | Agent_core.Types.ResponsesOutputItems _ | Agent_core.Types.Ping | Agent_core.Types.Connected
+             | Agent_core.Types.MessageStop | Agent_core.Types.InlineContentReplay _ | Agent_core.Types.ResponsesOutputItems _ | Agent_core.Types.Ping | Agent_core.Types.Connected
              | Agent_core.Types.MessageStart _ | Agent_core.Types.ContentBlockStart _
              | Agent_core.Types.ContentBlockStop _ | Agent_core.Types.MessageDelta _
              | Agent_core.Types.SSEError _ | Agent_core.Types.NDJSONError _

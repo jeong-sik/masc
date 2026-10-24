@@ -11,6 +11,9 @@ open Types
 
 val parse_sse_event : string option -> string -> sse_event option
 val emit_synthetic_events : api_response -> (sse_event -> unit) -> unit
+(** Preserves exact inline Chat content replay through the synthetic stream.
+    Native Chat inline streams emit a terminal InlineContentReplay witness;
+    rejected chunks roll back both carrier bytes and occurrence identities. *)
 
 (** {1 First-token classification (Agent Core contract)}
 
@@ -151,12 +154,16 @@ val create_openai_stream_state
   :  ?provider:string
   -> ?model:string
   -> ?inline_reasoning:bool
+  -> ?preserve_inline_content:bool
   -> unit
   -> openai_stream_state
 (** [inline_reasoning] says the model's content channel also carries reasoning
     wrapped in tags (template-parser dialect or declared think-tags), which is
     separated out rather than drawn as reply text. Defaults to [false], and a
-    model that does not declare it keeps every byte of its content channel. *)
+    model that does not declare it keeps every byte of its content channel.
+    [preserve_inline_content] is separately declared by the Chat replay contract;
+    it retains scalar content deltas transactionally, including empty strings,
+    without treating absent/null content as an empty scalar. *)
 
 (** Emits one [MessageStart] from a complete, nonblank provider [chunk_id]
     and [chunk_model] pair, before this request publishes other events. Empty

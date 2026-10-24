@@ -251,7 +251,7 @@ let test_persisted_message_preserves_reasoning_provenance () =
       ~replay_contract:Agent_core.Llm_provider.Reasoning_replay_contract.
         { replay_policy = No_replay
         ; streaming = No_streaming_reasoning
-        ; output_wire = No_output_control
+        ; output_wire = No_output_control; content_carrier = Canonical_blocks
         } with
     | Ok source -> source | Error detail -> fail detail in
   let metadata = Types.Reasoning_source.metadata source
@@ -274,7 +274,7 @@ let test_persisted_message_preserves_reasoning_provenance () =
         { target = source
         ; contract = Provider.Reasoning_replay_contract.
             { replay_policy = No_replay; streaming = No_streaming_reasoning;
-              output_wire = No_output_control }
+              output_wire = No_output_control; content_carrier = Canonical_blocks }
         ; rotation = Provider.Reasoning_replay_contract.Require_identical_source
         } in
       (match Provider.Reasoning_history_projection.project

@@ -76,6 +76,12 @@ let validate_and_classify (messages : Types.message list) =
     | (message : Types.message) :: rest ->
       let classification = Types.Reasoning_source.classify message.metadata in
       let result =
+        let ( let* ) = Result.bind in
+        let* inline_replay = Inline_content_replay.of_metadata ~content:message.content message.metadata
+          |> Result.map_error (fun detail -> Invalid_response_replay {message_index;detail}) in
+        let* () = match inline_replay,message.role with
+          | Some _, (System|User|Tool) -> Error (Invalid_response_replay {message_index;detail="inline_content_replay:non_assistant"})
+          | None, _ | Some _, Assistant -> Ok () in
         match Response_replay.of_metadata ~content:message.content message.metadata with
         | Error detail -> Error (Invalid_response_replay {message_index; detail})
         | Ok (Some _) when message.role <> Assistant ->
@@ -341,6 +347,13 @@ let project
               ~content ~retained_indices message.metadata with
             | Error detail -> Error (Invalid_response_replay {message_index; detail})
             | Ok metadata ->
+           let retain_inline = match source_classification with
+             | Types.Reasoning_source.Present source ->
+               Types.Reasoning_source.rotation_admits ~rotation_policy ~stored:source ~target:reasoning_target
+               && replay_selected replay_policy ~assistant_had_tool_call:(content_has_tool_use message.content)
+                    ~message_index ~latest_user_message_index
+             | Types.Reasoning_source.Absent | Invalid | Duplicate -> false in
+           let metadata = if retain_inline then metadata else Inline_content_replay.remove_metadata metadata in
            let message = { message with content; metadata } in
            let projected, removed_empty =
              match message.role, assistant_has_payload content with

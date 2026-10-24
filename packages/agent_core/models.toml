@@ -762,7 +762,7 @@ reasoning_output_format = "split_reasoning_fields"
 # blocks opened with reasoning; removing it left a real answer of 338
 # characters at the median. template_parser keeps reading the field and splits
 # the tagged reasoning out of the content channel.
-content_inline_reasoning = "think_tags"
+content_inline_reasoning = "think_tags_with_chat_replay"
 reasoning_replay = "preserve_always"
 supports_response_format_json = false
 supports_structured_output = false

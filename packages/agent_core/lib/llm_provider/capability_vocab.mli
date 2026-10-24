@@ -75,6 +75,9 @@ type structured_output_support =
 type content_inline_reasoning =
   | No_content_inline_reasoning
   | Think_tags
+    (** Split tagged content for display; no original Chat carrier authority. *)
+  | Think_tags_with_chat_replay
+    (** Also retain/replay the original scalar Chat content through a validated witness. *)
 
 type reasoning_streaming_format =
   | Default_reasoning_streaming

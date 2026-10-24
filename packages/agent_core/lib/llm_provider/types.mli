@@ -589,6 +589,22 @@ type inference_timings =
   }
 [@@deriving show, yojson]
 
+(** Exact scalar Chat content carrier, bound to canonical content occurrences.
+    Only a parser with the declared Think_tags_with_chat_replay contract creates this witness.
+    Validation re-splits the original bytes and compares the named occurrences;
+    it never reconstructs a carrier from Thinking text. *)
+module Inline_content_replay : sig
+  type t = { raw_content : string; block_indices : int list }
+  [@@deriving show, yojson]
+  val metadata_key : string
+  val make : content:content_block list -> raw_content:string -> block_indices:int list -> (t, string) result
+  val metadata : t -> string * Yojson.Safe.t
+  val of_metadata : content:content_block list -> (string * Yojson.Safe.t) list -> (t option, string) result
+  val remove_metadata : (string * Yojson.Safe.t) list -> (string * Yojson.Safe.t) list
+  val retain : original_content:content_block list -> content:content_block list -> retained_indices:int list -> t -> (t option, string) result
+  val retain_metadata : original_content:content_block list -> content:content_block list -> retained_indices:int list -> (string * Yojson.Safe.t) list -> ((string * Yojson.Safe.t) list, string) result
+end
+
 (** Payload-free native Responses output-item partition. A message phase
     applies only to its own group, never to the flattened assistant message. *)
 module Response_replay : sig
@@ -632,6 +648,8 @@ type inference_telemetry =
     (** Creation-prefix identity for the response's reasoning, when the wire
         binds signatures to the prefix. [None] on wires without a binding,
         and on responses whose request predates the digest. *)
+  ; inline_content_replay : Inline_content_replay.t option
+    (** Original Chat content bytes and canonical occurrence binding. *)
   ; response_replay : Response_replay.t option
     (** Native output grouping retained through cache and assistant history. *)
   ; effective_context_window : int option
@@ -739,6 +757,14 @@ type api_response =
   }
 [@@deriving show]
 
+(** Retain admitted response occurrences and remap both replay witnesses.
+    Tool admission supplies exact source indices; no structural identity guess. *)
+val retain_response_content
+  :  retained_indices:int list
+  -> content:content_block list
+  -> api_response
+  -> (api_response, string) result
+
 type assistant_message_error =
   | Reasoning_source_telemetry_missing
   | Reasoning_source_missing
@@ -843,6 +869,8 @@ type sse_event =
       { stop_reason : stop_reason option
       ; usage : delta_usage option
       }
+  | InlineContentReplay of { raw_content : string; block_indices : int list }
+    (** Terminal raw Chat content and native stream block identities. *)
   | ResponsesOutputItems of (Response_replay.kind * int list) list
   (** Terminal native item grouping, referencing canonical stream block indices.
       This carries no text, tool arguments or provider response payload. *)

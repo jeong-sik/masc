@@ -165,7 +165,7 @@ let test_a_declined_projection_hands_over_the_carried_range () =
         ~replay_contract:
           { Replay.replay_policy = Replay.No_replay
           ; streaming = Replay.No_streaming_reasoning
-          ; output_wire = Replay.No_output_control
+          ; output_wire = Replay.No_output_control; content_carrier = Canonical_blocks
           }
     with
     | Ok source -> source

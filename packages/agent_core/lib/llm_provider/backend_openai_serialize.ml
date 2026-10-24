@@ -584,6 +584,7 @@ let typed_history_projection
 ;;
 
 let render_history_projection
+      ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
       ?(control_lowering = Message_origin_lowering.Preserve_positions)
       ?(assistant_tool_content_format = Capability_vocab.Assistant_tool_content_null)
       dialect
@@ -607,8 +608,18 @@ let render_history_projection
   let projected_messages =
     List.fold_left
       (fun projected (msg : Types.message) ->
-         let tool_calls = tool_calls_to_openai_json msg.content in
-         let include_reasoning = content_has_reasoning msg.content in
+         let inline_replay = match content_inline_reasoning with
+           | Capabilities.No_content_inline_reasoning | Capabilities.Think_tags -> None
+           | Capabilities.Think_tags_with_chat_replay ->
+             (match Inline_content_replay.of_metadata ~content:msg.content msg.metadata with
+              | Ok replay -> replay | Error detail -> invalid_arg detail) in
+         let wire_message = match inline_replay with
+           | None -> msg
+           | Some replay -> {msg with content=List.filter_map (fun (index,block) ->
+               if List.mem index replay.Inline_content_replay.block_indices then None else Some block)
+               (List.mapi (fun index block -> index,block) msg.content)} in
+         let tool_calls = tool_calls_to_openai_json wire_message.content in
+         let include_reasoning = content_has_reasoning wire_message.content in
          let include_reasoning_details =
            include_reasoning
            &&
@@ -623,8 +634,14 @@ let render_history_projection
              ~include_reasoning_details
              ~reasoning_wire_field
              ~assistant_tool_content_format
-             msg
+             wire_message
          in
+         let rendered = match inline_replay with
+           | None -> rendered
+           | Some replay -> List.map (function
+               | `Assoc fields -> `Assoc (("content",`String replay.Inline_content_replay.raw_content)
+                   :: List.remove_assoc "content" fields)
+               | other -> other) rendered in
          let rendered =
            match Message_origin_lowering.encode_user_boundary control_lowering ~message:msg rendered with
            | Ok messages -> messages
@@ -659,6 +676,7 @@ let project_history ?(tools_present = false) config messages =
 ;;
 
 let dialect_messages_of_history
+      ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
       ?(control_lowering = Message_origin_lowering.Preserve_positions)
       ?assistant_tool_content_format
       ~replay_capability
@@ -671,7 +689,7 @@ let dialect_messages_of_history
   | Ok projection ->
     Reasoning_history_projection.observe ~component:"backend_openai" ~stream projection;
     let rendered =
-      render_history_projection ~control_lowering ?assistant_tool_content_format dialect projection
+      render_history_projection ~content_inline_reasoning ~control_lowering ?assistant_tool_content_format dialect projection
     in
     Ok rendered.messages
 ;;

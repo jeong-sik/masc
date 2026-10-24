@@ -68,7 +68,9 @@ val parse_error_to_string : parse_error -> string
     [content_inline_reasoning] is the catalog-declared contract for reasoning
     embedded in the content channel; [Think_tags] splits [<think>] markup out of
     [message.content] into a [Thinking] block, while the default
-    [No_content_inline_reasoning] keeps [content] byte-identical in [Text]. *)
+    [No_content_inline_reasoning] keeps [content] byte-identical in [Text].
+    Scalar Think_tags_with_chat_replay content also carries a validated exact replay witness
+    through telemetry; displayed content remains split. *)
 val parse_openai_response_result_json
   :  ?content_inline_reasoning:Capabilities.content_inline_reasoning
   -> Yojson.Safe.t

@@ -235,17 +235,10 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
            response.content
        in
        let* response =
-         let content = admission.Agent_tools.admitted in
-         match response.telemetry with
-         | None | Some { response_replay = None; _ } -> Ok { response with content }
-         | Some ({ response_replay = Some replay; _ } as telemetry) ->
-           let* replay =
-             Types.Response_replay.retain ~original_content:response.content ~content
-               ~retained_indices:admission.Agent_tools.retained_content_indices replay
-             |> Result.map_error (fun detail -> Error.Internal detail)
-           in
-           Ok { response with content;
-                telemetry = Some {telemetry with response_replay = Some replay} }
+         Types.retain_response_content
+           ~content:admission.Agent_tools.admitted
+           ~retained_indices:admission.Agent_tools.retained_content_indices response
+         |> Result.map_error (fun detail -> Error.Internal detail)
        in
        (match admission.Agent_tools.rejected_names with
         | [] -> ()

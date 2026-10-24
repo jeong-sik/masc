@@ -113,7 +113,7 @@ let test_on_event_callback_fires () =
       | ContentBlockStop _ -> "content_block_stop"
       | MessageDelta _ -> "message_delta"
       | MessageStop -> "message_stop"
-      | ResponsesOutputItems _ -> "responses_output_items"
+      | InlineContentReplay _ | ResponsesOutputItems _ -> "responses_output_items"
       | Ping -> "ping"
       | SSEError _ -> "error"
       | NDJSONError _ -> "error"

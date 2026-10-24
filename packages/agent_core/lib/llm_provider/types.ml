@@ -854,6 +854,93 @@ let equal_output_token_receipt = Output_token_wire_internal.equal_receipt
 (** Native Responses output-item boundaries, referencing the existing content
     partition rather than copying provider payloads. No phase belongs to the
     flattened canonical assistant message. *)
+module Inline_content_replay = struct
+  type t = { raw_content : string; block_indices : int list }
+  [@@deriving show, yojson]
+  let metadata_key = "chat.inline_content_replay"
+  let remove_metadata metadata = List.filter (fun (key, _) -> key <> metadata_key) metadata
+
+  let segments raw_content =
+    let split = Inline_reasoning_split.create () in
+    let head = Inline_reasoning_split.feed_segments split raw_content in
+    head @ Inline_reasoning_split.flush_segments split
+
+  let normalize pieces =
+    List.fold_left (fun acc piece -> match acc, piece with
+      | Inline_reasoning_split.Text previous :: rest, Inline_reasoning_split.Text text ->
+        Inline_reasoning_split.Text (previous ^ text) :: rest
+      | Inline_reasoning_split.Reasoning previous :: rest, Inline_reasoning_split.Reasoning text ->
+        Inline_reasoning_split.Reasoning (previous ^ text) :: rest
+      | _, piece -> piece :: acc) [] pieces |> List.rev
+
+  let make ~content ~raw_content ~block_indices =
+    let blocks = Array.of_list content in
+    let rec collect previous pieces = function
+      | [] ->
+        if normalize (List.rev pieces) = normalize (segments raw_content)
+        then Ok {raw_content; block_indices}
+        else Error "inline_content_replay:carrier_mismatch"
+      | index :: rest ->
+        if index <= previous || index < 0 || index >= Array.length blocks then
+          Error "inline_content_replay:invalid_block_identity"
+        else match blocks.(index) with
+          | Text text -> collect index (Inline_reasoning_split.Text text :: pieces) rest
+          | Thinking {content; signature=None} ->
+            collect index (Inline_reasoning_split.Reasoning content :: pieces) rest
+          | Thinking {signature=Some _;_} | ReasoningDetails _ | RedactedThinking _
+          | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ ->
+            Error "inline_content_replay:invalid_content_kind"
+    in
+    let covered = List.for_all (fun (index, block) -> match block with
+      | Text _ -> List.mem index block_indices
+      | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ -> true
+      | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+        (List.mapi (fun index block -> index,block) content) in
+    if covered then collect (-1) [] block_indices
+    else Error "inline_content_replay:uncovered_content"
+
+  let metadata replay = metadata_key, to_yojson replay
+  let of_metadata ~content metadata =
+    match List.filter (fun (key, _) -> key = metadata_key) metadata with
+    | [] -> Ok None
+    | [(_, json)] ->
+      (match of_yojson json with
+       | Error _ -> Error "inline_content_replay:invalid_metadata"
+       | Ok {raw_content;block_indices} ->
+         Result.map Option.some (make ~content ~raw_content ~block_indices))
+    | _ :: _ -> Error "inline_content_replay:duplicate_metadata"
+
+  let retain_validated ~content ~retained_indices replay =
+    let indices = List.mapi (fun index original -> original,index) retained_indices in
+    let rec remap acc = function
+      | [] -> Some (List.rev acc)
+      | original :: rest ->
+        (match List.assoc_opt original indices with
+         | None -> None
+         | Some index -> remap (index :: acc) rest)
+    in
+    match remap [] replay.block_indices with
+    | None -> Ok None
+    | Some block_indices -> Result.map Option.some
+        (make ~content ~raw_content:replay.raw_content ~block_indices)
+
+  let retain ~original_content ~content ~retained_indices replay =
+    Result.bind (make ~content:original_content ~raw_content:replay.raw_content
+      ~block_indices:replay.block_indices)
+      (retain_validated ~content ~retained_indices)
+
+  let retain_metadata ~original_content ~content ~retained_indices metadata =
+    match of_metadata ~content:original_content metadata with
+    | Error _ as error -> error
+    | Ok None -> Ok metadata
+    | Ok (Some replay) ->
+      Result.map (function
+        | None -> remove_metadata metadata
+        | Some replay -> (metadata_key,to_yojson replay) :: remove_metadata metadata)
+        (retain_validated ~content ~retained_indices replay)
+
+end
+
 module Response_replay = struct
   type phase = Absent | Null | Commentary | Final_answer
   [@@deriving show, yojson]
@@ -960,6 +1047,9 @@ module Response_replay = struct
   ;;
 
   let retain_metadata ~original_content ~content ~retained_indices metadata =
+    let ( let* ) = Result.bind in
+    let* metadata = Inline_content_replay.retain_metadata
+        ~original_content ~content ~retained_indices metadata in
     match of_metadata ~content:original_content metadata with
     | Error _ as error -> error
     | Ok None -> Ok metadata
@@ -982,6 +1072,7 @@ type inference_telemetry =
   ; canonical_model_id : string option
   ; reasoning_source : Reasoning_source.t option
   ; reasoning_prefix : Reasoning_prefix.t option [@default None]
+  ; inline_content_replay : Inline_content_replay.t option [@default None]
   ; response_replay : Response_replay.t option [@default None]
   ; effective_context_window : int option
   ; provider_internal_action_count : int option
@@ -1001,6 +1092,7 @@ let default_inference_telemetry : inference_telemetry =
   ; canonical_model_id = None
   ; reasoning_source = None
   ; reasoning_prefix = None
+  ; inline_content_replay = None
   ; response_replay = None
   ; effective_context_window = None
   ; provider_internal_action_count = None
@@ -1019,6 +1111,22 @@ type api_response =
   ; telemetry : inference_telemetry option
   }
 [@@deriving show]
+
+let retain_response_content ~retained_indices ~content (response : api_response) =
+  let ( let* ) = Result.bind in
+  match response.telemetry with
+  | None -> Ok {response with content}
+  | Some telemetry ->
+    let* response_replay = match telemetry.response_replay with
+      | None -> Ok None
+      | Some replay -> Result.map Option.some
+          (Response_replay.retain ~original_content:response.content ~content ~retained_indices replay) in
+    let* inline_content_replay = match telemetry.inline_content_replay with
+      | None -> Ok None
+      | Some replay -> Inline_content_replay.retain
+          ~original_content:response.content ~content ~retained_indices replay in
+    Ok {response with content;telemetry=Some {telemetry with response_replay;inline_content_replay}}
+;;
 
 type assistant_message_error =
   | Reasoning_source_telemetry_missing
@@ -1051,10 +1159,18 @@ let assistant_message_of_response (response : api_response) =
        | Error detail -> Error (Invalid_response_replay detail)
        | Ok replay -> Ok [Response_replay.metadata replay])
   in
+  let replay_metadata = Result.bind replay_metadata (fun metadata ->
+    match Option.bind response.telemetry (fun telemetry -> telemetry.inline_content_replay) with
+    | None -> Ok metadata
+    | Some {Inline_content_replay.raw_content;block_indices} ->
+      (match Inline_content_replay.make ~content:response.content ~raw_content ~block_indices with
+       | Error detail -> Error (Invalid_response_replay detail)
+       | Ok replay -> Ok (Inline_content_replay.metadata replay :: metadata))) in
   match replay_metadata with
   | Error _ as error -> error
   | Ok metadata ->
     if not (content_has_reasoning_artifact response.content)
+       && Option.bind response.telemetry (fun telemetry -> telemetry.inline_content_replay) = None
     then Ok (message metadata)
     else (
       match response.telemetry with
@@ -1143,6 +1259,7 @@ type sse_event =
       { stop_reason : stop_reason option
       ; usage : delta_usage option
       }
+  | InlineContentReplay of { raw_content : string; block_indices : int list }
   | ResponsesOutputItems of (Response_replay.kind * int list) list
   (** Terminal native item grouping, referencing canonical stream block indices.
       This carries no text, tool arguments or provider response payload. *)

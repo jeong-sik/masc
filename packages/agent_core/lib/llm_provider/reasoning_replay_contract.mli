@@ -31,9 +31,9 @@ type streaming_reasoning =
     the typed dialect and carried in the replay capability record; consumers
     never compare source identities on their own terms.
 
-    This type is intentionally not a member of {!t}: {!t} is serialized into
-    the persisted reasoning-source stamp, so adding a field would make every
-    previously stored artifact fail to parse. *)
+    This type is intentionally not a member of {!t}: rotation is the request
+    consumer's compatibility decision, whereas {!t} describes the persisted
+    artifact's producing semantics. *)
 type rotation_policy =
   | Require_identical_source
   (** The artifact is bound to the exact producing source: it carries a
@@ -47,9 +47,15 @@ type rotation_policy =
       difference still drops it. *)
 [@@deriving show, eq, yojson]
 
+(** Source identity includes the original content carrier contract. This is a
+    required persisted field; artifacts lacking it are not converted. *)
+type content_carrier = Canonical_blocks | Inline_chat_content
+[@@deriving show, eq, yojson]
+
 type t =
   { replay_policy : replay_policy
   ; streaming : streaming_reasoning
   ; output_wire : output_wire
+  ; content_carrier : content_carrier
   }
 [@@deriving show, eq, yojson]

@@ -413,7 +413,7 @@ let parse_openai_response_result_json_raw
        and never lands in visible [Text]. *)
     let inline_content_blocks =
       match content_inline_reasoning with
-      | Capabilities.Think_tags ->
+      | Capabilities.Think_tags | Capabilities.Think_tags_with_chat_replay ->
         let splitter = Inline_reasoning_split.create () in
         let head = Inline_reasoning_split.feed_segments splitter text_content in
         let tail = Inline_reasoning_split.flush_segments splitter in
@@ -424,6 +424,19 @@ let parse_openai_response_result_json_raw
       | Capabilities.No_content_inline_reasoning ->
         if Api_common.string_is_blank text_content then [] else [ Text text_content ]
     in
+    let content = thinking_blocks @ inline_content_blocks @ tool_blocks in
+    let* inline_content_replay =
+      match content_inline_reasoning, msg |> member "content" with
+      | Capabilities.Think_tags_with_chat_replay, `String raw_content ->
+        Inline_content_replay.make ~content ~raw_content
+          ~block_indices:(List.mapi (fun index _ -> List.length thinking_blocks + index) inline_content_blocks)
+        |> Result.map Option.some |> Result.map_error unreadable_response
+      | (Capabilities.No_content_inline_reasoning | Capabilities.Think_tags
+        | Capabilities.Think_tags_with_chat_replay), _ -> Ok None
+    in
+    let telemetry = match telemetry_of_openai_json json, inline_content_replay with
+      | None, None -> None
+      | existing, _ -> Some { (Option.value existing ~default:default_inference_telemetry) with inline_content_replay } in
     let stop_reason =
       (* SSOT: Stop_reason_wire owns the wire finish-reason -> stop_reason table
          and the StopToolUse => has-tool-block invariant (previously duplicated
@@ -437,10 +450,9 @@ let parse_openai_response_result_json_raw
       { id = Cli_common_json.member_str "id" json
       ; model = Cli_common_json.member_str "model" json
       ; stop_reason
-      ; content =
-          thinking_blocks @ inline_content_blocks @ tool_blocks
+      ; content
       ; usage = usage_of_openai_json json
-      ; telemetry = telemetry_of_openai_json json
+      ; telemetry
       }
   | err ->
     (match Openai_error_envelope.of_error_value err with

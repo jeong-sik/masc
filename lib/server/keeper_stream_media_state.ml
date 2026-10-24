@@ -231,5 +231,5 @@ let on_event t (evt : Agent_core.Types.sse_event) =
       ; _
       }
   | Agent_core.Types.Connected
-  | Agent_core.Types.ResponsesOutputItems _
+  | Agent_core.Types.InlineContentReplay _ | Agent_core.Types.ResponsesOutputItems _
   | Agent_core.Types.Ping -> Unchanged

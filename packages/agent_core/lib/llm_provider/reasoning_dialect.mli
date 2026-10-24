@@ -103,6 +103,7 @@ type t =
   ; replay_policy : replay_policy
   ; streaming : streaming_reasoning
   ; output_wire : output_wire
+  ; content_carrier : Reasoning_replay_contract.content_carrier
   }
 
 val default : t

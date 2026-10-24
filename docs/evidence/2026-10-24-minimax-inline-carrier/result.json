@@ -1,0 +1,36 @@
+{
+  "scope": "actual extracted Inline_content_replay and production splitter core with fixture content payload types",
+  "source_sha256": {
+    "types.ml": "722aea12a1ee0b78fab694ba74f156672522418cebbccc0e1d31932086056040",
+    "carrier_slice": "b0820a7e247058acbcc3ea2340e7c9737271d9cad3c765ce1f2dead477ed11d5",
+    "reasoning_replay_contract.ml": "9c4b731fd155c133ff8111d8e50359b4b58ab3500f9852130511d0d14fa674c6",
+    "splitter_core": "2e54a7585c6c2bd16468f82967739b6e71d5c922c1839b8b033e39a8114ad619"
+  },
+  "project_linked": false,
+  "production_parser_serializer_executed": false,
+  "production_stream_accumulator_executed": false,
+  "provider_called": false,
+  "checks": {
+    "source_contract_json_round_trip": true,
+    "missing_carrier_contract_is_rejected": true,
+    "unknown_carrier_contract_is_rejected": true,
+    "carrier_contract_changes_source_semantics": true,
+    "raw_scalar_bytes_preserved": true,
+    "metadata_json_round_trip": true,
+    "native_sidechannel_reasoning_is_unbound": true,
+    "retained_indices_remap_after_native_drop": true,
+    "partial_inline_drop_removes_carrier": true,
+    "appended_uncovered_text_is_rejected": true,
+    "raw_edit_is_rejected": true,
+    "duplicate_metadata_is_rejected": true,
+    "duplicate_occurrence_is_rejected": true,
+    "negative_occurrence_is_rejected": true,
+    "out_of_range_occurrence_is_rejected": true,
+    "media_append_is_rejected": true,
+    "every_tag_chunk_boundary_validates": true,
+    "unicode_and_whitespace_chunk_boundaries_validate": true,
+    "unfinished_thinking_chunk_boundaries_validate": true,
+    "empty_tag_carrier_validates": true,
+    "empty_scalar_is_distinct_metadata": true
+  }
+}

@@ -2868,8 +2868,8 @@ let test_ollama_tool_media_occurrence_ownership () =
     (List.nth wire 4 |> member "tool_name" |> to_string);
   let nested_wire = List.nth wire 4 |> member "content" |> to_string
       |> Yojson.Safe.from_string |> to_list |> List.hd in
-  check_bool "nested result text remains in structured content" true
-    (member "content" nested_wire <> `Null);
+  check_bool "nested result retains its text and identity without image duplication" true
+    (nested_wire = Api_common.content_block_to_json (result "nested" [Text "nested text"]));
   let invalid_image = image_block ~source_type:Url ~media_type:"image/png"
       ~data:"https://example.test/image.png" () in
   expect_invalid_arg "native tool URL image" (fun () ->

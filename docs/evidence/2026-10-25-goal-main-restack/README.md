@@ -4,7 +4,7 @@ This is a local 16-layer source candidate over main
 `98a1508e6ecbda1d38d33aa7d0eb7f366b420ddf`. It preserves the public Goal14
 head `895df663fb303ee2fa95c38bbd28b571db9abb62`, the complete latest Draft
 measurement-receipt head `177219da10c1b27b606c10af70b4bf6ea39211da`, and new
-Draft observation-retention head `0606ece9b17f076c87926b92f39a373b26a11a5a`.
+Draft observation-retention head `32805eb764eab2710262446e925b0ea5c3a44c08`.
 All latest author production and raw evidence files are preserved, apart from
 explicitly documented conflict/consumer repairs and own-fragment citations.
 Preserving raw runtime reports is not an independent audit or a claim to have
@@ -144,19 +144,36 @@ in Node, fail for a positive-byte `prompt.completion_authority` before the
 one-line introducing-layer mapping and preserve its label and byte total
 afterward. No layout assertion, browser render or visible UI success is claimed.
 
-## Remaining top-layer HOLD
+## Latest author carrier response and remaining evidence limits
 
-The latest author documentation at 0606 preserves a separate current-source
-P2: a turn-local Completion Authority event in the Official Start standing
-System can outlive the local turn. An absent next-turn event creates no new
-carried observation. The author independent counterexample and source FAIL
-are preserved verbatim. Our Goal-empty projection checks address a different
-observation and do not clear this event-lifetime defect. A separately reviewed
-carrier repair is still needed; no whole-stack source PASS is claimed.
+The complete 0606-to-32805eb7 author delta is preserved. It projects the closed
+Completion Authority observation out of an exact Official Start standing
+System and into a separately sourced User input. Goal keeps its System/held
+policy. Host reads its post-hook issuer once and shares that immutable
+snapshot with Start and Resume; Claude, Codex, Antigravity and Muse use the
+shared Start composer. Missing/stale issuers cannot borrow an old event or
+attest new User input. Ordinary HTTP request assembly is unchanged.
 
-The author's completed native run 40114401559 at 2be9 also reports an
-unqualified Text constructor compilation error before any selected suite ran.
-The introducing-layer candidate qualifies only that first pattern as
-`Agent_core.Types.Text`; later patterns resolve from the same closed type.
-This is a minimal source compile repair. The complete native fixture was not
-built here, and none of the six suites is counted as executed after it.
+The new exact-source Start/Resume component passes 55 checks against this
+candidate's real typed-Origin and codec-v3 interfaces. It includes the actual
+Host.start_prompt and selected Host snapshot/blank-base guard statements, with
+explicit minimal record/guard and unreachable-effect ports. It observes Start
+System = BASE + Goal, one current event in User, absent next event = NEXT OWNER,
+changed correlation keys, canonical-source/actual-target proof and JSON write
+slot binding. These are pure components, not full Host/hooks, a native process,
+vendor retention, remote model behavior or whole-stack source approval.
+
+The Goal withdrawal probe was rerun because the actual submission-link API
+now requires a closed Start/Resume target. Before and unsafe-formatter controls
+still fail; the current repair passes 25 checks. Scope/codec sources are
+unchanged, so their meaningful prior executions are rebound by exact SHA
+rather than rerun. The already captured Dashboard consumer fragment is also
+unchanged and retains its actual TypeError-to-74-byte result.
+
+The author's same follow-up adopts the identical Agent_core.Types.Text
+qualification from our earlier local candidate. The completed older native
+run 40114401559 remains historical compile-failure evidence; no fresh complete
+native compilation or any of its six selected-suite executions is claimed.
+The prior 2be9/0606 source FAIL and independent counterexample remain in the
+author evidence as historical findings addressed by this new source delta.
+Current exact-scope independent review and native verification remain separate.

@@ -1308,6 +1308,7 @@ let test_goal_summaries_render_titles () =
           ; summary_title = "Improve wake context"
           ; summary_criterion = None
           ; summary_review_note = None
+      ; summary_measurement = Ok None
           ; summary_phase = None
           ; summary_held_task_link = Prompt.Not_served_by_held_task
           }
@@ -1341,6 +1342,7 @@ let test_goal_heading_counts_what_the_block_lists () =
           ; summary_title = "Improve wake context"
           ; summary_criterion = None
           ; summary_review_note = None
+      ; summary_measurement = Ok None
           ; summary_phase = None
           ; summary_held_task_link = Prompt.Not_served_by_held_task
           }

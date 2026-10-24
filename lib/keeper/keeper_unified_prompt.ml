@@ -203,6 +203,7 @@ type goal_summary =
   ; summary_phase : Goal_phase.t option
   ; summary_criterion : Goal_store.criterion option
   ; summary_review_note : string option
+  ; summary_measurement : (Goal_measurement.t option, string) result
   ; summary_held_task_link : held_task_link
   }
 
@@ -242,6 +243,22 @@ let format_goal_summaries (summaries : goal_summary list) : string =
                [ render_fragment Prompt_names.keeper_world_active_goals_review
                    [ "note", note ] ])
           in
+          let measurement =
+            match summary.summary_measurement with
+            | Ok None ->
+              render_fragment
+                Prompt_names.keeper_world_active_goals_measurement_not_recorded []
+            | Ok (Some record) ->
+              render_fragment
+                Prompt_names.keeper_world_active_goals_measurement_reported
+                [ "measurement", Goal_measurement.to_yojson record
+                  |> Yojson.Safe.to_string ]
+            | Error reason ->
+              render_fragment
+                Prompt_names.keeper_world_active_goals_measurement_unavailable
+                [ "reason", reason ]
+          in
+          let details = details @ [ measurement ] in
           let base = match summary.summary_phase with
           | Some Goal_phase.Verifying ->
             base
@@ -1102,6 +1119,11 @@ let active_goal_summaries ~(config : Workspace.config) ~(keeper_name : string) =
                 keeper_name detail;
               fun _goal_id -> Held_task_link_unreadable)
        in
+       let measurements =
+         match open_goals with
+         | [] -> Ok []
+         | _ :: _ -> Goal_measurement.load config
+       in
        List.map
          (fun (goal : Goal_store.goal) ->
             { summary_goal_id = goal.id
@@ -1109,6 +1131,7 @@ let active_goal_summaries ~(config : Workspace.config) ~(keeper_name : string) =
             ; summary_phase = Some goal.phase
             ; summary_criterion = Some (Goal_store.criterion_of_goal goal)
             ; summary_review_note = goal.last_review_note
+            ; summary_measurement = Goal_measurement.latest_for_goal measurements goal
             ; summary_held_task_link = held_task_link goal.id
             })
          open_goals)

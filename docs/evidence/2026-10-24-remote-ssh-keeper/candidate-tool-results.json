@@ -1,0 +1,102 @@
+[
+  {
+    "call_id": "ssh-file-0-0",
+    "tool": "Execute",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-0",
+      "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"recorded\",\"receipts\":[{\"status\":\"unavailable\",\"reason\":\"peer_receipt_missing\"}]},\"cwd\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"execution_location\":{\"cwd\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"5ad9995a0b814f54a4a36b1aaf5ee49c\\\", \\\"cwd\\\": \\\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\\\", \\\"hostname\\\": \\\"6758e8d27ec8\\\", \\\"uid\\\": 1000}\\n\",\"typed\":true,\"execution_time_ms\":500}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-0-1",
+    "tool": "Write",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-1",
+      "content": "{\"ok\":true,\"path\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a/notes.txt\",\"mode\":\"overwrite\",\"bytes_written\":7,\"via\":\"remote_ssh\"}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-0-2",
+    "tool": "Read",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-2",
+      "content": "{\"ok\":true,\"path\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a/notes.txt\",\"bytes\":7,\"truncated\":false,\"offset\":1,\"returned_lines\":1,\"content\":\"before\\n\",\"via\":\"remote_ssh\"}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-0-3",
+    "tool": "Edit",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-3",
+      "content": "{\"ok\":true,\"path\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a/notes.txt\",\"mode\":\"patch\",\"bytes_written\":6,\"changed\":true,\"occurrences\":1,\"replace_all\":false,\"via\":\"remote_ssh\"}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-0-4",
+    "tool": "Grep",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-4",
+      "content": "{\"ok\":true,\"op\":\"rg\",\"path\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a/notes.txt\",\"pattern\":\"^after$\",\"via\":\"remote_ssh\",\"status\":{\"kind\":\"exit\",\"code\":0},\"matches\":[\"1:after\"]}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-0-5",
+    "tool": "Execute",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-5",
+      "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"recorded\",\"receipts\":[{\"status\":\"unavailable\",\"reason\":\"peer_receipt_missing\"}]},\"cwd\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"execution_location\":{\"cwd\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"5ad9995a0b814f54a4a36b1aaf5ee49c\\\", \\\"cwd\\\": \\\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\\\", \\\"hostname\\\": \\\"6758e8d27ec8\\\", \\\"uid\\\": 1000, \\\"notes\\\": \\\"after\\\\n\\\", \\\"sha256\\\": \\\"7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919\\\", \\\"files\\\": [\\\"notes.txt\\\", \\\"ssh-proof.json\\\"]}\\n\",\"typed\":true,\"execution_time_ms\":382}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-pin-denied-0",
+    "tool": "Execute",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-pin-denied-0",
+      "content": "{\"ok\":false,\"status\":{\"kind\":\"exit\",\"code\":1},\"shim_execution_evidence\":{\"status\":\"recorded\",\"receipts\":[{\"status\":\"unavailable\",\"reason\":\"transport_unavailable\"}]},\"cwd\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"execution_location\":{\"cwd\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"No ED25519 host key is known for [127.0.0.1]:56243 and you have requested strict checking.\\r\\nHost key verification failed.\\r\\nremote_ssh_transport_error: endpoint proof: no result trailer delimiter\",\"typed\":true,\"execution_time_ms\":63}"
+    },
+    "expected_failure": true
+  },
+  {
+    "call_id": "ssh-file-pin-restored-0",
+    "tool": "Execute",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-pin-restored-0",
+      "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"recorded\",\"receipts\":[{\"status\":\"unavailable\",\"reason\":\"peer_receipt_missing\"}]},\"cwd\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"execution_location\":{\"cwd\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"5ad9995a0b814f54a4a36b1aaf5ee49c\\\", \\\"cwd\\\": \\\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\\\", \\\"hostname\\\": \\\"6758e8d27ec8\\\", \\\"uid\\\": 1000, \\\"notes\\\": \\\"after\\\\n\\\", \\\"sha256\\\": \\\"7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919\\\", \\\"files\\\": [\\\"notes.txt\\\", \\\"ssh-proof.json\\\"]}\\n\",\"typed\":true,\"execution_time_ms\":398}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-restart-0",
+    "tool": "Read",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-restart-0",
+      "content": "{\"ok\":true,\"path\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a/notes.txt\",\"bytes\":6,\"truncated\":false,\"offset\":1,\"returned_lines\":1,\"content\":\"after\\n\",\"via\":\"remote_ssh\"}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-restart-1",
+    "tool": "Execute",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-restart-1",
+      "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"recorded\",\"receipts\":[{\"status\":\"unavailable\",\"reason\":\"peer_receipt_missing\"}]},\"cwd\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"execution_location\":{\"cwd\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"5ad9995a0b814f54a4a36b1aaf5ee49c\\\", \\\"cwd\\\": \\\"/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a\\\", \\\"hostname\\\": \\\"6758e8d27ec8\\\", \\\"uid\\\": 1000, \\\"notes\\\": \\\"after\\\\n\\\", \\\"sha256\\\": \\\"7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919\\\", \\\"files\\\": [\\\"notes.txt\\\", \\\"ssh-proof.json\\\"]}\\n\",\"typed\":true,\"execution_time_ms\":360}"
+    },
+    "expected_failure": false
+  }
+]

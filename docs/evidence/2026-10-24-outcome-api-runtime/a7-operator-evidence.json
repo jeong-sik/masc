@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "result": {
+    "task_id": "task-001",
+    "verification_id": "vrf-6f2840c94c7e633c3bf1ce78cd51d174",
+    "producer": "goal-canary-operator",
+    "authority_kind": "human_operator",
+    "authority_actor": "goal-canary-operator",
+    "evidence": {
+      "access": "available",
+      "request": {
+        "id": "vrf-6f2840c94c7e633c3bf1ce78cd51d174",
+        "task_id": "task-001",
+        "worker": "goal-canary-operator",
+        "created_at": 1792834850.173826
+      },
+      "items": [
+        {
+          "kind": "note",
+          "content": "Actual isolated Docker computation succeeded; controlled approval boundary observation."
+        },
+        {
+          "kind": "note",
+          "content": "Docker Node exit0 stdout4; controlled operator-proxy fixture, no independent LLM or Goal confirmation claim."
+        },
+        {
+          "kind": "note",
+          "content": "\uc2e4\uc81c Docker \uc0b0\uc220 \uacb0\uacfc 4\ub97c \ud655\uc778\ud588\ub2e4. \uc774\ud6c4 \uc2b9\uc778\uc740 \ud1b5\uc81c\ub41c operator-proxy fixture\uc774\uba70 \ub3c5\ub9bd LLM \ud310\ub2e8\uc774\ub098 Goal \uc0ac\ub78c \ud655\uc778\uc744 \ub73b\ud558\uc9c0 \uc54a\ub294\ub2e4."
+        }
+      ]
+    }
+  }
+}

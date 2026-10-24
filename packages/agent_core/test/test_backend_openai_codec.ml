@@ -517,6 +517,139 @@ let test_parse_reasoning_details_and_tool_calls_coexist () =
      | _ -> false)
 ;;
 
+(* #27924: use the shipped native MiniMax model declaration, canonical
+   assistant-history projection and final request builder together. The older
+   details fixture above chooses its replay dialect by hand. These are offline
+   codec fixtures, not evidence for Ollama-hosted MiniMax or native API access. *)
+let test_minimax_native_catalog_replay () =
+  let caps = require_model_capabilities "minimax-m3" in
+  let config =
+    Provider_config.make
+      ~kind:Provider_config.OpenAI_compat
+      ~provider_id:"minimax"
+      ~model_id:"minimax-m3"
+      ~base_url:"https://api.minimax.io"
+      ~request_path:"/v1/chat/completions"
+      ~model_capabilities_override:caps
+      ()
+  in
+  let call =
+    `Assoc
+      [ "id", `String "weather-call"
+      ; "type", `String "function"
+      ; "function", `Assoc
+          [ "name", `String "weather"
+          ; "arguments", `String {|{"city":"Seoul"}|}
+          ]
+      ]
+  in
+  let assistant response =
+    let response = Complete_common.patch_telemetry response ~config None in
+    match assistant_message_of_response response with
+    | Ok message -> message
+    | Error error -> Alcotest.fail (show_assistant_message_error error)
+  in
+  let sync content fields =
+    match Parse.parse_openai_response_result_json
+            ~content_inline_reasoning:caps.content_inline_reasoning
+            (response_json ~content ~finish_reason:"tool_calls"
+               ~message_fields:(("tool_calls", `List [call]) :: fields) ()) with
+    | Ok response -> assistant response
+    | Error error -> Alcotest.fail (Parse.parse_error_to_string error)
+  in
+  let stream content fields =
+    let dialect = Reasoning_dialect.for_provider_config config in
+    let inline_reasoning = match caps.content_inline_reasoning with
+      | Capabilities.Think_tags -> true
+      | Capabilities.No_content_inline_reasoning -> false
+    in
+    let state = Streaming.create_openai_stream_state ~inline_reasoning () in
+    let acc = Complete_stream_acc.create_stream_acc () in
+    let feed wire =
+      let parsed = Streaming.parse_openai_sse_chunk
+          ~streaming_reasoning:dialect.streaming wire in
+      let events, _ = Streaming.openai_sse_parse_result_to_events state parsed in
+      List.iter (Complete_stream_acc.accumulate_event acc) events
+    in
+    let chunk delta finish = Yojson.Safe.to_string
+        (`Assoc ["id", `String "mini-response"; "model", `String "minimax-m3";
+                 "choices", `List [`Assoc ["index", `Int 0; "delta", `Assoc delta;
+                                           "finish_reason", finish]]]) in
+    let indexed_call = match call with
+      | `Assoc fields -> `Assoc (("index", `Int 0) :: fields)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        Alcotest.fail "tool fixture must be an object"
+    in
+    feed (chunk (("content", content) :: fields) `Null);
+    feed (chunk ["tool_calls", `List [indexed_call]] `Null);
+    feed (chunk [] (`String "tool_calls"));
+    feed "[DONE]";
+    match Complete_stream_acc.finalize_stream_acc acc with
+    | Ok response -> assistant response
+    | Error error -> Alcotest.fail (show_stream_error error)
+  in
+  let cases =
+    [ "split reasoning", `String "", ["reasoning_content", `String "check forecast"],
+        Some "check forecast"
+    ; "structured reasoning", `String "",
+        [ "reasoning_content", `String "check forecast"
+        ; "reasoning_details", `List [`Assoc
+            ["type", `String "reasoning.text"; "id", `String "thought-1";
+             "format", `String "MiniMax-response-v1"; "index", `Int 0;
+             "text", `String "check forecast"]] ],
+        Some "check forecast"
+    ; "inline reasoning", `String "<think>check forecast</think>", [],
+        Some "check forecast"
+    ; "tool without thinking", `Null, [], None
+    ]
+  in
+  let last = match Parse.parse_openai_response_result_json
+                     (response_json ~content:(`String "Sunny") ()) with
+    | Ok response -> assistant response
+    | Error error -> Alcotest.fail (Parse.parse_error_to_string error)
+  in
+  List.iter (fun (mode, parse) -> List.iter
+    (fun (label, content, fields, expected_reasoning) ->
+       let label = mode ^ ": " ^ label in
+       let first = parse content fields in
+       let history =
+         [ msg User [Text "Weather?"]
+         ; first
+         ; msg Tool
+             [ToolResult { tool_use_id = "weather-call"; content = "sunny"
+                         ; outcome = Tool_succeeded; json = None; content_blocks = None }]
+         ; last
+         ; msg User [Text "And tomorrow?"]
+         ]
+       in
+       let body = Backend_openai_request.build_request ~config ~messages:history ()
+           |> Yojson.Safe.from_string in
+       let wire = member "messages" body |> to_list in
+       check_int (label ^ " keeps complete conversation") 5 (List.length wire);
+       let replay = List.nth wire 1 in
+       check_bool (label ^ " tool identity and arguments") true
+         (member "tool_calls" replay = `List [call]);
+       Alcotest.(check (option string)) (label ^ " keeps reasoning across human turn")
+         expected_reasoning
+         (match member "reasoning_content" replay with
+          | `String text -> Some text
+          | `Null -> None
+          | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
+            Alcotest.fail "reasoning_content is not a string");
+       check_bool (label ^ " structured reasoning remains unchanged") true
+         (member "reasoning_details" replay =
+          match List.assoc_opt "reasoning_details" fields with
+          | Some details -> details
+          | None -> `Null);
+       check_bool (label ^ " reasoning stays out of visible answer") true
+         (match member "content" replay with
+          | `Null | `String "" -> true
+          | `String _ | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> false);
+       check_string (label ^ " answer without thinking retained") "Sunny"
+         (member "content" (List.nth wire 3) |> to_string))
+    cases) ["sync", sync; "stream", stream]
+;;
+
 let test_parse_reasoning_details_rejects_malformed () =
   let expect_error label expected_prefix reasoning_details =
     let json =
@@ -3275,6 +3408,10 @@ let () =
             "reasoning_details and tool_calls coexist"
             `Quick
             test_parse_reasoning_details_and_tool_calls_coexist
+        ; Alcotest.test_case
+            "MiniMax native catalog parse/history/request replay"
+            `Quick
+            test_minimax_native_catalog_replay
         ; Alcotest.test_case
             "reasoning_details rejects malformed"
             `Quick

@@ -48,7 +48,7 @@ const frameTarget=async()=>{
  assert.equal(matches.length,1,'fixture must expose exactly one observed iframe button');return '@'+matches[0][1];
 };
 const act=async(action,target)=>{
- const result=await nativeTargetInput(page,{action,target,expectedUrl:${JSON.stringify(url)},waitMs:2000});
+ const result=await nativeTargetInput(page,{action,target,expectedUrl:${JSON.stringify(url)}});
  assert.equal(result.error,null,JSON.stringify(result));
  assert(result.receipt!==null&&typeof result.receipt==='object'&&!Array.isArray(result.receipt),'native receipt must satisfy the actual OCaml peer object contract');
  const kind=action==='hover'?'mouseenter':'dblclick';
@@ -66,12 +66,12 @@ await snapshot();state=await act('double_click','text="Frame action"');
 assert.equal(state.outer.filter(e=>e.type==='dblclick'&&e.trusted===true).length,1);
 assert.equal(state.inner.filter(e=>e.type==='dblclick').length,1,'outer text action does not double-click the iframe again');
 const before=await observe();
-const refusal=await nativeTargetInput(page,{action:'hover',target:'loc=role:button[name="Frame action"]',expectedUrl:${JSON.stringify(url+'wrong')},waitMs:2000});
+const refusal=await nativeTargetInput(page,{action:'hover',target:'loc=role:button[name="Frame action"]',expectedUrl:${JSON.stringify(url+'wrong')}});
 assert.equal(refusal.before,true);assert.match(refusal.error,/not at expectedUrl/);
 assert.deepEqual(await observe(),before);observations.push({action:'wrong_url',result:refusal,observed:before});
 await page.screenshot({path:${JSON.stringify(join(resolve(output),'trusted-frame-results.png'))}});
 const stale=await frameTarget();await page.evaluate(()=>document.querySelector('iframe').remove());
-const missing=await nativeTargetInput(page,{action:'hover',target:stale,expectedUrl:${JSON.stringify(url)},waitMs:2000});
+const missing=await nativeTargetInput(page,{action:'hover',target:stale,expectedUrl:${JSON.stringify(url)}});
 assert.equal(missing.before,undefined);assert.equal(typeof missing.error,"string");assert.deepEqual(await observe(),before);
 observations.push({action:'removed_frame_ref',target:stale,result:missing,observed:await observe()});
 console.log('MASC_PROOF '+JSON.stringify({spaceId:task.spaceId,finished:false,url:${JSON.stringify(url)},frameOrigin:${JSON.stringify(frameOrigin)},observations}));`;

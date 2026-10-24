@@ -5,8 +5,7 @@ type page_key =
   }
 
 type filter =
-  { status : Masc_domain.Task_status_tag.t option
-  ; include_done : bool
+  { lifecycle : Keeper_tasks_list_query.lifecycle_filter
   ; projection : string
   ; selection : Keeper_tasks_list_query.t
   }
@@ -34,11 +33,7 @@ let compare_key left right =
 
 let filter_to_yojson filter =
   `Assoc
-    [ ( "status"
-      , match filter.status with
-        | None -> `Null
-        | Some status -> `String (Masc_domain.Task_status_tag.to_string status) )
-    ; "include_done", `Bool filter.include_done
+    [ "lifecycle", Keeper_tasks_list_query.lifecycle_filter_to_yojson filter.lifecycle
     ; "projection", `String filter.projection
     ; "selection", Keeper_tasks_list_query.to_yojson filter.selection
     ]
@@ -68,19 +63,14 @@ let field name = function
   | _ -> None
 ;;
 
-let filter_of_yojson json =
-  let selection =
-    Option.bind (field "selection" json)
-      (fun value -> Result.to_option (Keeper_tasks_list_query.of_args value))
-  in
-  match field "status" json, field "include_done" json, field "projection" json, selection with
-  | Some status, Some (`Bool include_done), Some (`String projection), Some selection ->
-    (match status with
-     | `Null -> Some { status = None; include_done; projection; selection }
-     | `String raw ->
-       Option.map
-         (fun status -> { status = Some status; include_done; projection; selection })
-         (Masc_domain.Task_status_tag.of_string raw)
+let filter_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+     | ["lifecycle", lifecycle; "projection", `String projection; "selection", selection] ->
+       (match Keeper_tasks_list_query.lifecycle_filter_of_yojson lifecycle,
+              Keeper_tasks_list_query.of_args selection with
+        | Some lifecycle, Ok selection -> Some { lifecycle; projection; selection }
+        | None, _ | _, Error _ -> None)
      | _ -> None)
   | _ -> None
 ;;
@@ -93,8 +83,7 @@ let page_key_of_yojson json =
 ;;
 
 let filter_equal left right =
-  Option.equal Masc_domain.Task_status_tag.equal left.status right.status
-  && Bool.equal left.include_done right.include_done
+  Keeper_tasks_list_query.lifecycle_filter_equal left.lifecycle right.lifecycle
   && String.equal left.projection right.projection
   && Keeper_tasks_list_query.equal left.selection right.selection
 ;;

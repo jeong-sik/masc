@@ -599,7 +599,9 @@ let test_tasks_list_refuses_a_status_it_does_not_know () =
          | Error (`Msg message) -> fail message
          | Ok text ->
            let json = Yojson.Safe.from_string text in
-           let filter = replace "status" (`String "in-progress") (U.member "filter" json) in
+           let filter = replace "lifecycle"
+               (`Assoc ["kind", `String "status"; "status", `String "in-progress"])
+               (U.member "filter" json) in
            Base64.encode_string
              ~pad:false
              ~alphabet:Base64.uri_safe_alphabet
@@ -609,7 +611,18 @@ let test_tasks_list_refuses_a_status_it_does_not_know () =
        check string "the cursor is the field" "cursor"
          U.(payload |> member "field" |> to_string);
        check string "an unknown status is unparseable" "cursor_unparseable"
-         U.(payload |> member "error_kind" |> to_string))
+         U.(payload |> member "error_kind" |> to_string);
+       let old_shape = match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet issued with
+         | Error (`Msg message) -> fail message
+         | Ok text ->
+           let json = Yojson.Safe.from_string text in
+           let filter = U.member "filter" json in
+           let old_filter = `Assoc ["status", `Null; "include_done", `Bool false;
+             "projection", U.member "projection" filter; "selection", U.member "selection" filter] in
+           Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+             (Yojson.Safe.to_string (replace "filter" old_filter json)) in
+       check string "an old opaque filter is refused rather than reinterpreted" "cursor_unparseable"
+         U.(refused "an old cursor shape" (call old_shape) |> member "error_kind" |> to_string))
 ;;
 
 let test_tasks_list_targeted_queries () =
@@ -632,6 +645,17 @@ let test_tasks_list_targeted_queries () =
          ; { seed with id = "d"; title = "Release done";
              task_status = Masc_domain.Done { assignee = "alice";
                completed_at = "2026-10-01T19:00:00Z"; notes = Some "receipt" } }
+         ; { seed with id = "e"; title = "Cancelled work";
+             task_status = Masc_domain.Cancelled { cancelled_by = "alice";
+               cancelled_at = "2026-10-01T19:00:00Z"; reason = Some "withdrawn" } }
+         ; { seed with id = "f"; title = "Unclaimed work"; task_status = Masc_domain.Todo }
+         ; { seed with id = "g"; title = "Claimed work";
+             task_status = Masc_domain.Claimed { assignee = "alice";
+               claimed_at = "2026-10-01T18:00:00Z" } }
+         ; { seed with id = "h"; title = "Submitted work";
+             task_status = Masc_domain.AwaitingVerification { assignee = "alice";
+               started_at = "2026-10-01T18:00:00Z"; submitted_at = "2026-10-01T18:30:00Z";
+               verification_id = "verification-h" } }
          ] in
        Workspace_backlog.write_backlog config { backlog with tasks };
        Workspace_goal_index.write_goal_task_links config [ "goal-a", [ "a"; "b"; "d" ] ];
@@ -661,6 +685,44 @@ let test_tasks_list_targeted_queries () =
        let selected = page [ "task_ids", `List [ `String "d"; `String "a" ];
                              "include_done", `Bool true; "projection", `String "full" ] in
        check (list string) "known IDs batch full contracts including completion" [ "a"; "d" ] (ids selected);
+       let exact = ["task_ids", `List (List.map (fun id -> `String id) ["a";"d";"e";"f";"g";"h"]);
+                    "projection", `String "full"] in
+       let all = page exact in
+       check (list string) "exact IDs survive every lifecycle transition by default"
+         ["a";"d";"e";"f";"g";"h"] (ids all);
+       check (list string) "known Task lookup reads all six persisted states"
+         ["in_progress";"done";"cancelled";"todo";"claimed";"awaiting_verification"]
+         U.(all |> member "snapshot" |> to_list
+            |> List.map (fun row -> row |> member "status" |> to_string));
+       check (list string) "general discovery remains active-only" ["a";"b";"c";"f";"g";"h"]
+         (ids (page []));
+       check (list string) "explicit false still excludes done and cancelled" ["a";"f";"g";"h"]
+         (ids (page (("include_done", `Bool false) :: exact)));
+       check (list string) "explicit true includes done and excludes cancelled" ["a";"d";"f";"g";"h"]
+         (ids (page (("include_done", `Bool true) :: exact)));
+       check (list string) "explicit null status keeps the active default" ["a";"f";"g";"h"]
+         (ids (page (("status", `Null) :: exact)));
+       List.iter (fun (status,id) -> check (list string) "an explicit state overrides the flag"
+           [id] (ids (page (["status", `String status; "include_done", `Bool false] @ exact))))
+         ["in_progress","a";"done","d";"cancelled","e";"todo","f";
+          "claimed","g";"awaiting_verification","h"];
+       let exact_revision = U.(all |> member "revision") in
+       check string "repeated exact lookup can acknowledge the same revision" "unchanged"
+         U.(page (("if_revision", exact_revision) :: exact) |> member "kind" |> to_string);
+       check string "a different resolved lifecycle cannot inherit that revision" "snapshot"
+         U.(page (["if_revision", exact_revision; "include_done", `Bool true] @ exact)
+            |> member "kind" |> to_string);
+       let first_exact = page (("limit", `Int 1) :: exact) in
+       let exact_cursor = U.(first_exact |> member "next_cursor") in
+       let done_page = page (["limit", `Int 1; "cursor", exact_cursor] @ exact) in
+       check (list string) "exact lookup cursor reaches the completed Task" ["d"] (ids done_page);
+       check (list string) "the following exact page retains the cancelled Task" ["e"]
+         (ids (page (["limit", `Int 1; "cursor", U.member "next_cursor" done_page] @ exact)));
+       List.iter (fun include_done ->
+         match (execute (["limit", `Int 1; "cursor", exact_cursor;
+                           "include_done", `Bool include_done] @ exact)).disposition with
+         | Tool_result.Failed Tool_result.Policy_rejection -> ()
+         | _ -> fail "cursor crossed into another resolved lifecycle") [true;false];
        let changed = execute [ "cursor", cursor; "query", `String "RELEASE" ] in
        (match changed.disposition with
         | Tool_result.Failed Tool_result.Policy_rejection -> ()
@@ -678,7 +740,8 @@ let test_tasks_list_targeted_queries () =
          | Tool_result.Failed Tool_result.Policy_rejection -> ()
          | _ -> fail "invalid selection was silently ignored")
          [ "task_ids", `List []; "task_ids", `List [ `Int 1 ];
-           "assignee", `Int 1; "goal_id", `String " "; "query", `String "" ];
+           "assignee", `Int 1; "goal_id", `String " "; "query", `String "";
+           "include_done", `Null; "include_done", `String "true"; "include_done", `Int 1 ];
        check (list string) "unlinked Goal has no matches" []
          (ids (page [ "goal_id", `String "unknown" ]));
        let path = Workspace_goal_index.goal_task_links_path config in

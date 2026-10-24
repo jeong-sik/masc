@@ -42,7 +42,8 @@ val canonical_output_contract : unit -> string
 (** The output-contract sentence with the canonical verdict schema. *)
 
 val prepare
-  :  verification_id:string
+  :  generator_runtime:string option
+  -> verification_id:string
   -> attempt:int
   -> question:Task.Anti_rationalization.verdict_question
   -> lookup_root:Task.Anti_rationalization.lookup_root
@@ -59,6 +60,8 @@ val prepare
 val verification_id : t -> string
 val attempt : t -> int
 val review_request : t -> Task.Anti_rationalization.review_request
+val generator_runtime : t -> string option
+(** Captured producer runtime evidence, never rebuilt from a later runtime alias. *)
 val question : t -> Task.Anti_rationalization.verdict_question
 val lookup_root : t -> Task.Anti_rationalization.lookup_root
 val lookup_schemas : t -> string list

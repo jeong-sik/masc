@@ -33,7 +33,14 @@ interface HarnessOverview {
   distinct_runtime_rate?: number | null
   distinct_runtime_count?: number
   verdicts_with_generator_runtime?: number
-  model_identity_observation?: { kind: 'unobserved'; verdict_count: number }
+  model_identity_observation?: {
+    observed_verdict_count: number
+    unobserved_verdict_count: number
+    same_model_identity_count: number
+    distinct_model_identity_count: number
+    distinct_model_identity_rate: number | null
+    unobserved_causes: { producer: number; evaluator: number; both: number }
+  }
 }
 
 export interface HarnessVerdictItem {

@@ -119,7 +119,7 @@ let test_actual_retained_lookup_and_restored_receipt () = with_workspace (fun co
      | Tool_result.Completed {content_blocks=None; _} | Tool_result.Failed _ | Tool_result.Deferred _ ->
        Alcotest.fail (Tool_result.message result));
     on_tool_result ~input result;
-    Ok {AR.selected_runtime_id="goal-reviewer"; verdict=Some (AR.Approve "The actual evidence reaches the metric.")})
+    Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None; verdict=Some (AR.Approve "The actual evidence reaches the metric.")})
     (fun () ->
       let first = checked (run store retained authority) in
       Alcotest.(check int) "exactly one actual reviewer entry" 1 !calls;
@@ -184,7 +184,7 @@ let test_pre_admission_repair_keeps_original () = with_workspace (fun config sto
   with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
       ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-    incr calls; Ok {AR.selected_runtime_id="goal-reviewer"; verdict=Some (AR.Approve "admitted")}) (fun () ->
+    incr calls; Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None; verdict=Some (AR.Approve "admitted")}) (fun () ->
     Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn (fun () -> Error "fixture admission unavailable");
     let declined = checked (run store retained authority) in
     Alcotest.(check bool) "actual admission did not judge" true (declined.result.verdict = None);
@@ -243,7 +243,7 @@ let test_linked_frontier_and_staged_run_recovery () =
       Alcotest.(check string) "retry keeps complete original prompt" (V.prompt original) prompt;
       if !calls = 1 then Error (Agent_core.Error.Api (Agent_core.Error.Retry.RateLimited
         {retry_after=Some 1.; message="definite temporary refusal"}))
-      else Ok {AR.selected_runtime_id="goal-reviewer"; verdict=Some (AR.Approve "checked original")}) (fun () ->
+      else Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None; verdict=Some (AR.Approve "checked original")}) (fun () ->
       let refusal = checked (run store retained authority) in
       Alcotest.(check bool) "typed definite refusal retains retry candidate" true
         (refusal.result.retryable_runtimes <> []);
@@ -295,7 +295,7 @@ let test_actual_goal_commit_reply_loss_and_conflict () =
     with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-      incr calls; Ok {AR.selected_runtime_id="goal-reviewer"; verdict=Some (AR.Approve "actual proof")}) (fun () ->
+      incr calls; Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None; verdict=Some (AR.Approve "actual proof")}) (fun () ->
       let receipt = checked (run store retained authority) in
       let retained = load store original in
       let judgment = checked (W.retained_judgment retained) in
@@ -387,7 +387,7 @@ let actual_review verdict calls =
     let result = lookup.AR.dispatch ~name:"tool_read_file" ~args:input in
     if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
     on_tool_result ~input result;
-    Ok {AR.selected_runtime_id="goal-reviewer"; verdict=Some verdict}
+    Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None; verdict=Some verdict}
 let actual_approve calls = actual_review (AR.Approve "actual target measured") calls
 
 let test_actual_integral_receipt_commits_after_restart () = with_workspace (fun config store _ ->

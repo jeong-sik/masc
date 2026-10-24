@@ -61,6 +61,7 @@ type verdict =
 type reviewer_reply =
   { selected_runtime_id : string
   ; verdict : verdict option
+  ; evaluator_execution : Runtime_response_identity.t option
   }
 
 let outcome_observer_fn
@@ -117,6 +118,7 @@ type review_result =
   { verdict : verdict option
   ; evaluator_runtime : string
   ; generator_runtime : string option
+  ; evaluator_execution : Runtime_response_identity.t option
   ; gate : gate
   ; fallback_reason : string option
   ; retryable_runtimes : string list
@@ -650,6 +652,7 @@ let run_with_execution_policy ~execution_policy
       { verdict = None
       ; evaluator_runtime = unresolved_evaluator_runtime
       ; generator_runtime
+      ; evaluator_execution = None
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
       ; retryable_runtimes = []
@@ -667,6 +670,7 @@ let run_with_execution_policy ~execution_policy
       { verdict = None
       ; evaluator_runtime = unresolved_evaluator_runtime
       ; generator_runtime
+      ; evaluator_execution = None
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
       ; retryable_runtimes = []
@@ -686,6 +690,7 @@ let run_with_execution_policy ~execution_policy
          { verdict = None
          ; evaluator_runtime = first_slot
          ; generator_runtime
+         ; evaluator_execution = None
          ; gate = Evaluator_unavailable
          ; fallback_reason = Some detail
          ; retryable_runtimes = []
@@ -822,7 +827,7 @@ let run_with_execution_policy ~execution_policy
                      (Printexc.to_string exn)))
          in
          (match result with
-          | Ok {selected_runtime_id;verdict=_} -> on_execution (Reply_received {runtime_id=selected_runtime_id})
+          | Ok {selected_runtime_id;verdict=_;evaluator_execution=_} -> on_execution (Reply_received {runtime_id=selected_runtime_id})
           | Error _ -> ());
          (* The walk reports after recording the refusal's rest. Retain that
             classification here: another candidate in this slot can outlive
@@ -841,7 +846,7 @@ let run_with_execution_policy ~execution_policy
        in
        let rec attempt ~retryable_runtimes ~model_absent_runtimes ((slot, _) as candidate) remaining =
          match run_attempt candidate with
-         | Ok {verdict=Some verdict;selected_runtime_id=slot}, _nested_retryable_runtimes, _, _ ->
+         | Ok {verdict=Some verdict;selected_runtime_id=slot;evaluator_execution}, _nested_retryable_runtimes, _, _ ->
            (match verdict with
             | Approve reason ->
               task_info
@@ -857,12 +862,13 @@ let run_with_execution_policy ~execution_policy
              { verdict = Some verdict
              ; evaluator_runtime = slot
              ; generator_runtime
+             ; evaluator_execution
              ; gate = Structured_tool
              ; fallback_reason = None
              ; retryable_runtimes = []
              ; model_absent_runtimes = []
              }
-         | Ok {verdict=None;selected_runtime_id=slot}, nested_retryable_runtimes, nested_model_absent, _ ->
+         | Ok {verdict=None;selected_runtime_id=slot;evaluator_execution=_}, nested_retryable_runtimes, nested_model_absent, _ ->
            let retryable_runtimes = append_unique retryable_runtimes nested_retryable_runtimes in
            let model_absent_runtimes = append_unique model_absent_runtimes nested_model_absent in
            let detail =
@@ -885,6 +891,7 @@ let run_with_execution_policy ~execution_policy
                 { verdict = None
                 ; evaluator_runtime = slot
                 ; generator_runtime
+                ; evaluator_execution = None
                 ; gate = Invalid_verdict
                 ; fallback_reason = Some detail
                 ; retryable_runtimes
@@ -948,6 +955,7 @@ let run_with_execution_policy ~execution_policy
                 { verdict = None
                 ; evaluator_runtime = slot
                 ; generator_runtime
+                ; evaluator_execution = None
                 ; gate = Evaluator_unavailable
                 ; fallback_reason = Some detail
                 ; retryable_runtimes
@@ -1025,9 +1033,9 @@ let review ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result
     ~lookup ~provider_rest ~base_path req
 ;;
 
-let review_rendered ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~prompt ~lookup
+let review_rendered ~generator_runtime ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~prompt ~lookup
     ~provider_rest ~base_path req =
-  run_review ~execution_policy:Retained_original ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~render_prompt:(fun () -> Ok prompt)
+  run_review ?generator_runtime ~execution_policy:Retained_original ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~render_prompt:(fun () -> Ok prompt)
     ~lookup ~provider_rest ~base_path req
 ;;
 

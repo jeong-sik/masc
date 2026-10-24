@@ -11,7 +11,6 @@ type openssh =
   ; ssh_bin : string
   ; identity_file : string
   ; known_hosts_file : string
-  ; control_path_dir : string
   }
 
 type container_exec =
@@ -114,9 +113,9 @@ type shared_state =
     (* The most recent dispatch that reached the wire, by class. *)
   }
 
-(* Runner values are rebuilt per typed dispatch, while the session ceiling
-   (sshd MaxSessions for OpenSSH, a courtesy bound for a guest) is
-   endpoint-scoped. Keep the admission state at that same scope. This is a
+(* Runner values are rebuilt per typed dispatch, while the active-request
+   ceiling is endpoint-scoped across Keepers. Keep admission at that same
+   scope; sshd connection admission remains the remote operator's policy. This is a
    module-global registry, so Stdlib.Mutex is the correct guard; no yielding
    work or logging happens while it is held. *)
 (* Workspace, full transport declaration, request root, allowed environment,
@@ -126,8 +125,8 @@ type endpoint_identity = string * transport * string * string list * int * int
 (* These immutable values bind probes, negotiated major and admission to the
    endpoint and transport that produced them. Names alone survive a host or
    policy edit and cannot identify those observations. Credential references
-   are paths: replacing their contents, or reusing an existing ControlMaster,
-   is not a new identity here. *)
+   are paths: replacing their contents is not a new observation identity.
+   Every OpenSSH invocation authenticates independently of these observations. *)
 let shared_states : (endpoint_identity, shared_state) Hashtbl.t = Hashtbl.create 8
 let shared_states_mu = Stdlib.Mutex.create ()
 
@@ -270,6 +269,10 @@ let of_docker_exec
 
 let openssh_prefix (o : openssh) =
   let endpoint = o.endpoint in
+  (* Reusing an authenticated master skips new identity/pin checks after a
+     credential file replacement. Independent connections also avoid the
+     ControlPath Unix-socket path limit. Only the endpoint's dedicated hosts
+     file supplies host trust. *)
   [ o.ssh_bin
   ; "-T"
   ; "-F"
@@ -278,6 +281,10 @@ let openssh_prefix (o : openssh) =
   ; "BatchMode=yes"
   ; "-o"
   ; "IdentitiesOnly=yes"
+  ; "-o"
+  ; "IdentityFile=none"
+  ; "-o"
+  ; "IdentityAgent=none"
   ; "-i"
   ; o.identity_file
   ; "-o"
@@ -289,13 +296,13 @@ let openssh_prefix (o : openssh) =
   ; "-o"
   ; "UserKnownHostsFile=" ^ o.known_hosts_file
   ; "-o"
+  ; "GlobalKnownHostsFile=none"
+  ; "-o"
   ; Printf.sprintf "ConnectTimeout=%d" endpoint.connect_timeout_sec
   ; "-o"
-  ; "ControlMaster=auto"
+  ; "ControlMaster=no"
   ; "-o"
-  ; "ControlPersist=120"
-  ; "-o"
-  ; "ControlPath=" ^ Filename.concat o.control_path_dir "%C"
+  ; "ControlPath=none"
   ; "-o"
   ; "ServerAliveInterval=15"
   ; "-o"

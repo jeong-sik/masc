@@ -238,6 +238,11 @@ let test_argv_frame_stream_and_exit () =
   check string "stdout streamed" "remote-out" (Buffer.contents stdout_chunks);
   check string "stderr streamed without trailer" "remote-err" (Buffer.contents stderr_chunks);
   let expected_argv = List.tl (Keeper_sandbox_remote.transport_argv state) in
+  (* These are authentication boundaries: a live master would bypass the
+     current dedicated pin file, and a global hosts file is not its authority. *)
+  List.iter (fun option -> check bool option true (List.mem option expected_argv))
+    [ "ControlMaster=no"; "ControlPath=none"; "GlobalKnownHostsFile=none"
+    ; "IdentityFile=none"; "IdentityAgent=none" ];
   check (list string) "pinned ssh argv" expected_argv
     (String.split_on_char '\n' (read_file (frame_path ^ ".argv")));
   let frame = read_file frame_path in

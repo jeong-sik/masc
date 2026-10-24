@@ -149,8 +149,10 @@ class FilesFixture(smoke.ModelFixture):
 
 def ssh(args, argv):
     prefix = ['ssh', '-T', '-F', 'none', '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes',
+              '-o', 'IdentityFile=none', '-o', 'IdentityAgent=none',
               '-o', 'ForwardAgent=no', '-o', 'ClearAllForwardings=yes',
               '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + args.known_hosts,
+              '-o', 'GlobalKnownHostsFile=none', '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
               '-o', 'ConnectTimeout=10', '-i', args.identity, '-p', str(args.port),
               args.user + '@' + args.host]
     return smoke.command(prefix + [shlex.join(argv)], os.environ.copy())

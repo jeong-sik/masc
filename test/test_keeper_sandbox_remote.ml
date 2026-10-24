@@ -829,7 +829,7 @@ let test_openssh_observation_reads_the_dispatch_cache () =
   in
   let openssh : Keeper_sandbox_remote.openssh =
     { endpoint; ssh_bin; identity_file = "key"; known_hosts_file = "hosts"
-    ; control_path_dir = Filename.concat base_path "unused-control" }
+    }
   in
   let cached () = Keeper_sandbox_remote.report_openssh ~base_path openssh in
   (match (cached ()).probe with
@@ -874,7 +874,6 @@ let test_openssh_observation_reads_the_dispatch_cache () =
     ; "home policy", { openssh with endpoint = { endpoint with private_home = true } }
     ; "capabilities", { openssh with endpoint = { endpoint with capabilities = [ "observe" ] } }
     ; "SSH binary", { openssh with ssh_bin = "another-ssh" }
-    ; "control directory", { openssh with control_path_dir = "another-control" }
     ];
   (match (Keeper_sandbox_remote.report_openssh ~base_path:(base_path ^ "-other") openssh).probe with
    | Probe_not_asked -> ()

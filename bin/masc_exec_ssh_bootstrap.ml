@@ -361,7 +361,8 @@ let authorize_key endpoint ~known_hosts_file public_file =
     [ "ssh-copy-id"; "-i"; public_file; "-p"; string_of_int endpoint.Exec_ssh_endpoint.port
     ; "-F"; "none"; "-o"; "ForwardAgent=no"; "-o"
     ; "StrictHostKeyChecking=yes"; "-o"
-    ; "UserKnownHostsFile=" ^ known_hosts_file; remote_target endpoint
+    ; "UserKnownHostsFile=" ^ known_hosts_file; "-o"; "GlobalKnownHostsFile=none"
+    ; remote_target endpoint
     ]
 ;;
 

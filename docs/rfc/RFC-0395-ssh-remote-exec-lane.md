@@ -34,10 +34,12 @@ The client ignores ambient SSH configuration and pins its authority:
 
 - no PTY; stdout and stderr remain separate;
 - `-F none`, agent forwarding off, all forwarding cleared;
-- batch mode, a dedicated identity, strict host-key checking, and one explicit
-  `known_hosts` file;
+- batch mode, a dedicated identity without ambient agent/default-key fallback,
+  strict host-key checking, and one explicit
+  `known_hosts` file, with system hosts fallback disabled;
 - bounded connect and server-alive timers;
-- endpoint-scoped ControlMaster multiplexing with an explicit session ceiling.
+- independent authentication per command, with an endpoint-scoped concurrent
+  request ceiling. No control socket or idle master is retained.
 
 The remote command is always the fixed literal `masc-exec-shim`. A versioned
 frame on stdin carries binary-safe argv, env, cwd, timeout, and payload stdin.

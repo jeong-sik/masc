@@ -2,8 +2,8 @@
     issue #28822 option (a)).
 
     Reads the case corpus and a [runs.jsonl] produced by
-    [scripts/harness_coding_eval.sh], assembles the suite through
-    [Coding_eval_report.build_suite], prints the report, and writes
+    [scripts/harness_coding_eval.sh], separates configured model, memory mode,
+    and experiment cohorts through [Coding_eval_report.build_suite], and writes
     [REPORT.md] + [report.json] into the output directory. Exit 1 means a
     structural problem (unreadable corpus, malformed rows); a low pass rate
     is a result, not an error. *)

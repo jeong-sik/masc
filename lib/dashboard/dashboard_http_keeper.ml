@@ -539,8 +539,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               (Keeper_id.Trace_id.to_string m.runtime.trace_id)
           in
           let ( conversation_tail,
-                k2k_recent,
-                k2k_mentions,
+                recent_addressed_messages,
+                keeper_mention_counts,
                 conversation_raw_count ) =
             keeper_history_summary_json
               ~all_keeper_names:names
@@ -576,8 +576,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                      acc)
                  None
           in
-          let k2k_count =
-            match k2k_recent with
+          let addressed_message_count =
+            match recent_addressed_messages with
             | `List xs -> List.length xs
             | _ -> 0
           in
@@ -742,7 +742,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 else [
                   ("metrics_series", metrics_series);
                   ("conversation_tail", conversation_tail);
-                  ("k2k_recent", k2k_recent);
+                  ("recent_addressed_messages", recent_addressed_messages);
                 ]
               in
 	              let profile = Dashboard_execution_helpers.get_agent_profile m.name in
@@ -914,8 +914,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("recent_tool_names", `List (List.map (fun item -> `String item) recent_tool_names));
               ("conversation_tail_count", `Int conversation_tail_count);
               ("conversation_raw_count", `Int conversation_raw_count);
-              ("k2k_count", `Int k2k_count);
-              ("k2k_mentions", k2k_mentions);
+              ("addressed_message_count", `Int addressed_message_count);
+              ("keeper_mention_counts", keeper_mention_counts);
               ("provider_health", provider_health_json);
               ("trust", trust_json);
               ("context_budget", context_budget);

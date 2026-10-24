@@ -70,6 +70,15 @@ describe('normalizeKeepers sandbox_profile', () => {
   })
 })
 
+describe('normalizeKeepers addressed-message activity', () => {
+  it('carries the server count to the Keeper activity surface', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'mention-observer', status: 'active', addressed_message_count: 1 },
+    ])
+    expect(keeper?.addressed_message_count).toBe(1)
+  })
+})
+
 describe('normalizeKeepers phase field', () => {
   it('normalizes lowercase backend phase to PascalCase KeeperPhase', () => {
     const [keeper] = normalizeKeepers([

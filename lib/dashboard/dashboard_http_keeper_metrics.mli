@@ -42,12 +42,6 @@ val keeper_history_summary_json :
     file and returns
     [(conversation, recent_mentions, mention_counts, raw_count)].
     Internal sources are excluded by their recorded provenance. Message length,
-    punctuation and language do not decide whether a conversation is visible. *)
-
-(** {1 Test-visible helpers}
-    Pinned for behaviour-tests under {!test/test_dashboard_keeper_metrics_10286}. *)
-
-val contains_ci : string -> string -> bool
-(** [contains_ci haystack needle] is a case-insensitive substring
-    check.  Returns [false] when [needle] is empty or longer than
-    [haystack]. *)
+    punctuation and language do not decide whether a conversation is visible.
+    Mention activity uses the canonical Keeper address grammar and identities;
+    it is not a delivery receipt. *)

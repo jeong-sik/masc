@@ -803,7 +803,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         tool_audit_at: toIsoTimestamp(row.tool_audit_at) ?? asString(row.tool_audit_at) ?? null,
         diagnostic: normalizeKeeperDiagnostic(row.diagnostic),
         conversation_tail_count: asNumber(row.conversation_tail_count),
-        k2k_count: asNumber(row.k2k_count),
+        addressed_message_count: asNumber(row.addressed_message_count),
         metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
         metrics_window: metricsWindow,
         provider_health: providerHealth,

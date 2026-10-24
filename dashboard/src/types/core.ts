@@ -1506,8 +1506,8 @@ export interface Keeper {
   tool_audit_source?: string | null
   tool_audit_at?: string | null
   conversation_tail_count?: number
-  k2k_count?: number
-  k2k_mentions?: Array<{ keeper: string; count: number }>
+  addressed_message_count?: number
+  keeper_mention_counts?: Array<{ keeper: string; count: number }>
   metrics_window?: MetricsWindow
   // Metrics time-series (from backend metrics_series)
   metrics_series?: KeeperMetricPoint[]

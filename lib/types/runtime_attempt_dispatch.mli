@@ -15,11 +15,17 @@
 
 type t =
   | Dispatched
-      (** The candidate's provider or client was invoked. The attempt error,
-          if any, is that candidate's answer. *)
+      (** The candidate's provider or client was invoked. An error may be a
+          complete refusal or an unknown outcome; invocation alone does not
+          prove that a response was received. *)
   | Rejected_before_dispatch
       (** The walk refused the candidate without invoking it. The attempt
           error names the refusal; no provider saw the request. *)
 
 (** Log rendering: ["dispatched"] or ["rejected_before_dispatch"]. *)
 val to_string : t -> string
+
+type continuation = Next_may_dispatch | Original_must_resolve
+(** Host request disposition after a typed attempt failure, checked by the
+    runtime walk before admitting another candidate. It does not reclassify
+    whether the failed candidate reached its provider. *)

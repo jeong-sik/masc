@@ -73,10 +73,12 @@ let run_llm_reviewer_fn
      evaluator_runtime:string ->
      candidate_kind:Types_core.verifier_slot_kind ->
      prompt:string ->
+     ?system_prompt:string ->
      ?goal_blocks:Agent_core.Types.content_block list ->
      report_tool_schema:Types_core.tool_schema ->
      lookup:lookup_surface ->
      on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
+     attempt_continuation:(dispatch:Runtime_attempt_dispatch.t -> Agent_core.Error.t -> Runtime_attempt_dispatch.continuation) ->
      on_runtime_attempt_error:
        (runtime_id:string
         -> attempt:int
@@ -84,7 +86,7 @@ let run_llm_reviewer_fn
         -> Agent_core.Error.t
         -> unit) ->
      unit -> (reviewer_reply, Agent_core.Error.t) result) Atomic.t
-  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       Error (Agent_core.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
 (** Issue #8436: the verdict vocabulary is owned by this variant. Witness
@@ -582,12 +584,41 @@ let append_unique left right =
   List.fold_left (fun ids id -> if List.mem id ids then ids else ids @ [ id ]) left right
 ;;
 
-let run
+type failure_certainty = Before_dispatch | Definite_refusal | Outcome_unknown
+
+type execution_observation =
+  | Admission_refused
+  | Attempt_failed of { runtime_id:string; certainty:failure_certainty; error:Agent_core.Error.t }
+  | Reply_received of { runtime_id:string }
+
+let failure_certainty ~dispatch error =
+  match dispatch with
+  | Runtime_attempt_dispatch.Rejected_before_dispatch -> Before_dispatch
+  | Runtime_attempt_dispatch.Dispatched ->
+    match error with
+    | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _ | Timeout _) -> Outcome_unknown
+    | Agent_core.Error.Api (RateLimited _ | Overloaded _ | ServerError _ | AuthError _
+        | AuthorizationError _ | PaymentRequired _ | NotFound _ | ContextOverflow _
+        | InputCapacity _ | InvalidRequest _) -> Definite_refusal
+    | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _ | HardQuota _
+        | CapacityExhausted _ | AuthError _ | AuthorizationError _ | ServerError _
+        | NotFound _ | InvalidRequest _ | EmptyCompletion _) -> Definite_refusal
+    | Agent_core.Error.Provider (MissingApiKey _ | InvalidConfig _ | ParseError _
+        | UnknownVariant _ | ProviderUnavailable _ | NetworkError _ | Timeout _
+        | ProviderTerminal _ | RepeatingGeneration _ | ProviderReportedError _ | ProviderWireError _)
+    | Agent_core.Error.Agent _ | Mcp _ | Config _ | Serialization _ | Io _
+    | Orchestration _ | Internal _ | Internal_carried _ -> Outcome_unknown
+
+type execution_policy = Ordinary_review | Retained_original
+
+let run_with_execution_policy ~execution_policy
       ?evaluator_runtime
       ?generator_runtime
       ?(on_verdict : review_result -> unit = fun _ -> ())
       ?(on_tool_result : input:Yojson.Safe.t -> Tool_result.result -> unit = fun ~input:_ _ -> ())
       ?(sw : Eio.Switch.t option = None)
+      ?system_prompt
+      ?(on_execution = fun _ -> ())
       ~(log_info : string -> unit)
       ~(log_warn : string -> unit)
       ~(render_prompt : unit -> (string, string) result)
@@ -606,6 +637,7 @@ let run
     on_verdict result;
     result
   in
+  let emit_admission result = on_execution Admission_refused; emit result in
   let task_info fmt = Stdlib.Format.ksprintf log_info fmt in
   let task_warn fmt = Stdlib.Format.ksprintf log_warn fmt in
   match resolve_evaluator_slots evaluator_runtime with
@@ -614,7 +646,7 @@ let run
       ~outcome:"unavailable"
       ~runtime:unresolved_evaluator_runtime;
     task_warn "%s; no verdict committed" reason;
-    emit
+    emit_admission
       { verdict = None
       ; evaluator_runtime = unresolved_evaluator_runtime
       ; generator_runtime
@@ -631,7 +663,7 @@ let run
       ~runtime:unresolved_evaluator_runtime;
     let reason = "verifier_exact exact-output lane resolved to no admitted slots" in
     task_warn "%s; no verdict committed" reason;
-    emit
+    emit_admission
       { verdict = None
       ; evaluator_runtime = unresolved_evaluator_runtime
       ; generator_runtime
@@ -650,7 +682,7 @@ let run
          "prompt unavailable runtime=%s: %s"
          first_slot
          detail;
-       emit
+       emit_admission
          { verdict = None
          ; evaluator_runtime = first_slot
          ; generator_runtime
@@ -736,6 +768,14 @@ let run
                 ; "disposition", `String (Tool_result.string_of_disposition result) ] @ fields) ] in
          Agent_core.Types.Text (Yojson.Safe.to_string data) :: media
        in
+       let unknown_dispatch = ref false in
+       let must_preserve_original () = execution_policy=Retained_original && !unknown_dispatch in
+       let observe_failure ~runtime_id ~dispatch error =
+         let certainty = failure_certainty ~dispatch error in
+         (match certainty with Outcome_unknown -> unknown_dispatch := true
+          | Before_dispatch | Definite_refusal -> ());
+         on_execution (Attempt_failed {runtime_id;certainty;error})
+       in
        let run_attempt (slot, candidate_kind) =
          let prior_evidence = List.concat (List.rev !lookup_observations) in
          let goal_blocks = match prior_evidence, goal_blocks with
@@ -756,12 +796,19 @@ let run
                ~evaluator_runtime:slot
                ~candidate_kind
                ~prompt
+               ?system_prompt
                ?goal_blocks
                ~report_tool_schema:report_review_verdict_schema
                ~lookup
                ~on_tool_result
+               ~attempt_continuation:(fun ~dispatch error ->
+                 match execution_policy,failure_certainty ~dispatch error with
+                 | Retained_original,Outcome_unknown -> Runtime_attempt_dispatch.Original_must_resolve
+                 | Ordinary_review,(Before_dispatch | Definite_refusal | Outcome_unknown)
+                 | Retained_original,(Before_dispatch | Definite_refusal) -> Runtime_attempt_dispatch.Next_may_dispatch)
                ~on_runtime_attempt_error:
-                 (fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
+                 (fun ~runtime_id ~attempt:_ ~dispatch error ->
+                    observe_failure ~runtime_id ~dispatch error;
                     let failure = candidate_failure ~provider_rest ~runtime_id error in
                     attempt_failures := !attempt_failures @ [ runtime_id, failure ])
                ()
@@ -774,6 +821,9 @@ let run
                      "review evaluator raised unexpectedly: %s"
                      (Printexc.to_string exn)))
          in
+         (match result with
+          | Ok {selected_runtime_id;verdict=_} -> on_execution (Reply_received {runtime_id=selected_runtime_id})
+          | Error _ -> ());
          (* The walk reports after recording the refusal's rest. Retain that
             classification here: another candidate in this slot can outlive
             the stated reset and prune it before the slot answers. *)
@@ -841,6 +891,14 @@ let run
                 ; model_absent_runtimes
                 })
          | Error error, nested_retryable_runtimes, nested_model_absent, attempt_observed ->
+           if not attempt_observed then (
+             let dispatch = match error with
+               | Agent_core.Error.Config _ -> Runtime_attempt_dispatch.Rejected_before_dispatch
+               | Agent_core.Error.Api _ | Provider _ | Agent _ | Mcp _ | Serialization _
+               | Io _ | Orchestration _ | Internal _ | Internal_carried _ -> Runtime_attempt_dispatch.Dispatched in
+             observe_failure ~runtime_id:slot ~dispatch error);
+           let remaining = if must_preserve_original () then [] else remaining in
+           let nested_retryable_runtimes = if must_preserve_original () then [] else nested_retryable_runtimes in
            let detail = Agent_core.Error.to_string error in
            let slot_failure = candidate_failure ~provider_rest ~runtime_id:slot error in
            let slot_model_absent =
@@ -852,13 +910,14 @@ let run
               the slot's terminal error describes the lane, not a path that
               can be dated. *)
            let slot_retries =
-             match slot_failure, attempt_observed with
+             match slot_failure, (attempt_observed || must_preserve_original ()) with
              | Reviews_again, false -> [ slot ]
              | Reviews_again, true | (Model_absent | Producer_must_act), _ -> []
            in
            let candidate_retries = append_unique nested_retryable_runtimes slot_retries in
            let retryable = candidate_retries <> [] in
-           let retryable_runtimes = append_unique retryable_runtimes candidate_retries in
+           let retryable_runtimes = if must_preserve_original () then []
+             else append_unique retryable_runtimes candidate_retries in
            let model_absent_runtimes =
              append_unique model_absent_runtimes (append_unique nested_model_absent slot_model_absent)
            in
@@ -898,9 +957,21 @@ let run
        attempt ~retryable_runtimes:[] ~model_absent_runtimes:[] first_candidate rest_slots)
 ;;
 
+let run ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result ?sw
+    ?system_prompt ?on_execution ~log_info ~log_warn ~render_prompt ?goal_blocks
+    ~lookup ~provider_rest ~base_path () =
+  run_with_execution_policy ~execution_policy:Ordinary_review
+    ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result ?sw
+    ?system_prompt ?on_execution ~log_info ~log_warn ~render_prompt ?goal_blocks
+    ~lookup ~provider_rest ~base_path ()
+;;
+
 (* The Task lane: its own prompt variables, its own log subject. Everything
    after the prompt string is the shared {!run}. *)
 let run_review
+      ?(execution_policy=Ordinary_review)
+      ?system_prompt
+      ?on_execution
       ?evaluator_runtime
       ?generator_runtime
       ?on_verdict
@@ -927,12 +998,14 @@ let run_review
            ())
   in
   let lookup_for_judge = lookup_with_evidence_observation lookup in
-  run
+  run_with_execution_policy ~execution_policy
     ?evaluator_runtime
     ?generator_runtime
     ?on_verdict
     ?on_tool_result
     ~sw
+    ?system_prompt
+    ?on_execution
     ?goal_blocks:(if image_blocks = [] then None else Some image_blocks)
     ~log_info:(fun message ->
       Log.Task.info "task_id=%s [task-completion-review] %s" req.task_id message)
@@ -952,8 +1025,8 @@ let review ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result
     ~lookup ~provider_rest ~base_path req
 ;;
 
-let review_rendered ?on_verdict ?on_tool_result ?sw ~prompt ~lookup
+let review_rendered ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~prompt ~lookup
     ~provider_rest ~base_path req =
-  run_review ?on_verdict ?on_tool_result ?sw ~render_prompt:(fun () -> Ok prompt)
+  run_review ~execution_policy:Retained_original ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~render_prompt:(fun () -> Ok prompt)
     ~lookup ~provider_rest ~base_path req
 ;;

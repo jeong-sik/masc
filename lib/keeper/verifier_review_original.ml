@@ -4,7 +4,7 @@ module AR = Task.Anti_rationalization
 
 let ( let* ) = Result.bind
 
-let schema = "verifier_review_original/v1"
+let schema = "verifier_review_original/v2"
 
 (* Strict JSON decoding helpers. A decoder that reads a required key with a
    bare [List.assoc] leaks [Not_found] out of the [result] on a missing key,
@@ -85,6 +85,7 @@ type t =
   ; lookup_schemas : string list
   ; lookup_binding : string
   ; system_prompt : string
+  ; system_instructions : string
   ; output_contract : string
   }
 
@@ -102,6 +103,7 @@ let prepare ~verification_id ~attempt ~question ~lookup_root ~lookup_schemas ~lo
       system_prompt ~lookup_schemas ~question ~lookup_root req
       |> Result.map_error (fun detail -> "verifier review prompt unavailable: " ^ detail)
     in
+    let* system_instructions=Prompt_registry.render_prompt_template Prompt_names.verification_system [] in
     Ok
       { verification_id
       ; attempt
@@ -111,6 +113,7 @@ let prepare ~verification_id ~attempt ~question ~lookup_root ~lookup_schemas ~lo
       ; lookup_schemas
       ; lookup_binding
       ; system_prompt
+      ; system_instructions
       ; output_contract = canonical_output_contract ()
       })
 ;;
@@ -123,6 +126,7 @@ let lookup_root t = t.lookup_root
 let lookup_schemas t = t.lookup_schemas
 let lookup_binding t = t.lookup_binding
 let system_prompt_text t = t.system_prompt
+let system_instructions t = t.system_instructions
 let output_contract t = t.output_contract
 
 (* Serialisation. The subject, question and lookup grants are the parts a
@@ -376,6 +380,7 @@ let field_names =
   ; "question"
   ; "review_request"
   ; "schema"
+  ; "system_instructions"
   ; "system_prompt"
   ; "verification_id"
   ]
@@ -391,6 +396,7 @@ let to_json t =
     ; "lookup_root", lookup_root_to_json t.lookup_root
     ; "lookup_schemas", lookup_schemas_to_json t.lookup_schemas
     ; "lookup_binding", `String t.lookup_binding
+    ; "system_instructions", `String t.system_instructions
     ; "system_prompt", `String t.system_prompt
     ; "output_contract", `String t.output_contract
     ]
@@ -425,6 +431,7 @@ let of_json json =
         if String_util.is_lowercase_sha256_hex lookup_binding then Ok ()
         else Error "verifier review original authority digest is invalid" in
       let* system_prompt = text "system_prompt" in
+      let* system_instructions = text "system_instructions" in
       let* output_contract = text "output_contract" in
       let* attempt =
         let* value = field "attempt" fields in
@@ -452,6 +459,7 @@ let of_json json =
           ; lookup_schemas
           ; lookup_binding
           ; system_prompt
+          ; system_instructions
           ; output_contract
           })
   | _ -> Error "verifier review original must be an object"
@@ -461,3 +469,7 @@ let digest t =
   let* canonical = Lane_addon_action.canonical (to_json t) in
   Ok (Lane_addon_store.digest (Yojson.Safe.to_string canonical))
 ;;
+
+let successor original =
+  if original.attempt = Int.max_int then Error "verifier attempt identity exhausted"
+  else Ok {original with attempt=original.attempt + 1}

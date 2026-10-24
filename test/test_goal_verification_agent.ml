@@ -225,8 +225,8 @@ type stub_behavior =
   | Stub_model_absent (* a typed retired/unknown-model refusal (404 family) *)
 
 let recording_reviewer ?(before_verdict = fun _prompt -> ()) calls behaviors =
-  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_
-      ~on_tool_result ~on_runtime_attempt_error:_ () ->
+  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_
+      ~on_tool_result ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     calls := !calls @ [ evaluator_runtime ];
     before_verdict prompt;
     let answer verdict_json verdict =
@@ -502,8 +502,8 @@ let test_goal_proof_reads_the_workspace_playground () =
      agree, the way a real reviewer's do. *)
   let stated_reason = "measured pass rate 100% reaches the target" in
   let reviewer =
-    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_
-        ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_
+        ~lookup ~on_tool_result ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       let { AR.schemas; dispatch } = lookup in
       check bool "the read tool is advertised" true
         (List.exists
@@ -567,8 +567,8 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
      round trip is stubbed — the same reviewer answers both times. *)
   let verdicts = ref [] in
   let reviewer =
-    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
-        ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_
+        ~lookup ~on_tool_result ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       let { AR.dispatch; _ } = lookup in
       let read =
         dispatch
@@ -667,8 +667,8 @@ let test_goal_proof_surface_survives_a_crowded_playground () =
   let reached = ref false in
   let prompt_seen = ref "" in
   let reviewer =
-    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_
-        ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_
+        ~lookup:_ ~on_tool_result ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       prompt_seen := prompt;
       reached := true;
       on_tool_result
@@ -1463,8 +1463,8 @@ let test_reopen_from_verifying_cancels_a_hung_review () =
   ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
   let entered, resolve_entered = Eio.Promise.create () in
   let hanging_reviewer =
-    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
-        ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_
+        ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       ignore (Eio.Promise.try_resolve resolve_entered ());
       let never, _ = Eio.Promise.create () in
       Eio.Promise.await never
@@ -1969,8 +1969,8 @@ tools-support = true
   in
   let refusals = ref 0 in
   let refusing_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
-      ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
-      ~on_runtime_attempt_error () =
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+      ~attempt_continuation:_ ~on_runtime_attempt_error () =
     incr refusals;
     on_runtime_attempt_error ~runtime_id:evaluator_runtime ~attempt:0
       ~dispatch:Keeper_attempt_dispatch.Dispatched refusal;

@@ -373,6 +373,8 @@ val run_named :
   ?runtime_retry_deferral:runtime_retry_deferral ->
   ?checkpoint_progress:
     Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->
+  ?attempt_continuation:
+    (dispatch:Keeper_attempt_dispatch.t -> Agent_core.Error.t -> Runtime_attempt_dispatch.continuation) ->
   ?on_runtime_attempt_error:
     (runtime_id:string ->
     attempt:int ->
@@ -394,6 +396,12 @@ val run_named :
     resolves each candidate's model temperature before trying it with AGENT_CORE, and
     asks [Runtime_attempt_fsm.should_try_next] on failure.
     The runtime loop runs inside a capacity-managed queue permit.
+
+    [attempt_continuation] supplies the request owner's explicit disposition
+    at the existing retry-admission point after each concrete attempt failure.
+    [Original_must_resolve] prevents a new candidate or deferred suffix even
+    when the error is transient and no effect-capable tool was observed.
+    Existing callers default to [Next_may_dispatch].
 
     [on_runtime_attempt_error] observes every typed candidate failure after
     its runtime manifest row and provider-rest evidence are recorded, before
@@ -593,6 +601,8 @@ module For_testing : sig
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
     ?retry_deferral:runtime_retry_deferral ->
     ?tool_results_saved:(unit -> bool) ->
+    ?attempt_continuation:
+      (dispatch:Keeper_attempt_dispatch.t -> Agent_core.Error.t -> Runtime_attempt_dispatch.continuation) ->
     ?on_attempt_error:
       (runtime_id:string ->
       attempt:int ->

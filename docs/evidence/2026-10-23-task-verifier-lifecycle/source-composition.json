@@ -1,0 +1,115 @@
+{
+  "base": "3c5dcbd1e2a40fddd3cc9cd19b5abb08ce56b809",
+  "source_before_documentation": "f8a5c4b92ae1d10d15070b177d3e8af2ef144978",
+  "private_source": "3df4e97c97f81b414b5e9191746ee7510d0bbd23",
+  "private_base": "a862236ceff5da8af63a9b01bfa05e1357706d07",
+  "composition": "38be + f22d + 3df on captured-endpoint/alias lower; sole conflict kept top-level Store and explicit Workspace alias",
+  "changed_ocaml": [
+    {
+      "path": "lib/completion_authority_agent.ml",
+      "sha256": "3aa7a3a55637c85d24005395489e309c43777a9cbc0c9d4d3b67b3850a2e9a38"
+    },
+    {
+      "path": "lib/completion_authority_agent.mli",
+      "sha256": "08daaa7ce49201df8222f30e8e09923cce928f0ff19016d843e15b527609bab4"
+    },
+    {
+      "path": "lib/keeper/keeper_turn_driver.ml",
+      "sha256": "77e619a2abbac62c0e585b9f0ac9bc4e7ff021d98e2903704215e48b724deba3"
+    },
+    {
+      "path": "lib/keeper/keeper_turn_driver.mli",
+      "sha256": "c6454e5de0fb63ce8485118170176f335f350ce9341a1ac34b56f7fc87920a3d"
+    },
+    {
+      "path": "lib/keeper/keeper_turn_driver_wrappers.ml",
+      "sha256": "6707645865bff474f96ff9b0875d20d35340c6da7b5a4f0b87c85a67038249f7"
+    },
+    {
+      "path": "lib/keeper/keeper_turn_driver_wrappers.mli",
+      "sha256": "82d188bd503a0a7492177f7e7fe86af76d448fe244ad0c3f7eff9828b90f24ab"
+    },
+    {
+      "path": "lib/keeper/verifier_review_original.ml",
+      "sha256": "423a85a84b5a95c6de888e3ba3384dd5e4edf68380ce96dc56c2b44b7b028f25"
+    },
+    {
+      "path": "lib/keeper/verifier_review_original.mli",
+      "sha256": "55d813b144e5d7d55f29e460740c9cc9d3b20ada8eca1a89a496cafdf642cd1b"
+    },
+    {
+      "path": "lib/keeper/verifier_review_owner.ml",
+      "sha256": "c73121f5fe830a2244f1f6a6e827caae0a0c4245af1bfbf52b2878dc652abe9a"
+    },
+    {
+      "path": "lib/keeper/verifier_review_owner.mli",
+      "sha256": "d6f718d56183fb8c35e87db8c68550797cbecb39b19e96d846e112e2450f02c3"
+    },
+    {
+      "path": "lib/keeper/verifier_review_worker.ml",
+      "sha256": "d9926e9697a84a76dc1b6006c4d795b19cbf3044f7d4f5978ecc21add7d1804d"
+    },
+    {
+      "path": "lib/keeper/verifier_review_worker.mli",
+      "sha256": "bdc59a7f9871caa8db5ed88389b7bd7eab41525f0cb0fa3ac561c7a83d762359"
+    },
+    {
+      "path": "lib/task/anti_rationalization.ml",
+      "sha256": "96aa0ec8fd8c07261b9b7e331f497a896e4b3d88300b56965ea9116e75ffc8cc"
+    },
+    {
+      "path": "lib/task/anti_rationalization.mli",
+      "sha256": "135b042490d682055914a2e7e79e5783358202b127f9b6befce4f60c7959fb3b"
+    },
+    {
+      "path": "lib/types/runtime_attempt_dispatch.ml",
+      "sha256": "d94691257db2c73468e9ab4eb6826cc3abb81b82ca495814b3420946d7b4bf43"
+    },
+    {
+      "path": "lib/types/runtime_attempt_dispatch.mli",
+      "sha256": "cd4d7b6614ef613a58d9da03b613c42c4d63da43f5361c590d4d26244f65d2d2"
+    },
+    {
+      "path": "lib/workspace_metric_hooks.ml",
+      "sha256": "389acd676b9c9783e565ee943a87046713551bbf62699fe133d3100dd1d00dc5"
+    },
+    {
+      "path": "test/test_anti_rationalization_empty_reject.ml",
+      "sha256": "dd249687ab2784374d62d9112e512c66bd9a00b8055d8d4c92171a830a263e39"
+    },
+    {
+      "path": "test/test_completion_repair_delivery.ml",
+      "sha256": "ef3cb77e2b2fb8b523e1f2ab3cb9de6fcf459cf9cfcc26bb38139030b9e7d202"
+    },
+    {
+      "path": "test/test_completion_trust_harness.ml",
+      "sha256": "af9867e1af08e19402aef42b5add7ded194fdec9667b7781a57b21e25f834464"
+    },
+    {
+      "path": "test/test_goal_verification_agent.ml",
+      "sha256": "fe7ff553084dc616b937fe047fae229db20b10e524da5d8cb1f8fde215f8ec7e"
+    },
+    {
+      "path": "test/test_telemetry_task_transition_10358.ml",
+      "sha256": "4d45d9187f7014193b3aa553a1a1bd579f16dcef7b861cfb746ded0eb8c4f4cb"
+    },
+    {
+      "path": "test/test_tool_task_coverage.ml",
+      "sha256": "8be61c0689eebcdafc6c20d50818b5b48f1a41cf92ffd92df3a8717a739e9ef9"
+    },
+    {
+      "path": "test/test_verification.ml",
+      "sha256": "97b54ea05dc4d6c468b3d8350c31ae2ff22280df6bc87aad5582e07129b20261"
+    },
+    {
+      "path": "test/test_verifier_exact_lane.ml",
+      "sha256": "b517d4382bb0ec1b4c5b9976f5532990c90803afa973e336b0b974b3d14af38d"
+    },
+    {
+      "path": "test/test_verifier_review_worker.ml",
+      "sha256": "8e09993a126c9a3799a92518abb5cd7ae36ab54b7cd05cd3612347b956d45073"
+    }
+  ],
+  "parser": "PASS26; no build/type/executable tests",
+  "scope": "Task only, not full E06 Goal/Add-on conversion"
+}

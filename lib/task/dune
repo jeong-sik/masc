@@ -55,6 +55,7 @@
   masc.skill_snapshot
   masc.skill_snapshot_service
   masc_goal
+  masc.agent_core.llm_provider
   masc.agent_core
   ; anti_rationalization reads the Domain A model-absence classifier
   ; (Keeper_runtime_failure_route.core_error_is_model_absent).

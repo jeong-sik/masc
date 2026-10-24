@@ -580,6 +580,7 @@ let attempt_runtime_candidates
       true)
     ?retry_deferral
     ?(tool_results_saved = fun () -> false)
+    ?(attempt_continuation = fun ~dispatch:_ _ -> Runtime_attempt_dispatch.Next_may_dispatch)
     ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ ~dispatch:_ _error -> ())
     ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
     ?(provider_answered = fun _ -> true)
@@ -887,8 +888,13 @@ let attempt_runtime_candidates
        (* Stable demotion retains every declared candidate, including when
           all are observed unavailable. Neither hint causes a wait or gate. *)
        let rest = demote_rest rest in
+       let continuation = attempt_continuation ~dispatch error in
+       let request_retry_admitted = match continuation with
+         | Runtime_attempt_dispatch.Next_may_dispatch -> true
+         | Original_must_resolve -> false in
        let retry_admitted =
          allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
+         && request_retry_admitted
        in
        let effect_retry_admitted =
          Keeper_provider_attempt_effect.allows_same_turn_retry
@@ -972,7 +978,9 @@ let attempt_runtime_candidates
          ; checkpoint_after
          }
        in
-       if not effect_retry_admitted
+       if not request_retry_admitted
+       then lane_terminal (this_candidate error)
+       else if not effect_retry_admitted
        then lane_terminal (this_candidate terminal_error)
        else if retry_admitted && error_is_retryable
        then loop ~observed_overflow (idx + 1) rest
@@ -1740,6 +1748,7 @@ let run_named
     ?on_runtime_attempt
     ?runtime_retry_deferral
     ?checkpoint_progress
+    ?attempt_continuation
     ?on_runtime_attempt_error
     ?on_runtime_lane_terminal_error
     ?on_deferred_runtime_consumed
@@ -2180,6 +2189,7 @@ let run_named
     ?retry_deferral:runtime_retry_deferral
     ~tool_results_saved:(fun () ->
       Keeper_turn_driver_try_provider.tool_results_saved checkpoint_progress)
+    ?attempt_continuation
     ?on_attempt_error:on_runtime_attempt_error
     ?on_lane_terminal_error:on_runtime_lane_terminal_error
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->

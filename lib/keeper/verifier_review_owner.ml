@@ -150,37 +150,228 @@ let load_for_destination ~store ~verification_id ~attempt ~installation_id ~pack
     then Ok original
     else Error (Corrupt_original "retained verifier destination or summary does not match")
 
+module Progress = Lane_addon_request_progress
+module AR = Task.Anti_rationalization
+type retained = { record : Owner.retained; original : V.t }
+let original retained = retained.original
+let progress retained = retained.record.progress
+let load_retained ~store ~verification_id ~attempt ~installation_id ~package_id =
+  let* original = load_for_destination ~store ~verification_id ~attempt ~installation_id ~package_id in
+  let* request_id = attempt_request_id ~verification_id ~attempt
+    |> Result.map_error (fun d -> Corrupt_original d) in
+  let* record = Owner.load ~store ~scope ~request_id
+    |> Result.map_error (fun e -> Load_store_unavailable (Owner.error_to_string e)) in
+  match record with
+  | None -> Error Not_found
+  | Some record ->
+    let* digest = V.digest original |> Result.map_error (fun d -> Corrupt_original d) in
+    if record.request_digest = digest then Ok {record;original}
+    else Error (Corrupt_original "verifier original changed during restore")
+
+let advance ~store retained event =
+  match Owner.advance ~store ~expected:retained.record ~event with
+  | Error error -> Error (Load_store_unavailable (Owner.update_error_to_string error))
+  | Ok (Owner.Unconfirmed detail) -> Error (Load_store_unavailable
+      ("verifier progress publication unconfirmed; restore original before any effect: " ^ detail))
+  | Ok (Owner.Already_stored _) when event = Progress.Dispatch_intended ->
+    Error (Load_store_unavailable "dispatch intention was already retained; dispatch outcome must be restored")
+  | Ok (Owner.Stored record | Owner.Already_stored record) -> Ok {retained with record}
+
+let result_to_json (result:AR.review_result) =
+  let optional = function None -> `Null | Some value -> `String value in
+  let verdict = match result.verdict with None -> `Null
+    | Some (AR.Approve reason) -> `Assoc ["decision",`String "approve";"reason",`String reason]
+    | Some (AR.Reject reason) -> `Assoc ["decision",`String "reject";"reason",`String reason] in
+  `Assoc ["schema",`String "verifier_review_result/v1";"verdict",verdict;
+    "evaluator_runtime",`String result.evaluator_runtime;
+    "generator_runtime",optional result.generator_runtime;
+    "gate",`String (AR.gate_to_string result.gate);
+    "fallback_reason",optional result.fallback_reason;
+    "retryable_runtimes",`List (List.map (fun x -> `String x) result.retryable_runtimes);
+    "model_absent_runtimes",`List (List.map (fun x -> `String x) result.model_absent_runtimes)]
+
+let result_of_json json =
+  let open Yojson.Safe.Util in
+  let decode () =
+    let fields = to_assoc json in
+    let* () = if List.sort String.compare (List.map fst fields) =
+      ["evaluator_runtime";"fallback_reason";"gate";"generator_runtime";
+       "model_absent_runtimes";"retryable_runtimes";"schema";"verdict"]
+      && member "schema" json = `String "verifier_review_result/v1"
+      then Ok () else Error "invalid retained verifier result fields" in
+    let optional = function `Null -> None | value -> Some (to_string value) in
+    let verdict = match member "verdict" json with
+      | `Null -> Ok None
+      | `Assoc fields when List.sort String.compare (List.map fst fields)=["decision";"reason"] ->
+        (match List.assoc "decision" fields,List.assoc "reason" fields with
+         | `String "approve",`String reason -> Ok (Some (AR.Approve reason))
+         | `String "reject",`String reason when String.trim reason <> "" -> Ok (Some (AR.Reject reason))
+         | _ -> Error "invalid retained verifier decision")
+      | _ -> Error "invalid retained verifier verdict" in
+    let* verdict = verdict in
+    let* gate = match member "gate" json with
+      | `String "structured_tool" -> Ok AR.Structured_tool
+      | `String "invalid_verdict" -> Ok AR.Invalid_verdict
+      | `String "evaluator_unavailable" -> Ok AR.Evaluator_unavailable
+      | _ -> Error "invalid retained verifier result gate" in
+    let* () = match verdict,gate with
+      | Some _,AR.Structured_tool | None,(AR.Invalid_verdict | AR.Evaluator_unavailable) -> Ok ()
+      | Some _,(AR.Invalid_verdict | AR.Evaluator_unavailable) | None,AR.Structured_tool ->
+        Error "retained verifier decision and gate disagree" in
+    let strings key = member key json |> to_list |> List.map to_string in
+    Ok {AR.verdict;evaluator_runtime=member "evaluator_runtime" json |> to_string;
+      generator_runtime=optional (member "generator_runtime" json);gate;
+      fallback_reason=optional (member "fallback_reason" json);
+      retryable_runtimes=strings "retryable_runtimes";
+      model_absent_runtimes=strings "model_absent_runtimes"} in
+  try decode () with Type_error _ | Undefined _ | Not_found -> Error "malformed retained verifier result"
+
+let judgment_to_json ~original ~notes result =
+  let* digest=V.digest original in
+  Ok (`Assoc ["schema",`String "verifier_host_judgment/v1";
+    "original_digest",`String digest;"result",result_to_json result;"notes",`String notes])
+
+let judgment_of_json ~original json =
+  let* digest=V.digest original in
+  match json with
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=
+      ["notes";"original_digest";"result";"schema"]
+      && List.assoc "schema" fields=`String "verifier_host_judgment/v1"
+      && List.assoc "original_digest" fields=`String digest ->
+    let* result=result_of_json (List.assoc "result" fields) in
+    (match result.AR.verdict,List.assoc "notes" fields with
+     | Some _,`String notes when String.trim notes<>"" -> Ok (result,notes)
+     | None,_ | Some _,_ -> Error "retained host judgment lacks a verdict or its complete domain notes")
+  | _ -> Error "retained host judgment differs from its complete original"
+
+let known_observations = function
+  | `List (_::_ as observations) ->
+    List.fold_left (fun state observation ->
+      let* reached,failed=state in
+      match observation with
+      | `Assoc fields when List.sort String.compare (List.map fst fields)=["fact"]
+          && List.assoc "fact" fields=`String "admission_refused" -> Ok (reached,failed)
+      | `Assoc fields when List.sort String.compare (List.map fst fields)=["fact";"runtime_id"] ->
+        (match List.assoc "fact" fields,List.assoc "runtime_id" fields with
+         | `String "reply_received",`String id when String.trim id<>"" -> Ok (true,failed)
+         | _ -> Error "invalid retained reviewer reply observation")
+      | `Assoc fields when List.sort String.compare (List.map fst fields)=["error_category";"fact";"runtime_id"] ->
+        (match List.assoc "fact" fields,List.assoc "runtime_id" fields,List.assoc "error_category" fields with
+         | `String "before_dispatch",`String id,`String category when String.trim id<>"" && String.trim category<>"" ->
+           Ok (reached,id::failed)
+         | `String "definite_refusal",`String id,`String category when String.trim id<>"" && String.trim category<>"" ->
+           Ok (true,id::failed)
+         | _ -> Error "retained reviewer failure is not definitely resolved")
+      | _ -> Error "invalid retained reviewer execution observations") (Ok (false,[])) observations
+  | _ -> Error "retained reviewer disposition has no concrete admission observations"
+
+let validate_admission evidence =
+  match evidence with
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=["observations";"result";"schema"]
+      && List.assoc "schema" fields=`String "verifier_admission_refusal/v1" ->
+    let* reached,_failed=known_observations (List.assoc "observations" fields) in
+    let* result=result_of_json (List.assoc "result" fields) in
+    (match reached,result.AR.verdict,result.gate with
+     | false,None,AR.Evaluator_unavailable -> Ok ()
+     | true,_,_ | false,Some _,_ | false,None,(Structured_tool | Invalid_verdict) ->
+       Error "retained admission refusal includes execution or a model reply")
+  | _ -> Error "invalid retained reviewer admission refusal"
+
+let retry_result evidence =
+  match evidence with
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=
+      ["certainty";"observations";"result";"schema"]
+      && List.assoc "schema" fields = `String "verifier_review_refusal/v1"
+      && List.assoc "certainty" fields = `String "definite" ->
+    let* reached,failed=known_observations (List.assoc "observations" fields) in
+    let* result = result_of_json (List.assoc "result" fields) in
+    (match result.AR.verdict,result.retryable_runtimes with
+     | None,_::_ when reached && List.for_all (fun id -> List.mem id failed) result.retryable_runtimes -> Ok ()
+     | None,_::_ -> Error "terminal reviewer retry lacks its definite execution observations"
+     | Some _,_ | None,[] -> Error "original refusal has no typed safe retry")
+  | _ -> Error "original refusal does not establish a definite terminal retry"
+
 let next_attempt ~store ~verification_id ~installation_id ~package_id =
-  let* records = Owner.discover ~store ~scope
-    |> Result.map_error (fun error -> Load_store_unavailable (Owner.error_to_string error)) in
-  let step result record =
-    let* highest = result in
-    let corrupt detail = Error (Corrupt_original detail) in
-    match Owner.Record.summary record with
-    | `Assoc fields when
-        List.sort String.compare (List.map fst fields) =
-          ["attempt"; "original_digest"; "schema"; "verification_id"] ->
-      (match List.assoc "schema" fields, List.assoc "verification_id" fields,
-          List.assoc "attempt" fields, List.assoc "original_digest" fields with
-       | `String version, `String id, `Int attempt, `String digest
-           when String.equal version V.schema && attempt >= 0
-             && String_util.is_lowercase_sha256_hex digest ->
-         let* key = attempt_request_id ~verification_id:id ~attempt
-           |> Result.map_error (fun detail -> Corrupt_original detail) in
-         if not (String.equal key (Owner.Record.request_id record)
-           && String.equal digest (Owner.Record.request_digest record)
-           && String.equal tool_name (Owner.Record.tool record))
-         then corrupt "verifier inventory summary does not match its record"
-         else if not (String.equal id verification_id) then Ok highest
-         else if not (String.equal installation_id (Owner.Record.installation_id record)
-           && String.equal package_id (Owner.Record.package_id record))
-         then corrupt "verification attempts belong to another destination"
-         else Ok (Some (match highest with None -> attempt | Some previous -> max previous attempt))
-       | _ -> corrupt "verifier inventory summary is invalid")
-    | _ -> corrupt "verifier inventory summary has an unexpected field set" in
-  let* highest = List.fold_left step (Ok None) records in
-  match highest with
-  | None -> Ok 0
-  | Some highest when highest = Int.max_int ->
-    Error (Corrupt_original "verifier attempt identity exhausted")
-  | Some highest -> Ok (highest + 1)
+  let* records = Owner.load_scope ~store ~scope
+    |> Result.map_error (fun e -> Load_store_unavailable (Owner.error_to_string e)) in
+  let* related = List.fold_left (fun acc (record:Owner.retained) ->
+    let* acc = acc in
+    let* original = V.of_json record.request |> Result.map_error (fun d -> Corrupt_original d) in
+    let* expected_summary = summary_of original |> Result.map_error (fun d -> Corrupt_original d) in
+    let* expected_key = attempt_request_id ~verification_id:(V.verification_id original) ~attempt:(V.attempt original)
+      |> Result.map_error (fun d -> Corrupt_original d) in
+    let* () = if record.tool=tool_name && record.request_id=expected_key
+      && Yojson.Safe.equal record.summary expected_summary then Ok ()
+      else Error (Corrupt_original "verifier inventory differs from its full original") in
+    if V.verification_id original <> verification_id then Ok acc
+    else if record.installation_id<>installation_id || record.package_id<>package_id
+      then Error (Corrupt_original "verifier inventory belongs to another destination")
+    else Ok ({record;original}::acc)) (Ok []) records in
+  let related = List.sort (fun left right -> Int.compare (V.attempt left.original) (V.attempt right.original)) related in
+  let retain_child parent successor child =
+    let* expected = V.successor parent.original |> Result.map_error (fun d -> Corrupt_original d) in
+    let* digest = V.digest child |> Result.map_error (fun d -> Corrupt_original d) in
+    if not (Yojson.Safe.equal (V.to_json expected) (V.to_json child))
+      || successor.Progress.request_digest<>digest then
+      Error (Corrupt_original "verifier successor changed its frozen semantic input")
+    else
+      let* () = retain ~store ~verification_id ~attempt:(V.attempt child)
+        ~installation_id ~package_id child |> Result.map_error (function
+          | Original_invalid d | Identity_mismatch d | Retain_store_unavailable d | Already_retained d -> Corrupt_original d) in
+      let* _ = match Progress.phase parent.record.progress with
+        | Progress.Subdividing _ -> advance ~store parent (Progress.Successor_observed successor.request_id)
+        | Progress.Subdivided _ -> Ok parent
+        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+        | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ ->
+          Error (Corrupt_original "verifier successor lacks original terminal authorization") in
+      load_retained ~store ~verification_id ~attempt:(V.attempt child) ~installation_id ~package_id in
+  let rec walk parent rest =
+    match Progress.phase parent.record.progress,rest with
+    | (Progress.Subdividing (refusal,successor) | Subdivided (refusal,successor)),_ ->
+      let* () = retry_result refusal.evidence |> Result.map_error (fun d -> Corrupt_original d) in
+      let* child = match rest with
+        | child::_ -> Ok child.original
+        | [] -> let* json = Owner.load_successor_request ~store ~scope successor
+            |> Result.map_error (fun e -> Load_store_unavailable (Owner.error_to_string e)) in
+          V.of_json json |> Result.map_error (fun d -> Corrupt_original d) in
+      let* expected_key=attempt_request_id ~verification_id ~attempt:(V.attempt child)
+        |> Result.map_error (fun d -> Corrupt_original d) in
+      let* ()=if expected_key=successor.request_id then Ok ()
+        else Error (Corrupt_original "verifier successor key differs") in
+      let* child=retain_child parent successor child in
+      walk child (match rest with [] -> [] | _::tail -> tail)
+    | Progress.Rejected ({stage=Progress.Execution;evidence} as _refusal),[] ->
+      (match retry_result evidence with
+       | Error _ -> Ok (V.attempt parent.original)
+       | Ok () ->
+         let* child=V.successor parent.original |> Result.map_error (fun d -> Corrupt_original d) in
+         let* request_id=attempt_request_id ~verification_id ~attempt:(V.attempt child)
+           |> Result.map_error (fun d -> Corrupt_original d) in
+         let* successor=Owner.prepare_successor ~store ~scope ~request_id ~request:(V.to_json child)
+           |> Result.map_error (fun e -> Load_store_unavailable (Owner.error_to_string e)) in
+         let* parent=advance ~store parent (Progress.Successor_intended successor) in
+         let* child=retain_child parent successor child in Ok (V.attempt child.original))
+    | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+      | Commit_unknown _ | Finished _ | Conflicted _
+      | Rejected {stage=Progress.Before_dispatch;_}),[] -> Ok (V.attempt parent.original)
+    | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+      | Commit_unknown _ | Finished _ | Conflicted _
+      | Rejected {stage=(Progress.Before_dispatch | Progress.Execution);_}),_::_ ->
+      Error (Corrupt_original "verifier child exists without its original successor intent") in
+  match related with
+  | [] -> Ok 0
+  | first::rest when V.attempt first.original=0 -> walk first rest
+  | _::_ -> Error (Corrupt_original "verifier inventory is missing its original first attempt")
+
+let pending_commits ~store ~installation_id ~package_id =
+  let* records=Owner.load_scope ~store ~scope
+    |> Result.map_error (fun e -> Load_store_unavailable (Owner.error_to_string e)) in
+  List.fold_left (fun acc (record:Owner.retained) ->
+    let* acc=acc in
+    let* original=V.of_json record.request |> Result.map_error (fun d -> Corrupt_original d) in
+    let* retained=load_retained ~store ~verification_id:(V.verification_id original)
+      ~attempt:(V.attempt original) ~installation_id ~package_id in
+    match Progress.phase record.progress with
+    | Judged _ | Committing _ | Commit_unknown _ -> Ok (retained::acc)
+    | Captured | Admission_wait _ | Dispatch_pending _ | Finished _
+    | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok acc) (Ok []) records

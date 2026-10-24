@@ -5,6 +5,8 @@ type error =
   | Original_not_found
   | Original_corrupt of string
   | Grants_mismatch of string
+  | Execution_pending of string
+  | Persistence_unavailable of string
 
 val run_attempt :
   ?on_verdict:(Task.Anti_rationalization.review_result -> unit) ->
@@ -12,6 +14,7 @@ val run_attempt :
   ?sw:Eio.Switch.t option ->
   store:Verifier_review_owner.store -> verification_id:string -> attempt:int ->
   installation_id:string -> package_id:string ->
+  prepare_notes:(Task.Anti_rationalization.review_result -> string) ->
   authority:Verification_authority_tools.task_review ->
   provider_rest:(string -> Task.Anti_rationalization.provider_rest) -> unit ->
   (Task.Anti_rationalization.review_result, error) result
@@ -20,4 +23,19 @@ val run_attempt :
     changed workspace, producer, full schema or submitted snapshot before
     dispatch. Execute the stored prompt and images; callers supply neither
     another question nor a lookup dispatch closure. The structured output
-    contract must still match the review protocol. *)
+    contract must still match the review protocol. [prepare_notes] belongs to
+    the host and renders its captured evidence metadata before the judgment
+    and notes are published atomically. Restored judgments do not rebuild or
+    validate lookup authority. *)
+
+val commit_attempt :
+  store:Verifier_review_owner.store -> verification_id:string -> attempt:int ->
+  installation_id:string -> package_id:string ->
+  change:Lane_addon_request_progress.change ->
+  observe:(Lane_addon_request_progress.change -> (Yojson.Safe.t, string) result) ->
+  apply:(Lane_addon_request_progress.change -> (unit, string) result) ->
+  (unit, error) result
+(** Host-only domain commitment of the exact retained judgment. Observe and
+    apply consume the retained intent on resume, never a newly generated one.
+    A possible prior commit is confirmed by the exact expected after-state or
+    retried only after observing its own original before-state. *)

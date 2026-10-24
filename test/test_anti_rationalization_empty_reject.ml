@@ -65,7 +65,7 @@ let test_explicit_base_path_reaches_reviewer () =
   in
   let received = ref None in
   with_reviewer
-    (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+    (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
        received := Some base_path;
        Ok {AR.selected_runtime_id="task-reviewer";verdict=None})
     (fun () ->
@@ -100,7 +100,7 @@ let configure_prompt_registry () =
 
 let test_structured_tool_is_the_only_semantic_verdict () =
   with_reviewer
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
        Ok {AR.selected_runtime_id="task-reviewer";verdict=Some (AR.Approve "")})
     (fun () ->
        let result = review () in
@@ -116,7 +116,7 @@ let test_structured_tool_is_the_only_semantic_verdict () =
 
 let test_response_text_is_never_parsed_as_verdict () =
   with_reviewer
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
        Ok {AR.selected_runtime_id="task-reviewer";verdict=None})
     (fun () ->
        let result = review () in
@@ -129,7 +129,7 @@ let test_response_text_is_never_parsed_as_verdict () =
 
 let test_evaluator_failure_is_unavailable_not_reject () =
   with_reviewer
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
        Error (Agent_core.Error.Internal "review transport unavailable"))
     (fun () ->
        let result = review () in
@@ -147,7 +147,7 @@ let test_evaluator_failure_is_unavailable_not_reject () =
    name no candidate that could review again, so nothing arms a retry. *)
 let test_structural_budget_failure_is_not_retryable () =
   with_reviewer
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
        Error
          (Agent_core.Error.Agent
             (Agent_core.Error.HookExecutionFailed
@@ -176,7 +176,7 @@ let test_structural_budget_failure_is_not_retryable () =
    [Api (RateLimited _)]), so the slot is named as able to review again. *)
 let test_rate_limit_failure_stays_retryable () =
   with_reviewer
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
        Error
          (Agent_core.Error.Api
             (Agent_core.Error.Retry.RateLimited
@@ -271,11 +271,11 @@ let test_verdict_enum_mirrors_valid_verdict_strings () =
       ?sw:_
       ~evaluator_runtime:_ ~candidate_kind:_
       ~prompt:_
-      ?goal_blocks:_
+      ?system_prompt:_ ?goal_blocks:_
       ~report_tool_schema
       ~lookup:_
       ~on_tool_result:_
-      ~on_runtime_attempt_error:_
+      ~attempt_continuation:_ ~on_runtime_attempt_error:_
       () ->
        received := Some report_tool_schema;
        Ok {AR.selected_runtime_id="task-reviewer";verdict=None})
@@ -320,7 +320,7 @@ let test_verdict_enum_mirrors_valid_verdict_strings () =
    remains an approval even when the submitted snapshot is note-only. *)
 let test_note_only_verdict_is_owned_by_the_reviewer () =
   with_reviewer
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
        Ok {AR.selected_runtime_id="task-reviewer";verdict=Some (AR.Approve "everything looks fine")})
     (fun () ->
        let result = review () in
@@ -342,7 +342,7 @@ let test_note_only_verdict_is_owned_by_the_reviewer () =
 let test_successful_lookup_is_exposed_to_the_reviewer () =
   let saw_success = ref false in
   with_reviewer
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
        (let { AR.dispatch; _ } = lookup in
           let result = dispatch ~name:"keeper_read_file" ~args:(`Assoc []) in
           let data_exposes_success =

@@ -12,6 +12,18 @@ val start :
   unit
 
 module For_testing : sig
+  val process_original_once : config:Workspace_utils_backend_setup.config -> sw:Eio.Switch.t ->
+    clock:float Eio.Time.clock_ty Eio.Resource.t -> task:Masc_domain.task ->
+    assignee:string -> verification_id:string -> (unit, string) result
+  (** Actual production preparation/recovery ordering. An already retained host
+      judgment commits without rebuilding evidence or lookup authority. *)
+
+  val commit_original : config:Workspace_utils_backend_setup.config -> task:Masc_domain.task ->
+    store:Verifier_review_owner.store -> attempt:int -> installation_id:string -> package_id:string ->
+    verification_id:string -> notes:string -> (unit, string) result
+  (** The actual host commitment adapter, including original-intent validation,
+      authoritative Task readback and the domain verdict boundary. *)
+
   val authority_actor : string
   (** The fixed authority identity (RFC-0361 D7(b)): the [verifier_exact]
       lane id, shared by every judgement so verdicts aggregate by actor. *)

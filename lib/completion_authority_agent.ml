@@ -776,73 +776,174 @@ let announce_stall ~notify ~task_id ~verification_id ~cause ~disposition =
    semantic verdict produced by the evaluator. Infrastructure failures never
    call this function. A failed commit is its own outcome because the verdict
    was decided but never reached the Task. *)
-let task_terminal_detail (runtime : runtime) task_id =
-  match Workspace.read_task_status_r runtime.config ~task_id with
-  | Ok (Some task) ->
-    (match task.status with
-     | Masc_domain.Done { assignee; _ } ->
-       Some (Printf.sprintf "Done (producer=%s)" assignee)
-     | Masc_domain.Cancelled { cancelled_by; _ } ->
-       Some (Printf.sprintf "Cancelled by %s" cancelled_by)
-     | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
-     | Masc_domain.AwaitingVerification _ -> None)
-  | Ok None | Error _ -> None
-
-let commit_verdict
-      (runtime : runtime)
-      (task : Masc_domain.task)
-      ~verification_id
-      ~authority
-      ~verdict
-      ~notes
-      ~verdict_label
-      ~on_commit
-      ~(evaluator_runtime : string option)
-  =
-  match
-    Workspace.commit_verdict_r
-      runtime.config
-      ~authority
-      ~verdict
-      ~task_id:task.id
-      ~verification_id
-      ~notes
-      ?evaluator_runtime
-      ()
-  with
-  | Ok _ ->
-    Log.Misc.info
-      "system LLM completion authority committed task_id=%s verification_id=%s authority=%s verdict=%s"
-      task.id
-      verification_id
-      (Masc_domain.completion_authority_actor authority)
-      verdict_label;
-    Committed, on_commit
-  | Error error ->
-    (match error with
-     | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
-       (* The Task reached a terminal state (Done/Cancelled) between the
-          system lane's read of AwaitingVerification and this verdict commit.
-          The verdict the evaluator produced is stale: an authority that ran
-          after it (a human operator's HITL commit, or another lane) already
-          closed the obligation. Quietly close as superseded instead of
-          announcing a Stalled task with no retry armed — retrying would just
-          reproduce the same commit refusal against the already-terminal Task. *)
-       (match task_terminal_detail runtime task.id with
-        | Some detail ->
-          Log.Misc.info
-            "completion authority superseded task_id=%s verification_id=%s terminal=%s verdict=%s"
-            task.id verification_id detail verdict_label;
-          Superseded_by { authority = detail }, Verification_run_registry.Superseded_by { authority = detail }
-        | None ->
-          let cause = Commit_failed { detail = Masc_domain.masc_error_to_string error } in
-          Stalled cause, registry_outcome_of_stop_cause cause)
-     | Masc_domain.Task (Masc_domain.Task_error.NotFound _ | AlreadyClaimed _
-         | NotClaimed _ | InvalidId _ | TransitionRejected _ | VerificationSuperseded _)
-     | Agent _ | Auth _ | System _ ->
-       let cause = Commit_failed { detail = Masc_domain.masc_error_to_string error } in
-       Stalled cause, registry_outcome_of_stop_cause cause)
+let commit_verdict_with_config
+      (config : Workspace_utils_backend_setup.config) (task : Masc_domain.task)
+      ~store ~attempt ~installation_id ~package_id
+      ~verification_id ~authority ~verdict:_ ~notes:_ ~verdict_label ~on_commit
+      ~(evaluator_runtime : string option) =
+  let module O = Verifier_review_owner in
+  let module W = Verifier_review_worker in
+  let module P = Lane_addon_request_progress in
+  let module AR = Task.Anti_rationalization in
+  let operation () =
+    let* retained = O.load_retained ~store ~verification_id ~attempt ~installation_id ~package_id
+      |> Result.map_error (function O.Not_found -> "original absent"
+        | Load_store_unavailable d | Corrupt_original d -> d) in
+    let original=O.original retained in
+    let* judgment = match P.phase (O.progress retained) with
+      | P.Judged json -> Ok json
+      | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) -> Ok commit.judgment
+      | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
+        Error "domain commit lacks original retained judgment" in
+    let* original_digest=Verifier_review_original.digest original in
+    let* result,notes=O.judgment_of_json ~original judgment in
+    let* before,started_at =
+      let status = match Lane_addon_request_progress.phase (O.progress retained) with
+        | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
+          (match commit.change.before with
+           | `Assoc fields -> (match List.assoc_opt "status" fields with
+               | Some json -> Masc_domain.task_status_of_yojson json
+               | None -> Error "original commit before-state has no Task status")
+           | _ -> Error "original commit before-state is malformed")
+        | Judged _ -> Ok task.task_status
+        | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
+          Error "original review has no commit before-state" in
+      let* status=status in
+      match status with
+      | Masc_domain.AwaitingVerification awaiting when awaiting.verification_id=verification_id
+          && awaiting.assignee=(Verifier_review_original.review_request original).AR.agent_name ->
+        Ok (`Assoc ["task_id",`String task.id;"status",Masc_domain.task_status_to_yojson status],awaiting.started_at)
+      | Masc_domain.AwaitingVerification _ | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ ->
+        Error "domain commit preparation differs from original verification" in
+    let after=`Assoc ["schema",`String "verifier_domain_commit/v1";"original_digest",`String original_digest;
+      "verification_id",`String verification_id;"task_id",`String task.id;
+      "producer",`String (Verifier_review_original.review_request original).AR.agent_name;
+      "authority_actor",`String (Masc_domain.completion_authority_actor authority);
+      "review",O.result_to_json result;"notes",`String notes;"started_at",`String started_at] in
+    let decode (change:P.change) =
+      let open Yojson.Safe.Util in
+      try
+        let fields=to_assoc change.after in
+        let* ()=if List.sort String.compare (List.map fst fields)=
+          ["authority_actor";"notes";"original_digest";"producer";"review";"schema";
+           "started_at";"task_id";"verification_id"]
+          && member "schema" change.after=`String "verifier_domain_commit/v1"
+          && member "original_digest" change.after=`String original_digest
+          && member "verification_id" change.after=`String verification_id
+          && member "task_id" change.after=`String task.id
+          && member "producer" change.after=`String (Verifier_review_original.review_request original).AR.agent_name
+          && member "authority_actor" change.after=`String (Masc_domain.completion_authority_actor authority)
+          && Yojson.Safe.equal (member "review" change.after) (O.result_to_json result)
+          then Ok () else Error "domain commit intent differs from its immutable original" in
+        let* ()=if member "notes" change.after=`String notes then Ok ()
+          else Error "original commit notes differ from retained host judgment" in
+        let started_at=member "started_at" change.after |> to_string in
+        let* result=O.result_of_json (member "review" change.after) in
+        let* ()=match change.before with
+          | `Assoc fields when List.sort String.compare (List.map fst fields)=["status";"task_id"]
+              && List.assoc "task_id" fields=`String task.id ->
+            let* status=Masc_domain.task_status_of_yojson (List.assoc "status" fields) in
+            (match status with
+             | Masc_domain.AwaitingVerification awaiting when awaiting.verification_id=verification_id
+                 && awaiting.assignee=(Verifier_review_original.review_request original).AR.agent_name
+                 && awaiting.started_at=started_at -> Ok ()
+             | AwaitingVerification _ | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ ->
+               Error "original commit before-state differs from exact verification and producer")
+          | _ -> Error "original commit before-state does not name its Task" in
+        let note=Yojson.Safe.from_string notes in
+        let header=member "verification_request" note and review=member "review" note in
+        let* ()=if member "id" header=`String verification_id
+          && member "task_id" header=`String task.id
+          && member "worker" header=`String (Verifier_review_original.review_request original).AR.agent_name
+          && member "authority_actor" review=`String (Masc_domain.completion_authority_actor authority)
+          && member "authority_kind" review=`String (Masc_domain.completion_authority_kind authority)
+          && member "evaluator_runtime" review=`String result.AR.evaluator_runtime
+          && member "gate" review=`String (AR.gate_to_string result.gate)
+          then Ok () else Error "retained domain notes do not bind original verification and evaluator" in
+        let* verdict=match result.AR.verdict with Some verdict -> Ok verdict
+          | None -> Error "domain commit intent has no verdict" in
+        Ok (notes,started_at,result,verdict)
+      with Type_error _ | Undefined _ | Yojson.Json_error _ -> Error "malformed original domain commit intent" in
+    let observe_with_terminal change =
+      let* notes,started_at,_result,verdict=decode change in
+      let* inspection=Workspace.read_task_inspection_r config ~task_id:task.id in
+      match inspection with
+      | Workspace.Inspected_task {task=current;location=_} ->
+        let current_before=`Assoc ["task_id",`String current.id;
+          "status",Masc_domain.task_status_to_yojson current.task_status] in
+        if Yojson.Safe.equal current_before change.P.before then Ok (current_before,None)
+        else
+          let producer=(Verifier_review_original.review_request original).AR.agent_name in
+          let matched=match verdict,current.task_status with
+            | AR.Approve _,Masc_domain.Done done_ -> done_.assignee=producer && done_.notes=Some notes
+            | AR.Reject reason,Masc_domain.InProgress work ->
+              work.assignee=producer && work.started_at=started_at &&
+              (match current.handoff_context with
+               | Some handoff -> handoff.summary=reason && handoff.reason=Some reason
+                 && handoff.evidence_refs=[verification_id]
+                 && handoff.updated_by=Some (Masc_domain.completion_authority_actor authority)
+               | None -> false)
+            | AR.Approve _,(Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _)
+            | AR.Reject _,(Todo | Claimed _ | AwaitingVerification _ | Done _ | Cancelled _) -> false in
+          if matched then Ok (change.after,None)
+          else
+            let terminal=match current.task_status with
+              | Masc_domain.Done {assignee;_} -> Some (Printf.sprintf "Done (producer=%s)" assignee)
+              | Masc_domain.Cancelled {cancelled_by;_} -> Some (Printf.sprintf "Cancelled by %s" cancelled_by)
+              | Masc_domain.Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> None in
+            Ok (`Assoc ["conflicting_task",Masc_domain.task_to_yojson current],terminal)
+      | Task_unobserved -> Error "original commit Task is unobserved"
+      | Task_deletion_recorded _ -> Error "original commit Task has deletion receipt" in
+    let observe change=Result.map fst (observe_with_terminal change) in
+    let apply change =
+      let* notes,_started_at,result,review_verdict=decode change in
+      Workspace.commit_verdict_r config ~authority
+        ~verdict:(completion_verdict_of_review review_verdict) ~task_id:task.id ~verification_id
+        ~notes ~evaluator_runtime:result.AR.evaluator_runtime ()
+      |> Result.map (fun _ -> ()) |> Result.map_error Masc_domain.masc_error_to_string in
+    let commit_error=function W.Original_not_found -> "original absent"
+      | W.Original_corrupt d | Grants_mismatch d | Execution_pending d | Persistence_unavailable d -> d in
+    match W.commit_attempt ~store ~verification_id ~attempt ~installation_id ~package_id
+      ~change:{P.before;after} ~observe ~apply with
+    | Ok () -> Ok `Committed
+    | Error (W.Execution_pending detail) ->
+      (* A competing terminal authority closes the review obligation, but only
+         after validating the retained intent and recording its conflict. Store,
+         decoding and nonterminal failures remain unresolved commit failures. *)
+      let* retained=O.load_retained ~store ~verification_id ~attempt ~installation_id ~package_id
+        |> Result.map_error (function O.Not_found -> "original absent"
+          | Load_store_unavailable d | Corrupt_original d -> d) in
+      let* commit,already_conflicted=match P.phase (O.progress retained) with
+        | P.Committing commit | Commit_unknown (commit,_) -> Ok (commit,false)
+        | Conflicted (commit,_) -> Ok (commit,true)
+        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _
+        | Rejected _ | Subdividing _ | Subdivided _ -> Error detail in
+      let* observed,terminal=observe_with_terminal commit.change in
+      (match terminal with
+       | None -> Error detail
+       | Some authority ->
+         let* ()=if already_conflicted then Ok () else
+           O.advance ~store retained (P.Commit_conflicted observed)
+           |> Result.map (fun _ -> ())
+           |> Result.map_error (function O.Not_found -> "original absent"
+             | Load_store_unavailable d | Corrupt_original d -> d) in
+         Ok (`Superseded authority))
+    | Error error -> Error (commit_error error) in
+  match operation () with
+  | Ok `Committed ->
+    Log.Misc.info "system LLM completion authority confirmed task_id=%s verification_id=%s authority=%s verdict=%s"
+      task.id verification_id (Masc_domain.completion_authority_actor authority) verdict_label;
+    Committed,on_commit
+  | Ok (`Superseded authority) ->
+    Log.Misc.info "completion authority superseded task_id=%s verification_id=%s terminal=%s verdict=%s"
+      task.id verification_id authority verdict_label;
+    Superseded_by {authority},Verification_run_registry.Superseded_by {authority}
+  | Error detail ->
+    let _ = evaluator_runtime in
+    let cause=Commit_failed {detail} in Stalled cause,registry_outcome_of_stop_cause cause
 ;;
+
+let commit_verdict (runtime:runtime) = commit_verdict_with_config runtime.config
 
 (** What the system lane does with one Task it was woken for, read off the
     status alone. Pure, so the routing is testable without a runtime. *)
@@ -901,15 +1002,45 @@ let process_task_once
   let stop cause = complete (Stalled cause, registry_outcome_of_stop_cause cause) in
   let defer_unavailable ~stage ~detail = stop (Infrastructure_unavailable { stage; detail }) in
   try
-    match admission_of_status task.task_status with
-    | Not_awaiting ->
-      defer_unavailable
-        ~stage:Verification_run_registry.Review_preparation
-        ~detail:
-          (Printf.sprintf
-             "task %s is not awaiting a verdict (status=%s)"
-             task.id
-             (Masc_domain.task_status_to_string task.task_status))
+    let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons") in
+    match Verifier_review_owner.pending_commits ~store
+      ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review" with
+    | Error _ -> defer_unavailable ~stage:Verification_run_registry.Review_preparation
+        ~detail:"original host judgment inventory unavailable"
+    | Ok pending ->
+      match List.find_opt (fun retained ->
+        let original=Verifier_review_owner.original retained in
+        Verifier_review_original.verification_id original=verification_id
+          && (Verifier_review_original.review_request original).task_id=task.id
+          && (Verifier_review_original.review_request original).agent_name=assignee) pending with
+      | Some retained ->
+        let original=Verifier_review_owner.original retained in
+        let judgment=match Lane_addon_request_progress.phase (Verifier_review_owner.progress retained) with
+          | Judged judgment -> Some judgment
+          | Committing commit | Commit_unknown (commit,_) -> Some commit.judgment
+          | Captured | Admission_wait _ | Dispatch_pending _ | Finished _
+          | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> None in
+        (match judgment with
+         | None -> stop (Raised {detail="retained host judgment changed during recovery"})
+         | Some judgment ->
+           (match Verifier_review_owner.judgment_of_json ~original judgment with
+            | Error detail -> stop (Raised {detail})
+            | Ok (result,notes) -> (match result.Task.Anti_rationalization.verdict with
+                | None -> stop (Raised {detail="original host judgment has no structured verdict"})
+                | Some review_verdict ->
+                  let on_commit=match review_verdict with
+                    | Approve reason -> Verification_run_registry.Approved {reason}
+                    | Reject reason -> Verification_run_registry.Rejected {reason} in
+                  complete ~evaluator_runtime:result.evaluator_runtime
+                    (commit_verdict runtime task ~store ~attempt:(Verifier_review_original.attempt original)
+                      ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review"
+                      ~verification_id ~authority ~verdict:(completion_verdict_of_review review_verdict)
+                      ~notes ~verdict_label:(Task.Anti_rationalization.verdict_constructor_name review_verdict)
+                      ~on_commit ~evaluator_runtime:(Some result.evaluator_runtime)))))
+      | None ->
+      match admission_of_status task.task_status with
+      | Not_awaiting -> defer_unavailable ~stage:Verification_run_registry.Review_preparation
+          ~detail:"Task is not awaiting this verification and has no retained host judgment"
     | Review_completion ->
     match
       prepare_review
@@ -955,11 +1086,11 @@ let process_task_once
                and Task/Goal transition stay on this host side below. *)
             let owner_store =
               Lane_addon_store.create
-                ~root:(Filename.concat runtime.config.base_path "request-ownership")
+                ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons")
             in
             let installation_id = "masc.completion-authority" in
             let package_id = "masc.completion-authority.review" in
-            let run_result : (Task.Anti_rationalization.review_result, string) result =
+            let run_result : (int * Task.Anti_rationalization.review_result, string) result =
               let* attempt =
                 Verifier_review_owner.next_attempt ~store:owner_store ~verification_id
                   ~installation_id ~package_id
@@ -967,6 +1098,12 @@ let process_task_once
                   | Verifier_review_owner.Not_found -> "attempt inventory not found"
                   | Verifier_review_owner.Load_store_unavailable d -> "store: " ^ d
                   | Verifier_review_owner.Corrupt_original d -> "original_corrupt: " ^ d) in
+              let* () = match Verifier_review_owner.load_for_destination ~store:owner_store
+                ~verification_id ~attempt ~installation_id ~package_id with
+              | Ok _ -> Ok ()
+              | Error (Verifier_review_owner.Load_store_unavailable detail
+                | Verifier_review_owner.Corrupt_original detail) -> Error detail
+              | Error Verifier_review_owner.Not_found ->
               let* original =
                 Verifier_review_original.prepare
                   ~verification_id
@@ -979,8 +1116,7 @@ let process_task_once
                   prepared.review_request
                 |> Result.map_error (fun reason -> "original_invalid: " ^ reason)
               in
-              let* () =
-                Verifier_review_owner.retain
+              Verifier_review_owner.retain
                   ~store:owner_store
                   ~verification_id
                   ~attempt
@@ -993,7 +1129,10 @@ let process_task_once
                   | Verifier_review_owner.Retain_store_unavailable d -> "store: " ^ d
                   | Verifier_review_owner.Already_retained d -> "already_retained: " ^ d)
               in
+              let* result =
               Verifier_review_worker.run_attempt
+                ~prepare_notes:(fun result -> review_notes ~request:prepared.request
+                  ~evidence_access:prepared.evidence_access ~unread_images:prepared.unread_images ~result ~authority)
                 ~on_tool_result
                 ~sw:(Some runtime.sw)
                 ~store:owner_store
@@ -1007,11 +1146,14 @@ let process_task_once
               |> Result.map_error (function
                 | Verifier_review_worker.Original_not_found -> "original_not_found"
                 | Verifier_review_worker.Original_corrupt d -> "original_corrupt: " ^ d
-                | Verifier_review_worker.Grants_mismatch d -> "grants_mismatch: " ^ d)
+                | Verifier_review_worker.Grants_mismatch d -> "grants_mismatch: " ^ d
+                | Verifier_review_worker.Execution_pending d -> "execution_pending: " ^ d
+                | Verifier_review_worker.Persistence_unavailable d -> "persistence: " ^ d)
+              in Ok (attempt,result)
             in
             match run_result with
             | Error detail -> stop (Raised { detail = "verifier review attempt failed: " ^ detail })
-            | Ok result ->
+            | Ok (attempt,result) ->
             (* Every verdict lands in the calibration ledger the Harness
                surface reads — which evaluator judged, and whether a fallback
                answered for the intended one. The judge kept running after the
@@ -1052,6 +1194,7 @@ let process_task_once
            (commit_verdict
               runtime
               task
+              ~store:owner_store ~attempt ~installation_id ~package_id
               ~verification_id
               ~authority
               ~verdict
@@ -1066,8 +1209,8 @@ let process_task_once
        observation row before the cancellation continues, so it neither
        stays Running in memory nor vanishes on the next replay (lane audit
        W6 — a cancelled verifier run used to leave no trace at all). The
-       task itself stays awaiting_verification; the boot sweep re-reviews
-       it. *)
+       Task obligation remains; the boot sweep restores its exact retained
+       execution/commit state and never assumes cancellation means no dispatch. *)
     Eio.Cancel.protect (fun () ->
       complete
         ( ()
@@ -1288,6 +1431,22 @@ let process_scope (runtime : runtime) ~scope =
            | Masc_domain.Cancelled _ -> None)
         backlog.tasks
     in
+    let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons") in
+    let entries = match Verifier_review_owner.pending_commits ~store
+      ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review" with
+      | Error _ ->
+        Log.Misc.error "verifier original commit inventory unavailable; no commit recovery inferred";
+        entries
+      | Ok pending -> List.fold_left (fun entries retained ->
+          let original=Verifier_review_owner.original retained in
+          let req=Verifier_review_original.review_request original in
+          let key={task_id=req.task_id;verification_id=Verifier_review_original.verification_id original} in
+          if List.exists (fun (present,_) -> review_key_equal present key) entries then entries
+          else match Workspace.read_task_inspection_r runtime.config ~task_id:req.task_id with
+            | Ok (Workspace.Inspected_task {task;location=_}) -> (key,(task,req.agent_name))::entries
+            | Error detail ->
+              Log.Misc.error "verifier pending commit Task observation unavailable: %s" detail; entries
+            | Ok (Task_unobserved | Task_deletion_recorded _) -> entries) entries pending in
     List.iter
       (fun (key, (task, assignee)) ->
          Eio.Fiber.fork ~sw:runtime.sw (fun () ->
@@ -1372,9 +1531,7 @@ let install_callback (runtime : runtime) =
            assignee))
 ;;
 
-let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
-  Eio.Switch.check sw;
-  let runtime =
+let make_runtime ~sw ~clock ~(config:Workspace_utils_backend_setup.config) =
     { config
     ; sw
     ; clock
@@ -1388,7 +1545,12 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     ; in_flight = Atomic.make []
     ; review_slots = Eio.Semaphore.make 4
     }
-  in
+
+;;
+
+let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
+  Eio.Switch.check sw;
+  let runtime=make_runtime ~sw ~clock ~config in
   let owner = Some runtime in
   match Atomic.compare_and_set active_runtime None owner with
   | false ->
@@ -1425,6 +1587,22 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
 ;;
 
 module For_testing = struct
+  let process_original_once ~config ~sw ~clock ~task ~assignee ~verification_id =
+    let runtime=make_runtime ~config ~sw ~clock in
+    match process_task_once runtime task ~assignee ~verification_id with
+    | Committed -> Ok ()
+    | Superseded_by {authority} -> Error ("original superseded by " ^ authority)
+    | Stalled cause -> Error (stop_cause_detail cause)
+
+  let commit_original ~config ~task ~store ~attempt ~installation_id ~package_id ~verification_id ~notes =
+    match commit_verdict_with_config config task ~store ~attempt ~installation_id ~package_id
+      ~verification_id ~authority:system_authority ~verdict:Masc_domain.Verdict_approved
+      ~notes ~verdict_label:"retained" ~on_commit:(Verification_run_registry.Approved {reason="retained"})
+      ~evaluator_runtime:None with
+    | Committed,_ -> Ok ()
+    | Superseded_by {authority},_ -> Error ("original superseded by " ^ authority)
+    | Stalled cause,_ -> Error (stop_cause_detail cause)
+
   let authority_actor = authority_actor
   let retry_delay_of_paths = Verification_retry.delay_of_paths
   let evidence_refs_of_output = evidence_refs_of_output

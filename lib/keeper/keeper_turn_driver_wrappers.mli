@@ -34,6 +34,8 @@ val run_named_with_masc_tools :
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
+  ?attempt_continuation:
+    (dispatch:Keeper_attempt_dispatch.t -> Agent_core.Error.t -> Runtime_attempt_dispatch.continuation) ->
   ?on_runtime_attempt_error:
     (runtime_id:string ->
     attempt:int ->
@@ -55,7 +57,8 @@ val run_named_with_masc_tools :
     lane ownership in runtime manifests and metrics; the default retains
     compatibility for non-Keeper callers. [on_runtime_attempt_error] forwards
     the typed per-candidate observation from {!Keeper_turn_driver.run_named}
-    without changing its terminal result.
+    without changing its terminal result. [attempt_continuation] separately
+    forwards typed request-owner retry admission to the actual runtime walk.
 
     [native_tools] adds native tools without losing invocation identity or
     handler observations.

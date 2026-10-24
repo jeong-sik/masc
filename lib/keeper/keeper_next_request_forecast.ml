@@ -515,7 +515,6 @@ let boundary_forecast ~config ~keeper_name ~meta ~trace_id ~(boundary : atom_bou
   let records, records_read = records_of_store ~config ~keeper_name in
   let readings = readings_of_records records in
   let turn_start = Keeper_carried_front.Turn_boundary { end_atom = boundary.end_atom } in
-  let continuity = None in
   let seed =
     lazy ((Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id).seed)
   in

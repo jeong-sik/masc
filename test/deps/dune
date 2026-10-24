@@ -49,6 +49,7 @@
   (re_export grpc-direct-core)
   (re_export httpun)
   (re_export masc_backend)
+  (re_export masc_candle_runtime)
   (re_export masc_compression)
   (re_export masc_core)
   (re_export masc.string_util)

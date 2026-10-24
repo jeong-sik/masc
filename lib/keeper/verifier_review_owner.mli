@@ -119,3 +119,8 @@ val retry_result : Yojson.Safe.t -> (unit, string) result
 (** Verify a definite terminal non-verdict and its typed retryable runtime
     observations. This shared reviewer disposition alone performs no retry;
     the subject owner must retain and confirm its exact successor first. *)
+
+val terminal_result : Yojson.Safe.t -> (unit, string) result
+(** Validate a definite settled non-verdict independently of automatic retry
+    candidacy. Explicit subject requests may use this fact, never an unknown
+    dispatch, to authorize their own durable linked retry. *)

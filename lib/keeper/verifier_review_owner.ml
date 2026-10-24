@@ -277,7 +277,7 @@ let validate_admission evidence =
        Error "retained admission refusal includes execution or a model reply")
   | _ -> Error "invalid retained reviewer admission refusal"
 
-let retry_result evidence =
+let terminal_review_result evidence =
   match evidence with
   | `Assoc fields when List.sort String.compare (List.map fst fields)=
       ["certainty";"observations";"result";"schema"]
@@ -285,11 +285,17 @@ let retry_result evidence =
       && List.assoc "certainty" fields = `String "definite" ->
     let* reached,failed=known_observations (List.assoc "observations" fields) in
     let* result = result_of_json (List.assoc "result" fields) in
-    (match result.AR.verdict,result.retryable_runtimes with
-     | None,_::_ when reached && List.for_all (fun id -> List.mem id failed) result.retryable_runtimes -> Ok ()
-     | None,_::_ -> Error "terminal reviewer retry lacks its definite execution observations"
-     | Some _,_ | None,[] -> Error "original refusal has no typed safe retry")
+    (match result.AR.verdict with
+     | None when reached && List.for_all (fun id -> List.mem id failed) result.retryable_runtimes -> Ok result
+     | None | Some _ -> Error "terminal reviewer retry lacks its definite execution observations")
   | _ -> Error "original refusal does not establish a definite terminal retry"
+
+let terminal_result evidence = Result.map (fun _ -> ()) (terminal_review_result evidence)
+let retry_result evidence =
+  let* result = terminal_review_result evidence in
+  match result.AR.retryable_runtimes with
+  | _::_ -> Ok ()
+  | [] -> Error "original refusal has no typed safe retry"
 
 let next_attempt ~store ~verification_id ~installation_id ~package_id =
   let* records = Owner.load_scope ~store ~scope

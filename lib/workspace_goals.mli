@@ -68,6 +68,10 @@ val handle_goal_transition
   -> Workspace_types.context
   -> Yojson.Safe.t
   -> Tool_result.result
+(** Repeating request_complete also retains an explicit actor-bound linked
+    verifier retry when the old attempt is definitely settled. Unknown or
+    active dispatch grants no retry. Publication failure is reported, rather
+    than treating the scheduling wake as durable retry authority. *)
 
 type verifier_decision =
   | Proof_proven

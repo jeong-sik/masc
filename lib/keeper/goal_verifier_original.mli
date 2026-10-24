@@ -17,6 +17,9 @@ val prepare :
     contract, generated producer or supplied prompt/dispatch closure is used. *)
 
 val subject : t -> Verification_authority_tools.goal_subject
+val base_path : t -> string
+(** Captured host workspace identity, available during judgment recovery
+    without rebuilding the lookup surface. *)
 val attempt : t -> int
 val submitted_evidence : t -> Workspace_verification_store.submitted_evidence_item list
 val lookup_binding : t -> string

@@ -7,6 +7,8 @@ module Progress = Lane_addon_request_progress
 let ( let* ) = Result.bind
 let scope = "goal-proof-reviews"
 let tool_name = "goal_proof_review"
+let host_installation_id = "masc.goal-verification"
+let host_package_id = "masc.goal-verification.review"
 
 type run_identity = {run_id : string; started_at : float}
 type receipt = {
@@ -17,10 +19,22 @@ type receipt = {
 }
 type error = Store_unavailable of string | Original_invalid of string
   | Authority_changed of string | Execution_pending of string
+type retry_grant = {parent_digest : string; requested_by : string}
 type retained = {record : Owner.retained; original : V.t; run : run_identity}
+let error_to_string = function Store_unavailable d | Original_invalid d | Authority_changed d | Execution_pending d -> d
 
 let invalid detail = Error (Original_invalid detail)
 let decode result = Result.map_error (fun detail -> Original_invalid detail) result
+let serialized ~store ~kind ~identity work =
+  try
+    let root = Lane_addon_store.root store in
+    let parent = Unix.realpath (Filename.dirname root) in
+    let key = Filename.concat parent (Filename.concat (Filename.basename root)
+      (Filename.concat "goal-review-serialization" (kind ^ "-" ^ Lane_addon_store.digest identity))) in
+    File_lock_eio.with_mutex key work
+  with Unix.Unix_error (error, operation, _) -> Error (Store_unavailable (operation ^ ": " ^ Unix.error_message error))
+let serialized_subject ~store ~goal_id ~request_id work =
+  serialized ~store ~kind:"subject" ~identity:(Yojson.Safe.to_string (`List [`String goal_id; `String request_id])) work
 let text key fields = Json_util.require_field_string ~surface:scope key fields
 let field key fields = match List.assoc_opt key fields with
   | Some value -> Ok value | None -> Error (scope ^ "." ^ key ^ " is required")
@@ -39,18 +53,32 @@ let run_of_json json =
 (* The staged successor and its published owner name the very same complete
    request bytes. In particular, recovery cannot invent another run after the
    parent intent has become durable. The summary remains an observation index. *)
-let request_json original run =
+let grant_json = function
+  | None -> `Null
+  | Some grant -> `Assoc ["parent_digest", `String grant.parent_digest; "requested_by", `String grant.requested_by]
+let grant_of_json = function
+  | `Null -> Ok None
+  | json ->
+    let* fields = object_fields ["parent_digest"; "requested_by"] json in
+    let* parent_digest = text "parent_digest" fields in
+    let* requested_by = text "requested_by" fields in
+    if String_util.is_lowercase_sha256_hex parent_digest then Ok (Some {parent_digest; requested_by})
+    else Error "invalid Goal retry parent digest"
+let request_json original run explicit_retry =
   `Assoc ["schema", `String "goal_verifier_request/v1";
-    "original", V.to_json original; "run", run_json run]
+    "original", V.to_json original; "run", run_json run; "explicit_retry", grant_json explicit_retry]
 
 let request_of_json json =
-  let* fields = object_fields ["schema"; "original"; "run"] json in
+  let* fields = object_fields ["schema"; "original"; "run"; "explicit_retry"] json in
   let* version = text "schema" fields in
   let* original_json = field "original" fields in
   let* original = V.of_json original_json in
   let* encoded_run = field "run" fields in
   let* run = run_of_json encoded_run in
-  if version = "goal_verifier_request/v1" then Ok (original, run)
+  let* encoded_grant = field "explicit_retry" fields in
+  let* explicit_retry = grant_of_json encoded_grant in
+  if version = "goal_verifier_request/v1" && (V.attempt original > 0 || explicit_retry = None)
+  then Ok (original, run, explicit_retry)
   else Error "unknown Goal verifier request schema"
 
 let key ~goal_id ~request_id ~attempt =
@@ -67,13 +95,13 @@ let summary original run =
     "original_digest", `String digest; "run", run_json run])
 
 let validate_record ~installation_id ~package_id (record : Owner.retained) =
-  let* original, run = decode (request_of_json record.request) in
+  let* original, run, explicit_retry = decode (request_of_json record.request) in
   let* expected_key = decode (original_key original) in
   let* fields = decode (object_fields ["schema"; "original_digest"; "run"] record.summary) in
   let* summary_run = decode (field "run" fields) in
   let* summary_run = decode (run_of_json summary_run) in
   let* expected_summary = decode (summary original run) in
-  let* expected_digest = decode (Owner.request_digest (request_json original run)) in
+  let* expected_digest = decode (Owner.request_digest (request_json original run explicit_retry)) in
   if record.scope <> scope || record.tool <> tool_name || record.request_id <> expected_key
     || record.request_digest <> expected_digest || summary_run <> run
     || not (Yojson.Safe.equal expected_summary record.summary) then
@@ -90,16 +118,21 @@ let load ~store ~installation_id ~package_id ~goal_id ~request_id ~attempt =
   | None -> Ok None
   | Some record -> Result.map Option.some (validate_record ~installation_id ~package_id record)
 
-let retain ~store ~installation_id ~package_id ~run original =
+let retain_with_grant ~store ~installation_id ~package_id ~run ~explicit_retry original =
   let* request_id = decode (original_key original) in
   let* summary = decode (summary original run) in
   let* () = Owner.retain ~store ~scope ~request_id ~installation_id ~package_id
-    ~tool:tool_name ~summary ~request:(request_json original run)
+    ~tool:tool_name ~summary ~request:(request_json original run explicit_retry)
     |> Result.map_error (fun e -> Store_unavailable (Owner.error_to_string e)) in
   let subject = V.subject original in
   let* loaded = load ~store ~installation_id ~package_id ~goal_id:subject.goal_id
     ~request_id:subject.request_id ~attempt:(V.attempt original) in
   match loaded with Some retained -> Ok retained | None -> invalid "retained Goal original is absent"
+
+let retain ~store ~installation_id ~package_id ~run original =
+  let subject = V.subject original in
+  serialized_subject ~store ~goal_id:subject.goal_id ~request_id:subject.request_id (fun () ->
+    retain_with_grant ~store ~installation_id ~package_id ~run ~explicit_retry:None original)
 
 let read_all ~store =
   let* records = Owner.load_scope ~store ~scope
@@ -117,6 +150,7 @@ let inventory ~store ~installation_id ~package_id =
 
 let original (retained : retained) = retained.original
 let run_identity (retained : retained) = retained.run
+let destination (retained : retained) = retained.record.installation_id, retained.record.package_id
 let progress (retained : retained) = retained.record.progress
 
 let receipt_json retained (receipt : receipt) =
@@ -129,6 +163,13 @@ let receipt_json retained (receipt : receipt) =
     "tools", `List (List.map Verification_run_registry.tool_observation_to_yojson receipt.tools);
     "elapsed_s", `Float receipt.elapsed_s])
 
+let tools_of_json = function
+  | `List values ->
+    List.fold_right (fun value tail ->
+      let* observation = Verification_run_registry.tool_observation_of_yojson value in
+      let* tail = tail in Ok (observation::tail)) values (Ok [])
+  | _ -> Error "Goal verifier receipt tools must be a list"
+
 let receipt_of_json retained json =
   let* fields = object_fields ["schema"; "original_digest"; "run"; "result"; "tools"; "elapsed_s"] json in
   let* version = text "schema" fields in
@@ -139,12 +180,7 @@ let receipt_of_json retained json =
   let* result_json = field "result" fields in
   let* result = Verifier_review_owner.result_of_json result_json in
   let* tools_json = field "tools" fields in
-  let* tools = match tools_json with
-    | `List values ->
-      List.fold_right (fun value tail ->
-        let* observation = Verification_run_registry.tool_observation_of_yojson value in
-        let* tail = tail in Ok (observation::tail)) values (Ok [])
-    | _ -> Error "Goal verifier receipt tools must be a list" in
+  let* tools = tools_of_json tools_json in
   let* elapsed_s = Json_util.require_field_float ~surface:scope "elapsed_s" fields in
   if version <> "goal_verifier_receipt/v1" || digest <> expected_digest
     || run <> retained.run || not (Float.is_finite elapsed_s) || elapsed_s < 0. then
@@ -187,14 +223,60 @@ let retained_judgment retained =
   | Some _ -> Ok judgment
   | None -> invalid "Goal judgment has no structured verdict"
 
+let observed_receipt retained =
+  let* receipt = restored_receipt retained in
+  match receipt with
+  | Some _ -> Ok receipt
+  | None ->
+    match Progress.phase (progress retained) with
+    | Progress.Admission_wait evidence ->
+      let* receipt, _ = decode (refusal_receipt retained evidence) in Ok (Some receipt)
+    | Dispatch_pending (Some (Progress.Outcome_unknown (`Assoc fields)))
+        when List.assoc_opt "schema" fields = Some (`String "goal_verifier_unknown/v1") ->
+      let* _ = decode (object_fields ["schema"; "receipt"; "observations"] (`Assoc fields)) in
+      let* encoded = decode (field "receipt" fields) in
+      Result.map Option.some (decode (receipt_of_json retained encoded))
+    | Captured | Dispatch_pending None
+    | Dispatch_pending (Some (Outcome_unknown _ | Waiting _ | Absent _)) -> Ok None
+    | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
+    | Subdividing _ | Subdivided _ -> invalid "Goal terminal observation lacks its original receipt"
+
+let tool_observations retained =
+  let* receipt = observed_receipt retained in
+  match receipt with
+  | Some receipt -> Ok receipt.tools
+  | None ->
+    match Progress.phase (progress retained) with
+    | Dispatch_pending (Some (Progress.Outcome_unknown evidence)) ->
+      (match evidence with
+       | `Assoc fields when List.assoc_opt "schema" fields = Some (`String "goal_verifier_unknown/v1") ->
+         let* fields = decode (object_fields ["schema"; "receipt"; "observations"] evidence) in
+         let* encoded = decode (field "receipt" fields) in
+         let* receipt = decode (receipt_of_json retained encoded) in Ok receipt.tools
+       | `Assoc _ ->
+         let* fields = decode (object_fields ["cause"; "run"; "tools"; "observations"] evidence) in
+         let* cause = decode (text "cause" fields) in
+         let* encoded_run = decode (field "run" fields) in
+         let* run = decode (run_of_json encoded_run) in
+         let* tools = decode (field "tools" fields) in
+         if cause = "review_cancelled" && run = retained.run then decode (tools_of_json tools)
+         else invalid "Goal cancellation observation differs from its fixed run"
+       | _ -> invalid "Goal unknown observation is malformed")
+    | Captured | Admission_wait _ | Dispatch_pending None -> Ok []
+    | Dispatch_pending (Some (Waiting _ | Absent _)) ->
+      invalid "Goal dispatch observation has no retained tool receipt"
+    | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
+    | Subdividing _ | Subdivided _ -> invalid "Goal terminal observation lacks its original receipt"
+
 let advance ~store retained event =
+  serialized ~store ~kind:"record" ~identity:retained.record.request_id (fun () ->
   match Owner.advance ~store ~expected:retained.record ~event with
   | Error error -> Error (Store_unavailable (Owner.update_error_to_string error))
   | Ok (Owner.Unconfirmed detail) -> Error (Store_unavailable
       ("Goal progress publication is unconfirmed; restore its original before effects: " ^ detail))
   | Ok (Owner.Already_stored _) when event = Progress.Dispatch_intended ->
     Error (Execution_pending "Goal dispatch intent already exists; restore its outcome")
-  | Ok (Owner.Stored record | Owner.Already_stored record) -> Ok {retained with record}
+  | Ok (Owner.Stored record | Owner.Already_stored record) -> Ok {retained with record})
 
 let reload ~store retained =
   let subject = V.subject retained.original in
@@ -217,7 +299,7 @@ let retryable_refusal retained evidence =
   | [] -> Ok false
   | _::_ -> let* () = decode (Verifier_review_owner.retry_result disposition) in Ok true
 
-let frontier ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
+let select_frontier ~automatic ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
   let* _ = decode (key ~goal_id ~request_id ~attempt:0) in
   let* records = read_all ~store in
   let* related = List.fold_left (fun state retained ->
@@ -231,14 +313,26 @@ let frontier ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
   let restore_child parent successor =
     let* encoded = Owner.load_successor_request ~store ~scope successor
       |> Result.map_error (fun error -> Store_unavailable (Owner.error_to_string error)) in
-    let* child, run = decode (request_of_json encoded) in
+    let* child, run, explicit_retry = decode (request_of_json encoded) in
+    let* refusal = match Progress.phase (progress parent) with
+      | Subdividing (refusal,_) | Subdivided (refusal,_) -> Ok refusal
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Conflicted _ | Rejected _ -> invalid "Goal child lacks its terminal parent" in
+    let* automatic_retry = retryable_refusal parent refusal.evidence in
+    let* _, disposition = decode (refusal_receipt parent refusal.evidence) in
+    let* () = match explicit_retry with
+      | None when automatic_retry -> Ok ()
+      | None -> invalid "Goal successor lacks a typed automatic retry"
+      | Some grant when grant.parent_digest = parent.record.request_digest ->
+        decode (Verifier_review_owner.terminal_result disposition)
+      | Some _ -> invalid "Goal explicit retry names another parent" in
     let* expected = decode (V.successor parent.original) in
     let* child_key = decode (original_key child) in
     let* () = if successor.Progress.request_id = child_key
         && Yojson.Safe.equal (V.to_json expected) (V.to_json child)
         && run.run_id <> parent.run.run_id then Ok ()
       else invalid "Goal successor changed its complete original or reused the previous run" in
-    let* child = retain ~store ~installation_id ~package_id ~run child in
+    let* child = retain_with_grant ~store ~installation_id ~package_id ~run ~explicit_retry child in
     let* _ = match Progress.phase (progress parent) with
       | Progress.Subdividing _ -> advance ~store parent (Progress.Successor_observed successor.request_id)
       | Subdivided _ -> Ok parent
@@ -247,9 +341,7 @@ let frontier ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
     Ok child in
   let rec walk parent rest =
     match Progress.phase (progress parent), rest with
-    | (Progress.Subdividing (refusal, successor) | Subdivided (refusal, successor)), _ ->
-      let* retryable = retryable_refusal parent refusal.evidence in
-      let* () = if retryable then Ok () else invalid "Goal successor lacks a definite typed retry" in
+    | (Progress.Subdividing (_, successor) | Subdivided (_, successor)), _ ->
       let* child = restore_child parent successor in
       (match rest with
        | [] -> walk child []
@@ -260,7 +352,7 @@ let frontier ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
          then walk child tail else invalid "Goal inventory differs from its original linked child")
     | Rejected {stage=Progress.Execution; evidence}, [] ->
       let* retryable = retryable_refusal parent evidence in
-      if not retryable then Ok (Some parent)
+      if not retryable || not automatic then Ok (Some parent)
       else
         let* child = decode (V.successor parent.original) in
         let run = new_run () in
@@ -269,7 +361,7 @@ let frontier ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
           else invalid "Goal successor must have a distinct fixed run" in
         let* request_id = decode (original_key child) in
         let* successor = Owner.prepare_successor ~store ~scope ~request_id
-          ~request:(request_json child run)
+          ~request:(request_json child run None)
           |> Result.map_error (fun error -> Store_unavailable (Owner.error_to_string error)) in
         let* parent = advance ~store parent (Progress.Successor_intended successor) in
         let* child = restore_child parent successor in
@@ -283,6 +375,38 @@ let frontier ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
   | [] -> Ok None
   | first::rest when V.attempt first.original = 0 -> walk first rest
   | _::_ -> invalid "Goal frontier is missing its first original attempt"
+
+let frontier ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
+  serialized_subject ~store ~goal_id ~request_id (fun () ->
+    select_frontier ~automatic:true ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run)
+
+let request_retry ~store ~installation_id ~package_id ~goal_id ~request_id ~requested_by ~new_run =
+  serialized_subject ~store ~goal_id ~request_id (fun () ->
+  let* _ = decode (text "requested_by" ["requested_by", `String requested_by]) in
+  let* parent = select_frontier ~automatic:false ~store ~installation_id ~package_id
+    ~goal_id ~request_id ~new_run in
+  match parent with
+  | None -> Ok ()
+  | Some parent ->
+    match Progress.phase (progress parent) with
+    | Rejected {stage=Progress.Execution; evidence} ->
+      let* _ = retryable_refusal parent evidence in
+      let* _, disposition = decode (refusal_receipt parent evidence) in
+      let* () = decode (Verifier_review_owner.terminal_result disposition) in
+      let* child = decode (V.successor parent.original) in
+      let run = new_run () in
+      let* _ = decode (summary child run) in
+      let* () = if run.run_id <> parent.run.run_id then Ok () else invalid "Goal retry reused its parent's run" in
+      let grant = Some {parent_digest=parent.record.request_digest; requested_by} in
+      let* child_key = decode (original_key child) in
+      let* successor = Owner.prepare_successor ~store ~scope ~request_id:child_key
+        ~request:(request_json child run grant)
+        |> Result.map_error (fun e -> Store_unavailable (Owner.error_to_string e)) in
+      let* _ = advance ~store parent (Progress.Successor_intended successor) in
+      let* _ = select_frontier ~automatic:false ~store ~installation_id ~package_id
+        ~goal_id ~request_id ~new_run in Ok ()
+    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+    | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ -> Ok ())
 
 let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
   let* retained = reload ~store retained in

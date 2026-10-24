@@ -48,6 +48,10 @@ val default_record : goal_id:string -> record
 val record_to_yojson : record -> Yojson.Safe.t
 (** Historical record without a current-Goal comparison. *)
 
+val record_of_yojson : Yojson.Safe.t -> (record, string) result
+(** Strict current-schema record decoder, also used to authenticate retained
+    host commit before-states. Decoding supplies no mutation authority. *)
+
 val completion_state_of_yojson : Yojson.Safe.t -> (completion_state, string) result
 (** Decode the current completion contract, including verdict provenance.
     A stale-criterion projection is not a current completion and is refused. *)

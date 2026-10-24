@@ -1,13 +1,13 @@
 id = "onepassword"
 revision = "0.1.0"
-title = "1Password connection"
+title = "1Password"
 ui_category = "browser"
 runtime = "host_process"
 command = [".venv/bin/python", "server.py"]
 contributions = ["observe"]
 
 [world.tools]
-export = ["onepassword_status"]
+export = ["onepassword_status", "onepassword_login", "onepassword_login_status", "onepassword_logins", "onepassword_fill_next", "onepassword_finish", "onepassword_cancel"]
 invocation = "host_context"
 hooks = ["validate_input", "validate_output"]
 
@@ -27,7 +27,7 @@ binding_schema = '''{
   }, "required": ["sources"], "additionalProperties": false
 }'''
 presentation = '''{
-  "description": "1Password account connection. Browser login docking is under development.",
+  "description": "Private 1Password approvals for sign-in in the agent's original Browser session.",
   "readings": [
     {"lane_id": "connection", "path": ["phase"], "label": "Connection", "unit": null, "format": "text"},
     {"lane_id": "connection", "path": ["connected"], "label": "Account connected", "unit": null, "format": "boolean"},

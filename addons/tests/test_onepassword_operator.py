@@ -34,7 +34,7 @@ class OperatorTests(unittest.TestCase):
         self.connector = Connector(Configuration("client", "SECRET_MARKER", "https://masc.example/addons/oauth/callback"),
                                    PrivateStore(self.root / "private", provision=True), transport=self.transport)
         self.worker = server.Worker(self.root / "config.json")
-        self.loader = patch.object(server, "load_connector", return_value=self.connector)
+        self.loader = patch.object(server, "load_settings", return_value=server.Settings(self.connector, "fixture", None))
         self.loader.start()
         self.addCleanup(self.loader.stop)
 
@@ -474,7 +474,7 @@ class InstallationTests(unittest.TestCase):
                                                "browser_login_available": False})
         self.assertFalse(self.store.exists())
         with self.assertRaises(FileNotFoundError):
-            server.load_connector(self.configuration)
+            server.load_settings(self.configuration)
         self.assertFalse(self.store.exists())
 
         view = self.worker.operator({"action": "view", "arguments": {}})
@@ -488,6 +488,17 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(parse_qs(urlsplit(begun["open_url"]).query)["state"],
                          [begun["callback"]["state"]])
 
+    def test_status_and_operator_view_do_not_wait_behind_private_credential_io(self):
+        settings = self.worker.settings(provision=True)
+        # Exercise both the shared thread lock and a separately opened flock.
+        for store in [settings.connector.store, server.load_settings(self.configuration).connector.store]:
+            with store.locked(), ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(self.worker.status)
+                self.assertEqual(future.result(timeout=2), {
+                    "phase": "unavailable", "connected": False, "browser_login_available": False})
+                view = pool.submit(self.worker.operator_view, settings.connector).result(timeout=2)
+                self.assertIn("Pending login controls remain available", view["message"])
+
     def test_invalid_private_file_permissions_never_provision_store(self):
         for path in [self.configuration, self.secret]:
             with self.subTest(path=path.name):
@@ -499,12 +510,13 @@ class InstallationTests(unittest.TestCase):
                 path.chmod(0o600)
 
     def test_connect_refuses_callback_from_concurrent_replacement_attempt(self):
-        actual_load = server.load_connector
+        actual_load = server.load_settings
         begin_finished, continue_view = threading.Event(), threading.Event()
         pending = {}
 
         def paused_load(path, *, provision=False):
-            connector = actual_load(path, provision=provision)
+            settings = actual_load(path, provision=provision)
+            connector = settings.connector
             begin = connector.begin
 
             def paused_begin():
@@ -515,13 +527,13 @@ class InstallationTests(unittest.TestCase):
                 return pending
 
             connector.begin = paused_begin
-            return connector
+            return settings
 
-        with patch.object(server, "load_connector", side_effect=paused_load), ThreadPoolExecutor(max_workers=1) as pool:
+        with patch.object(server, "load_settings", side_effect=paused_load), ThreadPoolExecutor(max_workers=1) as pool:
             response_future = pool.submit(self.worker.operator, {"action": "connect", "arguments": {}})
             try:
                 self.assertTrue(begin_finished.wait(5), "initial begin did not finish")
-                other = actual_load(self.configuration)
+                other = actual_load(self.configuration).connector
                 original = other.authorization_identity()
                 self.assertEqual(original["connection_id"], pending["connection_id"])
                 other.cancel_authorization(expected_state=original["state"],
@@ -539,7 +551,7 @@ class InstallationTests(unittest.TestCase):
         for secret in [original["state"], replacement_identity["state"], pending["authorization_url"],
                        replacement["authorization_url"], "CLIENT_SECRET_MARKER"]:
             self.assertNotIn(secret, json.dumps(response))
-        self.assertEqual(actual_load(self.configuration).authorization_identity(), replacement_identity)
+        self.assertEqual(actual_load(self.configuration).connector.authorization_identity(), replacement_identity)
 
 
 if __name__ == "__main__":

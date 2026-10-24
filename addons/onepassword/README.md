@@ -1,8 +1,9 @@
 # 1Password connector (Experimental)
 
 Backend connection foundation for [#45736](https://github.com/jeong-sik/masc/issues/45736).
-This package is under development. It exports safe connection status through a
-native Lane Add-on. Browser sign-in and Keeper continuation are not yet connected,
+This package is under development. Its native Lane Add-on exports login requests,
+committed status, next-page fill, release and cancellation, with a separate private
+operator approval surface. Automatic durable Keeper continuation is not connected,
 and it has not performed a real 1Password login.
 The objective remains an installed connector that a Keeper uses in its existing
 Browser Add-on session, through verified website sign-in and continuation.
@@ -51,9 +52,10 @@ private plaintext record and starting a new connection.
 
 ## Private connection controls
 
-The package now advertises the non-exportable `lane_operator` port for `view`,
-`connect`, `complete` and transaction-pinned `cancel`. The host's existing Add-on
-panel provides its connection form through the [private operator control
+The package advertises the non-exportable `lane_operator` port for `view`,
+`connect`, `complete`, transaction-pinned `cancel`, and operation-pinned
+`login_approval`, `login_opened`, `login_confirmed` and `login_cancel`.
+The host's existing Add-on panel provides its connection form through the [private operator control
 contract](../../docs/design/lane-addon-operator-controls.md). Register the exact
 HTTPS URL `<your MASC origin>/addons/oauth/callback` with 1Password. The callback
 return is sent through authenticated private POST before the fragment is cleared.
@@ -74,7 +76,7 @@ These changes are source implementation, not an installed-host or real-account
 connection result. The previously installed development package still provides
 status only.
 
-## Docking contract still to implement
+## Login lifecycle and remaining docking
 
 `login.py` now implements a private durable lifecycle on the original companion
 socket. It pins caller/account/Browser/tab, records intent before requests and
@@ -96,8 +98,11 @@ printing private tracebacks.
 Initial host binding now runs on the same owned worker after admission returns.
 The version-2 companion contract retains the successful invocation's original
 grant for that bind; unsupported hosts fail negotiation. Status reads and socket
-cancellation stay available while the initial bind waits. Worker exports and
-the approval UI are not yet connected to this executor.
+cancellation stay available while the initial bind waits. Worker exports now use
+this executor. Only `onepassword_login` receives a new host grant; later calls
+use the retained original operation and verify the original caller. The private
+UI can reopen the exact approval link. Navigating to the app never starts polling
+by itself; a separate human opened acknowledgement starts the vendor clock.
 Cancelling a queued login also withdraws its not-yet-bound host nonce through
 an independent credentialless control. Only an acknowledged withdrawal permits
 a confirmed cancellation; uncertain disposal stays unknown, including on a
@@ -110,7 +115,8 @@ starts the five-second wait. It uses the declared
 2/5/10-second windows, pauses for the user after two minutes and respects a
 one-minute rate-limit wait. Pausing does not expire the task or create another
 request. The service schedules the engine's steps with one checker per request.
-Its worker tools, private approval UI and Keeper continuation are still to be connected.
+Its worker tools and private approval UI are source implementation; automatic
+durable Keeper continuation remains to be connected.
 
 The Browser private wire and original-CDP extension loader are now source
 implementation. Package-owned `prepare.js` waits for extension readiness and
@@ -121,15 +127,15 @@ the original session. Their results stay on the private backend path; these
 programs are not model tools. The independent host socket broker and two-phase
 Python client are [source implementation](../../docs/design/lane-addon-companion-broker.md).
 Runtime/private-context authority wiring is also source implementation. The
-package negotiates no companion exports until its login engine is connected to
-worker tools and continuation. Installed-host execution and real account
+package negotiates the login-start export through version 2 of the private
+companion contract. Installed-host execution and real account
 verification remain unfinished.
 
-1. Extend the private connection controls with approval links, confirmed remote
-   revocation and explicit interrupted-exchange recovery. A new account must not
+1. Extend the private connection controls with confirmed remote revocation
+   and explicit interrupted-exchange recovery. A new account must not
    borrow an earlier account's integration key.
-2. Complete the package's login tools through existing Lane Add-on discovery
-   and host-context caller identity.
+2. Verify the package's login tools through installed Lane Add-on discovery
+   and an actual Keeper invocation.
 3. Supported 1Password extension loading in the original owned Chromium session.
    `createAccessRequest`, status and `fillCredential` run under that Browser
    Add-on's existing page-operation ownership. No separate CDP fill bypass.
@@ -155,7 +161,7 @@ Login-engine tests use real private files and fabricated credential/Browser
 edges, including one real Unix-socket request/status/fill/release
 flow. They do not execute Chrome, the OCaml broker or a real 1Password account.
 
-## Install the development status connector
+## Install the development connector
 
 Python 3.11 or later and the installed `masc-native-addon-launcher` are required.
 Prepare the package environment in the final installed `onepassword/` directory
@@ -181,16 +187,25 @@ Use the [example declaration](../../docs/examples/lane-addons/onepassword.toml),
 resolve `manifest_path` relative to its installed location, and save it under the
 runtime's resolved `lane-addons` directory. This package is a normal MCP Add-on;
 it does not declare a second `service = "browser"` or replace the Browser owner.
-Its skill and `onepassword_status` export are discovered through ordinary Add-on
-installation. Configuration/state failure reports unavailable, never connected.
+Its skill and tool exports are discovered through ordinary Add-on installation.
+Configuration/state failure reports unavailable, never connected.
 
 The operator may provision `connection-config.json` next to `server.py`, owned
-by their UID with mode 0600, containing exactly `client_id`, `client_secret_file`,
-`redirect_uri` and `store_directory`. Both file/directory paths must be absolute.
+by their UID with mode 0600, containing `client_id`, `client_secret_file`,
+`redirect_uri` and `store_directory`. For Browser login, add `browser_extension`
+with exactly `directory` (the installed unpacked extension absolute path) and
+`extension_id` (its 32-character Chrome extension ID). Without that optional
+object, account controls remain available and Browser login is unavailable.
+Both file/directory paths must be absolute.
 The client secret file must be an owned regular 0600 file. The store must be a
 dedicated 0700 directory outside Lane retention and agent work disks. Avoid
 putting a credential value in the declaration, package skill or config document.
-No configuration is required to discover the tool and observe `not_configured`.
+No configuration is required to discover tools and observe `not_configured`.
+The worker pins the configuration and client-secret snapshot. A changed or unreadable snapshot
+retires that owner and disposes its original grants; restart the Add-on deliberately
+after editing settings instead of retargeting live operations. Account-state reads
+refuse a busy private lock immediately, so they cannot block subsequent MCP
+cancellation behind an extension call.
 
 ## Disable or remove the connector
 

@@ -532,8 +532,40 @@ let cancelled_finalizer () = with_finalizer_fixture ~hooks:[] ~invocation:Lane_a
     check int "cancelled finalization keeps the one raw reply" 1 !raw;
     check string "cancelled effect is never replayed" "increment\n" (calls ()))
 
+let actual_onepassword_package () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+  let directory=match List.find_opt (fun path -> Sys.file_exists (Filename.concat path "lane.toml"))
+      [Filename.concat (Sys.getcwd ()) "../addons/onepassword";
+       Filename.concat (Sys.getcwd ()) "addons/onepassword"] with
+    | Some path -> path | None -> fail "actual 1Password package dependency is missing" in
+  let package=Lane_addon_manifest.load ~path:(Filename.concat directory "lane.toml") |> require in
+  let maximum=Lane_addon_types.max_reply_bytes package in
+  let contract=Protocol.contract ~host_requests:false ~action_tool:package.action_tool
+      ~tool_invocation:package.tool_invocation ~exported_tools:package.exported_tools
+      ~tool_hooks:package.tool_hooks ~max_reply_bytes:maximum |> require in
+  let protocol=Protocol.create ~instance_id:"actual-onepassword-package" ~contract () in
+  let script=Filename.concat package.directory "server.py" in
+  let configuration=Filename.temp_file "unconfigured-onepassword-" ".json" in
+  Sys.remove configuration;
+  let client=Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
+      ~command:"python3" ~args:[script;"--config";configuration]
+      ~max_response_bytes:maximum () |> require in
+  Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Protocol.close protocol)) (fun () ->
+    require (Protocol.initialize protocol client);
+    check (list string) "actual package schemas publish all declared exports"
+      (List.sort String.compare package.exported_tools)
+      (Protocol.exported_tools protocol |> List.map (fun (tool:Mcp_protocol.Mcp_types.tool) -> tool.name)
+       |> List.sort String.compare);
+    check (list string) "only start receives a companion grant" ["onepassword_login"]
+      (Protocol.companion_tools protocol);
+    let status=Protocol.call_exported_tool ~principal:Lane_addon_call_context.Operator protocol
+        ~name:"onepassword_status" ~arguments:(`Assoc []) |> require in
+    check bool "actual status traverses host input and output validators" true
+      (status.structured_content=Some (`Assoc ["phase",`String "not_configured";
+        "connected",`Bool false;"browser_login_available",`Bool false])))))
+
 let () = run "Addon engine-independent MCP admission"
-  ["protocol",[test_case "actual standalone stdio server preserves admission and hook contracts" `Quick standalone_protocol;
+  ["protocol",[test_case "actual 1Password package initializes through host validators" `Quick actual_onepassword_package;
+    test_case "actual standalone stdio server preserves admission and hook contracts" `Quick standalone_protocol;
     test_case "private companion context and reserved port" `Quick companion_context_codec;
     test_case "companion grants preserve only validated public replies" `Quick (negotiated_companion "companion");
     test_case "private worker errors lose raw text and metadata" `Quick (negotiated_companion "companion-error");

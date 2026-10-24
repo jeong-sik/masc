@@ -412,8 +412,8 @@ class Connector:
             raise ConnectionError("connection_configuration_mismatch")
         return record
 
-    def status(self) -> dict:
-        with self.store.locked() as root:
+    def status(self, *, blocking=True) -> dict:
+        with self.store.locked(blocking=blocking) as root:
             record = self._read(root)
             phase = Phase(record["phase"])
             # An interrupted one-use exchange/rotation is never replayed.

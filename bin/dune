@@ -669,7 +669,7 @@
  (name masc_tui_resource_images)
  (wrapped false)
  (modules masc_tui_resource_images)
- (libraries masc_tui_artifact_html masc_tui_mcp masc_tui_image_preview masc_tui_image_payload))
+ (libraries masc_tui_markdown masc_tui_artifact_html masc_tui_mcp masc_tui_image_preview masc_tui_image_payload))
 
 (library
  (name masc_tui_acting)

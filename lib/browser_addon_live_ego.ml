@@ -140,48 +140,52 @@ let start_session t ~timeout_s =
           ignore (Eio.Promise.try_resolve set_ready (Error (Peer.Unstarted "the ego session ended before it connected")));
           Eio.Promise.resolve set_ended ()) (fun () ->
         match Eio.Switch.run (fun process_sw ->
-          remove_socket t.socket;
-          Eio.Switch.on_release process_sw (fun () -> remove_socket t.socket);
-          let listening = Eio.Net.listen ~sw:process_sw ~backlog:1 (Eio.Stdenv.net t.env) (`Unix t.socket) in
-          let manager = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:stop_grace_s in
-          let input_read, input_write = Eio_unix.pipe process_sw in
-          let output_read, output_write = Eio_unix.pipe process_sw in
-          match Eio.Process.spawn ~sw:process_sw manager ~stdin:input_read ~stdout:output_write ~stderr:output_write
-                  [t.command; "nodejs"; "-e"; session_loop ~socket:t.socket] with
-          | exception (Eio.Io _ as exn) -> ignore (Eio.Promise.try_resolve set_ready (Error (Peer.Unstarted (Printexc.to_string exn))))
-          | exception Unix.Unix_error (code, _, _) ->
-            ignore (Eio.Promise.try_resolve set_ready (Error (Peer.Unstarted (Unix.error_message code))))
-          | process ->
-            Eio.Flow.close input_read; Eio.Flow.close input_write; Eio.Flow.close output_write;
-            (* What the process writes reaches ego only when it exits; the
-               start of it says why a process ended early. *)
-            let written = Buffer.create read_chunk_bytes and chunk = Cstruct.create read_chunk_bytes in
-            let drained, set_drained = Eio.Promise.create () in
-            (* A daemon, so a switch that is leaving stops the process
-               instead of waiting for its output to end. *)
-            Eio.Fiber.fork_daemon ~sw:process_sw (fun () ->
-              let rec drain () = match Eio.Flow.single_read output_read chunk with
-                | read ->
-                  if Buffer.length written + read <= Peer.output_limit_bytes then
-                    Buffer.add_string written (Cstruct.to_string ~len:read chunk);
-                  drain ()
-                | exception (End_of_file | Eio.Io _) -> Eio.Promise.resolve set_drained (); `Stop_daemon in
-              drain ());
-            let ended_early status = match status with
-              | `Exited code -> Peer.Exited {code; output = Buffer.contents written}
-              | `Signaled signal -> Peer.Signaled signal in
-            (* A stop asked for while the process has not connected, by a
-               start that was cancelled, ends the wait as well. *)
-            match Eio.Time.with_timeout clock timeout_s (fun () ->
-              Eio.Fiber.any [
-                (fun () -> Ok (`Connected (fst (Eio.Net.accept ~sw:process_sw listening))));
-                (fun () -> Ok (`Ended (Eio.Process.await process)));
-                (fun () -> Eio.Promise.await stop_requested; Ok `Stopped) ]) with
-            | Error `Timeout -> ignore (Eio.Promise.try_resolve set_ready (Error Peer.Timed_out))
-            | Ok (`Ended status) -> ignore (Eio.Promise.try_resolve set_ready (Error (ended_early status)))
-            | Ok `Stopped -> ignore (Eio.Promise.try_resolve set_ready (Error (Peer.Unstarted "the ego session was stopped before it connected")))
-            | Ok (`Connected flow) ->
-              Eio.Net.close listening; remove_socket t.socket;
+          (* Eio owns the listening socket's path until its switch ends.
+             End that scope once the handshake answers; the accepted flow
+             and process belong to the outer switch and keep serving. *)
+          let written = Buffer.create read_chunk_bytes and chunk = Cstruct.create read_chunk_bytes in
+          let drained, set_drained = Eio.Promise.create () in
+          let ended_early status = match status with
+            | `Exited code -> Peer.Exited {code; output = Buffer.contents written}
+            | `Signaled signal -> Peer.Signaled signal in
+          let connected = Eio.Switch.run (fun listener_sw ->
+            remove_socket t.socket;
+            let listening = Eio.Net.listen ~sw:listener_sw ~backlog:1 (Eio.Stdenv.net t.env) (`Unix t.socket) in
+            let manager = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:stop_grace_s in
+            let input_read, input_write = Eio_unix.pipe process_sw in
+            let output_read, output_write = Eio_unix.pipe process_sw in
+            match Eio.Process.spawn ~sw:process_sw manager ~stdin:input_read ~stdout:output_write ~stderr:output_write
+                    [t.command; "nodejs"; "-e"; session_loop ~socket:t.socket] with
+            | exception (Eio.Io _ as exn) -> Error (Peer.Unstarted (Printexc.to_string exn))
+            | exception Unix.Unix_error (code, _, _) -> Error (Peer.Unstarted (Unix.error_message code))
+            | process ->
+              Eio.Flow.close input_read; Eio.Flow.close input_write; Eio.Flow.close output_write;
+              (* What the process writes reaches ego only when it exits; the
+                 start of it says why a process ended early. *)
+              (* A daemon, so a switch that is leaving stops the process
+                 instead of waiting for its output to end. *)
+              Eio.Fiber.fork_daemon ~sw:process_sw (fun () ->
+                let rec drain () = match Eio.Flow.single_read output_read chunk with
+                  | read ->
+                    if Buffer.length written + read <= Peer.output_limit_bytes then
+                      Buffer.add_string written (Cstruct.to_string ~len:read chunk);
+                    drain ()
+                  | exception (End_of_file | Eio.Io _) -> Eio.Promise.resolve set_drained (); `Stop_daemon in
+                drain ());
+              (* A stop asked for while the process has not connected, by a
+                 start that was cancelled, ends the wait as well. *)
+              match Eio.Time.with_timeout clock timeout_s (fun () ->
+                Eio.Fiber.any [
+                  (fun () -> Ok (`Connected (fst (Eio.Net.accept ~sw:process_sw listening))));
+                  (fun () -> Ok (`Ended (Eio.Process.await process)));
+                  (fun () -> Eio.Promise.await stop_requested; Ok `Stopped) ]) with
+              | Error `Timeout -> Error Peer.Timed_out
+              | Ok (`Ended status) -> Error (ended_early status)
+              | Ok `Stopped -> Error (Peer.Unstarted "the ego session was stopped before it connected")
+              | Ok (`Connected flow) -> Ok (process, flow)) in
+          match connected with
+          | Error failure -> ignore (Eio.Promise.try_resolve set_ready (Error failure))
+          | Ok (process, flow) ->
               let reader = Eio.Buf_read.of_flow flow ~initial_size:read_chunk_bytes ~max_size:Peer.output_limit_bytes in
               let ended_now () =
                 (* The socket closed: the process is ending, and its status says how. *)

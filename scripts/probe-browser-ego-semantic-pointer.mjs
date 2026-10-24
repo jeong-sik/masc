@@ -72,7 +72,7 @@ assert.deepEqual(await observe(),before);observations.push({action:'wrong_url',r
 await page.screenshot({path:${JSON.stringify(join(resolve(output),'trusted-frame-results.png'))}});
 const stale=await frameTarget();await page.evaluate(()=>document.querySelector('iframe').remove());
 const missing=await nativeTargetInput(page,{action:'hover',target:stale,expectedUrl:${JSON.stringify(url)},waitMs:2000});
-assert.equal(missing.before,true);assert.deepEqual(await observe(),before);
+assert.equal(missing.before,undefined);assert.equal(typeof missing.error,"string");assert.deepEqual(await observe(),before);
 observations.push({action:'removed_frame_ref',target:stale,result:missing,observed:await observe()});
 console.log('MASC_PROOF '+JSON.stringify({spaceId:task.spaceId,finished:false,url:${JSON.stringify(url)},frameOrigin:${JSON.stringify(frameOrigin)},observations}));`;
  const run=await new Promise((resolve,reject)=>{

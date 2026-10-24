@@ -21,7 +21,25 @@ lane을 생략한 BrowserSession open을 사용한다. 여러 작업 세션이 �
 그곳에서 새로 관측한다. BrowserSession/Goto도 반환된 lane으로 이어간다.
 명시한 lane/clientId는 자동 선택보다 우선한다.
 
-## 받은 화면에서 이어가기
+## Ego Lite에서 관측하고 입력하기
+
+선택한 연결이 `ego_task_space`이면 `BrowserRead mode=snapshot`을 기본으로 쓴다.
+Ego 자신의 접근성 트리와 ref를 읽으며, 같은 탭의 click·fill·hover·double_click에는
+`BrowserInteract target: {ref: 12}`처럼 관측한 ref를 전달한다. `expectedUrl`은
+snapshot에 나온 최상위 탭의 URL이다. 조작 뒤에는 새 snapshot으로 실제 결과를 확인하고,
+페이지 변경이나 stale/unknown ref 오류 뒤에도 같은 탭에서 ref를 새로 읽는다.
+
+`selector`를 쓰는 click·fill·hover·double_click·select_option도 Ego SDK가 직접 해석한다.
+관측한 ref(`@12`), role·text locator, CSS를 사용할 수 있다. click·fill·hover는 SDK가
+대상을 화면 안으로 스크롤하므로 먼저 좌표를 찾거나 수동 스크롤하지 않는다.
+CSS는 열린 shadow root를 찾고, locator는 최상위 문서에 실행 가능한 대상이 없으면
+iframe을 찾는다. 프레임 안의 대상은 snapshot의 ref로 구분하며 `framePath`를 넣지 않는다.
+
+본문만 필요하면 text, 시각적 확인에는 screenshot을 고른다. scene/regions와
+documentId/nodeId는 TUI 관측을 이어가거나 좌표가 필요할 때 사용하며 Ego ref와 섞지 않는다.
+관측 범위·selector와 옵션 선택의 자세한 계약은 [읽기와 관측 복구](references/observation.md)를 따른다.
+
+## TUI에서 받은 화면 이어가기
 
 TUI의 `y` 관측에 있는 lane·clientId·tabId·url을 사용한다. 같은 탭을 다시 찾으려고
 BrowserTabs부터 호출하지 않는다. 당시 선택 내용의 설명이면 충분한 text로 답할 수 있다.
@@ -72,7 +90,7 @@ TUI Browser Lane에 여러 관측 탭이 보이면 `1`–`9`로 표시된 탭을
 조작은 ordinary click을 고른다. 선택·리다이렉트·탭 활성화의 상세 계약이 필요하면
 [composition 동선](references/composition.md)을 읽는다.
 
-다음 판단에 필요한 읽기 하나를 고른다. 본문과 참조가 함께 필요하면 scene,
+Ego 이외의 연결에서는 다음 판단에 필요한 읽기 하나를 고른다. 본문과 참조가 함께 필요하면 scene,
 텍스트만 필요하면 text, 추가 컨트롤 정보가 필요하면 elements를 사용한다.
 elements에 `within`(CSS selector)을 주면 그 요소와 그 안의 컨트롤만 돌려준다.
 응답의 `withinMatches`가 0이면 selector가 아무 요소도 고르지 못한 것이다.

@@ -1090,59 +1090,60 @@ let dom_input t ~id ~label ~deadline ~verb input =
         | Some (`Bool false) -> Error (Live.Before_effect reason)
         | Some _ | None -> Error (Live.Outcome_unknown (reason ^ "; " ^ unknown))
 
-(* ego finds a snapshot target itself. The run refuses before any effect when
-   a JavaScript dialog blocks the page, the page is not at the observed URL,
-   or the target does not name exactly one element; ego's wait says which. A
+(* ego owns locator resolution, actionability and auto-scrolling. MASC checks
+   ownership, dialog and the observed URL before entering its Page method.
+   Once that method starts, any failure is uncertain and is never replayed. A
    receipt lists the pages the action opened and a JavaScript dialog it
    raised. The tab's row in the space says where the page is after, also
    while that dialog is open. *)
-let target_wait_ms = 2000
 let ego_locator = function
   | Browser_lane.Target_ref node -> "@" ^ string_of_int node
   | Target_role {role;name;exact} ->
     Printf.sprintf "loc=role:%s[name%s%s]" role (if exact then "=" else "*=") (Yojson.Safe.to_string (str name))
   | Target_text {text;exact} -> "text=" ^ (if exact then Yojson.Safe.to_string (str text) else text)
 type target_operation = Target_click | Target_fill of string | Target_hover | Target_double_click
+  | Target_select of Browser_lane.option_selection
 let target_input_script = {js|async function nativeTargetInput(page, args) {
   const reason = error => String(error && error.message || error);
   let refusal = null, urlBefore = null;
   const checkUrl = async () => {
     try {
       urlBefore = await page.url();
-      if (urlBefore !== args.expectedUrl)
+      if (args.expectedUrl !== null && urlBefore !== args.expectedUrl)
         refusal = "the tab is at " + urlBefore + ", not at expectedUrl; read it again";
     } catch (error) { refusal = reason(error); }
   };
-  if (!["click", "fill", "hover", "double_click"].includes(args.action))
+  if (!["click", "fill", "hover", "double_click", "select_option"].includes(args.action))
     return {before: true, error: "unsupported snapshot target action"};
   await checkUrl();
-  if (refusal === null) {
-    try { await page.waitForSelector(args.target, {state: "attached", timeout: args.waitMs}); }
-    catch (error) { refusal = reason(error); }
-  }
-  if (refusal === null) await checkUrl();
   if (refusal !== null) return {before: true, error: refusal};
   let receipt = null, failure = null;
   try {
     switch (args.action) {
       case "click": receipt = await page.click(args.target, {label: args.cursor}); break;
       case "fill": receipt = await page.fill(args.target, args.text); break;
-      case "hover": receipt = await page.hover(args.target); break;
-      case "double_click": receipt = await page.dblclick(args.target); break;
+      case "hover": receipt = await page.hover(args.target, {label: args.cursor}); break;
+      case "double_click": receipt = await page.dblclick(args.target, {label: args.cursor}); break;
+      case "select_option": receipt = {selectedValues: await page.selectOption(args.target, args.selection)}; break;
     }
   } catch (error) { failure = reason(error); }
   return {urlBefore, receipt, error: failure};
 }|js}
-let target_input t ~id ~label ~deadline ~cursor ~expected_url ~target ~operation =
+let native_input t ~id ~label ~deadline ~cursor ~expected_url ~locator ~reference ~operation =
   let verb, text = match operation with
     | Target_click -> "click", `Null
     | Target_fill text -> "fill", str text
     | Target_hover -> "hover", `Null
-    | Target_double_click -> "double_click", `Null in
+    | Target_double_click -> "double_click", `Null
+    | Target_select _ -> "select_option", `Null in
+  let selection = match operation with
+    | Target_select (Browser_lane.Single_option value) -> obj ["value",str value]
+    | Target_select (Browser_lane.Multiple_options values) -> `List (List.map (fun value -> obj ["value",str value]) values)
+    | Target_click | Target_fill _ | Target_hover | Target_double_click -> `Null in
   let unknown = Printf.sprintf "read tab %d before another step" id in
   let response = run_step t ~window_s:(left t deadline) ~step:"page.target_input"
-      ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",str expected_url;"target",str (ego_locator target);
-        "action",str verb;"text",text;"waitMs",`Int target_wait_ms;"cursor",str cursor])
+      ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",(match expected_url with Some url -> str url | None -> `Null);"target",str locator;
+        "action",str verb;"text",text;"selection",selection;"cursor",str cursor])
       (String.concat "\n" [
         target_input_script;
         unblocked_agent_page;
@@ -1175,10 +1176,15 @@ let target_input t ~id ~label ~deadline ~cursor ~expected_url ~target ~operation
         | Some json -> Result.map (fun dialog -> ["dialog",Browser_surface.dialog_json dialog]) (ego_dialog json) in
       (match popups, dialog with
        | Ok popups, Ok dialog ->
-         Ok (obj (["tabId",`Int id;"action",str verb;"target",Browser_lane.snapshot_target_to_json target;
-                   "urlBefore",str url_before]
+         let* selected = match operation, List.assoc_opt "selectedValues" receipt with
+           | Target_select _, Some (`List values) when List.for_all (function `String _ -> true | _ -> false) values ->
+             Ok ["selectedValues",`List values]
+           | Target_select _, (None | Some _) -> outcome "ego answered selection without its selected values"
+           | (Target_click | Target_fill _ | Target_hover | Target_double_click), (None | Some _) -> Ok [] in
+         Ok (obj (["tabId",`Int id;"action",str verb] @ reference @ ["urlBefore",str url_before]
                   @ tab_fields (Some tab)
                   @ (match popups with [] -> [] | _ :: _ -> ["popups",`List popups])
+                  @ selected
                   @ dialog))
        | Error detail, _ | _, Error detail -> outcome detail)
     | _ -> outcome "ego answered the input outside its answer frame"
@@ -1211,7 +1217,17 @@ let interact ?actor t args =
     | Browser_lane.Fill_node _ | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _
     | Browser_lane.Double_click _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Ok () in
   let* expected_url, action =
-    if Browser_interaction.needs_pointer_resolution request.action then
+    let needs_resolution = match request.action with
+      | Browser_lane.Click _ | Browser_lane.Hover (Browser_lane.Selector _)
+      | Browser_lane.Double_click (Browser_lane.Selector _) -> false
+      | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Set_zoom _
+      | Browser_lane.Set_viewport _ | Browser_lane.Double_click _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
+      | Browser_lane.Scroll _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Hover_at _
+      | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _ | Browser_lane.Double_click_at _
+      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
+      | Browser_lane.Fill_node _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _
+      | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Browser_interaction.needs_pointer_resolution request.action in
+    if needs_resolution then
       let* resolved = resolve t ~label ~deadline (input ~expected_url:request.expected_url request.action) in
       before (Browser_interaction.resolve_pointer_input request.action resolved)
     else Ok (request.expected_url, request.action) in
@@ -1235,9 +1251,17 @@ let interact ?actor t args =
         "        if (outcome.error !== null) throw new Error(outcome.error);"]
       ~fields:["path",`List (List.map pixels path);cursor] in
   let on_target ~target operation = match expected_url with
-    | Some expected_url -> target_input t ~id ~label ~deadline ~cursor:cursor_text ~expected_url ~target ~operation
+    | Some _ -> native_input t ~id ~label ~deadline ~cursor:cursor_text ~expected_url
+        ~locator:(ego_locator target) ~reference:["target",Browser_lane.snapshot_target_to_json target] ~operation
     | None -> Error (Live.Before_effect "a snapshot target requires expectedUrl") in
+  let on_selector selector operation = native_input t ~id ~label ~deadline ~cursor:cursor_text ~expected_url
+      ~locator:selector ~reference:["selector",str selector] ~operation in
   match action with
+  | Browser_lane.Click selector -> on_selector selector Target_click
+  | Browser_lane.Fill {selector;text} -> on_selector selector (Target_fill text)
+  | Browser_lane.Select_option {selector;selection} -> on_selector selector (Target_select selection)
+  | Browser_lane.Hover (Browser_lane.Selector selector) -> on_selector selector Target_hover
+  | Browser_lane.Double_click (Browser_lane.Selector selector) -> on_selector selector Target_double_click
   | Browser_lane.Click_at {point; viewport; button} -> pointer viewport point (Press {button; count = 1})
   | Browser_lane.Double_click_at {point; viewport} -> pointer viewport point (Press {button = Browser_lane.Pointer.Primary; count = 2})
   | Browser_lane.Hover_at {point; viewport} -> pointer viewport point Move
@@ -1249,9 +1273,9 @@ let interact ?actor t args =
      | Browser_lane.Keyboard.Character scalar when Uchar.to_int scalar > last_pressable_character ->
        Error (Live.Before_effect press_refused)
      | Browser_lane.Keyboard.Character _ | Browser_lane.Keyboard.Named _ -> keyboard (Chord key))
-  | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Fill_node _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _ ->
+  | Browser_lane.Fill_node _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _ ->
     dom_input t ~id ~label ~deadline ~verb (input ~expected_url action)
-  | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _ | Browser_lane.Double_click _ ->
+  | Browser_lane.Click_node _ | Browser_lane.Hover (Browser_lane.Scene_node _) | Browser_lane.Double_click (Browser_lane.Scene_node _) ->
     Error (Live.Before_effect "unresolved semantic pointer target")
   | Browser_lane.Click_target target -> on_target ~target Target_click
   | Browser_lane.Fill_target {target; text} -> on_target ~target (Target_fill text)

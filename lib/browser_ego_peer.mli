@@ -85,13 +85,17 @@ val space_id : t -> int
     started while this ego process watched it: each step that acts on such
     a page starts watching it, and a row says pending, completed or
     interrupted as {!Browser_downloads} does, a completed file once
-    published. Input finds its target, checks the observed page and
-    makes its DOM edits with the page scripts the BiDi connection runs, and
-    sends mouse and keys through ego. ego shows each mouse step's label beside
+    published. Selector and snapshot input use ego's native locator and Page methods,
+    including automatic scrolling and iframe/shadow traversal. Selector strings
+    follow ego's documented syntax. Scene references, document scrolling and
+    direct link following retain the shared page adapter because ego has no
+    MASC document/node identity or direct-link primitive. Coordinates and keys
+    use ego's mouse and keyboard APIs. Native selectOption follows ego's
+    programmatic selection semantics, including disabled options. ego shows each mouse step's label beside
     its cursor: MASC, [actor] (or "agent"), and the interaction, as the BiDi
-    connection's overlay does. Snapshot target input checks the URL
-    again after the native selector wait; this is not an atomic navigation
-    guard. Re-read a snapshot after page changes or input and on a native
+    connection's overlay does. Native input checks the observed URL before calling ego; this is not an
+    atomic navigation guard. Ego owns its locator/actionability waits; a method
+    failure is uncertain, including a missing or stale target. Re-read a snapshot after page changes or input and on a native
     stale/unknown ref refusal. Native drags share the observed waypoint
     contract, require zero duration and release the button in the same run.
     Unconfirmed release blocks further input on this peer; read/finish remain

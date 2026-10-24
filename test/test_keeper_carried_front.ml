@@ -31,7 +31,7 @@ let record
       window
   : Turn_record.t
   =
-  { execution_ids = []
+  { request_observations = [];  execution_ids = []
   ; keeper = "alpha"
   ; agent_name = "alpha-agent"
   ; turn_kind = Turn_record.Direct

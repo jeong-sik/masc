@@ -62,6 +62,46 @@ let observe_native_provider_request binding calls_seen () =
     [call.seed_checkpoint; call.checkpoint];
   calls_seen := call.call_id :: !calls_seen
 
+let check_no_stale_request_after_prepare_failure env binding =
+  let module Native = Keeper_direct_native_continuation in
+  let call = match native_state binding with
+    | Keeper_native_call.Terminal_unacknowledged (call, _) -> call
+    | Keeper_native_call.No_native_call | Keeper_native_call.Active _ -> fail "expected retired call" in
+  let runtime = match Runtime_agent_execution_runtime.get () with
+    | Some runtime -> runtime | None -> fail "fixture has no native runtime" in
+  let dir = Eio.Path.(env#fs / binding.Native.session_dir / "native-executions" / call.call_id) in
+  let projection = Agent_core.Agent.open_execution_projection ~runtime ~dir call.locator
+    |> require "read retired projection" in
+  let old = Agent_core.Agent.Execution_projection.provider_requests projection ()
+    |> require "read old request evidence" in
+  check bool "old call contains serialized receipt evidence" true
+    (List.exists (fun (request:Agent_core.Agent.Execution_projection.provider_request) ->
+      match request.provenance with
+      | Some (Llm_provider.Completion_outcome.Serialized _) -> true
+      | None | Some (Llm_provider.Completion_outcome.Not_serialized
+        | Llm_provider.Completion_outcome.Cache_reused _
+        | Llm_provider.Completion_outcome.External_unobserved
+        | Llm_provider.Completion_outcome.Interrupted_unobserved) -> false) old);
+  let boundary = Native.capture_request_boundary binding |> require "capture exact request boundary" in
+  let config = Runtime_agent.default_config ~name:"blocked-before-publication"
+    ~provider_cfg:(Llm_provider.Provider_config.make ~kind:Anthropic ~model_id:"fixture"
+      ~base_url:"http://not-used.invalid" ()) ~system_prompt:"fixture" ~tools:[] in
+  let config = {config with Runtime_agent.execution_store=Some (Agent_core.Agent.execution_store ~runtime ~dir ())} in
+  (match Native.prepare ~binding ~runtime_id:call.runtime_id ~config
+    ~agent_core_checkpoint:None ~input:(Native.New_input {blocks=[Agent_core.Types.Text "fixture"];metadata=[]})
+    ~agent_ref:(ref None) () with
+   | Error _ -> () | Ok _ -> fail "pre-publication store conflict unexpectedly prepared");
+  check bool "failed prepare did not replace the previous call" true
+    (match native_state binding with
+     | Keeper_native_call.Terminal_unacknowledged (after,_) -> String.equal call.call_id after.call_id
+     | Keeper_native_call.No_native_call | Keeper_native_call.Active _ -> false);
+  match Native.request_evidence binding ~boundary ~runtime_id:call.runtime_id with
+  | Request_observation.No_matching_call -> ()
+  | Request_observation.Not_dispatched | Request_observation.No_durable_scope
+  | Request_observation.Read_failed _ | Request_observation.Recorded _ ->
+    fail "failed prepare reattributed a previous same-runtime request"
+;;
+
 let test_http_effect_checkpoint_owner_restart_alternate ?(durable_native = false) ?(interleave = false) ?(lose_retained = false) ?(projection_failure = false) () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -79,6 +119,7 @@ let test_http_effect_checkpoint_owner_restart_alternate ?(durable_native = false
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
     remove base_path);
   let primary_requests = ref 0 and alternate_bodies = ref [] and effects = ref 0 in
+  let request_observations = ref [] in
   let observe_native_request = ref (fun () -> ()) and native_calls_seen = ref [] in
   let callback _connection request body =
     let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
@@ -233,7 +274,9 @@ is-default = true
         check_native_acknowledged binding;
         observe_native_request := observe_native_provider_request binding native_calls_seen)
         native_binding;
-      let result = Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = session_id }) ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      let result = Keeper_turn_driver.run_named
+        ~on_request_observation:(fun observation -> request_observations := observation :: !request_observations)
+        ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = session_id }) ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
         ~keeper_name ~base_path  ~goal:"Finish original task"
         ~system_prompt:"Use the effect receipt to finish the original task."
@@ -248,7 +291,9 @@ is-default = true
       match result, !deferred with
       | Error _, Some lane ->
         check bool "only the original attempt may defer" false resume;
-        Option.iter (fun binding -> check_native_retired binding Agent_core.Agent.Terminal_failed) native_binding;
+        Option.iter (fun binding ->
+          check_native_retired binding Agent_core.Agent.Terminal_failed;
+          check_no_stale_request_after_prepare_failure env binding) native_binding;
         Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispatch_snapshot lane
           |> require "durable direct deferral";
         Option.iter check_native_acknowledged native_binding;
@@ -408,6 +453,7 @@ let test_http_same_path_resume_after_tool_result ?(durable_native = false) ~resu
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
     remove base_path);
   let request_bodies = ref [] and effects = ref 0 in
+  let request_observations = ref [] in
   let observe_native_request = ref (fun () -> ()) and native_calls_seen = ref [] in
   let bad_gateway () =
     Cohttp_eio.Server.respond_string ~status:`Bad_gateway
@@ -524,7 +570,9 @@ is-default = true
         check_native_acknowledged binding;
         observe_native_request := observe_native_provider_request binding native_calls_seen)
         native_binding;
-      let result = Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = session_id }) ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      let result = Keeper_turn_driver.run_named
+        ~on_request_observation:(fun observation -> request_observations := observation :: !request_observations)
+        ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = session_id }) ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~checkpoint_progress
         ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
         ~keeper_name ~base_path  ~goal:"Finish original task"
@@ -609,6 +657,17 @@ is-default = true
     (Store.has_claimable_queued store ~now:(Time_compat.now ()) |> require "has_claimable_queued");
   Store.close store |> require "close store";
   run_phase ~resume:true;
+  if durable_native then (
+    let recorded = List.filter_map (fun (observation:Request_observation.t) ->
+      match observation.evidence with
+      | Request_observation.Recorded {call_id;requests} ->
+        check bool "recorded call retains provider request outcomes" true (requests<>[]);
+        Some call_id
+      | Request_observation.Not_dispatched | Request_observation.No_durable_scope
+      | Request_observation.No_matching_call | Request_observation.Read_failed _ -> None)
+      !request_observations in
+    check (list string) "every native call has independent durable request observation"
+      (List.sort_uniq String.compare !native_calls_seen) (List.sort_uniq String.compare recorded));
   if durable_native then check int "same-path continuation allocates a fresh native scope" 2
     (List.length (List.sort_uniq String.compare !native_calls_seen));
   check int "the saved tool is not run again" 1 !effects;

@@ -238,6 +238,20 @@ module type S = sig
     ; settlement_seq : int
     }
 
+  type provider_request =
+    { node_id : Node_id.t
+    ; turn : int
+    ; ordinal : int
+    ; provenance : Llm_provider.Completion_outcome.request_provenance option
+    }
+
+  (** Root-run provider attempts in journal order, excluding nested Agent runs.
+      [None] means no returned request snapshot was recorded on that attempt.
+      Reads one authoritative immutable snapshot; absence is not non-serialization.
+      [after] selects only attempts opened or request snapshots materialized
+      after that exact same-scope journal boundary. *)
+  val provider_requests : t -> ?after:cursor -> unit -> (provider_request list, error) result
+
   val settled_tool_invocations : t -> (settled_tool_invocation list, error) result
   (** Canonically settled invocations of this root run, in journal settlement
       order. The invocation carries its original turn and planned occurrence;

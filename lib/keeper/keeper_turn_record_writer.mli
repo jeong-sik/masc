@@ -45,6 +45,7 @@ val write :
   model_input_window:Turn_record.model_input_window option ->
   response_observed_model_input:Turn_record.response_observed_model_input option ->
   raw_trace_run_ref:Turn_record.raw_trace_run_ref option ->
+  request_observations:Request_observation.t list ->
   sampling:Turn_record.sampling ->
   usage:Turn_record.usage ->
   turn_output_tokens:int option ->

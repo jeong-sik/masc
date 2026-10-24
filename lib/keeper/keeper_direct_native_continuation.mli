@@ -108,3 +108,9 @@ val effect_observation : prepared -> Keeper_provider_attempt_effect.t
     tool effects. *)
 
 
+
+(** Read the current matching call's root provider attempts after dispatch.
+    No matching call is distinct from unavailable/corrupt journal evidence. *)
+type request_boundary
+val capture_request_boundary : binding -> (request_boundary, string) result
+val request_evidence : binding -> boundary:request_boundary -> runtime_id:string -> Request_observation.evidence

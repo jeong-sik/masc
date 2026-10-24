@@ -30,7 +30,7 @@ let sample_record
       ()
   : Turn_record.t
   =
-  { execution_ids = []
+  { request_observations = [];  execution_ids = []
   ; keeper = "beta"
   ; agent_name = "beta-agent"
   ; turn_kind = Turn_record.Direct

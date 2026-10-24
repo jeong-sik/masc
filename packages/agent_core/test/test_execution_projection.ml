@@ -256,6 +256,11 @@ let test_live_and_restart_projection () =
               ~limit:128
               ())
        in
+       let requests = projection_value (Projection.provider_requests projection ()) in
+       check int "root request query excludes nested Agent request snapshots" 1 (List.length requests);
+       (match requests with
+        | [{Projection.provenance=None;_}] -> ()
+        | [] | _::_ -> fail "root query borrowed a nested Agent request receipt");
        let nodes = node_kinds all in
        let agent_runs =
          List.filter_map
@@ -690,6 +695,12 @@ let test_native_request_provenance_reopen () =
           | Projection.Node_opened _ | Projection.Node_updated _ | Projection.Node_closed _ -> None)
           page.Projection.events in
         let first = read () in
+        let projection = projection_value (Agent.open_execution_projection ~runtime ~dir locator) in
+        let baseline = projection_value (Projection.current_cursor projection) in
+        let old = projection_value (Projection.provider_requests projection ()) in
+        check int "root request query sees its provider attempt" 1 (List.length old);
+        check int "unchanged same-call boundary excludes historical receipts" 0
+          (List.length (projection_value (Projection.provider_requests projection ~after:baseline ())));
         let first_node, fact = match snapshot first with
           | [entry] -> entry | _ -> fail "each provider attempt must own one returned request fact" in
         check bool "receipt belongs to its provider attempt" true

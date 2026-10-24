@@ -393,6 +393,7 @@ type try_provider_ctx =
   ; preserve_thinking : bool option
   ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
   ; agent_core_checkpoint : Agent_core.Checkpoint.t option
+  ; on_request_evidence : (Request_observation.evidence -> unit) option
   ; native_binding : Keeper_direct_native_continuation.binding option
   ; native_retired_history_cut : Keeper_direct_native_continuation.retired_history_cut option
   ; sw : Eio.Switch.t

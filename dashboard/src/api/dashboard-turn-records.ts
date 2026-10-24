@@ -2,6 +2,7 @@
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
+import { decodeRequestObservations, type RequestObservation } from './request-observation'
 import { get, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
 import { isRecord, asBoolean, asNumber } from '../components/common/normalize'
@@ -103,6 +104,7 @@ export type TurnModelInputWindow = {
 }
 export type TurnResponseObservedModelInput = TurnModelInputWindow & { runtime_profile: string }
 export type TurnRecordEntry = {
+  request_observations: RequestObservation[]
   execution_ids: string[]
   keeper: string
   // Required identity fields emitted by Turn_record.to_json.
@@ -542,6 +544,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'keeper',
     'agent_name',
     'turn_kind',
+    'request_observations',
     'raw_trace_run_ref',
     'trace_id',
     'absolute_turn',
@@ -587,6 +590,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const raw_trace_run_ref =
     raw.raw_trace_run_ref === null ? null : decodeTurnRawTraceRunRef(raw.raw_trace_run_ref)
   const trace_id = decodeExactNonEmptyString(raw.trace_id)
+  const request_observations = decodeRequestObservations(raw.request_observations)
   const absolute_turn = asNumber(raw.absolute_turn)
   const turn_ref = decodeExactNonEmptyString(raw.turn_ref)
   const runtime_profile = decodeExactNonEmptyString(raw.runtime_profile)
@@ -682,6 +686,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || ttfrc_ms === null
     || temperature === null
     || top_p === null
+    || request_observations === null
     || max_tokens === null
     || enable_thinking === null
     || input_tokens === null
@@ -711,6 +716,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     finish_reason,
     temperature,
     top_p,
+    request_observations,
     max_tokens,
     enable_thinking,
     usage_scope,

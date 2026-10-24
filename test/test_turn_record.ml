@@ -85,7 +85,7 @@ let input_components_or_fail = function
   | None -> fail "expected available input components"
 
 let sample_record () : Turn_record.t =
-  { execution_ids =
+  { request_observations = [];  execution_ids =
       [ Ids.Execution_id.of_string "exec-1781200000000-0001"
       ; Ids.Execution_id.of_string "exec-1781200000001-0002"
       ]
@@ -1212,6 +1212,30 @@ let test_context_window_absent_on_the_error_path () =
        `Errored)
 
 
+let test_request_observations_roundtrip () =
+  let observations =
+    [{Request_observation.runtime_profile="native.fixture";attempt=0;
+      evidence=Request_observation.Recorded {call_id="fixture-call";requests=
+        [{node_id="provider-0";turn=0;ordinal=0;provenance=None}]}};
+     {runtime_profile="native.fixture";attempt=1;evidence=Request_observation.Read_failed "unavailable"};
+     {runtime_profile="official.fixture";attempt=2;evidence=Request_observation.No_durable_scope}] in
+  let record = {(sample_record ()) with request_observations=observations} in
+  let json = Turn_record.to_json record in
+  (match Turn_record.of_json json with
+   | Error detail -> fail detail
+   | Ok decoded -> check bool "all per-attempt request facts survive codec" true
+       (List.map Request_observation.to_json observations =
+        List.map Request_observation.to_json decoded.request_observations));
+  match json with
+  | `Assoc fields ->
+    (match Turn_record.of_json (`Assoc (List.remove_assoc "request_observations" fields)) with
+     | Error _ -> () | Ok _ -> fail "missing observations became a fabricated empty list");
+    (match Request_observation.of_json (`Assoc ["runtime_profile",`String "native.fixture";
+       "attempt",`Int 0;"evidence",`Assoc ["status",`String "unknown"]]) with
+     | Error _ -> () | Ok _ -> fail "unknown observation silently normalized")
+  | _ -> fail "writer did not produce object"
+;;
+
 let () =
   run "turn_record"
     [ ( "prompt_block_id"
@@ -1294,6 +1318,7 @@ let () =
         ; test_case "the tool surface payload round trips" `Quick
             test_the_tool_surface_payload_round_trips
         ] )
+    ; ( "request observations", [test_case "per-attempt facts and unavailability roundtrip" `Quick test_request_observations_roundtrip] )
     ; ( "turn_ref"
       , [ test_case "make/to_string/of_string roundtrip" `Quick
             test_turn_ref_roundtrip

@@ -154,6 +154,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
     entries: [
       {
         record: {
+          request_observations: [],
           keeper: 'albini',
           agent_name: 'keeper-albini-agent',
           usage_scope: 'per_request',
@@ -175,6 +176,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
       },
       {
         record: {
+          request_observations: [],
           keeper: 'albini',
           agent_name: 'keeper-albini-agent',
           usage_scope: 'per_request',
@@ -893,10 +895,10 @@ describe('KeeperTurnInspector v2 drawer', () => {
       expect(params).toContain('temperature0.7')
       if (enableThinking === undefined) {
         expect(params).toContain('top_p—')
-        expect(params).toContain('max_tokens—')
+        expect(params).toContain('max_tokens 요청—')
       } else {
         expect(params).toContain('top_p0.9')
-        expect(params).toContain('max_tokens8,192')
+        expect(params).toContain('max_tokens 요청8,192')
       }
       expect(params).toContain(`enable_thinking${expected}`)
       // fabricated defaults must not appear as chips

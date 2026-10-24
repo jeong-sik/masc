@@ -109,6 +109,7 @@ type t =
   ; model_input_window : model_input_window option
   ; response_observed_model_input : response_observed_model_input option
   ; raw_trace_run_ref : raw_trace_run_ref option
+  ; request_observations : Request_observation.t list
   ; sampling : sampling
   ; usage : usage
   ; turn_output_tokens : int option
@@ -251,6 +252,7 @@ let to_json (r : t) : Yojson.Safe.t =
          | Some components ->
            `List (List.map input_component_to_json components)
          | None -> `Null )
+     ; "request_observations", `List (List.map Request_observation.to_json r.request_observations)
      ; ("runtime_profile", `String r.runtime_profile)
      ; "request_runtime_profile", request_runtime_profile
      ; "request_body_bytes", request_body_bytes
@@ -529,6 +531,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "turn_ref"
             ; "blocks"
             ; "input_components"
+            ; "request_observations"
             ; "runtime_profile"
             ; "request_runtime_profile"
             ; "request_body_bytes"
@@ -758,6 +761,16 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           in
           Ok (Some run_ref)
       in
+      let* request_observations =
+        let* value = require "request_observations" fields in
+        match value with
+        | `List values ->
+          let rec decode decoded = function
+            | [] -> Ok (List.rev decoded)
+            | value::rest -> let* value=Request_observation.of_json value in decode (value::decoded) rest in
+          decode [] values
+        | _ -> Error "turn_record: request_observations must be an array"
+      in
       let* selected_model = opt_member "selected_model" fields as_nonempty_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
       let* tool_surface_ref =
@@ -820,6 +833,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; model_input_window
         ; response_observed_model_input
         ; raw_trace_run_ref
+        ; request_observations
         ; sampling = { temperature; top_p; max_tokens; enable_thinking }
         ; usage =
             { input_tokens

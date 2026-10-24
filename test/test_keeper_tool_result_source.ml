@@ -36,7 +36,7 @@ let with_record kind f =
       worker_run_id="worker-original";path=Filename.concat
         (Keeper_types_support.keeper_raw_trace_dir config keeper) "turn-proof.jsonl";
       start_seq=1;end_seq=5;agent_name="agent_core-test";session_id=trace} in
-    Keeper_turn_record_writer.write
+    Keeper_turn_record_writer.write ~request_observations:[]
       ~model_input_window:None ~response_observed_model_input:None
       ~config ~keeper_name:keeper ~agent_name:keeper ~turn_kind:kind ~trace_id:trace
       ~absolute_turn:1 ~runtime_profile:"test" ~selected_model:None ~finish_reason:None

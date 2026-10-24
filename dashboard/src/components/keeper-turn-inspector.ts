@@ -1,3 +1,4 @@
+import { RequestObservationFacts } from './common/request-observation-facts'
 import { isDismissEscape } from '../lib/keyboard'
 // Keeper Turn Inspector (RFC-0233 PR-4) — one row per keeper turn from
 // GET /api/v1/keepers/:name/turn-records, with the server-computed
@@ -878,9 +879,11 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
       <div class="ti-params">
         <span class="ti-param">temperature<b>${record.temperature ?? '—'}</b></span>
         <span class="ti-param">top_p<b>${record.top_p ?? '—'}</b></span>
-        <span class="ti-param">max_tokens<b>${record.max_tokens?.toLocaleString() ?? '—'}</b></span>
+        <span class="ti-param">max_tokens 요청<b>${record.max_tokens?.toLocaleString() ?? '—'}</b></span>
         <span class="ti-param">enable_thinking<b>${thinkingChipLabel(record)}</b></span>
       </div>
+      <div class="ti-sec-h" style=${{ marginTop: '16px' }}><h4>출력 토큰 결정</h4></div>
+      <${RequestObservationFacts} observations=${record.request_observations} />
       <div class="ti-sec-h" style=${{ marginTop: '16px' }}><h4>실행 메타데이터</h4></div>
       <div class="ti-kv">
         <span class="k">selected model</span><span class="v">${record.selected_model ?? 'n/a'}</span>

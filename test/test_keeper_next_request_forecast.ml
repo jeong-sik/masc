@@ -238,7 +238,7 @@ max-concurrent = 1
     }
   in
   let write_record ~turn response_observed_model_input =
-    Keeper_turn_record_writer.write
+    Keeper_turn_record_writer.write ~request_observations:[]
       ~config ~keeper_name:meta.name ~agent_name:meta.name ~turn_kind:Turn_record.Direct
       ~trace_id ~absolute_turn:turn ~runtime_profile:"forecast.seed"
       ~selected_model:None ~finish_reason:None ~context_window:None
@@ -693,7 +693,7 @@ let test_the_librarian_gap_is_read_from_small_files () =
       ; model_input_front = (seed ~messages:persisted first_atom).front
       }
     in
-    Keeper_turn_record_writer.write
+    Keeper_turn_record_writer.write ~request_observations:[]
       ~config ~keeper_name ~agent_name:keeper_name ~turn_kind:Turn_record.Direct
       ~trace_id ~absolute_turn:turn ~runtime_profile:"librarian-gap"
       ~selected_model:None ~finish_reason:None ~context_window:None

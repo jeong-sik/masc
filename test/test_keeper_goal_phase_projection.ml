@@ -493,10 +493,64 @@ let test_schema_rejected_store_renders_reason_and_file_not_zero_goals () =
   check bool "no Goal heading is drawn" false (contains_in world "### Active Goals (")
 ;;
 
+let test_goal_measurement_tracks_current_revision_and_read_failure () =
+  with_workspace @@ fun config ->
+  seed_all_phases config;
+  let goal_id = "goal-executing" in
+  let summary () =
+    match
+      List.find_opt
+        (fun (value : Keeper_unified_prompt.goal_summary) ->
+           String.equal value.summary_goal_id goal_id)
+        (get_ok (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name))
+    with
+    | Some value -> value
+    | None -> fail "the open Goal disappeared"
+  in
+  (match (summary ()).summary_measurement with
+   | Ok None -> ()
+   | Ok (Some _) | Error _ -> fail "an unmeasured Goal needs an explicit empty observation");
+  let goal =
+    match Goal_store.find_goal config ~goal_id with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_store.Goal_absent | Goal_store.Store_unavailable _ -> fail "fixture Goal unavailable"
+  in
+  (match Goal_measurement.record config ~goal_id
+           ~criterion_revision:goal.criterion_revision
+           ~observed_value:"0 of 2 acceptance cases observed"
+           ~evidence:"note:baseline execution, neither required result observed"
+           ~actor:keeper_name with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_measurement.error_to_string error));
+  (match (summary ()).summary_measurement with
+   | Ok (Some measured) ->
+     check string "observed zero is preserved" "0 of 2 acceptance cases observed"
+       measured.observed_value;
+     check string "evidence identity is preserved"
+       "note:baseline execution, neither required result observed" measured.evidence;
+     check string "measurement names the admitted criterion" goal.criterion_revision
+       measured.criterion_revision
+   | Ok None | Error _ -> fail "the recorded measurement did not reach turn context");
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1
+    ; updated_at = Masc_domain.now_iso ()
+    ; goals = [ { goal with criterion_revision = "changed-criterion" } ]
+    };
+  (match (summary ()).summary_measurement with
+   | Ok None -> ()
+   | Ok (Some _) | Error _ -> fail "a previous criterion's measurement leaked into the new one");
+  Fs_compat.save_file (Goal_measurement.path config) "not JSON";
+  (match (summary ()).summary_measurement with
+   | Error _ -> ()
+   | Ok None | Ok (Some _) -> fail "an unreadable measurement was converted to a value")
+;;
+
 let () =
   run "keeper_goal_phase_projection"
     [ ( "prompt surfaces"
-      , [ test_case "schema-rejected rows render reason and file, never zero goals" `Quick
+      , [ test_case "Goal measurement preserves current revision and unavailable source" `Quick
+            test_goal_measurement_tracks_current_revision_and_read_failure
+        ; test_case "schema-rejected rows render reason and file, never zero goals" `Quick
             test_schema_rejected_store_renders_reason_and_file_not_zero_goals
         ; test_case "unavailable Goal source preserves independent turn and frame" `Quick
             test_unreadable_goals_preserve_context_and_independent_turn

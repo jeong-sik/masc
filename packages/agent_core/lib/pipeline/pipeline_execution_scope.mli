@@ -32,6 +32,14 @@ val turn_ordinal : t -> int
 val before_provider_attempt : t -> Binding_identity.t -> (unit, Error.t) result
 val provider : t -> Execution_agent_scope.provider_attempt option
 
+(** Persist the returned fact before response handling or provider failure
+    settlement. A transient turn or a refusal before opening any provider
+    attempt has no durable provider node to update. *)
+val record_provider_request_provenance
+  :  t
+  -> Llm_provider.Completion_outcome.request_provenance
+  -> (unit, Error.t) result
+
 val record_provider_response
   :  t
   -> Llm_provider.Types.api_response

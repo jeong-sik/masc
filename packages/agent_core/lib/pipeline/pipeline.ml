@@ -79,6 +79,10 @@ let stage_route
       agent
       prep
   =
+  let ( let* ) result next = match result with
+    | Ok value -> next value
+    | Error error -> Llm_provider.Completion_outcome.before_serialization (Error error)
+  in
   let* provider_config =
     Pipeline_stage_route.provider_config_for_turn ?on_provider_failure ~turn_config agent
   in
@@ -124,12 +128,13 @@ let stage_route
              (* The full original response must reach the observer before
                 stage_collect removes or recovers tool names. Its raw block
                 indices and pre-admission inventory own Keeper's occurrences. *)
-             let* response = dispatch_sync
+             dispatch_sync
                ~sw ?clock ~trace_context ?on_provider_failure
-               ?before_provider_attempt ~provider_config agent prep in
-             Llm_provider.Streaming.emit_synthetic_events response
-               (Llm_provider.Complete_stream.emit_stream_event on_event);
-             Ok response
+               ?before_provider_attempt ~provider_config agent prep
+             |> Llm_provider.Completion_outcome.map_result (Result.map (fun response ->
+                  Llm_provider.Streaming.emit_synthetic_events response
+                    (Llm_provider.Complete_stream.emit_stream_event on_event);
+                  response))
            end else
              dispatch_stream
                ~sw
@@ -145,7 +150,8 @@ let stage_route
                ?before_provider_attempt
                ())
   in
-  Result.map (fun response -> provider_config, response) result
+  Llm_provider.Completion_outcome.map_result
+    (Result.map (fun response -> provider_config, response)) result
 ;;
 
 (* ── Stage 4: Collect ────────────────────────────────────── *)
@@ -770,7 +776,7 @@ let run_new_turn
             })
      | None -> ());
     let t0 = Pipeline_common.timestamp_now ?clock () in
-    let api_result =
+    let api_outcome =
       stage_route
         ~sw
         ?clock
@@ -783,9 +789,12 @@ let run_new_turn
         ~turn_config
         agent
         prep
-      |> tag_error "route"
+      |> Llm_provider.Completion_outcome.map_result (tag_error "route")
     in
     let duration_ms = (Pipeline_common.timestamp_now ?clock () -. t0) *. 1000.0 in
+    let* () = Pipeline_execution_scope.record_provider_request_provenance
+      execution api_outcome.Llm_provider.Completion_outcome.request_provenance in
+    let api_result = api_outcome.Llm_provider.Completion_outcome.result in
     (match agent.options.journal, api_result with
      | Some j, Ok (_, response) ->
        let input_tokens, output_tokens =

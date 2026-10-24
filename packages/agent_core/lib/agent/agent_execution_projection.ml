@@ -64,6 +64,7 @@ type node =
 
 type node_update =
   | Provider_event of Yojson.Safe.t
+  | Provider_request_snapshot of Llm_provider.Completion_outcome.request_provenance
   | Provider_response_snapshot of Llm_provider.Types.api_response
   | Output_delta of Yojson.Safe.t
   | Output_snapshot of Llm_provider.Types.content_block
@@ -390,6 +391,7 @@ let node value =
 
 let node_update = function
   | Event.Provider_event value -> Provider_event value
+  | Event.Provider_request_snapshot value -> Provider_request_snapshot value
   | Event.Provider_response_snapshot value -> Provider_response_snapshot value
   | Event.Output_delta value -> Output_delta value
   | Event.Output_snapshot value -> Output_snapshot value
@@ -673,7 +675,7 @@ let settled_tool_invocations t =
         (fun (update : Event.node_update Journal.event_record) ->
            match update.value with
            | Event.Tool_result _ -> Some (Event.seq update.event)
-           | Event.Provider_event _ | Event.Provider_response_snapshot _
+           | Event.Provider_request_snapshot _ | Event.Provider_event _ | Event.Provider_response_snapshot _
            | Event.Output_delta _ | Event.Output_snapshot _
            | Event.Tool_input_delta _ | Event.Tool_input_snapshot _
            | Event.Tool_progress _ -> None)

@@ -75,6 +75,11 @@ val admit_request_body
   -> prepared_request
   -> (serialized_request, Http_client.http_error) result
 
+(** Retain the serialization fact owned by an admitted body when a later
+    measurement or local admission rejects the request before completion.
+    This does not assert dispatch or provider acceptance. *)
+val serialized_outcome : serialized_request -> 'a -> 'a Completion_outcome.t
+
 (** What the measurement is ahead of, and the caller's bounds for it; see
     {!Prepared_completion_request.next_stage}. *)
 type 'clock measurement_next_stage = 'clock Prepared_completion_request.next_stage =

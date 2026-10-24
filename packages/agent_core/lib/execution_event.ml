@@ -200,6 +200,7 @@ let pp_node formatter node =
 
 type node_update =
   | Provider_event of Yojson.Safe.t
+  | Provider_request_snapshot of Llm_provider.Completion_outcome.request_provenance
   | Provider_response_snapshot of Llm_provider.Types.api_response
   | Output_delta of Yojson.Safe.t
   | Output_snapshot of Llm_provider.Types.content_block
@@ -316,6 +317,7 @@ let validate_content_block block =
 
 let validate_node_update update =
   match update with
+  | Provider_request_snapshot _ -> Ok ()
   | Provider_response_snapshot value -> Response_snapshot.validate value
   | Provider_event value -> validate_json ~context:"provider event" value
   | Output_delta value -> validate_json ~context:"output delta" value
@@ -455,8 +457,11 @@ let equal_update left right =
   | Output_snapshot left, Output_snapshot right
   | Tool_input_snapshot left, Tool_input_snapshot right
   | Tool_result left, Tool_result right -> left = right
+  | Provider_request_snapshot left, Provider_request_snapshot right ->
+    Llm_provider.Completion_outcome.equal_request_provenance left right
   | Provider_response_snapshot left, Provider_response_snapshot right -> left = right
   | ( ( Provider_event _
+      | Provider_request_snapshot _
       | Provider_response_snapshot _
       | Output_delta _
       | Output_snapshot _
@@ -680,6 +685,9 @@ let node_update_json kind value = `Assoc [ "type", `String kind; "value", value 
 
 let node_update_to_yojson_unchecked update =
   match update with
+  | Provider_request_snapshot value ->
+    node_update_json "provider_request_snapshot"
+      (Llm_provider.Completion_outcome.request_provenance_to_yojson value)
   | Provider_response_snapshot value ->
     node_update_json "provider_response_snapshot" (Response_snapshot.to_yojson value)
   | Provider_event value -> node_update_json "provider_event" value
@@ -714,6 +722,9 @@ let node_update_of_yojson json =
   let* update =
     match kind with
     | "provider_event" -> Ok (Provider_event value)
+    | "provider_request_snapshot" ->
+      let+ value = Llm_provider.Completion_outcome.request_provenance_of_yojson value in
+      Provider_request_snapshot value
     | "provider_response_snapshot" ->
       let+ value = Response_snapshot.of_yojson value in
       Provider_response_snapshot value

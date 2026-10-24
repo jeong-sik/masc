@@ -211,6 +211,14 @@ let window_spent_by_the_measurement ~operation ~parameter ~seconds ~phase ~next_
     }
 ;;
 
+(* Local failures before any returned transport outcome retain only a known
+   native body. An injected transport owns its own projection. *)
+let before_completion agent serialized result =
+  match agent.options.transport with
+  | None -> Llm_provider.Complete.serialized_outcome serialized result
+  | Some _ -> Llm_provider.Completion_outcome.before_serialization result
+;;
+
 let dispatch_sync
       ~sw
       ?clock
@@ -221,7 +229,10 @@ let dispatch_sync
       agent
       (prep : Agent_turn.turn_preparation)
   =
-  let ( let* ) = Result.bind in
+  let ( let* ) result next = match result with
+    | Ok value -> next value
+    | Error error -> Llm_provider.Completion_outcome.before_serialization (Error error)
+  in
   let tools = Option.value prep.Agent_turn.tools_json ~default:[] in
   let* binding =
     binding_identity_for_call agent provider_config
@@ -257,12 +268,15 @@ let dispatch_sync
         Llm_provider.Complete.admit_request_body ~stream:false prepared)
       |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
     with
-    | Error error -> Error error
+    | Error error -> Llm_provider.Completion_outcome.before_serialization (Error error)
     | Ok serialized ->
+      let result =
       (match preflight_serving_constraint ~binding ~now_unix_s prepared with
        | Error error -> Error error
        | Ok () when not requires_exact_fit ->
-         (Llm_provider.Complete.complete_serialized
+         Ok (Llm_provider.Completion_outcome.map_result
+          (Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider))
+          (Llm_provider.Complete.complete_serialized
            ~sw
            ~net:agent.net
            ?clock
@@ -272,8 +286,7 @@ let dispatch_sync
            ?call_timeout_s:agent.options.call_timeout_s
            ?permit_wait:agent.options.permit_wait
            ?request_wire_observer:agent.pre_dispatch_serialization_observer
-           ()).Llm_provider.Completion_outcome.result
-         |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
+           ()))
        | Ok () ->
          (match Llm_provider.Complete.resolve_context_limit prepared with
           | Error error -> Error (fit_error ~binding error)
@@ -332,7 +345,9 @@ let dispatch_sync
                                 ~phase:Llm_provider.Http_client.Non_streaming_body
                                 ~next_stage:"completion"))
                       | `Unbounded | `Remaining _ ->
-                        (Llm_provider.Complete.complete_admitted
+                        Ok (Llm_provider.Completion_outcome.map_result
+          (Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider))
+          (Llm_provider.Complete.complete_admitted
                           ~sw
                           ~net:agent.net
                           ?clock
@@ -342,11 +357,13 @@ let dispatch_sync
                           ~call_window
                           ?permit_wait:agent.options.permit_wait
                           ?request_wire_observer:agent.pre_dispatch_serialization_observer
-                          ()).Llm_provider.Completion_outcome.result
-                        |> Result.map_error
-                             (Provider_failure_attribution.of_http_error ~binding ~provider)))))))
+                          ()))))))))
+      in
+      (match result with
+       | Ok outcome -> outcome
+       | Error error -> before_completion agent serialized (Error error))
   in
-  finish_call ?on_provider_failure result
+  Llm_provider.Completion_outcome.map_result (finish_call ?on_provider_failure) result
 ;;
 
 let dispatch_stream
@@ -363,7 +380,10 @@ let dispatch_stream
       ?before_provider_attempt
       ()
   =
-  let ( let* ) = Result.bind in
+  let ( let* ) result next = match result with
+    | Ok value -> next value
+    | Error error -> Llm_provider.Completion_outcome.before_serialization (Error error)
+  in
   let tools = Option.value prep.Agent_turn.tools_json ~default:[] in
   let* binding =
     binding_identity_for_call agent provider_config
@@ -399,12 +419,15 @@ let dispatch_stream
         Llm_provider.Complete.admit_request_body ~stream:true prepared)
       |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
     with
-    | Error error -> Error error
+    | Error error -> Llm_provider.Completion_outcome.before_serialization (Error error)
     | Ok serialized ->
+      let result =
       (match preflight_serving_constraint ~binding ~now_unix_s prepared with
        | Error error -> Error error
        | Ok () when not requires_exact_fit ->
-         (Llm_provider.Complete.complete_stream_serialized
+         Ok (Llm_provider.Completion_outcome.map_result
+          (Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider))
+          (Llm_provider.Complete.complete_stream_serialized
            ~sw
            ~net:agent.net
            ?clock
@@ -415,8 +438,7 @@ let dispatch_stream
            ~on_event
            ?on_telemetry
            ?request_wire_observer:agent.pre_dispatch_serialization_observer
-           ()).Llm_provider.Completion_outcome.result
-         |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
+           ()))
        | Ok () ->
          (match Llm_provider.Complete.resolve_context_limit prepared with
           | Error error -> Error (fit_error ~binding error)
@@ -519,7 +541,9 @@ let dispatch_stream
                               first_event_timeout_s
                               admitted
                         in
-                        (Llm_provider.Complete.complete_stream_admitted
+                        Ok (Llm_provider.Completion_outcome.map_result
+          (Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider))
+          (Llm_provider.Complete.complete_stream_admitted
                           ~sw
                           ~net:agent.net
                           ?clock
@@ -530,11 +554,13 @@ let dispatch_stream
                           ~on_event
                           ?on_telemetry
                           ?request_wire_observer:agent.pre_dispatch_serialization_observer
-                          ()).Llm_provider.Completion_outcome.result
-                        |> Result.map_error
-                             (Provider_failure_attribution.of_http_error ~binding ~provider)))))))
+                          ()))))))))
+      in
+      (match result with
+       | Ok outcome -> outcome
+       | Error error -> before_completion agent serialized (Error error))
   in
-  finish_call ?on_provider_failure result
+  Llm_provider.Completion_outcome.map_result (finish_call ?on_provider_failure) result
 ;;
 
 let%test "a refusal this stage makes before dispatch is Attempt_rejected" =

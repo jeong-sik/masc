@@ -863,6 +863,23 @@ let terminal_recovery_action scope =
       | Ok (Some view) -> Ok view)
 ;;
 
+let record_provider_request_provenance provider provenance =
+  transact provider.turn.scope.writer
+    (Tx.update_node ~node:provider.node (Event.Provider_request_snapshot provenance))
+  |> Result.map ignore
+;;
+
+let provider_request_provenance provider =
+  match Writer.find_node provider.turn.scope.writer provider.node with
+  | Error error -> Error (Scope_unavailable error)
+  | Ok None -> Error (Resume_topology_mismatch "provider attempt node disappeared")
+  | Ok (Some { Journal.materialized = Journal.Provider_attempt_state {request_provenance; _}; _ }) ->
+    Ok request_provenance
+  | Ok (Some { Journal.materialized = (Journal.Agent_run_state | Journal.Agent_turn_state
+      | Journal.Output_block_state _ | Journal.Tool_invocation_state _ | Journal.Tool_attempt_state); _ }) ->
+    Error (Resume_topology_mismatch "request provenance is not on a provider attempt")
+;;
+
 let record_provider_response provider response =
   transact
     provider.turn.scope.writer
@@ -877,12 +894,12 @@ let provider_response provider =
   | Ok
       (Some
          { Journal.materialized =
-             Journal.Provider_attempt_state { response = Some response }
+             Journal.Provider_attempt_state { response = Some response; _ }
          ; _
          }) -> Ok response
   | Ok
       (Some
-         { Journal.materialized = Journal.Provider_attempt_state { response = None }; _ })
+         { Journal.materialized = Journal.Provider_attempt_state { response = None; _ }; _ })
     -> Error (Resume_topology_mismatch "provider response authority is not materialized")
   | Ok
       (Some

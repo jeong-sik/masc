@@ -101,7 +101,10 @@ type node_status =
 type materialized =
   | Agent_run_state
   | Agent_turn_state
-  | Provider_attempt_state of { response : Llm_provider.Types.api_response option }
+  | Provider_attempt_state of
+      { response : Llm_provider.Types.api_response option
+      ; request_provenance : Llm_provider.Completion_outcome.request_provenance option
+      }
   | Output_block_state of { snapshot : Llm_provider.Types.content_block option }
   | Tool_invocation_state of
       { input : Llm_provider.Types.content_block option
@@ -177,6 +180,7 @@ type invariant_violation =
       ; actual : Event.Event_id.t option
       }
   | Invalid_update_for_node of Event.Node_id.t
+  | Provider_request_already_materialized of Event.Node_id.t
   | Provider_response_already_materialized of Event.Node_id.t
   | Output_snapshot_already_materialized of Event.Node_id.t
   | Output_snapshot_kind_mismatch of
@@ -498,6 +502,7 @@ module Reducer = struct
     ; children_rev : Event.node event_record list
     ; occurrences : Event.Node_id.t Occurrence_map.t
     ; updates_rev : Event.node_update event_record list
+    ; provider_request : Llm_provider.Completion_outcome.request_provenance option
     ; provider_response : Llm_provider.Types.api_response option
     ; output_snapshot : Llm_provider.Types.content_block option
     ; tool_input : Llm_provider.Types.content_block option
@@ -534,7 +539,7 @@ module Reducer = struct
     | Event.Agent_run _ -> Agent_run_state
     | Event.Agent_turn _ -> Agent_turn_state
     | Event.Provider_attempt _ ->
-      Provider_attempt_state { response = record.provider_response }
+      Provider_attempt_state { response = record.provider_response; request_provenance = record.provider_request }
     | Event.Output_block _ -> Output_block_state { snapshot = record.output_snapshot }
     | Event.Tool_invocation _ ->
       Tool_invocation_state { input = record.tool_input; result = record.tool_result }
@@ -728,6 +733,10 @@ module Reducer = struct
   let validate_update (record : node_record) node_id update =
     match Event.node_kind record.node, update with
     | Event.Provider_attempt _, Event.Provider_event _ -> Ok ()
+    | Event.Provider_attempt _, Event.Provider_request_snapshot _ ->
+      if Option.is_some record.provider_request
+      then Error (Provider_request_already_materialized node_id)
+      else Ok ()
     | Event.Provider_attempt _, Event.Provider_response_snapshot _ ->
       if Option.is_some record.provider_response
       then Error (Provider_response_already_materialized node_id)
@@ -796,6 +805,7 @@ module Reducer = struct
           , _ ) -> Error (Tool_result_snapshot_not_tool_result node_id))
     | Event.Tool_attempt, Event.Tool_progress _ -> Ok ()
     | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), Event.Provider_event _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), Event.Provider_request_snapshot _)
     | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), Event.Provider_response_snapshot _)
     | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Tool_invocation _ | Event.Tool_attempt), Event.Output_delta _)
     | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Tool_invocation _ | Event.Tool_attempt), Event.Output_snapshot _)
@@ -817,6 +827,7 @@ module Reducer = struct
       ; children_rev = []
       ; occurrences = Occurrence_map.empty
       ; updates_rev = []
+      ; provider_request = None
       ; provider_response = None
       ; output_snapshot = None
       ; tool_input = None
@@ -986,9 +997,17 @@ module Reducer = struct
       { record with
         last_event_id = Event.event_id event
       ; updates_rev = { event; value = update } :: record.updates_rev
+      ; provider_request =
+          (match update with
+           | Event.Provider_request_snapshot value -> Some value
+           | Event.Provider_event _ | Event.Provider_response_snapshot _
+           | Event.Output_delta _ | Event.Output_snapshot _ | Event.Tool_input_delta _
+           | Event.Tool_input_snapshot _ | Event.Tool_progress _ | Event.Tool_result _ ->
+             record.provider_request)
       ; provider_response =
           (match update with
            | Event.Provider_response_snapshot value -> Some value
+           | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Output_delta _
            | Event.Output_snapshot _
@@ -999,6 +1018,7 @@ module Reducer = struct
       ; output_snapshot =
           (match update with
            | Event.Output_snapshot value -> Some value
+           | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Provider_response_snapshot _
            | Event.Output_delta _
@@ -1009,6 +1029,7 @@ module Reducer = struct
       ; tool_input =
           (match update with
            | Event.Tool_input_snapshot value -> Some value
+           | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Provider_response_snapshot _
            | Event.Output_delta _
@@ -1019,6 +1040,7 @@ module Reducer = struct
       ; tool_result =
           (match update with
            | Event.Tool_result value -> Some value
+           | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Provider_response_snapshot _
            | Event.Output_delta _
@@ -1097,6 +1119,7 @@ module Reducer = struct
       ; children_rev = record.children_rev
       ; occurrences = record.occurrences
       ; updates_rev = record.updates_rev
+      ; provider_request = record.provider_request
       ; provider_response = record.provider_response
       ; output_snapshot = record.output_snapshot
       ; tool_input = record.tool_input

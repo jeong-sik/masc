@@ -1615,6 +1615,11 @@ let install_search_runner calls result _clock _config =
     Ok result);
   fun () -> ()
 
+let check_search_declaration root expected =
+  let package = Lane_addon_manifest.load ~path:(Filename.concat root ".masc/package.toml")
+    |> Result.map_error Lane_addon_manifest.error_to_string |> unwrap in
+  check bool "the actual manifest loader admits the search declaration" expected package.web_search
+
 let check_search_result expected actual =
   let decoded = Lane_addon_search_result.result_of_json actual |> unwrap in
   check (option string) "the serving provider survives delivery"
@@ -1624,15 +1629,18 @@ let check_search_result expected actual =
   check bool "the complete provider result survives delivery" true (expected.search = decoded.search)
 
 let test_web_search_requires_the_package_declaration () =
-  let calls = ref [] in
-  let result = search_result (`Assoc ["rows", `List []]) in
-  with_installation ~listing:[web_search "undeclared-search"]
-    ~owner_setup:(install_search_runner calls result)
-    (fun clock _config worker _ _root ->
-      await clock (fun () -> delivered "undeclared-search" worker);
-      check string "another host port does not grant web search" "not_allowed"
-        (text "status" (result_of "undeclared-search" worker));
-      check (list (pair string (option int))) "the host provider runner was never called" [] !calls)
+  List.iter (fun manifest ->
+    let calls = ref [] in
+    let result = search_result (`Assoc ["rows", `List []]) in
+    with_installation ~manifest ~listing:[web_search "undeclared-search"]
+      ~owner_setup:(install_search_runner calls result)
+      (fun clock _config worker _ root ->
+        check_search_declaration root false;
+        await clock (fun () -> delivered "undeclared-search" worker);
+        check string "another host port does not grant web search" "not_allowed"
+          (text "status" (result_of "undeclared-search" worker));
+        check (list (pair string (option int))) "the host provider runner was never called" [] !calls))
+    [manifest; manifest ^ "\n[world]\nweb_search=false\n"]
 
 let test_web_search_delivers_one_decodable_result () =
   let calls = ref [] in
@@ -1640,7 +1648,8 @@ let test_web_search_delivers_one_decodable_result () =
     `Assoc ["url", `String "https://example.invalid/evidence"; "title", `String "Original source"]]]) in
   with_installation ~manifest:search_manifest ~listing:[web_search "inline-search"]
     ~owner_setup:(install_search_runner calls result)
-    (fun clock _config worker _ _root ->
+    (fun clock _config worker _ root ->
+      check_search_declaration root true;
       await clock (fun () -> delivered "inline-search" worker);
       check_search_result result (result_of "inline-search" worker);
       check (list (pair string (option int))) "the original query and limit reach the runner once"
@@ -1652,7 +1661,8 @@ let test_web_search_retains_the_original_result_without_rerunning () =
     "sources", `List [`String "https://example.invalid/full-source"]]) in
   with_installation ~manifest:search_manifest
     ~owner_setup:(install_search_runner calls result)
-    (fun clock _config worker _ _root ->
+    (fun clock _config worker _ root ->
+      check_search_declaration root true;
       let complete, marker = capture_retained_result worker ~id:"retained-search" ~source_id:None in
       let request = web_search "retained-search" in
       worker.listing := [request];

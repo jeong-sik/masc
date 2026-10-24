@@ -151,8 +151,8 @@ let load ~path =
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
           let names = List.map fst fields in
           if List.length names <> List.length (List.sort_uniq String.compare names)
-             || List.exists (fun key -> not (List.mem key ["skills"; "actions"; "outputs"; "tools"; "state"; "exact_outputs"; "asks"])) names
-          then Error "world accepts skills, actions, outputs, tools, state and exact_outputs tables" else Ok fields
+             || List.exists (fun key -> not (List.mem key ["skills"; "actions"; "outputs"; "tools"; "state"; "exact_outputs"; "asks"; "web_search"])) names
+          then Error "world accepts skills, actions, outputs, tools, state, exact_outputs, asks and web_search" else Ok fields
       | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
       | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
       | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)

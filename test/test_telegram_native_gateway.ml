@@ -44,7 +44,20 @@ let test_producer_exact_route_and_receipt () =
       ~channel_user_name:"Ada" ~channel_workspace_id:"" ~conversation_id:delivery.conversation_id
       ~external_message_id:delivery.external_message_id ~workspace_id:None ~extra_mentions:[] ~sender_keeper:None
       ~user_row_origin:Keeper_chat_store.Needs_append in
-    ignore(make delivery.surface |> ok);
+    let source = make delivery.surface |> ok in
+    let canonical = Keeper_chat_operation.canonical_json source
+      |> Result.map_error Keeper_chat_operation.canonical_json_error_to_string |> ok in
+    ignore(Keeper_chat_operation_payload.source_of_json canonical |> ok);
+    let actual=Surface_ref.of_json(Surface_ref.to_json delivery.surface) |> ok in
+    check bool "terminal consumer accepts persisted coordinates" true
+      (Keeper_telegram_coordinates.matches_surface ~bot_user_id:777L ~chat_id:(-1001234567890L)
+        ~message_thread_id:(Some 7) ~direct_messages_topic_id:None ~reply_to_message_id:(Some 8) actual);
+    (match delivery.surface with
+     | Surface_ref.Gate {label;address} ->
+       ignore(make(Surface_ref.Gate{label;address=List.rev address}) |> ok);
+       List.iter (fun bad -> check bool "exact address rejects duplicate missing and unknown fields" true (Result.is_error(make(Surface_ref.Gate{label;address=bad}))))
+         ([(("chat_id","-1001234567890")::address);List.tl address;("unexpected","value")::address])
+     | _ -> fail "Telegram surface must be Gate");
     check bool "tampered generic surface cannot replace typed topic" true
       (Result.is_error(make(Keeper_telegram_coordinates.surface ~bot_user_id:777L ~chat_id:(-1001234567890L)
         ~message_thread_id:(Some 8) ~direct_messages_topic_id:None ~reply_to_message_id:(Some 8))))

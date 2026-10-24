@@ -3302,7 +3302,8 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                    |> fun result -> Result.bind result (fun rows ->
                      match List.map Keeper_chat_store.captured_row_message rows with
                      | [row] when Option.fold ~none:false
-                         ~some:(Surface_ref.equal operation_payload.source.surface) row.surface
+                         ~some:(Keeper_telegram_coordinates.matches_surface ~bot_user_id ~chat_id
+                           ~message_thread_id ~direct_messages_topic_id ~reply_to_message_id) row.surface
                          && row.conversation_id = operation_payload.source.conversation_id -> Ok row.blocks
                      | [_] -> Error "Telegram terminal assistant destination differs from operation"
                      | [] -> Error "Telegram terminal assistant row is not persisted"

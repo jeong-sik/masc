@@ -138,8 +138,8 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
       if channel<>"telegram" || channel_user_id<>Int64.to_string user_id
         || channel_workspace_id<>"" || workspace_id<>None
       then Error "Telegram Keeper operation speaker/channel/workspace differs from route"
-      else if actual_surface<>Keeper_telegram_coordinates.surface
-        ~bot_user_id ~chat_id ~message_thread_id ~direct_messages_topic_id ~reply_to_message_id
+      else if not (Keeper_telegram_coordinates.matches_surface
+        ~bot_user_id ~chat_id ~message_thread_id ~direct_messages_topic_id ~reply_to_message_id actual_surface)
       then Error "Telegram Keeper operation surface differs from its exact route"
       else Ok ()
     | ( Keeper_continuation_channel.Imessage { user_id; _ }

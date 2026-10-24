@@ -5243,6 +5243,7 @@ type preset_restore_report =
   ; prr_default_prompts : Prompt_preset.default_comparison
   ; prr_preserved_lane_settings : (string * preset_lane_setting) list
   ; prr_skipped_lanes : (string * string) list
+  ; prr_skipped_assignments : (string * string) list
   }
 
 (* The routes answer [{ok:false, error}] on a refused request; read that
@@ -5601,7 +5602,17 @@ let decode_preset_restore json =
     let* prr_default_prompts = decode_preset_defaults report in
     let* prr_preserved_lane_settings = decode_preset_preserved_lane_settings report in
     let* prr_skipped_lanes = decode_preset_skipped_lanes report in
-    Ok { prr_restored; prr_autosave; prr_prompt_overrides; prr_instructions; prr_runtime; prr_default_prompts; prr_preserved_lane_settings; prr_skipped_lanes }
+    let* prr_skipped_assignments =
+      match report with
+      | `Assoc fields when not (List.mem_assoc "skipped_assignments" fields) -> Ok []
+      | _ ->
+        let* rows = required_list_field report "skipped_assignments" in
+        decode_list "skipped_assignments" (fun row ->
+          let* keeper = required_string_field row "keeper" in
+          let* reason = required_string_field row "reason" in
+          Ok (keeper, reason)) rows
+    in
+    Ok { prr_restored; prr_autosave; prr_prompt_overrides; prr_instructions; prr_runtime; prr_default_prompts; prr_preserved_lane_settings; prr_skipped_lanes; prr_skipped_assignments }
 ;;
 
 type librarian_run_page =

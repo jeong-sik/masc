@@ -1702,6 +1702,7 @@ type preset_restore_report = {
   prr_default_prompts : Prompt_preset.default_comparison;
   prr_preserved_lane_settings : (string * preset_lane_setting) list;
   prr_skipped_lanes : (string * string) list;
+  prr_skipped_assignments : (string * string) list;
 }
 
 val decode_presets : Yojson.Safe.t -> (presets_snapshot, string) result

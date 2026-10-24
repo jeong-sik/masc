@@ -431,6 +431,23 @@ fi
 if $do_install; then
   echo ""
   echo "[opam-pin] --install set; rebuilding ${#pinned_pkgs[@]} pinned packages..."
+  # opam's depext (e.g. conf-protoc -> libprotobuf-dev protobuf-compiler) runs
+  # apt-get from this script too, and #45174 refreshed the index only in
+  # install-ocaml-deps/install.sh. A stale runner index then 404s every deb
+  # this install asks for (run 40038962695, step exit 10), so refresh here as
+  # well before the first apt-get can run. Same shape as #45174: a warning, not
+  # a hard failure, so an air-gapped mirror still gets its chance.
+  refresh_apt_index() {
+    local started_at
+    started_at="$(date +%s)"
+    echo "Refreshing apt package index..."
+    if sudo apt-get update -qq; then
+      echo "Refreshed apt package index in $(( $(date +%s) - started_at ))s"
+    else
+      echo "::warning::apt package index refresh failed; attempting install with existing package index" >&2
+    fi
+  }
+  refresh_apt_index
   opam install --yes "${pinned_pkgs[@]}"
   echo "[opam-pin] install complete. Installed binaries now match the pins above."
 else

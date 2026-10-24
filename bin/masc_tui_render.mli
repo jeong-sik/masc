@@ -171,6 +171,7 @@ val frame_choice :
 (** The visible surface or overlay, also used before preparing Home focus. *)
 
 val render :
+  home:Masc_tui_home.prepared Lazy.t ->
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option *
   Masc_tui_approvals_model.approval_row option *
@@ -178,7 +179,10 @@ val render :
   Masc_tui_pane_selection.layout
 (** The frame without press marks, where each marked text landed in it, and
     where each of its panes sits. Commit the zones and the panes only once
-    the terminal accepts the frame. *)
+    the terminal accepts the frame. [home] is a fresh, UI-domain-owned lazy
+    reading for this synchronous Build only. Frame preparation and drawing
+    may force it; neither awaits, shares it with another domain, nor mutates
+    its source inputs between those forces. Other surfaces leave it unforced. *)
 
 val browser_lane_scroll_limit :
   Masc_tui_types.state -> terminal_rows:int -> cols:int ->

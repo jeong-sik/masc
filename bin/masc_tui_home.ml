@@ -40,7 +40,7 @@ let ordered_decision_rows rows =
 
 (* Current successes survive another source's failure. Stale snapshots are
    reachable through their source reading, never offered as current requests. *)
-let home_decision_rows (state : state) =
+let decision_rows_of_state (state : state) =
   let reading = approvals_reading state in
   let clean = Masc_tui_ansi.Terminal_text.single_line in
   let approval_rows =
@@ -165,7 +165,7 @@ let reconcile_home_request_detail state =
          | Home_goal_confirmation _ | Home_operator_task _ -> false)
       then ()
       else if not (List.exists (fun (action, _) -> equal_home_action action (Home_request request))
-                     (home_decision_rows state)) then begin
+                     (decision_rows_of_state state)) then begin
         (match request with
           | Home_question _ -> clear_ask_answering state
           | Home_held_call _ | Home_gate_request _ | Home_operator_request _
@@ -197,7 +197,7 @@ let reconcile_home_request_detail state =
                          ~sort:state.planning_sort planning.pl_goals)))
         | Home_operator_task task_id -> state.task_detail_id <- Some task_id
 
-let home_continue_rows (state : state) =
+let continue_rows_of_state (state : state) =
   let last =
     match state.home_last_chat, state.opening_mode with
     | Recorded_chat name, _ -> Some (Keeper_id.Keeper_name.to_string name, "")
@@ -270,19 +270,10 @@ let home_continue_rows (state : state) =
   in
   resume @ choose
 
-let home_actions state =
-  List.map fst (home_decision_rows state @ home_continue_rows state)
-
-let home_selected_action state =
-  let actions = home_actions state in
-  match state.home_selected with
-  | None -> List.nth_opt actions 0
-  | Some action -> List.find_opt (equal_home_action action) actions
-
 (* Frame preparation pins only an authoritative initial reading; transient
    boot destinations must remain free to settle. Drawing shares these pure
    projections but does not store either selection or viewport state. *)
-let home_initial_reading_ready state selected =
+let initial_reading_ready state selected =
   match selected with
   | Some (Home_request _ | Home_resume _ | Home_read_last _) -> true
   | Some Home_approvals -> approvals_reading_current state
@@ -294,7 +285,7 @@ let home_initial_reading_ready state selected =
         | Masc_tui_agenda.Not_read | Read_failed _ -> false)
   | Some Home_agenda | None -> false
 
-let home_notice_lines state =
+let notice_lines_of_state state =
   let clean = Masc_tui_ansi.Terminal_text.single_line in
   (match Masc_tui_credential_preparation.status state.credential_preparation with
    | Not_requested | Settled -> []
@@ -307,24 +298,60 @@ let home_notice_lines state =
      | None -> []
      | Some (_, receipt) -> [" Last decision receipt · " ^ clean receipt])
 
+type prepared = {
+  decisions : (home_action * string) list;
+  continuation : (home_action * string) list;
+  selected : home_action option;
+  selection_changed : bool;
+  notices : string list;
+  help_hint_shown : bool;
+  initial_ready : bool;
+}
+
+let prepare (state : state) =
+  let decisions = decision_rows_of_state state in
+  let continuation = continue_rows_of_state state in
+  let first = function [] -> None | (action, _) :: _ -> Some action in
+  let selected = match state.home_selected with
+    | None ->
+        (match first decisions with
+         | Some _ as action -> action
+         | None -> first continuation)
+    | Some action ->
+        let find rows = Option.map fst
+          (List.find_opt (fun (current, _) -> equal_home_action action current) rows) in
+        (match find decisions with
+         | Some _ as action -> action
+         | None -> find continuation)
+  in
+  { decisions; continuation; selected;
+    selection_changed = Option.is_some state.home_selected && Option.is_none selected;
+    notices = notice_lines_of_state state;
+    help_hint_shown = state.help_hint_shown;
+    initial_ready = initial_reading_ready state selected }
+
+let home_decision_rows prepared = prepared.decisions
+let home_continue_rows prepared = prepared.continuation
+let home_selected_action prepared = prepared.selected
+let home_selection_changed prepared = prepared.selection_changed
+let home_initial_reading_ready prepared = prepared.initial_ready
+let home_notice_lines prepared = prepared.notices
+
 (* The rows Home gives its decision window: the body budget less the one-time
    help line while it is shown and the requests link that always takes the
    first body row. The drawing and the key loop that stores the window's first
    row both read this, so they cannot disagree by the help line. *)
-let home_requests_budget state ~chrome_budget =
-  let help_line = if state.help_hint_shown then 0 else 1 in
+let home_requests_budget prepared ~chrome_budget =
+  let help_line = if prepared.help_hint_shown then 0 else 1 in
   max 0 (chrome_budget - help_line - 1)
 
-let home_decision_window state ~budget =
-  let decisions = home_decision_rows state in
-  let continuation = home_continue_rows state in
-  let selected = home_selected_action state in
-  let warning_rows =
-    if Option.is_some state.home_selected && Option.is_none selected then 1 else 0
-  in
-  let capacity = max 0 (budget - List.length (home_notice_lines state)
-      - List.length continuation - 2 - warning_rows) in
-  let first = max 0 (min state.home_decision_scroll (List.length decisions - capacity)) in
+let home_decision_window prepared ~scroll ~budget =
+  let decisions = prepared.decisions in
+  let selected = prepared.selected in
+  let warning_rows = if prepared.selection_changed then 1 else 0 in
+  let capacity = max 0 (budget - List.length prepared.notices
+      - List.length prepared.continuation - 2 - warning_rows) in
+  let first = max 0 (min scroll (List.length decisions - capacity)) in
   let first = match List.find_index (fun (action, _) -> Option.equal equal_home_action (Some action) selected) decisions with
     | Some index when index < first -> index
     | Some index when index >= first + capacity -> max 0 (index - capacity + 1)
@@ -333,8 +360,9 @@ let home_decision_window state ~budget =
   first, capacity
 
 let home_step state ~backwards =
-  let actions = home_actions state in
-  let current = home_selected_action state in
+  let prepared = prepare state in
+  let actions = List.map fst (prepared.decisions @ prepared.continuation) in
+  let current = prepared.selected in
   let index =
     match List.find_index (fun action -> Option.equal equal_home_action (Some action) current) actions with
     | None -> 0

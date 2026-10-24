@@ -30,6 +30,8 @@ evidence_row() {
     --argjson edited_target_files "${17}" \
     --argjson build_exit "${18}" \
     --argjson operation_id "${19}" \
+    --arg experiment_digest "${20}" \
+    --arg memory_mode "${21}" \
     '{
       case_id: $case_id,
       run_index: $run_index,
@@ -37,6 +39,8 @@ evidence_row() {
       operation_id: $operation_id,
       provider: $provider,
       model: $model,
+      experiment_digest: $experiment_digest,
+      memory_mode: $memory_mode,
       status: $status,
       verify_exit: $verify_exit,
       regression_exit: $regression_exit,

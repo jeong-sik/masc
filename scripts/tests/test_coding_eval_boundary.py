@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""Behavior probes for coding-eval oracle, grading and resume boundaries.
+
+Run with --docker-image IMAGE to also execute the real isolated Docker grader.
+That image must already provide bash and Python 3; no image is pulled here.
+"""
+
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import types
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def load(name):
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts/harness/lib" / (name + ".py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+sandbox = load("coding_eval_sandbox")
+inputs = load("coding_eval_inputs")
+DOCKER_IMAGE = None
+
+
+class CodingBoundary(unittest.TestCase):
+    def test_node_oracle_edit_does_not_fix_the_candidate(self):
+        if not shutil.which("node"):
+            self.skipTest("Node is unavailable for the fixed corpus control")
+        for case_id, target in [("l1-node-sum", "sum.js"), ("l2-node-stats", "stats.js")]:
+            with self.subTest(case_id=case_id), tempfile.TemporaryDirectory() as temporary:
+                case = ROOT / "benchmarks/coding/cases" / case_id
+                workspace = Path(temporary) / "candidate"
+                shutil.copytree(case / "workspace", workspace)
+                original = hashlib.sha256((workspace / target).read_bytes()).hexdigest()
+                (workspace / "check.js").write_text("process.exit(0);\n")
+                before = subprocess.run(["bash", str(case / "verify.sh"), str(workspace)], capture_output=True)
+                self.assertEqual(before.returncode, 0)
+                snapshot = Path(temporary) / "snapshot"
+                snapshot.mkdir()
+                sandbox.prepare_snapshot(case, workspace, snapshot)
+                after = subprocess.run(["bash", str(case / "verify.sh"), str(snapshot / "workspace")], capture_output=True)
+                self.assertNotEqual(after.returncode, 0)
+                self.assertEqual(hashlib.sha256((snapshot / "workspace" / target).read_bytes()).hexdigest(), original)
+                self.assertEqual((snapshot / "workspace/check.js").read_bytes(), (case / "workspace/check.js").read_bytes())
+
+    def test_candidate_link_is_refused_before_host_oracle_restoration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            candidate = root / "candidate"
+            candidate.mkdir()
+            marker = root / "marker"
+            marker.write_text("unchanged")
+            (candidate / "check.sh").symlink_to(marker)
+            with self.assertRaises(sandbox.InputRefused):
+                sandbox.prepare_snapshot(ROOT / "benchmarks/coding/cases/l1-node-sum", candidate, root / "snapshot")
+            self.assertEqual(marker.read_text(), "unchanged")
+
+    def test_frozen_resume_rejects_changed_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "repo"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "--allow-empty", "-m", "fixture"], check=True)
+            script_paths = [
+                "scripts/harness_coding_eval.sh", "scripts/run-local.sh",
+                "scripts/harness/lib/coding_eval_evidence.sh", "scripts/harness/lib/coding_eval_inputs.py",
+                "scripts/harness/lib/coding_eval_sandbox.py", "scripts/harness/lib/server_bootstrap.sh",
+                "scripts/harness/lib/mcp_call.sh", "scripts/harness/lib/test_framework.sh",
+                "scripts/harness/prompts/coding_keeper.txt", "config/runtime.toml",
+                "cases/case/case.json", "masc", "report", "runtime.toml",
+            ]
+            for path in script_paths:
+                destination = root / path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(path)
+            output = Path(temporary) / "out"
+            output.mkdir()
+            args = types.SimpleNamespace(root=root, cases=root / "cases", runtime_config=root / "runtime.toml",
+                binary=root / "masc", report_binary=root / "report", models="fixture:model", memory_mode="off",
+                execution_mode="live", image="sha256:" + "a" * 64, acceptance_manifest=None,
+                out=output / "experiment.json", check=False)
+            inputs.capture(args)
+            args.check = True
+            inputs.capture(args)
+            for relative in ("cases/case/case.json", "config/runtime.toml", "runtime.toml", "masc", "scripts/harness/prompts/coding_keeper.txt"):
+                with self.subTest(changed_input=relative):
+                    path = root / relative
+                    original = path.read_bytes()
+                    path.write_bytes(original + b" changed")
+                    with self.assertRaisesRegex(ValueError, "inputs differ"):
+                        inputs.capture(args)
+                    path.write_bytes(original)
+            manifest = json.loads(args.out.read_text())
+            run = output / "runs/run/evidence.json"
+            run.parent.mkdir(parents=True)
+            row = {"run_id": "run", "experiment_digest": manifest["experiment_digest"], "memory_mode": "off"}
+            run.write_text(json.dumps(row))
+            collection = types.SimpleNamespace(experiment=args.out, runs=output / "runs", out=output / "runs.jsonl")
+            inputs.collect(collection)
+            self.assertEqual(json.loads(collection.out.read_text()), row)
+            row["experiment_digest"] = "b" * 64
+            run.write_text(json.dumps(row))
+            with self.assertRaisesRegex(ValueError, "another experiment"):
+                inputs.collect(collection)
+
+    def test_actual_docker_grading_keeps_host_inputs_outside(self):
+        if DOCKER_IMAGE is None:
+            self.skipTest("pass --docker-image for actual Docker grading")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            case = root / "case"
+            workspace = root / "candidate"
+            (case / "workspace").mkdir(parents=True)
+            workspace.mkdir()
+            (case / "case.json").write_text(json.dumps({"verify": "verify.sh", "test_files": ["check.sh"]}))
+            (case / "verify.sh").write_text('set -eu\nbash "$1/check.sh"\n')
+            (case / "workspace/check.sh").write_text('set -eu\ncd "$(dirname "$0")"\npython3 candidate.py\n')
+            marker = root / "host-only-marker"
+            marker.write_text("host input")
+            (workspace / "candidate.py").write_text(
+                "import os,pathlib,socket\n"
+                "assert os.getuid() != 0\n"
+                "assert os.getenv('CODING_EVAL_HOST_SENTINEL') is None\n"
+                "assert not pathlib.Path('/var/run/docker.sock').exists()\n"
+                f"assert not pathlib.Path({str(marker)!r}).exists()\n"
+                "try:\n pathlib.Path('/input/write-test').write_text('no')\n"
+                "except OSError:\n pass\n"
+                "else:\n raise AssertionError('input mount is writable')\n"
+                "try:\n socket.create_connection(('1.1.1.1',443))\n"
+                "except OSError:\n pass\n"
+                "else:\n raise AssertionError('grader network is reachable')\n"
+                "assert not pathlib.Path('guest-only').exists()\n"
+                "pathlib.Path('guest-only').write_text('guest output')\n"
+            )
+            previous = os.environ.get("CODING_EVAL_HOST_SENTINEL")
+            os.environ["CODING_EVAL_HOST_SENTINEL"] = "fixture-only"
+            try:
+                receipt = root / "receipt.json"
+                self.assertEqual(sandbox.grade(case, workspace, DOCKER_IMAGE, "verify", receipt=receipt), 0)
+                proof = json.loads(receipt.read_text())
+                self.assertEqual(proof["image_id"], DOCKER_IMAGE)
+                self.assertEqual(proof["exit_code"], 0)
+                self.assertIn("workspace/candidate.py", [row["path"] for row in proof["inputs"]["files"]])
+            finally:
+                if previous is None:
+                    del os.environ["CODING_EVAL_HOST_SENTINEL"]
+                else:
+                    os.environ["CODING_EVAL_HOST_SENTINEL"] = previous
+            self.assertFalse((workspace / "guest-only").exists())
+            self.assertEqual(marker.read_text(), "host input")
+            descriptor = json.loads((case / "case.json").read_text())
+            for stage in ("regression", "build"):
+                descriptor[stage] = stage + ".sh"
+                (case / (stage + ".sh")).write_text((case / "verify.sh").read_text())
+            (case / "case.json").write_text(json.dumps(descriptor))
+            output = root / "stages"
+            output.mkdir()
+            original_runner = sandbox.grade_snapshot
+            def mutate_between_stages(*args, **kwargs):
+                code = original_runner(*args, **kwargs)
+                (workspace / "candidate.py").write_text("raise SystemExit(7)\n")
+                return code
+            sandbox.grade_snapshot = mutate_between_stages
+            try:
+                sandbox.grade_stages(case, workspace, DOCKER_IMAGE, output)
+            finally:
+                sandbox.grade_snapshot = original_runner
+            self.assertEqual(json.loads((output / "grading.json").read_text()),
+                             {"verify": 0, "regression": 0, "build": 0})
+            proofs = [json.loads((output / (stage + "-receipt.json")).read_text())
+                      for stage in ("verify", "regression", "build")]
+            self.assertEqual(len({proof["inputs"]["sha256"] for proof in proofs}), 1)
+            (workspace / "candidate.py").write_text("raise SystemExit(7)\n")
+            self.assertEqual(sandbox.grade(case, workspace, DOCKER_IMAGE, "verify"), 7)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--docker-image")
+    selected, remaining = parser.parse_known_args()
+    if selected.docker_image:
+        DOCKER_IMAGE = subprocess.check_output(["docker", "image", "inspect", selected.docker_image, "--format", "{{.Id}}"], text=True).strip()
+    unittest.main(argv=[sys.argv[0]] + remaining)

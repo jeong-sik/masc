@@ -25,7 +25,7 @@ logical accounting blocks do not become source capabilities.
 
 `probe_official_resume.py` compiles exact pure projection, codec and receipt
 source with actual role/content/metadata/message type fragments. It executes
-the base projection from `git show 661becba...` and reproduces the missing Goal
+the byte-identical published base projection from `git show 3badb881...` and reproduces the missing Goal
 (2 checks), then executes the repair (14 checks): changed/new Goal delivery,
 held omission, no extra-world replay, source span/receipt identity, stale issuer
 refusal and JSON turn-text slot binding. `official-resume-check.json` records
@@ -36,7 +36,9 @@ the fixture does not exercise their behavior.
 All five changed OCaml files parse and `git diff --check` passes. The authored
 native `test_keeper_official_client_host` fixture additionally exercises real
 `Host.prepare_turn`, the production request assembler, the held projection,
-codec and receipt consumer. That native suite has **not** been executed here.
+codec and receipt consumer. The parent integration executed it atd3a242837194e94c435a228228ac0eaab10724aa: two selected suites passed40102214212.
 Neither the pure probe nor this authored fixture proves full SDK sessions,
 completed vendor transport or model retention. No local Dune, real official
 client session, CI watch or live Keeper mutation was performed for this repair.
+
+The parent integration session binds the author baseline661becba to published root baseline3badb881 in probe-baseline-binding.json. Their projection file bytes are identical. The replay script uses published ancestry so a separate clone can reproduce the baseline without an unpublished author commit.

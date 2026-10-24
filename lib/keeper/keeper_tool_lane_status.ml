@@ -50,6 +50,14 @@ let outdated_shim_action =
    seen until the server asks again."
 ;;
 
+let unreported_shim_release_action =
+  "The endpoint answered, but its shim did not report a release. Its release \
+   cannot be compared with this server's; a mismatch has not been established. \
+   The lane still runs with the negotiated protocol. The operator can inspect \
+   the shim's provenance and, if needed, reinstall it from this server's \
+   release. This is the probe's observation at observed_at_unix."
+;;
+
 let json_of_report (r : Keeper_sandbox_remote.lane_report) : Yojson.Safe.t =
   let probe, probe_action =
     match r.probe with
@@ -69,7 +77,8 @@ let json_of_report (r : Keeper_sandbox_remote.lane_report) : Yojson.Safe.t =
           ]
       , (match release with
          | Some release when String.equal release Build_version.current -> None
-         | Some _ | None -> Some outdated_shim_action) )
+         | Some _ -> Some outdated_shim_action
+         | None -> Some unreported_shim_release_action) )
     | Keeper_sandbox_remote.Probe_failed { at; detail } ->
       ( `Assoc
           [ "state", `String "failed"; "at_unix", `Float at; "detail", `String detail ]

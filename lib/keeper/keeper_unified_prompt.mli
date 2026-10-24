@@ -129,8 +129,9 @@ val active_goal_summaries :
 val format_active_goal_summaries :
   (goal_summary list, Goal_store.unavailable) result -> string option
 (** The shared Active Goals prompt layer, including current criterion and
-    measurement provenance. [Ok []] omits the layer; [Error] renders the
-    authoritative store failure. This projection grants no effect authority. *)
+    measurement provenance. [Ok []] explicitly renders the empty observation;
+    [Error] renders the authoritative store failure. This projection grants no
+    effect authority. *)
 
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -231,8 +232,9 @@ val build_prompt :
       annotation on [Verifying] goals (RFC-0387 stage 2), a [yours]
       annotation on goals a held task serves, and an unknown-link annotation
       on every goal when the held tasks or their links cannot be read. These
-      are the workspace's open goals ({!active_goal_summaries}). Omitted or
-      [Ok []], the layer is absent when the world Goal source is available.
+      are the workspace's open goals ({!active_goal_summaries}). [Ok []] renders
+      the authoritative empty observation. When omitted, empty observed Goal
+      IDs render empty; nonempty IDs without summaries keep the layer absent.
       [Error] is the typed store failure ({!Goal_store.unavailable}, RFC-0444
       §2.3 row 6): a failed world or summary source renders its reason,
       file, mirror and reset step without blocking other context.

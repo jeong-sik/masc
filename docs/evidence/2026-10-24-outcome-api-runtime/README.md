@@ -34,4 +34,4 @@ metric plan/reader/provider follow-up run
 passed all four selected suites at source
 `b9bba3d4b416e269ff1d586f17f81e55c09ad8b3`. The earlier 29-suite run remains
 26 pass and 3 fail at its own source. Neither run is full regression evidence.
-Dashboard rendering is a separate, still unclaimed stage.
+Actual dashboard consumer rendering was subsequently captured in [the isolated browser experiment](../2026-10-24-outcome-dashboard-runtime/README.md); its real API, module-opened dialog and development-proxy scope are recorded separately.

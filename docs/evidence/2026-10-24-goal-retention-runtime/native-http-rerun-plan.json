@@ -1,0 +1,9 @@
+{
+  "source_sha": "9f024959528a5c0ea12ce59f0c1a63b2a364695d",
+  "suite": "test_keeper_direct_goal_provider_wire",
+  "minimal": true,
+  "runtime_product_source": "1eef45b69f395b1819537c116c7df839023da110",
+  "product_delta": "none:git diff --exit-code1eef HEAD --lib bin dashboard config scripts",
+  "reason": "initialize real Workspace fixture; retain actual bundled Task writer and authoritative Goal-link assertions",
+  "run_id": 40098831581
+}

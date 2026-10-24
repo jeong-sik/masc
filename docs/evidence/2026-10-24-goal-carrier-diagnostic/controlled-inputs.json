@@ -1,0 +1,61 @@
+[
+  {
+    "arm": "tail_user",
+    "schema_sha256": "6aff97439e6f5c90ca535962f467264414afb4f430354c6015118b8779a52d2c",
+    "options": {
+      "temperature": 0.4,
+      "seed": 20261024
+    },
+    "think": true,
+    "roles": [
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "tool",
+      "user"
+    ],
+    "total_message_content_bytes": 25977,
+    "returned_tools_executed": false
+  },
+  {
+    "arm": "system_suffix",
+    "schema_sha256": "6aff97439e6f5c90ca535962f467264414afb4f430354c6015118b8779a52d2c",
+    "options": {
+      "temperature": 0.4,
+      "seed": 20261024
+    },
+    "think": true,
+    "roles": [
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "tool"
+    ],
+    "total_message_content_bytes": 25979,
+    "returned_tools_executed": false
+  },
+  {
+    "arm": "leading_user",
+    "schema_sha256": "6aff97439e6f5c90ca535962f467264414afb4f430354c6015118b8779a52d2c",
+    "options": {
+      "temperature": 0.4,
+      "seed": 20261024
+    },
+    "think": true,
+    "roles": [
+      "system",
+      "user",
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "tool"
+    ],
+    "total_message_content_bytes": 25977,
+    "returned_tools_executed": false
+  }
+]

@@ -15,6 +15,7 @@ import { type TelemetryFreshnessMetadata } from './dashboard-shared'
 export const TURN_PROMPT_BLOCK_IDS = [
   'keeper_instructions',
   'dynamic_context',
+  'active_goals',
   'temporal_summary',
   'memory_os_recall',
   'librarian_working_context',

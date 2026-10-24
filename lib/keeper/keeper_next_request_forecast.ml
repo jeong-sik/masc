@@ -241,8 +241,8 @@ type composition =
   ; pinned_blocks : (Prompt_block_id.t * int) list
   }
 
-(* Keeper instructions ride in the system prompt and every other prompt
-   block rides as pinned extra system context; the message kinds are the
+(* Keeper instructions and the Goal observation ride in the system prompt;
+   the remaining prompt blocks ride as pinned extra context. Message kinds are the
    history the range decides about and belong to neither. A composition is a
    first round's when it carries a block the post-tool assembly drops; the
    predicate is the assembly's own, and so is the block order: the assembly
@@ -255,7 +255,7 @@ let read_composition (components : Turn_record.input_component list) =
         match component.Turn_record.component with
         | Turn_record.Tool_schemas ->
           instructions, schemas + component.bytes, blocks, first_round
-        | Turn_record.Prompt_block Prompt_block_id.Keeper_instructions ->
+        | Turn_record.Prompt_block (Prompt_block_id.Keeper_instructions | Prompt_block_id.Active_goals) ->
           instructions + component.bytes, schemas, blocks, first_round
         | Turn_record.Prompt_block
             (( Prompt_block_id.Dynamic_context

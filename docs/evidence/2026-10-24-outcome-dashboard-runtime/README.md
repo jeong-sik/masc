@@ -1,0 +1,11 @@
+# Actual Task outcome dashboard against an isolated runtime
+
+The screenshot was captured in authorized replacement Ego TaskSpace 15, page p1, using the repository AgentDetailOverlay with real `masc_agent_fitness` data. No DOM content or API response was substituted. The actual task-001 was submitted, inspected and approved through a controlled operator proxy; the separate Goal remained Executing. The screenshot shows completion and Task lifecycle approval at 100%, handoff unobserved, and the explicit statement that external acceptance is unobserved and Goal human confirmation is separate. This is one Task observation, not fleet or external-acceptance success.
+
+Backend: isolated 127.0.0.1:62470, source 7501aec032012869d8b979e0d14e1a9a9464ace7, native server SHA256 0d246b36b1cafa6828733301a384e10435609bf3f5a00c7dd2bf6db8936f4e43. See ../2026-10-24-outcome-api-runtime for persisted API receipts. No production installation is claimed.
+
+Frontend: the root worktree's actual Vite development preview at 127.0.0.1:59235. The preview started from b9bba3d4b416e269ff1d586f17f81e55c09ad8b3; the relevant consumer/decoder hashes below identify its unchanged Task-outcome implementation. The app's actual exported openAgentProfile function opened the dialog; that bypasses roster navigation, so this is consumer rendering evidence, not complete roster navigation QA. Authentication used the fixture's real private admin credential, which is excluded from evidence.
+
+The stock development MCP proxy rewrites Host but leaves Origin unchanged, yielding a backend 403. The environment-only vite-proof.mts validates that the incoming Origin matches incoming Host, then rewrites Origin to this fixed backend, matching the established WebSocket proxy behavior. Foreign/missing origins are refused; there is no wildcard CORS change. Product source and backend origin checks were unchanged. This test environment adjustment is part of the observation scope.
+
+The screenshot was visually inspected. visible-dialog.json retains browser text and capture time; hashes.json binds the screenshot, visible text, environment config and relevant source. Browser data came from the real approved Task; no fixture generated success rates.

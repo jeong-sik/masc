@@ -101,10 +101,13 @@ describe('KeeperTurnInspectorPanel', () => {
         { id: 'operator_note', bytes: 32, text: 'check the cancel record first' },
       ],
       assembled: null,
+      assembledBytes: 0,
+      systemPrompt: null,
+      systemPromptPartition: null,
     })
 
     render(html`<${KeeperTurnInspectorPanel} keepers=${KEEPERS} />`)
-    fireEvent.click(screen.getByRole('tab', { name: 'Typed next prompt' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Captured prompt' }))
 
     expect(await screen.findByText('operator_note')).toBeTruthy()
     expect(screen.getByText('1.0 KB')).toBeTruthy()

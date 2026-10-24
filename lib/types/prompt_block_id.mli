@@ -6,11 +6,12 @@
     leverage that keeps the record honest.
 
     [Keeper_instructions] is the rendered system prompt (keeper_prompt.ml).
-    [Dynamic_context] is the composite soft-context string built by
+    [Active_goals] is the renderer-attributed Goal snapshot split from the
+    per-turn world context, including current criterion and measurement.
+    [Dynamic_context] is the remaining composite soft-context string built by
     keeper_turn.ml/keeper_run_prompt.ml (continuity snapshot, skill
     route, worktree, telemetry feedback, turn instructions, recent
-    failure memory) — recorded as one block until a real producer
-    introduces a typed decomposition. This is a closed current contract:
+    failure memory). This is a closed current contract:
     constructors without a producer and forward-compatible catch-alls
     are intentionally excluded.
 
@@ -29,6 +30,7 @@
 type t =
   | Keeper_instructions
   | Dynamic_context
+  | Active_goals
   | Temporal_summary
   | Memory_os_recall
   | Librarian_working_context
@@ -73,10 +75,11 @@ val injected_on_post_tool_round : t -> bool
     documented DeepSeek and GLM tool loops end such a request with the tool
     result instead, and re-broadcasting the world state there made models
     re-answer it on every round (task-514, 2026-08-24). Recurring state
-    blocks therefore stay on the first round only; a block answers [true]
-    only when its appearance genuinely is someone speaking mid-turn
-    ([Operator_note], RFC-0366). A new constructor must declare its class
-    here before it can ride a post-tool round.
+    blocks therefore stay on the first round only. [Active_goals] is the
+    separately produced immutable Goal snapshot: it remains available after
+    tools without rebroadcasting Task, Gate, Lane or inbox state. Operator
+    speech remains [Operator_note] (RFC-0366). A new constructor must declare
+    its class here before it can ride a post-tool round.
 
     [Temporal_summary] is one of those first-round blocks for the same
     reason, so the clock a Keeper reads is the one rendered for its turn's

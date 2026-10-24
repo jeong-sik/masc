@@ -36,6 +36,42 @@ let sanitize_user_message = Inference_utils.sanitize_text_utf8
 
 let assemble_extra_system_context = Keeper_context_assembly.assemble
 
+let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_assembly
+    ~dynamic_context_partition ~existing_extra_system_context ~blocks =
+  let blocks, dynamic_context_partition =
+    if post_tool_round then
+      let goals = match Option.bind previous_assembly (fun previous ->
+          previous.Keeper_context_assembly.system_prompt) with
+        | None -> []
+        | Some {goal_text = None; _} -> []
+        | Some {goal_text = Some text; _} -> [Prompt_block_id.Active_goals, text] in
+      goals @ blocks, dynamic_context_partition
+    else
+      match dynamic_context_partition,
+        List.filter (fun (id, _) -> Prompt_block_id.equal id Prompt_block_id.Dynamic_context) blocks with
+      | Some partition, [(_, dynamic)] when String.equal dynamic (Keeper_context_layers.text partition) ->
+        let goals, remaining = Keeper_context_layers.partition_layer Active_goals partition in
+        let goal_blocks = match Keeper_context_layers.text goals with
+          | "" -> [] | text -> [Prompt_block_id.Active_goals, text] in
+        goal_blocks @ List.map (fun (id, text) ->
+          if Prompt_block_id.equal id Prompt_block_id.Dynamic_context
+          then id, Keeper_context_layers.text remaining else id, text) blocks, Some remaining
+      | Some _, _ | None, _ -> blocks, dynamic_context_partition
+  in
+  let blocks = blocks
+    |> List.filter (fun (id, _) -> not post_tool_round || Prompt_block_id.injected_on_post_tool_round id)
+    |> List.stable_sort (fun (left, _) (right, _) ->
+         Int.compare (Prompt_block_id.cache_rank left) (Prompt_block_id.cache_rank right)) in
+  let goals, blocks = List.partition (fun (id, _) ->
+      Prompt_block_id.equal id Prompt_block_id.Active_goals) blocks in
+  let goal_text = match goals with
+    | [] -> None
+    | [(_, text)] -> Some (Inference_utils.sanitize_text_utf8 text)
+    | _ :: _ :: _ -> invalid_arg "request context has more than one Goal observation" in
+  assemble_extra_system_context ~dynamic_context_partition ~existing_extra_system_context ~blocks
+  |> Keeper_context_assembly.with_goal_system_prompt
+       ~base_text:(Inference_utils.sanitize_text_utf8 base_system_prompt) ~goal_text
+
 (* See the mli: a position question about the last message, deliberately not
    [Hooks.last_tool_results], which answers containment over the whole
    history. *)

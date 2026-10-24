@@ -1,0 +1,487 @@
+{
+  "observed_at": "2026-10-24T14:41:45.061631+00:00",
+  "goal_id": "goal-canary-three-results",
+  "criterion_revision": "334daddc9a1cff6757982b3e90eadaac",
+  "wire": [
+    {
+      "request": "request-000002.request",
+      "request_sha256": "288b9e57d10372e4c6b608d484ef36a92d951d62578016ab8a71796623847ad7",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "user",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_p15lyef2",
+          "function": {
+            "index": 0,
+            "name": "Read",
+            "arguments": {
+              "file_path": "workspace/acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "d469e051989737060ee2bc73967c0d2f0acfb77934b9b3374ba532daf6026cb3"
+    },
+    {
+      "request": "request-000003.request",
+      "request_sha256": "e7d6889d5280d08718cd6d391e2485e973d2f1b03c0665483b94b2472ad181b1",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_amvl548x",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 2,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "5f0a87f8e948bdda16242a74ecca86358de3baeec84e1e0ae9606c0a5d9ec5f3"
+    },
+    {
+      "request": "request-000004.request",
+      "request_sha256": "2578aee7d596987ba4c5a2496a3f7ce09f5e25304db654b7374b30e074342420",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_apne6jpe",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 2,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "659d84559501032d571b9e9dee945e9c46527278c8c92567c76039f24f852b77"
+    },
+    {
+      "request": "request-000005.request",
+      "request_sha256": "6683d8196e6079996982aae77200c2455608269bf12c93706554869069df72a0",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_cjzotm1v",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "description": "Read workspace/acceptance.json. Change the value of the \"alpha\" field to true. Ensure \"beta\" and \"gamma\" remain false. Use artifact:workspace/acceptance.json as evidence for verification. Do not modify \"beta\" or \"gamma\" until this task is approved.",
+              "goal_id": "goal-canary-three-results",
+              "priority": 2,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "9bf02c0d9472a04ce45df348d43404a12628f15fefc325063a6bf3a6215ecf01"
+    },
+    {
+      "request": "request-000006.request",
+      "request_sha256": "5e15efb75fae20c2b45453680ae79c49df42d9c114c7a2fd15249c1c3957f72e",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [],
+      "response_sha256": "169bf1c9f3db2096b847ab7e3366e6568028ec66bb6cadb069d9e810c2f587d4"
+    },
+    {
+      "request": "request-000007.request",
+      "request_sha256": "35d2ab0c49d185f974132da1e801c8cc4efd02c83f4046c71ee42caf7a4bfc06",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "user",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_p2gftsnw",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_claim",
+            "arguments": {
+              "task_id": "task-001"
+            }
+          }
+        }
+      ],
+      "response_sha256": "7f230a352b548c356b5e1a5d6d4cc64e41d0ed1d158ef9ec2022fa391c516048"
+    },
+    {
+      "request": "request-000008.request",
+      "request_sha256": "752e355dfa2fdcb1213253960fb6c8b0e38792e4f439965a62d287ba12b6934f",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_24mz8c0a",
+          "function": {
+            "index": 0,
+            "name": "Read",
+            "arguments": {
+              "file_path": "workspace/acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "5027540e3b2bc08a4965c9e8d244f924328af938b2f78d85591b5137bbcce66d"
+    },
+    {
+      "request": "request-000009.request",
+      "request_sha256": "893afe85099137947ae8ac87f925959a933c928312a0c7762a8afae77219653b",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_94q0yiw4",
+          "function": {
+            "index": 0,
+            "name": "Edit",
+            "arguments": {
+              "file_path": "workspace/acceptance.json",
+              "new_string": "{\"alpha\": true, \"beta\": false, \"gamma\": false}",
+              "old_string": "{\"alpha\": false, \"beta\": false, \"gamma\": false}"
+            }
+          }
+        }
+      ],
+      "response_sha256": "138a245a182975cfef718c67bbc782667414592dba174d5317d7dffc95f835b0"
+    },
+    {
+      "request": "request-000010.request",
+      "request_sha256": "41a742c00fce44b8f3d1e31fc6af048d30f4f37b9f7d9f322cd1a67ede1432eb",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_1gl0qz55",
+          "function": {
+            "index": 0,
+            "name": "Read",
+            "arguments": {
+              "file_path": "workspace/acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "67748b82900c170766943bd78735a146e369051237b6c6b75664f6f02e2a5410"
+    },
+    {
+      "request": "request-000011.request",
+      "request_sha256": "f03b931e99f90c776097653bf4a44ba02f164ff8468deb4da9ed0ce423fad2a8",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_x1zli4aq",
+          "function": {
+            "index": 0,
+            "name": "Edit",
+            "arguments": {
+              "file_path": "workspace/acceptance.json",
+              "new_string": "{\"alpha\": true, \"beta\": false, \"gamma\": false}",
+              "old_string": "{\"alpha\": false, \"beta\": false, \"gamma\": false}"
+            }
+          }
+        }
+      ],
+      "response_sha256": "d33947f9302cf0988dd7bea48774910dee34dd75a4f1ac11def7332973660a3f"
+    },
+    {
+      "request": "request-000012.request",
+      "request_sha256": "3fc8fb4a85bd0349fa1c340bd8618a121331261d16d29c991871f1347528a276",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_srdvmqrr",
+          "function": {
+            "index": 0,
+            "name": "Write",
+            "arguments": {
+              "content": "{\"alpha\": true, \"beta\": false, \"gamma\": false}",
+              "file_path": "workspace/acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "055255f20ef4013ee58966e14902406c4af88091ce8925455afa874470e08094"
+    },
+    {
+      "request": "request-000013.request",
+      "request_sha256": "ab53246382a00653a75d009519a70a24ff29c220b31c12712c9b99db93c3d97f",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_93m43nl8",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_done",
+            "arguments": {
+              "evidence_refs": [
+                "artifact:workspace/acceptance.json"
+              ],
+              "notes": "Task completed: Set alpha to true in acceptance.json. beta and gamma were explicitly kept as false. This was done in accordance with the request, pending approval.",
+              "result": "File workspace/acceptance.json was updated to {\"alpha\": true, \"beta\": false, \"gamma\": false}. This modification was performed to fulfill the requested task.",
+              "task_id": "task-001"
+            }
+          }
+        }
+      ],
+      "response_sha256": "0e35051c53772b3b9e455354dbe41de29340c531bcd13269b8bd0bc48118cb04"
+    },
+    {
+      "request": "request-000014.request",
+      "request_sha256": "aa0871aad3cc5b00ffbd7c9474c2fc7f3df76a45776d6347338563658f4c5112",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [],
+      "response_sha256": "b37e66b70415df39a6ba363424cbefb9cd5e1adf073d89d095004ec7737674b6"
+    },
+    {
+      "request": "request-000015.request",
+      "request_sha256": "22cb0c419a3a7a15c908737e4befdf4f7cce5c5eaf5da90abed0dcbfb9330178",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": true,
+      "newest_message_role": "user",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [],
+      "response_sha256": "cc057e8a174592c77a2341cc3ac55887736211d88c5db394e172ad5d26ef4ea8"
+    },
+    {
+      "request": "request-000019.request",
+      "request_sha256": "79c160e303e8cbead51cb69235f72d4dcc256dce25836267e3b9a370fd83b137",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": true,
+      "newest_message_role": "user",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [],
+      "response_sha256": "9e5b2fd0dbc4f7064c7545457c882c62023bc609c1af539268af8a250396e184"
+    }
+  ],
+  "backlog": {
+    "tasks": [
+      {
+        "id": "task-001",
+        "title": "Set alpha to true in acceptance.json",
+        "description": "Read workspace/acceptance.json. Change the value of the \"alpha\" field to true. Ensure \"beta\" and \"gamma\" remain false. Use artifact:workspace/acceptance.json as evidence for verification. Do not modify \"beta\" or \"gamma\" until this task is approved.",
+        "priority": 2,
+        "files": [],
+        "created_at": "2026-10-24T14:29:27Z",
+        "created_by": "goal-canary",
+        "contract": {
+          "strict": true,
+          "required_evidence": [
+            "artifact:workspace/acceptance.json"
+          ]
+        },
+        "handoff_context": {
+          "summary": "File workspace/acceptance.json was updated to {\"alpha\": true, \"beta\": false, \"gamma\": false}. This modification was performed to fulfill the requested task.",
+          "evidence_refs": [
+            "artifact:workspace/acceptance.json"
+          ],
+          "updated_at": "2026-10-24T14:34:13Z",
+          "updated_by": "goal-canary"
+        },
+        "status": "done",
+        "assignee": "goal-canary",
+        "completed_at": "2026-10-24T14:36:06Z",
+        "notes": "Controlled operator-proxy canary approval after exact retained artifact inspection: alpha=true, beta=false, gamma=false; first Task only. No independent LLM verdict or human Goal completion confirmation claim."
+      }
+    ],
+    "pending_completion_rejections": [],
+    "delivered_completion_rejections": [],
+    "pending_completion_approvals": [],
+    "task_deletion_receipts": [],
+    "task_creation_receipts": [],
+    "last_updated": "2026-10-24T14:36:06Z",
+    "version": 7
+  },
+  "artifact": {
+    "alpha": true,
+    "beta": false,
+    "gamma": false
+  },
+  "artifact_sha256": "5fa852df4c27a68cc7e0c127b94c0fe2169a33f55201d50b20618a9ba45e9f06",
+  "goal_api": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.64.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"status\":\"ok\",\"generated_at\":\"2026-10-24T14:41:45Z\",\"count\":1,\"goals\":[{\"id\":\"goal-canary-three-results\",\"criterion_revision\":\"334daddc9a1cff6757982b3e90eadaac\",\"title\":\"alpha, beta, gamma 세 결과를 실제 파일에서 확인한다\",\"metric\":\"playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric\",\"target_value\":\"3/3: alpha=true, beta=true, gamma=true, each persisted and reread\",\"due_date\":null,\"priority\":1,\"phase\":\"executing\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-10-24T14:28:54Z\",\"updated_at\":\"2026-10-24T14:28:54Z\",\"verification\":{\"goal_id\":\"goal-canary-three-results\",\"completion\":{\"state\":\"idle\"},\"submitted_evidence\":[],\"updated_at\":\"2026-10-24T14:41:45Z\"},\"measurement\":{\"state\":\"reported\",\"record\":{\"id\":\"91046d8ff851d901c2618fed875f0cef\",\"goal_id\":\"goal-canary-three-results\",\"criterion_revision\":\"334daddc9a1cff6757982b3e90eadaac\",\"observed_value\":\"0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread\",\"evidence\":\"note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.\",\"actor\":\"goal-canary-operator\",\"recorded_at\":\"2026-10-24T14:28:54Z\"}}}],\"rollup\":{\"active_count\":1,\"verifying_count\":0,\"awaiting_confirmation_count\":0,\"done_count\":0,\"dropped_count\":0,\"paused_count\":0,\"blocked_count\":0}}",
+            "status": "ok",
+            "tool": "masc_goal_list"
+          },
+          "trace_id": "2",
+          "agent_id": "goal-canary-operator",
+          "tool": "masc_goal_list",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-10-24T14:41:45Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"status\":\"ok\",\"generated_at\":\"2026-10-24T14:41:45Z\",\"count\":1,\"goals\":[{\"id\":\"goal-canary-three-results\",\"criterion_revision\":\"334daddc9a1cff6757982b3e90eadaac\",\"title\":\"alpha, beta, gamma 세 결과를 실제 파일에서 확인한다\",\"metric\":\"playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric\",\"target_value\":\"3/3: alpha=true, beta=true, gamma=true, each persisted and reread\",\"due_date\":null,\"priority\":1,\"phase\":\"executing\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-10-24T14:28:54Z\",\"updated_at\":\"2026-10-24T14:28:54Z\",\"verification\":{\"goal_id\":\"goal-canary-three-results\",\"completion\":{\"state\":\"idle\"},\"submitted_evidence\":[],\"updated_at\":\"2026-10-24T14:41:45Z\"},\"measurement\":{\"state\":\"reported\",\"record\":{\"id\":\"91046d8ff851d901c2618fed875f0cef\",\"goal_id\":\"goal-canary-three-results\",\"criterion_revision\":\"334daddc9a1cff6757982b3e90eadaac\",\"observed_value\":\"0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread\",\"evidence\":\"note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.\",\"actor\":\"goal-canary-operator\",\"recorded_at\":\"2026-10-24T14:28:54Z\"}}}],\"rollup\":{\"active_count\":1,\"verifying_count\":0,\"awaiting_confirmation_count\":0,\"done_count\":0,\"dropped_count\":0,\"paused_count\":0,\"blocked_count\":0}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "status": "ok",
+        "generated_at": "2026-10-24T14:41:45Z",
+        "count": 1,
+        "goals": [
+          {
+            "id": "goal-canary-three-results",
+            "criterion_revision": "334daddc9a1cff6757982b3e90eadaac",
+            "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+            "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+            "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+            "due_date": null,
+            "priority": 1,
+            "phase": "executing",
+            "last_review_note": null,
+            "last_review_at": null,
+            "created_at": "2026-10-24T14:28:54Z",
+            "updated_at": "2026-10-24T14:28:54Z",
+            "verification": {
+              "goal_id": "goal-canary-three-results",
+              "completion": {
+                "state": "idle"
+              },
+              "submitted_evidence": [],
+              "updated_at": "2026-10-24T14:41:45Z"
+            },
+            "measurement": {
+              "state": "reported",
+              "record": {
+                "id": "91046d8ff851d901c2618fed875f0cef",
+                "goal_id": "goal-canary-three-results",
+                "criterion_revision": "334daddc9a1cff6757982b3e90eadaac",
+                "observed_value": "0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread",
+                "evidence": "note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.",
+                "actor": "goal-canary-operator",
+                "recorded_at": "2026-10-24T14:28:54Z"
+              }
+            }
+          }
+        ],
+        "rollup": {
+          "active_count": 1,
+          "verifying_count": 0,
+          "awaiting_confirmation_count": 0,
+          "done_count": 0,
+          "dropped_count": 0,
+          "paused_count": 0,
+          "blocked_count": 0
+        }
+      }
+    }
+  }
+}

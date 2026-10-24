@@ -42,6 +42,19 @@ val assemble_extra_system_context :
     estimate has authority over assembly or dispatch; typed provider overflow
     is handled at the MASC lane boundary. *)
 
+val assemble_request_context :
+  base_system_prompt:string ->
+  post_tool_round:bool ->
+  previous_assembly:extra_system_context_assembly option ->
+  dynamic_context_partition:Keeper_context_layers.rendered option ->
+  existing_extra_system_context:string option ->
+  blocks:(Prompt_block_id.t * string) list -> extra_system_context_assembly
+(** Split renderer-attributed Active Goals into a stable system suffix.
+    [base_system_prompt] is the pre-existing override when present, otherwise
+    the original turn system prompt. Later tool rounds retain only that exact
+    issued Goal snapshot and permitted extra blocks. Other world state stays
+    first-round only. No store read or conversation-history write. *)
+
 val ends_with_tool_results : Agent_core.Types.message list -> bool
 
 val is_later_round_of_this_turn :

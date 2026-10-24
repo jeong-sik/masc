@@ -85,6 +85,24 @@ val save_file_backed_raw_token_credential :
   string -> agent_name:string -> role:agent_role -> raw_token:string ->
   (agent_credential, masc_error) result
 
+type startup_admin_token_source =
+  | Stored_admin_token
+  | Minted_admin_token
+  | Supplied_admin_token
+
+val prepare_startup_admin_token :
+  string -> raw_token:string option ->
+  (string * agent_credential * startup_admin_token_source, masc_error) result
+(** Resolve the startup Admin owner and prepare its bearer under one credential
+    transaction. An absent owner file selects [admin]; an occupied blank or
+    unreadable owner refuses. [Some raw_token] keeps explicit
+    startup publication semantics. [None] reuses a valid matching persisted
+    Admin pair without rewriting its identity, role, expiry or bytes, and mints
+    a file-backed pair using the configured expiry only when both paths are
+    absent. Missing halves, unreadable or invalid pairs and expired credentials
+    refuse without replacement. Auth enablement and internal Keeper tokens are
+    unchanged. Publication errors retain the existing partial-effect report. *)
+
 type file_backed_token_lifetime = Config_expiry | No_expiry | Expires_in_hours of int
 
 type login_auth_change = Auth_already_required | Auth_enabled | Require_token_enabled

@@ -51,6 +51,21 @@ module For_testing : sig
   (** The actual host commitment adapter, including original-intent validation,
       authoritative Task readback and the domain verdict boundary. *)
 
+  val commit_original_with_effects :
+    observe:(config:Workspace_utils_backend_setup.config -> original:Verifier_review_original.t ->
+      judgment:Yojson.Safe.t -> authority:Masc_domain.completion_authority ->
+      Lane_addon_request_progress.change -> (Yojson.Safe.t, string) result) ->
+    apply:(config:Workspace_utils_backend_setup.config -> original:Verifier_review_original.t ->
+      judgment:Yojson.Safe.t -> authority:Masc_domain.completion_authority ->
+      Lane_addon_request_progress.change ->
+      (unit, commit_apply_error Verifier_review_worker.apply_failure) result) ->
+    config:Workspace_utils_backend_setup.config -> task:Masc_domain.task ->
+    store:Verifier_review_owner.store -> attempt:int -> installation_id:string -> package_id:string ->
+    verification_id:string -> notes:string -> (unit, string) result
+  (** The same private production commitment runner, with scoped effect wrappers
+      for measuring calls that delegate to [observe_original]/[apply_original].
+      Production is fixed to those real effects; no global hook is installed. *)
+
   val authority_actor : string
   (** The fixed authority identity (RFC-0361 D7(b)): the [verifier_exact]
       lane id, shared by every judgement so verdicts aggregate by actor. *)

@@ -835,7 +835,7 @@ let apply_original_change ~config ~original ~judgment ~authority change =
        | Agent _ | Auth _ | System _ ->
          Error (W.Outcome_unknown {error=failure; detail}))
 
-let commit_verdict_with_config
+let commit_verdict_with_effects ~observe_original ~apply_original
       (config : Workspace_utils_backend_setup.config) (task : Masc_domain.task)
       ~store ~attempt ~installation_id ~package_id
       ~verification_id ~authority ~verdict:_ ~notes:_ ~verdict_label ~on_commit
@@ -872,13 +872,10 @@ let commit_verdict_with_config
         Ok (`Assoc ["task_id",`String task.id;"status",Masc_domain.task_status_to_yojson status],awaiting.started_at)
       | Masc_domain.AwaitingVerification _ | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ ->
         Error "domain commit preparation differs from original verification" in
-    let* ()=match (P.observer (O.progress retained)).registration with
-      | Lane_addon_request_receipt.Unobserved -> Ok ()
-      | Pending _ | Acknowledged _ ->
-        let* status=Verifier_review_publication.captured_before retained in
-        let* captured=Verifier_review_commit_intent.before_of_status ~original status in
-        if Yojson.Safe.equal before captured then Ok ()
-        else Error "domain intent before-state differs from the captured original" in
+    let* captured_status=Verifier_review_publication.captured_before retained in
+    let* captured=Verifier_review_commit_intent.before_of_status ~original captured_status in
+    let* ()=if Yojson.Safe.equal before captured then Ok ()
+      else Error "domain intent before-state differs from the captured original" in
     let* change=Verifier_review_commit_intent.prepare ~original ~judgment ~authority ~before in
     let after=change.P.after in
     let decode change = Verifier_review_commit_intent.decode
@@ -887,8 +884,8 @@ let commit_verdict_with_config
       | Finished commit -> let* _=decode commit.change in Ok ()
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
       | Commit_unknown _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok () in
-    let observe=observe_original_change ~config ~original ~judgment ~authority in
-    let apply=apply_original_change ~config ~original ~judgment ~authority in
+    let observe=observe_original ~config ~original ~judgment ~authority in
+    let apply=apply_original ~config ~original ~judgment ~authority in
     match W.commit_attempt ~store ~verification_id ~attempt ~installation_id ~package_id
       ~change:{P.before;after} ~observe ~apply with
     | Ok () ->
@@ -917,6 +914,9 @@ let commit_verdict_with_config
     let _ = evaluator_runtime in
     let cause=Commit_failed {detail} in Stalled cause,registry_outcome_of_stop_cause cause
 ;;
+
+let commit_verdict_with_config = commit_verdict_with_effects
+  ~observe_original:observe_original_change ~apply_original:apply_original_change
 
 let commit_verdict (runtime:runtime) = commit_verdict_with_config runtime.config
 
@@ -1702,14 +1702,18 @@ module For_testing = struct
     | Superseded_by {authority} -> Error ("original superseded by " ^ authority)
     | Stalled cause -> Error (stop_cause_detail cause)
 
-  let commit_original ~config ~task ~store ~attempt ~installation_id ~package_id ~verification_id ~notes =
-    match commit_verdict_with_config config task ~store ~attempt ~installation_id ~package_id
+  let commit_original_with_effects ~observe ~apply ~config ~task ~store ~attempt ~installation_id ~package_id ~verification_id ~notes =
+    match commit_verdict_with_effects ~observe_original:observe ~apply_original:apply
+      config task ~store ~attempt ~installation_id ~package_id
       ~verification_id ~authority:system_authority ~verdict:Masc_domain.Verdict_approved
       ~notes ~verdict_label:"retained" ~on_commit:(Verification_run_registry.Approved {reason="retained"})
       ~evaluator_runtime:None with
     | Committed,_ -> Ok ()
     | Superseded_by {authority},_ -> Error ("original superseded by " ^ authority)
     | Stalled cause,_ -> Error (stop_cause_detail cause)
+
+  let commit_original = commit_original_with_effects
+    ~observe:observe_original_change ~apply:apply_original_change
 
   let authority_actor = authority_actor
   let retry_delay_of_paths = Verification_retry.delay_of_paths

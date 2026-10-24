@@ -774,23 +774,92 @@ let test_one_unpublishable_original_does_not_starve_boot () = with_observed_host
      | _ -> Alcotest.fail "healthy sibling has no durable actual completion");
     Alcotest.(check int) "boot failures never cause a second review" 1 !calls)
 
-let test_missing_observer_refuses_before_domain_mutation () = with_observed_host
-  (fun ~config ~store ~clock ~sw ~task ~first:_ ~authority ~calls ->
-    let result=loaded (W.run_attempt ~prepare_notes:domain_notes ~store ~verification_id ~attempt:0
-      ~installation_id:host_installation ~package_id:host_package ~authority
-      ~provider_rest:(fun _ -> AR.No_stated_rest) ()) in
-    let before=Masc_domain.task_to_yojson (task_in_backlog config) in
-    (match Host.commit_original ~config ~task ~store ~attempt:0
-       ~installation_id:host_installation ~package_id:host_package ~verification_id ~notes:(domain_notes result) with
-     | Error _ -> () | Ok () -> Alcotest.fail "missing actual before/observations authorized a domain commit");
-    let registry=R.replay (Filename.concat (Workspace_core.masc_dir config) "missing-observer-runs.jsonl") in
-    (match Host.process_original_once ~registry ~config ~sw ~clock ~task ~assignee:producer ~verification_id with
-     | Error _ -> () | Ok () -> Alcotest.fail "fresh host invented missing execution facts");
-    Alcotest.(check bool) "unprovable original leaves actual Task unchanged" true
-      (Yojson.Safe.equal before (Masc_domain.task_to_yojson (task_in_backlog config)));
-    (match P.phase (O.progress (load_host store)) with
-     | Judged _ -> () | _ -> Alcotest.fail "unprovable original crossed the commit boundary");
-    Alcotest.(check int) "unavailable original is never reviewed twice" 1 !calls)
+let test_missing_observer_refuses_before_domain_mutation () =
+  let exercise ~observed phase = with_observed_host
+    (fun ~config ~store ~clock ~sw ~task ~first ~authority ~calls ->
+      let result=loaded (if observed then
+          run_observed ~clock ~task ~store ~installation_id:host_installation
+            ~package_id:host_package first authority
+        else W.run_attempt ~prepare_notes:domain_notes ~store ~verification_id ~attempt:0
+          ~installation_id:host_installation ~package_id:host_package ~authority
+          ~provider_rest:(fun _ -> AR.No_stated_rest) ()) in
+      Alcotest.(check int) "fixture actually ran its original reviewer" 1 !calls;
+      let judged=load_host store in
+      let judgment=match P.phase (O.progress judged) with
+        | Judged judgment -> judgment
+        | _ -> Alcotest.fail "actual worker did not retain its judgment" in
+      let original=O.original judged in
+      let before=get (Masc.Verifier_review_commit_intent.before_of_status
+        ~original task.Masc_domain.task_status) in
+      let change=get (Masc.Verifier_review_commit_intent.prepare
+        ~original ~judgment ~authority:Publication.authority ~before) in
+      let notes,_started_at,decoded,verdict=get (Masc.Verifier_review_commit_intent.decode
+        ~original ~judgment ~authority:Publication.authority change) in
+      Alcotest.(check string) "strict retained intent binds the actual host notes" (domain_notes result) notes;
+      Alcotest.(check bool) "strict retained intent binds the actual review" true
+        (Yojson.Safe.equal (O.result_to_json result) (O.result_to_json decoded));
+      (match verdict with AR.Approve "checked" -> ()
+       | _ -> Alcotest.fail "strict retained intent has no actual approval");
+      Alcotest.(check bool) "actual host read confirms this valid intent could apply" true
+        (Yojson.Safe.equal change.P.before (get (Host.observe_original ~config ~original
+          ~judgment ~authority:Publication.authority change)));
+      let staged=match phase with
+        | `Judged -> judged
+        | `Committing | `Commit_unknown -> loaded (O.advance ~store judged (P.Commit_intended change)) in
+      let staged=match phase with
+        | `Judged | `Committing -> staged
+        | `Commit_unknown -> loaded (O.advance ~store staged
+            (P.Commit_uncertain (`Assoc ["fixture",`String "retained commit reply unknown"]))) in
+      (match phase,P.phase (O.progress staged) with
+       | `Judged,Judged _ | `Committing,Committing _ | `Commit_unknown,Commit_unknown _ -> ()
+       | _ -> Alcotest.fail "actual owner events did not reach the selected recovery phase");
+      let events=P.events (O.progress staged) in
+      let raw_task=Fs_compat.load_file (Workspace_backlog.backlog_path config) in
+      let observations=ref 0 and applications=ref 0 in
+      let observe ~config ~original ~judgment ~authority change =
+        incr observations;Host.observe_original ~config ~original ~judgment ~authority change in
+      let apply ~config ~original ~judgment ~authority change =
+        incr applications;Host.apply_original ~config ~original ~judgment ~authority change in
+      let commit ()=Host.commit_original_with_effects ~observe ~apply ~config ~task ~store ~attempt:0
+        ~installation_id:host_installation ~package_id:host_package ~verification_id ~notes in
+      let path=Filename.concat (Workspace_core.masc_dir config) "missing-observer-runs.jsonl" in
+      let registry=R.replay path in
+      let registry_bytes ()=if Fs_compat.file_exists path then Some (Fs_compat.load_file path) else None in
+      let raw_registry=registry_bytes () in
+      if observed then (
+        get (commit ());
+        Alcotest.(check int) "observed sibling executes exactly one real domain apply" 1 !applications;
+        Alcotest.(check int) "observed sibling reads before and confirms after" 2 !observations;
+        (match (task_in_backlog config).Masc_domain.task_status with
+         | Done _ -> () | _ -> Alcotest.fail "observed valid sibling did not commit the actual Task");
+        get (Host.process_original_once ~registry ~config ~sw ~clock ~task:(task_in_backlog config)
+          ~assignee:producer ~verification_id);
+        assert_terminal_ack store;
+        (match R.get (R.replay path) ~verification_id with
+         | Some {status=Completed {outcome=Approved {reason="checked"};_};_} -> ()
+         | _ -> Alcotest.fail "observed sibling has no durable actual terminal publication"))
+      else (
+        (match (P.observer (O.progress staged)).registration with
+         | Masc.Lane_addon_request_receipt.Unobserved -> ()
+         | Pending _ | Acknowledged _ -> Alcotest.fail "negative control unexpectedly has observations");
+        let missing="original execution observations were not retained; recovery cannot reconstruct tools or elapsed time" in
+        let expect_missing = function
+          | Error detail -> Alcotest.(check string) "exact missing observations cause the refusal" missing detail
+          | Ok () -> Alcotest.fail "missing actual observations authorized a domain commit" in
+        expect_missing (commit ());
+        Alcotest.(check int) "missing observations refuse before actual host observation" 0 !observations;
+        Alcotest.(check int) "missing observations refuse before actual domain apply call" 0 !applications;
+        expect_missing (Host.process_original_once ~registry ~config ~sw ~clock ~task
+          ~assignee:producer ~verification_id);
+        Alcotest.(check string) "unprovable recovery preserves the raw actual Task"
+          raw_task (Fs_compat.load_file (Workspace_backlog.backlog_path config));
+        Alcotest.(check bool) "unprovable recovery preserves the exact owner phase and events" true
+          (events=P.events (O.progress (load_host store)));
+        Alcotest.(check (option string)) "unprovable recovery publishes no competing registry row"
+          raw_registry (registry_bytes ()));
+      Alcotest.(check int) "recovery never adds another reviewer call" 1 !calls) in
+  List.iter (fun phase -> exercise ~observed:false phase;exercise ~observed:true phase)
+    [`Judged;`Committing;`Commit_unknown]
 
 let () =
   let prompts = Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts" in

@@ -115,7 +115,7 @@ let terminal_expected retained =
       Ok (commit,outcome)
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
       | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _
-      | Subdivided _),_ -> Error "review has no terminal retained commit fact" in
+      | Subdivided _),(R.Running | R.Completed _) -> Error "review has no terminal retained commit fact" in
   let* _=Verifier_review_commit_intent.decode ~original:(O.original retained)
     ~judgment:commit.P.judgment ~authority commit.change in
   let* ()=if Yojson.Safe.equal before commit.change.before then Ok ()

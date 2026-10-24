@@ -134,7 +134,38 @@ let test_retained_svg_format () =
   | Named_path _ | Staged _ | Output_image _ | Unavailable_image _ | No_image ->
     fail "expected immutable retained attachment"
 
+let test_markdown_diagrams () =
+  let first = "flowchart LR\n A[개인 계정] --> B{권한 확인}" in
+  let second = "pie title Work\n \"Done\":8\n \"Pending\":2" in
+  let source = "# Report\n\n```mermaid\n" ^ first ^ "\n```\n\n"
+    ^ "~~~mermaid\n" ^ second ^ "\n~~~\n\n```mermaid\nflowchart TD\n X --> Y" in
+  let parts = [text (Some "text/plain") source;
+    text None source; blob (Some "image/png") "QUJD";
+    text (Some "application/json") source] in
+  let candidates = Images.images ~mime_type:(Some "TEXT/MARKDOWN; charset=utf-8") parts in
+  check (list int) "only declared Markdown and images participate" [2;2;3]
+    (List.map fst candidates);
+  let diagrams = List.filter_map (function
+    | _, Preview.Output_image {name;source=Inline_mermaid source} -> Some (name,source)
+    | _, (Named_path _ | Staged _ | Stored_attachment _
+      | Output_image {source=(Inline_data _ | Inline_svg _ | Server_path _ | Remote_uri _);_}
+      | Unavailable_image _ | No_image) -> None) candidates in
+  check (list (pair string string)) "exact closed sources keep part and occurrence identity"
+    ["Mermaid · part 2 · diagram 1", first;
+     "Mermaid · part 2 · diagram 2", second] diagrams;
+  check string "following image still owns its original part" "QUJD"
+    (payload (snd (List.nth candidates 2)));
+  List.iter (fun mime ->
+    check int "document Markdown aliases share diagram admission" 2
+      (List.length (Images.images ~mime_type:None [text (Some mime) source])))
+    ["text/markdown"; "text/x-markdown"; "application/markdown"];
+  match List.nth parts 1 with
+  | {Mcp.rc_kind=Resource_text original;_} ->
+      check string "retained report source is unchanged" source original
+  | {Mcp.rc_kind=Resource_blob _;_} -> fail "expected retained Markdown"
+
 let () = run "resource image sources" ["source decisions", [
+  test_case "Markdown diagrams retain source and part ownership" `Quick test_markdown_diagrams;
   test_case "wire conservation" `Quick test_wire_conservation;
   test_case "malformed parts refused" `Quick test_malformed_parts_refused;
   test_case "multipart declared media" `Quick test_multipart_types;

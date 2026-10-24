@@ -59,3 +59,26 @@ with transport tokens absent, verify status and descriptor policy, verify
 clear returns to the newly configured value, and cover Slack disabled state
 and invalid-policy diagnostics without opening a transport. These cases are
 prepared source until the new exact-source execution completes.
+
+## Actual six-suite execution and narrow fixture correction
+
+[Run 40063396106](https://github.com/jeong-sik/masc/actions/runs/40063396106)
+completed on `b0f9f1c2bf1d6051a49377e6d9fb7cd3127a46fa`. All six executables
+compiled and ran: **219 cases, 218 passed, one failed, zero skipped**. Five
+suites fully passed (39 overlay, 16 connector-state, 20 Discord-policy,
+34 Slack-policy and 7 Dashboard cases). All new actual-start cases passed.
+Workspace ran 103 cases: 102 passed and one stale rendered-message assertion
+failed. [Structured accounting](behavior-40063396106.json) comes from the full
+runner artifact; its downloaded archive digest and extracted log were verified.
+This remains a failed run, not a passing six-suite receipt.
+
+The failed Workspace fixture required the removed text `current_assignee=claude`,
+while the current error is typed `TransitionRejected` / `Current_owner_required`
+and the renderer states the owner in prose. The attempted public completion
+mutation is preserved. The correction checks the exact typed task, requested
+actor, completion-submission action and assignee; then re-reads the authoritative
+backlog to verify the task remains Claimed by the original owner. Other errors
+and success both fail the test. No production source or other suite input
+changes follow the six-suite execution. Only the corrected Workspace suite
+requires a new execution; the other five results keep their original source
+identity above. The follow-up PR receipt records its exact source and result.

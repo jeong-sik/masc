@@ -1,0 +1,72 @@
+{
+  "run_id": 40063396106,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/40063396106",
+  "source": "b0f9f1c2bf1d6051a49377e6d9fb7cd3127a46fa",
+  "conclusion": "failure",
+  "actual_suites": [
+    {
+      "suite": "test_workspace",
+      "cases": 103,
+      "passed": 102,
+      "failed": 1,
+      "skipped": 0,
+      "duration_seconds": 4.011
+    },
+    {
+      "suite": "test_keeper_effective_meta_overlay",
+      "cases": 39,
+      "passed": 39,
+      "failed": 0,
+      "skipped": 0,
+      "duration_seconds": 0.597
+    },
+    {
+      "suite": "test_channel_gate_discord_state",
+      "cases": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "duration_seconds": 0.016
+    },
+    {
+      "suite": "test_server_discord_trigger_policy",
+      "cases": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "duration_seconds": 0.011
+    },
+    {
+      "suite": "test_server_slack_trigger_policy",
+      "cases": 34,
+      "passed": 34,
+      "failed": 0,
+      "skipped": 0,
+      "duration_seconds": 0.07
+    },
+    {
+      "suite": "test_dashboard_keeper_metrics_10286",
+      "cases": 7,
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "duration_seconds": 0.002
+    }
+  ],
+  "total_cases": 219,
+  "passed": 218,
+  "failed": 1,
+  "skipped": 0,
+  "artifact": {
+    "id": 12548765193,
+    "name": "suite-runner-log",
+    "archive_digest": "sha256:f9210a1379f79a6ad198a6a0045e1cf3332b1f90a8d8e78ef3c62c31638d75f9",
+    "extracted_file": "ci-run-tests.log",
+    "extracted_bytes": 205697,
+    "extracted_sha256": "af7f728f6aa3a1e19a0ec7f1314de46248cd275f1d8a55a10e6dec4a633f5f5f",
+    "archive_digest_verified_against_download": true
+  },
+  "sole_failure": "Workspace task_errors.1 expected removed rendered substring current_assignee=claude; current typed Current_owner_required renderer names the owner in prose.",
+  "new_startup_cases": "Discord no-token configured/override/clear and Slack enabled/disabled/strict-invalid-policy real start cases all ran and passed.",
+  "claim_limit": "This is an actual compiled and executed six-suite result with one failure, not a passing run or installed-runtime proof."
+}

@@ -13,6 +13,7 @@
   runtime_attempt_dispatch
   model_input_front
   runtime_answerer
+  runtime_response_identity
   turn_record
   request_observation
   health_status

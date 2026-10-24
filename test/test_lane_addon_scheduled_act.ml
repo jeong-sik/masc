@@ -66,6 +66,8 @@ let backend worker : Runtime.For_testing.backend = {
       exported_tools = (fun () -> []);
       call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->
         Error (Lane_addon_call_context.Transport_error "no exported tools"));
+      operator_schema=(fun () -> None);
+      call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);
       action_schema = (fun () -> Some action_schema);
       act = (fun ~arguments ->
         worker.calls := text "request_id" arguments :: !(worker.calls);

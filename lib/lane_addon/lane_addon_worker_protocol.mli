@@ -39,6 +39,17 @@ val close : t -> unit
     cleanup, child processes, profiles or resource release. *)
 val exported_tools : t -> Mcp_protocol.Mcp_types.tool list
 val action_schema : t -> Yojson.Safe.t option
+type operator_error = Operator_unavailable | Operator_rejected | Operator_outcome_unknown
+val operator_schema : t -> Yojson.Safe.t option
+val call_operator : t -> admit:(unit -> (unit, operator_error) result) ->
+  arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result
+(** Private [lane_operator] port. Only the authenticated operator HTTP boundary
+    may call it. This bypasses model exports, hooks, result callbacks, receipts
+    and observation retention. Errors never contain worker/request text.
+    Discovery is optional, exact and atomic with Ready. A lost reply is never
+    replayed. Cancellation revokes the original connection. [admit] rechecks
+    original host authority under the per-worker RPC mutex, just before send;
+    the host must not hold global lifecycle locks while waiting for the reply. *)
 val host_requests : t -> (Yojson.Safe.t, error) result
 val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
 (** Private host request/result ports. Both must be advertised exactly once

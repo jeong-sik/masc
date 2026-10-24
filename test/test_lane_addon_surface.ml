@@ -49,6 +49,19 @@ let query_boundaries () =
     (Result.is_error (Routes.decode_body {|{"instance_id":"first","instance_id":"second"}|}));
   check bool "non-object body rejected" true (Result.is_error (Routes.decode_body "[]"))
 
+let operator_boundaries () =
+  let request = {|{"instance_id":"original","expected_incarnation":"original","mode":"invoke","arguments":{"action":"complete","arguments":{"callback_url":"PRIVATE_MARKER"}}}|} in
+  check bool "private request preserves original destination without public dispatch" true
+    (match Routes.decode_operator_request request with
+     | Ok {instance_id="original";expected_incarnation="original";command=Routes.Invoke_operator (`Assoc _)} -> true
+     | Ok _ | Error () -> false);
+  List.iter (fun body -> check bool "invalid private envelope has no raw error text" true
+    (Routes.decode_operator_request body=Error ()))
+    ["PRIVATE_MARKER"; {|{"instance_id":"a","instance_id":"b","mode":"describe","expected_incarnation":"a"}|};
+     {|{"instance_id":"a","mode":"describe","expected_incarnation":"a","arguments":{}}|};
+     {|{"instance_id":"a","mode":"invoke","expected_incarnation":"a"}|};
+     {|{"instance_id":"a","mode":"describe","expected_incarnation":"a","caller":"operator"}|}]
+
 let broadcast_principal_requires_authenticated_actor () =
   let principal standing caller = Routes.broadcast_principal_for_standing standing caller in
   check (result string string) "operator token resolves canonical actor"
@@ -92,5 +105,6 @@ let () =
         test_case "subscription TOML emits strict nested item schema" `Quick subscription_items_keep_strict_schema];
       "request boundaries", [test_case "source identity remains exact" `Quick readonly_parameters_preserve_identity;
         test_case "query windows and duplicate identities" `Quick query_boundaries;
+        test_case "private operator envelope never repairs identity or echoes input" `Quick operator_boundaries;
         test_case "Broadcast recovery requires authenticated principal" `Quick
           broadcast_principal_requires_authenticated_actor] ]

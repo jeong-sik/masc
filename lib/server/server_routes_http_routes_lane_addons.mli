@@ -3,6 +3,12 @@
 val add_routes : sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t -> Http_server_eio.Router.t -> Http_server_eio.Router.t
 
 val decode_body : string -> (Yojson.Safe.t, string) result
+type operator_command = Describe_operator | Invoke_operator of Yojson.Safe.t
+type operator_request = {
+  instance_id : string; expected_incarnation : string; command : operator_command;
+}
+val decode_operator_request : string -> (operator_request, unit) result
+(** Closed private request envelope. Parse errors carry no request text. *)
 
 (** {2 Installation questions}
 

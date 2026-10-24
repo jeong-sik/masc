@@ -11,11 +11,13 @@ type contract = {
 type error = Invalid_contract of string | Protocol_failed of string
   | Host_refusal of Lane_addon_call_context.host_refusal
   | Invalid_observation of string | Stopped
+type operator_error = Operator_unavailable | Operator_rejected | Operator_outcome_unknown
 type ready = {
   client : Agent_core.Mcp.t;
   exported_tools : Mcp_protocol.Mcp_types.tool list;
   tool_hooks : (string * Lane_addon_tool_hooks.t) list;
   action_schema : Yojson.Safe.t option;
+  operator_schema : Yojson.Safe.t option;
 }
 type attachment = Awaiting | Initializing of Agent_core.Mcp.t
   | Ready of ready | Retired of Agent_core.Mcp.t option
@@ -70,6 +72,8 @@ let exported_tools t = match t.attachment with
   | Ready ready -> ready.exported_tools | Awaiting | Initializing _ | Retired _ -> []
 let action_schema t = match t.attachment with
   | Ready ready -> ready.action_schema | Awaiting | Initializing _ | Retired _ -> None
+let operator_schema t = match t.attachment with
+  | Ready ready -> ready.operator_schema | Awaiting | Initializing _ | Retired _ -> None
 let ready_for_call t = match t.attachment with
   | Ready ready -> Ok ready
   | Awaiting | Initializing _ -> Error (Host_refusal (Lane_addon_call_context.Unavailable "worker protocol is not ready"))
@@ -112,6 +116,14 @@ let initialize t client =
             let advertised_once name=List.length (List.filter (fun (tool:Mcp_protocol.Mcp_types.tool) -> tool.name=name) tools)=1 in
             if advertised_once host_requests_tool && advertised_once host_result_tool then Ok ()
             else Error (Protocol_failed "a package that declares exact outputs must advertise lane_host_requests and lane_host_result once each") in
+          let* operator_schema = match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) ->
+              tool.name = operator_tool) tools with
+            | [] -> Ok None
+            | [tool] ->
+                let* () = Lane_addon_action.validate_value_schema tool.input_schema
+                  |> Result.map_error (fun _ -> Protocol_failed "invalid private operator schema") in
+                Ok (Some tool.input_schema)
+            | _ -> Error (Protocol_failed "duplicate private operator port") in
           let* exported = List.fold_left (fun result name ->
             let* selected = result in
             match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) -> String.equal tool.name name) tools with
@@ -123,7 +135,7 @@ let initialize t client =
             let* hooks = Lane_addon_tool_hooks.prepare ~hooks:t.contract.tool_hooks tool
               |> Result.map_error (fun detail -> Protocol_failed detail) in
             Ok ((tool.name, hooks) :: checks)) (Ok []) exported in
-          Ok {client;tool_hooks;action_schema;exported_tools=List.rev exported}
+          Ok {client;tool_hooks;action_schema;operator_schema;exported_tools=List.rev exported}
     with
     | Eio.Cancel.Cancelled _ as exn -> revoke t; raise exn
     | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _
@@ -137,6 +149,34 @@ let initialize t client =
 
 let protect_call t work =
   try work () with Eio.Cancel.Cancelled _ as exn -> revoke t; raise exn
+
+let call_operator t ~admit ~arguments =
+  protect_call t (fun () ->
+    Eio.Mutex.use_ro t.mutex (fun () ->
+      let* ready = ready_for_call t |> Result.map_error (fun _ -> Operator_unavailable) in
+      let* schema = Option.to_result ~none:Operator_unavailable ready.operator_schema in
+      let* arguments = Lane_addon_action.validate_input ~schema ~name:operator_tool arguments
+        |> Result.map_error (fun _ -> Operator_rejected) in
+      let* () = admit () in
+      let* () = if revoked t then Error Operator_unavailable else Ok () in
+      (* Raw replies and failures stay on this private path. In particular, do
+         not use exported-tool finalizers, on_result or action receipts here. *)
+      let unknown () = revoke t; Error Operator_outcome_unknown in
+      try
+        let* result = Agent_core.Mcp.call_tool_full ready.client ~name:operator_tool ~arguments
+          |> Result.map_error (fun _ -> revoke t; Operator_outcome_unknown) in
+        let* () = match t.attachment with
+          | Ready current when current == ready -> Ok ()
+          | Awaiting | Initializing _ | Ready _ | Retired _ -> Error Operator_outcome_unknown in
+        match result.Mcp_protocol.Mcp_types.is_error, result.structured_content with
+        | Some true, _ -> unknown ()
+        | (Some false | None), Some (`Assoc _ as value) -> Ok value
+        | (Some false | None), (Some _ | None) -> unknown ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      (* This privacy boundary deliberately erases even unexpected SDK failure
+         text: parser exceptions can embed a worker response containing secrets. *)
+      | _ -> unknown ()))
 
 let observe t ~binding ~sources =
   protect_call t (fun () ->

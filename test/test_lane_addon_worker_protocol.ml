@@ -29,10 +29,20 @@ for line in sys.stdin:
             result["tools"].append({"name":"lane_host_requests","inputSchema":{"type":"object"}})
         if len(sys.argv) > 2 and sys.argv[2] == "context":
             result["tools"].append({"name":"lane_call","inputSchema":{"type":"object"}})
+        if len(sys.argv) > 2 and sys.argv[2] in ["operator", "operator-duplicate"]:
+            tool = {"name":"lane_operator","inputSchema":{"type":"object","additionalProperties":False,
+                "properties":{"value":{"type":"string"},"fail":{"type":"boolean"}},"required":["value","fail"]}}
+            result["tools"] += [tool] * (2 if sys.argv[2] == "operator-duplicate" else 1)
     elif method == "tools/call":
         params = request["params"]
         if len(sys.argv) > 1:
             with open(sys.argv[1],"a") as output: output.write(params["name"]+"\n")
+        if params["name"] == "lane_operator":
+            private = params["arguments"]["value"]
+            result = {"content":[{"type":"text","text":private}],"structuredContent":{"private":private},
+                "_meta":{"private":private},"isError":params["arguments"]["fail"]}
+            print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":result}),flush=True)
+            continue
         if params["name"] == "lane_observe": value = {"rows":[],"coverage":[]}
         elif params["name"] == "lane_host_requests": value = {"requests":[]}
         elif params["name"] == "lane_host_result": value = {"accepted":True}
@@ -89,6 +99,44 @@ let invalid_contract () =
     (match Protocol.contract ~host_requests:false ~action_tool:None ~tool_invocation:Lane_addon_types.Direct
       ~exported_tools:["increment";"increment"] ~tool_hooks:[] ~max_reply_bytes:4096 with
      | Error (Protocol.Invalid_contract _) -> true | _ -> false)
+
+let private_operator () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+  List.iter (fun action_tool ->
+    check bool "operator port cannot escape through export or action" true
+      (Result.is_error (Protocol.contract ~host_requests:false ~action_tool
+        ~tool_invocation:Lane_addon_types.Direct ~exported_tools:(if action_tool=None then ["lane_operator"] else [])
+        ~tool_hooks:[] ~max_reply_bytes:4096))) [None;Some "lane_operator"];
+  let calls=Filename.temp_file "addon-private-operator-" ".calls" in
+  Fun.protect ~finally:(fun () -> Sys.remove calls) (fun () ->
+    let contract=require (Protocol.contract ~host_requests:false ~action_tool:None
+      ~tool_invocation:Lane_addon_types.Direct ~exported_tools:["increment"] ~tool_hooks:[] ~max_reply_bytes:4096) in
+    let protocol=Protocol.create ~instance_id:"private-operator" ~contract () in
+    let client=require (Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
+      ~command:"python3" ~args:["-c";server;calls;"operator"] ~max_response_bytes:4096 ()) in
+    Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Protocol.close protocol)) (fun () ->
+      require (Protocol.initialize protocol client);
+      check bool "private discovery is separate from model exports" true
+        (Option.is_some (Protocol.operator_schema protocol) && List.for_all
+          (fun (tool:Mcp_protocol.Mcp_types.tool) -> tool.name<>"lane_operator") (Protocol.exported_tools protocol));
+      let arguments=`Assoc ["value",`String "PRIVATE_MARKER";"fail",`Bool false] in
+      check bool "public exported path cannot call private port" true
+        (Result.is_error (Protocol.call_exported_tool protocol ~name:"lane_operator" ~arguments));
+      check bool "private input validation emits no request or parser detail" true
+        (Protocol.call_operator protocol ~admit:(fun () -> Ok ()) ~arguments:(`Assoc []) = Error Protocol.Operator_rejected);
+      check bool "host authority is rechecked before dispatch" true
+        (Protocol.call_operator protocol ~admit:(fun () -> Error Protocol.Operator_unavailable) ~arguments
+          = Error Protocol.Operator_unavailable);
+      check string "refused calls reached no worker" "" (In_channel.with_open_bin calls In_channel.input_all);
+      let answer=require (Protocol.call_operator protocol ~admit:(fun () -> Ok ()) ~arguments) in
+      check bool "only private structured result reaches operator caller" true (answer=`Assoc ["private",`String "PRIVATE_MARKER"]);
+      let failed=Protocol.call_operator protocol ~admit:(fun () -> Ok ())
+        ~arguments:(`Assoc ["value",`String "PRIVATE_FAILURE_MARKER";"fail",`Bool true]) in
+      check bool "post-dispatch errors erase all content/meta/detail" true (failed=Error Protocol.Operator_outcome_unknown);
+      check bool "unknown private outcome fences the original protocol" true (Protocol.revoked protocol);
+      check bool "unknown call cannot be replayed" true
+        (Protocol.call_operator protocol ~admit:(fun () -> Ok ()) ~arguments = Error Protocol.Operator_unavailable);
+      check string "exact two explicit private dispatches" "lane_operator\nlane_operator\n"
+        (In_channel.with_open_bin calls In_channel.input_all)))))
 
 let host_port_admission ~selected ~advertised () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let calls = Filename.temp_file "addon-host-port-" ".calls" in
@@ -292,6 +340,7 @@ let cancelled_finalizer () = with_finalizer_fixture ~hooks:[] ~invocation:Lane_a
 
 let () = run "Addon engine-independent MCP admission"
   ["protocol",[test_case "actual standalone stdio server preserves admission and hook contracts" `Quick standalone_protocol;
+    test_case "private operator port never enters model exports or error detail" `Quick private_operator;
     test_case "host finalization retains original context and allows another RPC" `Quick finalized_receipt;
     test_case "selected output hook validates finalized receipt" `Quick
       (finalized_output ~hooks:[Lane_addon_types.Validate_output] ~accepted:false);

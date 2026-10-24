@@ -67,6 +67,8 @@ let container_id t = t.id
 let image_identity t = t.image
 let container_name t = t.name
 let action_schema t = Protocol.action_schema t.protocol
+let operator_schema t = Protocol.operator_schema t.protocol
+let call_operator t ~admit ~arguments = Protocol.call_operator t.protocol ~admit ~arguments
 let exported_tools t = Protocol.exported_tools t.protocol
 let protocol_result result = Result.map_error (function
   | Protocol.Invalid_contract detail -> Invalid_package detail

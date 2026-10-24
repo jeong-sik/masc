@@ -110,6 +110,8 @@ type package = {
 val host_requests_tool : string
 (** [lane_host_requests]: the worker lists every request it waits for
     (RFC operator-quiz §4.4). *)
+val operator_tool : string
+(** Reserved private operator port. Cannot be an export or an action tool. *)
 
 val host_result_tool : string
 (** [lane_host_result]: the host delivers one final result. *)

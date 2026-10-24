@@ -88,6 +88,7 @@ type eval_run = {
   tool_calls_made : string list;
   total_turns : int;
   total_cost_usd : float option;
+  (** [None] when this run's full cost was not observed. *)
   duration_ms : int;
   outcome : Trajectory.trajectory_outcome;
   error : string option;
@@ -100,6 +101,8 @@ type eval_result = {
   mean_score : float;
   consistency : float;
   total_cost_usd : float option;
+  (** Full cost of every run, including failures. [None] for no runs or when
+      any run's cost is unreported; a known subtotal is not a total. *)
   ci95_low : float;
   ci95_high : float;
   min_runs_met : bool;
@@ -151,7 +154,9 @@ val compute_pass_at_k : k:int -> n:int -> c:int -> float
 val summarize_runs :
   scenario:scenario -> k:int -> eval_run list -> eval_result
 (** Aggregate the runs of a single scenario into an
-    {!eval_result} (pass@k, mean score, consistency, total cost). *)
+    {!eval_result} (pass@k, mean score, consistency, total cost). The caller
+    must first separate model/configuration/experiment cohorts. Missing run
+    costs remain unknown in the result rather than forming a partial total. *)
 
 (** {1 Scenario IO} *)
 

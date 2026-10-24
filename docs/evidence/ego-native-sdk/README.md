@@ -29,7 +29,7 @@ The URL check precedes SDK entry and does not atomically guard a later input.
   snapshot in the same Node invocation. This demonstrates SDK behavior,
   **not a Keeper workflow API**.
 - [proof.json](proof.json) binds those observations to the production function's
-  SHA-256; [ego.log](ego.log) includes the final snapshot;
+  SHA-256; [sdk-output.txt](sdk-output.txt) includes the final snapshot;
   [native-sdk-results.png](native-sdk-results.png) was visually inspected.
 - `ocamlc -stop-after parsing` passed for the changed OCaml files; TOML decode
   and `git diff --check` passed.

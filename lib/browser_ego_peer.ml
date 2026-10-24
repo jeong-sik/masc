@@ -1218,11 +1218,12 @@ let interact ?actor t args =
     | Browser_lane.Double_click _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Ok () in
   let* expected_url, action =
     let needs_resolution = match request.action with
-      | Browser_lane.Click _ | Browser_lane.Hover (Browser_lane.Selector _)
-      | Browser_lane.Double_click (Browser_lane.Selector _) -> false
+      | Browser_lane.Click _ -> false
+      | Browser_lane.Hover target | Browser_lane.Double_click target ->
+        (match target with Browser_lane.Selector _ -> false | Browser_lane.Scene_node _ -> true)
       | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Set_zoom _
-      | Browser_lane.Set_viewport _ | Browser_lane.Double_click _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
-      | Browser_lane.Scroll _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Hover_at _
+      | Browser_lane.Set_viewport _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
+      | Browser_lane.Scroll _ | Browser_lane.Drag_to _ | Browser_lane.Hover_at _
       | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _ | Browser_lane.Double_click_at _
       | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
       | Browser_lane.Fill_node _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _

@@ -868,6 +868,85 @@ let with_runtime_catalog f =
   f ()
 ;;
 
+let test_restore_keeps_refused_runtime_declarations ~accepted_siblings () =
+  with_runtime_catalog @@ fun () ->
+  with_base (fun ~base_path ~keepers:_ ~config ->
+    let path = Filename.concat config "runtime.toml" in
+    let baseline = runtime_fixture ^ "\n[runpod_mtp.qwen]\n\n[openai.gpt]\n" in
+    write_file path baseline;
+    let current = or_fail (Preset.capture ~base_path ~name:"old-routing" ~description:"") in
+    let assignments =
+      if accepted_siblings then
+        ["routingtest", "removed.runtime"; "newkeeper", "removed.runtime";
+         "acceptedkeeper", "runpod_mtp.qwen"]
+      else ["routingtest", "removed.runtime"; "budgettest", "openai.gpt"] in
+    let lanes = List.map (fun (lane : Preset.lane) ->
+      match Preset.lane_key lane.owner with
+      | "librarian_exact" -> {lane with cli_slots = ["removed.cli"]}
+      | "hitl_auto_judge" when accepted_siblings -> {lane with slots = ["runpod_mtp.qwen"]}
+      | _ -> lane) current.lanes in
+    let target = {current with assignments; lanes} in
+    or_fail (Preset.save ~base_path target);
+    let saved_path = Filename.concat (Preset.source_directory ~base_path target) "runtime.json" in
+    let original = Fs_compat.load_file saved_path in
+    let report = or_fail (Preset.restore ~base_path target.name) in
+    (match report.runtime_result, accepted_siblings with
+     | Preset.Runtime_committed _, true | Preset.Runtime_unchanged, false -> ()
+     | Preset.Runtime_failed reason, _ -> Alcotest.fail reason
+     | Preset.Runtime_unchanged, true -> Alcotest.fail "valid sibling settings were not committed"
+     | Preset.Runtime_committed _, false -> Alcotest.fail "refused declarations changed the current file");
+    Alcotest.(check bool) "refused assignment is explicitly reported" true
+      (List.mem_assoc "routingtest" report.skipped_assignments);
+    Alcotest.(check bool) "refused complete lane is explicitly reported" true
+      (List.mem_assoc "librarian_exact" report.skipped_lanes);
+    let after = or_fail (Preset.capture ~base_path ~name:"after" ~description:"") in
+    Alcotest.(check (option string)) "refused route keeps the current assignment"
+      (Some "openai.gpt") (List.assoc_opt "routingtest" after.assignments);
+    Alcotest.(check (option string)) "refused absent route remains absent"
+      None (List.assoc_opt "newkeeper" after.assignments);
+    let lane snapshot id = List.find (fun (lane : Preset.lane) ->
+      Preset.lane_key lane.owner = id) snapshot.Preset.lanes in
+    Alcotest.(check bool) "refused lane keeps its complete current declaration" true
+      (lane current "librarian_exact" = lane after "librarian_exact");
+    if accepted_siblings then begin
+      Alcotest.(check (option string)) "valid assignment still restores"
+        (Some "runpod_mtp.qwen") (List.assoc_opt "acceptedkeeper" after.assignments);
+      Alcotest.(check (option string)) "assignment absent from saved snapshot is removed"
+        None (List.assoc_opt "budgettest" after.assignments);
+      Alcotest.(check (list string)) "valid lane still restores"
+        ["runpod_mtp.qwen"] (lane after "hitl_auto_judge").slots
+    end else
+      Alcotest.(check string) "refused declarations leave the runtime file byte-identical"
+        baseline (Fs_compat.load_file path);
+    Alcotest.(check string) "restoration preserves the original saved bytes"
+      original (Fs_compat.load_file saved_path))
+;;
+
+let test_restore_preserves_a_healthy_assignment_when_saved_catalog_row_is_missing () =
+  with_runtime_catalog @@ fun () ->
+  with_base (fun ~base_path ~keepers:_ ~config ->
+    let path = Filename.concat config "runtime.toml" in
+    let baseline = runtime_fixture ^
+      "\n[runpod_mtp.qwen]\n\n[openai.gpt]\n\n[models.removed]\napi-name = \"removed\"\nmax-context = 64000\n[openai.removed]\n" in
+    write_file path baseline;
+    let current = or_fail (Preset.capture ~base_path ~name:"missing-catalog" ~description:"") in
+    let target = { current with assignments =
+      ["routingtest", "openai.removed"; "budgettest", "openai.gpt"] } in
+    let candidate = Preset.runtime_text_with ~current_assignments:current.assignments
+      ~current_lanes:current.lanes ~assignments:target.assignments ~lanes:target.lanes baseline in
+    or_fail (Runtime.validate_config_text ~runtime_config_path:path candidate);
+    or_fail (Preset.save ~base_path target);
+    let report = or_fail (Preset.restore ~base_path target.name) in
+    (match report.runtime_result with
+     | Preset.Runtime_unchanged -> ()
+     | Preset.Runtime_committed _ -> Alcotest.fail "an unavailable saved route replaced the healthy route"
+     | Preset.Runtime_failed reason -> Alcotest.fail reason);
+    Alcotest.(check bool) "the unavailable saved assignment is reported" true
+      (List.mem_assoc "routingtest" report.skipped_assignments);
+    Alcotest.(check string) "the healthy current route and source remain untouched"
+      baseline (Fs_compat.load_file path))
+;;
+
 let test_saved_lane_request_settings_shape () =
   with_runtime_catalog @@ fun () ->
   with_base (fun ~base_path ~keepers:_ ~config ->
@@ -1449,6 +1528,12 @@ let () =
             test_runtime_text_carries_the_lane_request_settings
         ; Alcotest.test_case "saved lane settings restore; unrecorded settings preserve current values" `Quick
             test_saved_lane_request_settings_shape
+        ; Alcotest.test_case "refused routes preserve current values while valid siblings restore" `Quick
+            (test_restore_keeps_refused_runtime_declarations ~accepted_siblings:true)
+        ; Alcotest.test_case "refused routes alone do not change the runtime file" `Quick
+            (test_restore_keeps_refused_runtime_declarations ~accepted_siblings:false)
+        ; Alcotest.test_case "catalog-missing saved route cannot replace a healthy assignment" `Quick
+            test_restore_preserves_a_healthy_assignment_when_saved_catalog_row_is_missing
         ; Alcotest.test_case "an override written against an older default still restores" `Quick
             test_override_written_against_an_older_default_still_restores
         ; Alcotest.test_case "an override that cannot render is skipped with the reason" `Quick

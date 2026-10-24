@@ -65,7 +65,8 @@ type part_result =
   }
 
 type runtime_result =
-  | Runtime_unchanged  (** the parsed routing already matched; the file was not touched *)
+  | Runtime_unchanged  (** No accepted routing change; the file was not touched.
+                          Exclusions may still make this a partial restore. *)
   | Runtime_committed of Runtime.config_commit_receipt
       (** The replacement is visible. Retains durability, lock warnings and
           exact-output registry application; it is not a request to retry. *)
@@ -90,7 +91,12 @@ type restore_report =
   ; preserved_lane_settings : (string * string) list
       (** Lane id and setting not recorded in the target, kept as currently declared. *)
   ; skipped_lanes : (string * string) list
-      (** Lanes unavailable in this runtime. Their saved contents remain intact. *)
+      (** Lanes unavailable or refused by the runtime writer. Their current
+          declarations and saved contents remain intact. *)
+  ; skipped_assignments : (string * string) list
+      (** Keeper assignments unavailable under the current capability catalog
+          or refused by the runtime writer. The current
+          assignment, including its absence, is preserved. *)
   }
 
 val autosave_name : string
@@ -139,7 +145,11 @@ val restore : base_path:string -> string -> (restore_report, string) result
     reports what it applied and what it skipped. An override that no
     longer renders under the prompt's current contract is skipped with that
     reason, as the boot-time restore would refuse it. One written against an
-    older default body is applied. *)
+    older default body is applied. Runtime assignments and lane declarations
+    that the current runtime writer refuses, and assignments unavailable under
+    the current capability catalog, are reported separately and keep
+    their current values. Accepted declarations still restore; no replacement
+    runtime is inferred. *)
 
 module For_testing : sig
   val restore_with_config_commit :

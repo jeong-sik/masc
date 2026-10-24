@@ -496,6 +496,7 @@ type try_provider_ctx =
   ; preserve_thinking : bool option
   ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
   ; agent_core_checkpoint : Agent_core.Checkpoint.t option
+  ; on_request_evidence : (Request_observation.evidence -> unit) option
   ; native_binding : Keeper_direct_native_continuation.binding option
   ; native_retired_history_cut : Keeper_direct_native_continuation.retired_history_cut option
   ; (* Eio concurrency *)
@@ -2411,6 +2412,10 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         let run_fn () =
           Eio_guard.check_if_ready ();
           let module Native = Keeper_direct_native_continuation in
+          let boundary = match ctx.native_binding, ctx.on_request_evidence with
+            | Some binding, Some _ -> Some (Native.capture_request_boundary binding)
+            | None, _ | Some _, None -> None in
+          let result =
           let input, checkpoint = match continuation_checkpoint with
             | Some checkpoint -> Native.Continue_from_checkpoint, Some checkpoint
             | None ->
@@ -2463,6 +2468,17 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
                 ~input_metadata:metadata
                 blocks
+
+          in
+          (match ctx.on_request_evidence, ctx.native_binding with
+           | Some observe, Some binding ->
+             let evidence = match boundary with
+               | Some (Ok boundary) -> Native.request_evidence binding ~boundary ~runtime_id:ctx.runtime_id
+               | Some (Error detail) -> Request_observation.Read_failed detail
+               | None -> Request_observation.Read_failed "native request boundary was not captured" in
+             observe evidence
+           | None, _ | Some _, None -> ());
+          result
         in
         run_fn ())
     in

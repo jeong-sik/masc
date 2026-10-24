@@ -112,7 +112,7 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     ; session_id = trace_id
     }
   in
-  Keeper_turn_record_writer.write
+  Keeper_turn_record_writer.write ~request_observations:[]
     ~model_input_window:None
     ~response_observed_model_input:None
     ~config

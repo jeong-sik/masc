@@ -258,6 +258,9 @@ type t =
        is not derived from prompt blocks or provider token usage. [None] means
        this turn ended before AGENT_CORE exposed the measurement; both JSON
        fields are then required explicit nulls. *)
+  ; request_observations : Request_observation.t list
+    (** Per-runtime-attempt journal observations, including explicit lack of
+        a scope or a read failure. An empty list means none was observed. *)
   ; sampling : sampling
   ; usage : usage
   ; turn_output_tokens : int option

@@ -5628,7 +5628,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
     | Some digest -> digest
     | None -> fail "the record's own history has that atom"
   in
-  { execution_ids = []
+  { request_observations = [];  execution_ids = []
   ; keeper = "alpha"
   ; agent_name = "alpha-agent"
   ; turn_kind = Turn_record.Direct

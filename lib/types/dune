@@ -14,6 +14,7 @@
   model_input_front
   runtime_answerer
   turn_record
+  request_observation
   health_status
   types_core
   task_status_observation
@@ -26,6 +27,7 @@
  (flags
   (:standard -w +4 -w +33 -w +37))
  (libraries
+  masc.agent_core.llm_provider
   yojson
   unix
   time_compat

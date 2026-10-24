@@ -5,7 +5,7 @@ let turn_ref trace turn = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
 
 let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.Per_request)
     ~trace ~turn () : Turn_record.t =
-  { execution_ids = []
+  { request_observations = [];  execution_ids = []
   ; keeper = "omega"
   ; agent_name = "keeper-omega"
   ; turn_kind = Direct

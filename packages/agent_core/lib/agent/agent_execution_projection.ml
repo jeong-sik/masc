@@ -18,6 +18,13 @@ module Run_id = Event.Run_id
 module Node_id = Event.Node_id
 module Correlation_id = Event.Correlation_id
 
+type provider_request =
+  { node_id : Node_id.t
+  ; turn : int
+  ; ordinal : int
+  ; provenance : Llm_provider.Completion_outcome.request_provenance option
+  }
+
 type settled_tool_invocation =
   { invocation : Tool_contract.Invocation.t
   ; tool_name : string
@@ -654,6 +661,55 @@ let beginning_cursor t = { scope_id = t.scope_id; seq = 0 }
 let current_cursor t =
   let+ snapshot = refresh t in
   { scope_id = t.scope_id; seq = Durable.last_seq snapshot.durable }
+;;
+
+let provider_requests t ?(after : cursor option) () =
+  let* snapshot = refresh t in
+  let* after_seq = match after with
+    | None -> Ok 0
+    | Some cursor when not (Durable.Scope_id.equal cursor.scope_id t.scope_id) -> Error Cursor_scope_mismatch
+    | Some cursor when cursor.seq > Durable.last_seq snapshot.durable ->
+      Error (Cursor_ahead {cursor_role=After;cursor_seq=cursor.seq;high_watermark=Durable.last_seq snapshot.durable})
+    | Some cursor -> Ok cursor.seq in
+  let invalid detail = Error (Semantic_failure {seq=Durable.last_seq snapshot.durable; detail}) in
+  let* root = match Journal.Reducer.find_run snapshot.reducer t.locator_run_id with
+    | None -> Error (Locator_not_found t.locator_run_id)
+    | Some view -> Ok (Journal.run_root view.run) in
+  let rec visit records = function
+    | [] -> Ok (List.map snd (List.sort (fun (a,_) (b,_) -> Int.compare a b) records))
+    | (id, turn)::rest ->
+      let* view = match Journal.Reducer.find_node snapshot.reducer id with
+        | None -> invalid "provider request descendant disappeared"
+        | Some view -> Ok view in
+      if not (Event.Run_id.equal (Event.node_run_id view.node) t.locator_run_id)
+      then visit records rest
+      else
+        let children turn = List.map (fun (child:Event.node Journal.event_record) ->
+          Event.node_id child.value, turn) view.children @ rest in
+        match Event.node_kind view.node with
+        | Event.Agent_run _ -> visit records (children turn)
+        | Event.Agent_turn {ordinal} -> visit records (children (Some ordinal))
+        | Event.Provider_attempt {ordinal;_} ->
+          let* turn = match turn with Some turn -> Ok turn
+            | None -> invalid "provider request has no owning turn" in
+          (match view.materialized with
+           | Journal.Provider_attempt_state {request_provenance;_} ->
+             let changed = Event.seq view.opened.event > after_seq ||
+               List.exists (fun (update:Event.node_update Journal.event_record) ->
+                 match update.value with
+                 | Event.Provider_request_snapshot _ -> Event.seq update.event > after_seq
+                 | Event.Provider_event _ | Event.Provider_response_snapshot _
+                 | Event.Output_delta _ | Event.Output_snapshot _ | Event.Tool_input_delta _
+                 | Event.Tool_input_snapshot _ | Event.Tool_progress _ | Event.Tool_result _ -> false)
+                 view.updates in
+             if changed then visit ((Event.seq view.opened.event, {node_id=id;turn;ordinal;provenance=request_provenance})::records) rest
+             else visit records rest
+           | Journal.Agent_run_state | Journal.Agent_turn_state | Journal.Output_block_state _
+           | Journal.Tool_invocation_state _ | Journal.Tool_attempt_state ->
+             invalid "provider request node changed kind")
+        | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt -> visit records rest
+  in
+  visit [] [root,None]
 ;;
 
 let settled_tool_invocations t =

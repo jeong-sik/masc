@@ -451,3 +451,39 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
                                   checkpoint_sink=Some checkpoint_sink};
       checkpoint=agent_core_checkpoint; input}
 
+
+type request_boundary = (string * Agent.Execution_projection.cursor) option
+
+let capture_request_boundary binding =
+  let* observed = state binding in
+  match observed with
+  | Native.No_native_call -> Ok None
+  | Native.Active call | Native.Terminal_unacknowledged (call, _) ->
+    let* projection = open_projection binding call in
+    let* cursor = Agent.Execution_projection.current_cursor projection
+      |> Result.map_error Agent.Execution_projection.error_to_string in
+    Ok (Some (call.call_id, cursor))
+;;
+
+let request_evidence binding ~boundary ~runtime_id =
+  let read () =
+    let* observed = state binding in
+    match observed with
+    | Native.No_native_call -> Ok Request_observation.No_matching_call
+    | Native.Active call | Native.Terminal_unacknowledged (call, _) ->
+      if not (String.equal call.runtime_id runtime_id) then Ok Request_observation.No_matching_call
+      else
+        let* projection = open_projection binding call in
+        let after = match boundary with
+          | Some (call_id,cursor) when String.equal call_id call.call_id -> Some cursor
+          | Some _ | None -> None in
+        let* requests = Agent.Execution_projection.provider_requests projection ?after ()
+          |> Result.map_error Agent.Execution_projection.error_to_string in
+        if Option.is_some after && requests=[] then Ok Request_observation.No_matching_call
+        else
+          let requests = List.map (fun (request:Agent.Execution_projection.provider_request) ->
+            { Request_observation.node_id=Agent.Execution_projection.Node_id.to_string request.node_id;
+              turn=request.turn;ordinal=request.ordinal;provenance=request.provenance }) requests in
+          Ok (Request_observation.Recorded {call_id=call.call_id;requests}) in
+  match read () with Ok evidence -> evidence | Error detail -> Request_observation.Read_failed detail
+;;

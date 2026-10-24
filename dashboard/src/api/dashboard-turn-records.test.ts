@@ -25,6 +25,7 @@ function entry(overrides: Record<string, unknown> = {}) {
       turn_ref: 'trace-1#7',
       runtime_profile: 'anthropic.claude',
       ts: 1_700_000_000,
+      request_observations: [],
       execution_ids: ['exec-1'],
       blocks: [],
       input_components: [],

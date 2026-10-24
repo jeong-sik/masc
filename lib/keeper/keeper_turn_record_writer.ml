@@ -23,6 +23,7 @@ let write
       ~model_input_window
       ~response_observed_model_input
       ~raw_trace_run_ref
+      ~request_observations
       ~sampling
       ~usage
       ~turn_output_tokens
@@ -56,6 +57,7 @@ let write
     ; model_input_window
     ; response_observed_model_input
     ; raw_trace_run_ref
+    ; request_observations
     ; sampling
     ; usage
     ; turn_output_tokens

@@ -1659,8 +1659,20 @@ let official_client_turn_start ~session_id ~read_boundary =
 
 (* Native recovery evidence can close the retry boundary, but cannot erase an
    effect already observed by the selected runtime adapter. *)
-let observe_native_attempt binding run ~idx ~runtime_id candidate =
-  let result, checkpoint, effect_disposition, dispatch = run ~idx ~runtime_id candidate in
+let observe_native_attempt ?on_request_observation binding run ~idx ~runtime_id candidate =
+  let observed = ref false in
+  let on_request_evidence = Option.map (fun observe evidence ->
+    observed := true;
+    observe {Request_observation.runtime_profile=runtime_id;attempt=idx;evidence})
+    on_request_observation in
+  let result, checkpoint, effect_disposition, dispatch = run ?on_request_evidence ~idx ~runtime_id candidate in
+  if not !observed then Option.iter (fun observe ->
+    let evidence = match dispatch, binding with
+      | Keeper_attempt_dispatch.Rejected_before_dispatch, _ -> Request_observation.Not_dispatched
+      | Keeper_attempt_dispatch.Dispatched, None -> Request_observation.No_durable_scope
+      | Keeper_attempt_dispatch.Dispatched, Some _ ->
+        Request_observation.Read_failed "native API invocation returned no current request observation" in
+    observe evidence) on_request_evidence;
   let effect_disposition = match binding, effect_disposition with
     | Some binding, Keeper_provider_attempt_effect.No_effect_observed ->
       Keeper_direct_native_continuation.binding_effect_observation ~binding
@@ -1746,6 +1758,7 @@ let run_named
     ?deferred_runtime_lane
     ?on_memory_capacity_refusal
     ?on_runtime_attempt
+    ?on_request_observation
     ?runtime_retry_deferral
     ?checkpoint_progress
     ?attempt_continuation
@@ -2236,7 +2249,7 @@ let run_named
       | Missing_runtime _ -> false)
     ~provider_answered:(fun (named : named_run_result) -> run_result_answered named.run_result)
     ~emit_runtime_manifest
-    ~run_attempt:(observe_native_attempt native_binding (fun ~idx ~runtime_id:attempt_runtime_id candidate ->
+    ~run_attempt:(observe_native_attempt ?on_request_observation native_binding (fun ?on_request_evidence ~idx ~runtime_id:attempt_runtime_id candidate ->
       let native_admission = match native_binding with
         | None -> Ok None
         | Some binding ->
@@ -3229,6 +3242,7 @@ let run_named
             ; preserve_thinking = inference_policy.attempt_preserve_thinking
             ; cooperative_yield_probe
             ; agent_core_checkpoint
+            ; on_request_evidence
             ; native_binding
             ; native_retired_history_cut = None
             ; trace_link

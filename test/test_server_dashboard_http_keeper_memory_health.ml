@@ -1125,7 +1125,7 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
       ; model_input_front = Model_input_front.At_atom (Option.get (digest_at first_atom))
       }
     in
-    Masc.Keeper_turn_record_writer.write
+    Masc.Keeper_turn_record_writer.write ~request_observations:[]
       ~config ~keeper_name ~agent_name:keeper_name ~turn_kind:Turn_record.Direct
       ~trace_id ~absolute_turn:turn ~runtime_profile:"glm"
       ~selected_model:None ~finish_reason:None ~context_window:None

@@ -1305,6 +1305,7 @@ let run_turn
        window cut is observed before serialization, so a turn whose request was
        refused at the wire has a real cut and no wire observation. Sharing one
        cell would let the missing half erase the half that was measured. *)
+    let request_observations_rev = ref [] in
     let model_input_window_ref = ref None in
     let response_observed_model_input_ref = ref None in
     let current_request_provider_content_ref :
@@ -1667,6 +1668,8 @@ let run_turn
                            (Keeper_turn_scope.bus ~scope:event_scope)
                            event_bus)
                       ?trace_link
+                      ~on_request_observation:(fun observation ->
+                        request_observations_rev := observation :: !request_observations_rev)
                       ~on_runtime_attempt:
                         (fun attempt ->
                            runtime_walk_observed := true;
@@ -2474,6 +2477,7 @@ let run_turn
           ~response_observed_model_input:
             !response_observed_model_input_ref
           ~raw_trace_run_ref
+          ~request_observations:(List.rev !request_observations_rev)
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id settled_runtime_id

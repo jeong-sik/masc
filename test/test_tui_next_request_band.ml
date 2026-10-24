@@ -468,7 +468,7 @@ let test_runtime_configuration_attaches_by_exact_id () =
 let test_retained_forecast_reuses_recent_reading_only () =
   let turn_ref = Ids.Turn_ref.make ~trace_id:"t" ~absolute_turn:1 in
   let latest : Turn_record.t =
-    { execution_ids = []
+    { request_observations = [];  execution_ids = []
     ; keeper = "omega"
     ; agent_name = "keeper-omega"
     ; turn_kind = Direct

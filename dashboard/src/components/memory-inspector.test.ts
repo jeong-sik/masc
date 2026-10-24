@@ -112,6 +112,7 @@ function turnRecordsPayload() {
     },
     entries: [{
       record: {
+      request_observations: [],
         execution_ids: [],
         keeper: keeper.id,
         agent_name: `keeper-${keeper.id}-agent`,
@@ -495,6 +496,7 @@ describe('MemoryInspector pure projections', () => {
     inputComponents: TurnRecordRow['record']['input_components'] = [],
   ): TurnRecordRow => ({
     record: {
+      request_observations: [],
       execution_ids: [],
       keeper: 'keeper',
       agent_name: 'keeper-keeper-agent',

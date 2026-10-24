@@ -69,11 +69,11 @@
       "requirement": "Keeper chooses a matching Goal for related work and creates a Task with its goal_id",
       "state": "measured_pass",
       "evidence": [
-        "docs/evidence/2026-10-24-goal-system-runtime/g2-observation.json",
-        "docs/evidence/2026-10-24-goal-system-runtime/g2-goal-links.json",
-        "docs/evidence/2026-10-24-goal-system-runtime/g2-task.json"
+        "docs/evidence/2026-10-25-goal-lookup-runtime/g2-goal-links.json",
+        "docs/evidence/2026-10-25-goal-lookup-runtime/g2-task.json",
+        "docs/evidence/2026-10-25-goal-lookup-runtime/first-wire-schema.json"
       ],
-      "scope": "Actual local Gemma Read→Task-create emitted matching delivered Goal ID, self-corrected required description after two rejected calls, actual handler accepted and authoritative Goal registry links task-001. Owner request contained no Goal ID. Captured System bytes/hash equal actual provider wire; no Goal in trailing User. Task stillTodo at this snapshot; first-turn execution and G3 are not inferred. Single Goal, changed staged prompt cohort, no multi-Goal selection-rate claim.",
+      "scope": "Fresh real Qwen3:8b at54e8 emitted matching Goal ID in actual Task-create, persisted authoritative link and claimed task-001. Owner request contains no Goal ID; no operator Task link or execution reminder. Initial Read path misuse and all-false formatting Write before Task are retained in this cohort; no first-attempt or population success claim. G3 remains unpassed.",
       "counterevidence": [
         "/tmp/masc-goal-wire-7501aec0/request-000003.request",
         "/tmp/masc-goal-wire-7501aec0/request-000006.response",
@@ -83,26 +83,54 @@
         "docs/evidence/2026-10-24-goal-retention-runtime/failed-gemma-observation.json",
         "docs/evidence/2026-10-24-goal-carrier-diagnostic/README.md"
       ],
-      "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a"
+      "source_sha": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+      "prior_measured_pass": {
+        "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+        "scope": "Actual local Gemma Read→Task-create emitted matching delivered Goal ID, self-corrected required description after two rejected calls, actual handler accepted and authoritative Goal registry links task-001. Owner request contained no Goal ID. Captured System bytes/hash equal actual provider wire; no Goal in trailing User. Task stillTodo at this snapshot; first-turn execution and G3 are not inferred. Single Goal, changed staged prompt cohort, no multi-Goal selection-rate claim.",
+        "evidence": [
+          "docs/evidence/2026-10-24-goal-system-runtime/g2-observation.json",
+          "docs/evidence/2026-10-24-goal-system-runtime/g2-goal-links.json",
+          "docs/evidence/2026-10-24-goal-system-runtime/g2-task.json"
+        ]
+      },
+      "additional_cohort_counterevidence": {
+        "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+        "model": "qwen3:8b",
+        "result": "omitted Goal association",
+        "evidence": "docs/evidence/2026-10-24-goal-qwen-runtime/README.md"
+      }
     },
     {
       "id": "G3",
       "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
       "state": "measured_fail",
+      "source_sha": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+      "measured_at": "2026-10-24T15:40:10.576374+00:00",
       "evidence": [
-        "docs/evidence/2026-10-24-goal-system-runtime/g3-after-approval-observation.json",
-        "/tmp/masc-goal-wire-3badb881/request-000019.request",
-        "/tmp/masc-goal-canary-3badb881/operator-observations/approval-receipt.json"
+        "docs/evidence/2026-10-25-goal-lookup-runtime/README.md",
+        "docs/evidence/2026-10-25-goal-lookup-runtime/postapproval-diagnosis.json",
+        "docs/evidence/2026-10-25-goal-lookup-runtime/independent-runtime-audit.json"
       ],
-      "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
-      "measured_at": "2026-10-24T14:45:45.548135+00:00",
-      "scope": "Real gemma4:e2b linked partial Task approved by controlled operator proxy after exact immutable artifact inspection; approval event and current Goal reach actual request000019, 33 tools offered including goal_measure. Model returns text claiming still awaiting verification and calls no tools; artifact remains1/3 and Goal reported measurement0/3. No Keeper message after approval. One pre-approval execution reminder disclosed.",
-      "additional_cohort_counterevidence": {
-        "model": "qwen3:8b",
+      "scope": "Fresh real Qwen3:8b; model creates/claims Goal-linked first Task without operator association or reminder; operator proxy approves immutable alpha-only artifact. No postapproval Keeper message. Approval reaches request15; model performs actual beta/gamma work, rereads/submits retained artifacts and persists final3/3 observation at request26. Strict full case FAIL: terminal27 calls this Goal verification/achievement and predicts Task approval completes Goal, while actual Goal remains Executing and Task2/3 await verification. Asked intermediate1/3-before-work order also missed. Only explicit awaiting-verification listing occurs; no causal runtime proof of exact-ID default repair.",
+      "prior_measured_failures": {
+        "id": "G3",
+        "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
+        "state": "measured_fail",
+        "evidence": [
+          "docs/evidence/2026-10-24-goal-system-runtime/g3-after-approval-observation.json",
+          "/tmp/masc-goal-wire-3badb881/request-000019.request",
+          "/tmp/masc-goal-canary-3badb881/operator-observations/approval-receipt.json"
+        ],
         "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
-        "evidence": "docs/evidence/2026-10-24-goal-qwen-runtime/README.md",
-        "result": "measured_fail",
-        "scope": "Fresh real Keeper executes partial Task, omits Goal association. Controlled pre-approval public-MCP link establishes G3 fixture condition. Approval delivered; three exact-ID default queries omit Done and return empty; model ends stale-awaiting without actual Goal measurement or remaining work. No postapproval message; model/tool default interaction not proven sole cause."
+        "measured_at": "2026-10-24T14:45:45.548135+00:00",
+        "scope": "Real gemma4:e2b linked partial Task approved by controlled operator proxy after exact immutable artifact inspection; approval event and current Goal reach actual request000019, 33 tools offered including goal_measure. Model returns text claiming still awaiting verification and calls no tools; artifact remains1/3 and Goal reported measurement0/3. No Keeper message after approval. One pre-approval execution reminder disclosed.",
+        "additional_cohort_counterevidence": {
+          "model": "qwen3:8b",
+          "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+          "evidence": "docs/evidence/2026-10-24-goal-qwen-runtime/README.md",
+          "result": "measured_fail",
+          "scope": "Fresh real Keeper executes partial Task, omits Goal association. Controlled pre-approval public-MCP link establishes G3 fixture condition. Approval delivered; three exact-ID default queries omit Done and return empty; model ends stale-awaiting without actual Goal measurement or remaining work. No postapproval message; model/tool default interaction not proven sole cause."
+        }
       }
     },
     {
@@ -217,7 +245,7 @@
     "Historical Task counts include legitimate independent Tasks; linkage ratio is diagnostic, not a target or gate.",
     "G2 measured pass at3bad single-Goal Gemma canary. G3 measured failure: delivered approval ignored by model; no Goal completion, population success, model independence or microVM end-to-end grading claim."
   ],
-  "measured_at": "2026-10-24T15:04:01.051125+00:00",
+  "measured_at": "2026-10-24T15:35:25.822641+00:00",
   "summary": {
     "required": 11,
     "measured_pass": 10,
@@ -255,6 +283,9 @@
       "G3"
     ],
     "followup_task_id": "task-2620",
-    "task_ledger_note": "Prior four session Tasks2595–2598 were externally cancelled by local-admin at13:39Z orphan cleanup; cancellation is not completion. Task2620 is a Goal-linked, claimed/started successor to2595 for remaining G3."
+    "task_ledger_note": "Prior four session Tasks2595–2598 were externally cancelled by local-admin at13:39Z orphan cleanup; cancellation is not completion. Task2620 is a Goal-linked, claimed/started successor to2595 for remaining G3.",
+    "lookup_candidate": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+    "lookup_native_result": "40105703498 PASS:27Taskoutcomes +2canonicalTOML parity",
+    "lookup_build_result": "40105705308 SUCCESS; exact candidate54e8, workflowf31033df4d45a2ee97ec7f86ce149a6a33cff6a1; serverSHA6a2266ee62065039dfd4f37651b21122f8a239041bd762532392f9f46b5f0b57; checked server-only extraction, compatible dca support, not package installation."
   }
 }

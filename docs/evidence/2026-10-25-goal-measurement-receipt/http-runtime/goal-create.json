@@ -1,0 +1,14 @@
+{
+  "id": "goal-receipt-http-check",
+  "criterion_revision": "194efd0c49d088643d081da5fc457036",
+  "title": "Controlled receipt transport check",
+  "metric": "note:Transport proof only",
+  "target_value": "HTTP and MCP preserve reported-only and actual Executing lifecycle",
+  "due_date": null,
+  "priority": 3,
+  "phase": "executing",
+  "last_review_note": null,
+  "last_review_at": null,
+  "created_at": "2026-10-24T16:29:41Z",
+  "updated_at": "2026-10-24T16:29:41Z"
+}

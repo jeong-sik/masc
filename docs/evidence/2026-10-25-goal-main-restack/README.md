@@ -3,9 +3,13 @@
 This is a local source candidate over main
 `98a1508e6ecbda1d38d33aa7d0eb7f366b420ddf`, preserving the original 14-layer
 Goal head `895df663fb303ee2fa95c38bbd28b571db9abb62` and the fifteenth Draft
-measurement-receipt layer. The latter moved from `3014cfce` to `ec664e53` while
-the candidate was prepared; that delta only corrects the authoritative-empty
-provider-wire fixture expectation and is preserved here. No author checkout,
+measurement-receipt layer. The latter moved from `3014cfce` to `ec664e53` and
+then `cc510480` while the candidate was prepared. The first delta corrects the
+authoritative-empty provider-wire fixture expectation; the second publishes 67
+evidence/document/fragment paths. Both are preserved, with only the new fragment's
+missing own-PR citation repaired. Adopting the raw runtime reports is not an
+independent validation or a claim to have executed their native/model runs.
+No author checkout,
 runtime store, installed candidate, PR readiness, or public ref was changed.
 
 The whole stack was rebased with `gh stack rebase`. Conflict choices preserve
@@ -86,11 +90,25 @@ after restore and no second dispatch. It and the full worker/host typecheck
 remain unexecuted. Changed OCaml parsing and fragment checks are separate
 source checks; they do not establish native or runtime success. The original
 Goal snapshot/empty-observation producer sources remain byte-identical to the
-previous repair. The earlier 8/25 component runs were not rerun and retain their
+previous repair. The earlier 8-check snapshot run was not rerun and retains its
 original source/effect-port limits.
 
 The official projection and submission-link files also inherit main's typed
 message-origin change. Those files differ from the earlier 25-check source.
-Their small origin-construction/classification deltas were read, but the older
-execution is not evidence that this current projection, complete Host, or live
-provider path passes. Only the unchanged producer bytes have exact source reuse.
+The older execution was not carried forward as current proof. Instead,
+`probe_current_origin.py --repo PATH` compiles the current actual Origin/message
+types, projection, codec v3, System assembly, submission-link interface and
+write-receipt prefix. An Agent Core alias port preserves their nominal type
+identity; Goal data types and registry resolution remain named fixture ports.
+It executes the actual formatter, Goal row/world arm, template renderer and
+exact prompt-template bytes.
+
+Reversing only the two functional formatter/world hunks in this same source
+fails at last-Goal removal: Resume is only OWNER, the old Goal digest remains
+held and there are no source occurrences. The formatter-only unsafe control
+also fails by fabricating empty from known nonempty IDs with unknown summaries.
+The current source passes all 25 checks: canonical Active Goals(0) arrives in
+the actual codec-v3 User JSON, the previous digest is retired, System span/hash
+and the Resume write slot bind, and the same empty observation is not resent.
+These are fresh exact-source pure-component results with the recorded effect
+ports, not full Host, native provider/SDK, remote retention or live behavior.

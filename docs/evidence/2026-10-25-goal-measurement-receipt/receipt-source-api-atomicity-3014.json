@@ -1,0 +1,180 @@
+{
+  "schema": "masc.independent-source-review.v1",
+  "reviewer": "repair_evidence_integrity",
+  "reviewer_agent": "/root/repair_evidence_integrity",
+  "written_at_utc": "2026-10-24T16:30:40.663206+00:00",
+  "record_kind": "retrospective durable record of source review already performed in this session; not a new code review",
+  "source_checkout": "/tmp/masc-goal-receipt-integration-20261025",
+  "scope_exclusions": [
+    "GitHub APPROVE or merge",
+    "whole Native Stack approval",
+    "new CI API lookup or watch",
+    "native or live-model execution by reviewer",
+    "Goal proof or final human confirmation",
+    "uncommitted root evidence edits"
+  ],
+  "verdict": "PASS",
+  "head": "3014cfce79636f1e41cc39f6019a3428c6912145",
+  "base": "895df663fb303ee2fa95c38bbd28b571db9abb62",
+  "scope": "Direct PR45839 receipt delta only: source/API/atomicity. Inherited parent integration test mismatch is separately recorded below and in the companion artifact.",
+  "changed_files": [
+    "config/prompts/keeper.md",
+    "config/tools/masc_goal_measure.toml",
+    "docs/evidence/2026-10-25-goal-measurement-receipt/README.md",
+    "docs/evidence/2026-10-25-goal-measurement-receipt/parse-check.json",
+    "docs/evidence/2026-10-25-goal-measurement-receipt/probe_receipt.py",
+    "docs/evidence/2026-10-25-goal-measurement-receipt/source-check.json",
+    "docs/spec/00-glossary.md",
+    "lib/goal/goal_measurement.ml",
+    "lib/goal/goal_measurement.mli",
+    "lib/server/server_routes_http_routes_dashboard.ml",
+    "lib/workspace_goals.ml",
+    "test/test_goal_tool_toml_parity.ml",
+    "test/test_goal_verification_gate.ml",
+    "test/test_keeper_direct_goal_provider_wire.ml"
+  ],
+  "raw_binary_delta_sha256": "d90b99225ec7e03667248637f8c824590a1ac3e2aa08a991d70a98fa3b8ab619",
+  "rest_identity_at_review": {
+    "pr": 45839,
+    "state": "open",
+    "draft": true,
+    "head": "3014cfce79636f1e41cc39f6019a3428c6912145",
+    "base": "895df663fb303ee2fa95c38bbd28b571db9abb62",
+    "base_ref": "codex/goal-tool-round-context-20261024",
+    "stack": {
+      "id": 2561944,
+      "number": 45750,
+      "position": 15,
+      "size": 15,
+      "base": {
+        "ref": "main",
+        "sha": "43162710e28f61375ece2d6497de9892705ef691"
+      }
+    },
+    "provenance": "Actual read-only gh REST response captured during the prior3014 review in this reviewer session; not refreshed for this retrospective artifact",
+    "observation_timestamp": "not separately captured"
+  },
+  "author_equivalence": {
+    "head": "bf7927734d0822f2ed47e41a86121eed78ba3907",
+    "base": "1c6205ea60bd6fc225450fdda1b9c691b92aa3a2",
+    "changed_product_config_test_count": 9,
+    "bindings": [
+      {
+        "path": "config/prompts/keeper.md",
+        "author_sha256": "a311d3af98bbd5e8094f37a367c8042b15c59add6c14e20857905bc21d20f77d",
+        "integrated_sha256": "a311d3af98bbd5e8094f37a367c8042b15c59add6c14e20857905bc21d20f77d",
+        "byte_equal": true
+      },
+      {
+        "path": "config/tools/masc_goal_measure.toml",
+        "author_sha256": "c2f5f172b147a62b4fc6f9b971941ca0df2eb95a47dd5791dbceeb473b02daa9",
+        "integrated_sha256": "c2f5f172b147a62b4fc6f9b971941ca0df2eb95a47dd5791dbceeb473b02daa9",
+        "byte_equal": true
+      },
+      {
+        "path": "lib/goal/goal_measurement.ml",
+        "author_sha256": "172f5002dcecd7faa2eeabbbf9e2aab0da0e9178cbe4e0ffbd133769a05e6d13",
+        "integrated_sha256": "172f5002dcecd7faa2eeabbbf9e2aab0da0e9178cbe4e0ffbd133769a05e6d13",
+        "byte_equal": true
+      },
+      {
+        "path": "lib/goal/goal_measurement.mli",
+        "author_sha256": "c79527056a14ebf4aa4f95caccb562ea0107338d6dcc1ddb9641c1e290c6d5ab",
+        "integrated_sha256": "c79527056a14ebf4aa4f95caccb562ea0107338d6dcc1ddb9641c1e290c6d5ab",
+        "byte_equal": true
+      },
+      {
+        "path": "lib/server/server_routes_http_routes_dashboard.ml",
+        "author_sha256": "d88df0328be749b351bda5aeba04315e2132e03a303cb6f6c81d5fe69b35b84d",
+        "integrated_sha256": "d88df0328be749b351bda5aeba04315e2132e03a303cb6f6c81d5fe69b35b84d",
+        "byte_equal": true
+      },
+      {
+        "path": "lib/workspace_goals.ml",
+        "author_sha256": "f76bef2f8101fd669df39dce61f2eb1dc0b89212d89f917f839ea4ff3b438727",
+        "integrated_sha256": "f76bef2f8101fd669df39dce61f2eb1dc0b89212d89f917f839ea4ff3b438727",
+        "byte_equal": true
+      },
+      {
+        "path": "test/test_goal_tool_toml_parity.ml",
+        "author_sha256": "2c7def662241c117c5a1e554c30ac047ac92776f9eb577348aa2b40e446692dd",
+        "integrated_sha256": "2c7def662241c117c5a1e554c30ac047ac92776f9eb577348aa2b40e446692dd",
+        "byte_equal": true
+      },
+      {
+        "path": "test/test_goal_verification_gate.ml",
+        "author_sha256": "c1c41375c0315328ea42f00d8e7c7b54d855df2561414c809cf7979d0ba78a7f",
+        "integrated_sha256": "c1c41375c0315328ea42f00d8e7c7b54d855df2561414c809cf7979d0ba78a7f",
+        "byte_equal": true
+      },
+      {
+        "path": "test/test_keeper_direct_goal_provider_wire.ml",
+        "author_sha256": "6fe77c4dc467aedfc99ddd564e09dea29f4509b00d88b362c332c43e056653cb",
+        "integrated_sha256": "6fe77c4dc467aedfc99ddd564e09dea29f4509b00d88b362c332c43e056653cb",
+        "byte_equal": true
+      }
+    ]
+  },
+  "published_baseline_binding": {
+    "author": "1c6205ea60bd6fc225450fdda1b9c691b92aa3a2",
+    "published_parent": "895df663fb303ee2fa95c38bbd28b571db9abb62",
+    "path": "lib/workspace_goals.ml",
+    "byte_equal": true,
+    "sha256": "3371bab23f8d2be38a1e5df2414ef922fae8fd6e8d950aab09c471a43c89d800"
+  },
+  "reviewed_contract": {
+    "producer": "Goal_measurement.record and record_json return private receipt{measurement;goal_at_recording}",
+    "atomicity": "Actual Goal_store.transact_goal holds the Goal lock across authoritative read and callback. The existing callback writes measurement under its existing lock and returns the identical Goal; unchanged-Goal branch writes no Goal file. Receipt uses that immutable returned Goal, not a later read.",
+    "serialization": "Pure shared receipt_fields feeds MCP and HTTP; measurement_status=reported_only, existing Goal_store JSON at recording, completion_effect=unchanged. MCP/HTTP existing success envelopes preserved.",
+    "storage": "Durable measurement row/version/schema and Goal lifecycle transition rules unchanged; no extra store or compatibility mirror.",
+    "consumers": "All record/record_json references searched. MCP/HTTP, direct native Goal fixtures and four direct record sites accounted. Separate Goal-list verification ledger decoder remains unchanged.",
+    "race_limit": "goal_at_recording is the state inside the recording transaction, not a guarantee of current phase after unlock or delivery; completion_effect describes this operation."
+  },
+  "independent_checks": {
+    "actual_source_probe": {
+      "checks_passed": 21,
+      "source_check_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-independent-root3014-receipt-review-4y3srcnr/source-check.json",
+      "source_check_sha256": "755e9758b03129dd22b1fb8abba6a5b41f0f7b5a03172c57f430656d0af7efcf",
+      "emitted_receipt_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-independent-root3014-receipt-review-4y3srcnr/receipt.json",
+      "emitted_receipt_sha256": "d8d17bce7874e9b1449e51a4851b4e667c62397d43643f9045877702532483b8",
+      "effect_ports": "Named in-memory transaction/lock/backend/clock/identifier/transport ports; not native lock/filesystem/HTTP/vendor execution",
+      "input_snapshot_sha256": "deade748cbf2802db9b283289e17d2d2064a98cf919ef5d26012550b9025017c"
+    },
+    "source_diff_check": "PASS during the prior review; no new check claimed here"
+  },
+  "remaining_p0_p2_in_direct_delta": [],
+  "inherited_integration_finding": {
+    "priority": "P2",
+    "status_at3014_review": "open",
+    "path": "test/test_keeper_direct_goal_provider_wire.ml",
+    "line": 164,
+    "issue": "Parent895 intentionally emits authoritative Active Goals(0), but existing Empty receiver assertion expected no Active Goals. Predicted native failure later matched actual3014 log.",
+    "later_resolution": {
+      "head": "ec664e53b7eda6a7dae4eb09daa04b56ad98997d",
+      "base": "3014cfce79636f1e41cc39f6019a3428c6912145",
+      "author_head": "c352e598968c5d6003c584a0dd4d079669974cad",
+      "later_independent_source_verdict": "PASS; parent integration P2 closed in source; no remaining P0-P2 in one-file test repair",
+      "artifact_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-independent-empty-goal-repair-review-cx8j98vo/review.json",
+      "artifact_sha256": "a6cde40bd4ee13459fd6df13455b6ec5c8b258d14bbf1a833a770ad58d033874",
+      "scope": "Later source repair of Empty native HTTP assertion only; do not rewrite the original3014 assessment as clean integration"
+    }
+  },
+  "later_parent_execution_reports": {
+    "provenance": "Later parent-agent message supplied with this archival request; not independently refetched or executed by reviewer",
+    "native": {
+      "run": 40111175993,
+      "head": "ec664e53b7eda6a7dae4eb09daa04b56ad98997d",
+      "scope": "actual HTTP six cases",
+      "result": "PASS reported by parent"
+    },
+    "build": {
+      "run": 40110337126,
+      "head": "3014cfce79636f1e41cc39f6019a3428c6912145",
+      "scope": "macOS candidate server",
+      "result": "SUCCESS and checked server reported by parent",
+      "binary_sha256_prefix_only": "bd9042",
+      "full_sha256": "not supplied in this message"
+    }
+  },
+  "g3_limit": "Receipt source and frozen inference do not establish actual G3 compliance. Actual54 cohort strict G3 remained HOLD/FAIL for public verification/autocompletion overclaim."
+}

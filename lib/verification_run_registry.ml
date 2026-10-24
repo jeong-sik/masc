@@ -16,6 +16,7 @@ type outcome =
   | Commit_failed of { detail : string }
   | Raised of { detail : string }
   | Review_cancelled of { detail : string }
+  | Superseded_by of { authority : string }
 
 type tool_observation =
   { tool_name : string
@@ -114,6 +115,7 @@ let outcome_label = function
   | Commit_failed _ -> "commit_failed"
   | Raised _ -> "raised"
   | Review_cancelled _ -> "review_cancelled"
+  | Superseded_by _ -> "superseded_by"
 ;;
 
 module Payload = struct
@@ -187,6 +189,7 @@ module Payload = struct
     | Raised { detail }
     | Review_cancelled { detail } ->
       [ "detail", `String detail ]
+    | Superseded_by { authority } -> [ "authority", `String authority ]
     | Infrastructure_unavailable { stage; detail } ->
       [ "stage", `String (infrastructure_stage_to_string stage)
       ; "detail", `String detail
@@ -282,6 +285,9 @@ module Payload = struct
       | "review_cancelled" ->
         let* detail = Run_registry_core.Json.string_field "detail" fields in
         Ok (Review_cancelled { detail })
+      | "superseded_by" ->
+        let* authority = Run_registry_core.Json.string_field "authority" fields in
+        Ok (Superseded_by { authority })
       | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
     in
     Ok { outcome; evaluator_runtime; elapsed_s; tools }
@@ -404,6 +410,8 @@ let outcome_detail_fields = function
     ]
   | Not_reviewed { gate; detail } ->
     [ "gate", `String gate; "detail", `String detail ]
+  | Superseded_by { authority } ->
+    [ "authority", `String authority ]
 ;;
 
 let run_to_yojson run =

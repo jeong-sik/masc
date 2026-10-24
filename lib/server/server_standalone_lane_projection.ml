@@ -533,6 +533,7 @@ let terminal_of_verification_outcome = function
   | Verification_run_registry.Approved _
   | Verification_run_registry.Rejected _ -> Succeeded
   | Verification_run_registry.Review_cancelled _ -> Cancelled
+  | Verification_run_registry.Superseded_by _ -> Cancelled
 ;;
 
 let observed_verification_run (run : Verification_run_registry.run) =

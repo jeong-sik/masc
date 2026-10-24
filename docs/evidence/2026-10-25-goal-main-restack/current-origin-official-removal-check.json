@@ -1,6 +1,6 @@
 {
   "scope": "actual extracted formatter, full Goal row function, world Active_goals arm, registry template renderer and actual pure projection/codec/receipt; fixture registry resolution and Goal data type stand-ins; no Goal-store decoder/I/O, full Keeper assembly/Host/hooks/SDK/client/transport/provider/remote-retention proof",
-  "candidate_head": "3bbdd51fedca544df12b21d2995f67f15adcd0a0",
+  "candidate_head": "87fa841b50a97de996778cff5a511ac6bbe6224d",
   "reverted_before_scope": "same current source, only formatter Ok[]->None and world Active_goals functional hunk reversed",
   "sources": [
     {
@@ -36,12 +36,12 @@
     {
       "compiled": "keeper_context_assembly.mli",
       "source": "lib/keeper/keeper_context_assembly.mli",
-      "sha256": "1479a882a788783bfc430cd44803ed679f6815d2c0a597c94f262810bc0f10ee"
+      "sha256": "3c1e58f3fd6930146c0a219038fe37287023885dea6a9884d450d26b8896b782"
     },
     {
       "compiled": "keeper_context_assembly.ml",
       "source": "lib/keeper/keeper_context_assembly.ml",
-      "sha256": "484a02f701471656b68403748d48bb6f470bf494261e791cfea9475dcf0d8f48"
+      "sha256": "2452346ee72de6c3e6ca29dacc316ee401bcfa152e36ed96846c1e0cde8cf336"
     },
     {
       "compiled": "keeper_official_client_context_codec.mli",
@@ -91,12 +91,12 @@
     {
       "compiled": "keeper_context_submission_link.mli",
       "source": "lib/keeper/keeper_context_submission_link.mli",
-      "sha256": "1a9a3fa6133b8d55e33ce1eaec5d73d06b373fd0afa0f05dcafc0ab018745120"
+      "sha256": "2b94dd37de68f913fe074e40f517ce23b84049b244bd8198650eb9e5b59e8be0"
     },
     {
       "compiled": "keeper_context_submission_link.ml",
       "source": "lib/keeper/keeper_context_submission_link.ml",
-      "sha256": "63a2423f7be2023bcf13ae19262d99782500de2b603a285dcf040ef0bceca513"
+      "sha256": "b195b59f10318cf0b034240d89b83b3759cf13efe326f9e4ca4e2a020087c37e"
     },
     {
       "variant": "before",
@@ -126,7 +126,7 @@
   "results": [
     {
       "variant": "before",
-      "projection_sha256": "bcfb030e148483c0ad4ba8ea38e29646cc4ee5c4099e55172cdb51e6ee481e3b",
+      "projection_sha256": "b3615429a286a961ddcb943efc3c2e8372c66c95314cb86f68fa2fa734dd232e",
       "compile_exit": 0,
       "compile_stderr": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\n",
       "run_exit": 2,
@@ -134,7 +134,7 @@
     },
     {
       "variant": "unsafe_formatter_only",
-      "projection_sha256": "bcfb030e148483c0ad4ba8ea38e29646cc4ee5c4099e55172cdb51e6ee481e3b",
+      "projection_sha256": "b3615429a286a961ddcb943efc3c2e8372c66c95314cb86f68fa2fa734dd232e",
       "compile_exit": 0,
       "compile_stderr": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\n",
       "run_exit": 2,
@@ -142,7 +142,7 @@
     },
     {
       "variant": "after",
-      "projection_sha256": "bcfb030e148483c0ad4ba8ea38e29646cc4ee5c4099e55172cdb51e6ee481e3b",
+      "projection_sha256": "b3615429a286a961ddcb943efc3c2e8372c66c95314cb86f68fa2fa734dd232e",
       "compile_exit": 0,
       "compile_stderr": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\n",
       "run_exit": 0,

@@ -21,5 +21,6 @@ val resume :
   by:string -> [> `Already_running | `Resumed ]
 
 (** Destructive reset of workspace state for tests and explicit internal
-    maintenance. *)
+    maintenance. Symlinks inside the workspace are unlinked without deleting
+    their targets. Removed directories can be recreated by memoized writers. *)
 val reset : Workspace_utils_backend_setup.config -> string

@@ -291,6 +291,16 @@ let test_autonomous_wake_native_reply () = with_token (fun clock ->
   check (option (pair string string)) "configured iMessage destination used" (Some ("self-guid","answer")) !sent;
   check bool "self-chat receipt cannot claim original group was answered" false
     (Native.matches_continuation native imessage);
+  let native_input = `Assoc ["connector",`String "imessage";"channel_id",`String "source";
+    "native_route",Native.to_yojson native;"content",`String "answer";"mention_user_ids",`List []] in
+  let replay = Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input native_input |> ok in
+  check (option string) "approval names the actual configured destination" (Some "imessage self-guid: answer")
+    (Keeper_tool_in_process_runtime.connector_post_call_summary replay);
+  let json = Keeper_surface_post.delivery_target_to_yojson
+    (Keeper_surface_post.Delivered_to_native native) in
+  check bool "duplicate receipt field is refused" true
+    (match json with `Assoc fields -> Result.is_error (Keeper_surface_post.delivery_target_of_yojson
+       (`Assoc (("channel_id",`String "source")::fields))) | _ -> fail "receipt object");
   check bool "unknown native route cannot be replayed" true
     (Result.is_error (Native.of_yojson (`Assoc ["kind",`String "dashboard";"thread_id",`String "foreign"]))))
 

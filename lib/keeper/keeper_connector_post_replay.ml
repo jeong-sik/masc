@@ -217,7 +217,7 @@ let connector_post_call_summary replay =
   match replay with
   | Replay_native_post {route;content;_} ->
     line ~connector:(Keeper_native_origin_reply.connector route)
-      ~channel_id:(Keeper_native_origin_reply.channel_id route) ~content
+      ~channel_id:(Keeper_native_origin_reply.destination_id route) ~content
   | Replay_discord_post { channel_id; content; _ } ->
     line ~connector:Keeper_surface_post.discord_label ~channel_id ~content
   | Replay_slack_post { channel_id; content; _ } ->

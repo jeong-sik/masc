@@ -277,7 +277,9 @@ let delivery_target_of_yojson json =
            | Some _ ->
              Error "delivery target thread_ts must be a non-empty string")
      | Some (`String (("telegram" | "imessage") as kind)) ->
-       (match List.assoc_opt "native_route" fields with
+       if List.sort String.compare (List.map fst fields) <> ["channel_id";"kind";"native_route"] then
+         Error "native delivery metadata requires exactly kind, channel_id, native_route"
+       else (match List.assoc_opt "native_route" fields with
         | None -> Error "native delivery target is missing native_route"
         | Some value -> Result.bind (Keeper_native_origin_reply.of_yojson value) (fun route ->
           Result.bind (field "channel_id" fields) (fun channel_id ->

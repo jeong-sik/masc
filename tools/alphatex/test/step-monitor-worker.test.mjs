@@ -20,7 +20,7 @@ async function runtime({ pcm = 'paced', vst = 'valid' } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'monitor-worker-'))
   const trace = join(directory, 'events.jsonl'), workers = []
   for (const file of ['synth-stream.mjs', 'soundfont-stream.mjs', 'soundfont_stream.py', 'soundfont_host.py', 'step-monitor.mjs', 'step-monitor-worker.mjs', 'step-monitor-session.mjs',
-    'render-midi-clock.mjs', 'exact-time.mjs', 'phrase-backing.mjs', 'sequencer-project.mjs', 'tick-units.mjs', 'note-quantize.mjs', 'note-overlap.mjs', 'project-sound.mjs', 'pcm-output.mjs', 'vst-stream.mjs', 'vst-host.mjs', 'session-data.mjs', 'capture-time.mjs', 'wave-file.mjs']) {
+    'render-midi-clock.mjs', 'exact-time.mjs', 'phrase-backing.mjs', 'sequencer-project.mjs', 'tick-units.mjs', 'note-quantize.mjs', 'note-overlap.mjs', 'project-sound.mjs', 'pcm-output.mjs', 'vst-stream.mjs', 'vst-host.mjs', 'session-data.mjs', 'ump-packets.mjs', 'capture-time.mjs', 'wave-file.mjs']) {
     await copyFile(new URL(`../${file}`, import.meta.url), join(directory, file))
   }
   await symlink(fileURLToPath(new URL('../node_modules', import.meta.url)), join(directory, 'node_modules'), 'dir')

@@ -30,7 +30,7 @@ type RawView = 'text' | 'tree'
 
 const TABS: Array<{ id: Tab; label: string; hint: string }> = [
   { id: 'raw', label: 'Retained trace records', hint: 'REDACTED TRACE · 보존된 실행 레코드' },
-  { id: 'prompt', label: 'Typed next prompt', hint: 'TYPED · 다음 턴에 조립될 시스템 컨텍스트' },
+  { id: 'prompt', label: 'Captured prompt', hint: 'TYPED · 마지막으로 기록된 프롬프트' },
   { id: 'note', label: 'Operator input', hint: 'OPERATOR INPUT · 다음 턴 한 번에만 실리는 문장' },
 ]
 

@@ -1,6 +1,6 @@
 {
   "scope": "actual pure projection/codec/receipt only; no Host.prepare_turn, hooks, SDK, client, transport or remote retention proof",
-  "baseline": "661becba96bffd341e0968cce48927f360edfa19",
+  "baseline": "3badb88117794510dac576bf3fc34f0336e17d8a",
   "sources": [
     {
       "compiled": "agent_core.ml",

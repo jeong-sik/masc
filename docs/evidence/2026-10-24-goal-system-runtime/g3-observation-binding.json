@@ -1,0 +1,6 @@
+{
+  "source_observation": "/tmp/masc-goal-canary-3badb881/observations/20261024T144145061631Z.json",
+  "sha256": "d01c76ebebbf643e3dd17ef965580f345dd86ca73d2c97906628a1eb3344f4c4",
+  "observed_at": "2026-10-24T14:41:45.061631+00:00",
+  "scope": "Read-only post-approval Task, Goal and actual artifact; no further Keeper message sent after approval"
+}

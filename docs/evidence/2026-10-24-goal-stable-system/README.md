@@ -44,8 +44,7 @@ reproduces that missing-consumer error before the repair.
 
 These receipts describe issuance before provider message/IPC encoding. They
 do not prove remote retention. The official-client host already consumes the
-existing override, but official held/resume native identity behavior has not
-been executed for this change. The existing official extra-context subset
+existing override, with the held/resume changes and their separate executed native scope recorded below. No live official vendor session was executed. The existing official extra-context subset
 proof remains scoped to extra context and does not assert a Goal System span.
 
 ## Executed checks
@@ -72,11 +71,10 @@ proof remains scoped to extra context and does not assert a Goal System span.
 The authored real HTTP receiver regression checks three provider requests,
 leading System Goal bytes, unchanged prior override, first-request-only other
 world state, genuine bundled Task creation/linkage, captures and an ephemeral
-checkpoint. Its native execution, a new exact-build Keeper experiment and a
-visible browser check are pending. No live G2/G3 success is claimed here.
+checkpoint. Its six-suite native execution passed40101087040 at published source3badb881. The subsequent exact-build real Gemma run and visible browser check are in [the runtime report](../2026-10-24-goal-system-runtime/README.md): G2 passes for that cohort and G3 fails after delivered approval. Deterministic tests, real inference and UI evidence remain distinct.
 
 Independent source review of661becba found a P2 in official-client Resume: changed Goal observation was absent from the carried prompt while vendor sessions retained their first System until compaction. This source FAIL is preserved at its own head in `independent-source-review.json`.
 
 The subsequent typed carried-path repair and bounded baseline/repaired execution are recorded in [official-resume-repair.md](official-resume-repair.md). Regular HTTP, official Resume source checks and hosted native execution have separate scopes.
 
-The subsequent preservation of the official blank-instructions policy is in [official-blank-repair.md](official-blank-repair.md). Independent source review passed the authored repair; the coupled native Host test has not yet been executed for this repair.
+The subsequent preservation of the official blank-instructions policy is in [official-blank-repair.md](official-blank-repair.md). Independent source review passed the authored repair; the coupled native Host and projection suites passed40103733597 atcf60643a1680b6c1cfa678feb5c97034b3bd8d22 (87+13 tests). No live vendor session is claimed.

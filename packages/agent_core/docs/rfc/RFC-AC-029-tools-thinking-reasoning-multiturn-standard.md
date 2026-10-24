@@ -271,6 +271,18 @@ model/protocol-specific conformance fixtures that carry these fields through
 production parse → history → request paths. The OpenAI phase portion is already
 implemented and must not be repeated as unfinished work.
 
+The native M3 fixture in #45689 covers split reasoning, structured reasoning
+and tool calls without thinking through sync/SSE parse → history → request.
+Inline `<think>` content is explicitly outside that conformance claim: the
+current sync parser and SSE splitter retain its text as `Thinking`, but discard
+the original inline carrier; the request serializer then emits `reasoning_content`
+instead of preserving the original `content`. This contradicts the native inline
+replay requirement above. The offline reproduction is recorded in
+[the inline replay gap evidence](../../../../docs/evidence/2026-10-24-minimax-inline-replay-gap/README.md).
+#27924 remains unresolved for a typed original-wire witness across sync/SSE,
+canonical history and same-provider replay. Reconstructing `<think>` tags from
+merged reasoning blocks cannot recover the original placement or bytes.
+
 Neither page establishes MiniMax `tool_choice` acceptance parity or all MiniMax
 Responses replay semantics. Record those as unverified, rather than deriving
 restrictions from compatibility branding or changing capabilities without

@@ -1583,33 +1583,38 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
   ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
   let request_id = pending_request_id config goal_id in
   let registry = Goal_verification_run_registry.global () in
-  let completed_outcomes () =
-    reviews_of_goal registry goal_id
-    |> List.filter_map (fun (run : Goal_verification_run_registry.run) ->
-      match run.status with
-      | Goal_verification_run_registry.Completed { outcome; _ } -> Some outcome
-      | Goal_verification_run_registry.Running -> None)
+  let calls = ref [] in
+  let retained_original () =
+    let store = Lane_addon_store.create
+        ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    match Goal_verifier_worker.inventory ~store
+        ~installation_id:Goal_verifier_worker.host_installation_id
+        ~package_id:Goal_verifier_worker.host_package_id with
+    | Error error -> fail (Goal_verifier_worker.error_to_string error)
+    | Ok rows ->
+      (match List.filter (fun retained ->
+         let subject = Goal_verifier_original.subject (Goal_verifier_worker.original retained) in
+         subject.goal_id = goal_id && subject.request_id = request_id) rows with
+       | [retained] -> retained
+       | rows -> fail (Printf.sprintf "expected one admission original, got %d" (List.length rows)))
   in
   let deferred_once, resolve_deferred_once = Eio.Promise.create () in
   let deferred_twice, resolve_deferred_twice = Eio.Promise.create () in
   let committed, resolve_committed = Eio.Promise.create () in
   let saved_observer = Atomic.get Goal_verification_run_registry.change_observer_fn in
   let observer () =
-    let deferrals =
-      List.fold_left (fun count outcome ->
-        match outcome with
-        | Goal_verification_run_registry.Deferred _ -> count + 1
-        | Goal_verification_run_registry.Committed ->
-          ignore (Eio.Promise.try_resolve resolve_committed ());
-          count
-        | Goal_verification_run_registry.Reviewed
-        | Goal_verification_run_registry.Superseded _
-        | Goal_verification_run_registry.Review_cancelled _
-        | Goal_verification_run_registry.Raised _ -> count)
-        0 (completed_outcomes ())
-    in
-    if deferrals >= 1 then ignore (Eio.Promise.try_resolve resolve_deferred_once ());
-    if deferrals >= 2 then ignore (Eio.Promise.try_resolve resolve_deferred_twice ())
+    List.iter (fun (run : Goal_verification_run_registry.run) ->
+      match run.status with
+      | Completed {outcome=Deferred _; _} ->
+        (* A known pre-dispatch refusal re-admits its immutable original and
+           run. Count actual reviewer entries at completion publication,
+           rather than requiring another registry row for the same run. *)
+        if List.length !calls >= 1 then ignore (Eio.Promise.try_resolve resolve_deferred_once ());
+        if List.length !calls >= 2 then ignore (Eio.Promise.try_resolve resolve_deferred_twice ())
+      | Completed {outcome=Committed; _} ->
+        ignore (Eio.Promise.try_resolve resolve_committed ())
+      | Running | Completed {outcome=(Reviewed | Superseded _ | Review_cancelled _ | Raised _); _} -> ())
+      (reviews_of_goal registry goal_id)
   in
   let clock () = match !workspace_clock with
     | Some clock -> clock
@@ -1625,7 +1630,7 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
     (fun () ->
       Atomic.set Goal_verification_run_registry.change_observer_fn observer;
       with_lane_and_reviewer ~slots:(fun () -> Ok ["verifier-a"])
-        ~reviewer:(recording_reviewer (ref []) ["verifier-a", Stub_permanent])
+        ~reviewer:(recording_reviewer calls ["verifier-a", Stub_permanent])
         (fun () ->
           Eio.Switch.run (fun sw ->
             Goal_verification_agent.start ~sw ~clock:(Option.get !workspace_clock) ~config;
@@ -1667,8 +1672,23 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
              | posts ->
                fail (Printf.sprintf "expected one stall notice, got %d"
                        (List.length posts)));
+            let original = retained_original () in
+            let original_json = Goal_verifier_original.to_json (Goal_verifier_worker.original original) in
+            let original_run = Goal_verifier_worker.run_identity original in
+            let check_same_original () =
+              let retained = retained_original () in
+              check bool "pre-dispatch re-admission keeps the complete original" true
+                (Yojson.Safe.equal original_json
+                   (Goal_verifier_original.to_json (Goal_verifier_worker.original retained)));
+              check bool "pre-dispatch re-admission keeps the fixed run" true
+                (original_run = Goal_verifier_worker.run_identity retained);
+              check int "pre-dispatch repair allocates no successor" 0
+                (Goal_verifier_original.attempt (Goal_verifier_worker.original retained));
+              retained
+            in
             for _ = 1 to idle_ticks_after_deferral do Eio.Time.sleep (clock ()) idle_tick_s done;
-            check int "idle ticks start no review" 1 (List.length (reviews_of_goal registry goal_id));
+            check int "idle ticks start no reviewer call" 1 (List.length !calls);
+            check int "one original run remains visible" 1 (List.length (reviews_of_goal registry goal_id));
             check int "idle ticks post no notice" 1 (List.length (stall_posts ()));
             check string "the Goal waits in verifying" "verifying" (stored_phase config goal_id);
             ignore (must_succeed "a request while the lane is still down"
@@ -1676,16 +1696,20 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
             check string "asking again without evidence keeps the request" request_id
               (pending_request_id config goal_id);
             await_within "the second deferral" deferred_twice;
-            check int "the second request was reviewed" 2
-              (List.length (reviews_of_goal registry goal_id));
+            check int "the explicit second request entered the reviewer" 2 (List.length !calls);
+            (match Lane_addon_request_progress.phase (Goal_verifier_worker.progress (check_same_original ())) with
+             | Admission_wait _ -> ()
+             | _ -> fail "the permanent config refusal must remain known not dispatched");
             check int "the same stall is not posted twice" 1 (List.length (stall_posts ()));
             Atomic.set AR.run_llm_reviewer_fn
-              (recording_reviewer (ref []) ["verifier-a", Stub_approve "lane back, target met"]);
+              (recording_reviewer calls ["verifier-a", Stub_approve "lane back, target met"]);
             ignore (must_succeed "the request the notice names"
               (transition ctx goal_id "request_complete"));
-            await_within "the requested review's commit" committed)));
-  check int "each request started exactly one review" 3
-    (List.length (reviews_of_goal registry goal_id));
+            await_within "the requested review's commit" committed;
+            ignore (check_same_original ()))));
+  check int "each explicit request entered the reviewer exactly once" 3 (List.length !calls);
+  check int "all admissions used the one original run" 1 (List.length (reviews_of_goal registry goal_id));
+  check int "the completed worker posted the same stall only once" 1 (List.length (stall_posts ()));
   check string "the requested review committed" "awaiting_confirmation" (stored_phase config goal_id)
 ;;
 
@@ -1988,15 +2012,52 @@ tools-support = true
     Error refusal
   in
   let approvals = ref [] in
+  let initial_run = ref None in
+  let successor_running, resolve_successor_running = Eio.Promise.create () in
+  let reviewer_entered, resolve_reviewer_entered = Eio.Promise.create () in
   let finished, finish = Eio.Promise.create () in
   let permanent = Atomic.get Goal_verification_run_registry.change_observer_fn in
   let registry = Goal_verification_run_registry.global () in
   let observer () =
-    if List.exists (fun (run : Goal_verification_run_registry.run) ->
+    List.iter (fun (run : Goal_verification_run_registry.run) ->
       match run.status with
-      | Completed {outcome=Committed; _} -> true
-      | _ -> false) (reviews_of_goal registry goal_id)
-    then ignore (Eio.Promise.try_resolve finish ())
+      | Running ->
+        (match !initial_run with
+         | None -> initial_run := Some run.run_id
+         | Some first when first <> run.run_id ->
+           ignore (Eio.Promise.try_resolve resolve_successor_running run)
+         | Some _ -> ())
+      | Completed {outcome=Committed; _} ->
+        ignore (Eio.Promise.try_resolve finish ())
+      | Completed _ -> ()) (reviews_of_goal registry goal_id)
+  in
+  let diagnostic_state () =
+    let runs = reviews_of_goal registry goal_id |> List.map (fun (run : Goal_verification_run_registry.run) ->
+      Printf.sprintf "%s:%s" run.run_id (Goal_verification_run_registry.status_label run.status)) in
+    let store = Lane_addon_store.create
+        ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let originals = match Goal_verifier_worker.inventory ~store
+        ~installation_id:Goal_verifier_worker.host_installation_id
+        ~package_id:Goal_verifier_worker.host_package_id with
+      | Error error -> "unavailable:" ^ Goal_verifier_worker.error_to_string error
+      | Ok rows -> rows |> List.filter_map (fun retained ->
+          let original = Goal_verifier_worker.original retained in
+          let subject = Goal_verifier_original.subject original in
+          if subject.goal_id <> goal_id || subject.request_id <> request_id then None
+          else
+            let phase = match Lane_addon_request_progress.phase (Goal_verifier_worker.progress retained) with
+              | Captured -> "captured" | Admission_wait _ -> "admission_wait"
+              | Dispatch_pending _ -> "dispatch_pending" | Judged _ -> "judged"
+              | Committing _ -> "committing" | Commit_unknown _ -> "commit_unknown"
+              | Finished _ -> "finished" | Conflicted _ -> "conflicted"
+              | Rejected _ -> "rejected" | Subdividing _ -> "subdividing" | Subdivided _ -> "subdivided" in
+            Some (Printf.sprintf "attempt=%d,run=%s,phase=%s"
+              (Goal_verifier_original.attempt original)
+              (Goal_verifier_worker.run_identity retained).run_id phase)) |> String.concat ";"
+    in
+    Printf.sprintf "goal=%s request=%s retry_pending=%b mock_now=%.6f reset=%.6f refusals=%d approvals=%d registry=[%s] originals=[%s]"
+      goal_id request_id (Agent.retry_pending ~goal_id) (Eio.Time.now clock)
+      (started +. rest_sec) !refusals (List.length !approvals) (String.concat ";" runs) originals
   in
   Fun.protect ~finally:(fun () -> Atomic.set Goal_verification_run_registry.change_observer_fn permanent)
     (fun () ->
@@ -2006,9 +2067,9 @@ tools-support = true
           Goal_verification_agent.start ~sw ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) ~config;
           let actual_clock = Option.get !workspace_clock in
           let await label f =
-            match Eio.Time.with_timeout actual_clock hung_review_wait_s (fun () -> f (); Ok ()) with
-            | Ok () -> ()
-            | Error `Timeout -> fail (label ^ " did not happen")
+            match Eio.Time.with_timeout actual_clock hung_review_wait_s (fun () -> Ok (f ())) with
+            | Ok value -> value
+            | Error `Timeout -> fail (label ^ " did not happen; " ^ diagnostic_state ())
           in
           let rec until condition = if condition () then () else (Eio.Fiber.yield (); until condition) in
           await "the retry being armed" (fun () -> until (fun () -> Agent.retry_pending ~goal_id));
@@ -2032,13 +2093,26 @@ tools-support = true
              fail (Printf.sprintf "expected one stall notice, got %d" (List.length posts)));
           check int "one refused review so far" 1 !refusals;
           Atomic.set AR.run_llm_reviewer_fn
-            (recording_reviewer approvals [ slot, Stub_approve "quota reset, target measured" ]);
-          await "the review at the stated reset" (fun () ->
-            until (fun () ->
-              if !approvals <> [] then true
-              else (ignore (Eio_mock.Clock.try_advance clock); false)));
-          check bool "the Goal was not reviewed again before the stated reset" true
-            (Float.compare (Eio.Time.now clock) (started +. rest_sec -. 0.001) >= 0);
+            (recording_reviewer
+              ~before_verdict:(fun _ ->
+                ignore (Eio.Promise.try_resolve resolve_reviewer_entered (Eio.Time.now clock)))
+              approvals [ slot, Stub_approve "quota reset, target measured" ]);
+          check int "the replacement reviewer has not entered before the reset" 0 (List.length !approvals);
+          check bool "the dated retry is still armed" true (Agent.retry_pending ~goal_id);
+          check bool "the armed timer accepts one clock advance" true (Eio_mock.Clock.try_advance clock);
+          (* The existing deadline covers both observable boundaries. Suspend
+             while real retained-store I/O runs, rather than continuously
+             advancing the mock clock until a model happens to answer. *)
+          let successor, entered_at = await "the review at the stated reset" (fun () ->
+            let successor = Eio.Promise.await successor_running in
+            let entered_at = Eio.Promise.await reviewer_entered in
+            successor, entered_at) in
+          check string "the automatic successor keeps the pending request" request_id successor.request_id;
+          check bool "the automatic successor has its own run" true
+            (Some successor.run_id <> !initial_run);
+          check bool "actual reviewer entry is not before the stated reset" true
+            (Float.compare entered_at (started +. rest_sec -. 0.001) >= 0);
+          check int "the reset enters the replacement reviewer once" 1 (List.length !approvals);
           check int "no refused review ran in between" 1 !refusals;
           await "the commit" (fun () -> Eio.Promise.await finished);
           check string "proof awaits human confirmation" "awaiting_confirmation"

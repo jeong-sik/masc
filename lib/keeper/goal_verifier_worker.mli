@@ -12,6 +12,13 @@ type receipt = {
   elapsed_s : float;
 }
 
+val goal_admission_result :
+  Task.Anti_rationalization.review_result -> Task.Anti_rationalization.review_result
+(** Pure Goal admission projection shared by execution and host publication.
+    A verdict without its stated reason is a non-verdict with no automatic
+    retry. The retained raw reviewer result is unchanged; this projection
+    grants no dispatch, retry or domain authority. *)
+
 type error =
   | Store_unavailable of string
   | Original_invalid of string

@@ -179,6 +179,7 @@ class _Live:
     bridge: Companion = field(repr=False)
     caller: dict
     cancelled: threading.Event = field(default_factory=threading.Event)
+    authority_ended: bool = False
 
 
 class Logins:
@@ -188,6 +189,7 @@ class Logins:
         self._bridge, self._clock = bridge, clock
         self._lock, self._handles_lock = threading.RLock(), threading.Lock()
         self._lifecycle = _Lifecycle.OPEN
+        self._cleanup_unconfirmed = False
         self._live, self._lease = {}, None
         self._prepare = Path(__file__).with_name("prepare.js").read_text()
         self._program = Path(__file__).with_name("autofill.js").read_text()
@@ -249,14 +251,32 @@ class Logins:
         try:
             live.bridge.release()
         except (BridgeError, OSError, ValueError, TypeError):
+            self._dispose(live)
             record = self._save(replace(record, phase=Phase.OUTCOME_UNKNOWN))
         else:
+            live.authority_ended = True
             record = self._save(replace(record, phase=phase))
         finally:
-            live.bridge.cancel()
+            live.bridge.close()
             with self._handles_lock:
                 self._live.pop(record.operation_id, None)
         return record.public()
+
+    def _dispose(self, live):
+        """Withdraw even a not-yet-bound original nonce, then seal its client."""
+        if live.authority_ended:
+            live.bridge.close()
+            return True
+        live.bridge.cancel()
+        try:
+            live.bridge.withdraw()
+            live.authority_ended = True
+        except (BridgeError, OSError, ValueError, TypeError):
+            self._cleanup_unconfirmed = True
+            return False
+        finally:
+            live.bridge.close()
+        return True
 
     @contextmanager
     def _admission(self):
@@ -293,11 +313,12 @@ class Logins:
                         live.bridge.cancel()
                         raise LoginError("outcome_unknown")
                     self._live[record.operation_id] = live
-                live.bridge.bind(browser_instance_id=browser_instance_id, tab_id=tab_id)
                 return record.public(), True
             except (LoginError, BridgeError, ConnectionError, OSError, ValueError, TypeError):
                 if record is not None:
-                    live.bridge.cancel()
+                    # This invocation has not returned acceptance yet. Its
+                    # host withdraws the unused grant when admission fails.
+                    live.bridge.close()
                     with self._handles_lock:
                         self._live.pop(record.operation_id, None)
                     return self._save(replace(record, phase=Phase.OUTCOME_UNKNOWN,
@@ -313,6 +334,11 @@ class Logins:
             if live is None or not _text(goal) or not _text(reason):
                 raise LoginError("unavailable")
             try:
+                if live.cancelled.is_set():
+                    raise LoginError("outcome_unknown")
+                live.bridge.bind(browser_instance_id=record.browser_instance_id, tab_id=record.tab_id)
+                if live.cancelled.is_set():
+                    raise LoginError("outcome_unknown")
                 live.bridge.prepare(extension_id=self.extension.extension_id,
                     directory=str(self.extension.directory), program=self._prepare, arguments={})
                 record = self._save(replace(record, phase=Phase.REQUESTING))
@@ -324,7 +350,7 @@ class Logins:
                 record = self._save(replace(record, phase=Phase.APPROVAL_READY, **result))
                 return record.public()
             except (LoginError, BridgeError, ConnectionError, OSError, ValueError, TypeError):
-                live.bridge.cancel()
+                self._dispose(live)
                 with self._handles_lock:
                     self._live.pop(record.operation_id, None)
                 return self._save(replace(record, phase=Phase.OUTCOME_UNKNOWN,
@@ -420,7 +446,7 @@ class Logins:
                     raise LoginError("outcome_unknown")
                 return self._fill(replace(record, reference=result["reference"]), live)
             except (LoginError, BridgeError, ConnectionError, OSError, ValueError, TypeError):
-                live.bridge.cancel()
+                self._dispose(live)
                 with self._handles_lock:
                     self._live.pop(operation_id, None)
                 return self._save(replace(record, phase=Phase.OUTCOME_UNKNOWN,
@@ -453,7 +479,7 @@ class Logins:
             try:
                 return self._fill(record, live)
             except (LoginError, BridgeError, ConnectionError, OSError, ValueError, TypeError):
-                live.bridge.cancel()
+                self._dispose(live)
                 with self._handles_lock:
                     self._live.pop(operation_id, None)
                 return self._save(replace(record, phase=Phase.OUTCOME_UNKNOWN,
@@ -491,16 +517,18 @@ class Logins:
                 if not _caller(caller) or caller not in [live.caller, {"kind": "operator"}]:
                     raise LoginError("unavailable")
                 live.cancelled.set()
-                live.bridge.cancel()
+                live.bridge.interrupt()
         return record.public()
 
     def cancel(self, operation_id, caller):
         self.interrupt(operation_id, caller)
         with self._lock:
             record = self._owned(operation_id, caller)
+            live = self._live.get(operation_id)
+            withdrawn = live is None or self._dispose(live)
             if record.phase in TERMINAL:
                 return record.public()
-            phase = (Phase.CANCELLED if record.phase in {Phase.APPROVAL_READY, Phase.AWAITING_APPROVAL,
+            phase = (Phase.CANCELLED if withdrawn and record.phase in {Phase.APPROVAL_READY, Phase.AWAITING_APPROVAL,
                       Phase.WAITING_USER, Phase.FILL_SUBMITTED} else Phase.OUTCOME_UNKNOWN)
             record = self._save(replace(record, phase=phase, app_link=None, reference=None))
             with self._handles_lock:
@@ -511,13 +539,18 @@ class Logins:
         with self._handles_lock:
             if self._lifecycle is _Lifecycle.OPEN:
                 self._lifecycle = _Lifecycle.CLOSING
-            for live in self._live.values():
+            original = tuple(self._live.values())
+            for live in original:
                 live.cancelled.set()
                 live.bridge.cancel()
         with self._lock:
+            withdrawn = all([self._dispose(live) for live in original])
+            self._cleanup_unconfirmed = self._cleanup_unconfirmed or not withdrawn
             if self._lease is not None:
                 os.close(self._lease)
                 self._lease = None
             with self._handles_lock:
                 self._live.clear()
                 self._lifecycle = _Lifecycle.CLOSED
+            if self._cleanup_unconfirmed:
+                raise LoginError("outcome_unknown")

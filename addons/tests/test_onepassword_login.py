@@ -50,6 +50,7 @@ class Bridge:
         self.calls, self.responses = [], []
         self.cancelled = False
         self.fill_error = self.release_error = False
+        self.withdraw_error = False
         self.fill_entered = self.fill_return = None
         self.release_entered = self.release_return = None
         self.journal_store = None
@@ -91,6 +92,17 @@ class Bridge:
         self.cancelled = True
         if self.fill_return:
             self.fill_return.set()
+
+    def withdraw(self):
+        self.calls.append(("withdraw", {}))
+        if self.withdraw_error:
+            raise BridgeError("PRIVATE_WITHDRAW_ERROR_MARKER")
+
+    def close(self):
+        self.cancel()
+
+    def interrupt(self):
+        self.cancel()
         if self.release_return:
             self.release_return.set()
 
@@ -498,6 +510,27 @@ class LoginTests(unittest.TestCase):
         result = self.engine.cancel(operation, CALLER)
         self.assertEqual(result["phase"], "cancelled")
         self.assertNotEqual(self.start()["operation_id"], operation)
+
+    def test_unconfirmed_withdrawal_never_claims_cancelled_or_clean_close(self):
+        self.engine.close()
+        bridge = Bridge()
+        bridge.withdraw_error = True
+        engine = Logins(self.connector, self.journal, self.extension,
+                        bridge=lambda _descriptor: bridge, clock=lambda: self.now)
+        try:
+            admitted, reserved = engine.reserve(descriptor={"private": "PRIVATE_CAPABILITY"}, caller=CALLER,
+                browser_instance_id=BROWSER, tab_id=7, website="https://example.test/login",
+                goal="Sign in", reason="Continue task")
+            self.assertTrue(reserved)
+            result = engine.cancel(admitted["operation_id"], CALLER)
+            self.assertEqual(result["phase"], "outcome_unknown")
+            self.assert_public(result)
+            self.assertEqual([name for name, _ in bridge.calls], ["withdraw"])
+        finally:
+            with self.assertRaisesRegex(LoginError, "^outcome_unknown$"):
+                engine.close()
+        with self.assertRaisesRegex(LoginError, "^outcome_unknown$"):
+            engine.close()
 
     def test_restart_does_not_rebind_approval_or_grant(self):
         operation, bridge = self.ready()

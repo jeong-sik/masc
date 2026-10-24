@@ -26,14 +26,25 @@ command. The grant's host-generated operation UUID and selected tab are immutabl
 commands with a different operation/tab are refused before dispatch. A new owner,
 new socket or new browser session cannot inherit the old operation.
 
+A credentialless withdrawal frame removes the exact invocation nonce without
+selecting a Browser or calling its factory. Its strict acknowledgement means
+admission removed, independently of Browser settlement. An absent nonce has the
+same acknowledgement, so an explicit reconciliation after a lost control reply
+cannot create another operation. This also withdraws accepted, not-yet-bound
+grants when their queued login is cancelled.
+
 The channel carries the existing private extension prepare/invoke/release
 commands. Their programs and arguments remain trusted package-owned backend data.
 The executor uses the original Browser private wire and its existing page slot;
 it must fence/retire uncertain original Browser calls when cancelled. The socket
 broker itself does not own or bypass that Browser serializer.
 
-Ending a normal exported invocation withdraws an unused grant. An already
-claimed connection remains available to its background login operation.
+Ending an unaccepted exported invocation withdraws an unused grant. A validated
+successful invocation accepts its original grant before returning; its worker
+may bind in the background after the reply. Accepted grants belong to the
+original provider until claimed, cancelled or that owner ends. Acceptance never
+resurrects a cancelled or consumed grant. An already claimed connection remains
+available to its background login operation.
 Cancelling the invocation also cancels a claimed connection. Peer EOF or
 additional pipelined input cancels and joins both the initial binding factory and
 an active extension call. The same framing reader observes buffered bytes, so
@@ -48,11 +59,13 @@ Browser/process cleanup. The caller removes its private directory after that joi
 
 ## Host connection and call context
 
-An optional reserved MCP `lane_companion` handshake declares version 1 and the
+An optional reserved MCP `lane_companion` handshake requires a version-2 request
+and declares version 2 plus the
 exact exported tools that need this channel. It requires host-context invocation;
 the reserved handshake cannot be exported or used as an action. Negotiation,
 schemas and exports become visible together at Ready. Companion exports require
 input validation and closed public output schemas even when other hooks are disabled.
+An unsupported host cannot silently negotiate deferred binding.
 
 The native MCP connection lazily owns one private allocation. Only a negotiated
 export receives a fresh capability in its private `lane_call` envelope. The
@@ -85,21 +98,32 @@ socket, finite closed JSON, operation identities and frame bounds. Constructing
 `bind(browser_instance_id=..., tab_id=...)` registers the original socket before
 blocking on connect or the initial response. Cancellation interrupts either an
 initial bind or a later receive and permanently prevents reconnect/rebind.
+`withdraw()` uses an independent cancellation socket for only the original
+nonce, caches a strict acknowledgement and permits an explicit unknown-outcome
+reconciliation. `close()` seals the handle before closing both sockets; no new
+bind or withdrawal socket can be created after that owner boundary.
+Business `interrupt()` stops only the original operation socket, preserving an
+already running withdrawal. The service authenticates and deduplicates repeated
+cancel requests before interrupting; repeated receipts cannot sabotage disposal.
 
-Commands are serialized on that one socket. A partial/lost send or malformed
+Browser commands are serialized on their one original socket. A partial/lost send or malformed
 reply is an unknown outcome, never a retry. Public exceptions contain fixed codes,
 and the descriptor's capability is excluded from its representation. A successful
 fill result still requires subsequent website-level authentication verification.
 
 ## Verification and remaining integration
 
-Nine focused Python tests passed using the real client and actual Unix sockets
-against a fabricated host. They cover prepare/invoke/release, immutable operation
+Focused Python tests use the real client and actual Unix sockets against a
+fabricated host. They cover prepare/invoke/release, immutable operation
 binding, peer loss without replay, malformed/duplicate/nonfinite replies, strict
 boolean receipts, cancellation during an initial bind and an active receive,
-unused-handle cancellation and private endpoint permissions.
+unused-handle cancellation, explicit nonce withdrawal, disposal/close races and
+private endpoint permissions. The service fixtures also hold an actual initial
+socket handshake while reading state/cancelling, and withdraw a queued NEW
+handle before any bind; a descriptor replay is refused by the fabricated host.
 
-Seven OCaml source scenarios exercise one-use grants, unused-grant withdrawal,
+OCaml source scenarios exercise one-use grants, accepted background binding,
+cancelled/consumed acceptance without resurrection, unused-grant withdrawal,
 reader-buffered pipelining, cancellation-ignoring bind/execute cleanup, peer loss,
 explicit invocation cancellation and the separate revocation/join boundary. This
 coding session parsed those sources; it did not execute, typecheck or build them.

@@ -86,10 +86,6 @@ class Service:
                 if job.operation_id in self._confirmed:
                     return
                 self._confirmed.add(job.operation_id)
-            elif job.kind is _Kind.CANCEL:
-                if job.operation_id in self._cancels:
-                    return
-                self._cancels.add(job.operation_id)
             heapq.heappush(self._jobs, (self.clock() if due is None else due,
                                        next(self._sequence), job))
             self._condition.notify_all()
@@ -97,18 +93,21 @@ class Service:
     def submit(self, **arguments):
         self._available()
         result, reserved = self.engine.reserve(**arguments)
-        if reserved:
+        if not reserved:
+            # A successful exported reply retains its host grant. Failed
+            # admission must instead make the host withdraw that unused grant.
+            raise LoginError("outcome_unknown")
+        try:
+            self._enqueue(_Job(_Kind.REQUEST, result["operation_id"], dict(arguments["caller"]),
+                               goal=arguments["goal"], reason=arguments["reason"]))
+        except LoginError:
+            # The service closed after admission; only this original grant
+            # can be cancelled. Engine close may already have joined it.
             try:
-                self._enqueue(_Job(_Kind.REQUEST, result["operation_id"], dict(arguments["caller"]),
-                                   goal=arguments["goal"], reason=arguments["reason"]))
+                self.engine.cancel(result["operation_id"], arguments["caller"])
             except LoginError:
-                # The service closed after admission; only this original grant
-                # can be cancelled. Engine close may already have joined it.
-                try:
-                    self.engine.cancel(result["operation_id"], arguments["caller"])
-                except LoginError:
-                    pass
-                raise
+                pass
+            raise
         return result
 
     def status(self, operation_id, caller):
@@ -152,11 +151,26 @@ class Service:
         return result
 
     def cancel(self, operation_id, caller):
-        self._available()
-        # Goes directly to the independent socket cancellation handle; it must
-        # not queue behind the private IO it is supposed to interrupt.
-        self.engine.interrupt(operation_id, caller)
-        self._enqueue(_Job(_Kind.CANCEL, operation_id, dict(caller)))
+        with self._condition:
+            if self._phase is not _Phase.OPEN:
+                raise LoginError("unavailable")
+            # This committed-snapshot read verifies the original caller even
+            # for a repeated receipt, without waiting behind private IO.
+            self.engine.status(operation_id, caller)
+            if operation_id in self._cancels:
+                return {"operation_id": operation_id, "cancel_requested": True}
+            self._cancels.add(operation_id)
+            try:
+                # Hold admission through interruption and enqueue. A duplicate
+                # or owner close cannot enter the gap and interrupt disposal.
+                self.engine.interrupt(operation_id, caller)
+                heapq.heappush(self._jobs, (self.clock(), next(self._sequence),
+                    _Job(_Kind.CANCEL, operation_id, dict(caller))))
+            except BaseException:
+                self._cancels.discard(operation_id)
+                self._condition.notify_all()
+                raise
+            self._condition.notify_all()
         return {"operation_id": operation_id, "cancel_requested": True}
 
     def _next(self):

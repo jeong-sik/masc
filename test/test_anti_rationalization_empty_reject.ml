@@ -1,3 +1,4 @@
+module Tool_bridge = Masc.Tool_bridge
 module AR = Masc.Task.Anti_rationalization
 
 let request : AR.review_request =

@@ -304,7 +304,24 @@
     "actual_prior_run": 40078689529,
     "actual_prior_run_conclusion": "compile failure before all 5 suite starts",
     "prior_cr": 5637557664,
-    "current_execution": "not requested / no result at 2026-10-24T12:42:55.487046+00:00",
-    "current_formal_approval": "not recorded"
+    "current_execution": {
+      "run": 40095356149,
+      "checkout": "44b6daee827adb9ef700c29f8d221220c2024df9",
+      "PASS": 105,
+      "FAIL": 0,
+      "SKIP": 0,
+      "TODO": 0
+    },
+    "current_formal_approval": {
+      "review": 5638294412,
+      "scope": "code44b6 only; not upper/merge",
+      "replaces_own_cr": 5637557664
+    }
+  },
+  "final_evidence_layer": {
+    "updated_at": "2026-10-24T13:06:23.311365+00:00",
+    "code_head_unchanged": "44b6daee827adb9ef700c29f8d221220c2024df9",
+    "approval_and_merge": "not claimed for new upper head",
+    "installed_runtime": "not claimed"
   }
 }

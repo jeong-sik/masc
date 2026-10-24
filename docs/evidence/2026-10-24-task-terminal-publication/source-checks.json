@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-24T12:42:55.487046+00:00",
+  "at": "2026-10-24T13:06:23.311365+00:00",
   "code_pr": 45769,
   "evidence_pr": 45770,
   "native_stack": 45771,
@@ -328,27 +328,27 @@
     {
       "target": "test_goal_verifier_worker",
       "cases": 16,
-      "new_candidate_execution": "not requested / not run at document writing"
+      "new_candidate_execution": "observed in actual run40095356149; see actual_validation"
     },
     {
       "target": "test_goal_verification_agent",
       "cases": 39,
-      "new_candidate_execution": "not requested / not run at document writing"
+      "new_candidate_execution": "observed in actual run40095356149; see actual_validation"
     },
     {
       "target": "test_verifier_review_worker",
       "cases": 18,
-      "new_candidate_execution": "not requested / not run at document writing"
+      "new_candidate_execution": "observed in actual run40095356149; see actual_validation"
     },
     {
       "target": "test_completion_trust_harness",
       "cases": 9,
-      "new_candidate_execution": "not requested / not run at document writing"
+      "new_candidate_execution": "observed in actual run40095356149; see actual_validation"
     },
     {
       "target": "test_verification_run_registry",
       "cases": 23,
-      "new_candidate_execution": "not requested / not run at document writing"
+      "new_candidate_execution": "observed in actual run40095356149; see actual_validation"
     }
   ],
   "historical_source_stages": {
@@ -371,13 +371,98 @@
     "prior_cr": 5637557664,
     "prior_cr_head": "6c9bf61e4cf155723af37125b3173a0730912ec7",
     "internal_source_clear_missed_p2": true,
-    "new_formal_approval": "not recorded",
-    "reviewer_own_cr_resolution": "not claimed"
+    "new_formal_approval": 5638294412,
+    "reviewer_own_cr_resolution": "footer explicitly replaces own CR5637557664; source receipt admitted current44b6"
   },
   "claims": {
-    "typecheck_current_candidate": false,
-    "execution_current_candidate": false,
+    "typecheck_current_candidate": true,
+    "execution_current_candidate": true,
     "installed_runtime": false,
-    "merge": false
+    "merge": false,
+    "typecheck_scope": "selected five executable/transitive dependency build only",
+    "execution_scope": "five suites with private controlled fixtures",
+    "full_repository_regression": false,
+    "external_model": false
+  },
+  "pre_execution_document_timestamp": "2026-10-24T12:42:55.487046+00:00",
+  "actual_validation": {
+    "run_id": 40095356149,
+    "job_id": 120876318526,
+    "checkout": "44b6daee827adb9ef700c29f8d221220c2024df9",
+    "selected_executable_build": "success",
+    "suites": [
+      {
+        "suite": "test/test_goal_verifier_worker",
+        "counts": {
+          "OK": 16,
+          "FAIL": 0,
+          "SKIP": 0,
+          "TODO": 0
+        },
+        "terminal": "[targeted] test/test_goal_verifier_worker: OK in 1s"
+      },
+      {
+        "suite": "test/test_goal_verification_agent",
+        "counts": {
+          "OK": 39,
+          "FAIL": 0,
+          "SKIP": 0,
+          "TODO": 0
+        },
+        "terminal": "[targeted] test/test_goal_verification_agent: OK in 73s"
+      },
+      {
+        "suite": "test/test_verifier_review_worker",
+        "counts": {
+          "OK": 18,
+          "FAIL": 0,
+          "SKIP": 0,
+          "TODO": 0
+        },
+        "terminal": "[targeted] test/test_verifier_review_worker: OK in 1s"
+      },
+      {
+        "suite": "test/test_completion_trust_harness",
+        "counts": {
+          "OK": 9,
+          "FAIL": 0,
+          "SKIP": 0,
+          "TODO": 0
+        },
+        "terminal": "[targeted] test/test_completion_trust_harness: OK in 1s"
+      },
+      {
+        "suite": "test/test_verification_run_registry",
+        "counts": {
+          "OK": 23,
+          "FAIL": 0,
+          "SKIP": 0,
+          "TODO": 0
+        },
+        "terminal": "[targeted] test/test_verification_run_registry: OK in 0s"
+      }
+    ],
+    "totals": {
+      "PASS": 105,
+      "FAIL": 0,
+      "SKIP": 0,
+      "TODO": 0
+    },
+    "artifact_id": 12560518815,
+    "receipt_sha256": "3e55cae9dd6ad7392bfcd42994ecaa04592895e2b48ae00fb6a842eaca051ac5",
+    "runner_sha256": "656f84ac3f1346832135c63fc7d809a40a229e8dcfcb8811b901b41a2abdc9c7",
+    "scope": "controlled five-suite production-path regression; no external model, installed runtime or full-repository claim"
+  },
+  "code_source_approval": {
+    "review_api_id_from_guard_receipt": 5638294412,
+    "raw_review_node_id": "PRR_kwDOQ7_DYc8AAAABUBGLjA",
+    "state": "APPROVED",
+    "submitted_at": "2026-10-24T12:49:57Z",
+    "firstline": "verdict: PASS head: 44b6daee827adb9ef700c29f8d221220c2024df9 by: code-reviewer-brother",
+    "footer": "approve-guard: head `44b6daee827adb9ef700c29f8d221220c2024df9` \u00b7 source review \u00b7 replaces own CHANGES_REQUESTED 5637557664 \u00b7 reviewed base `d587bf1ffa123a05ae688cbc9fabe8e35221b206` \u00b7 diff sha256 `d6c3fb1ccda47623e0cf9755cbd580f3c0618483d72be6fe6a1efa783f9783ba`",
+    "full_reviews_file": "/tmp/masc-goal-terminal-final-validation-20261024/attempt-2/code44b6-reviews.json",
+    "full_reviews_sha256": "96927a34cfbdde8eca81128a90c1ab57776d8702f3690e00d1a6dbf6e3304477",
+    "source_receipt_sha256": "15c8a856417b4487eb5b796da54c85ddda1f6514a9d9fdbdc56f594a34534aaa",
+    "scope": "code #45769 exact44b6 only; no evidence-layer approval/integration claim"
   }
 }

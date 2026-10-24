@@ -1,24 +1,51 @@
 # Goal / Task terminal publication repair — source and evidence scope
 
-이 문서는 새 수리 스택의 문서 전용 상위 PR에 담은 작성 시각 기준 증거다. 원래 Goal 11개 PR의 외부 병합과 고정 main 포함은 아래 감사 결과로 확인했다. 검토한 이전 수리 스냅샷은 `4cad4c4c…` 기준의 `6a2241fb…`이며, 새 수리는 처음 ac7 위에서 준비한 뒤 아래 실제 충돌을 반영해 고정 d587 위의 별도 candidate로 만들었다. fresh 소스는 아래 코드 스냅샷에 고정했고 각 PR의 번호별 changelog를 반영했다. 2026-10-24T08:25:18.907636+00:00 작성 시각 기준 새 실행은 요청하지 않았으며 결과도 없다. 이전 소스 CLEAR나 역사적 실행을 새 수리의 완료·승인·실행 성공으로 옮겨 쓰지 않는다.
+이 문서는 새 수리 스택의 문서 전용 상위 PR에 담은 실제 결과와 source 범위의 증거다. 원래 Goal 11개 PR의 외부 병합과 고정 main 포함은 아래 감사 결과로 확인했다. 검토한 이전 수리 스냅샷은 `4cad4c4c…` 기준의 `6a2241fb…`이며, 새 수리는 처음 ac7 위에서 준비한 뒤 아래 실제 충돌을 반영해 고정 d587 위의 별도 candidate로 만들었다. 현재 실행·승인 head는 아래 44b6이고, 이전 준비·실패·내부 검토 기록은 역사적 범위로 구분해 유지한다. 이전 소스 CLEAR나 역사적 실행을 새 수리의 완료·승인·실행 성공으로 옮겨 쓰지 않는다.
 
-## 현재 수리 candidate와 증거 상태
+## 현재 코드와 실제 결과
 
 - Native Stack #45771: code [#45769](https://github.com/jeong-sik/masc/pull/45769) → evidence [#45770](https://github.com/jeong-sik/masc/pull/45770).
-- 현재 수리 code commit: `44b6daee827adb9ef700c29f8d221220c2024df9`. 직접 parent는 `6c9bf61e4cf155723af37125b3173a0730912ec7`이며, branch의 main 기준은 `d587bf1ffa123a05ae688cbc9fabe8e35221b206`이다. 직접 parent와 branch base를 구분한다.
-- 새 commit은 아래 확인된 두 결함에 대한 4개 파일만 바꾼다. 나머지 13개 수리 파일은 6c9와 byte-identical이다. 정확한 수리 패치 SHA256은 `9e0efaab502cb8052b9d8b3f29419e8b50db4f5fe53ca768cb9ad5c09b65f1a8`이다. main 대비 현재 소스 17개 패치 SHA256은 `645968414841616749b8ff18bd9b097413bb776e6e37ed5f86bd95e857dd3e19`이다.
-- 변경 4개 파일 parser와 whitespace 검사 통과. 기존 13개 파일은 같은 바이트의 이전 parser 확인을 재사용했다. 로컬 Dune/타입 검사 또는 새 실행 PASS를 주장하지 않는다. [현재 17개 해시](source-checks.json)와 [수리 검사 기록](observation-guard-source-checks.json)을 보존했다.
-- `2026-10-24T12:42:55.487046+00:00` 작성 시각 기준 새 code candidate의 5개 suite는 아직 요청하지 않았고 실행 결과도 없다. 아래 6c9의 실제 컴파일 실패와 역사적 cd155의 55 PASS를 이 새 commit의 결과로 옮겨 쓰지 않는다.
-- 각 PR은 자체 diff에 자기 번호를 인용한 changelog를 가진다. 상위 evidence는 문서·기록·raw runner log만 추가하며 code candidate의 실행 입력을 바꾸지 않는다. 최종 Ready의 REST head/base/canonical diff는 별도 receipt로 고정한다.
+- 실제 실행·승인 대상 code head는 `44b6daee827adb9ef700c29f8d221220c2024df9`다. 직접 parent는 `6c9bf61e4cf155723af37125b3173a0730912ec7`, branch의 main 기준은 `d587bf1ffa123a05ae688cbc9fabe8e35221b206`이다. 문서 상위층 추가로 code head를 바꾸지 않았다.
+- [run 40095356149](https://github.com/jeong-sik/masc/actions/runs/40095356149), job `120876318526`의 실제 checkout이 위 44b6임을 원문 checkout log로 확인했다. `2026-10-24T12:51:50Z` 완료. **105 PASS / 0 FAIL / 0 SKIP / 0 TODO**, 선택 5개 suite 모두 실제 실행·완료했다.
+- Artifact `12560518815` [suite-runner-log ZIP](https://github.com/jeong-sik/masc/actions/runs/40095356149/artifacts/12560518815)은 23,905 bytes, SHA256 `8937746dd34dae50a5d4fc4bf218ec9bc970c63821eb022bc31d3bada348dcd3`다. archive 무결성·광고 digest·추출 runner bytes를 대조했다.
+- [원문 runner log](40095356149/ci-run-tests.log)는 172,665 bytes, SHA256 `656f84ac3f1346832135c63fc7d809a40a229e8dcfcb8811b901b41a2abdc9c7`다.
+- [실제 checkout·suite·case·archive receipt](40095356149/receipt.json), [읽기 결과](40095356149/readback.md), [P2 관련 실제 assertion 근거](40095356149/critical-assertions.json)를 원문 바이트로 보존했다. 이전 6c9 compile 실패와 cd155의 역사적 55 PASS는 아래 별개로 유지한다.
+- 변경 4개 파일의 parser/whitespace 및 기존 13개 파일의 동일 바이트 확인에 더해, 이번 선택 5개 executable과 transitive dependencies의 실제 CI build가 통과했다. 전체 repository의 모든 target·전체 회귀를 빌드/실행했다는 뜻은 아니다.
+- 각 PR은 자체 changelog를 가진다. 최종 상위층은 docs/changelog만 바꾸며 44b6의 17개 소스와 전체 13,956개 non-docs/changelog tracked input이 동일하다. workflow·runner·Dune 입력과 선언 fixture도 같다. 이는 source/input 동일성 증거이며 별도의 runtime 환경·최종 merge 결과 검증을 대체하지 않는다.
+
+| 실제 실행 suite | PASS | FAIL | SKIP | TODO |
+| --- | ---: | ---: | ---: | ---: |
+| `test_goal_verifier_worker` | 16 | 0 | 0 | 0 |
+| `test_goal_verification_agent` | 39 | 0 | 0 | 0 |
+| `test_verifier_review_worker` | 18 | 0 | 0 | 0 |
+| `test_completion_trust_harness` | 9 | 0 | 0 | 0 |
+| `test_verification_run_registry` | 23 | 0 | 0 | 0 |
+| 합계 | 105 | 0 | 0 | 0 |
+
+## 실제 P2 회귀 측정 범위
+
+Task Worker의 단일 case `execution 17`이 runner 1154–1247행에서 6개의 시나리오 블록을 끝내고 PASS했다. 고정 source의 List.iter 순서가 Judged → Committing → Commit_unknown 각각의 missing negative → observed positive를 연결한다. 로그 자체가 phase 이름을 따로 출력하지 않으므로 이 대응은 정확한 source와 함께 읽은 범위다. 6개 하위 시나리오를 6개 Alcotest 통과 수로 더하지 않았다.
+
+- 실제 host 함수에 위임하는 같은 private runner의 scoped counter에서 음성 3회 모두 observe 0 / apply 0, 정상 대조 3회 모두 observe 2 / apply 1을 확인했다.
+- 별도로 호출한 production `process_original_once` 음성 경로는 정확한 관측 누락 사유로 거부했다. Task 원문·Owner 이벤트·registry의 유무와 바이트 보존 및 추가 reviewer 0회를 검사했다. **production-entry 호출 자체에 callback counter를 설치한 것은 아니다.**
+- 정상 대조의 실제 Task Done, production recovery 성공, durable Owner Completion ACK, 파일 replay 후 Approved 행은 case 안의 실패 분기와 ACK assertion으로 함께 확인됐다. [원문 해당 case](40095356149/missing-observer-case.log)에 출력된 값과 source에 있는 silent guard의 범위는 [구조화 근거](40095356149/critical-assertions.json)에서 구분했다.
+
+실행은 private Workspace/실제 임시 파일·registry/제어된 reviewer·오류 transport·mock clock 등을 사용하는 production-path 회귀다. 실제 외부 모델, 설치된 서버/Keeper, 전체 회귀, 배포 또는 사용자 제품 QA 결과로 부르지 않는다.
+
+## 현재 코드의 독립 source approval
+
+[MASC brother 승인 `5638294412`](https://github.com/jeong-sik/masc/pull/45769#pullrequestreview-5638294412)은 `2026-10-24T12:49:57Z` 제출됐으며, firstline/footer가 정확한 44b6 head, base d587, canonical full diff `d6c3fb1ccda47623e0cf9755cbd580f3c0618483d72be6fe6a1efa783f9783ba`, Native45771 position 1/2에 묶여 있다. Footer가 본인 CR `5637557664` 대체를 명시한다. [전체 원문](44b6-source-approval.json)과 [source-receipt](44b6-source-receipt.json)를 보존했으며 Root의 `approve-guard --source-receipt`는 exit 0과 approval_ids=[5638294412]를 확인했다.
+
+이 승인은 code #45769의 해당 source만 인증한다. 이 문서 상위층의 최종 head 승인, whole-stack merge-guard, 통합·설치 결과로 확대하지 않는다. 현재 source 승인과 실제 실행 증거는 서로 다른 단계이며 source approval 시각은 실행 완료보다 앞선다.
 
 ## 실제 6c9 실행 실패 — 5개 suite 모두 미시작
 
-[run 40078689529](https://github.com/jeong-sik/masc/actions/runs/40078689529), job `120827487514`는 실제 checkout `6c9bf61e4cf155723af37125b3173a0730912ec7`에서 **컴파일 중 실패**했다. `Verifier_review_publication.terminal_expected`의 tuple fallback status wildcard가 fatal warning 4 (`fragile-match`)를 냈다. 새 수리는 닫힌 `R.Running | R.Completed _`를 명시한다. 새 타입 검사 성공을 미리 주장하지 않는다.
+[run 40078689529](https://github.com/jeong-sik/masc/actions/runs/40078689529), job `120827487514`는 실제 checkout `6c9bf61e4cf155723af37125b3173a0730912ec7`에서 **컴파일 중 실패**했다. `Verifier_review_publication.terminal_expected`의 tuple fallback status wildcard가 fatal warning 4 (`fragile-match`)를 냈다. 새 수리는 닫힌 `R.Running | R.Completed _`를 명시한다. 이 실패 run은 수리 후 컴파일 증거가 아니며, 새 44b6 selected build는 위 실제 결과로 별도 기록했다.
 
 공유 selected build가 먼저 실패하여 요청한 5개 suite는 모두 시작하지 않았다. 실행 case는 0, assertion 실패는 0, Alcotest SKIP도 0이다. 이는 5개 suite PASS나 5개 실패 case라는 뜻이 아니다. 도구 준비/의존성 설치는 진행됐고 실제 compiler diagnostic이 확인됐으므로 환경 오류로 바꾸어 부르지 않는다.
 
 - Artifact `12554168212` ZIP: 5,031 bytes, SHA256 `29c5f3cec81a6fe90460200ff0e43353927d990f94f15223127f291ec82ef05c`; 다운로드 archive와 광고 digest 일치.
-- [원문 suite runner log](40078689529-ci-run-tests.log): 30,560 bytes, SHA256 `ad8258390b9bb66aa6f68ac2a0d7c26b370b80d0691b0a2cd4317ae0ae0caa3b`. 18개 행의 선택 build/컴파일 command/진단이며 운영 토큰 패턴, 인증 header, secret assignment 및 전체 환경/trace dump는 관측되지 않았다.
+- [원문 suite runner log](40078689529-ci-run-tests.log): 30,560 bytes, SHA256 `ad8258390b9bb66aa6f68ac2a0d7c26b370b80d0691b0a2cd4317ae0ae0caa3b`.
 - 원문 job log: 103,874 bytes, SHA256 `6b15673c47179e382eb063050380239420734f2b5fc05504e58dd08778fa5b5a`.
 - [정확한 실패·checkout·suite별 미실행 receipt](40078689529-failure.json)에 원문 archive/job/checkout/log 해시를 모두 보존했다. 원래 실패 기록을 삭제하거나 덮어쓰지 않았다.
 
@@ -28,9 +55,9 @@
 
 유효한 judgment/commit intent가 있는 `Committing` 또는 `Commit_unknown`에 Registration이 없으면 이전 Caa가 `Unobserved -> Ok ()`로 통과했다. 실제 Task apply 뒤 publication에서야 관측 정보 부재가 드러났다. 이제 모든 적용 가능 retained phase는 같은 canonical `captured_before`를 통해 실제 execution/before receipt를 검증한 뒤 Worker/domain 경계로 들어간다. 관측 사실이 없는 기록의 도구·시각을 복원해 꾸미거나 호환 fallback을 두지 않는다.
 
-기존 missing-observer case를 실제 Owner 이벤트로 만든 Judged/Committing/Commit_unknown 각각의 음성 및 정상 대조 사례로 확장했다. 같은 private host runner에서 음성 사례는 strict intent와 실제 before가 유효함을 먼저 확인한 후 정확한 missing-observation 오류, real-delegating observe/apply 호출 0회, Task 원문·Owner 이벤트·registry 유무/바이트 보존, 추가 reviewer 0회를 검사하도록 선언했다. 실제 production `process_original_once` 거부도 유지한다. 관측 정보가 있는 대조 사례는 같은 runner의 실제 apply 1회, before/after 관측 2회, Task Done과 실제 terminal registry ACK를 검사한다. 이 수치는 준비한 assertion이며 아직 실행 측정값이 아니다. suite의 Alcotest case 선언 수는 18개 그대로다.
+기존 missing-observer case를 실제 Owner 이벤트로 만든 Judged/Committing/Commit_unknown 각각의 음성 및 정상 대조 사례로 확장했다. 같은 private host runner에서 음성 사례는 strict intent와 실제 before가 유효함을 먼저 확인한 후 정확한 missing-observation 오류, real-delegating observe/apply 호출 0회, Task 원문·Owner 이벤트·registry 유무/바이트 보존, 추가 reviewer 0회를 검사하도록 선언했다. 실제 production `process_original_once` 거부도 유지한다. 관측 정보가 있는 대조 사례는 같은 runner의 실제 apply 1회, before/after 관측 2회, Task Done과 실제 terminal registry ACK를 검사한다. 이 수리 작성 당시에는 준비한 assertion이었으며, 현재 44b6의 실제 측정 범위는 위 run40095356149에 구분해 기록했다. suite의 Alcotest case 선언 수는 18개 그대로다.
 
-MLI 변경은 `For_testing`의 scoped effect wrapper entry뿐이다. Production alias는 기존 real observe/apply에 고정되어 있고 새 global hook, registry, 원본 wire schema 또는 product 설정은 없다. Root와 독립 main_build가 정확한 v2 패치를 source CLEAR로 읽었지만 새 head의 formal approval, CR 해소 또는 실행 PASS를 뜻하지 않는다. CR author의 현재-head 재판정은 별도로 필요하다.
+MLI 변경은 `For_testing`의 scoped effect wrapper entry뿐이다. Production alias는 기존 real observe/apply에 고정되어 있고 새 global hook, registry, 원본 wire schema 또는 product 설정은 없다. Root와 독립 main_build가 정확한 v2 패치를 source CLEAR로 읽었지만 새 head의 formal approval, CR 해소 또는 실행 PASS를 뜻하지 않는다. 당시 필요했던 CR author의 재판정은 위 승인5638294412로 확인했으며, 그 source 범위만 인정한다.
 
 ## 이전 ac7 기반 코드 준비 스냅샷
 
@@ -39,10 +66,10 @@ MLI 변경은 `For_testing`의 scoped effect wrapper entry뿐이다. Production 
 - main 대비 17개 소스·테스트 파일 패치 SHA256: `f683a2789b69a64fa679845430c62633e1628161156e62f7a69c4b194546a97a`.
 - 이전 `6a2241fb…` 대비 14개 파일은 byte-identical이다. 변경한 3개는 Caa의 외부 private helper 반환 계약, 외부 trust-harness 검증 보존, 이에 맞춘 terminal/stale-call fixture 기대값이다. 이식 차이 SHA256: `f0aac0e5e23649ae89b2ac2b5b9588c95103cd697f712427c4c0b48cc355711a`.
 - 실제 author/committer: `masc-pro-builder <besleepers@gmail.com>`. 이는 신규 source-admission에서 해당 계정을 독립 검토자로 세지 않는 근거다.
-- 당시 실제 확인: 17/17 OCaml 5.5.1 parser 통과, whitespace 검사 통과. 현재 파일별 해시와 이전 확인의 재사용 범위는 [검사 기록](source-checks.json)에 구분했다. 타입 검사와 새 소스의 실행 결과는 아직 없다.
+- 당시 실제 확인: 17/17 OCaml 5.5.1 parser 통과, whitespace 검사 통과. 현재 파일별 해시와 이전 확인의 재사용 범위는 [검사 기록](source-checks.json)에 구분했다. 당시 타입 검사와 새 소스 실행 결과는 없었다. 현재 44b6 결과와 구분한다.
 - Root 및 독립 에이전트의 source CLEAR는 위 소스 이식 범위에 대한 내부 검토다. 새 PR의 current-head 독립 approval, merge-guard 통과 또는 실행 PASS를 뜻하지 않는다.
 
-실제 외부 병합 Caa의 부분적인 `Execution_pending` 재관측 fallback은 reviewed typed/atomic/ACK 경로로 교체했다. `For_testing.process_original_once`와 `commit_original`의 `Superseded_by`→Error 계약은 유지했다. 새 terminal/stale fixture는 이 정확한 Error와 실제 durable `R.Superseded_by`, Owner ACK, Task 보존·추가 reviewer/registry effect 없음까지 함께 검증하도록 선언했다. 외부 trust-harness의 retained `Conflicted`와 boot pending 제외 검증 13개 줄 및 reviewer callback label 두 개를 보존하고, pending 판정에 canonical `needs_publication`을 적용했다. 이 문장의 fixture 검증은 소스에 선언된 assertion 범위이며 실제 실행 성공은 아직 미기록이다.
+실제 외부 병합 Caa의 부분적인 `Execution_pending` 재관측 fallback은 reviewed typed/atomic/ACK 경로로 교체했다. `For_testing.process_original_once`와 `commit_original`의 `Superseded_by`→Error 계약은 유지했다. 새 terminal/stale fixture는 이 정확한 Error와 실제 durable `R.Superseded_by`, Owner ACK, Task 보존·추가 reviewer/registry effect 없음까지 함께 검증하도록 선언했다. 외부 trust-harness의 retained `Conflicted`와 boot pending 제외 검증 13개 줄 및 reviewer callback label 두 개를 보존하고, pending 판정에 canonical `needs_publication`을 적용했다. 당시 이 문장은 source assertion 범위만 가리켰다. 현재 실행 성공의 범위는 위 exact44b6 artifact에 별도로 기록했다.
 
 ## 검토한 이전 수리 스냅샷
 
@@ -54,7 +81,7 @@ MLI 변경은 `For_testing`의 scoped effect wrapper entry뿐이다. Production 
 - 독립 소스 검토 두 건이 CLEAR로 보고되었다. 이 판정은 현재 PR의 정식 approval, 타입 검사, 실행 성공을 대신하지 않는다.
 - 기록된 로컬 확인은 17/17 파일의 OCaml parser 통과와 whitespace 검사다. 독립 검토에서 17개 실제 파일 해시와 위 head 일치를 확인했다. 로컬 Dune 빌드와 테스트 실행은 하지 않았다.
 
-새 `ac7fe109…` 기반 소스 이식과 내부 source 검토는 위 준비 스냅샷에서 확인했다. 이전 스냅샷의 실행 성공으로 대체하지 않았으며 타입 검사·새 실행 성공은 아직 미기록이다. 아래 선언 수는 새 준비 코드의 실제 test_case 선언을 다시 읽은 수치이며 통과 수가 아니다.
+새 `ac7fe109…` 기반 소스 이식과 내부 source 검토는 위 준비 스냅샷에서 확인했다. 당시에는 타입 검사·새 실행 성공이 미기록이었다. 현재 exact44b6 실행은 위에 별도로 기록했다. 아래 선언 수는 새 준비 코드의 실제 test_case 선언을 다시 읽은 수치이며 통과 수가 아니다.
 
 ## 원래 Goal 11개 PR의 외부 병합 감사 — 확인된 사실
 
@@ -68,7 +95,7 @@ MLI 변경은 `For_testing`의 scoped effect wrapper entry뿐이다. Production 
 
 [공개 감사 댓글의 정확한 readback](https://github.com/jeong-sik/masc/pull/45710#issuecomment-6381863174)에 이 범위가 기록되어 있다. 로컬 근거는 `/tmp/goal-external-merged-source-accounting.json`과 `/tmp/masc-goal-original-eleven-premerge-audit-20261024/audit-report.md`이다. 이는 관측된 외부 integration과 역사적 source-admission 공백의 기록이다. 소스 동작 실패 판정, 사후 승인, 새 수리의 merge 또는 최신 main 실행 성공을 뜻하지 않는다.
 
-새 `ac7fe109…` 이식의 외부 helper 반환 계약과 trust-harness 검증 보존은 위 준비 코드에서 확인했다. 원래 49개 커밋은 재게시하지 않으며 닫힌 원래 11개 branch에도 쓰지 않았다. 새 실행 결과는 아직 없다.
+새 `ac7fe109…` 이식의 외부 helper 반환 계약과 trust-harness 검증 보존은 위 준비 코드에서 확인했다. 원래 49개 커밋은 재게시하지 않으며 닫힌 원래 11개 branch에도 쓰지 않았다. 당시 이 이식의 실행 결과는 없었으며, 현재44b6 결과와 구분한다.
 
 ## 수리하는 실제 경계
 
@@ -87,17 +114,17 @@ MLI 변경은 `For_testing`의 scoped effect wrapper entry뿐이다. Production 
 
 새 mutable 상태 레지스트리, 문자열 기반 상태 추정, 재적용 권한 또는 별도의 판단 권한은 추가하지 않는다. legacy Task worker를 활성 completion-authority 경로의 증거로 바꾸어 부르지도 않는다.
 
-## 새 fixture와 실행 검증 계획 — 아직 미실행
+## fixture 범위와 실제 실행
 
-아래는 ac7 준비 commit에서 실제 test_case 선언을 읽고, 새 d587 candidate에서 선언 수를 바꾸지 않았음을 확인한 수치다. **현재 44b6 수리 소스의 5개 suite는 모두 아직 미실행**이다. 실제 PASS/FAIL/SKIP은 authoritative suite-runner artifact를 읽은 뒤 별도로 입력한다. 한 test case 안의 Done/Cancelled/Rejected 하위 시나리오를 별도 통과 수로 더하지 않는다.
+아래는 ac7 준비 commit에서 실제 test_case 선언을 읽고, 새 d587 candidate에서 선언 수를 바꾸지 않았음을 확인한 수치다. 작성 당시에는 미실행이었으며 현재 44b6의 실제 5개 suite 결과는 위 artifact readback으로 확정했다. 아래 선언 수는 위 실제 결과와 대조했고 서로 같은 사실로 혼용하지 않는다. 한 test case 안의 Done/Cancelled/Rejected 하위 시나리오를 별도 통과 수로 더하지 않는다.
 
 | suite | 선언 수 / 현재 증거 상태 | 확인할 경계 |
 | --- | --- | --- |
-| `test_goal_verifier_worker` | 16 declared / 새 소스 실행 미기록 | retained Goal 원본·도구·거부·commit·publication 복구 보존 |
-| `test_goal_verification_agent` | 39 declared / 새 소스 실행 미기록 | 원본 admission, reviewer 진입, successor, 사람 확인 경계 |
-| `test_verifier_review_worker` | 18 declared / 새 소스 실행 미기록 | 기존 11개와 새 7개 Task composition 사례 |
-| `test_completion_trust_harness` | 9 declared / 새 소스 실행 미기록 | 실제 활성 Task producer→authority→registry/Board 경로 보존 |
-| `test_verification_run_registry` | 23 declared / 새 소스 실행 미기록 | 기존 18개와 새 5개 strict publication·durability 사례 |
+| `test_goal_verifier_worker` | 16 declared / 실제 16 PASS | retained Goal 원본·도구·거부·commit·publication 복구 보존 |
+| `test_goal_verification_agent` | 39 declared / 실제 39 PASS | 원본 admission, reviewer 진입, successor, 사람 확인 경계 |
+| `test_verifier_review_worker` | 18 declared / 실제 18 PASS | 기존 11개와 새 7개 Task composition 사례 |
+| `test_completion_trust_harness` | 9 declared / 실제 9 PASS | 실제 활성 Task producer→authority→registry/Board 경로 보존 |
+| `test_verification_run_registry` | 23 declared / 실제 23 PASS | 기존 18개와 새 5개 strict publication·durability 사례 |
 
 새 Worker 사례는 다음 실제 경로를 사용한다.
 
@@ -128,15 +155,15 @@ Registry의 새 5개 사례는 absent/running/exact completed publication, 실�
 
 Completion ACK가 있는 비종료 `Conflicted`도 원래 `Commit_failed`를 유지한다. 오래된 요청이 다시 들어오면 소스 경로상 WARN과 알림 함수 호출은 반복될 수 있다. Board는 같은 subject/gate/disposition을 최근 200개 verification System post에서 찾으면 게시를 억제하므로, 매번 새 Board 글이 생긴다는 뜻은 아니다. 조회 창 밖이거나 이전 게시가 없으면 다시 게시할 수 있다. 이 범위에서 새 process enum이나 Board 동작은 바꾸지 않는다.
 
-소스는 이 중복 요청에 모델·apply·registry 쓰기 재실행을 허용하지 않으며 새 fixture에서 이를 확인하도록 선언되어 있다. 비종료 실패를 실제 Task 완료나 Done/Cancelled authority로 위장하지 않는다. Completion ACK는 registry publication의 확인이며 Board 전달 확인과도 구분한다.
+소스는 이 중복 요청에 모델·apply·registry 쓰기 재실행을 허용하지 않으며 통과한 fixture에서 이를 확인했다. 비종료 실패를 실제 Task 완료나 Done/Cancelled authority로 위장하지 않는다. Completion ACK는 registry publication의 확인이며 Board 전달 확인과도 구분한다.
 
 반환된 Unconfirmed와 취소 검증은 실제 Worker/Owner와 실제 Caa 공유 guard를 연결해 수행하는 fixture다. `Eval_calibration.record_verdict`의 일반 예외를 전체 `process_task_once` 안에서 직접 주입한 별도 사례는 없다. 소스의 동일 guard 경로 검토와 이 실행 fixture의 범위를 구분한다. OS 프로세스를 강제 종료한 운영 장애 실험으로도 부르지 않는다.
 
-## 새 결과를 받은 뒤 채울 항목
+## 남은 증거 경계
 
 - 새 코드 PR #45769 / 문서 전용 상위 PR #45770 / Native Stack #45771: 위 게시 범위에 기록했다. 최종 Ready REST vector는 별도 receipt에 고정한다.
 - 새 코드 commit / 직접 parent / branch main 기준 / 4파일 수리 패치와 17파일 source hash: 위에 기록했다. 최종 REST base·canonical full diff binding은 별도 receipt로 남긴다.
-- 이전 6c9 run40078689529의 실제 compile 실패/5suite 미시작은 위에 보존했다. 새 44b6 candidate의 실행 결과는 아직 미기록이다.
-- 새 current-head 독립 source approval과 effective CR·미해결 thread: 미기록.
+- 이전 6c9 compile 실패/5suite 미시작과 새 44b6의 실제 105 PASS는 위에 구분해 보존했다.
+- code44b6 source approval과 본인 P2 CR 대체는 위에서 확인했다. 최종 upper source approval, current whole-stack guard 및 thread 상태는 별도 최신 판정 대상이다.
 - 원래 외부 병합 Goal11 감사: 확정. 위 ac7 고정 main에 merge 11/11 포함, 07:52:35–46 UTC `jeong-sik`, premerge 유효 source approval 0/11, effective CR 0, current threads 0. 역사적 thread 부재는 미확인. [공개 readback](https://github.com/jeong-sik/masc/pull/45710#issuecomment-6381863174).
 - 새 수리의 integration, 설치 binary, 실행 중 runtime, 배포 및 실제 사용자 QA: 미기록. 원래 Goal11의 관측된 외부 integration은 위 감사와 구분한다.

@@ -1697,17 +1697,26 @@ let test_the_upload_script_runs_in_node () =
    effect. Frame_read is refused by the live transport gate, so a direct
    peer call would not prove which message the public tool receives. *)
 let test_input_frame_paths_are_refused_with_the_way_that_works () =
-  let peer = opened (fun sent -> match sent.step with
+  let runs = ref 0 in
+  let peer = opened (fun sent ->
+    incr runs;
+    match sent.step with
     | "tabs.list" -> answered tabs
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
+  let before = !runs in
   let says label needle result =
     check bool label true (String_util.contains_substring (before_effect label result) needle) in
+  let frame_click = interact_args ~frame_path:["#frame"] (Lane.Click "#send") in
+  (match Masc.Browser_interaction.parse frame_click with
+   | Ok _ -> ()
+   | Error detail -> failf "the frame fixture must reach the peer: %s" detail);
   says "frame input names target" "acts inside frames through target"
-    (dispatch peer Live.Page_interact (interact_args ~frame_path:["#frame"] (Lane.Click_node {document_id="d1";node_id="send"})));
+    (dispatch peer Live.Page_interact frame_click);
   says "an upload frame path names the native route" "without framePath"
     (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=["#frame"];
-      interaction=Lane.Action.Upload {target=Lane.Action.File_input "#file";paths=["/tmp/note.txt"]}})))
+      interaction=Lane.Action.Upload {target=Lane.Action.File_input "#file";paths=["/tmp/note.txt"]}})));
+  check int "neither refused frame request dispatches an SDK script" before !runs
 
 (* The chooser SDK stand-in has no DOM evaluator. Its native click
    opens a file chooser when [opens] holds, one that takes several files when

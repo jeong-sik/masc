@@ -286,12 +286,10 @@ def run(script,answer):
         answer({'since':'2026-10-23T09:00:00.000Z','rows':[{'id':ident,'label':'p1','url':'https://fixture.test/report.txt',
             'suggestedFilename':'report.txt','state':'completed','path':str(saved),'reason':None}]})
     elif step=='page.upload':
-        # The worker's copies, as ego would set them on the page's input.
+        # Ego receives the worker's copies; the peer records staged metadata.
         paths=[pathlib.Path(path) for path in args['paths']]
         (root/'uploaded').write_text(json.dumps([str(path) for path in paths]))
-        files=[{'name':path.name,'size':path.stat().st_size} for path in paths]
-        answer({'error':None,'dialog':None,'tab':{'url':'https://fixture.test/','title':'Fixture'},
-            'after':{'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','files':files})}})
+        answer({'error':None,'dialog':None,'tab':{'url':'https://fixture.test/','title':'Fixture'}})
     elif step=='space.finish':answer(None)
     else:answer(error='unexpected step '+step)
 for raw in stream:
@@ -408,8 +406,8 @@ let scenario mode =
           (dispatch (W.Upload_stage {id=grant;actor;route;verb=upload}) = W.Receipt);
         (match Owner.dispatch_upload owner ~id:grant ~actor ~route ~verb:upload with
          | W.Issue_result (Ok (B.Answered json)) ->
-           check string "the files the input holds" {|[{"name":"note.txt","size":5}]|}
-             (Yojson.Safe.to_string Yojson.Safe.Util.(json |> member "data" |> member "files"))
+           check string "the staged files handed to the SDK" {|[{"name":"note.txt","size":5}]|}
+             (Yojson.Safe.to_string Yojson.Safe.Util.(json |> member "data" |> member "chosen"))
          | W.Issue_result (Ok (B.Lane_absent | Timed_out | Refused _ | Rejected_before_effect _)) | W.Issue_result (Error _)
          | Snapshot_result _ | Model_reply _ | Download_reply _ | Poll_result _ | Receipt | Service_refusal _ ->
            fail "the staged upload did not reach ego");

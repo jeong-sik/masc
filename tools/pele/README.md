@@ -24,6 +24,8 @@ nonzero without an image. The caller retains source and owns preview selection.
 
 Optional `fontSize` is a positive safe integer (default `16`) passed to Pele as
 a layout input, so a document can use the terminal's measured text size.
+Generated SVG declares its default font family and size explicitly for resvg;
+authored child font overrides and diagram label proportions remain intact.
 `maxWidth`, `fontSize` and `colors` stay fixed while inspecting one diagram.
 Optional `raster` requests a display surface independently of that layout:
 

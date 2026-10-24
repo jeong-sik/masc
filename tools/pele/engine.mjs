@@ -4,8 +4,13 @@ import { Resvg } from '@resvg/resvg-js';
 
 // resvg does not implement CSS custom properties. Resolve them in attributes,
 // with element-local inheritance, without touching label text or path data.
-function concreteSvg(svg, colors) {
+function concreteSvg(svg, colors, fontSize) {
   const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  // Pele measures inherited labels with this font, but resvg does not expand
+  // Pele's CSS `font` shorthand. Declare the known defaults explicitly without
+  // overriding authored font sizes or families on child elements.
+  document.documentElement.setAttribute('font-size', String(fontSize));
+  document.documentElement.setAttribute('font-family', 'sans-serif');
   const presentationAttributes = new Set([
     'fill', 'stroke', 'color', 'stop-color', 'flood-color', 'lighting-color',
     'font-family', 'font-size', 'font-weight', 'font-style',
@@ -230,7 +235,7 @@ export function renderDocument(request) {
         maxWidth: request.maxWidth, images: false, links: false,
         responsive: false, fontFamily: 'sans-serif', fontSize,
       });
-      svg = concreteSvg(result.svg, colors);
+      svg = concreteSvg(result.svg, colors, fontSize);
       renderer = new Resvg(svg, {
         background: background ?? '#ffffff',
         fitTo: raster === undefined

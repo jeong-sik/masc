@@ -12,9 +12,19 @@ selector-to-selector drag now use the native session runner. The lane chooses
 the execution policy from its authenticated client's actual transport and the
 closed interaction type. Other browsers and scene/coordinate/custom-waypoint
 adapters retain their existing worker-side policy. The private Add-on client
-keeps its shared reply policy: an opaque live UUID does not authorize Ego-only
-waiting. The host/worker path selects native waits from its authenticated
-concrete transport independently of that private channel.
+selects its wait policy from the original worker's validated snapshot: an
+opaque live UUID alone does not authorize Ego-only waiting. Only an exact Ego
+transport observation removes the additional execution clock. Automation,
+Stagehand, WebExtension and BiDi retain their shared reply windows. Missing
+transport metadata refuses differing-policy calls before dispatch. The worker
+still owns browser admission and validates its actual transport.
+
+A new snapshot clears the previous transport observation. Only the latest
+snapshot may publish metadata, so overlapping replies cannot restore stale
+entries after replacement, failure or revocation. Socket tests exercise actual
+writes, silent peers, SDK-owned waiting and controlled overlapping snapshots.
+These new tests are pending execution; parsing and independent source review
+are separate evidence.
 
 The independent audit also found a poll-lifetime boundary. Ego polls between
 SDK commands. A legitimate long command could outlive the idle 120-second

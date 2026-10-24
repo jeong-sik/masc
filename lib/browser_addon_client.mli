@@ -14,9 +14,13 @@ val call : t -> on_cancel_after_dispatch:(unit -> unit) -> Browser_addon_wire.co
     cancellation still propagates. Model-backed Issue calls also wait for their
     owner rather than the quick transport clock. Owned Chrome Session_open also
     retains its original startup owner and resource-readiness bounds.
-    This private client retains the shared reply policy; a live client ID does
-    not prove an Ego transport. The actual worker selects SDK-owned input waits
-    from its admitted concrete transport, independently of this channel.
+    Ego-specific waits require the exact live client's transport from a validated
+    Snapshot reply of this original worker. Unknown live transport is refused
+    before dispatch when its policy differs; owned routes and other live browsers
+    retain the original transport window. This metadata selects a wait policy,
+    never browser authority. Only the latest Snapshot may publish metadata;
+    starting it clears the preceding observation, and stale replies cannot
+    replace it. Revoke also clears it.
     Cancellation after writing invokes
     the owner's callback under cancellation protection, then propagates. *)
 val revoke : t -> unit

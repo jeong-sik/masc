@@ -117,7 +117,7 @@ let standalone_lane_latency_summary (lane : Tui_decode.standalone_lane) =
   match lane.sl_p50_elapsed_s with
   | Some s -> (
       match Message_layout.elapsed_text s with
-      | Some text -> Some (Printf.sprintf "평균(p50) %s 소요" text)
+      | Some text -> Some (Printf.sprintf "중앙값(p50) %s 소요" text)
       | None -> None)
   | None -> None
 
@@ -168,7 +168,7 @@ let failover_candidate_rows ?(no_slot_count = 0) ~admitted_slots ~cli_slots
   ]
   @ (if no_slot_count > 0 then
        [ ( Theme.warn ()
-         , Printf.sprintf "전체 후보 실패(무응답): %d건" no_slot_count ) ]
+         , Printf.sprintf "슬롯 미기록: %d건" no_slot_count ) ]
      else [])
   @ (match dropped_slots with
      | [] -> []
@@ -368,7 +368,7 @@ let standalone_lane_without_slot_rows_ko (lane : Tui_decode.standalone_lane) =
   in
   counted "Vendor System One (외부 직접 응답)" without.slws_vendor_system_one
   @ counted "서버 재시작으로 중단" without.slws_server_restarted
-  @ counted "전체 후보 실패로 슬롯 미배정(무응답)" without.slws_no_slot
+  @ counted "슬롯 미기록" without.slws_no_slot
   @ gap
 
 let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =

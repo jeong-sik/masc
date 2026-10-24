@@ -92,10 +92,12 @@ Website authentication is a separate observation after confirmed fill settlement
 This is source implementation; no host built from this layer is installed and no
 1Password extension/account was exercised. The remaining implementation must:
 
-1. Use an independent private broker for the Python connector. Existing model
-   request/result ports retain their payloads and cannot carry tokens or
-   approval links. Nested calls on the connector's same MCP connection would
-   deadlock behind the exported call's mutex and the Python request loop.
+1. Wire the [independent private broker](lane-addon-companion-broker.md) into
+   the original provider's runtime/private call context. Its host socket and
+   Python transport are source implementation; the runtime factory remains open.
+   Existing model request/result ports retain their payloads and cannot carry
+   tokens or approval links. Nested calls on the connector's same MCP connection
+   would deadlock behind the exported call's mutex and Python request loop.
 2. Bind connector connection UUID, provider owner, Browser owner, original
    session/target and host principal to each login operation. Public continuation
    records carry only safe operation identity and status.

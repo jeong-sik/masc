@@ -792,6 +792,7 @@ let test_late_verdict_respects_actual_terminal_authority () =
            | Conflicted _ -> ()
            | _ -> fail "competing authority must leave an exact retained commit conflict");
           (match Masc.Verifier_review_owner.pending_commits
+             ~selection:Masc.Verifier_review_owner.All_verifications
              ~terminal_pending:Masc.Verifier_review_publication.needs_publication
              ~store ~installation_id ~package_id with
            | Ok [] -> ()

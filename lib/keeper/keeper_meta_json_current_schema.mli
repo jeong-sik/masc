@@ -58,4 +58,7 @@ val find_duplicate : ('a * 'b) list -> 'a option
 val validate_current_object :
   Yojson.Safe.t -> ((string * Yojson.Safe.t) list, validation_error) result
 (** Require exactly the current top-level key set and return its fields. A
-    non-object, or a duplicate, missing, or extra field, is [Invalid_current]. *)
+    non-object, or a duplicate, missing, or extra field, is [Invalid_current].
+    The first repeated key takes precedence over extra or missing fields.
+    Extra fields retain input order; missing fields retain schema order.
+    Successful fields retain their input order and values. *)

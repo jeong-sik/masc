@@ -120,6 +120,10 @@ let field_name = function
 
 let current_field_names = List.map field_name all_fields
 
+module Field_names = Set.Make (String)
+
+let current_field_set = Field_names.of_list current_field_names
+
 let object_of_field_values field_values =
   let supplied = List.map fst field_values in
   if supplied <> all_fields
@@ -146,34 +150,38 @@ let find_duplicate fields =
 let validate_current_object (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
-    (match find_duplicate fields with
-     | Some key ->
-       Error
-         (invalid_currentf "duplicate field %s" key)
-     | None ->
-       let current_fields, outside_fields =
-         List.partition
-           (fun (key, _) -> List.mem key current_field_names)
-           fields
-       in
-       let outside_current = List.map fst outside_fields in
-       let present = List.map fst current_fields in
-       let missing =
-         List.filter (fun key -> not (List.mem key present)) current_field_names
-       in
-       if outside_current <> []
-       then
-         Error
-           (invalid_currentf
-              "fields outside the current schema: %s"
-              (String.concat ", " outside_current))
-       else if missing <> []
-       then
-         Error
-           (invalid_currentf
-              "missing required fields: %s"
-              (String.concat ", " missing))
-       else Ok current_fields)
+    (* Duplicate priority and diagnostic order belong to the reader contract.
+       Retain outside names until the scan has ruled out every duplicate.
+       Start with the immutable schema and remove each observed key. Set.remove
+       returns the same physical set for an absent key (the stdlib contract),
+       so a valid key needs one traversal and no growing seen-key index. *)
+    let rec scan remaining outside_seen outside_rev = function
+      | (key, _) :: rest ->
+        let next = Field_names.remove key remaining in
+        if next != remaining then
+          scan next outside_seen outside_rev rest
+        else if Field_names.mem key current_field_set
+                || Field_names.mem key outside_seen then
+          Error (invalid_currentf "duplicate field %s" key)
+        else
+          scan remaining (Field_names.add key outside_seen) (key :: outside_rev) rest
+      | [] ->
+        if outside_rev <> [] then
+          Error
+            (invalid_currentf "fields outside the current schema: %s"
+               (String.concat ", " (List.rev outside_rev)))
+        else if Field_names.is_empty remaining then Ok fields
+        else
+          let missing =
+            List.filter
+              (fun key -> Field_names.mem key remaining)
+              current_field_names
+          in
+          Error
+            (invalid_currentf "missing required fields: %s"
+               (String.concat ", " missing))
+    in
+    scan current_field_set Field_names.empty [] fields
   | other ->
     Error
       (invalid_currentf

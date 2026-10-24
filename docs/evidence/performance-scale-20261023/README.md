@@ -291,3 +291,55 @@ synthetic response bodies and complete private health/log packets remain in
 `/tmp/masc-native-execution-*-20261023` on the measurement host, with their
 request-log hashes in the committed packet. These are not installed candidate,
 active 350-agent continuity, full TUI rendering, or 0.1 ms acceptance results.
+
+## Metadata schema validation
+
+An eight-second CPU sample of the verified candidate, in a new isolated
+350-paused-metadata workspace, mostly observed waiting: 5,929 of 6,225 main
+thread samples were in the poll stack. Active stacks included metadata key
+validation/list membership, JSON/TOML parsing, filesystem opens/stats and
+Candle account-revision work. This does not attribute the earlier 10.14-second
+outlier to one cause. `native_profile_identity.json` binds the private sample
+to the actual binary/runtime and cleanup receipts; its intrusive timing run
+is excluded from the previous latency comparison.
+
+The current-key validator scanned association lists for duplicates, known
+fields and required fields on every metadata read. It now removes observed
+keys from an immutable schema set. An absent removal returns the same set
+under the OCaml 5.5.1 Set contract; this distinguishes a first valid occurrence
+without a second lookup. Previously seen outside keys are tracked only on
+malformed input. The generic duplicate helper used by nested values remains
+unchanged. No file freshness or metadata value validation is skipped.
+
+The first repeated key still outranks outside/missing fields, outside keys
+retain input order, missing keys retain schema order, and successful fields
+retain input order and values. The existing schema suite now exercises those
+boundaries together. Independent adversarial source review passed after the
+final set-removal change.
+
+`run_meta_key_probe.py` interprets both complete source modules against their
+actual interfaces, with the repository's JSON-kind function. It compares exact
+results across 5,105 reordered/malformed/current-object cases and measures nine
+alternating before/after rounds. The baseline is
+`5f1002b04848ca14506155a55211e099bdb916c9`. Fixture construction and full GC are
+outside the timed region. Schema-set construction occurs once at module load;
+its startup cost is not measured. All changed sources and input hashes are in
+`meta_key_sources.json`; raw rounds and exact-result receipt are retained.
+
+```sh
+python3 docs/evidence/performance-scale-20261023/run_meta_key_probe.py \
+  --output /tmp/new-meta-key-probe
+```
+
+OCaml 5.5.1 interpreter, valid metadata key validation only:
+
+| Objects | Before median ms | After median ms | Before / after allocated bytes |
+|---:|---:|---:|---:|
+| 35 | 1.564792 | 0.345708 | 117,336 / 135,256 |
+| 350 | 14.001167 | 3.410041 | 1,170,696 / 1,349,896 |
+| 3,500 | 150.829959 | 35.388625 | 11,704,296 / 13,496,296 |
+
+This component becomes faster in the interpreter but allocates an additional
+512 bytes per valid object in this fixture. It is not a native server speedup,
+a file-I/O improvement, or an active-agent capacity result. Native schema and
+consumer execution for this additional source change remains pending.

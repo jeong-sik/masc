@@ -5294,7 +5294,7 @@ let test_telegram_claim_pins_owner_across_cursor_failure () =
     List.iter(fun meta->match Keeper_meta_store.replace_snapshot config meta with
       | Ok ()->() | Error detail->fail detail) [a;b];
     let bind keeper_name=match Channel_gate_telegram_state.bind ~channel_id:"-1005"
-      ~keeper_name ~actor_name:"fixture" with Ok ()->() | Error _->fail "binding persistence" in
+      ~keeper_name ~actor_name:"fixture" with Ok _->() | Error _->fail "binding persistence" in
     bind a.name;
     let clock=Eio.Stdenv.clock env in
     let post ~url ~body = match Filename.basename(Uri.path(Uri.of_string url)) with

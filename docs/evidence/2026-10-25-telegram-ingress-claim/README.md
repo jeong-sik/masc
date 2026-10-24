@@ -55,3 +55,19 @@ the changed ingress path requires new execution. The prior lower SOURCE PASS was
 explicitly retracted after the new finding. All current stack heads and full diffs
 need new review after restacking. No merge, external delivery or issue closure
 is claimed here.
+
+## Focused execution update
+
+[Run 40116879873](https://github.com/jeong-sik/masc/actions/runs/40116879873)
+checked out exactly `3fb24f2d0753cbbd60988d20f1b2751adcbdcd0c`.
+The native gateway suite passed all 10 cases. The overall run failed because
+the new Owner fixture expected `Ok ()` from the binding API, whose success
+payload is JSON. No Owner cases executed in this run. The fixture now accepts
+that success payload; production code is unchanged. Owner reopen/A1-B0 behavior
+still requires execution. Invalid-UTF-8 and explicit-error fixture refinements
+made after the executed source are not certified by the 10-case result.
+
+The external reviewer dismissed the prior change request and recorded a
+[source-only resolution](https://github.com/jeong-sik/masc/pull/45831#pullrequestreview-5639183657)
+at `61f899c1e6cf2fd79df833189dbc8e6a59ee2e27`. That is not formal approval,
+execution evidence or approval for the current complete stack.

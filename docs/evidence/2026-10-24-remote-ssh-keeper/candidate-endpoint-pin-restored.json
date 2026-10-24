@@ -1,0 +1,27 @@
+{
+  "name": "proof",
+  "host": "127.0.0.1",
+  "user": "masc",
+  "port": 56243,
+  "remote_root": "/srv/masc/playground",
+  "observation": {
+    "lane": "remote_ssh",
+    "endpoint": "proof",
+    "probe": {
+      "state": "answered",
+      "protocol_major": 3,
+      "capabilities": [
+        "observe"
+      ],
+      "shim_release": null,
+      "server_release": "0.64.0",
+      "observed_at_unix": 1792855611.955317
+    },
+    "last_dispatch": {
+      "outcome": "payload_finished",
+      "at_unix": 1792855622.550164,
+      "status": "exit=0"
+    },
+    "operator_action": "The endpoint answers, but its shim came from a different release than this server. The lane still runs: the two negotiate the protocol and tolerate one release apart. Nothing you run changes it, and the operator repairs it by reinstalling the shim from this server's release. The release shown is what the endpoint answered at observed_at_unix; a shim replaced since is not seen until the server asks again."
+  }
+}

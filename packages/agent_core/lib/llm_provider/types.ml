@@ -871,7 +871,10 @@ module Inline_content_replay = struct
         Inline_reasoning_split.Text (previous ^ text) :: rest
       | Inline_reasoning_split.Reasoning previous :: rest, Inline_reasoning_split.Reasoning text ->
         Inline_reasoning_split.Reasoning (previous ^ text) :: rest
-      | _, piece -> piece :: acc) [] pieces |> List.rev
+      | [], (Inline_reasoning_split.Text _ | Inline_reasoning_split.Reasoning _)
+      | Inline_reasoning_split.Text _ :: _, Inline_reasoning_split.Reasoning _
+      | Inline_reasoning_split.Reasoning _ :: _, Inline_reasoning_split.Text _ ->
+        piece :: acc) [] pieces |> List.rev
 
   let make ~content ~raw_content ~block_indices =
     let blocks = Array.of_list content in

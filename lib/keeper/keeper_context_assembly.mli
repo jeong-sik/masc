@@ -27,9 +27,11 @@ type system_prompt = private
   ; text : string
   ; partition : receipt
   }
-(** One issued effective system prompt: the prior base/override followed by
-    exact renderer-issued observations. Its partition describes this physical carrier,
-    independently of the extra-context carrier. It is never a history row. *)
+(** One canonical issued System: the prior base/override followed by exact
+    renderer-issued observations, independently of the extra-context carrier.
+    Official clients may project a current-turn observation to User rather
+    than their persistent System; this issuer receipt is not that submitted
+    packet. It is never a history row. *)
 type t = private
   { extra_system_context : string option
   ; blocks : (Prompt_block_id.t * string) list
@@ -67,8 +69,9 @@ val system_prompt_override : previous:string option -> t -> string option
     [None] versus [Some ""] and every byte of the prior override. *)
 
 val system_prompt_receipt_to_json : system_prompt -> Yojson.Safe.t
-(** Explicit [system_prompt] carrier plus its exact raw UTF8 partition. This
-    is an issuer receipt, not a remote-retention or encoded-wire claim. *)
+(** Explicit canonical [system_prompt] source scope plus its exact raw UTF8
+    partition. This is an issuer receipt, not a submitted-packet, remote-retention
+    or encoded-wire claim. *)
 
 val blocks_for_carrier : t -> string -> (Prompt_block_id.t * string) list option
 (** Returns the issuer's blocks only for the exact carrier and when no prefix

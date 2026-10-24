@@ -22,8 +22,8 @@
         "lib/types/prompt_block_id.ml": "29d4f8d8ce8bbf3bf53fd304a4ed95e48ee609d83de2ea2f8946c78d3255268e",
         "lib/keeper/keeper_context_layers.mli": "e1c4e1e44e1ccf629c7709424880a91af6d3c7552709523e1af5ff43fee85741",
         "lib/keeper/keeper_context_layers.ml": "2fbefab7ec5f8686eb1a0b936646e28569191f1799608b590f9eb14a62db9259",
-        "lib/keeper/keeper_context_assembly.mli": "1479a882a788783bfc430cd44803ed679f6815d2c0a597c94f262810bc0f10ee",
-        "lib/keeper/keeper_context_assembly.ml": "484a02f701471656b68403748d48bb6f470bf494261e791cfea9475dcf0d8f48"
+        "lib/keeper/keeper_context_assembly.mli": "3c1e58f3fd6930146c0a219038fe37287023885dea6a9884d450d26b8896b782",
+        "lib/keeper/keeper_context_assembly.ml": "2452346ee72de6c3e6ca29dacc316ee401bcfa152e36ed96846c1e0cde8cf336"
       },
       "request_fragment_sha256": "8ec582f9ccaf0f69d28232ae0f85a89cbf05de6ac388c31432bed7a7b20adcca",
       "actual_sanitizer_sha256": "7d474a456047251d9d89ddb3251cc9f3b8b9adc87d61d300388c6de166cf7c6e",

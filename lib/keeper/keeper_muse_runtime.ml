@@ -489,7 +489,7 @@ let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.pr
   then Ok (Host.resume_prompt ~goal ~held ?composed_context prepared.messages).Host.prompt
   else
     let* history = render_messages prepared.messages in
-    Ok
+    Ok (Host.start_prompt prepared
       ([ String_util.trim_nonempty prepared.system_prompt
          |> Option.map (fun value -> system_instructions_label () ^ value)
        ; String_util.trim_nonempty history
@@ -497,6 +497,7 @@ let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.pr
        ]
        |> List.filter_map Fun.id
        |> String.concat prompt_section_separator)
+      |> Keeper_context_submission_link.text)
 ;;
 
 let tool_spec (tool : Host.dynamic_tool) =
@@ -1127,7 +1128,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         observe_transport_uncertain ();
         Printexc.raise_with_backtrace exn backtrace
     in
-    let composed_context = Option.bind composed_context (fun read -> read ()) in
+    let composed_context = prepared.composed_context in
     let held = Session_store.held_context_for_resume claim_plan ~expected:stored_session in
     let held_context =
       if is_resume
@@ -1968,7 +1969,8 @@ module For_testing = struct
 
   let start_prompt ~system_prompt ~goal messages =
     let prepared : Host.prepared_turn =
-      { messages; system_prompt; tools = []; reasoning_effort = None }
+      { messages; system_prompt; start_context = Keeper_context_submission_link.literal ""
+      ; composed_context = None; tools = []; reasoning_effort = None }
     in
     prompt_for_turn ~held:[] ~is_resume:false ~goal prepared
   ;;

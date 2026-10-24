@@ -77,8 +77,8 @@ let with_fixture f =
           |> get in
         let destination : M.destination =
           { Keeper_librarian_durable_request.installation_id = "inst-1"
-          ; package_id = "librarian"
-          ; tool = "librarian_run_tui_reading"
+          ; package_id = Keeper_librarian_durable_request.package_id
+          ; tool = Keeper_librarian_durable_request.tool
           ; source_revision = "1111111111111111111111111111111111111111"
           ; configuration_revision = "2222222222222222222222222222222222222222" }
         in

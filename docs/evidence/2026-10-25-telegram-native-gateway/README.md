@@ -11,8 +11,8 @@ Source: `f01373f25ffa2c10a5da4ffd3dbc5072b01ceee5`. The six existing focused sui
 `connector-status`, `connector-overview-strip`, `connector-readiness-rail`,
 `connector-paths-strip`, `connector-constants`, `connector-setup-guides`.
 See [the actual result log](dashboard-focused.txt); only the local working
-path is normalized to `<worktree>`. This is DOM/fixture behavior, not a browser,
-installed bundle, screenshot or live server measurement.
+path is normalized to `<worktree>`. This test result is DOM/fixture behavior. The separate browser observation below
+checks candidate UI rendering, not the native backend or an installed bundle.
 
 Command, from dashboard:
 
@@ -63,6 +63,28 @@ failure rather than triggering a blind resend. Protocol authority:
 
 Private media references/binary upload and automatic partial-send resume remain
 open acceptance. Removing source/services APIs does not stop an already-running
-external poller. No installed binary, service shutdown, live Telegram request,
-model reply, deployed UI or physical screenshot was produced. The parent PR's
+external poller. No installed candidate binary, external poller shutdown, live Telegram request,
+model reply or deployed candidate UI was produced. The parent PR's
 custody-only CI evidence is separate from this actual Keeper integration scope.
+
+## Candidate UI observation
+
+Source `7eb9a49bb764221d04dfda739d35465c503f6d8f` was served by a temporary Vite
+listener on loopback port 5517. Ego Browser rendered the actual Telegram route
+and opened Config; [the cropped screenshot](telegram-config-candidate.png)
+shows the native token/permission guide and a token placeholder, not a secret.
+The capture was visually inspected. No binding, configuration write, Keeper
+request or outbound message was submitted. The agent's browser task and Vite
+listener were closed after capture.
+
+The candidate frontend proxied the existing server on port 8935. Its full health
+reported version 0.64.0, effective base `/Users/dancer/me`, effective MASC root
+`/Users/dancer/me/.masc`, and no top-level git SHA. That runtime was not replaced
+or matched to this candidate. Its Telegram API still reported a missing status
+file; this is explicit mixed-version observation, not native poller deployment
+proof. Other runtime activity is outside this UI inspection.
+
+Browser procedure: ego-browser skill, one task space (26), navigate to
+`/dashboard/#connectors?section=connector-status&connector=telegram`, inspect
+semantic snapshot, open Config, wait for the native config panel, capture that
+panel's actual DOM rectangle and visually inspect it. No page mocks were used.

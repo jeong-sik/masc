@@ -4,7 +4,9 @@
 val definition : Mcp_protocol.Mcp_types.tool
 val command : Yojson.Safe.t -> (Browser_lane.verb, string) result
 (** Decode the original command with its original route preference. No selection
-    or dispatch takes place. Shared with mandatory host artifact finalization. *)
+    or dispatch takes place. Space hand-off/take-over require an explicit live
+    clientId here too; automatic browser selection cannot change ownership.
+    Shared with mandatory host artifact finalization. *)
 val invoke : owner:Browser_addon_owner.t -> principal:Lane_addon_call_context.principal ->
   Yojson.Safe.t -> Mcp_protocol.Mcp_types.tool_result
 (** Select once, retain the concrete client in the receipt, and dispatch once.

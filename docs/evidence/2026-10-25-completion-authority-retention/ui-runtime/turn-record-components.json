@@ -1,0 +1,208 @@
+{
+  "scope": "Actual retained typed component metadata only; no model response, reasoning, history or credentials",
+  "observed_at": "2026-10-24T17:47:16.875787+00:00",
+  "raw_response_sha256": "a63f4e7904fa19d4549594e3c4594337ac5c507a689bda5343941fd7e914ceb0",
+  "source": "turn_record",
+  "health": "ok",
+  "entries": [
+    {
+      "trace_id": "trace-1792862169652-00000",
+      "absolute_turn": 1,
+      "timestamp": null,
+      "blocks": [
+        {
+          "block": "keeper_instructions",
+          "bytes": 23893,
+          "digest": "f4a8be1ac6950779ce157f24725f40d1b44f724b5a2b4a4567c2b095d7d659fd"
+        },
+        {
+          "block": "active_goals",
+          "bytes": 1282,
+          "digest": "fa58498fbab074bed8a230b420fbbf602062c4a87f9cea944ac46fc6d8a1783d"
+        }
+      ],
+      "input_components": [
+        {
+          "component": "message_thinking",
+          "bytes": 12247
+        },
+        {
+          "component": "message_tool_result",
+          "bytes": 2829
+        },
+        {
+          "component": "message_tool_use",
+          "bytes": 914
+        },
+        {
+          "component": "message_user",
+          "bytes": 613
+        },
+        {
+          "component": "prompt.active_goals",
+          "bytes": 1282
+        },
+        {
+          "component": "prompt.keeper_instructions",
+          "bytes": 23893
+        },
+        {
+          "component": "tool_schemas",
+          "bytes": 48236
+        }
+      ]
+    },
+    {
+      "trace_id": "trace-1792862169652-00000",
+      "absolute_turn": 2,
+      "timestamp": null,
+      "blocks": [
+        {
+          "block": "keeper_instructions",
+          "bytes": 23893,
+          "digest": "f4a8be1ac6950779ce157f24725f40d1b44f724b5a2b4a4567c2b095d7d659fd"
+        },
+        {
+          "block": "active_goals",
+          "bytes": 1350,
+          "digest": "505f2fc0fa084c976275c652db6f38954d27495cde747bfd31908840ede86dbd"
+        },
+        {
+          "block": "completion_authority",
+          "bytes": 1030,
+          "digest": "75f2526db09aae8370e090d1485fa342e3b3521888d4f37b6887a5bc4ea02e1a"
+        }
+      ],
+      "input_components": [
+        {
+          "component": "message_assistant_text",
+          "bytes": 515
+        },
+        {
+          "component": "message_thinking",
+          "bytes": 16669
+        },
+        {
+          "component": "message_tool_result",
+          "bytes": 7359
+        },
+        {
+          "component": "message_tool_use",
+          "bytes": 1899
+        },
+        {
+          "component": "message_user",
+          "bytes": 1538
+        },
+        {
+          "component": "prompt.active_goals",
+          "bytes": 1350
+        },
+        {
+          "component": "prompt.completion_authority",
+          "bytes": 1030
+        },
+        {
+          "component": "prompt.keeper_instructions",
+          "bytes": 23893
+        },
+        {
+          "component": "tool_schemas",
+          "bytes": 48236
+        }
+      ]
+    },
+    {
+      "trace_id": "trace-1792862169652-00000",
+      "absolute_turn": 3,
+      "timestamp": null,
+      "blocks": [
+        {
+          "block": "keeper_instructions",
+          "bytes": 23893,
+          "digest": "f4a8be1ac6950779ce157f24725f40d1b44f724b5a2b4a4567c2b095d7d659fd"
+        },
+        {
+          "block": "active_goals",
+          "bytes": 1282,
+          "digest": "fa58498fbab074bed8a230b420fbbf602062c4a87f9cea944ac46fc6d8a1783d"
+        },
+        {
+          "block": "completion_authority",
+          "bytes": 795,
+          "digest": "602462c67a76266db3fabce6a9e75eec293bdb24cc6713af034711258a3dd793"
+        },
+        {
+          "block": "memory_os_recall",
+          "bytes": 1094,
+          "digest": "eb88355ee464a1279a065ab8b10509b052df35d85f6c58ec0ddad2a64d09e6f8"
+        },
+        {
+          "block": "librarian_working_context",
+          "bytes": 352,
+          "digest": "bac073c7da79d65285a9a5db57351493fa6a9b90a76b73199f4a7b2d4b26118e"
+        },
+        {
+          "block": "dynamic_context",
+          "bytes": 4216,
+          "digest": "e9170e03c7d0d3cd04d78498989c6932bf3e691bf86f57857a1b7e8330f5e9e6"
+        },
+        {
+          "block": "temporal_summary",
+          "bytes": 84,
+          "digest": "c88f351064d8e70f5cd6832851011e53f3e4896eccf461efe5b6f844069d1097"
+        }
+      ],
+      "input_components": [
+        {
+          "component": "message_assistant_text",
+          "bytes": 515
+        },
+        {
+          "component": "message_tool_result",
+          "bytes": 4437
+        },
+        {
+          "component": "message_tool_use",
+          "bytes": 1899
+        },
+        {
+          "component": "message_user",
+          "bytes": 2463
+        },
+        {
+          "component": "prompt.active_goals",
+          "bytes": 1282
+        },
+        {
+          "component": "prompt.completion_authority",
+          "bytes": 795
+        },
+        {
+          "component": "prompt.dynamic_context",
+          "bytes": 4216
+        },
+        {
+          "component": "prompt.keeper_instructions",
+          "bytes": 23893
+        },
+        {
+          "component": "prompt.librarian_working_context",
+          "bytes": 352
+        },
+        {
+          "component": "prompt.memory_os_recall",
+          "bytes": 1094
+        },
+        {
+          "component": "prompt.temporal_summary",
+          "bytes": 84
+        },
+        {
+          "component": "tool_schemas",
+          "bytes": 48236
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "generated_at": "2026-10-24T17:43:12.161122+00:00",
+  "scope": "External private first-positive-approval observation; no raw thinking or credentials",
+  "files": {
+    "README.md": {
+      "bytes": 3262,
+      "sha256": "e1a797b2b9549d9438ff37b53efaa41041121805814fba20fe12d1fb47c5b76f"
+    },
+    "approval-system-carrier.json": {
+      "bytes": 1814,
+      "sha256": "51f2c03b8b3e549e473cf294d3ba0b3df8cd518e973bb34f508d11560f22483c"
+    },
+    "approved-verification-source.json": {
+      "bytes": 914,
+      "sha256": "5116671a04d2ffac65240edc960b1114615c12f934358ea7620e0ecc4d41332d"
+    },
+    "artifact-approved-immutable.json": {
+      "bytes": 55,
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+    },
+    "artifact-final.json": {
+      "bytes": 55,
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+    },
+    "diagnosis.json": {
+      "bytes": 12213,
+      "sha256": "7825f33336239f843a988893a0108f327dae9f093ed5d1c719f642e57aa2eb59"
+    },
+    "earlier-stage-references.json": {
+      "bytes": 877,
+      "sha256": "42746612ca1ccb36e8710e54da30aa66ce48a4ca4b0530483cb333807db146d5"
+    },
+    "observe.py": {
+      "bytes": 10198,
+      "sha256": "a06d675c6b5cb0635fe69a462da90a962e74c33874eeaa0d8dbfcf5dbd56cc37"
+    },
+    "operator/approval-intent.json": {
+      "bytes": 337,
+      "sha256": "9de5431335fea9d4e567ce7e350b54d89b37c21ba54906b6726a42bc8ef73a5f"
+    },
+    "operator/approval-receipt.json": {
+      "bytes": 118,
+      "sha256": "03f878421a564b40272bfffd05d1a9f1f5871e660acec76c2393b7128e0f3112"
+    },
+    "operator/fixture-scope.json": {
+      "bytes": 809,
+      "sha256": "7b9ffb46f1bd1b59290a4a13b371ab2e79f13e90096050157216b09ddfb0524f"
+    },
+    "operator/partial-artifact.json": {
+      "bytes": 55,
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+    },
+    "operator/partial-inspection.json": {
+      "bytes": 2545,
+      "sha256": "8f76f8ea5d00aa90ba56375992fd2654746706d1bb0d44f9d9295228fd352c5b"
+    },
+    "snapshot.json": {
+      "bytes": 82128,
+      "sha256": "c28ef6f66308fa7d66e23f1334f914ca6c6051a7b1fde8d888fa2de51e68fb5e"
+    },
+    "snapshots/20261024T174049623208Z.json": {
+      "bytes": 82128,
+      "sha256": "c28ef6f66308fa7d66e23f1334f914ca6c6051a7b1fde8d888fa2de51e68fb5e"
+    },
+    "terminal.json": {
+      "bytes": 3520,
+      "sha256": "d021161e56aa17926d5ef5ba6985f0adc13852dbbd684c53a6840cce235d1296"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "source_sha": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+  "binary_path": "/tmp/masc-goal-runtime-2be9d216/masc",
+  "binary_sha256": "e7824df94868e89a340f9cb56339f5c9b43f2df83ad2e4365cfef8361acccbee",
+  "bytes": 104915280,
+  "matches_expected_sha256": true,
+  "embedded_source_bytes_found": true,
+  "executed_by_observer": false,
+  "macos_build_run_parent_report": 40114425938,
+  "source_limits_parent_report": "Ordinary source74/Official24 are distinct checks; known OfficialP2 sourceFAIL; targeted6 native suites compileblocked/unexecuted. This actual ordinaryHTTP observation does not clear Official or native failures."
+}

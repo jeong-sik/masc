@@ -1,0 +1,64 @@
+{
+  "scope": "Actual captured intermediate submission failure followed by a successful capture; cause unproved. The intermediate raw verification record was absent when observer tried to freeze it.",
+  "failed_verification_id": "vrf-4048d103bdf4bc71f2c119dccfb49986",
+  "submission_request": {
+    "request_id": "request-000015",
+    "request_sha256": "f8b35ae7a5c64521815a506b364ea28d5171b09abf441ce8d6bfbd36a983e737",
+    "response_sha256": "19163bc2c01fb18386281f3149e1992748dcd27b49bbb36f0d605c5555915b99",
+    "tool_calls": [
+      {
+        "id": "call_zo0wd5ez",
+        "function": {
+          "index": 0,
+          "name": "keeper_task_done",
+          "arguments": {
+            "evidence_refs": [
+              "artifact:workspace/acceptance.json"
+            ],
+            "result": "Set alpha to true in acceptance.json with beta/gamma as false",
+            "task_id": "task-001"
+          }
+        }
+      }
+    ]
+  },
+  "actual_capture_feedback_in_request16": {
+    "role": "tool",
+    "tool_name": "keeper_task_done",
+    "content": "{\"result\":\"task-001 in_progress → awaiting_verification\",\"evidence_capture\":{\"verification_id\":\"vrf-4048d103bdf4bc71f2c119dccfb49986\",\"diagnostics\":[{\"kind\":\"artifact_unreadable\",\"reason\":{\"code\":\"invalid_reference\"}}]},\"disposition\":\"completed\",\"typed_outcome\":{\"kind\":\"Progress\"}}"
+  },
+  "actual_awaiting_intermediate_snapshot_in_request17": {
+    "role": "tool",
+    "tool_name": "keeper_tasks_list",
+    "content": "{\"backlog_authority\":\"primary\",\"degraded\":false,\"projection\":\"full\",\"matching_count\":1,\"returned_count\":1,\"truncated\":false,\"new_tasks_count\":0,\"new_tasks\":[],\"kind\":\"snapshot\",\"revision\":\"tasks:f7b68313d14fee13eca645b81ddbd52906387b47aaff7e16a058a3f0f2afd3ae\",\"snapshot\":[{\"id\":\"task-001\",\"title\":\"Set alpha to true in acceptance.json\",\"description\":\"Update alpha to true in workspace/acceptance.json as the first step toward completing all three flags\",\"priority\":3,\"files\":[],\"created_at\":\"2026-10-24T17:18:30Z\",\"created_by\":\"goal-canary\",\"contract\":{\"completion_contract\":[\"alpha is explicitly set to true\"],\"required_evidence\":[\"artifact:workspace/acceptance.json\"]},\"handoff_context\":{\"summary\":\"Set alpha to true in acceptance.json with beta/gamma as false\",\"evidence_refs\":[\"artifact:workspace/acceptance.json\"],\"updated_at\":\"2026-10-24T17:31:51Z\",\"updated_by\":\"goal-canary\"},\"status\":\"awaiting_verification\",\"assignee\":\"goal-canary\",\"started_at\":\"2026-10-24T17:18:48Z\",\"submitted_at\":\"2026-10-24T17:31:51Z\",\"verification_id\":\"vrf-4048d103bdf4bc71f2c119dccfb49986\"}]}"
+  },
+  "repeat_submission_request": {
+    "request_id": "request-000017",
+    "request_sha256": "acfae7a58dbe4a1db05ee04efb16090d95ce6ddfc07d5314ce82abea2ac032fc",
+    "response_sha256": "75647f68ddf086c2a71bedf9f8d13e788df8a7be46f0fdb60a8708e7af748421",
+    "tool_calls": [
+      {
+        "id": "call_ok2cxahq",
+        "function": {
+          "index": 0,
+          "name": "keeper_task_done",
+          "arguments": {
+            "evidence_refs": [
+              "artifact:workspace/acceptance.json"
+            ],
+            "result": "Set alpha to true in acceptance.json with beta/gamma as false",
+            "task_id": "task-001"
+          }
+        }
+      }
+    ]
+  },
+  "repeated_arguments_structurally_equal": true,
+  "actual_success_feedback_in_request18": {
+    "role": "tool",
+    "tool_name": "keeper_task_done",
+    "content": "{\"result\":\"task-001 awaiting_verification → awaiting_verification\",\"evidence_capture\":{\"verification_id\":\"vrf-a42e77c7eac0e45281d6cd2245840243\",\"diagnostics\":[]},\"disposition\":\"completed\",\"typed_outcome\":{\"kind\":\"Progress\"}}"
+  },
+  "intermediate_record_present_in_final_verification_history": false,
+  "raw_intermediate_record_reconstruction": "UNKNOWN. No file was recovered; do not invent its content or disappearance cause. Existing wire diagnostic and Task snapshot prove the observed failure."
+}

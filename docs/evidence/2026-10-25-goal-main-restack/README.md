@@ -4,7 +4,7 @@ This is a local 16-layer source candidate over main
 `98a1508e6ecbda1d38d33aa7d0eb7f366b420ddf`. It preserves the public Goal14
 head `895df663fb303ee2fa95c38bbd28b571db9abb62`, the complete latest Draft
 measurement-receipt head `177219da10c1b27b606c10af70b4bf6ea39211da`, and new
-Draft observation-retention head `32805eb764eab2710262446e925b0ea5c3a44c08`.
+Draft observation-retention head `2bc6ae8fa1904d8232c8ea0738e0b14bab824945`.
 All latest author production and raw evidence files are preserved, apart from
 explicitly documented conflict/consumer repairs and own-fragment citations.
 Preserving raw runtime reports is not an independent audit or a claim to have
@@ -177,3 +177,24 @@ native compilation or any of its six selected-suite executions is claimed.
 The prior 2be9/0606 source FAIL and independent counterexample remain in the
 author evidence as historical findings addressed by this new source delta.
 Current exact-scope independent review and native verification remain separate.
+
+## Later author evidence and native counterevidence
+
+The author 328-to-2bc6 publication adopts the identical Dashboard metadata
+entry and adds 89 documentation/evidence paths, preserved as the author's
+records. The fragment now describes Start/User and the metadata correction;
+only the missing own-PR citation on each of its two bullets is repaired here.
+No production function or earlier executed component input changed in this
+adoption. Source/component checks are therefore rebound, not repeated.
+
+The new native receipt at source328 records six completed suites /245 tests,
+but the Claude runtime suite records three explicit failures (lifecycle0,8,13)
+and times out600seconds after lifecycle47; case48 has no settled result.
+The first failure follows the standing-System assertion in the new lifecycle
+fixture. Full expected/received failure summaries are unavailable because the
+suite timed out. The inherited-child error in case13 is preserved separately.
+These observations are unresolved native counterevidence, not a repaired-suite
+PASS and not a measured failure of the differently composed local candidate.
+The independent author-source PASS predates these results. Earlier-source
+Qwen G3 failure and UI experiment records remain separate from this candidate,
+Official transport, production installation and our own execution claims.

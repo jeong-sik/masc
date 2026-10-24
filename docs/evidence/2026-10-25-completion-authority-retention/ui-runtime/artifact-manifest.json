@@ -1,0 +1,61 @@
+{
+  "scope": "New UI evidence artifacts only; independent source/native/runtime receipts elsewhere remain distinct",
+  "files": {
+    "README.md": {
+      "bytes": 3607,
+      "sha256": "f1ed7e6c1381a73ed4644f54d459bcf4dd0a1c16062da76538028c8881525d8e"
+    },
+    "after-metadata-fix-components.png": {
+      "bytes": 172206,
+      "sha256": "835827b3267363d37ceb1d63cfb8813fee6afc3503ac4f8e4eb8728d60226880"
+    },
+    "backend-binding.json": {
+      "bytes": 1375,
+      "sha256": "84aa3664b2bbdc5e484f738df6bad004dd84494b6907bddee6c977857ade30a1"
+    },
+    "browser-completion.json": {
+      "bytes": 199,
+      "sha256": "9b8ac14c5767586af8a25442b36fa11cb58b3e35f5ebd72a0040398947aa1187"
+    },
+    "captured-prompt-before-metadata-fix.png": {
+      "bytes": 141698,
+      "sha256": "034006839cb8d6f64d0f16daf94a24c2cf1bb711b5a57c7ee7a792561c5cd35a"
+    },
+    "dom-observation.json": {
+      "bytes": 1345,
+      "sha256": "f27a8708d1d7d4793e7f7ee6793b44689dba882c999925899d30b2bcfe0e75a6"
+    },
+    "frontend-binding.json": {
+      "bytes": 4417,
+      "sha256": "2fdc5507e2e17cfec3500ccd378743d154709533bfdbaa55839cf31f5702492c"
+    },
+    "frontend-stop.json": {
+      "bytes": 446,
+      "sha256": "62380b2013f4680901444fcaabd047530109f78f00719e8068fe98d0c01745a8"
+    },
+    "last-prompt-api.json": {
+      "bytes": 66283,
+      "sha256": "7100710c82f60cbcc77368111c8b23a44ddab64a720d74aabeb5366489c06362"
+    },
+    "memory-inspector-render-error.png": {
+      "bytes": 79970,
+      "sha256": "ac920dac57881f29e48d0590f455edaa00ecb5d683a19abafb33ed7b30e6da4a"
+    },
+    "persisted-prompt-capture.json": {
+      "bytes": 66204,
+      "sha256": "83840c81b9c0c2c369a3bbe8e2817bc71cf30540fb103a61c53e584db0603dc0"
+    },
+    "turn-record-components.json": {
+      "bytes": 5477,
+      "sha256": "8e5a85c063e9f600382c971122ebd4968f3238b46d6d89c5be9f9513cc308750"
+    },
+    "wire-system-binding.json": {
+      "bytes": 8313,
+      "sha256": "df7b29210aed4d9223cf2431247798639cd8f08105263a0aa72f2bad80ce9137"
+    },
+    "dashboard-authority-observation.png": {
+      "bytes": 154167,
+      "sha256": "a2a426efeb6fb331a0303cbff57463c8428eed9ed2416e835e600633a3993fbf"
+    }
+  }
+}

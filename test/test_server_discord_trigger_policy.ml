@@ -371,31 +371,31 @@ module Gw = Discord_gateway_state
    restart, so what it must hold is: an override wins, and clearing one returns
    to the configured answer rather than to the hardcoded baseline. *)
 
-let installed_policy () = ps (Runtime_params.get Connector_trigger_policy.discord)
+let installed_policy () = ps (Runtime_params.get Connector_trigger_params.discord)
 
 let set_override policy =
-  match Runtime_params.set Connector_trigger_policy.discord policy with
+  match Runtime_params.set Connector_trigger_params.discord policy with
   | Ok () -> ()
   | Error detail -> fail ("override rejected: " ^ detail)
 ;;
 
 let with_clean_override f =
   Fun.protect
-    ~finally:(fun () -> Runtime_params.clear Connector_trigger_policy.discord)
+    ~finally:(fun () -> Runtime_params.clear Connector_trigger_params.discord)
     f
 ;;
 
 let test_configured_answers_without_override () =
   with_clean_override (fun () ->
-    Runtime_params.clear Connector_trigger_policy.discord;
-    Connector_trigger_policy.set_discord_configured Gw.All;
+    Runtime_params.clear Connector_trigger_params.discord;
+    Connector_trigger_params.set_discord_configured Gw.All;
     check string "the configured policy answers when nothing overrides it"
       (ps Gw.All) (installed_policy ()))
 ;;
 
 let test_override_wins_over_configured () =
   with_clean_override (fun () ->
-    Connector_trigger_policy.set_discord_configured Gw.All;
+    Connector_trigger_params.set_discord_configured Gw.All;
     set_override Gw.Mention_only;
     check string "an operator override outranks env and TOML"
       (ps Gw.Mention_only) (installed_policy ()))
@@ -403,9 +403,9 @@ let test_override_wins_over_configured () =
 
 let test_clear_returns_to_configured () =
   with_clean_override (fun () ->
-    Connector_trigger_policy.set_discord_configured Gw.Mention_or_thread;
+    Connector_trigger_params.set_discord_configured Gw.Mention_or_thread;
     set_override Gw.All;
-    Runtime_params.clear Connector_trigger_policy.discord;
+    Runtime_params.clear Connector_trigger_params.discord;
     check string "clearing returns to what env and TOML said, not the baseline"
       (ps Gw.Mention_or_thread) (installed_policy ()))
 ;;
@@ -426,8 +426,8 @@ let test_status_follows_param_set_clear_and_failed_audit () =
   with_temp_dir @@ fun base_path ->
   with_env Env_config_core.base_path_env_key base_path (fun () ->
     with_clean_override (fun () ->
-      Connector_trigger_policy.set_discord_configured Gw.Mention_or_thread;
-      let key = Runtime_params.key Connector_trigger_policy.discord in
+      Connector_trigger_params.set_discord_configured Gw.Mention_or_thread;
+      let key = Runtime_params.key Connector_trigger_params.discord in
       let mutate f =
         match
           Server_routes_http_routes_activity.mutate_runtime_param_with_effects

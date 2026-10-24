@@ -493,8 +493,8 @@ let ensure_init () =
   let (_ : _) = Runtime_params.get dashboard_min_border_length in
   let (_ : _) = Runtime_params.get dashboard_agent_quiet_threshold_sec in
   let (_ : _) = Runtime_params.get dashboard_agent_stuck_threshold_sec in
-  let (_ : _) = Runtime_params.get Connector_trigger_policy.discord in
-  let (_ : _) = Runtime_params.get Connector_trigger_policy.slack in
+  let (_ : _) = Runtime_params.get Connector_trigger_params.discord in
+  let (_ : _) = Runtime_params.get Connector_trigger_params.slack in
   Keeper_config.ensure_runtime_params_init ()
 
 let surfaces_json () =

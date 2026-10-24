@@ -16,7 +16,7 @@
   channel_gate_telegram_state
   channel_gate_metrics
   connector_ingress_lane
-  connector_trigger_policy
+  connector_trigger_params
   discord_api_version
   discord_observability
   gate_connector_observability

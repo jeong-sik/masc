@@ -15,7 +15,7 @@ The repair keeps one generic registry and one typed trigger-policy authority:
 - Move `Runtime_params.ml/.mli` byte for byte into existing `masc_core`, whose
   declared dependencies already own all modules the implementation uses.
 - Move the sole enum helper and two trigger parameter declarations/default
-  cells from `Runtime_settings` to gate-owned `Connector_trigger_policy`.
+  cells from `Runtime_settings` to gate-owned `Connector_trigger_params`.
   Existing persisted keys, parsers, validators, metadata, configured defaults
   and override behavior are preserved. The old declarations are removed.
 - Make ingress, disconnected status, and runtime API regressions read the same
@@ -41,3 +41,9 @@ excluded, and a dispatch alone is not a successful execution. No local Dune
 build, broad CI, installed binary replacement, restart or live transport repair
 is claimed. The original five native layer identities are preserved; this is
 an upper repair layer and the whole stack integrates through its new top only.
+
+Source review caught a name collision between the first extraction name and
+the existing root `Connector_trigger_policy` TOML loader. The extracted typed
+handles are therefore named `Connector_trigger_params`; the loader module and
+its `Make`/`load_error` API remain unchanged. Run 40063030116 targeted the
+pre-correction head and is not validation of this corrected source.

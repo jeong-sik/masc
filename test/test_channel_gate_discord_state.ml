@@ -228,7 +228,7 @@ let test_conditional_unbind_preserves_reassigned_binding () =
 let test_connectors_json_advertises_gate_connector_descriptor () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
-    Connector_trigger_policy.set_discord_configured Discord_gateway_state.All;
+    Connector_trigger_params.set_discord_configured Discord_gateway_state.All;
     ignore
       (Discord_state.bind ~channel_id:"1234567890" ~keeper_name:"luna"
          ~actor_name:"dashboard");

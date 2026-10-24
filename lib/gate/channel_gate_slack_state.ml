@@ -196,7 +196,7 @@ let read_status ~audit_limit =
   let recent_audit = read_recent_audit ~limit:audit_limit in
   {
     gateway_state;
-    trigger_policy = Runtime_params.get Connector_trigger_policy.slack;
+    trigger_policy = Runtime_params.get Connector_trigger_params.slack;
     available;
     error;
     binding_store_path = binding_store_path ();

@@ -575,6 +575,12 @@ let test_reasonless_goal_reply_requires_explicit_retry () =
         | Some receipt -> receipt | None -> Alcotest.fail "original reply was not retained" in
       Alcotest.(check bool) "raw model verdict and actual lookup survive reopening" true
         (receipt.result.verdict = Some (AR.Approve reason) && receipt.tools <> []);
+      (match R.get (R.global ()) ~run_id:receipt.run.run_id with
+       | Some (R.Review {status=R.Completed {outcome=R.Deferred _; evaluated_verdict=None; tools; _}; _}) ->
+         Alcotest.(check bool) "published non-verdict preserves the actual raw tool observations" true
+           (tools=receipt.tools)
+       | None | Some (R.Review _ | R.Scan_skipped _) ->
+         Alcotest.fail "reasonless receipt was not published as a valid deferred non-verdict");
       Atomic.set AR.run_llm_reviewer_fn (actual_approve calls);
       (match Agent.process_pending_work config {Agent.goal_id=subject.goal_id} with
        | Deferred Verdict_without_reason -> ()
@@ -641,7 +647,7 @@ let test_finished_publication_survives_registry_retention () = with_workspace (f
       R.register_running registry ~run_id ~goal_id:subject.goal_id ~request_id:subject.request_id
         ~criterion:subject.criterion ~review_kind:R.Proof ~authority_actor:"verifier_exact"
         ~started_at:(original_run.started_at +. float_of_int index);
-      R.mark_completed registry ~run_id ~outcome:R.Committed ~evaluated_verdict:None
+      R.mark_completed registry ~run_id ~outcome:(R.Deferred {detail="newer observation"}) ~evaluated_verdict:None
         ~tools:[] ~elapsed_s:0. ()
     done;
     hosted (H.commit_proof ~config ~store ~registry (host_load store original));
@@ -659,21 +665,69 @@ let test_finished_publication_survives_registry_retention () = with_workspace (f
       (In_channel.with_open_bin registry_path In_channel.input_all);
     Alcotest.(check int) "no reviewer redispatch" 1 !calls))
 
-let test_raised_review_retains_actual_tool_observation () = with_workspace (fun config store _ ->
+let reviewer_exit_after_actual_lookup calls ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+    ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
+    ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
+  incr calls;
+  let input = `Assoc ["file_path", `String measurement_path] in
+  let result = lookup.AR.dispatch ~name:"tool_read_file" ~args:input in
+  if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
+  on_tool_result ~input result;
+  raise Exit
+
+let test_caught_reviewer_exit_retains_actual_unknown_receipt () = with_workspace (fun config store _ ->
   let authority,retained = host_prepared config store in
   let original = W.original retained in
   let calls = ref 0 in
-  with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
-      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
-      ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-    incr calls;
-    let input = `Assoc ["file_path", `String measurement_path] in
-    let result = lookup.AR.dispatch ~name:"tool_read_file" ~args:input in
-    if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
-    on_tool_result ~input result;
-    raise Exit) (fun () ->
-      (try ignore (run store retained authority); Alcotest.fail "review exception was swallowed"
-       with Exit -> ());
+  with_reviewer (reviewer_exit_after_actual_lookup calls) (fun () ->
+    (match run store retained authority with
+     | Error (W.Execution_pending _) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "caught reviewer error did not retain an unknown dispatch");
+    let restored_store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+    let restored = host_load restored_store original in
+    let receipt = match checked (W.observed_receipt restored) with
+      | Some receipt -> receipt | None -> Alcotest.fail "caught reviewer error lost its raw result" in
+    let caught_error = Agent_core.Error.Internal
+      (Printf.sprintf "review evaluator raised unexpectedly: %s" (Printexc.to_string Exit)) in
+    Alcotest.(check bool) "caught Exit retains the typed unavailable non-verdict" true
+      (receipt.result.verdict=None && receipt.result.gate=AR.Evaluator_unavailable
+       && receipt.result.retryable_runtimes=[]);
+    Alcotest.(check (option string)) "raw caught Internal error survives reopening"
+      (Some (Agent_core.Error.to_string caught_error)) receipt.result.fallback_reason;
+    let tools = checked (W.tool_observations restored) in
+    Alcotest.(check bool) "caught reviewer error retains its actual lookup" true
+      (tools=receipt.tools && List.exists (fun (tool : Verification_run_registry.tool_observation) ->
+        tool.tool_name="tool_read_file") tools);
+    let registry = R.replay (Filename.concat config.base_path "caught-review-history.jsonl") in
+    hosted (H.publish ~store:restored_store ~registry restored
+      ~outcome:(R.Deferred {detail="caught reviewer error"}));
+    (match R.get registry ~run_id:receipt.run.run_id with
+     | Some (R.Review {status=R.Completed {outcome=R.Deferred _; evaluated_verdict=None; tools=observed; _}; _}) ->
+       Alcotest.(check bool) "caught error publishes its actual tools as deferred" true (observed=tools)
+     | None | Some (R.Review _ | R.Scan_skipped _) -> Alcotest.fail "caught error observation is absent");
+    (match run restored_store restored authority with
+     | Error (W.Execution_pending _) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "caught reviewer error redispatched its unknown original");
+    Alcotest.(check int) "caught reviewer is never replayed" 1 !calls))
+
+let test_raised_review_retains_actual_tool_observation () = with_workspace (fun config store _ ->
+  let exception Observation_failed in
+  let authority,retained = host_prepared config store in
+  let original = W.original retained in
+  let calls = ref 0 and observer_calls = ref 0 in
+  with_reviewer (reviewer_exit_after_actual_lookup calls) (fun () ->
+      let old_observer = Atomic.get AR.outcome_observer_fn in
+      Fun.protect ~finally:(fun () -> Atomic.set AR.outcome_observer_fn old_observer) (fun () ->
+        (* The reviewer Exit becomes typed Internal inside AR. This existing
+           post-review observer runs outside that catch boundary and raises
+           a distinct exception that must actually escape to the worker. *)
+        Atomic.set AR.outcome_observer_fn (fun ~outcome:_ ~runtime:_ ->
+          incr observer_calls;
+          Alcotest.(check int) "escaping observer follows the actual reviewer lookup" 1 !calls;
+          raise Observation_failed);
+        (try ignore (run store retained authority); Alcotest.fail "observer exception was swallowed"
+         with Observation_failed -> ()));
+      Alcotest.(check int) "the original observer exception escaped exactly once" 1 !observer_calls;
       let restored_store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
       let restored = host_load restored_store original in
       let tools = checked (W.tool_observations restored) in
@@ -681,9 +735,11 @@ let test_raised_review_retains_actual_tool_observation () = with_workspace (fun 
         (List.exists (fun (tool : Verification_run_registry.tool_observation) ->
           tool.tool_name="tool_read_file") tools);
       let registry = R.replay (Filename.concat config.base_path "raised-review-history.jsonl") in
-      hosted (H.publish ~store:restored_store ~registry restored ~outcome:(R.Raised {detail="Exit"}));
+      let detail = Printexc.to_string Observation_failed in
+      hosted (H.publish ~store:restored_store ~registry restored ~outcome:(R.Raised {detail}));
       (match R.get registry ~run_id:(W.run_identity retained).run_id with
-       | Some (R.Review {status=R.Completed {outcome=R.Raised _; tools=observed; _}; _}) ->
+       | Some (R.Review {status=R.Completed {outcome=R.Raised {detail=observed_detail}; tools=observed; _}; _}) ->
+         Alcotest.(check string) "Raised names the actual escaping observer exception" detail observed_detail;
          Alcotest.(check bool) "raised host observation preserves the actual tools" true (observed=tools)
        | None | Some (R.Review _ | R.Scan_skipped _) -> Alcotest.fail "raised observation is absent");
       (match run restored_store restored authority with
@@ -701,6 +757,7 @@ let () = Alcotest.run "retained Goal worker" ["execution", [
   Alcotest.test_case "actual integral receipt commits after restart and rejects alteration" `Quick test_actual_integral_receipt_commits_after_restart;
   Alcotest.test_case "actual agent restores before lookup and registry" `Quick test_actual_agent_restores_before_lookup_and_registry;
   Alcotest.test_case "finished publication survives registry retention" `Quick test_finished_publication_survives_registry_retention;
+  Alcotest.test_case "caught reviewer Exit retains its actual unknown receipt" `Quick test_caught_reviewer_exit_retains_actual_unknown_receipt;
   Alcotest.test_case "raised review retains actual tool observation" `Quick test_raised_review_retains_actual_tool_observation;
   Alcotest.test_case "actual proof partial write and phase-moved boot" `Quick test_actual_partial_proof_and_nonverifying_boot;
   Alcotest.test_case "actual explicit retry and unknown fence" `Quick test_actual_explicit_retry_and_unknown_fence;

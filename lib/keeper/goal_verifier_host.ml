@@ -56,10 +56,11 @@ let completion ~registry retained =
   let* tools = worker (W.tool_observations retained) in
   match receipt with
   | Some receipt ->
+    let result = W.goal_admission_result receipt.result in
     let evaluated = Option.map (function
       | AR.Approve reason -> R.Approved {reason}
-      | Reject reason -> R.Rejected {reason}) receipt.result.verdict in
-    Ok {evaluated; runtime=Some receipt.result.evaluator_runtime; tools; elapsed=receipt.elapsed_s}
+      | Reject reason -> R.Rejected {reason}) result.verdict in
+    Ok {evaluated; runtime=Some result.evaluator_runtime; tools; elapsed=receipt.elapsed_s}
   | None ->
     let* prior = read_registry ~registry retained in
     let elapsed = match prior with

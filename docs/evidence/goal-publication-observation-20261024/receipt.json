@@ -74,5 +74,6 @@
     ],
     "task_suites": "not repeated; Task source unchanged in this layer",
     "status_at_receipt": "No actual result for this repair yet; final exact-head dispatch and review receipts belong on the PR."
-  }
+  },
+  "pull_request": 45710
 }

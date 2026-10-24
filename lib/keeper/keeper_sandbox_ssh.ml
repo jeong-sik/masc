@@ -20,18 +20,16 @@ let runtime_config_path ~base_path =
   if Sys.file_exists workspace_path then Some workspace_path else Runtime.config_path ()
 ;;
 
-let resolve_endpoint_name ~base_path ~name:endpoint_name =
-  let endpoint_name = String.trim endpoint_name in
+let read_runtime_config ~base_path ~context =
   let* config_path =
     runtime_config_path ~base_path
     |> Option.to_result
          ~none:
            (Printf.sprintf
-              "remote_ssh_runtime_config_missing: endpoint %s cannot be resolved because runtime.toml is unavailable"
-              endpoint_name)
+              "remote_ssh_runtime_config_missing: %s cannot be resolved because runtime.toml is unavailable"
+              context)
   in
-  let* runtime_config =
-    Runtime_toml.parse_file config_path
+  Runtime_toml.parse_file config_path
     |> Result.map_error (fun errors ->
       let details =
         errors
@@ -39,8 +37,19 @@ let resolve_endpoint_name ~base_path ~name:endpoint_name =
         |> String.concat "; "
       in
       Printf.sprintf
-        "remote_ssh_runtime_config_invalid: endpoint %s: %s"
-        endpoint_name details)
+        "remote_ssh_runtime_config_invalid: %s: %s"
+        context details)
+;;
+
+let configured_endpoints ~base_path =
+  let* config = read_runtime_config ~base_path ~context:"endpoint catalog" in
+  Ok config.Runtime_schema.exec_ssh_endpoints
+;;
+
+let resolve_endpoint_name ~base_path ~name:endpoint_name =
+  let endpoint_name = String.trim endpoint_name in
+  let* runtime_config =
+    read_runtime_config ~base_path ~context:("endpoint " ^ endpoint_name)
   in
   Runtime_schema.exec_ssh_endpoint runtime_config endpoint_name
   |> Option.to_result
@@ -83,27 +92,34 @@ let ensure_control_path_dir path =
          path msg)
 ;;
 
-let create ?ssh_bin ~base_path ~keeper_name
-    ~(endpoint : Exec_ssh_endpoint.t) () =
-  let* () =
-    Exec_ssh_endpoint.validate_destination
-      ~host:endpoint.host ~user:endpoint.user
-  in
+let openssh_configuration ?ssh_bin ~base_path
+    ~(endpoint : Exec_ssh_endpoint.t) () : Keeper_sandbox_remote.openssh =
   let ssh_bin =
     match ssh_bin with
     | Some path -> path
     | None -> Option.value (Atomic.get ssh_bin_override) ~default:"ssh"
   in
   let control_path_dir = Config_dir_resolver.run_ssh_dir ~base_path in
+  { endpoint
+  ; ssh_bin
+  ; identity_file = resolve_path ~base_path endpoint.identity_file
+  ; known_hosts_file = resolve_path ~base_path endpoint.known_hosts_file
+  ; control_path_dir
+  }
+;;
+
+let create ?ssh_bin ~base_path ~keeper_name
+    ~(endpoint : Exec_ssh_endpoint.t) () =
+  let* () =
+    Exec_ssh_endpoint.validate_destination
+      ~host:endpoint.host ~user:endpoint.user
+  in
+  let openssh = openssh_configuration ?ssh_bin ~base_path ~endpoint () in
+  let control_path_dir = openssh.control_path_dir in
   let* () = ensure_control_path_dir control_path_dir in
   Ok
     (Keeper_sandbox_remote.of_openssh ~base_path ~keeper_name
-       { endpoint
-       ; ssh_bin
-       ; identity_file = resolve_path ~base_path endpoint.identity_file
-       ; known_hosts_file = resolve_path ~base_path endpoint.known_hosts_file
-       ; control_path_dir
-       })
+       openssh)
 ;;
 
 let sandbox_endpoint ~base_path (endpoint : Exec_ssh_endpoint.t)

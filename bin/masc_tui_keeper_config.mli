@@ -59,10 +59,12 @@ val reopen_edit_on_current : before:Yojson.Safe.t -> edited:string -> current:Yo
     for review; this does not authorize or dispatch a save. *)
 
 val sandbox_patch : profile:Keeper_sandbox_config.sandbox_profile -> Yojson.Safe.t -> (Yojson.Safe.t option, string) result
-(** Prepare only the absolute Sandbox profile change using this snapshot's
-    composite revision. [None] proves the observed profile already matches;
-    [Some patch] contains only that profile and expected revision. Invalid
-    revision/profile observations stay errors, including the no-change case. *)
+(** Prepare the Sandbox selection using this snapshot's composite revision.
+    SSH keeps an explicitly selected registered endpoint or selects the sole
+    registered endpoint; an empty/ambiguous/unavailable registry is refused
+    with directions to edit the endpoint. SSH selects inherited networking;
+    other profiles clear the endpoint in the same CAS patch. [None] means the
+    observed combination already matches. Invalid observations stay errors. *)
 
 val view_lines : sanitize:(string -> string) -> Yojson.Safe.t -> string list
 (** The whole Settings pane, styled. Every row carries a glyph saying whether

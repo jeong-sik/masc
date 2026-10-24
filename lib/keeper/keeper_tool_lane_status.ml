@@ -156,7 +156,8 @@ let handle ~(config : Workspace.config) ~(meta : keeper_meta) ~args:_ : Yojson.S
     Keeper_sandbox_ssh.resolve_endpoint
       ~base_path:config.base_path ~keeper_name:meta.name
     |> Result.map (fun endpoint ->
-      Keeper_sandbox_remote.report_openssh ~base_path:config.base_path ~endpoint)
+      Keeper_sandbox_ssh.openssh_configuration ~base_path:config.base_path ~endpoint ()
+      |> Keeper_sandbox_remote.report_openssh ~base_path:config.base_path)
     |> with_remote_report ~meta
   | Keeper_types_profile_sandbox.Micro_vm ->
     Keeper_turn_sandbox_runtime.microvm_attached_endpoint ~config ~meta ()

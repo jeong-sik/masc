@@ -8,7 +8,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperInputPolicy, KeeperConfig, KeeperSystemPromptPreview, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, KeeperConfigRuntimeSync, SandboxProfile } from '../types'
+import type { KeeperInputPolicy, KeeperConfig, KeeperSystemPromptPreview, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, KeeperConfigRuntimeSync, SandboxProfile, RemoteSshEndpoint, RemoteSshEndpointCatalog, RemoteSshProbe } from '../types'
 import { UNKNOWN_NETWORK_MODE, UNKNOWN_SANDBOX_PROFILE } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
@@ -37,6 +37,53 @@ function asLooseNullableNumber(value: unknown): number | null {
 function decodeInputPolicy(value: unknown): KeeperInputPolicy {
   if (value === 'small' || value === 'wide') return value
   throw new Error('Invalid keeper config response: input_policy must be small or wide')
+}
+
+function decodeRemoteSshEndpoints(value: unknown): RemoteSshEndpointCatalog {
+  const invalid = (detail: string): RemoteSshEndpointCatalog => ({ state: 'unavailable', detail })
+  if (!isRecord(value)) return invalid('SSH endpoint 목록을 읽지 못했습니다')
+  if (value.state === 'unavailable' && typeof value.detail === 'string') return { state: 'unavailable', detail: value.detail }
+  if (value.state !== 'available' || !Array.isArray(value.endpoints)) return invalid('SSH endpoint 목록 응답이 올바르지 않습니다')
+  const endpoints: RemoteSshEndpoint[] = []
+  const names = new Set<string>()
+  for (const endpoint of value.endpoints) {
+    if (!isRecord(endpoint) || typeof endpoint.name !== 'string' || !endpoint.name.trim()
+      || names.has(endpoint.name) || typeof endpoint.host !== 'string'
+      || typeof endpoint.user !== 'string' || typeof endpoint.remote_root !== 'string'
+      || !Number.isInteger(endpoint.port) || typeof endpoint.port !== 'number'
+      || endpoint.port < 1 || endpoint.port > 65535 || !isRecord(endpoint.observation)) {
+      return invalid('SSH endpoint 선언을 해석하지 못했습니다')
+    }
+    const observation = endpoint.observation
+    const rawProbe = observation.probe
+    let probe: RemoteSshProbe
+    if (!isRecord(rawProbe)) return invalid('SSH probe 관측을 해석하지 못했습니다')
+    if (rawProbe.state === 'not_asked') probe = { state: 'not_asked' }
+    else if (rawProbe.state === 'answered' && isPositiveSafeInteger(rawProbe.protocol_major)
+      && (rawProbe.shim_release === null || typeof rawProbe.shim_release === 'string')
+      && typeof rawProbe.observed_at_unix === 'number' && Number.isFinite(rawProbe.observed_at_unix)) {
+      probe = { state: 'answered', protocol_major: rawProbe.protocol_major, shim_release: rawProbe.shim_release, observed_at_unix: rawProbe.observed_at_unix }
+    } else if (rawProbe.state === 'failed' && typeof rawProbe.at_unix === 'number'
+      && Number.isFinite(rawProbe.at_unix) && typeof rawProbe.detail === 'string') {
+      probe = { state: 'failed', at_unix: rawProbe.at_unix, detail: rawProbe.detail }
+    } else return invalid('SSH probe 상태가 올바르지 않습니다')
+    const dispatch = observation.last_dispatch
+    let last_dispatch: RemoteSshEndpoint['observation']['last_dispatch']
+    if (dispatch === null) last_dispatch = null
+    else if (isRecord(dispatch) && typeof dispatch.at_unix === 'number' && Number.isFinite(dispatch.at_unix)) {
+      if (dispatch.outcome === 'payload_finished' && typeof dispatch.status === 'string') {
+        last_dispatch = { outcome: 'payload_finished', at_unix: dispatch.at_unix, status: dispatch.status }
+      } else if (dispatch.outcome === 'lane_failed' && typeof dispatch.failure === 'string' && typeof dispatch.detail === 'string') {
+        last_dispatch = { outcome: 'lane_failed', at_unix: dispatch.at_unix, failure: dispatch.failure, detail: dispatch.detail }
+      } else return invalid('SSH 실행 결과를 해석하지 못했습니다')
+    } else return invalid('SSH 실행 관측이 올바르지 않습니다')
+    if (observation.operator_action !== null && typeof observation.operator_action !== 'string') return invalid('SSH 복구 안내를 해석하지 못했습니다')
+    names.add(endpoint.name)
+    endpoints.push({ name: endpoint.name, host: endpoint.host, user: endpoint.user, port: endpoint.port,
+      remote_root: endpoint.remote_root,
+      observation: { probe, last_dispatch, operator_action: observation.operator_action } })
+  }
+  return { state: 'available', endpoints }
 }
 
 // Decodes only this field: an unknown shape becomes a visible decode failure
@@ -390,6 +437,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     sandbox_profile: asNullableString(data.sandbox_profile) ?? UNKNOWN_SANDBOX_PROFILE,
     network_mode: asNullableString(data.network_mode) ?? UNKNOWN_NETWORK_MODE,
     remote_endpoint: asNullableString(data.remote_endpoint),
+    remote_ssh_endpoints: decodeRemoteSshEndpoints(data.remote_ssh_endpoints),
     voice_always_allow: data.voice_always_allow !== undefined ? asLooseBoolean(data.voice_always_allow) : null,
     keeper_last_error: asNullableString(data.keeper_last_error),
     sandbox_roots: normalizeStringList(data.sandbox_roots),

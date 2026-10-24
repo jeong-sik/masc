@@ -5,12 +5,28 @@ val resolve_endpoint_name :
   base_path:string -> name:string -> (Exec_ssh_endpoint.t, string) result
 (** Resolve one explicit endpoint name against runtime.toml. *)
 
+val configured_endpoints :
+  base_path:string -> (Exec_ssh_endpoint.t list, string) result
+(** Read the effective runtime endpoint registry without connecting, probing,
+    creating a runner or changing readiness state. An unavailable or invalid
+    registry is an error, distinct from a successfully read empty registry. *)
+
 val resolve_endpoint :
   base_path:string ->
   keeper_name:string ->
   (Exec_ssh_endpoint.t, string) result
 (** Resolve the keeper manifest's [remote_endpoint] against runtime.toml.
     Missing configuration and unknown names fail closed. *)
+
+val openssh_configuration :
+  ?ssh_bin:string ->
+  base_path:string ->
+  endpoint:Exec_ssh_endpoint.t ->
+  unit ->
+  Keeper_sandbox_remote.openssh
+(** Resolve the transport's binary, credential path references and control
+    directory exactly as {!create} does. This does not validate, read key
+    contents, create directories, start a runner or contact an endpoint. *)
 
 val create :
   ?ssh_bin:string ->

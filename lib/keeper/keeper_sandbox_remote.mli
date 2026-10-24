@@ -198,9 +198,13 @@ val outdated_shim_repair : t -> string
     For Docker the server knows only the path it execs in the container, and
     the sentence says no more than that. *)
 
-val report_openssh : base_path:string -> endpoint:Exec_ssh_endpoint.t -> lane_report
-(** Read the same endpoint-scoped observations as the runner without creating
-    a runner, an SSH control directory, a cache entry, or a remote probe. *)
+val report_openssh : base_path:string -> openssh -> lane_report
+(** Read observations bound to this complete endpoint declaration and resolved
+    transport configuration without creating a runner, SSH control directory,
+    cache entry, or remote probe. A changed host, root, credential path, policy
+    or transport does not inherit the previous declaration's observations.
+    File contents replaced at an unchanged credential path and an already
+    connected SSH ControlMaster are not identified by this config value. *)
 
 val report : t -> lane_report
 

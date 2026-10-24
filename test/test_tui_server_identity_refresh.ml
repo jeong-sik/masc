@@ -3529,7 +3529,14 @@ let test_settings_save_not_sent_preserves_origin_input () =
 let sandbox_save_snapshot profile =
   let observed = (keeper_settings_snapshot ()).Masc_tui_types.kss_observed in
   match observed with
-  | `Assoc fields -> `Assoc (("sandbox_profile",`String (Keeper_sandbox_config.sandbox_profile_to_string profile)) :: fields)
+  | `Assoc fields -> `Assoc
+      ([ "sandbox_profile",`String (Keeper_sandbox_config.sandbox_profile_to_string profile)
+       ; "network_mode",`String "none"
+       ; "remote_endpoint",`Null
+       ; "remote_ssh_endpoints",`Assoc
+           [ "state",`String "available"
+           ; "endpoints",`List [ `Assoc [ "name",`String "builder" ] ] ]
+       ] @ fields)
   | _ -> Alcotest.fail "invalid settings fixture"
 
 let test_sandbox_shortcut_uses_observed_revision () =
@@ -3537,10 +3544,12 @@ let test_sandbox_shortcut_uses_observed_revision () =
   let patch = match Masc_tui_keeper_config.sandbox_patch ~profile:Keeper_sandbox_config.Remote_ssh snapshot with
     | Ok (Some patch) -> patch | Ok None -> Alcotest.fail "profile change disappeared"
     | Error detail -> Alcotest.fail detail in
-  Alcotest.(check bool) "shortcut sends only the selected profile and observed revision" true
+  Alcotest.(check bool) "shortcut sends one complete SSH selection against the observed revision" true
     (match patch with
-     | `Assoc fields -> List.length fields=2
+     | `Assoc fields -> List.length fields=4
          && List.assoc_opt "sandbox_profile" fields = Some (`String "remote_ssh")
+         && List.assoc_opt "remote_endpoint" fields = Some (`String "builder")
+         && List.assoc_opt "network_mode" fields = Some (`String "inherit")
          && List.assoc_opt "expected_config_revision" fields = Some (Yojson.Safe.Util.member "config_revision" snapshot)
      | _ -> false);
   Alcotest.(check bool) "already selected profile needs no write" true

@@ -1,0 +1,647 @@
+{
+  "test/test_goal_verifier_worker": {
+    "start_line": 6,
+    "started_at": "2026-10-24T13:45:03Z",
+    "cases": [
+      {
+        "marker": "OK",
+        "line": 27,
+        "description": "execution          0   actual retained visual lookup and rest..."
+      },
+      {
+        "marker": "OK",
+        "line": 39,
+        "description": "execution          1   unknown and cancellation never redispa..."
+      },
+      {
+        "marker": "OK",
+        "line": 50,
+        "description": "execution          2   same-original pre-admission repair."
+      },
+      {
+        "marker": "OK",
+        "line": 56,
+        "description": "execution          3   authority destination and strict inven..."
+      },
+      {
+        "marker": "OK",
+        "line": 83,
+        "description": "execution          4   linked frontier restores the original ..."
+      },
+      {
+        "marker": "OK",
+        "line": 96,
+        "description": "execution          5   actual Goal proof commit reply loss an..."
+      },
+      {
+        "marker": "OK",
+        "line": 109,
+        "description": "execution          6   actual integral receipt commits after ..."
+      },
+      {
+        "marker": "OK",
+        "line": 122,
+        "description": "execution          7   actual agent restores before lookup an..."
+      },
+      {
+        "marker": "OK",
+        "line": 134,
+        "description": "execution          8   finished publication survives registry..."
+      },
+      {
+        "marker": "OK",
+        "line": 145,
+        "description": "execution          9   caught reviewer Exit retains its actua..."
+      },
+      {
+        "marker": "OK",
+        "line": 156,
+        "description": "execution         10   raised review retains actual tool obse..."
+      },
+      {
+        "marker": "OK",
+        "line": 225,
+        "description": "execution         11   actual proof partial write and phase-m..."
+      },
+      {
+        "marker": "OK",
+        "line": 248,
+        "description": "execution         12   actual explicit retry and unknown fence."
+      },
+      {
+        "marker": "OK",
+        "line": 295,
+        "description": "execution         13   reasonless Goal reply needs an explici..."
+      },
+      {
+        "marker": "OK",
+        "line": 318,
+        "description": "execution         14   actual bound suspend and drop."
+      },
+      {
+        "marker": "OK",
+        "line": 329,
+        "description": "execution         15   cloned workspace refuses the original ..."
+      }
+    ],
+    "summary": [
+      {
+        "line": 331,
+        "text": "Test Successful in 1.619s. 16 tests run."
+      }
+    ],
+    "runner_terminal": [
+      {
+        "line": 333,
+        "text": "[targeted] test/test_goal_verifier_worker: OK in 2s"
+      }
+    ],
+    "counts": {
+      "OK": 16,
+      "FAIL": 0,
+      "SKIP": 0,
+      "TODO": 0
+    }
+  },
+  "test/test_goal_verification_agent": {
+    "start_line": 335,
+    "started_at": "2026-10-24T13:45:05Z",
+    "cases": [
+      {
+        "marker": "OK",
+        "line": 362,
+        "description": "submitted evidence                  0   pending proof binds e..."
+      },
+      {
+        "marker": "OK",
+        "line": 378,
+        "description": "submitted evidence                  1   invalid evidence leav..."
+      },
+      {
+        "marker": "OK",
+        "line": 404,
+        "description": "historical review evidence          0   superseded review kee..."
+      },
+      {
+        "marker": "OK",
+        "line": 423,
+        "description": "drain                               0   wake after deferred p..."
+      },
+      {
+        "marker": "OK",
+        "line": 442,
+        "description": "drain                               1   same-request explicit..."
+      },
+      {
+        "marker": "OK",
+        "line": 478,
+        "description": "drain                               2   deferred review is an..."
+      },
+      {
+        "marker": "OK",
+        "line": 490,
+        "description": "drain                               3   raised review is anno..."
+      },
+      {
+        "marker": "OK",
+        "line": 504,
+        "description": "drain                               4   pending before phase ..."
+      },
+      {
+        "marker": "OK",
+        "line": 519,
+        "description": "drain                               5   reopen from verifying..."
+      },
+      {
+        "marker": "OK",
+        "line": 535,
+        "description": "drain                               6   new request rejects a..."
+      },
+      {
+        "marker": "OK",
+        "line": 551,
+        "description": "drain                               7   proof pending drains ..."
+      },
+      {
+        "marker": "OK",
+        "line": 568,
+        "description": "drain                               8   goal proof reads the ..."
+      },
+      {
+        "marker": "OK",
+        "line": 588,
+        "description": "drain                               9   a refuted goal can re..."
+      },
+      {
+        "marker": "OK",
+        "line": 600,
+        "description": "drain                              10   goal proof surface su..."
+      },
+      {
+        "marker": "OK",
+        "line": 612,
+        "description": "drain                              11   refuted proof returns..."
+      },
+      {
+        "marker": "OK",
+        "line": 620,
+        "description": "non-verdicts keep evidence          0   scan preserves source..."
+      },
+      {
+        "marker": "OK",
+        "line": 639,
+        "description": "non-verdicts keep evidence          1   skipped scan records ..."
+      },
+      {
+        "marker": "OK",
+        "line": 646,
+        "description": "non-verdicts keep evidence          2   healthy store scan re..."
+      },
+      {
+        "marker": "OK",
+        "line": 656,
+        "description": "non-verdicts keep evidence          3   lane unavailable keep..."
+      },
+      {
+        "marker": "OK",
+        "line": 668,
+        "description": "non-verdicts keep evidence          4   malformed reply fails..."
+      },
+      {
+        "marker": "OK",
+        "line": 679,
+        "description": "non-verdicts keep evidence          5   all slots failed keep..."
+      },
+      {
+        "marker": "OK",
+        "line": 688,
+        "description": "non-verdicts keep evidence          6   approve without a sta..."
+      },
+      {
+        "marker": "OK",
+        "line": 701,
+        "description": "in-flight criterion edits           0   target edit invalidat..."
+      },
+      {
+        "marker": "OK",
+        "line": 714,
+        "description": "in-flight criterion edits           1   target ABA invalidate..."
+      },
+      {
+        "marker": "OK",
+        "line": 728,
+        "description": "in-flight criterion edits           2   priority edit preserv..."
+      },
+      {
+        "marker": "OK",
+        "line": 746,
+        "description": "transient retry                     0   provider recovery nee..."
+      },
+      {
+        "marker": "OK",
+        "line": 758,
+        "description": "transient retry                     1   drop invalidates an o..."
+      },
+      {
+        "marker": "OK",
+        "line": 782,
+        "description": "transient retry                     2   a stated provider res..."
+      },
+      {
+        "marker": "OK",
+        "line": 803,
+        "description": "permanent refusal                   0   retired model candida..."
+      },
+      {
+        "marker": "OK",
+        "line": 816,
+        "description": "permanent refusal                   1   retired model is filt..."
+      },
+      {
+        "marker": "OK",
+        "line": 827,
+        "description": "re-arm                              0   committed proven proo..."
+      },
+      {
+        "marker": "OK",
+        "line": 838,
+        "description": "re-arm                              1   committed refuted pro..."
+      },
+      {
+        "marker": "OK",
+        "line": 860,
+        "description": "re-arm                              2   one unreconcilable go..."
+      },
+      {
+        "marker": "OK",
+        "line": 874,
+        "description": "re-arm                              3   a clean scan replaces..."
+      },
+      {
+        "marker": "OK",
+        "line": 884,
+        "description": "re-arm                              4   verifying goal with a..."
+      },
+      {
+        "marker": "OK",
+        "line": 897,
+        "description": "candle snapshot                     0   a passing verdict lea..."
+      },
+      {
+        "marker": "OK",
+        "line": 908,
+        "description": "candle snapshot                     1   without a candle.toml..."
+      },
+      {
+        "marker": "OK",
+        "line": 919,
+        "description": "candle snapshot                     2   a refutation leaves n..."
+      },
+      {
+        "marker": "OK",
+        "line": 933,
+        "description": "candle snapshot                     3   a snapshot that canno..."
+      }
+    ],
+    "summary": [
+      {
+        "line": 935,
+        "text": "Test Successful in 71.191s. 39 tests run."
+      }
+    ],
+    "runner_terminal": [
+      {
+        "line": 937,
+        "text": "[targeted] test/test_goal_verification_agent: OK in 71s"
+      }
+    ],
+    "counts": {
+      "OK": 39,
+      "FAIL": 0,
+      "SKIP": 0,
+      "TODO": 0
+    }
+  },
+  "test/test_verifier_review_worker": {
+    "start_line": 939,
+    "started_at": "2026-10-24T13:46:16Z",
+    "cases": [
+      {
+        "marker": "OK",
+        "line": 954,
+        "description": "execution          0   frozen prompt, media, lookup and verdict."
+      },
+      {
+        "marker": "OK",
+        "line": 960,
+        "description": "execution          1   missing and changed authority refuse b..."
+      },
+      {
+        "marker": "OK",
+        "line": 973,
+        "description": "execution          2   retry keeps both immutable originals."
+      },
+      {
+        "marker": "OK",
+        "line": 982,
+        "description": "execution          3   unknown and cancellation never redispa..."
+      },
+      {
+        "marker": "OK",
+        "line": 992,
+        "description": "execution          4   actual host commit and restart."
+      },
+      {
+        "marker": "OK",
+        "line": 1003,
+        "description": "execution          5   actual host recovers cancellation afte..."
+      },
+      {
+        "marker": "OK",
+        "line": 1012,
+        "description": "execution          6   Judged recovery precedes actual prepar..."
+      },
+      {
+        "marker": "OK",
+        "line": 1018,
+        "description": "execution          7   commit unknown recovers original."
+      },
+      {
+        "marker": "OK",
+        "line": 1028,
+        "description": "execution          8   actual inner walk respects retained di..."
+      },
+      {
+        "marker": "OK",
+        "line": 1039,
+        "description": "execution          9   pre-admission configuration repair reu..."
+      },
+      {
+        "marker": "OK",
+        "line": 1042,
+        "description": "execution         10   invalid inventory refuses allocation."
+      },
+      {
+        "marker": "OK",
+        "line": 1073,
+        "description": "execution         11   Judged boot preserves terminal operato..."
+      },
+      {
+        "marker": "OK",
+        "line": 1098,
+        "description": "execution         12   actual typed refusal race never reappl..."
+      },
+      {
+        "marker": "OK",
+        "line": 1111,
+        "description": "execution         13   atomic judgment observation survives u..."
+      },
+      {
+        "marker": "OK",
+        "line": 1132,
+        "description": "execution         14   terminal publication cancellation reco..."
+      },
+      {
+        "marker": "OK",
+        "line": 1144,
+        "description": "execution         15   post-atomic observation cancellation r..."
+      },
+      {
+        "marker": "OK",
+        "line": 1154,
+        "description": "execution         16   unpublishable original cannot starve a..."
+      },
+      {
+        "marker": "OK",
+        "line": 1248,
+        "description": "execution         17   missing actual observer facts refuse b..."
+      }
+    ],
+    "summary": [
+      {
+        "line": 1250,
+        "text": "Test Successful in 1.158s. 18 tests run."
+      }
+    ],
+    "runner_terminal": [
+      {
+        "line": 1252,
+        "text": "[targeted] test/test_verifier_review_worker: OK in 1s"
+      }
+    ],
+    "counts": {
+      "OK": 18,
+      "FAIL": 0,
+      "SKIP": 0,
+      "TODO": 0
+    }
+  },
+  "test/test_completion_trust_harness": {
+    "start_line": 1254,
+    "started_at": "2026-10-24T13:46:17Z",
+    "cases": [
+      {
+        "marker": "OK",
+        "line": 1279,
+        "description": "completion_trust_dispatch_oracle          0   non-owner compl..."
+      },
+      {
+        "marker": "OK",
+        "line": 1296,
+        "description": "completion_trust_dispatch_oracle          1   completion of a..."
+      },
+      {
+        "marker": "OK",
+        "line": 1326,
+        "description": "completion_trust_dispatch_oracle          2   short notes rea..."
+      },
+      {
+        "marker": "OK",
+        "line": 1359,
+        "description": "completion_trust_dispatch_oracle          3   rendered image ..."
+      },
+      {
+        "marker": "OK",
+        "line": 1390,
+        "description": "completion_trust_dispatch_oracle          4   submitted evide..."
+      },
+      {
+        "marker": "OK",
+        "line": 1435,
+        "description": "completion_trust_dispatch_oracle          5   delivered rejec..."
+      },
+      {
+        "marker": "OK",
+        "line": 1462,
+        "description": "completion_trust_dispatch_oracle          6   unavailable eva..."
+      },
+      {
+        "marker": "OK",
+        "line": 1481,
+        "description": "completion_trust_dispatch_oracle          7   legitimate self..."
+      },
+      {
+        "marker": "OK",
+        "line": 1567,
+        "description": "completion_trust_dispatch_oracle          8   late verdict re..."
+      }
+    ],
+    "summary": [
+      {
+        "line": 1569,
+        "text": "Test Successful in 1.008s. 9 tests run."
+      }
+    ],
+    "runner_terminal": [
+      {
+        "line": 1571,
+        "text": "[targeted] test/test_completion_trust_harness: OK in 2s"
+      }
+    ],
+    "counts": {
+      "OK": 9,
+      "FAIL": 0,
+      "SKIP": 0,
+      "TODO": 0
+    }
+  },
+  "test/test_verification_run_registry": {
+    "start_line": 1573,
+    "started_at": "2026-10-24T13:46:19Z",
+    "cases": [
+      {
+        "marker": "OK",
+        "line": 1582,
+        "description": "rfc-0361-d4          0   running review is visible before it ..."
+      },
+      {
+        "marker": "OK",
+        "line": 1585,
+        "description": "rfc-0361-d4          1   every outcome has a distinct wire la..."
+      },
+      {
+        "marker": "OK",
+        "line": 1610,
+        "description": "rfc-0361-d4          2   failure outcomes carry an operator-r..."
+      },
+      {
+        "marker": "OK",
+        "line": 1627,
+        "description": "rfc-0361-d4          3   every outcome survives replay."
+      },
+      {
+        "marker": "OK",
+        "line": 1629,
+        "description": "rfc-0361-d4          4   an approval carries the reviewer's s..."
+      },
+      {
+        "marker": "OK",
+        "line": 1632,
+        "description": "rfc-0361-d4          5   an approval written without a reason..."
+      },
+      {
+        "marker": "OK",
+        "line": 1636,
+        "description": "rfc-0361-d4          6   not_reviewed wire shape is gate and ..."
+      },
+      {
+        "marker": "OK",
+        "line": 1640,
+        "description": "rfc-0361-d4          7   legacy row carrying retryable is rej..."
+      },
+      {
+        "marker": "OK",
+        "line": 1644,
+        "description": "rfc-0361-d4          8   replay drops running reviews."
+      },
+      {
+        "marker": "OK",
+        "line": 1648,
+        "description": "rfc-0361-d4          9   a retry replaces its prior attempt."
+      },
+      {
+        "marker": "OK",
+        "line": 1652,
+        "description": "rfc-0361-d4         10   unknown completion is logged without..."
+      },
+      {
+        "marker": "OK",
+        "line": 1657,
+        "description": "rfc-0361-d4         11   unknown outcome label is an error."
+      },
+      {
+        "marker": "OK",
+        "line": 1662,
+        "description": "rfc-0361-d4         12   rejected without a reason is an error."
+      },
+      {
+        "marker": "OK",
+        "line": 1666,
+        "description": "rfc-0361-d4         13   completed runs are pruned."
+      },
+      {
+        "marker": "OK",
+        "line": 1670,
+        "description": "rfc-0361-d4         14   stream replay large history."
+      },
+      {
+        "marker": "OK",
+        "line": 1676,
+        "description": "rfc-0361-d4         15   stream replay retries and running ba..."
+      },
+      {
+        "marker": "OK",
+        "line": 1680,
+        "description": "rfc-0361-d4         16   tool evidence keeps input and typed ..."
+      },
+      {
+        "marker": "OK",
+        "line": 1684,
+        "description": "rfc-0361-d4         17   global registry has one installation..."
+      },
+      {
+        "marker": "OK",
+        "line": 1687,
+        "description": "rfc-0361-d4         18   terminal publication reopens without..."
+      },
+      {
+        "marker": "OK",
+        "line": 1692,
+        "description": "rfc-0361-d4         19   terminal publication preserves confl..."
+      },
+      {
+        "marker": "OK",
+        "line": 1695,
+        "description": "rfc-0361-d4         20   terminal publication refuses unconfi..."
+      },
+      {
+        "marker": "OK",
+        "line": 1697,
+        "description": "rfc-0361-d4         21   terminal publication decoder refuses..."
+      },
+      {
+        "marker": "OK",
+        "line": 1701,
+        "description": "rfc-0361-d4         22   terminal confirmation survives displ..."
+      }
+    ],
+    "summary": [
+      {
+        "line": 1703,
+        "text": "Test Successful in 0.093s. 23 tests run."
+      }
+    ],
+    "runner_terminal": [
+      {
+        "line": 1705,
+        "text": "[targeted] test/test_verification_run_registry: OK in 0s"
+      }
+    ],
+    "counts": {
+      "OK": 23,
+      "FAIL": 0,
+      "SKIP": 0,
+      "TODO": 0
+    }
+  }
+}

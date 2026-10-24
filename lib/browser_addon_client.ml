@@ -55,7 +55,9 @@ let exchange t ~settlement ~on_cancel_after_dispatch command =
           let owned_startup=match route with
             | Browser_lane.Stagehand_route -> Option.is_none (Browser_lane.stagehand_server_deadline verb ~timeout_sec)
             | Browser_lane.Automation_route | Browser_lane.Live_route _ -> false in
-          let executor_owned = match Browser_lane.reply_policy verb with
+          (* The worker knows the admitted live transport. Wait for its policy
+             for potential Ego native inputs instead of imposing a second clock. *)
+          let executor_owned = match Browser_lane.ego_reply_policy verb with
             | Executor_owned -> true | Reply_window -> false in
           if owned_startup || executor_owned || Browser_lane.verb_uses_model verb then exchange ()
           else Eio.Time.with_timeout_exn clock allowance exchange

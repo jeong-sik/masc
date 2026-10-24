@@ -1106,7 +1106,7 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
   }
   return {urlBefore, receipt, error: failure, pointerReleased};
 }|js}
-let native_input t ~id ~label ~deadline ~cursor ~expected_url ~locator ~reference ~operation =
+let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operation =
   let verb, text = match operation with
     | Target_click -> "click", `Null
     | Target_fill text -> "fill", str text
@@ -1122,7 +1122,7 @@ let native_input t ~id ~label ~deadline ~cursor ~expected_url ~locator ~referenc
   let holds_button = match operation with Target_drag _ -> true
     | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> false in
   if holds_button then t.pointer_state <- Release_uncertain;
-  let response = run_step t ~window_s:(left t deadline) ~step:"page.target_input"
+  let response = run_native_step t ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",(match expected_url with Some url -> str url | None -> `Null);"target",str locator;
         "action",str verb;"text",text;"selection",selection;"cursor",str cursor;
         "destination",(match operation with Target_drag destination -> str destination | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> `Null)])
@@ -1243,10 +1243,10 @@ let interact ?actor t args =
         "        if (outcome.error !== null) throw new Error(outcome.error);"]
       ~fields:["path",`List (List.map pixels path);cursor] in
   let on_target ~target operation = match expected_url with
-    | Some _ -> native_input t ~id ~label ~deadline ~cursor:cursor_text ~expected_url
+    | Some _ -> native_input t ~id ~label ~cursor:cursor_text ~expected_url
         ~locator:(ego_locator target) ~reference:["target",Browser_lane.snapshot_target_to_json target] ~operation
     | None -> Error (Live.Before_effect "a snapshot target requires expectedUrl") in
-  let on_selector selector operation = native_input t ~id ~label ~deadline ~cursor:cursor_text ~expected_url
+  let on_selector selector operation = native_input t ~id ~label ~cursor:cursor_text ~expected_url
       ~locator:selector ~reference:["selector",str selector] ~operation in
   match action with
   | Browser_lane.Click selector -> on_selector selector Target_click
@@ -1258,7 +1258,7 @@ let interact ?actor t args =
     (match source,destination with
      | Browser_lane.Selector source, Browser_lane.Selector destination ->
        (match via with
-        | [] -> native_input t ~id ~label ~deadline ~cursor:cursor_text ~expected_url ~locator:source
+        | [] -> native_input t ~id ~label ~cursor:cursor_text ~expected_url ~locator:source
             ~reference:["source",obj ["selector",str source];"destination",obj ["selector",str destination]]
             ~operation:(Target_drag destination)
         | _::_ -> refused)

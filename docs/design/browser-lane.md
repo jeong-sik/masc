@@ -292,7 +292,8 @@ location or a configured label.
 
 `GET /api/v1/dashboard/browser-lane/clients` (read-state permission) returns
 `{ok:true,data:{clients:[{clientId,browser,version,engineVersion,transport}],bidiHost:{state,record,lock_held,detail,attach,message}}}`.
-`clients` are the live connections whose poll lease is current, and `bidiHost` is what the
+`clients` are the live connections whose poll lease is current or whose delivered
+executor-owned work is still running, and `bidiHost` is what the
 BiDi host's record says ([Live BiDi browser host](browser-bidi-live-host.md)). Browser reads, screenshots, and
 interactions accept `clientId`. With no ID, only one connected live client can
 be selected; multiple connections return `ambiguous_browser_clients`, and none
@@ -356,7 +357,11 @@ identity headers, and a transport change on an existing client ID are rejected. 
 has its own queue and pending response owners. An HTTP result from a different
 client cannot settle another client's command. Native EOF attempts a bounded
 `POST /browser-lane/disconnect`; after a crash without cleanup the existing
-120-second poll lease detects loss. Closed/expired clients release queued
+120-second poll lease detects idle connection loss. A delivered executor-owned
+request retains its original connection while its SDK operation is running;
+queued work alone does not. Its result renews the ordinary idle lease. Explicit
+disconnect overrides running work, and cancellation removes the original
+waiter and its execution ownership. Closed/expired clients release queued
 payloads; only their retired IDs remain until server restart. Retired native
 hosts exit on registration rejection so the extension can reconnect with a
 fresh process identity. The lane token remains the transport authorization;

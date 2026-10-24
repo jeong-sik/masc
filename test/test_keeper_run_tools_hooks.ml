@@ -1843,7 +1843,7 @@ let test_canonical_fact_precedes_stalled_observer () =
 ;;
 
 let message role content : Agent_core.Types.message =
-  { role; content = [ Agent_core.Types.Text content ]; name = None
+  { origin = Llm_provider.Types.Conversation;  role; content = [ Agent_core.Types.Text content ]; name = None
   ; tool_call_id = None; metadata = []
   }
 
@@ -1894,7 +1894,7 @@ let test_first_round_survives_a_replayed_tool_tail () =
 
 let test_trailing_tool_results_keep_exact_receipts () =
   let tool_message : Agent_core.Types.message =
-    { role = Agent_core.Types.Tool
+    { origin = Llm_provider.Types.Conversation;  role = Agent_core.Types.Tool
     ; content =
         [ Agent_core.Types.ToolResult
             { tool_use_id = "call-skill"
@@ -2163,7 +2163,7 @@ let blob_marker_for body =
 ;;
 
 let tool_message results =
-  { Agent_core.Types.role = Tool
+  { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Tool
   ; content =
       List.map
         (fun (tool_use_id, content) ->
@@ -2178,7 +2178,7 @@ let tool_message results =
 ;;
 
 let assistant text =
-  { Agent_core.Types.role = Assistant
+  { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Assistant
   ; content = [ Agent_core.Types.Text text ]
   ; name = None; tool_call_id = None; metadata = []
   }

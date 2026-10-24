@@ -337,7 +337,7 @@ type tail_closure =
    parse is genuine corruption and must keep latching. *)
 (* The synthesized result a turn that never came back would have produced. *)
 let interrupted_closer tool_use_id : T.message =
-  { role = T.Tool
+  { origin = Llm_provider.Types.Conversation;  role = T.Tool
   ; content =
       [ T.ToolResult
           { tool_use_id
@@ -440,7 +440,7 @@ let close_open_tail messages =
   | Ok { protected_suffix; _ } ->
     let closed_tool_use_ids = unresolved_tool_use_ids protected_suffix in
     let closer tool_use_id : T.message =
-      { role = T.Tool
+      { origin = Llm_provider.Types.Conversation;  role = T.Tool
       ; content =
           [ T.ToolResult
               { tool_use_id

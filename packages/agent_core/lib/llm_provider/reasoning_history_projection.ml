@@ -186,33 +186,21 @@ let validate_supported_reasoning ~reasoning_block_supported ~message_index conte
     Error (Unsupported_reasoning_block { message_index; block_index; block_kind })
 ;;
 
-(* The extra-system-context carrier rides the User role for wire
-   compatibility, but it is runtime-assembled context, not a person speaking:
-   [Types.Extra_system_context_provenance] exists so consumers attribute the
-   carrier by typed identity. Counting it as a user turn made
-   [Tool_call_assistant_messages_latest_user_turn] drop every assistant
-   reasoning block whenever a request carried the trailing per-turn context —
-   a keeper tool loop injects one on every provider round, so replay was
-   permanently empty on those lanes. Any classification of the carrier key
-   marks the message as a carrier (a replay question: does this message
-   carry context the thinking prefix must keep?). This deliberately differs
-   from [Runtime_model_input_tail_window.is_extra_context], which answers a
-   pinning question (must this message survive every cut?) and returns
-   false for [Historical]. *)
-let is_extra_system_context_carrier (message : Types.message) =
-  match Types.Extra_system_context_provenance.classify message.metadata with
-  | Types.Extra_system_context_provenance.Absent -> false
-  | Types.Extra_system_context_provenance.Present
-  | Types.Extra_system_context_provenance.Historical
-  | Types.Extra_system_context_provenance.Invalid
-  | Types.Extra_system_context_provenance.Duplicate -> true
+(* Only an ordinary caller User opens the semantic query boundary. The wire
+   adapter must preserve this boundary when it lowers control messages. *)
+let is_caller_query (message : Types.message) =
+  match message.role, message.origin with
+  | User, Conversation -> true
+  | (System | Assistant | Tool), _
+  | User, (System_context | Historical_system_context | Recovery_instruction
+          | Tool_result_followup | Agent_instruction) -> false
 ;;
 
 let find_latest_user_message_index classified_messages =
   List.fold_left
     (fun latest (message_index, (message : Types.message), _) ->
        match message.role with
-       | User when not (is_extra_system_context_carrier message) -> Some message_index
+       | User when is_caller_query message -> Some message_index
        | User | System | Assistant | Tool -> latest)
     None
     classified_messages

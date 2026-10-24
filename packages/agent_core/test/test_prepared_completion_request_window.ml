@@ -29,7 +29,7 @@ let config ?max_concurrent_requests base_url =
 ;;
 
 let messages =
-  [ { Types.role = Types.User
+  [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
     ; content = [ Types.Text "How long may this wait?" ]
     ; name = None
     ; tool_call_id = None

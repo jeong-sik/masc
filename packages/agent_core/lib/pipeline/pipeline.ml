@@ -173,7 +173,7 @@ let stage_route
    conversation. So the sentence names the request as the scope, gives both
    reasons a name can be missing, and points at loading before re-sending. *)
 let admission_refusal_message names : Types.message =
-  { Types.role = User
+  { origin = Recovery_instruction; Types.role = User
   ; content =
       [ Types.Text
           (Printf.sprintf
@@ -360,7 +360,7 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
            | Anthropic, Some message ->
              Util.snoc state.messages
                { message with
-                 metadata = Extra_system_context_provenance.as_historical message.metadata }
+                 origin = Historical_system_context }
            | Anthropic, None
            | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> state.messages
          in
@@ -929,7 +929,7 @@ let%test "last_tool_results_from empty messages" = Agent_turn.last_tool_results_
 
 let%test "last_tool_results_from no tool results" =
   let msgs =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "hello" ]
       ; name = None
       ; tool_call_id = None
@@ -942,13 +942,13 @@ let%test "last_tool_results_from no tool results" =
 
 let%test "last_tool_results_from finds tool results in last tool message" =
   let msgs =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ Text "thinking..." ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Tool
+    ; { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "t1"
@@ -981,7 +981,7 @@ let%test "last_tool_results_from finds tool results in last tool message" =
 
 let%test "last_tool_results_from ignores tool results outside tool role" =
   let msgs =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content =
           [ ToolResult
               { tool_use_id = "t1"
@@ -995,13 +995,13 @@ let%test "last_tool_results_from ignores tool results outside tool role" =
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ Text "response" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = User
+    ; { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "follow up" ]
       ; name = None
       ; tool_call_id = None
@@ -1028,13 +1028,13 @@ let%test "tag_error passes through Error" =
 
 let%test "last_tool_results_from assistant-only messages" =
   let msgs =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ Text "hello" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ Text "world" ]
       ; name = None
       ; tool_call_id = None
@@ -1047,7 +1047,7 @@ let%test "last_tool_results_from assistant-only messages" =
 
 let%test "last_tool_results_from picks last tool-result message" =
   let msgs =
-    [ { role = Tool
+    [ { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "t1"
@@ -1061,13 +1061,13 @@ let%test "last_tool_results_from picks last tool-result message" =
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ Text "mid" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Tool
+    ; { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "t2"
@@ -1090,7 +1090,7 @@ let%test "last_tool_results_from picks last tool-result message" =
 
 let%test "last_tool_results_from ignores mixed content outside tool role" =
   let msgs =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content =
           [ Text "some text"
           ; ToolResult
@@ -1113,7 +1113,7 @@ let%test "last_tool_results_from ignores mixed content outside tool role" =
 
 let%test "last_tool_results_from error tool result" =
   let msgs =
-    [ { role = Tool
+    [ { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "t1"
@@ -1139,13 +1139,13 @@ let%test "last_tool_results_from error tool result" =
 
 let%test "last_tool_results_from only non-result roles" =
   let msgs =
-    [ { role = System
+    [ { origin = Llm_provider.Types.Conversation;  role = System
       ; content = [ Text "system" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ Text "reply" ]
       ; name = None
       ; tool_call_id = None
@@ -1158,7 +1158,7 @@ let%test "last_tool_results_from only non-result roles" =
 
 let%test "last_tool_results_from multiple tool results in one message" =
   let msgs =
-    [ { role = Tool
+    [ { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "t1"
@@ -1194,7 +1194,7 @@ let%test "last_tool_results_from multiple tool results in one message" =
 
 let%test "last_tool_results_from user msg with only non-tool content" =
   let msgs =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content =
           [ Text "just text"; Types.ToolUse { id = "tu1"; name = "fn"; input = `Null } ]
       ; name = None

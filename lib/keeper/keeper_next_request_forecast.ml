@@ -390,7 +390,7 @@ let readings_of_records (records : Turn_record.t list) =
    before the turn. *)
 let wake_line () =
   let message =
-    { Agent_core.Types.role = Agent_core.Types.User
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.User
     ; content = [ Agent_core.Types.Text Env_config_keeper.KeeperAutonomous.default_wake_prompt ]
     ; name = None
     ; tool_call_id = None

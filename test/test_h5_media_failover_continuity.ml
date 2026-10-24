@@ -268,7 +268,7 @@ let checkpoint_with_messages messages =
 ;;
 
 let media_message () =
-  { Types.role = Types.User
+  { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
   ; content = [ Types.Text "attachments"; audio_block (); document_block () ]
   ; name = None
   ; tool_call_id = None

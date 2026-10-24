@@ -22,7 +22,9 @@ let message_of_response ?(metadata = []) ~question response =
     | Hooks.Declined -> Printf.sprintf "[Input declined] %s" question
     | Hooks.Timeout -> Printf.sprintf "[Input timed out] %s" question
   in
-  { role = User; content = [ Text text ]; name = None; tool_call_id = None; metadata }
+  let origin = match response with Hooks.Answer _ | Declined -> Conversation
+    | Timeout -> Recovery_instruction in
+  { origin; role = User; content = [ Text text ]; name = None; tool_call_id = None; metadata }
 ;;
 
 let apply_response ?metadata agent supplied response =

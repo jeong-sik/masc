@@ -2,7 +2,7 @@ module U = Masc.Keeper_transcript_unit
 module T = Agent_core.Types
 
 let message ?tool_call_id role content : T.message =
-  { role; content; name = None; tool_call_id; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id; metadata = [] }
 
 let text role value = message role [ T.Text value ]
 

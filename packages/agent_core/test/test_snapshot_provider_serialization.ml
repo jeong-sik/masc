@@ -26,7 +26,7 @@ open Types
 (* ── Shared fixture ─────────────────────────────────── *)
 
 let msg role content : message =
-  { role; content; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 (* One tool declaration in agent core's input_schema shape. *)

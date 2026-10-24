@@ -8,7 +8,7 @@
 open Masc
 
 let message role text : Agent_core.Types.message =
-  { role; content = [ Agent_core.Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content = [ Agent_core.Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
 
 (* One user/assistant exchange per index, each side [n] bytes of text. *)
 let history ~exchanges ~text_bytes =

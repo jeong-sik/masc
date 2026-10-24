@@ -1568,7 +1568,7 @@ let test_config_snapshot_exposes_retrievable_recent_work () =
   let request = "Finish this review: " ^ String.make 2000 'x' in
   Masc.Keeper_context_core_history.persist_message ~keeper_name:name
     ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:1) ~source:"direct_user" session
-    {Agent_core.Types.role=User; content=[Text request]; name=None;tool_call_id=None;metadata=[]};
+    { origin = Llm_provider.Types.Conversation; Agent_core.Types.role=User; content=[Text request]; name=None;tool_call_id=None;metadata=[]};
   let work = Masc.Keeper_recent_work.collect ~config ~meta in
   let expected = match Masc.Keeper_recent_work.preview ~base_path:base work with
     | Preview text -> text

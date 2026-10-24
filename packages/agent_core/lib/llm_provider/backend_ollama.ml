@@ -460,7 +460,7 @@ let%test "build_request omits keep_alive when caller omits it" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -483,7 +483,7 @@ let%test "build_request preserves explicit keep_alive duration" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -507,7 +507,7 @@ let%test "build_request serializes explicit keep_alive integer as JSON integer" 
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -531,7 +531,7 @@ let%test "build_request config.num_ctx injected into options" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -556,7 +556,7 @@ let%test "build_request carries repeat_penalty and repeat_last_n into options" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -581,7 +581,7 @@ let%test "build_request omits the repetition samplers when unset" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -607,7 +607,7 @@ let%test "build_request keeps repeat_last_n = -1 meaning the whole context" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -630,7 +630,7 @@ let%test "build_request omits num_ctx when None" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "hi" ]
       ; name = None
       ; tool_call_id = None

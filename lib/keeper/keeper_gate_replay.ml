@@ -635,8 +635,8 @@ let approval_input evidence =
           ~approval_id:evidence.approval_id ~evidence_fingerprint:fingerprint with
   | Error _ as error -> error
   | Ok identity ->
-    Ok (identity, Agent_core.Types.user_msg
-          (replay_evidence_fragment ~include_journal:false evidence))
+    Ok (identity, Agent_core.Types.make_message ~origin:Recovery_instruction ~role:User
+          [Text (replay_evidence_fragment ~include_journal:false evidence)])
 ;;
 
 let canonical_replay_evidence_fragment evidence =

@@ -50,7 +50,7 @@ let document_block =
 ;;
 
 let user_message content =
-  { Types.role = Types.User; content; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  Types.role = Types.User; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 let openai_config model_id =

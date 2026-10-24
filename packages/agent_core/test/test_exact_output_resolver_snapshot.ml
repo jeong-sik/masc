@@ -29,7 +29,7 @@ let schema =
 ;;
 
 let message : Types.message =
-  { role = Types.User
+  { origin = Llm_provider.Types.Conversation;  role = Types.User
   ; content = [ Types.Text "return one object" ]
   ; name = None
   ; tool_call_id = None

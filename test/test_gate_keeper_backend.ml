@@ -3908,7 +3908,7 @@ let test_runtime_multimodal_gate_lists_required_modalities () =
 let test_runtime_multimodal_gate_includes_initial_messages () =
   let initial_messages =
     [
-      { Agent_core.Types.role = Agent_core.Types.User;
+      { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.User;
         content =
           [
             Agent_core.Types.Text "previous image turn";

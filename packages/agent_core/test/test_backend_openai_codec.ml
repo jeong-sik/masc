@@ -18,7 +18,7 @@ let contains ~needle haystack =
 ;;
 
 let msg role content : message =
-  { role; content; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 let content_has_reasoning =
@@ -217,7 +217,7 @@ let block_of_fixture json =
 ;;
 
 let message_of_fixture json =
-  { role = role_of_fixture (require_string "message" "role" json)
+  { origin = Llm_provider.Types.Conversation;  role = role_of_fixture (require_string "message" "role" json)
   ; content = List.map block_of_fixture (require_list "message" "blocks" json)
   ; name = None
   ; tool_call_id = None

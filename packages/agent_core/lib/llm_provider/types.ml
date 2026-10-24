@@ -311,45 +311,6 @@ module Conversation_metadata = struct
   ;;
 end
 
-module Extra_system_context_provenance = struct
-  type classification =
-    | Absent
-    | Present
-    | Historical
-    | Invalid
-    | Duplicate
-
-  let key = "agent_core.extra_system_context.v1"
-  let entry = key, `Bool true
-  let metadata = [ entry ]
-
-  (* The round-trip value all three historical sites share: [classify]
-     decides by JSON shape, so one spelling keeps them from silently
-     flipping to [Invalid]. *)
-  let historical_value = "historical"
-  let historical_metadata = [ key, `String historical_value ]
-  let as_historical metadata =
-    List.map (fun (name, value) ->
-      if String.equal name key then name, `String historical_value else name, value)
-      metadata
-  ;;
-
-  let classify metadata =
-    let values =
-      List.filter_map
-        (fun (field_key, value) ->
-           if String.equal field_key key then Some value else None)
-        metadata
-    in
-    match values with
-    | [] -> Absent
-    | [ `Bool true ] -> Present
-    | [ `String s ] when String.equal s historical_value -> Historical
-    | [ _ ] -> Invalid
-    | _ -> Duplicate
-  ;;
-end
-
 (** Exact producer binding for stored reasoning artifacts. *)
 module Reasoning_source = struct
   type provider_instance = Provider_instance_id of string [@@deriving show]
@@ -576,8 +537,35 @@ end
 (** A single message in the conversation.
     [name] identifies the speaker (e.g. tool result source).
     [tool_call_id] links a tool result back to its tool_use request. *)
+type message_origin =
+  | Conversation
+  | System_context
+  | Historical_system_context
+  | Recovery_instruction
+  | Tool_result_followup
+  | Agent_instruction
+[@@deriving show]
+
+let message_origin_to_string = function
+  | Conversation -> "conversation"
+  | System_context -> "system_context"
+  | Historical_system_context -> "historical_system_context"
+  | Recovery_instruction -> "recovery_instruction"
+  | Tool_result_followup -> "tool_result_followup"
+  | Agent_instruction -> "agent_instruction"
+
+let message_origin_of_string = function
+  | "conversation" -> Some Conversation
+  | "system_context" -> Some System_context
+  | "historical_system_context" -> Some Historical_system_context
+  | "recovery_instruction" -> Some Recovery_instruction
+  | "tool_result_followup" -> Some Tool_result_followup
+  | "agent_instruction" -> Some Agent_instruction
+  | _ -> None
+
 type message =
   { role : role
+  ; origin : message_origin
   ; content : content_block list
   ; name : string option [@default None]
   ; tool_call_id : string option [@default None]
@@ -651,7 +639,8 @@ module Message_value = struct
     List.fold_left
       (fun accumulator block -> mix accumulator (block_hint block))
       (mix
-         (mix (role_hint message.role) (optional_string_hint message.name))
+         (mix (mix (role_hint message.role) (Hashtbl.hash message.origin))
+            (optional_string_hint message.name))
          (optional_string_hint message.tool_call_id))
       message.content
   ;;
@@ -1047,7 +1036,7 @@ let content_has_reasoning_artifact content =
 
 let assistant_message_of_response (response : api_response) =
   let message metadata =
-    { role = Assistant
+    { origin = Conversation;  role = Assistant
     ; content = response.content
     ; name = None
     ; tool_call_id = None
@@ -1266,8 +1255,8 @@ type stream_event_resolution =
     messages and need to convert to [content_block list]. *)
 
 (** Create a message with default [None] for optional fields. *)
-let make_message ?name ?tool_call_id ?(metadata = []) ~role content =
-  { role; content; name; tool_call_id; metadata }
+let make_message ?name ?tool_call_id ?(origin = Conversation) ?(metadata = []) ~role content =
+  { role; origin; content; name; tool_call_id; metadata }
 ;;
 
 (** Create a text content block. *)

@@ -16,7 +16,7 @@ let make_response text : Types.api_response =
 ;;
 
 let dummy_messages : Types.message list =
-  [ { role = User
+  [ { origin = Llm_provider.Types.Conversation;  role = User
     ; content = [ Text "hello" ]
     ; name = None
     ; tool_call_id = None

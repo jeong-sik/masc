@@ -4,10 +4,10 @@ module WT = Masc.Keeper_wake_telemetry
 module Types = Agent_core.Types
 
 let text_msg role s : Types.message =
-  { role; content = [ Types.Text s ]; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content = [ Types.Text s ]; name = None; tool_call_id = None; metadata = [] }
 
 let tool_use_msg id name input : Types.message =
-  {
+  { origin = Llm_provider.Types.Conversation;
     role = Types.Assistant;
     content = [ Types.ToolUse { id; name; input } ];
     name = None;
@@ -16,7 +16,7 @@ let tool_use_msg id name input : Types.message =
   }
 
 let tool_result_msg ~tool_use_id ~content : Types.message =
-  {
+  { origin = Llm_provider.Types.Conversation;
     role = Types.Tool;
     content =
       [
@@ -58,7 +58,7 @@ let test_tool_result_bytes () =
 
 let test_thinking_and_redacted () =
   let m : Types.message =
-    {
+    { origin = Llm_provider.Types.Conversation;
       role = Types.Assistant;
       content =
         [

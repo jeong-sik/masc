@@ -491,7 +491,7 @@ let official_client_message_blocks raw =
       match List.assoc_opt "schema" fields, List.assoc_opt "message" fields with
       | Some (`String schema), Some (`Assoc message) -> (
         match schema with
-        | "masc.official-client-context-message.v2" -> (
+        | "masc.official-client-context-message.v3" -> (
           match List.assoc_opt "content_blocks" message with
           | Some (`List blocks) ->
             let projected =

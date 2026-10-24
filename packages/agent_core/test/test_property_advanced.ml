@@ -69,7 +69,7 @@ let role_gen = QCheck.Gen.oneof [ QCheck.Gen.return User; QCheck.Gen.return Assi
 let message_gen =
   QCheck.Gen.map2
     (fun role content ->
-       { role; content; name = None; tool_call_id = None; metadata = [] })
+       { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] })
     role_gen
     (QCheck.Gen.list_size (QCheck.Gen.int_range 1 3) content_block_gen)
 ;;

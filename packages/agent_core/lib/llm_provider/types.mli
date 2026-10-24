@@ -378,27 +378,6 @@ module Conversation_metadata : sig
   val is_mergeable_followup : metadata -> bool
 end
 
-(** Exact provenance for the synthetic User message created from
-    [Hooks.extra_system_context]. Consumers can remove or attribute that carrier
-    by typed identity instead of assuming a list position or matching text. *)
-module Extra_system_context_provenance : sig
-  type classification =
-    | Absent
-    | Present
-    | Historical
-    | Invalid
-    | Duplicate
-
-  val metadata : metadata
-  val historical_metadata : metadata
-  (** A previously transmitted context retained in the conversation. Unlike
-      [Present], this is ordinary history, not the current request's pinned
-      context or a second contribution to its prompt-context metrics. *)
-  val as_historical : metadata -> metadata
-  (** Replace only the carrier marker, preserving all other metadata. *)
-  val classify : metadata -> classification
-end
-
 (** Producer binding stamped on stored reasoning artifacts: provider kind,
     concrete endpoint instance, canonical request model, and typed replay
     contract. Whether a difference in any of those dimensions still admits
@@ -479,8 +458,26 @@ module Reasoning_prefix : sig
   val classify : metadata -> classification
 end
 
+(** Canonical source identity, independent of the provider's wire role.
+    [Conversation] is an ordinary caller/model/tool transcript message; only
+    its [User] role opens a caller-input boundary. The remaining origins are
+    SDK control messages, never a new human query. Current context is pinned;
+    historical context is retained replay history. *)
+type message_origin =
+  | Conversation
+  | System_context
+  | Historical_system_context
+  | Recovery_instruction
+  | Tool_result_followup
+  | Agent_instruction
+[@@deriving show]
+
+val message_origin_to_string : message_origin -> string
+val message_origin_of_string : string -> message_origin option
+
 type message =
   { role : role
+  ; origin : message_origin
   ; content : content_block list
   ; name : string option
   ; tool_call_id : string option
@@ -982,6 +979,7 @@ type stream_event_resolution =
 val make_message
   :  ?name:string
   -> ?tool_call_id:string
+  -> ?origin:message_origin
   -> ?metadata:(string * Yojson.Safe.t) list
   -> role:role
   -> content_block list

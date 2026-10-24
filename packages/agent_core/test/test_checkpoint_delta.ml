@@ -28,10 +28,12 @@ let response_format_gen =
 
 let message_gen =
   let open QCheck.Gen in
-  map2
-    (fun role text ->
-       { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] })
+  map3
+    (fun role origin text ->
+       { origin; role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] })
     (oneof [ return User; return Assistant ])
+    (oneof [return Conversation; return System_context; return Historical_system_context;
+      return Recovery_instruction; return Tool_result_followup; return Agent_instruction])
     small_string_gen
 ;;
 
@@ -261,7 +263,7 @@ let test_delta_json_roundtrip () =
   let base =
     make_unit_checkpoint
       ~messages:
-        [ { role = User
+        [ { origin = Llm_provider.Types.Conversation;  role = User
           ; content = [ Text "hello" ]
           ; name = None
           ; tool_call_id = None
@@ -281,13 +283,13 @@ let test_delta_json_roundtrip () =
       ~tool_choice:(Some Auto)
       ~working_context:(Some (`Assoc [ "kind", `String "test_context_v1" ]))
       ~messages:
-        [ { role = User
+        [ { origin = Llm_provider.Types.Conversation;  role = User
           ; content = [ Text "hello" ]
           ; name = None
           ; tool_call_id = None
           ; metadata = []
           }
-        ; { role = Assistant
+        ; { origin = Llm_provider.Types.Conversation;  role = Assistant
           ; content = [ Text "world" ]
           ; name = None
           ; tool_call_id = None
@@ -433,7 +435,7 @@ let test_delta_json_rejects_malformed_context_removed () =
     make_unit_checkpoint
       ~context:target_context
       ~messages:
-        [ { role = User
+        [ { origin = Llm_provider.Types.Conversation;  role = User
           ; content = [ Text "hello" ]
           ; name = None
           ; tool_call_id = None
@@ -503,7 +505,7 @@ let test_empty_delta_roundtrip () =
       ~agent_name:"agent-a"
       ~turn_count:3
       ~messages:
-        [ { role = User
+        [ { origin = Llm_provider.Types.Conversation;  role = User
           ; content = [ Text "steady" ]
           ; name = None
           ; tool_call_id = None
@@ -535,7 +537,7 @@ let test_delta_roundtrip_preserves_message_metadata () =
   let base =
     make_unit_checkpoint
       ~messages:
-        [ { role = User
+        [ { origin = Llm_provider.Types.Conversation;  role = User
           ; content = [ Text "start" ]
           ; name = None
           ; tool_call_id = None
@@ -547,13 +549,13 @@ let test_delta_roundtrip_preserves_message_metadata () =
   let target =
     make_unit_checkpoint
       ~messages:
-        [ { role = User
+        [ { origin = Llm_provider.Types.Conversation;  role = User
           ; content = [ Text "start" ]
           ; name = None
           ; tool_call_id = None
           ; metadata = []
           }
-        ; { role = Assistant
+        ; { origin = Llm_provider.Types.Conversation;  role = Assistant
           ; content = [ Text "done" ]
           ; name = Some "agent_role_a"
           ; tool_call_id = Some "call_1"
@@ -613,7 +615,7 @@ let test_apply_delta_rejects_invalid_splice () =
   let base =
     make_unit_checkpoint
       ~messages:
-        [ { role = User
+        [ { origin = Llm_provider.Types.Conversation;  role = User
           ; content = [ Text "a" ]
           ; name = None
           ; tool_call_id = None
@@ -625,13 +627,13 @@ let test_apply_delta_rejects_invalid_splice () =
   let target =
     make_unit_checkpoint
       ~messages:
-        [ { role = User
+        [ { origin = Llm_provider.Types.Conversation;  role = User
           ; content = [ Text "a" ]
           ; name = None
           ; tool_call_id = None
           ; metadata = []
           }
-        ; { role = Assistant
+        ; { origin = Llm_provider.Types.Conversation;  role = Assistant
           ; content = [ Text "b" ]
           ; name = None
           ; tool_call_id = None
@@ -656,7 +658,7 @@ let test_apply_delta_rejects_invalid_splice () =
 let test_apply_delta_rejects_noncanonical_message () =
   let base = make_unit_checkpoint () in
   let invalid_message =
-    { role = User
+    { origin = Llm_provider.Types.Conversation;  role = User
     ; content =
         [ ToolResult
             { tool_use_id = "call-1"

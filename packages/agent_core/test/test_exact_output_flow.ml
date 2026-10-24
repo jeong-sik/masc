@@ -5,7 +5,7 @@ module EO = Agent_core.Exact_output
 exception Advance_committed_before_successor
 
 let msg text : Types.message =
-  { role = Types.User
+  { origin = Llm_provider.Types.Conversation;  role = Types.User
   ; content = [ Types.Text text ]
   ; name = None
   ; tool_call_id = None

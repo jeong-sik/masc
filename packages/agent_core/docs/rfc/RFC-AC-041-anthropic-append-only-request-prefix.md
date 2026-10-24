@@ -105,7 +105,7 @@
 
 - Anthropic wire 의 재생 규칙은 모델 행이 정한다. 행이 `reasoning_replay` 를 적지 않았으면(`Default_reasoning_replay`) 런타임이 `Force_latest_user_turn_tool_calls` 를 강제한다. #42677(병합 `c72b91bc99`, 2026-10-13T03:07:10Z)이 넣은 규칙이다(`lib/runtime/runtime_adapter.ml:608` `with_client_history_replay`, 강제는 `:635`). 찾은 행이 없어 능력 값이 `None` 이면 강제하지 않는다(`:637`). Anthropic 갈래는 행의 선언을 따른다(`reasoning_dialect.ml:523` `apply_replay_override`). 선언이 없을 때의 라이브러리 기본값은 `All_assistant_messages` 다(`:527`).
 - `claude-*` 행(`packages/agent_core/models.toml` 52~303줄)에는 `reasoning_replay` 선언이 없다. 이 파일의 첫 선언은 588줄이다. 그래서 Sonnet 5.5 같은 `claude-*` 모델은 강제 경로를 탄다. `claude_vincent` 런타임의 설정은 이 저장소 밖이라 읽지 못했다. #42677 본문이 이 런타임을 대상으로 적는다. 행이 스스로 규칙을 적으면 그 규칙이 이긴다(`deepseek-v4-pro` 행 802줄 `latest_user_turn_tool_calls`, `kimi-k2.7-code` 행 929줄 `preserve_always`).
-- 강제가 하는 일: 가장 새 user 메시지 뒤의 도구 루프에서 나온 thinking 만 다시 보내고(`reasoning_history_projection.ml:204-220` `replay_selected`), 이전 턴 assistant 메시지에서는 thinking 블록을 뗀다(같은 파일 303줄 `without_reasoning`). 턴별 문맥 메시지(`Extra_system_context_provenance`)는 user 턴으로 세지 않는다(같은 파일 176-202줄). 서명 블록은 글자 그대로 직렬화한다(`api_common.ml:364-379`).
+- 강제가 하는 일: 가장 새 user 메시지 뒤의 도구 루프에서 나온 thinking 만 다시 보내고(`reasoning_history_projection.ml:204-220` `replay_selected`), 이전 턴 assistant 메시지에서는 thinking 블록을 뗀다(같은 파일 303줄 `without_reasoning`). 턴별 문맥 메시지(`message.origin = System_context | Historical_system_context`)는 user 턴으로 세지 않는다(같은 파일 176-202줄). 서명 블록은 글자 그대로 직렬화한다(`api_common.ml:364-379`).
 - #42677 본문은 입력 토큰이 줄고 모델이 이전 턴의 추론을 못 보게 된다고 적고, 품질과 비용이 얼마나 달라지는지는 재 보지 않았다고 적는다. 실제 Anthropic API 로 400 이 사라지는지도 확인하지 못했다고 적는다.
 - 남은 결함: 강제가 정하는 것은 어느 블록이 후보인지다. 후보 블록이 만들어질 때와 앞부분이 같은지는 비교하지 않는다. 같은 턴의 도구 라운드 사이에도 앞부분이 바뀌는 경로가 있다. 첫 라운드에만 붙는 턴별 문맥(§1.3-1)이 그렇다. 첫 라운드에서 만든 서명 블록은 문맥 메시지 뒤에 묶이는데, 둘째 라운드 요청에서는 그 블록 앞에 문맥 메시지가 없다. 이것은 코드를 읽고 낸 추론이고 요청 본문으로 확인하지 않았다(Q14).
 
@@ -238,7 +238,7 @@ type context_placement =
 - 폴백으로 런타임이 바뀌어도 이력은 하나다. 각 요청이 자기 공급자의 방식으로 그린다. 앞부분이 바뀌는지는 §3.4 의 지문이 알려 준다.
 - "턴별" 의 뜻: hook 이 문맥을 낼 때마다(`Some ctx`) 한 번 남긴다. 문맥이 없는 라운드는 아무것도 남기지 않는다. 오늘은 첫 라운드에서만 `Some` 이다(§1.3-1). 이후 라운드에 문맥을 싣는 블록(`Prompt_block_id.injected_on_post_tool_round`)이 선언되면 그 라운드의 문맥이 새 메시지로 덧붙는다. 지난 문맥을 고치지 않는다.
 - 지금의 "요청 하나에 문맥 하나" 전제와 점검(`Keeper_agent_prompt_metrics` 의 `Prompt_context_carrier_repeated`, `lib/keeper/keeper_agent_prompt_metrics.ml:51`·`:180`. 용어집 "Extra System Context")은 "요청에 실려 보이는 문맥 하나" 로 바꾼다. 고정(pinned) 규칙도 바뀐다. 이력에 남은 지난 문맥은 보통 이력 atom 이어서 창에 잘린다. 잘리면 §3.4 가 그 앞부분에 묶인 서명 블록을 뺀다.
-- 이력에 남기는 문맥 메시지는 `Extra_system_context_provenance` 를 계속 달아야 한다(지금은 `agent_turn.ml:49` 가 단다). 재생 판정이 이 표식으로 그 메시지를 user 턴에서 뺀다(`reasoning_history_projection.ml:176-202`). 표식이 없으면 라운드 중간에 붙은 문맥이 "가장 새 user 메시지" 경계가 되어, 그 앞 도구 루프의 thinking 이 정책에서 빠진다.
+- 이력에 남기는 문맥 메시지는 `message.origin = Historical_system_context` 를 갖는다. 현재 문맥은 `System_context` 로 생성하고, 재생 경계는 `Conversation` 출처의 User 입력만 센다. 메타데이터나 문장 접두사는 메시지 출처의 권위가 아니다.
 
 ### 3.3 system·tools 는 고정하지 않고 바뀐 것을 알아낸다
 

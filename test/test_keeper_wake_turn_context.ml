@@ -1387,7 +1387,7 @@ let test_autonomous_turn_recovers_task_free_work_from_history () =
     let persist n source role text metadata =
       Masc.Keeper_context_core_history.persist_message ~keeper_name:meta.name
         ~turn_ref:(turn n) ~source session
-        {Agent_core.Types.role; content=[Text text]; name=None; tool_call_id=None; metadata} in
+        { origin = Llm_provider.Types.Conversation; Agent_core.Types.role; content=[Text text]; name=None; tool_call_id=None; metadata} in
     let attribution = Masc.Keeper_input_speaker.metadata
         (Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner) in
     persist 1 "direct_user" User "Review PR-ongoing through verdict" attribution;

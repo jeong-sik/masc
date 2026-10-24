@@ -316,7 +316,7 @@ let test_tool_result () =
   let config = gemini_config () in
   let messages =
     [ Types.user_msg "What's the weather?"
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content =
           [ ToolUse
               { id = "call_123"
@@ -328,7 +328,7 @@ let test_tool_result () =
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Tool
+    ; { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "call_123"
@@ -365,7 +365,7 @@ let test_tool_result () =
 
 let test_tool_result_missing_correlation_fails_closed () =
   let messages =
-    [ ({ role = Types.Tool
+    [ ({ origin = Llm_provider.Types.Conversation;  role = Types.Tool
        ; content =
            [ Types.ToolResult
                { tool_use_id = "missing-call"
@@ -395,7 +395,7 @@ let test_tool_result_missing_correlation_fails_closed () =
 
 let test_conflicting_tool_identity_fails_closed () =
   let message : Types.message =
-    { role = Assistant
+    { origin = Llm_provider.Types.Conversation;  role = Assistant
     ; content =
         [ ToolUse { id = "call-1"; name = "lookup"; input = `Assoc [] }
         ; ToolUse { id = "call-1"; name = "write"; input = `Assoc [] }
@@ -420,7 +420,7 @@ let test_dangling_tool_use_is_not_synthetically_closed () =
   let config = gemini_config () in
   let messages =
     [ Types.user_msg "question"
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ ToolUse { id = "call_1"; name = "lookup"; input = `Null } ]
       ; name = None
       ; tool_call_id = None
@@ -719,7 +719,7 @@ let test_textual_part_thought_signatures_roundtrip () =
    | _ -> fail "expected exact carriers adjacent to text and thought parts");
   let messages =
     [ Types.user_msg "Continue."
-    ; { Types.role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
       ; content = parsed.content
       ; name = None
       ; tool_call_id = None
@@ -756,7 +756,7 @@ let test_textual_part_signature_broken_adjacency_fails_closed () =
       ~thought_signature:"sig-text-broken"
   in
   let messages =
-    [ { Types.role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
       ; content =
           [ Types.RedactedThinking carrier
           ; Types.Thinking { content = "wrong target"; signature = None }
@@ -776,7 +776,7 @@ let test_textual_part_signature_broken_adjacency_fails_closed () =
 ;;
 
 let message_with_blocks role content : Types.message =
-  { role; content; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 let test_textual_part_signature_non_assistant_fails_closed () =
@@ -953,13 +953,13 @@ let test_thought_signature_roundtrip_request () =
   let config = gemini_config () in
   let messages =
     [ Types.user_msg "Use the search tool."
-    ; { Types.role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
       ; content = parsed.content
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Tool
+    ; { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id
@@ -1094,7 +1094,7 @@ let test_contents_role_mapping () =
 
 let test_contents_multimodal () =
   let messages =
-    [ { Types.role = User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = User
       ; content =
           [ Text "Describe this image:"
           ; Image
@@ -1291,7 +1291,7 @@ let test_thinking_part_roundtrip () =
   (* Test that Thinking content blocks become thought:true parts *)
   let config = gemini_config () in
   let messages =
-    [ { Types.role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
       ; content =
           [ Thinking { signature = None; content = "Let me consider..." }
           ; Text "The answer is 42."

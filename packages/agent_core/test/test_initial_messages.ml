@@ -14,7 +14,7 @@ let make_agent ~net ?(initial_messages = []) () =
 ;;
 
 let msg role text =
-  { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 (* ── Tests ──────────────────────────────────────────── *)

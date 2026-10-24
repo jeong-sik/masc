@@ -18,7 +18,7 @@ let response ?(content = []) ?(stop_reason = Agent_core.Types.EndTurn) () =
   }
 
 let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.message =
-  { role; content; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 
 let checkpoint_with_messages messages : Agent_core.Checkpoint.t =
   {
@@ -1907,7 +1907,7 @@ let test_max_tokens_text_is_rejected_for_checkpoint_continuation () =
 
 let test_truncation_checkpoint_drops_only_incomplete_assistant () =
   let tool_result =
-    { Agent_core.Types.role = Agent_core.Types.Tool
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Tool
     ; content =
         [ Agent_core.Types.ToolResult
             { tool_use_id = "call-1"

@@ -55,7 +55,7 @@ let assoc_field key = function
   | _ -> None
 
 let message_with_blocks blocks =
-  { Agent_core.Types.role = Agent_core.Types.User
+  { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.User
   ; content = blocks
   ; name = None
   ; tool_call_id = None
@@ -598,7 +598,7 @@ let test_media_degrade_restores_canonical_replay_prefix () =
       canonical_history
   in
   let assistant =
-    { Agent_core.Types.role = Agent_core.Types.Assistant
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant
     ; content = [ Agent_core.Types.Text "completed" ]
     ; name = None
     ; tool_call_id = None

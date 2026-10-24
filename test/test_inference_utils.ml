@@ -47,7 +47,7 @@ let test_total_tokens_parity_and_excludes_cache () =
 let test_utf8_sanitization_preserves_tool_failure_provenance () =
   let open Agent_core.Types in
   let message : message =
-    {
+    { origin = Llm_provider.Types.Conversation;
       role = Tool;
       content =
         [

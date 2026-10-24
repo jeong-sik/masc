@@ -659,7 +659,7 @@ let test_omitted_step_count_survives_the_wire () =
    must fold to a marker, so the next runtime switch shows a placeholder
    instead of another dump. *)
 let official =
-  {|{"schema":"masc.official-client-context-message.v2","message":{"role":"assistant","content_blocks":[
+  {|{"schema":"masc.official-client-context-message.v3","message":{"role":"assistant","content_blocks":[
     {"type":"thinking","thinking":"계획을 세웠다"},
     {"type":"text","text":"화면을 확인했습니다"},
     {"type":"tool_use","id":"call_1","name":"masc_msx_step","input":{"frames":60}},
@@ -700,7 +700,7 @@ let test_unknown_envelope_schema_folds_to_a_marker () =
    re-parse the envelope locally. *)
 let test_empty_envelope_projection_still_marks () =
   let raw =
-    {|{"schema":"masc.official-client-context-message.v2","message":{"role":"assistant","content_blocks":[]}}|}
+    {|{"schema":"masc.official-client-context-message.v3","message":{"role":"assistant","content_blocks":[]}}|}
   in
   let blocks = B.parse_text_to_blocks raw in
   (match blocks with
@@ -710,7 +710,7 @@ let test_empty_envelope_projection_still_marks () =
    | _ -> Alcotest.fail "expected exactly the empty-projection marker")
 
 let test_malformed_known_envelope_folds () =
-  let raw = {|{"schema":"masc.official-client-context-message.v2","message":"not-an-assoc"}|} in
+  let raw = {|{"schema":"masc.official-client-context-message.v3","message":"not-an-assoc"}|} in
   let blocks = B.parse_text_to_blocks raw in
   (match blocks with
    | [ B.Text t ] ->
@@ -720,7 +720,7 @@ let test_malformed_known_envelope_folds () =
 
 let test_redacted_thinking_maps_to_the_redacted_block () =
   let raw =
-    {|{"schema":"masc.official-client-context-message.v2","message":{"content_blocks":[
+    {|{"schema":"masc.official-client-context-message.v3","message":{"content_blocks":[
     {"type":"redacted_thinking","data":"opaque"}
   ]}}|}
   in

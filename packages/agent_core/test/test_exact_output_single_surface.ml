@@ -29,7 +29,7 @@ let _preserve_public_success_surface
 ;;
 
 let msg text : Types.message =
-  { role = Types.User
+  { origin = Llm_provider.Types.Conversation;  role = Types.User
   ; content = [ Types.Text text ]
   ; name = None
   ; tool_call_id = None
@@ -656,7 +656,7 @@ let test_wire_envelope_and_cross_feature_injection_rejected () =
       | _ -> fail "tool role rejection lost its neutral disposition")
    | Ok _ -> fail "tool role must reject before exact dispatch");
   let tool_message : Types.message =
-    { role = Types.Assistant
+    { origin = Llm_provider.Types.Conversation;  role = Types.Assistant
     ; content = [ Types.ToolUse { id = "tool-1"; name = "forbidden"; input = `Assoc [] } ]
     ; name = None
     ; tool_call_id = None

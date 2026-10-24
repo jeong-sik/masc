@@ -157,7 +157,7 @@ let test_sync_dispatches_via_complete_triggers_metrics () =
       ~transport
       ~config:pc
       ~messages:
-        [ { Types.role = User
+        [ { origin = Llm_provider.Types.Conversation;  Types.role = User
           ; content = [ Text "ping" ]
           ; name = None
           ; tool_call_id = None

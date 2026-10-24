@@ -1773,8 +1773,8 @@ let test_issuer_assembly_links_to_completed_slots () =
     Prompt_block_id.Memory_os_recall,repeated;Prompt_block_id.Temporal_summary,repeated] in
   let assembly=Assembly.assemble ~dynamic_context_partition:(Some dynamic_partition) ~existing_extra_system_context:None ~blocks in
   let carrier assembly : Agent_core.Types.message =
-    {role=System;content=[Text (Option.get assembly.Assembly.extra_system_context)];name=None;
-     tool_call_id=None;metadata=Agent_core.Types.Extra_system_context_provenance.metadata} in
+    { origin = Llm_provider.Types.System_context; role=System;content=[Text (Option.get assembly.Assembly.extra_system_context)];name=None;
+     tool_call_id=None;metadata=[]} in
   let message=carrier assembly in
   let held=Host.start_held_context ~composed_context:assembly [message] in
   let partial_held=List.filter (fun (item:Masc.Keeper_official_client_session_store.held_context) ->
@@ -4582,7 +4582,7 @@ supports_native_streaming = false
     let keeper_name = "codex-production-fixture" in
     let trace_id = "last-projection-trace" in
     let history = List.map (fun (role, text) ->
-      { Agent_core.Types.role; content = [Text text]; name = None;
+      { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role; content = [Text text]; name = None;
         tool_call_id = None; metadata = [] })
       [Agent_core.Types.User, "Earlier question";
        Agent_core.Types.Assistant, "Earlier answer"] in
@@ -5149,8 +5149,8 @@ let test_keeper_reprojects_memory_after_actual_codex_capacity_refusal () =
       Yojson.Safe.Util.(member "reason" receipt |> to_string);
     let reduced = Memory.render_prepared prepared in
     let encoded_context text =
-      { (Agent_core.Types.system_msg text) with
-        metadata = Agent_core.Types.Extra_system_context_provenance.metadata }
+      { (Agent_core.Types.system_msg text) with origin = Llm_provider.Types.System_context;
+        metadata = [] }
       |> Keeper_official_client_host.encode_history_message in
     let requests = In_channel.with_open_bin capture_path In_channel.input_lines
       |> List.map Yojson.Safe.from_string in
@@ -6278,7 +6278,7 @@ let test_keeper_preserves_typed_history_on_codex_wire () =
     ~finally:(fun () -> Sys.remove capture_path)
     (fun () ->
        let assistant_message : Agent_core.Types.message =
-         { role = Assistant
+         { origin = Llm_provider.Types.Conversation;  role = Assistant
          ; content =
              [ ToolUse
                  { id = "prior-call"
@@ -6417,8 +6417,8 @@ let test_keeper_context_lifecycle_three_settled_turns () =
   let same = "한글 \"repeated\"\n\\source" in
   let encoded_carrier text =
     let message : Agent_core.Types.message =
-      { role = System; content = [Text text]; name = None; tool_call_id = None;
-        metadata = Agent_core.Types.Extra_system_context_provenance.metadata } in
+      { origin = Llm_provider.Types.System_context;  role = System; content = [Text text]; name = None; tool_call_id = None;
+        metadata = [] } in
     Keeper_official_client_context_codec.encode message in
   let assembly changed = Assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Dynamic_context,same;
@@ -7543,8 +7543,8 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
            Runtime_native_tools.Native_read |> String.concat "\n\n"
        in
        let envelope context =
-         { (Agent_core.Types.system_msg context) with
-           metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+         { (Agent_core.Types.system_msg context) with origin = Llm_provider.Types.System_context;
+           metadata = []
          }
          |> Keeper_official_client_host.encode_history_message
        in
@@ -7596,15 +7596,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
           |> index 0
           |> member "text"
           |> to_string);
-       (match
-          context_message
-          |> member "metadata"
-          |> to_assoc
-          |> Agent_core.Types.Extra_system_context_provenance.classify
-        with
-        | Agent_core.Types.Extra_system_context_provenance.Present -> ()
-        | Absent | Historical | Invalid | Duplicate ->
-          fail "dynamic context lost its typed provenance");
+       (check string "dynamic context lost its typed provenance" "system_context" (context_message |> member "origin" |> to_string));
        check string "start prompt stays exact" goal (turn_prompt start_capture);
        check string "resume prompt carries the current context in front of the goal"
          (String.concat "\n\n"
@@ -8379,13 +8371,7 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
 (* The per-turn context envelope, as opposed to the unread observation that
    travels in front of it. *)
 let carries_extra_system_context envelope =
-  let metadata = Yojson.Safe.Util.(envelope |> member "message" |> member "metadata") in
-  match metadata with
-  | `Assoc metadata ->
-    (match Agent_core.Types.Extra_system_context_provenance.classify metadata with
-     | Present -> true
-     | Absent | Historical | Invalid | Duplicate -> false)
-  | _ -> false
+  Yojson.Safe.Util.(envelope |> member "message" |> member "origin") = `String "system_context"
 ;;
 
 let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
@@ -8510,15 +8496,7 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
        let sections = Astring.String.cuts ~sep:"\n\n" wire_text in
        check int "production turn instructions stay exact and occur once"
          1 (List.length (List.filter (String.equal expected_dynamic_context) sections));
-       (match
-          context_message
-          |> member "metadata"
-          |> to_assoc
-          |> Agent_core.Types.Extra_system_context_provenance.classify
-        with
-        | Agent_core.Types.Extra_system_context_provenance.Present -> ()
-        | Absent | Historical | Invalid | Duplicate ->
-          fail "production dynamic context lost its typed provenance"))
+       (check string "production dynamic context lost its typed provenance" "system_context" (context_message |> member "origin" |> to_string)))
 ;;
 
 let test_keeper_projects_typed_tools_and_hooks () =
@@ -8595,9 +8573,7 @@ let test_keeper_projects_typed_tools_and_hooks () =
           && String.equal
                "fixture-context"
                (Agent_core.Types.text_of_content message.content)
-          && Agent_core.Types.Extra_system_context_provenance.classify
-               message.metadata
-             = Agent_core.Types.Extra_system_context_provenance.Present)
+          && message.origin = Agent_core.Types.System_context)
         messages;
     Ok messages
   in

@@ -219,7 +219,7 @@ let test_agent_turn_preparation () =
       ]
   in
   let messages =
-    [ { Types.role = User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = User
       ; content = [ Text "hello" ]
       ; name = None
       ; tool_call_id = None
@@ -299,7 +299,7 @@ let test_provider_context_retention () =
   let projection (messages : Types.message list) =
     match duplicate_context, List.rev messages with
     | true, last :: _ when
-        Types.Extra_system_context_provenance.classify last.metadata = Present ->
+        last.origin = Types.System_context ->
       Ok (messages @ [last])
     | _ -> Ok messages
   in
@@ -317,7 +317,7 @@ let test_provider_context_retention () =
   let saved = List.map (fun message ->
       Checkpoint.message_to_json message |> Checkpoint.message_of_json |> Result.get_ok) saved in
   let has_historical = List.exists (fun (m : Types.message) ->
-    Types.Extra_system_context_provenance.classify m.metadata = Historical) saved in
+    m.origin = Types.Historical_system_context) saved in
   Alcotest.(check bool) "retention follows the producing provider" retained has_historical;
   Alcotest.(check int) "only Anthropic adds durable context"
     (if retained then 3 else 2) (List.length saved);
@@ -1249,7 +1249,7 @@ let test_agent_multiple_tools () =
 
 let test_prepare_turn_no_tools () =
   let messages =
-    [ { Types.role = User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = User
       ; content = [ Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -1275,19 +1275,19 @@ let test_prepare_turn_no_tools () =
 
 let test_prepare_turn_preserves_messages () =
   let messages =
-    [ { Types.role = User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = User
       ; content = [ Text "hello" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { Types.role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
       ; content = [ Text "hi there" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { Types.role = User
+    ; { origin = Llm_provider.Types.Conversation;  Types.role = User
       ; content = [ Text "how are you" ]
       ; name = None
       ; tool_call_id = None
@@ -1472,7 +1472,7 @@ let test_accumulate_usage_cumulative () =
 
 let test_prepare_turn_extra_context () =
   let messages =
-    [ { Types.role = User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = User
       ; content = [ Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -2371,13 +2371,13 @@ let test_agent_run_resumes_tool_without_duplicate_effects
          agent
          { config
          ; messages =
-             [ { Types.role = User
+             [ { origin = Llm_provider.Types.Conversation;  Types.role = User
                ; content = [ Text "run the tool" ]
                ; name = None
                ; tool_call_id = None
                ; metadata = []
                }
-             ; { Types.role = Assistant
+             ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
                ; content =
                    [ ToolUse
                        { id = tool_use_id; name = "durable_tool"; input = tool_input }
@@ -2654,7 +2654,7 @@ let test_agent_run_resume_ignores_injected_user_context_message () =
   test_agent_run_resumes_tool_without_duplicate_effects
     ~settled:true
     ~extra_restored_messages:
-      [ { Types.role = User
+      [ { origin = Llm_provider.Types.Conversation;  Types.role = User
         ; content = [ Text "[system] git status: clean" ]
         ; name = None
         ; tool_call_id = None
@@ -2670,7 +2670,7 @@ let test_agent_run_resume_rejects_mismatched_prompt () =
   test_agent_run_resumes_tool_without_duplicate_effects
     ~settled:true
     ~extra_restored_messages:
-      [ { Types.role = User
+      [ { origin = Llm_provider.Types.Conversation;  Types.role = User
         ; content = [ Text "[system] git status: clean" ]
         ; name = None
         ; tool_call_id = None
@@ -2911,13 +2911,13 @@ let test_agent_run_resumes_settled_closed_turn
          agent
          { config
          ; messages =
-             [ { Types.role = User
+             [ { origin = Llm_provider.Types.Conversation;  Types.role = User
                ; content = [ Text "run the tool" ]
                ; name = None
                ; tool_call_id = None
                ; metadata = []
                }
-             ; { Types.role = Assistant
+             ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
                ; content =
                    [ ToolUse
                        { id = tool_use_id; name = "durable_tool"; input = tool_input }
@@ -2926,7 +2926,7 @@ let test_agent_run_resumes_settled_closed_turn
                ; tool_call_id = None
                ; metadata = []
                }
-             ; { Types.role = Tool
+             ; { origin = Llm_provider.Types.Conversation;  Types.role = Tool
                ; content =
                    [ ToolResult
                        { tool_use_id
@@ -3380,7 +3380,7 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
                in
                let messages =
                  let assistant =
-                   { Types.role = Assistant
+                   { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
                    ; content = assistant_content
                    ; name = None
                    ; tool_call_id = None
@@ -3391,7 +3391,7 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
                  then
                    [ Types.user_msg "run mismatched zero-invocation authority"
                    ; assistant
-                   ; { Types.role = Tool
+                   ; { origin = Llm_provider.Types.Conversation;  Types.role = Tool
                      ; content =
                          [ Types.ToolResult
                              { tool_use_id = "restored-zero-call"
@@ -3494,13 +3494,13 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
                  { config
                  ; messages =
                      [ Types.user_msg "run malformed authority"
-                     ; { Types.role = Assistant
+                     ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
                        ; content = assistant_content
                        ; name = None
                        ; tool_call_id = None
                        ; metadata = []
                        }
-                     ; { Types.role = Tool
+                     ; { origin = Llm_provider.Types.Conversation;  Types.role = Tool
                        ; content = result_content
                        ; name = None
                        ; tool_call_id = None
@@ -3945,13 +3945,13 @@ let test_agent_run_resumes_all_blocked_settled_turn () =
          agent
          { config
          ; messages =
-             [ { Types.role = User
+             [ { origin = Llm_provider.Types.Conversation;  Types.role = User
                ; content = [ Text "run the tool" ]
                ; name = None
                ; tool_call_id = None
                ; metadata = []
                }
-             ; { Types.role = Assistant
+             ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
                ; content =
                    [ ToolUse
                        { id = tool_use_id; name = "durable_tool"; input = tool_input }
@@ -3960,7 +3960,7 @@ let test_agent_run_resumes_all_blocked_settled_turn () =
                ; tool_call_id = None
                ; metadata = []
                }
-             ; { Types.role = Tool
+             ; { origin = Llm_provider.Types.Conversation;  Types.role = Tool
                ; content =
                    [ ToolResult
                        { tool_use_id
@@ -4143,13 +4143,13 @@ let test_agent_run_resume_fires_on_yield () =
          agent
          { config
          ; messages =
-             [ { Types.role = User
+             [ { origin = Llm_provider.Types.Conversation;  Types.role = User
                ; content = [ Text "run the tool" ]
                ; name = None
                ; tool_call_id = None
                ; metadata = []
                }
-             ; { Types.role = Assistant
+             ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
                ; content =
                    [ ToolUse
                        { id = tool_use_id; name = "durable_tool"; input = tool_input }

@@ -448,7 +448,7 @@ let test_documented_refusal_exits_are_not_dropped_connections () =
 (* ── Prompt ──────────────────────────────────────────────────────────── *)
 
 let user_message text : Agent_core.Types.message =
-  { role = User; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role = User; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 (* MSP has no system-prompt channel: a start carries the system prompt, the

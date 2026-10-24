@@ -48,25 +48,25 @@ let make_checkpoint
 ;;
 
 let sample_messages =
-  [ { Types.role = Types.User
+  [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
     ; content = [ Types.Text "Hello" ]
     ; name = None
     ; tool_call_id = None
     ; metadata = []
     }
-  ; { Types.role = Types.Assistant
+  ; { origin = Llm_provider.Types.Conversation;  Types.role = Types.Assistant
     ; content = [ Types.Text "Hi there." ]
     ; name = None
     ; tool_call_id = None
     ; metadata = []
     }
-  ; { Types.role = Types.User
+  ; { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
     ; content = [ Types.Text "What is 2+2?" ]
     ; name = None
     ; tool_call_id = None
     ; metadata = []
     }
-  ; { Types.role = Types.Assistant
+  ; { origin = Llm_provider.Types.Conversation;  Types.role = Types.Assistant
     ; content = [ Types.Text "4" ]
     ; name = None
     ; tool_call_id = None
@@ -390,7 +390,7 @@ let test_resume_preserves_message_content () =
   with_net
   @@ fun net ->
   let msgs =
-    [ { Types.role = Types.User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
       ; content = [ Types.Text "Hello"; Types.Text "World" ]
       ; name = None
       ; tool_call_id = None

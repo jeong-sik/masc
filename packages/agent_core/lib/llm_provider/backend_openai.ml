@@ -375,7 +375,7 @@ let%test "parse_openai_response_result error returns Error" =
 
 let%test "openai_messages_of_message user text" =
   let msg =
-    { role = User
+    { origin = Types.Conversation;  role = User
     ; content = [ Text "hello" ]
     ; name = None
     ; tool_call_id = None
@@ -388,7 +388,7 @@ let%test "openai_messages_of_message user text" =
 
 let%test "openai_messages_of_message rejects user with tool_result" =
   let msg =
-    { role = User
+    { origin = Types.Conversation;  role = User
     ; content =
         [ Text "follow up"
         ; ToolResult
@@ -421,13 +421,13 @@ let%test "build_request rejects ToolResult outside role Tool" =
       ()
   in
   let messages =
-    [ { role = Assistant
+    [ { origin = Types.Conversation;  role = Assistant
       ; content = [ Text "hello" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = User
+    ; { origin = Types.Conversation;  role = User
       ; content =
           [ Text "follow up"
           ; ToolResult
@@ -454,7 +454,7 @@ let%test "build_request rejects ToolResult outside role Tool" =
 
 let%test "openai_messages_of_message assistant with tool_calls" =
   let msg =
-    { role = Assistant
+    { origin = Types.Conversation;  role = Assistant
     ; content = [ ToolUse { id = "tc1"; name = "fn"; input = `Assoc [] } ]
     ; name = None
     ; tool_call_id = None
@@ -467,7 +467,7 @@ let%test "openai_messages_of_message assistant with tool_calls" =
 
 let%test "openai_messages_of_message system" =
   let msg =
-    { role = System
+    { origin = Types.Conversation;  role = System
     ; content = [ Text "system prompt" ]
     ; name = None
     ; tool_call_id = None
@@ -480,7 +480,7 @@ let%test "openai_messages_of_message system" =
 
 let%test "openai_messages_of_message user empty content" =
   let msg =
-    { role = User; content = []; name = None; tool_call_id = None; metadata = [] }
+    { origin = Types.Conversation;  role = User; content = []; name = None; tool_call_id = None; metadata = [] }
   in
   let result = openai_messages_of_message msg in
   result = []
@@ -488,7 +488,7 @@ let%test "openai_messages_of_message user empty content" =
 
 let%test "openai_messages_of_message user with image" =
   let msg =
-    { role = User
+    { origin = Types.Conversation;  role = User
     ; content =
         [ Image { media_type = "image/png"; data = "abc123"; source_type = Types.Base64 }
         ; Text "describe this"
@@ -504,7 +504,7 @@ let%test "openai_messages_of_message user with image" =
 
 let%test "openai_messages_of_message user with document" =
   let msg =
-    { role = User
+    { origin = Types.Conversation;  role = User
     ; content =
         [ Document
             { media_type = "application/pdf"; data = "abc"; source_type = Types.Base64 }
@@ -520,7 +520,7 @@ let%test "openai_messages_of_message user with document" =
 
 let%test "openai_messages_of_message user with audio" =
   let msg =
-    { role = User
+    { origin = Types.Conversation;  role = User
     ; content =
         [ Audio
             { media_type = "audio/wav"; data = "audiodata"; source_type = Types.Base64 }
@@ -536,7 +536,7 @@ let%test "openai_messages_of_message user with audio" =
 
 let%test "openai_messages_of_message assistant text only" =
   let msg =
-    { role = Assistant
+    { origin = Types.Conversation;  role = Assistant
     ; content = [ Text "hello" ]
     ; name = None
     ; tool_call_id = None
@@ -551,7 +551,7 @@ let%test "openai_messages_of_message assistant text only" =
 
 let%test "openai_messages_of_message assistant excludes reasoning from content" =
   let msg =
-    { role = Assistant
+    { origin = Types.Conversation;  role = Assistant
     ; content =
         [ Thinking { signature = None; content = "hidden chain of thought" }
         ; Text "final answer"
@@ -570,7 +570,7 @@ let%test "openai_messages_of_message assistant excludes reasoning from content" 
 
 let%test "openai_messages_of_message assistant blank text with tool_calls" =
   let msg =
-    { role = Assistant
+    { origin = Types.Conversation;  role = Assistant
     ; content = [ Text ""; ToolUse { id = "tc1"; name = "fn"; input = `Assoc [] } ]
     ; name = None
     ; tool_call_id = None
@@ -585,7 +585,7 @@ let%test "openai_messages_of_message assistant blank text with tool_calls" =
 
 let%test "openai_messages_of_message Tool role with ToolResult" =
   let msg =
-    { role = Tool
+    { origin = Types.Conversation;  role = Tool
     ; content =
         [ ToolResult
             { tool_use_id = "tc1"
@@ -610,7 +610,7 @@ let%test "openai_messages_of_message Tool role with ToolResult" =
 
 let%test "openai_messages_of_message rejects Tool role without ToolResult" =
   let msg =
-    { role = Tool
+    { origin = Types.Conversation;  role = Tool
     ; content = [ Text "fallback" ]
     ; name = None
     ; tool_call_id = None
@@ -1099,7 +1099,7 @@ let%test
     | Error detail -> failwith detail
   in
   let messages =
-    [ { role = Assistant
+    [ { origin = Types.Conversation;  role = Assistant
       ; content =
           [ Thinking { signature = None; content = "use calculator" }
           ; ToolUse

@@ -169,7 +169,7 @@ let test_full_flow_externalize_reference_serve () =
       (* Step 5: The provider-bound ToolResult keeps the marker. Full bytes
          must not be re-inflated into every later model request. *)
       let msg : T.message =
-        {
+        { origin = Llm_provider.Types.Conversation;
           T.role = T.Tool;
           content =
             [

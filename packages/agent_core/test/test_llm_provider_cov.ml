@@ -41,11 +41,11 @@ let make_config
 ;;
 
 let user_msg s : Types.message =
-  { role = User; content = [ Text s ]; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role = User; content = [ Text s ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 let assistant_msg s : Types.message =
-  { role = Assistant
+  { origin = Llm_provider.Types.Conversation;  role = Assistant
   ; content = [ Text s ]
   ; name = None
   ; tool_call_id = None
@@ -54,7 +54,7 @@ let assistant_msg s : Types.message =
 ;;
 
 let system_msg s : Types.message =
-  { role = System; content = [ Text s ]; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role = System; content = [ Text s ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 let gemini_flash_model = "gemini-3.7-flash"
@@ -539,7 +539,7 @@ let test_message_to_json_system () =
 
 let test_message_to_json_tool () =
   let msg : Types.message =
-    { role = Tool
+    { origin = Llm_provider.Types.Conversation;  role = Tool
     ; content = [ Text "result" ]
     ; name = None
     ; tool_call_id = None
@@ -644,9 +644,12 @@ let test_tool_result_followup_merge_preserves_internal_metadata () =
           }
       ]
   in
+  let human = Types.user_msg "an actual new query" in
+  Alcotest.(check int) "actual caller User is never absorbed into a tool result" 2
+    (List.length (Api_common.merge_tool_result_followup_user_messages [tool_result;human]));
   let boundary = Types.Conversation_metadata.run_boundary_entry in
   let followup =
-    Types.make_message ~metadata:[ boundary ] ~role:User [ Text "continue" ]
+    Types.make_message ~origin:Recovery_instruction ~metadata:[ boundary ] ~role:User [ Text "continue" ]
   in
   match Api_common.merge_tool_result_followup_user_messages [ tool_result; followup ] with
   | [ merged ] ->
@@ -705,14 +708,14 @@ let test_contents_of_messages_mixed () =
 let test_contents_of_messages_tool_use () =
   let msgs : Types.message list =
     [ user_msg "call this tool"
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content =
           [ ToolUse { id = "tu1"; name = "my_fn"; input = `Assoc [ "x", `Int 1 ] } ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Tool
+    ; { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "tu1"
@@ -735,7 +738,7 @@ let test_contents_of_messages_tool_use () =
 
 let test_contents_of_messages_redacted_filtered () =
   let msgs : Types.message list =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ RedactedThinking "secret"; Text "visible" ]
       ; name = None
       ; tool_call_id = None

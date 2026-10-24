@@ -153,7 +153,7 @@ let test_prepare_turn_visible_tool_names_preserves_order () =
 
 let test_prepare_messages_no_reducer () =
   let msgs =
-    [ { Types.role = Types.User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
       ; content = [ Types.Text "hello" ]
       ; name = None
       ; tool_call_id = None
@@ -169,7 +169,7 @@ let test_prepare_messages_no_reducer () =
 
 let test_prepare_messages_extra_context () =
   let msgs =
-    [ { Types.role = Types.User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
       ; content = [ Types.Text "hello" ]
       ; name = None
       ; tool_call_id = None
@@ -187,28 +187,7 @@ let test_prepare_messages_extra_context () =
   Alcotest.(check bool)
     "typed provenance is present"
     true
-    (Types.Extra_system_context_provenance.classify carrier.metadata
-     = Types.Extra_system_context_provenance.Present);
-  let provenance_key =
-    match Types.Extra_system_context_provenance.metadata with
-    | [ (key, `Bool true) ] -> key
-    | _ -> Alcotest.fail "provenance metadata shape drifted"
-  in
-  Alcotest.(check bool)
-    "missing provenance is explicit"
-    true
-    (Types.Extra_system_context_provenance.classify []
-     = Types.Extra_system_context_provenance.Absent);
-  Alcotest.(check bool)
-    "malformed provenance is explicit"
-    true
-    (Types.Extra_system_context_provenance.classify [ provenance_key, `Bool false ]
-     = Types.Extra_system_context_provenance.Invalid);
-  Alcotest.(check bool)
-    "duplicate provenance is explicit"
-    true
-    (Types.Extra_system_context_provenance.classify (carrier.metadata @ carrier.metadata)
-     = Types.Extra_system_context_provenance.Duplicate);
+    (carrier.origin = Types.System_context);
   match carrier.content with
   | [ Types.Text "[system context] You are in test mode." ] -> ()
   | _ -> Alcotest.fail "expected single Text block"
@@ -223,7 +202,7 @@ let test_retained_context_respects_projection () =
       ~turn_params ~model_input_projection:project () |> Result.get_ok
   in
   let is_current (message : Types.message) =
-    Types.Extra_system_context_provenance.classify message.metadata = Present
+    message.origin = Types.System_context
   in
   let removed = prepare (fun messages -> Ok (List.filter (fun m -> not (is_current m)) messages)) in
   Alcotest.(check bool) "removed context is never retained" true
@@ -240,7 +219,7 @@ let test_retained_context_respects_projection () =
       (Types.text_of_content message.content);
     Alcotest.(check (option string)) "other metadata survives retention"
       (Some "projected")
-      (Types.Extra_system_context_provenance.as_historical message.metadata
+      (message.metadata
        |> List.assoc_opt "test-origin" |> Option.map Yojson.Safe.Util.to_string)
 ;;
 
@@ -263,7 +242,7 @@ let test_context_ambiguity_does_not_reject_preparation () =
 
 let test_prepare_messages_system_prompt_override_noop () =
   let msgs =
-    [ { Types.role = Types.User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
       ; content = [ Types.Text "hello" ]
       ; name = None
       ; tool_call_id = None
@@ -284,7 +263,7 @@ let test_prepare_messages_system_prompt_override_noop () =
 
 let test_prepare_messages_both_override_and_extra_context () =
   let msgs =
-    [ { Types.role = Types.User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
       ; content = [ Types.Text "hello" ]
       ; name = None
       ; tool_call_id = None
@@ -308,8 +287,7 @@ let test_prepare_messages_both_override_and_extra_context () =
   Alcotest.(check bool)
     "typed provenance is present"
     true
-    (Types.Extra_system_context_provenance.classify carrier.metadata
-     = Types.Extra_system_context_provenance.Present);
+    (carrier.origin = Types.System_context);
   match carrier.content with
   | [ Types.Text _ ] -> ()
   | _ -> Alcotest.fail "expected single Text block"
@@ -632,7 +610,7 @@ let make_tool_use name input =
 let test_apply_context_injection_no_injector () =
   let context = Context.create_sync () in
   let messages =
-    [ { Types.role = Types.User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
       ; content = [ Types.Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -669,7 +647,7 @@ let test_apply_context_injection_no_injector () =
 let test_apply_context_injection_with_context_update () =
   let context = Context.create_sync () in
   let messages =
-    [ { Types.role = Types.User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
       ; content = [ Types.Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -712,7 +690,7 @@ let test_apply_context_injection_with_context_update () =
 let test_apply_context_injection_with_extra_messages () =
   let context = Context.create_sync () in
   let messages =
-    [ { Types.role = Types.User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
       ; content = [ Types.Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -735,7 +713,7 @@ let test_apply_context_injection_with_extra_messages () =
     Some
       { Hooks.context_updates = []
       ; extra_messages =
-          [ { Types.role = Types.User
+          [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
             ; content = [ Types.Text "injected" ]
             ; name = None
             ; tool_call_id = None
@@ -754,7 +732,7 @@ let test_apply_context_injection_with_extra_messages () =
 let test_apply_context_injection_exception_is_error () =
   let context = Context.create_sync () in
   let messages =
-    [ { Types.role = Types.User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
       ; content = [ Types.Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -789,7 +767,7 @@ let test_apply_context_injection_exception_is_error () =
 let test_apply_context_injection_preserves_non_retryable_error () =
   let context = Context.create_sync () in
   let messages =
-    [ { Types.role = Types.User
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
       ; content = [ Types.Text "hi" ]
       ; name = None
       ; tool_call_id = None

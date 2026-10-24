@@ -119,15 +119,19 @@ let role_of_json json = let* s=text json in match s with
   | "system" -> Ok A.System | "user" -> Ok A.User | "assistant" -> Ok A.Assistant | "tool" -> Ok A.Tool
   | _ -> Error "Unknown captured message role"
 let message_json (message:A.message) = `Assoc ["role",role_json message.role;
+  "origin",`String (A.message_origin_to_string message.origin);
   "content",`List (List.map content_json message.content);"name",optional (fun s -> `String s) message.name;
   "tool_call_id",optional (fun s -> `String s) message.tool_call_id;
   "metadata",`List (List.map (fun (key,json) -> `Assoc ["key",`String key;"value",json]) message.metadata)]
-let message_of_json json = let* f=fields ["role";"content";"name";"tool_call_id";"metadata"] json in
+let message_of_json json = let* f=fields ["role";"origin";"content";"name";"tool_call_id";"metadata"] json in
+  let* origin_token=text (value "origin" f) in
+  let* origin=match A.message_origin_of_string origin_token with
+    | Some origin -> Ok origin | None -> Error "Unknown captured message origin" in
   let* role=role_of_json (value "role" f) in let* content=list content_of_json (value "content" f) in
   let* name=option text (value "name" f) in let* tool_call_id=option text (value "tool_call_id" f) in
   let+ metadata=list (fun json -> let* f=fields ["key";"value"] json in
     let+ key=text (value "key" f) in key,value "value" f) (value "metadata" f) in
-  ({A.role;content;name;tool_call_id;metadata}:A.message)
+  ({ origin; A.role;content;name;tool_call_id;metadata}:A.message)
 
 let source_json (source:C.source) = `Assoc ["reference",`String source.reference;"content",source.content]
 let source_of_json json = let* f=fields ["reference";"content"] json in

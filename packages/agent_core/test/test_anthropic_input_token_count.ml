@@ -4,7 +4,7 @@ open Types
 module Count = Input_token_count
 
 let msg role content : message =
-  { role; content; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 let tool =

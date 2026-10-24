@@ -20,7 +20,7 @@ let source_checkpoint pending =
     ; agent_name = "input-response"; model = "opaque-runtime"
     ; system_prompt = Some "Retained system"
     ; messages = [Core.Types.
-        {role=User; content=[Text "Retained history"]; name=None; tool_call_id=None
+        { origin = Llm_provider.Types.Conversation; role=User; content=[Text "Retained history"]; name=None; tool_call_id=None
         ;metadata=["origin", `String "original"]}]
     ; usage = Core.Types.empty_usage; turn_count = 4; created_at = 10.0
     ; tools = [tool]; tool_choice = Some Core.Types.Auto
@@ -73,7 +73,7 @@ let test_canonical_response_preserves_complete_checkpoint () =
      | Core.Hooks.Answer _ ->
        check bool "answer uses the canonical question" true
          (after.messages = original.messages @ [Core.Types.
-           {role=User; content=[Text "[User input] Original question?: \"yes\""]
+           { origin = Llm_provider.Types.Conversation; role=User; content=[Text "[User input] Original question?: \"yes\""]
            ;name=None;tool_call_id=None;metadata=[]}])
      | Core.Hooks.Declined ->
        check bool "explicit decline preserves history and reports canonical question" true
@@ -150,7 +150,7 @@ let test_autonomous_input_owner_rejects_lost_response_lineage () =
      refused_source "pending=None hid the missing accepted answer"
        (Some {original with pending_input=None});
      let progressed = {consumed with messages=consumed.messages @ [Core.Types.
-       {role=Assistant;content=[Text "answer retained"];name=None;tool_call_id=None;metadata=[]}]} in
+       { origin = Llm_provider.Types.Conversation; role=Assistant;content=[Text "answer retained"];name=None;tool_call_id=None;metadata=[]}]} in
      ignore (prepare (Some progressed) |> prepared)) with
    | Ok (`Ran ()) -> ()
    | Ok (`Busy _ | `Interrupted) | Error _ -> fail "autonomous publication did not run");

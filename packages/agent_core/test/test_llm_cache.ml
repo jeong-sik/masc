@@ -134,7 +134,7 @@ let test_fingerprint_message_roles () =
 let test_fingerprint_tool_use_blocks () =
   let config = make_config () in
   let msg name =
-    { role = Assistant
+    { origin = Llm_provider.Types.Conversation;  role = Assistant
     ; content = [ ToolUse { id = "call_1"; name; input = `Assoc [ "q", `String "x" ] } ]
     ; name = None
     ; tool_call_id = None
@@ -149,7 +149,7 @@ let test_fingerprint_tool_use_blocks () =
 let test_fingerprint_redacted_thinking_blocks () =
   let config = make_config () in
   let msg data =
-    { role = Assistant
+    { origin = Llm_provider.Types.Conversation;  role = Assistant
     ; content = [ RedactedThinking data; Text "visible" ]
     ; name = None
     ; tool_call_id = None

@@ -415,7 +415,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       in
       seed_ambiguous_resumed_session ~base_path ~tool;
       let tool_history : Agent_core.Types.message =
-        { role = Tool
+        { origin = Llm_provider.Types.Conversation;  role = Tool
         ; content =
             [ ToolResult
                 { tool_use_id = "prior-call"
@@ -433,7 +433,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       let large_history =
         List.init 70 (fun index ->
           let marker = Printf.sprintf "history-%02d" index in
-          { Agent_core.Types.role = User
+          { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = User
           ; content = [ Text (marker ^ ":" ^ String.make 4096 'x') ]
           ; name = None
           ; tool_call_id = None
@@ -860,11 +860,11 @@ let test_keeper_projects_mcp_tool_and_settles () =
         (String_util.contains_substring
            prompt
            (Keeper_official_client_host.encode_history_message
-              { Agent_core.Types.role = System
+              { origin = Llm_provider.Types.System_context;  Agent_core.Types.role = System
               ; content = [ Text dynamic_context ]
               ; name = None
               ; tool_call_id = None
-              ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+              ; metadata = []
               }));
       let resumed_prompt =
         match !observed_resumed_prompt with
@@ -877,11 +877,11 @@ let test_keeper_projects_mcp_tool_and_settles () =
         (String_util.contains_substring
            resumed_prompt
            (Keeper_official_client_host.encode_history_message
-              { Agent_core.Types.role = System
+              { origin = Llm_provider.Types.System_context;  Agent_core.Types.role = System
               ; content = [ Text dynamic_context ]
               ; name = None
               ; tool_call_id = None
-              ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+              ; metadata = []
               }));
       check bool
         "resume keeps the goal"
@@ -1254,7 +1254,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
 ;;
 
 let plain_user_message text : Agent_core.Types.message =
-  { role = User
+  { origin = Llm_provider.Types.Conversation;  role = User
   ; content = [ Text text ]
   ; name = None
   ; tool_call_id = None
@@ -1553,7 +1553,7 @@ let test_a_preamble_is_not_a_durable_atom () =
       if index mod 2 = 0
       then plain_user_message (Printf.sprintf "turn-%02d" index)
       else
-        ({ role = Assistant
+        ({ origin = Llm_provider.Types.Conversation;  role = Assistant
          ; content = [ Text (Printf.sprintf "reply-%02d" index) ]
          ; name = None
          ; tool_call_id = None

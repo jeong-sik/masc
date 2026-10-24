@@ -211,7 +211,7 @@ let with_image_followups messages =
     match pending with
     | [] -> reversed
     | _ ->
-      { role = User; content = List.rev pending; name = None
+      { origin = Types.Tool_result_followup; role = User; content = List.rev pending; name = None
       ; tool_call_id = None; metadata = [] } :: reversed
   in
   let rec loop reversed pending = function
@@ -248,7 +248,7 @@ let with_image_followups messages =
 [@@@coverage off]
 
 let[@warning "-32"] message role content : Types.message =
-  { role; content; name = None; tool_call_id = None; metadata = [] }
+  { origin = Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 let[@warning "-32"] tool_use id name = ToolUse { id; name; input = `Assoc [] }

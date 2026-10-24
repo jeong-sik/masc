@@ -670,7 +670,7 @@ val prepare_turn :
     named here once rather than in each lane (#33165).
 
     The hook's [extra_system_context] is appended as a raw [System] message
-    carrying {!Agent_core.Types.Extra_system_context_provenance}. Official
+    carrying [origin = System_context]. Official
     adapters must keep that message on their provider instruction surface; it
     is not an Agent Core synthetic User carrier. The Librarian working state
     is a second [System] message on the same surface, tagged

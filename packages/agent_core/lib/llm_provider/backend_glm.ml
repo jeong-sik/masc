@@ -400,7 +400,7 @@ let%test "build_request without thinking is passthrough" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "hello" ]
       ; name = None
       ; tool_call_id = None
@@ -424,7 +424,7 @@ let%test "build_request with thinking injects correct format" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "reason" ]
       ; name = None
       ; tool_call_id = None
@@ -451,7 +451,7 @@ let%test "build_request can preserve reasoning on demand" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "reason" ]
       ; name = None
       ; tool_call_id = None
@@ -476,7 +476,7 @@ let%test "build_request maps preserve_thinking to GLM clear_thinking=false" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "reason" ]
       ; name = None
       ; tool_call_id = None
@@ -530,7 +530,7 @@ let%test
     | Error detail -> failwith detail
   in
   let messages =
-    [ { role = Assistant
+    [ { origin = Types.Conversation;  role = Assistant
       ; content =
           [ Thinking { content = "prior reasoning"; signature = None }; Text "answer" ]
       ; name = None
@@ -568,7 +568,7 @@ let%test "build_request preserves ZAI GLM OpenAI-compatible replay and tool cont
     | Error detail -> failwith detail
   in
   let messages =
-    [ { role = Assistant
+    [ { origin = Types.Conversation;  role = Assistant
       ; content =
           [ Thinking { content = "prior reasoning"; signature = None }
           ; ToolUse
@@ -602,7 +602,7 @@ let%test "build_request emits exactly one thinking key for ZAI GLM (Agent Core c
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "reason" ]
       ; name = None
       ; tool_call_id = None
@@ -627,7 +627,7 @@ let%test "build_request with declared thinking=false injects disabled" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "no think" ]
       ; name = None
       ; tool_call_id = None
@@ -759,7 +759,7 @@ let%test "build_request strips chat_template_kwargs from Glm body" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "hi" ]
       ; name = None
       ; tool_call_id = None
@@ -784,7 +784,7 @@ let%test "build_request adds tool_stream when enabled" =
       ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "weather" ]
       ; name = None
       ; tool_call_id = None
@@ -825,7 +825,7 @@ let%test "build_request defaults tool_stream on for streaming + tools (Agent Cor
   in
   let () = assert (not config.tool_stream) in
   let messages =
-    [ { role = User
+    [ { origin = Types.Conversation;  role = User
       ; content = [ Text "weather" ]
       ; name = None
       ; tool_call_id = None

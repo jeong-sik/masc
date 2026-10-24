@@ -23,7 +23,7 @@ let with_temp_keepers f =
 ;;
 
 let message ~role text : Types.message =
-  { role
+  { origin = Llm_provider.Types.Conversation;  role
   ; content = [ Types.Text text ]
   ; name = None
   ; tool_call_id = None

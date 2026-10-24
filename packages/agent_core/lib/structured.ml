@@ -194,7 +194,7 @@ let extract ~sw ~net ~provider_config ~config ~(schema : 'a schema) prompt
   : ('a, Error.t) result
   =
   let messages =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text prompt ]
       ; name = None
       ; tool_call_id = None
@@ -277,7 +277,7 @@ let extract_stream
   : ('a * api_response, Error.t) result
   =
   let messages =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text prompt ]
       ; name = None
       ; tool_call_id = None

@@ -295,7 +295,7 @@ let probe_invocation ~sw ~net ~clock ~now ~runtime_id ~tool ~prompt () =
            | Error detail -> Error (Tool_schema_rejected detail)
            | Ok tool_json ->
              let messages =
-               [ { Agent_core.Types.role = Agent_core.Types.User
+               [ { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.User
                  ; content = [ Agent_core.Types.Text prompt ]
                  ; name = None
                  ; tool_call_id = None

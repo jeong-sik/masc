@@ -86,7 +86,7 @@ let test_clone_preserves_messages () =
     agent
     { (Agent.state agent) with
       messages =
-        [ { Types.role = User
+        [ { origin = Llm_provider.Types.Conversation;  Types.role = User
           ; content = [ Text "hello" ]
           ; name = None
           ; tool_call_id = None
@@ -178,7 +178,7 @@ let test_clone_state_divergence () =
     { (Agent.state agent) with
       turn_count = 10
     ; messages =
-        [ { Types.role = User
+        [ { origin = Llm_provider.Types.Conversation;  Types.role = User
           ; content = [ Text "original only" ]
           ; name = None
           ; tool_call_id = None
@@ -202,13 +202,13 @@ let test_clone_from_resumed_agent () =
     { (Agent.state agent) with
       turn_count = 3
     ; messages =
-        [ { Types.role = User
+        [ { origin = Llm_provider.Types.Conversation;  Types.role = User
           ; content = [ Text "msg1" ]
           ; name = None
           ; tool_call_id = None
           ; metadata = []
           }
-        ; { Types.role = Assistant
+        ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
           ; content = [ Text "reply1" ]
           ; name = None
           ; tool_call_id = None

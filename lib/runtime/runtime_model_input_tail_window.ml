@@ -10,7 +10,7 @@ let preamble_text =
    surfaces through the memory system when relevant."
 
 let preamble_message : Agent_core.Types.message =
-  { role = Agent_core.Types.User
+  { origin = Llm_provider.Types.Agent_instruction; role = Agent_core.Types.User
   ; content = [ Agent_core.Types.Text preamble_text ]
   ; name = None
   ; tool_call_id = None
@@ -118,25 +118,13 @@ let budget_error_to_core_error error =
        { message = budget_error_to_string error; limit = None })
 ;;
 
-(* A message is pinned when it must survive every cut: [System] entries
-   (defensive — the runtime carries the system prompt out of band), any
-   message with extra-system-context provenance, and the Librarian working
-   state. [Invalid]/[Duplicate] provenance still means the per-turn context
-   assembler authored the message, so it is pinned rather than exposed to
-   the cut on a malformed tag. [Historical] is not pinned: a retained
-   context carrier is ordinary history the cut may trim. This deliberately
-   differs from [Reasoning_history_projection.is_extra_system_context_carrier],
-   which answers a replay question (carrier or not?) and returns true for
-   [Historical]. *)
+(* Current runtime context and Librarian working/unread state survive cuts.
+   Historical system context is ordinary replay history and may be trimmed. *)
 let is_extra_context (msg : Agent_core.Types.message) =
-  match
-    Agent_core.Types.Extra_system_context_provenance.classify msg.metadata
-  with
-  | Agent_core.Types.Extra_system_context_provenance.Absent
-  | Agent_core.Types.Extra_system_context_provenance.Historical -> false
-  | Agent_core.Types.Extra_system_context_provenance.Present
-  | Agent_core.Types.Extra_system_context_provenance.Invalid
-  | Agent_core.Types.Extra_system_context_provenance.Duplicate -> true
+  match msg.origin with
+  | System_context -> true
+  | Conversation | Historical_system_context | Recovery_instruction
+  | Tool_result_followup | Agent_instruction -> false
 ;;
 
 let is_pinned msg = is_extra_context msg || is_working_state msg || is_unread_context msg

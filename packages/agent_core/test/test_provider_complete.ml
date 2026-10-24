@@ -511,13 +511,13 @@ let openai_responses_config () =
 let test_openai_responses_replays_assistant_phase_metadata () =
   let config = openai_responses_config () in
   let messages =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "continue" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = [ BOR.response_phase_metadata BOR.Final_answer ]
       }
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ Text "I will check." ]
       ; name = None
       ; tool_call_id = None
@@ -552,7 +552,7 @@ let unsupported_openai_responses_phase_message phase =
 let check_openai_responses_phase_metadata_rejected ~name ~metadata ~message =
   let config = openai_responses_config () in
   let messages =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ Text "drafting" ]
       ; name = None
       ; tool_call_id = None
@@ -663,7 +663,7 @@ let test_ollama_native_multimodal_request_body () =
     PC.make ~kind:Ollama ~model_id:"gemma4:9b" ~base_url:"http://localhost:11434" ()
   in
   let messages =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content =
           [ Text "What is in this image?"
           ; Image { media_type = "image/png"; data = "base64img"; source_type = Base64 }
@@ -786,7 +786,7 @@ let ollama_tool_correlation_config () =
 ;;
 
 let tool_result_message tool_use_id : message =
-  { role = Tool
+  { origin = Llm_provider.Types.Conversation;  role = Tool
   ; content =
       [ ToolResult
           { tool_use_id
@@ -803,7 +803,7 @@ let tool_result_message tool_use_id : message =
 ;;
 
 let tool_use_message id name : message =
-  { role = Assistant
+  { origin = Llm_provider.Types.Conversation;  role = Assistant
   ; content = [ ToolUse { id; name; input = `Assoc [] } ]
   ; name = None
   ; tool_call_id = None
@@ -848,7 +848,7 @@ let test_ollama_missing_tool_correlation_rejected_sync_and_stream () =
 
 let test_ollama_conflicting_tool_correlation_rejected_sync_and_stream () =
   let conflicting_batch : message =
-    { role = Assistant
+    { origin = Llm_provider.Types.Conversation;  role = Assistant
     ; content =
         [ ToolUse { id = "call-1"; name = "lookup"; input = `Assoc [] }
         ; ToolUse { id = "call-1"; name = "write"; input = `Assoc [] }
@@ -1080,7 +1080,7 @@ let test_kimi_direct_tool_result_uses_text_blocks () =
       ()
   in
   let messages =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content =
           [ Thinking
               { signature = Some "sig_1"; content = "I should call the calculator." }
@@ -1094,7 +1094,7 @@ let test_kimi_direct_tool_result_uses_text_blocks () =
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Tool
+    ; { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "tool_1"
@@ -1154,7 +1154,7 @@ let test_glm_preserved_reasoning_replay_and_preserves_auto_tool_choice () =
       ()
   in
   let messages =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content =
           [ Thinking { signature = None; content = "I need the calculator result." }
           ; ToolUse
@@ -1167,7 +1167,7 @@ let test_glm_preserved_reasoning_replay_and_preserves_auto_tool_choice () =
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Tool
+    ; { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "call_1"

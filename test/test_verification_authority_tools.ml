@@ -1200,7 +1200,7 @@ let test_goal_and_task_read_deliver_full_png () =
          | Agent_core.Types.Image { media_type="image/png"; data; source_type=Base64 } -> data = encoded
          | _ -> false) actual_blocks);
     let message role content : Agent_core.Types.message =
-      { role; content; name=None; tool_call_id=None; metadata=[] } in
+      { origin = Llm_provider.Types.Conversation;  role; content; name=None; tool_call_id=None; metadata=[] } in
     let messages =
       [ message User [ Text "Inspect the artifact visually" ]
       ; message Assistant [ ToolUse { id="read-visual"; name="Read"; input=args } ]

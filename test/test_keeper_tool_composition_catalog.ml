@@ -987,7 +987,7 @@ let test_public_draft_run_preserves_one_execution_identity ?(observe = true) ?(s
     let output = match Agent_core.Tool.execute ~invocation (find name) input with
       | Ok output -> output | Error error -> fail error.Agent_core.Types.message in
     let message : T.message =
-      { role = T.Tool
+      { origin = Llm_provider.Types.Conversation;  role = T.Tool
       ; content = [ T.ToolResult { tool_use_id = id; content = output.content
                                 ; outcome = T.Tool_succeeded; json = None; content_blocks = None } ]
       ; name = None; tool_call_id = Some id; metadata = [] } in

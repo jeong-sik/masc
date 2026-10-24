@@ -443,6 +443,7 @@ let metadata_of_json json =
 let message_json (msg : Types.message) content =
   let base_fields =
     [ "role", `String (Types.role_to_string msg.role)
+    ; "origin", `String (Types.message_origin_to_string msg.origin)
     ; "content", `List content
     ]
   in
@@ -464,6 +465,17 @@ let message_to_json (msg : Types.message) =
 
 let message_of_json json =
   let open Yojson.Safe.Util in
+  let origin = match json with
+    | `Assoc fields ->
+      (match List.filter_map (fun (key,value) -> if key="origin" then Some value else None) fields with
+       | [`String value] ->
+         (match Types.message_origin_of_string value with
+          | Some origin -> Ok origin
+          | None -> Error (Error.Serialization
+              (UnknownVariant {type_name="message_origin";value})))
+       | [] | _::_ -> Error (Error.Serialization
+           (JsonParseError {detail="Checkpoint.message requires one valid origin"})))
+    | _ -> Error (Error.Serialization (JsonParseError {detail="Checkpoint.message must be an object"})) in
   let role_str = json |> member "role" |> to_string in
   let role =
     match Types.role_of_string role_str with
@@ -480,11 +492,12 @@ let message_of_json json =
     |> result_all
   in
   let metadata = metadata_of_json json in
-  let* role = role
+  let* origin = origin
+  and* role = role
   and* content = content
   and* metadata = metadata in
   Ok
-    { role
+    { origin; role
     ; content
     ; name = json |> member "name" |> to_string_option
     ; tool_call_id = json |> member "tool_call_id" |> to_string_option

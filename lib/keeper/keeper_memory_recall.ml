@@ -117,36 +117,18 @@ let record_memory_recall_read_error ~site path exn_class =
     ()
 ;;
 
-type context_provenance_error =
-  | Invalid_context_provenance
-  | Duplicate_context_provenance
-
-let context_provenance_error_to_string = function
-  | Invalid_context_provenance -> "invalid runtime-context provenance"
-  | Duplicate_context_provenance -> "duplicate runtime-context provenance"
-;;
-
-let user_message_text ~on_error (message : Agent_core.Types.message) =
-  match message.role with
-  | Agent_core.Types.System | Agent_core.Types.Assistant | Agent_core.Types.Tool -> None
-  | Agent_core.Types.User ->
-    (match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
-     | Present | Historical -> None
-     | Invalid -> on_error Invalid_context_provenance; None
-     | Duplicate -> on_error Duplicate_context_provenance; None
-     | Absent ->
-       let content = String.trim (Agent_core.Types.text_of_message message) in
-       if content = "" then None else Some content)
+let user_message_text (message : Agent_core.Types.message) =
+  match message.role, message.origin with
+  | Agent_core.Types.User, Conversation ->
+    let content = String.trim (Agent_core.Types.text_of_message message) in
+    if content = "" then None else Some content
+  | (Agent_core.Types.System | Assistant | Tool), _
+  | User, (System_context | Historical_system_context | Recovery_instruction
+          | Tool_result_followup | Agent_instruction) -> None
 ;;
 
 let user_messages_newest_first (msgs : Agent_core.Types.message list) : string list =
-  let on_error error =
-    Log.Keeper.warn "user_messages_newest_first: omitting message with %s"
-      (context_provenance_error_to_string error)
-  in
-  msgs
-  |> List.rev
-  |> List.filter_map (user_message_text ~on_error)
+  List.rev msgs |> List.filter_map user_message_text
 ;;
 
 let load_history_user_messages_result ~path ~limit ~accept =
@@ -176,11 +158,7 @@ let load_history_user_messages_result ~path ~limit ~accept =
          if role = Some "user"
             && not (Keeper_types_support.is_internal_history_source source)
          then
-           let on_error error =
-             record_unreadable Keeper_memory_recall_exn_class.Type_error
-               (context_provenance_error_to_string error)
-           in
-           Keeper_context_core.message_of_json json |> user_message_text ~on_error
+           Keeper_context_core.message_of_json json |> user_message_text
          else None
        with
        | Invalid_argument detail ->

@@ -18,7 +18,7 @@ module Types = Agent_core.Types
 let trace = "trace"
 
 let message ~role text : Types.message =
-  { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 let user text = message ~role:Types.User text

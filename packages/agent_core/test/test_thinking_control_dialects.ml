@@ -852,7 +852,7 @@ let assistant_with_reasoning ?(tool = false) config =
     | Ok source -> source
     | Error detail -> fail ("invalid reasoning source fixture: " ^ detail)
   in
-  { role = Assistant
+  { origin = Llm_provider.Types.Conversation;  role = Assistant
   ; content
   ; name = None
   ; tool_call_id = None

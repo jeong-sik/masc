@@ -253,20 +253,20 @@ streaming = false
      request starts at the completed boundary (RFC keeper-context-window
      §13.4), and with one it starts there (§13.6). *)
   let initial_messages : Agent_core.Types.message list =
-    [ { role = Agent_core.Types.User
+    [ { origin = Llm_provider.Types.Conversation;  role = Agent_core.Types.User
       ; content = [ Agent_core.Types.Text "earlier ask, already read by the Librarian" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Agent_core.Types.Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Agent_core.Types.Assistant
       ; content = [ Agent_core.Types.ToolUse
           { id = "call-demote-1"; name = "fixture_tool"; input = historical_input } ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Agent_core.Types.Tool
+    ; { origin = Llm_provider.Types.Conversation;  role = Agent_core.Types.Tool
       ; content =
           [ Agent_core.Types.ToolResult
               { tool_use_id = "call-demote-1"

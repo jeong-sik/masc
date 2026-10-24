@@ -33,7 +33,7 @@ let prop_overflow_classifies_as_context_overflow =
         .Declared_runtime_lane_exhausted -> false)
 
 let user_text text : Agent_core.Types.message =
-  { role = Agent_core.Types.User
+  { origin = Llm_provider.Types.Conversation;  role = Agent_core.Types.User
   ; content = [ Agent_core.Types.Text text ]
   ; name = None
   ; tool_call_id = None
@@ -62,7 +62,7 @@ let text_contains needle texts =
 
 let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
   let assistant : Agent_core.Types.message =
-    { role = Agent_core.Types.Assistant
+    { origin = Llm_provider.Types.Conversation;  role = Agent_core.Types.Assistant
     ; content =
         [ Agent_core.Types.Text "old visible reply"
         ; Agent_core.Types.Thinking

@@ -1,5 +1,7 @@
 (** A captured provider response, owned by its live execution boundary.
-    Runtime aliases and later catalog lookups cannot construct this evidence. *)
+    Runtime aliases and later catalog lookups cannot construct this evidence.
+    For a submission it identifies the submitting tool's response, not every
+    model or collaborator that contributed to the submitted artifact. *)
 type t = private
   { execution_id : string
   ; actor : string

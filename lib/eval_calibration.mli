@@ -86,7 +86,9 @@ val record_verdict :
   unit ->
   unit
 (** Append a verdict record to the JSONL store. A result without a verdict is
-    a no-op: nobody judged, so there is nothing to remember. *)
+    a no-op: nobody judged, so there is nothing to remember.
+    [producer_execution] identifies the submitting tool response only, not
+    every earlier model or collaborator that authored the artifact. *)
 
 val record_human_label :
   notes_hash:string ->
@@ -121,6 +123,9 @@ val calibration_stats :
     false positive/negative rates, agreement rate. [distinct_runtime_rate]
     compares recorded runtime identifiers and is [null] when no pair was
     recorded. [model_identity_observation] separately compares the captured
-    producer/judge provider and reported-model identities, retaining observed
+    submitting-response/verdict-response provider and reported-model
+    identities, retaining observed
     and unobserved coverage and causes. Its rate is [null] without a complete
-    pair; identity diversity does not establish statistical independence. *)
+    pair. Submission identity does not identify every model or collaborator
+    that authored an artifact; identity diversity does not establish weight
+    differences or statistical independence. *)

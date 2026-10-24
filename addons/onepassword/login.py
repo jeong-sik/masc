@@ -6,6 +6,7 @@ submitted fill is an observed extension result, never website authentication.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
+from contextlib import contextmanager
 from enum import StrEnum
 import fcntl
 import math
@@ -255,11 +256,22 @@ class Logins:
                 self._live.pop(record.operation_id, None)
         return record.public()
 
-    def start(self, *, descriptor, caller, browser_instance_id, tab_id, website, goal, reason):
+    @contextmanager
+    def _admission(self):
+        # MCP admission must remain available for cancellation while the owner
+        # executes private IO on its background thread.
+        if not self._lock.acquire(blocking=False):
+            raise LoginError("unavailable")
+        try:
+            yield
+        finally:
+            self._lock.release()
+
+    def reserve(self, *, descriptor, caller, browser_instance_id, tab_id, website, goal, reason):
         if (not _caller(caller) or not _uuid(browser_instance_id) or type(tab_id) is not int
                 or tab_id < 0 or not _website(website) or not _text(goal) or not _text(reason)):
             raise LoginError("not_started")
-        with self._lock:
+        with self._admission():
             with self._handles_lock:
                 if self._lifecycle is not _Lifecycle.OPEN:
                     raise LoginError("unavailable")
@@ -280,10 +292,29 @@ class Logins:
                         raise LoginError("outcome_unknown")
                     self._live[record.operation_id] = live
                 live.bridge.bind(browser_instance_id=browser_instance_id, tab_id=tab_id)
+                return record.public(), True
+            except (LoginError, BridgeError, ConnectionError, OSError, ValueError, TypeError):
+                if record is not None:
+                    live.bridge.cancel()
+                    with self._handles_lock:
+                        self._live.pop(record.operation_id, None)
+                    return self._save(replace(record, phase=Phase.OUTCOME_UNKNOWN,
+                                              app_link=None, reference=None)).public(), False
+                raise LoginError("unavailable") from None
+
+    def request(self, operation_id, caller, *, goal, reason):
+        with self._lock:
+            record = self._owned(operation_id, caller)
+            if record.phase is not Phase.PREPARING:
+                return record.public()
+            live = self._live.get(operation_id)
+            if live is None or not _text(goal) or not _text(reason):
+                raise LoginError("unavailable")
+            try:
                 live.bridge.prepare(extension_id=self.extension.extension_id,
                     directory=str(self.extension.directory), program=self._prepare, arguments={})
                 record = self._save(replace(record, phase=Phase.REQUESTING))
-                result = self._invoke(record, live, kind="request", website=website, goal=goal, reason=reason)
+                result = self._invoke(record, live, kind="request", website=record.website, goal=goal, reason=reason)
                 if (set(result) != {"request_id", "entry_id", "app_link"}
                         or not _text(result["request_id"]) or not _text(result["entry_id"])
                         or not _app_link(result["app_link"])):
@@ -291,38 +322,61 @@ class Logins:
                 record = self._save(replace(record, phase=Phase.APPROVAL_READY, **result))
                 return record.public()
             except (LoginError, BridgeError, ConnectionError, OSError, ValueError, TypeError):
-                if record is not None:
-                    live.bridge.cancel()
-                    with self._handles_lock:
-                        self._live.pop(record.operation_id, None)
-                    return self._save(replace(record, phase=Phase.OUTCOME_UNKNOWN,
-                                              app_link=None, reference=None)).public()
-                raise LoginError("unavailable") from None
+                live.bridge.cancel()
+                with self._handles_lock:
+                    self._live.pop(record.operation_id, None)
+                return self._save(replace(record, phase=Phase.OUTCOME_UNKNOWN,
+                                          app_link=None, reference=None)).public()
 
     def status(self, operation_id, caller):
-        with self._lock:
-            return self._owned(operation_id, caller).public()
+        # _save replaces the immutable committed map in one assignment. Readers
+        # see its last durable snapshot without waiting behind extension IO.
+        return self._owned(operation_id, caller).public()
+
+    def operations(self, caller):
+        if self._lease is None or not _caller(caller):
+            raise LoginError("unavailable")
+        records = self._records
+        return [r.public() for r in records.values()
+                if caller == r.caller or caller == {"kind": "operator"}]
+
+    def pending_checks(self):
+        """Private scheduler inputs from the last committed snapshot."""
+        return [(r.operation_id, r.next_check_at) for r in self._records.values()
+                if r.phase is Phase.AWAITING_APPROVAL]
 
     def approval(self, operation_id):
         """Redeliver the private approval link without starting its clock."""
-        with self._lock:
-            record = self._owned(operation_id, {"kind": "operator"})
-            if record.phase not in {Phase.APPROVAL_READY, Phase.AWAITING_APPROVAL, Phase.WAITING_USER} or operation_id not in self._live:
-                raise LoginError("unavailable")
-            return {"open_url": record.app_link}
+        record = self._owned(operation_id, {"kind": "operator"})
+        live = self._live.get(operation_id)
+        if (record.phase not in {Phase.APPROVAL_READY, Phase.AWAITING_APPROVAL, Phase.WAITING_USER}
+                or live is None or live.cancelled.is_set()):
+            raise LoginError("unavailable")
+        return {"open_url": record.app_link}
 
-    def opened(self, operation_id):
+    def opened(self, operation_id, *, opened_at=None):
         """Private operator acknowledgement that the approval link opened."""
         with self._lock:
             record = self._owned(operation_id, {"kind": "operator"})
-            if record.phase not in {Phase.APPROVAL_READY, Phase.AWAITING_APPROVAL, Phase.WAITING_USER} or operation_id not in self._live:
-                raise LoginError("unavailable")
+            live = self._live.get(operation_id)
+            if (record.phase not in {Phase.APPROVAL_READY, Phase.AWAITING_APPROVAL, Phase.WAITING_USER}
+                    or live is None or live.cancelled.is_set()):
+                return record.public()
             if record.phase in {Phase.AWAITING_APPROVAL, Phase.WAITING_USER}:
                 return record.public()
-            now = self._clock()
+            now = self._clock() if opened_at is None else opened_at
+            if type(now) not in {int, float} or not math.isfinite(now) or now > self._clock():
+                raise LoginError("not_started")
             record = self._save(replace(record, phase=Phase.AWAITING_APPROVAL,
                                         opened_at=now, next_check_at=now + 5.))
             return record.public()
+
+    def confirmation_time(self, operation_id):
+        """Private operator checker may queue for the original rate-limit floor."""
+        record = self._owned(operation_id, {"kind": "operator"})
+        if record.phase not in {Phase.AWAITING_APPROVAL, Phase.WAITING_USER}:
+            raise LoginError("unavailable")
+        return record.next_check_at
 
     def advance(self, operation_id, caller, *, user_confirmed=False):
         with self._lock:
@@ -377,12 +431,22 @@ class Logins:
             raise LoginError("outcome_unknown")
         return self._save(replace(record, phase=Phase.FILL_SUBMITTED, fill_submitted=True)).public()
 
-    def fill_next(self, operation_id, caller):
-        """Explicit next username/password/OTP page; retains the original grant."""
-        with self._lock:
+    def reserve_fill(self, operation_id, caller):
+        with self._admission():
             record = self._owned(operation_id, caller)
             live = self._live.get(operation_id)
-            if record.phase is not Phase.FILL_SUBMITTED or live is None:
+            if record.phase is not Phase.FILL_SUBMITTED or live is None or live.cancelled.is_set():
+                raise LoginError("unavailable")
+            return self._save(replace(record, phase=Phase.FILLING)).public()
+
+    def fill(self, operation_id, caller):
+        """Execute an admitted next username/password/OTP page once."""
+        with self._lock:
+            record = self._owned(operation_id, caller)
+            if record.phase is not Phase.FILLING:
+                return record.public()
+            live = self._live.get(operation_id)
+            if live is None:
                 raise LoginError("unavailable")
             try:
                 return self._fill(record, live)
@@ -393,12 +457,22 @@ class Logins:
                 return self._save(replace(record, phase=Phase.OUTCOME_UNKNOWN,
                                           app_link=None, reference=None)).public()
 
+    def reserve_finish(self, operation_id, caller):
+        with self._admission():
+            record = self._owned(operation_id, caller)
+            live = self._live.get(operation_id)
+            if record.phase is not Phase.FILL_SUBMITTED or live is None or live.cancelled.is_set():
+                raise LoginError("unavailable")
+            return self._save(replace(record, phase=Phase.SETTLING, app_link=None, reference=None)).public()
+
     def finish(self, operation_id, caller):
         """Release after the caller's site check; this does not certify that check."""
         with self._lock:
             record = self._owned(operation_id, caller)
+            if record.phase is not Phase.SETTLING:
+                return record.public()
             live = self._live.get(operation_id)
-            if record.phase is not Phase.FILL_SUBMITTED or live is None:
+            if live is None:
                 raise LoginError("unavailable")
             return self._terminal(record, live, Phase.RELEASED)
 
@@ -406,8 +480,9 @@ class Logins:
         elapsed = self._clock() - record.opened_at
         return 2. if elapsed < 30. else 5. if elapsed < 60. else 10.
 
-    def cancel(self, operation_id, caller):
-        # Interrupt socket IO without waiting for the lifecycle serializer.
+    def interrupt(self, operation_id, caller):
+        """Cancel the original socket immediately; this is not settlement."""
+        record = self._owned(operation_id, caller)
         with self._handles_lock:
             live = self._live.get(operation_id)
             if live is not None:
@@ -415,6 +490,10 @@ class Logins:
                     raise LoginError("unavailable")
                 live.cancelled.set()
                 live.bridge.cancel()
+        return record.public()
+
+    def cancel(self, operation_id, caller):
+        self.interrupt(operation_id, caller)
         with self._lock:
             record = self._owned(operation_id, caller)
             if record.phase in TERMINAL:

@@ -25,9 +25,15 @@ Cancellation and explicit disconnect release ownership; a retired ID and late
 result cannot revive the connection. State reads and mutations use the same
 client mutex, preserving global-to-client lock order.
 
-The current base's host admission matches also omitted `Page_native_workflow`
+The current base's selection and host admission matches also omitted `Page_native_workflow`
 after a separate host-selection refactor. This layer restores those closed
 cases so native workflows pass through the selected host path.
+
+The preceding candidate `ae5c0a5f83236ac592e332bfaec2d06313faf305`
+failed selected CI [40102778277](https://github.com/jeong-sik/masc/actions/runs/40102778277)
+and macOS runtime build [40102780562](https://github.com/jeong-sik/masc/actions/runs/40102780562)
+on those missing cases (warning 8), before tests ran or candidate binaries were
+available. These are retained failures, not successful validation of this layer.
 
 ## Component evidence and limits
 

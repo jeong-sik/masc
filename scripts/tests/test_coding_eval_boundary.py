@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import types
 import unittest
 
@@ -34,6 +35,73 @@ DOCKER_IMAGE = None
 
 
 class CodingBoundary(unittest.TestCase):
+    def driver(self, root, script):
+        setup = '''source "$1/scripts/harness_coding_eval.sh" --models ollama:org/model,ollama:org-model --out "$2/out" --memory-mode off
+CONFIG_DIR="$2/config"
+EXPERIMENT_DIGEST=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+assert_experiment_inputs() { :; }
+'''
+        return subprocess.run(["bash", "-c", setup + script, "coding-boundary-fixture", str(ROOT), str(root)],
+                              capture_output=True, text=True)
+
+    def identity_fixture(self, root):
+        (root / "config").mkdir()
+        (root / "config/runtime.toml").write_text("")
+        (root / "case").mkdir()
+        (root / "case/case.json").write_text(json.dumps(
+            {"id": "case", "timeout_sec": 1, "verify": "verify.sh", "prompt": "controlled resume"}))
+        observed = self.driver(root, '''declare_requested_runtimes
+jq -cn --arg first_alias "$(model_alias_of ollama org/model)" --arg second_alias "$(model_alias_of ollama org-model)" \\
+  --arg first_run "$(run_id_of ollama org/model case 1)" --arg second_run "$(run_id_of ollama org-model case 1)" \\
+  '{first_alias:$first_alias,second_alias:$second_alias,first_run:$first_run,second_run:$second_run}'
+''')
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        return json.loads(observed.stdout)
+
+    def test_original_cohorts_have_separate_runtime_and_run_identities(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            observed = self.identity_fixture(root)
+            self.assertNotEqual(observed["first_alias"], observed["second_alias"])
+            self.assertNotEqual(observed["first_run"], observed["second_run"])
+            config = tomllib.loads((root / "config/runtime.toml").read_text())
+            for label, model in (("first", "org/model"), ("second", "org-model")):
+                alias = observed[label + "_alias"]
+                self.assertEqual(config["models"][alias]["api-name"], model)
+                self.assertIn(alias, config["ollama"])
+                run_id = observed[label + "_run"]
+                receipt = root / "out/runs" / run_id / "evidence.json"
+                receipt.parent.mkdir(parents=True)
+                receipt.write_text(json.dumps({"run_id": run_id, "provider": "ollama", "model": model,
+                    "case_id": "case", "run_index": 1, "experiment_digest": "a" * 64, "memory_mode": "off"}))
+            resumed = self.driver(root, '''run_one ollama org/model "$2/case" 1
+run_one ollama org-model "$2/case" 1
+''')
+            self.assertEqual(resumed.returncode, 0, resumed.stderr)
+            self.assertIn("skip " + observed["first_run"], resumed.stderr)
+            self.assertIn("skip " + observed["second_run"], resumed.stderr)
+
+    def test_resume_checks_every_original_run_field(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            observed = self.identity_fixture(root)
+            run_id = observed["first_run"]
+            receipt = root / "out/runs" / run_id / "evidence.json"
+            receipt.parent.mkdir(parents=True)
+            original = {"run_id": run_id, "provider": "ollama", "model": "org/model", "case_id": "case",
+                        "run_index": 1, "experiment_digest": "a" * 64, "memory_mode": "off"}
+            for key, changed in (("run_id", "foreign-run"), ("provider", "foreign-provider"),
+                                 ("model", "org-model"), ("case_id", "foreign-case"), ("run_index", 2),
+                                 ("run_index", True), ("experiment_digest", "b" * 64), ("memory_mode", "seeded")):
+                with self.subTest(field=key, changed=changed):
+                    data = json.dumps({**original, key: changed})
+                    receipt.write_text(data)
+                    refused = self.driver(root, 'run_one ollama org/model "$2/case" 1\n')
+                    self.assertNotEqual(refused.returncode, 0, refused.stdout + refused.stderr)
+                    self.assertIn("run receipt identity differs", refused.stderr)
+                    self.assertNotIn("skip " + run_id, refused.stderr)
+                    self.assertEqual(receipt.read_text(), data)
+
     def test_collect_refuses_duplicate_json_before_replacing_the_index(self):
         for duplicate in ("provider", "model", "memory_mode", "experiment_digest", "run_id", "nested", "manifest"):
             with self.subTest(duplicate=duplicate), tempfile.TemporaryDirectory() as temporary:

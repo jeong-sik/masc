@@ -382,7 +382,7 @@ let actual_approve calls = actual_review (AR.Approve "actual target measured") c
 let test_actual_integral_receipt_commits_after_restart () = with_workspace (fun config store _ ->
   let clock = Eio_mock.Clock.make () in
   Eio_mock.Clock.set_time clock 42.;
-  Time_compat.set_clock clock;
+  Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
   Fun.protect ~finally:Time_compat.clear_clock (fun () ->
     let authority, retained = host_prepared config store in
     let original = W.original retained in

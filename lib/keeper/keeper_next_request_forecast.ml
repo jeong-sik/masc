@@ -255,7 +255,8 @@ let read_composition (components : Turn_record.input_component list) =
         match component.Turn_record.component with
         | Turn_record.Tool_schemas ->
           instructions, schemas + component.bytes, blocks, first_round
-        | Turn_record.Prompt_block (Prompt_block_id.Keeper_instructions | Prompt_block_id.Active_goals) ->
+        | Turn_record.Prompt_block (Prompt_block_id.Keeper_instructions | Prompt_block_id.Active_goals
+            | Prompt_block_id.Completion_authority) ->
           instructions + component.bytes, schemas, blocks, first_round
         | Turn_record.Prompt_block
             (( Prompt_block_id.Dynamic_context

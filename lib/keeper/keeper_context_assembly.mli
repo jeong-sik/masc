@@ -15,14 +15,20 @@ type receipt = private
   ; sha256 : string
   ; spans : span list
   }
+type system_observation =
+  | Active_goals of string
+  | Completion_authority of string
+(** Only these renderer-issued observations can become a System suffix. *)
+val observation_block : system_observation -> Prompt_block_id.t * string
+
 type system_prompt = private
   { base_text : string
-  ; goal_text : string option
+  ; observations : system_observation list
   ; text : string
   ; partition : receipt
   }
 (** One issued effective system prompt: the prior base/override followed by
-    the exact Goal observation. Its partition describes this physical carrier,
+    exact renderer-issued observations. Its partition describes this physical carrier,
     independently of the extra-context carrier. It is never a history row. *)
 type t = private
   { extra_system_context : string option
@@ -33,7 +39,7 @@ type t = private
         its text is that block's text byte for byte. *)
   ; system_prompt : system_prompt option
     (** [None] means this generic extra assembly has no issued system value.
-        Production request assembly also records an unchanged base without a Goal. *)
+        Production request assembly also records an unchanged base without observations. *)
   }
 
 val assemble :
@@ -43,19 +49,21 @@ val assemble :
 (** Preserves [None] versus [Some ""], source order and every separator.
     [receipt=None] means no carrier exists, not a zero-byte carrier. *)
 
-val with_goal_system_prompt : base_text:string -> goal_text:string option -> t -> t
+val with_system_observations :
+  base_text:string -> observations:system_observation list -> t -> t
 (** Issue the supplied base or pre-existing override, appending an immutable
-    Goal observation only when present. No text matching, store read or history
-    mutation. [None] leaves the exact base bytes unchanged. *)
+    list of uniquely named observations. Duplicate kinds are rejected. No text
+    matching, store read or history mutation. An empty list leaves the exact
+    base bytes unchanged. *)
 
 val logical_blocks : t -> (Prompt_block_id.t * string) list
-(** Goal followed by extra-context blocks, once each. The base instructions
+(** System observations followed by extra-context blocks, once each. The base instructions
     remain separately attributed by their existing producer. *)
 
 val effective_system_prompt : base_text:string -> t -> string
 
 val system_prompt_override : previous:string option -> t -> string option
-(** Override only when the request carries a Goal suffix. Otherwise preserve
+(** Override only when the request carries an observation suffix. Otherwise preserve
     [None] versus [Some ""] and every byte of the prior override. *)
 
 val system_prompt_receipt_to_json : system_prompt -> Yojson.Safe.t

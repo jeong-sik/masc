@@ -8,6 +8,8 @@
     [Keeper_instructions] is the rendered system prompt (keeper_prompt.ml).
     [Active_goals] is the renderer-attributed Goal snapshot split from the
     per-turn world context, including current criterion and measurement.
+    [Completion_authority] is the existing completion-authority renderer's
+    Task approval/rejection event observations with their correlation keys.
     [Dynamic_context] is the remaining composite soft-context string built by
     keeper_turn.ml/keeper_run_prompt.ml (continuity snapshot, skill
     route, worktree, telemetry feedback, turn instructions, recent
@@ -31,6 +33,7 @@ type t =
   | Keeper_instructions
   | Dynamic_context
   | Active_goals
+  | Completion_authority
   | Temporal_summary
   | Memory_os_recall
   | Librarian_working_context
@@ -70,14 +73,16 @@ val injected_on_post_tool_round : t -> bool
 (** Whether the per-turn context assembly re-injects this block on a
     provider round that follows tool results.
 
-    The assembly rides the wire as a trailing User-role message, so on a
+    Extra context rides the wire as a trailing User-role message, so on a
     post-tool round it reads to the model as "someone spoke again" — the
     documented DeepSeek and GLM tool loops end such a request with the tool
     result instead, and re-broadcasting the world state there made models
     re-answer it on every round (task-514, 2026-08-24). Recurring state
     blocks therefore stay on the first round only. [Active_goals] is the
-    separately produced immutable Goal snapshot: it remains available after
-    tools without rebroadcasting Task, Gate, Lane or inbox state. Operator
+    separately produced immutable Goal snapshot. [Completion_authority] carries
+    this turn's approval/rejection correlation keys. Both remain in the System
+    carrier after tools without rebroadcasting Task, Gate, Lane or other inbox
+    state. Operator
     speech remains [Operator_note] (RFC-0366). A new constructor must declare
     its class here before it can ride a post-tool round.
 
@@ -99,6 +104,9 @@ val resent_when_held : t -> bool
     [true]: a note is someone speaking, and an operator repeating the same
     words is a new utterance, not a copy of the earlier one. A new constructor
     must declare its class here.
+
+    [Completion_authority] also answers [true], preserving its producer layer's
+    [Sent_every_resume] event semantics even when the session saw identical bytes.
 
     [Dynamic_context] answers for the block as one text. When the renderer's
     partition of the block is known, a resume compares its World State

@@ -85,5 +85,44 @@ let scenario () = Eio_main.run (fun env ->
             check bool "revoked connection refuses before dispatch" true
               (match Client.call client ~on_cancel_after_dispatch:(fun () -> incr cancellations) W.Snapshot with
                | Error (Client.Unavailable _) -> true | Ok _|Error (Client.Outcome_unknown _) -> false)))))))
+let silent_selector_reply_window route = Eio_main.run (fun env ->
+  let directory=Filename.temp_dir "bac-selector-" "" in
+  let path=Filename.concat directory "s" in
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path;Unix.rmdir directory)
+    (fun () -> Eio.Switch.run (fun sw ->
+      let net=Eio.Stdenv.net env and clock=Eio.Stdenv.clock env in
+      Eio_context.with_test_env ~sw ~clock ~net ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+        let socket=Eio.Net.listen ~sw ~backlog:1 net (`Unix path) in
+        let dispatched,dispatch=Eio.Promise.create () in
+        let never,_=Eio.Promise.create () in
+        let cancellations=ref 0 in
+        let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
+          ~max_message_bytes:4096 ~control_timeout_sec:0.01 ~available:(fun () -> true)) in
+        Eio.Fiber.first (fun () -> Eio.Switch.run (fun server_sw ->
+          Eio.Net.accept_fork ~sw:server_sw socket ~on_error:(fun exn -> raise exn) (fun flow _ ->
+            ignore(Eio.Buf_read.line(Eio.Buf_read.of_flow flow ~max_size:4096));
+            Eio.Promise.resolve dispatch ();
+            Eio.Promise.await never);
+          Eio.Promise.await never))
+          (fun () ->
+            let verb=Browser_lane.Page_interact {tab_id=1;frame_path=[];
+              expected_url=Some "https://example.test/";action=Browser_lane.Click "#save"} in
+            let observed=Eio.Fiber.first
+              (fun () -> `Returned(Client.call client ~on_cancel_after_dispatch:(fun () -> incr cancellations)
+                (W.Issue {route;verb;actor=None;timeout_sec=0.001;only_if_idle=false})))
+              (fun () -> Eio.Promise.await dispatched;Eio.Time.sleep clock 0.03;`Still_waiting) in
+            (match observed with
+             | `Returned(Error(Client.Outcome_unknown _)) -> ()
+             | `Returned(Ok _|Error(Client.Unavailable _)) -> fail "silent dispatched selector lost its unknown outcome"
+             | `Still_waiting -> fail "selector request escaped the private reply window");
+            check int "reply timeout is distinct from caller cancellation" 0 !cancellations)))))
+
 let ()=run "browser addon private client" ["transport",[
-  test_case "silent peer timeout cancellation and revoked connection" `Quick scenario]]
+  test_case "silent peer timeout cancellation and revoked connection" `Quick scenario;
+  test_case "silent automation selector keeps reply window" `Quick
+    (fun () -> silent_selector_reply_window Browser_lane.Automation_route);
+  test_case "silent Stagehand selector keeps reply window" `Quick
+    (fun () -> silent_selector_reply_window Browser_lane.Stagehand_route);
+  test_case "a live ID alone cannot grant SDK-owned waiting" `Quick
+    (fun () -> silent_selector_reply_window (Browser_lane.Live_route(Some(ok(Browser_lane.client_id_of_string
+      "0c000000-0000-4000-8000-000000000001")))))]]

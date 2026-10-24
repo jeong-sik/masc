@@ -598,6 +598,7 @@ let prompt_block_label = function
   | Prompt_block_id.Keeper_instructions -> "Keeper instructions"
   | Prompt_block_id.Dynamic_context -> "Dynamic context"
   | Prompt_block_id.Active_goals -> "Active Goals"
+  | Prompt_block_id.Completion_authority -> "Task completion decisions"
   | Prompt_block_id.Temporal_summary -> "Temporal summary"
   | Prompt_block_id.Memory_os_recall -> "Recall block"
   | Prompt_block_id.Librarian_working_context -> "Librarian working context"
@@ -722,6 +723,7 @@ let input_map_rows (record : Turn_record.t) (provider_input : provider_input opt
              | Turn_record.Prompt_block
                  ( Prompt_block_id.Dynamic_context
                  | Prompt_block_id.Active_goals
+                 | Prompt_block_id.Completion_authority
                  | Prompt_block_id.Temporal_summary
                  | Prompt_block_id.Memory_os_recall
                  | Prompt_block_id.Librarian_working_context

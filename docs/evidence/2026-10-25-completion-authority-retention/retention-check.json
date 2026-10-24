@@ -1,0 +1,68 @@
+{
+  "before": {
+    "checks": 70,
+    "matrix": [
+      {
+        "goal": false,
+        "authority": false,
+        "first_authority_in_system": false,
+        "first_authority_in_extra": false,
+        "post_tool_authority_in_system": false
+      },
+      {
+        "goal": true,
+        "authority": false,
+        "first_authority_in_system": false,
+        "first_authority_in_extra": false,
+        "post_tool_authority_in_system": false
+      },
+      {
+        "goal": false,
+        "authority": true,
+        "first_authority_in_system": false,
+        "first_authority_in_extra": true,
+        "post_tool_authority_in_system": false
+      },
+      {
+        "goal": true,
+        "authority": true,
+        "first_authority_in_system": false,
+        "first_authority_in_extra": true,
+        "post_tool_authority_in_system": false
+      }
+    ]
+  },
+  "after": {
+    "checks": 74,
+    "matrix": [
+      {
+        "goal": false,
+        "authority": false,
+        "first_authority_in_system": false,
+        "first_authority_in_extra": false,
+        "post_tool_authority_in_system": false
+      },
+      {
+        "goal": true,
+        "authority": false,
+        "first_authority_in_system": false,
+        "first_authority_in_extra": false,
+        "post_tool_authority_in_system": false
+      },
+      {
+        "goal": false,
+        "authority": true,
+        "first_authority_in_system": true,
+        "first_authority_in_extra": false,
+        "post_tool_authority_in_system": true
+      },
+      {
+        "goal": true,
+        "authority": true,
+        "first_authority_in_system": true,
+        "first_authority_in_extra": false,
+        "post_tool_authority_in_system": true
+      }
+    ]
+  }
+}

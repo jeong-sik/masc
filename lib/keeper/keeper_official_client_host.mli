@@ -327,8 +327,11 @@ val resume_prompt :
     historical task reference, the Librarian working state, and the context
     carrier -- one carried context per typed block when [composed_context]
     proves its exact text contains only uniquely named blocks and separators,
-    the whole carrier otherwise. The exact Goal observation in
-    [composed_context.system_prompt] is a separate carried [Active_goals]
+    the whole carrier otherwise. [composed_context.system_prompt] supplies
+    separately carried Goal and
+    Completion Authority observations. The latter retains [Sent_every_resume].
+    Each observation uses its own logical block and exact System source proof.
+    The Goal is a carried [Active_goals]
     context. An official session holds its first System prompt until native
     compaction, so a changed/new Goal is sent as a separate encoded User
     observation, with explicit System-derived source attribution. It is not

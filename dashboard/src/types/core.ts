@@ -1761,6 +1761,31 @@ export type KeeperInputPolicy = 'small' | 'wide'
 /** What a successful config POST did to the running lane. Absent on GET. */
 export type KeeperConfigRuntimeSync = 'lane_restarted' | 'deferred_until_turn_end'
 
+export type RemoteSshProbe =
+  | { state: 'not_asked' }
+  | { state: 'answered'; protocol_major: number; shim_release: string | null; observed_at_unix: number }
+  | { state: 'failed'; at_unix: number; detail: string }
+
+export interface RemoteSshEndpoint {
+  name: string
+  host: string
+  user: string
+  port: number
+  remote_root: string
+  observation: {
+    probe: RemoteSshProbe
+    last_dispatch:
+      | null
+      | { outcome: 'payload_finished'; at_unix: number; status: string }
+      | { outcome: 'lane_failed'; at_unix: number; failure: string; detail: string }
+    operator_action: string | null
+  }
+}
+
+export type RemoteSshEndpointCatalog =
+  | { state: 'available'; endpoints: RemoteSshEndpoint[] }
+  | { state: 'unavailable'; detail: string }
+
 export interface KeeperConfig {
   name: string
   config_revision: KeeperConfigRevisionState
@@ -1781,6 +1806,7 @@ export interface KeeperConfig {
   sandbox_profile?: string
   network_mode?: 'none' | 'inherit' | string
   remote_endpoint?: string | null
+  remote_ssh_endpoints?: RemoteSshEndpointCatalog
   voice_always_allow?: boolean | null
   keeper_last_error?: string | null
   sandbox_roots: string[]

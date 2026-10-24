@@ -131,6 +131,25 @@ let endpoint : Exec_ssh_endpoint.t =
   }
 ;;
 
+let test_registry_read_does_not_create_execution_state () =
+  let base_path = temp_dir () in
+  let config_dir = Filename.concat base_path ".masc/config" in
+  Fs_compat.mkdir_p config_dir;
+  let config_path = Filename.concat config_dir "runtime.toml" in
+  let read () = Keeper_sandbox_ssh.configured_endpoints ~base_path in
+  save config_path (Exec_ssh_endpoint.to_toml endpoint);
+  (match read () with
+   | Ok [ found ] -> check string "declared endpoint" endpoint.name found.name
+   | Ok _ -> fail "registry did not return the configured endpoint"
+   | Error detail -> fail detail);
+  check bool "catalogue does not create SSH control state" false
+    (Sys.file_exists (Filename.concat base_path ".masc/run/ssh"));
+  save config_path "";
+  (match read () with Ok [] -> () | Ok _ -> fail "empty registry retained an old row" | Error detail -> fail detail);
+  save config_path "[exec.ssh.endpoints.broken]\nunknown = true\n";
+  check bool "invalid registry is not an empty catalogue" true (Result.is_error (read ()))
+;;
+
 let test_destination_validation_before_side_effects () =
   let base_path = temp_dir () in
   let unsafe =
@@ -427,5 +446,7 @@ let () =
               test_shell_ir_target_resolves_endpoint
           ; test_case "unsafe typed destination rejected before side effects"
               `Quick test_destination_validation_before_side_effects
+          ; test_case "registry reading is not execution readiness" `Quick
+              test_registry_read_does_not_create_execution_state
           ] )
       ]

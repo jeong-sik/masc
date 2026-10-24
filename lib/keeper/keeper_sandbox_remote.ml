@@ -119,17 +119,26 @@ type shared_state =
    endpoint-scoped. Keep the admission state at that same scope. This is a
    module-global registry, so Stdlib.Mutex is the correct guard; no yielding
    work or logging happens while it is held. *)
-let shared_states : (string, shared_state) Hashtbl.t = Hashtbl.create 8
+(* Workspace, full transport declaration, request root, allowed environment,
+   connection timeout and session ceiling. All are part of the hash key. *)
+type endpoint_identity = string * transport * string * string list * int * int
+
+(* These immutable values bind probes, negotiated major and admission to the
+   endpoint and transport that produced them. Names alone survive a host or
+   policy edit and cannot identify those observations. Credential references
+   are paths: replacing their contents, or reusing an existing ControlMaster,
+   is not a new identity here. *)
+let shared_states : (endpoint_identity, shared_state) Hashtbl.t = Hashtbl.create 8
 let shared_states_mu = Stdlib.Mutex.create ()
 
-let shared_state_key ~base_path ~name ~max_concurrent_sessions =
-  Printf.sprintf "%s\x00%s\x00%d" base_path name max_concurrent_sessions
+let openssh_identity ~base_path (o : openssh) : endpoint_identity =
+  base_path, Openssh o, o.endpoint.remote_root, o.endpoint.env_allowlist,
+  o.endpoint.connect_timeout_sec, o.endpoint.max_concurrent_sessions
 ;;
 
-let shared_state ~base_path ~name ~max_concurrent_sessions =
-  let key = shared_state_key ~base_path ~name ~max_concurrent_sessions in
+let shared_state ((_, _, _, _, _, max_concurrent_sessions) as identity : endpoint_identity) =
   Stdlib.Mutex.protect shared_states_mu (fun () ->
-    match Hashtbl.find_opt shared_states key with
+    match Hashtbl.find_opt shared_states identity with
     | Some state -> state
     | None ->
       let state =
@@ -140,7 +149,7 @@ let shared_state ~base_path ~name ~max_concurrent_sessions =
         ; last_dispatch = Atomic.make None
         }
       in
-      Hashtbl.add shared_states key state;
+      Hashtbl.add shared_states identity state;
       state)
 ;;
 
@@ -157,6 +166,7 @@ type t =
        config mount). Never caller-supplied, so never under the allowlist. *)
   ; base_path : string
   ; keeper_name : string
+  ; identity : endpoint_identity
   ; shared : shared_state
   }
 
@@ -183,6 +193,7 @@ let workspace_root t =
 
 let of_openssh ~base_path ~keeper_name (o : openssh) =
   let remote_root = o.endpoint.remote_root in
+  let identity = openssh_identity ~base_path o in
   { name = o.endpoint.name
   ; transport = Openssh o
   ; remote_root
@@ -192,9 +203,8 @@ let of_openssh ~base_path ~keeper_name (o : openssh) =
   ; injected_env = []
   ; base_path
   ; keeper_name
-  ; shared =
-      shared_state ~base_path ~name:o.endpoint.name
-        ~max_concurrent_sessions:o.endpoint.max_concurrent_sessions
+  ; identity
+  ; shared = shared_state identity
   }
 ;;
 
@@ -209,6 +219,10 @@ let of_container_exec
       ~max_concurrent_sessions
       (c : container_exec)
   =
+  let identity : endpoint_identity =
+    base_path, Container_exec c, remote_root, env_allowlist,
+    connect_timeout_sec, max_concurrent_sessions
+  in
   { name = c.container_name
   ; transport = Container_exec c
   ; remote_root
@@ -218,7 +232,8 @@ let of_container_exec
   ; injected_env
   ; base_path
   ; keeper_name
-  ; shared = shared_state ~base_path ~name:c.container_name ~max_concurrent_sessions
+  ; identity
+  ; shared = shared_state identity
   }
 ;;
 
@@ -233,6 +248,10 @@ let of_docker_exec
       ~max_concurrent_sessions
       (c : container_exec)
   =
+  let identity : endpoint_identity =
+    base_path, Docker_exec c, remote_root, env_allowlist,
+    connect_timeout_sec, max_concurrent_sessions
+  in
   { name = c.container_name
   ; transport = Docker_exec c
   ; remote_root
@@ -242,7 +261,8 @@ let of_docker_exec
   ; injected_env
   ; base_path
   ; keeper_name
-  ; shared = shared_state ~base_path ~name:c.container_name ~max_concurrent_sessions
+  ; identity
+  ; shared = shared_state identity
   }
 ;;
 
@@ -659,18 +679,15 @@ let report t =
   report_shared ~lane:(lane_prefix t.transport) ~endpoint:t.name t.shared
 ;;
 
-let report_openssh ~base_path ~(endpoint : Exec_ssh_endpoint.t) =
-  let key =
-    shared_state_key ~base_path ~name:endpoint.name
-      ~max_concurrent_sessions:endpoint.max_concurrent_sessions
-  in
+let report_openssh ~base_path (o : openssh) =
+  let identity = openssh_identity ~base_path o in
   let shared =
-    Stdlib.Mutex.protect shared_states_mu (fun () -> Hashtbl.find_opt shared_states key)
+    Stdlib.Mutex.protect shared_states_mu (fun () -> Hashtbl.find_opt shared_states identity)
   in
   match shared with
-  | Some shared -> report_shared ~lane:"remote_ssh" ~endpoint:endpoint.name shared
+  | Some shared -> report_shared ~lane:"remote_ssh" ~endpoint:o.endpoint.name shared
   | None ->
-    { lane = "remote_ssh"; endpoint = endpoint.name
+    { lane = "remote_ssh"; endpoint = o.endpoint.name
     ; probe = Probe_not_asked; last_dispatch = None }
 ;;
 
@@ -968,17 +985,13 @@ type preflight_cache_entry =
   ; result : (unit, string) result
   }
 
-let preflight_cache : (string, preflight_cache_entry) Hashtbl.t = Hashtbl.create 8
+type preflight_identity = endpoint_identity * string * string * (string * string) list
+
+let preflight_cache : (preflight_identity, preflight_cache_entry) Hashtbl.t = Hashtbl.create 8
 let preflight_cache_mu = Stdlib.Mutex.create ()
 
-let transport_key t =
-  match t.transport with
-  | Openssh o -> o.ssh_bin
-  | Container_exec c | Docker_exec c -> c.container_name
-;;
-
 let preflight_cache_key t =
-  Printf.sprintf "%s\x00%s\x00%s\x00%s" t.base_path t.name t.keeper_name (transport_key t)
+  t.identity, t.keeper_name, t.gh_config_dir, t.injected_env
 ;;
 
 let cached_preflight ~now t =

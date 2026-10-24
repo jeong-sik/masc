@@ -31,6 +31,11 @@ val keeper_config_json :
     both keys, so removing or renaming either changes what that panel can
     save.
 
+    [remote_ssh_endpoints] reports an available endpoint registry (including
+    an empty one) or an unavailable registry with its error. Available rows
+    carry public endpoint metadata and the existing lane observations. This
+    read performs no SSH probe, creates no runner and makes no readiness claim.
+
     A missing or unrenderable prompt leaves the full editable configuration
     available, with [prompt.system_prompt] marked unavailable and no effective
     or assembled text. Its reason is [prompt_unrenderable]; an unreadable

@@ -7,6 +7,46 @@ describe('keeper config source projection', () => {
     vi.unstubAllGlobals()
   })
 
+  it('keeps endpoint declarations, empty registries and unavailable observations distinct', async () => {
+    const endpoint = {
+      name: 'builder', host: 'builder.invalid', user: 'masc', port: 22,
+      remote_root: '/srv/work',
+      observation: { probe: { state: 'not_asked' }, last_dispatch: null, operator_action: null },
+    }
+    const read = async (catalog: unknown) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        name: 'rtprobe', activation_mode: 'autonomous', input_policy: 'small',
+        max_context_override: null, skills: { names: null },
+        config_revision: { manifest: { state: 'missing' }, runtime_assignment: { state: 'runtime_config_missing' } },
+        remote_ssh_endpoints: catalog,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+      return (await fetchKeeperConfig('rtprobe')).remote_ssh_endpoints
+    }
+    const catalog = await read({ state: 'available', endpoints: [endpoint] })
+    expect(catalog).toEqual({ state: 'available', endpoints: [endpoint] })
+    expect(await read({ state: 'available', endpoints: [] })).toEqual({ state: 'available', endpoints: [] })
+    expect(await read({ state: 'unavailable', detail: 'runtime config cannot be read' }))
+      .toEqual({ state: 'unavailable', detail: 'runtime config cannot be read' })
+    for (const invalid of [
+      undefined,
+      { state: 'available', endpoints: [endpoint, endpoint] },
+      { state: 'available', endpoints: [{ ...endpoint, port: '22' }] },
+      { state: 'available', endpoints: [{ ...endpoint, observation: { ...endpoint.observation, probe: { state: 'future' } } }] },
+    ]) {
+      expect(await read(invalid)).toMatchObject({ state: 'unavailable' })
+    }
+    const answered = {
+      ...endpoint,
+      observation: {
+        probe: { state: 'answered', protocol_major: 3, shim_release: 'fixture', observed_at_unix: 1234 },
+        last_dispatch: { outcome: 'lane_failed', at_unix: 1235, failure: 'transport_failed', detail: 'connection refused' },
+        operator_action: 'check endpoint',
+      },
+    }
+    expect(await read({ state: 'available', endpoints: [answered] }))
+      .toEqual({ state: 'available', endpoints: [answered] })
+  })
+
   it('preserves typed TOML versus live-meta override evidence', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

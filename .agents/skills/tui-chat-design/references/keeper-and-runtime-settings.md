@@ -27,8 +27,10 @@
   필드는 current 값을 쓰고, 이전 revision과 context 축소 확인은 재사용하지 않는다. 편집기에서
   다시 확인하기 전 재전송하지 않는다. 원래 작업의 입력·응답은 후속 복구가 덮어쓰지 않는다.
 - Sandbox `d/m/s`는 SSOT의 typed profile을 같은 저장 작업에 캡처한다. worker가 최신 config
-  snapshot과 composite revision을 읽고 workspace/read owner를 재확인한 뒤 그 profile만 CAS로
-  보낸다. 현재 profile이 같아도 revision을 검증한 뒤 미전송 결과로 남긴다. key handler에서
+  snapshot과 composite revision을 읽고 workspace/read owner를 재확인한 뒤 선택한 조합을 CAS로
+  보낸다. SSH 선택은 같은 snapshot에서 기존 endpoint 또는 유일한 등록 endpoint를 고르고
+  network inherit를 함께 보낸다. 여러 endpoint는 e에서 명시 선택하며, SSH를 떠날 때는
+  endpoint null을 같은 CAS에 넣는다. 현재 조합이 같아도 revision을 검증한 뒤 미전송 결과로 남긴다. key handler에서
   HTTP를 기다리거나 cached pane의 revision으로 대체하지 않는다.
 - 같은 Keeper의 editor/shortcut pending은 직렬화한다. 다른 profile 키가 원래 요청을 바꾸지
   않는다. 종료 뒤 명시적 새 키만 다시 current를 읽는다. shortcut은 남아 있는 editor 초안을

@@ -61,3 +61,16 @@ check. Existing unchanged fixtures are not a newly observed passing result.
 Current API/catalog documentation now states these boundaries instead of
 presenting observations as proven read-only post-commit projections. #27890
 remains open for the full contract and its actual execution evidence.
+
+## Observed focused execution
+
+[Run 40114881637](https://github.com/jeong-sik/masc/actions/runs/40114881637)
+at `a7a7dbc396f5bcc55df3d957bc380f1c1d90a203` completed **SUCCESS**. Actual
+suite summaries: Pipeline **68**, Tool execution **28**, execution lane writer
+**22**, telemetry/checkpoint integration **9** cases, **127 total**. See
+[the retained execution summary](focused-execution.txt). This is the selected
+core behavior scope, including its existing recovery/settlement/sink fixtures,
+not a full regression, MASC server build, installed runtime or live provider.
+This evidence update changes documentation only; code/test inputs remain the
+executed source. The original issue's post-commit projection, checkpoint and
+retention acceptance gaps listed above remain open despite this focused PASS.

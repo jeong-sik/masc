@@ -131,7 +131,7 @@ let test_frozen_prompt_media_and_lookup () = with_workspace (fun config store ->
     let identity = get (Masc.Runtime_response_identity.make ~execution_id:"retained-execution"
       ~actor:"reviewer" ~runtime_id:"fixture-reviewer" ~response_id:"accepted-response"
       ~provider_id:"fixture-provider" ~model_id:"fixture-model" ~tool_use_id:"verdict-call"
-      ~provider_turn:2) in
+      ~provider_turn:2 ~source_tool_use_ordinal:0) in
     let calls = ref 0 in
     with_reviewer (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
         ?system_prompt ?goal_blocks ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->

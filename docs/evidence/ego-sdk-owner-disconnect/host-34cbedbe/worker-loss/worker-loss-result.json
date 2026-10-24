@@ -1,0 +1,9 @@
+{
+  "trigger": "SIGKILL of exact owned worker",
+  "sdk": {
+    "pid": 85220,
+    "state": "absent",
+    "observation_seconds": 0.06518095800129231
+  },
+  "manual_sdk_signal": false
+}

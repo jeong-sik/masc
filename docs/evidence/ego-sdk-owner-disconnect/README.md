@@ -36,8 +36,39 @@ pending call still answered before disconnection. Cases include idle persistent
 handles, pending async work, a buffered next script, owner half-close and the
 live-owner control. All ten recorded probe PIDs were confirmed absent afterward.
 
-This proves the production loop in the installed SDK evaluator. It does not
-claim a rebuilt full server's SIGTERM path yet. That integration result must be
-bound separately to its candidate binary. Existing long native-workflow and
-navigation results retain their earlier sources; this change adds no lifetime
-budget and does not replay those tasks.
+This proves the production loop in the installed SDK evaluator. Existing long
+native-workflow and navigation results retain their earlier sources; this change
+adds no lifetime budget and does not replay those tasks.
+
+## Compiled host integration
+
+[host-34cbedbe](host-34cbedbe/) records two isolated server/worker/SDK runs using
+candidate `34cbedbe5746855db9033921f4b0c9365f1fbbb6`. Its three binaries match the
+[successful macOS build](https://github.com/jeong-sik/masc/actions/runs/40110786294)
+receipt. The [focused live-Ego suite](https://github.com/jeong-sik/masc/actions/runs/40110779108)
+also completed successfully for that source. Neither result validates later
+shared-client policy changes.
+
+Each phase records the embedded source, executable hashes and effective private
+root through full health, then captures server-to-worker-to-SDK parentage and
+process birth times. No Keeper/model task or form submission ran. The ordinary
+browser-client snapshot starts the configured SDK and owns the task space.
+
+- Worker loss: SIGKILL only the captured worker. Its SDK disappeared within
+  0.0652 seconds of observation without a manual SDK signal. The server was then
+  stopped with SIGTERM; its original server, worker and SDK were all absent.
+- Server shutdown: a fresh private server resumed the same agent-owned space28.
+  SIGTERM only that captured server. The server, worker and SDK were all absent
+  after shutdown, without a separate manual SDK signal. This is an idle native
+  session proof; it does not simulate uninterruptible JavaScript CPU work.
+- The final actual TaskSpace list contains no space named
+  `masc-ego-owner-loss-20261025`; normal shutdown removed it. No extra finish call
+  was needed. Production binaries, runtime state and other spaces were untouched.
+
+[scope.json](host-34cbedbe/scope.json) records that the two owner-related source
+files are unchanged between the executed34c candidate and source12c001e. The new
+shared-client transport cache is outside this binary proof. Its focused run
+[40112787489](https://github.com/jeong-sik/masc/actions/runs/40112787489) was still
+running when this evidence was recorded. These observations establish the scoped
+owner-loss repair, not current-head full regression, release, installation or
+all browser behavior.

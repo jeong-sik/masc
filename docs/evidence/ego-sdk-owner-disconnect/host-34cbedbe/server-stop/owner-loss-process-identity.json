@@ -1,0 +1,28 @@
+{
+  "source": "34cbedbe5746855db9033921f4b0c9365f1fbbb6",
+  "server": {
+    "pid": 93841,
+    "ppid": 1,
+    "comm": "/tmp/masc-ego-runtime-34cbedbe/masc",
+    "executable": "/private/tmp/masc-ego-runtime-34cbedbe/masc",
+    "sha256": "0fee4735c087d3bcb423dcc59544ece0f57f71c4c2f184cec2093a0bcc7c83a0",
+    "birth": "Sun Oct 25 01:43:30 2026"
+  },
+  "worker": {
+    "pid": 94494,
+    "ppid": 93841,
+    "comm": "masc-browser-addon-worker",
+    "executable": "/private/tmp/masc-ego-runtime-34cbedbe/masc-browser-addon-worker",
+    "sha256": "afaaed9fdf55995c1f409f15b22daffb3b1cb4a2773ff490aaa0bc6046ebcb80",
+    "birth": "Sun Oct 25 01:43:33 2026"
+  },
+  "sdk": {
+    "pid": 94779,
+    "ppid": 94494,
+    "comm": "/Users/dancer/.local/bin/ego-browser",
+    "executable": "/Applications/ego lite.app/Contents/Frameworks/ego Framework.framework/Versions/0.6.0.20/Helpers/ego-browser",
+    "sha256": "6706a072959a4d09858d4dd29d8bde57584e78191ef704aeb56662c8e04cf4b0",
+    "birth": "Sun Oct 25 01:43:34 2026"
+  },
+  "scope": "exact private candidate tree; argv/environment omitted"
+}

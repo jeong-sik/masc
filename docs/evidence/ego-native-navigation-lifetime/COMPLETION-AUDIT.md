@@ -1,9 +1,33 @@
-# Native-first goal completion audit
+# Native-first goal audit
 
 Goal: use Ego Lite itself as far as its installed APIs support, supplementing
 actual MASC integration gaps. This audit covers implementation, PR delivery and
 isolated real execution. It does not claim merge, production installation,
 release readiness, every browser feature, or repair of unrelated runtime bugs.
+
+## Reopened verification scope
+
+The table below records the earlier14c9/a96 candidate evidence. It is not a
+completion verdict for the current stack. Subsequent independent review found
+that the shared client applied Ego-specific wait policy to non-Ego routes; a
+remote correction then restored a short clock for Ego as well. Current parent
+`07837af6092e304a77bcfb22af8f7fdf0c68f849` uses original-worker validated
+transport observations instead. Navigation commit
+`37f0b42f5e82b9b9028fc1debaa3b9716a317bbe` adds actual shared-client socket
+coverage for click/goto/reload/open-tab across Ego and other routes.
+
+Independent source review passes at top
+`12c001e55e27c7a9340ae27f956e112fd5360c76`; actual focused execution remains
+pending [40112787489](https://github.com/jeong-sik/masc/actions/runs/40112787489).
+The goal remains active until that evidence and the current-source integration
+scope are audited. Earlier real Keeper results do not execute this new client
+metadata path.
+
+The prior generic server-signal orphan limitation has separate compiled-host
+proof on34c; see [owner-disconnect evidence](../ego-sdk-owner-disconnect/).
+That evidence does not validate the later client policy.
+
+## Earlier candidate evidence
 
 | Requirement | Current source and inspected evidence | Result |
 |---|---|---|

@@ -1,0 +1,19 @@
+{
+  "trigger": "SIGTERM of exact private server",
+  "server": {
+    "pid": 93841,
+    "state": "absent",
+    "observation_seconds": 2.5517389589949744
+  },
+  "worker": {
+    "pid": 94494,
+    "state": "absent",
+    "observation_seconds": 0.03234104200237198
+  },
+  "sdk": {
+    "pid": 94779,
+    "state": "absent",
+    "observation_seconds": 0.01766516699717613
+  },
+  "manual_sdk_signal": false
+}

@@ -6,9 +6,12 @@
     This store persists those values as content-addressed artifacts and joins
     them to the TurnRecord with the same [turn_ref]. Repeated history messages
     therefore occupy one blob even when many turns transmit them, and a
-    newest durable snapshot lets the next turn derive an immutable reuse map
-    without process-global cache state or rewriting and fsyncing the same
-    bytes. Snapshot rows keep empty artifact previews, so message text lives
+    newest durable snapshot lets the next turn derive an immutable per-Keeper
+    reuse map. A map miss uses the blob store's existing strict-publication
+    memo: it reuses a physical file only after checking the same owned file
+    snapshot and exact bytes, otherwise strictly republishes it. Ordinary
+    non-strict writes cannot establish that memo. Snapshot rows keep empty
+    artifact previews, so message text lives
     only in the blob. The administrator-only endpoints list a row's parts and
     return one listed part's bytes at a time. *)
 
@@ -104,7 +107,9 @@ val write_best_effort :
   unit
 (** Persist one immutable snapshot. Payload preparation uses the shared CPU
     pool; each artifact reuse miss uses the shared IO pool for its content
-    addressing and strict durable put. Reuse lookup, map updates and the
+    addressing and strict durable reuse. A cold, changed or evicted blob still
+    requires strict payload and parent sync; concurrent cold misses may each
+    publish. Reuse lookup, map updates and the
     snapshot append remain on the caller. The pool adapters retain their
     inline policy when no pool is available, outside Eio, or when the caller is
     already a worker.

@@ -63,3 +63,30 @@ message. That common-case result does not justify the former MASC 20-second
 execution limit or prove a long action. The earlier real SDK and Keeper runs
 remain bound to their own exact sources. Combined host/Keeper verification of
 this layer is still required; no production installation is changed here.
+
+## Chooser ownership correction
+
+Selected CI [40105102108](https://github.com/jeong-sik/masc/actions/runs/40105102108)
+compiled candidate `fad55fd7c77d1ae55f7cd1d064d0908892fced2a`, then failed
+peer case 28: a second `setFiles([])` was attempted after the SDK had handled
+a failed assignment. The separate macOS runtime build
+[40105104432](https://github.com/jeong-sik/masc/actions/runs/40105104432)
+succeeded for that source; it does not include this correction.
+
+The second call came from `f12386db1d8` after the earlier live verification.
+Its new mock assumed failed SDK assignment left the chooser pending. Real Ego
+0.6.0.20 contradicts that assumption: [round 03](chooser-recheck/round-03-output.txt)
+executes the extracted production chooser body, deliberately changes the owned
+input to text just before assignment, receives the native error, then completes
+the next chooser in the same process. Only the two requested assignments occur;
+no empty assignment is sent. MASC now closes only a captured chooser that it
+has not handed to `setFiles`, retaining uncertainty and no replay after failure.
+The JavaScript mock now represents this observed SDK lifecycle; existing OCaml
+case 28 already asserts it. Independent delta source review found no P0-P2.
+
+Space 20 was confirmed missing; the operator's existing replacement permission
+was used to create continuing space 25/p1. The first two recheck rounds failed
+before file assignment because of invalid/inapplicable semantic locators; their
+logs are preserved. Round 03 inspected the input DOM and used its observed CSS
+selector. This proves production JavaScript with the installed SDK, not full
+host/Keeper integration. The local fixture server ended after each round.

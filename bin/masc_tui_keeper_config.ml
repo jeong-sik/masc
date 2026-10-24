@@ -24,6 +24,7 @@ let editable_fields =
   ; Direct ("input_policy", [ "input_policy" ])
   ; Direct ("max_context_override", [ "max_context_override" ])
   ; Direct ("sandbox_profile", [ "sandbox_profile" ])
+  ; Direct ("remote_endpoint", [ "remote_endpoint" ])
   ; Direct ("network_mode", [ "network_mode" ])
   ; Direct ("instructions", [ "prompt"; "instructions" ])
   ; Skill_selection
@@ -416,6 +417,32 @@ let reopened_stem ~reason edited =
   let body = String.split_on_char '\n' edited |> drop_refusals |> String.concat "\n" in
   "// " ^ one_line ^ "\n" ^ body
 
+let remote_endpoint_names snapshot =
+  match member "remote_ssh_endpoints" snapshot with
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt "state" fields with
+     | Some (`String "unavailable") ->
+       let detail = match List.assoc_opt "detail" fields with
+         | Some (`String detail) -> detail
+         | Some _ | None -> "endpoint registry is unavailable" in
+       Error detail
+     | Some (`String "available") ->
+       (match List.assoc_opt "endpoints" fields with
+        | Some (`List endpoints) ->
+          List.fold_left
+            (fun result endpoint ->
+               let ( let* ) = Result.bind in
+               let* names = result in
+               match member "name" endpoint with
+               | Some (`String name) when String.trim name <> "" && not (List.mem name names) ->
+                 Ok (name :: names)
+               | Some _ | None -> Error "endpoint registry has an invalid or duplicate name")
+            (Ok []) endpoints
+          |> Result.map List.rev
+        | Some _ | None -> Error "endpoint registry has no endpoint list")
+     | Some _ | None -> Error "endpoint registry has an unknown state")
+  | Some _ | None -> Error "endpoint registry was not observed; refresh Keeper settings"
+
 let sandbox_patch ~profile snapshot =
   let ( let* ) = Result.bind in
   let* revision = expected_config_revision snapshot in
@@ -424,9 +451,40 @@ let sandbox_patch ~profile snapshot =
         (match Keeper_sandbox_config.sandbox_profile_of_string value with
          | Some profile -> Ok profile | None -> Error "unknown observed sandbox profile")
     | Some _ | None -> Error "sandbox profile was not observed" in
-  if current = profile then Ok None
-  else Ok (Some (`Assoc ["expected_config_revision",revision;
-    "sandbox_profile",`String (Keeper_sandbox_config.sandbox_profile_to_string profile)]))
+  let* observed_endpoint = match member "remote_endpoint" snapshot with
+    | Some `Null | None -> Ok None
+    | Some (`String name) when String.trim name <> "" -> Ok (Some name)
+    | Some _ -> Error "remote endpoint was not observed as a name or null" in
+  let* network_mode = match member "network_mode" snapshot with
+    | Some (`String raw) ->
+      (match Masc.Keeper_types_profile_sandbox.network_mode_of_string raw with
+       | Some mode -> Ok mode
+       | None -> Error "unknown observed sandbox network mode")
+    | Some _ | None -> Error "sandbox network mode was not observed" in
+  let* endpoint = match profile with
+    | Keeper_sandbox_config.Docker | Micro_vm -> Ok None
+    | Remote_ssh ->
+      let* names = remote_endpoint_names snapshot in
+      (match observed_endpoint, names with
+       | Some name, _ when List.mem name names -> Ok (Some name)
+       | Some _, _ -> Error "remote_endpoint is not registered; press e to choose a registered endpoint"
+       | None, [ name ] -> Ok (Some name)
+       | None, [] -> Error "No SSH endpoints are registered in .masc/config/runtime.toml"
+       | None, _ :: _ :: _ ->
+         Error ("Press e and set remote_endpoint to one of: " ^ String.concat ", " names)) in
+  let endpoint_json = function None -> `Null | Some name -> `String name in
+  let changes =
+    (if current = profile then [] else
+       [ "sandbox_profile", `String (Keeper_sandbox_config.sandbox_profile_to_string profile) ])
+    @ (if observed_endpoint = endpoint then [] else
+         [ "remote_endpoint", endpoint_json endpoint ])
+    @ (match profile, network_mode with
+       | Keeper_sandbox_config.Remote_ssh, Masc.Keeper_types_profile_sandbox.Network_inherit -> []
+       | Remote_ssh, (Network_none | Network_policy) -> [ "network_mode", `String "inherit" ]
+       | (Docker | Micro_vm), (Network_inherit | Network_none | Network_policy) -> []) in
+  match changes with
+  | [] -> Ok None
+  | _ :: _ -> Ok (Some (`Assoc (("expected_config_revision",revision) :: changes)))
 
 let reopen_edit_on_current ~before ~edited ~current =
   let ( let* ) = Result.bind in
@@ -689,6 +747,13 @@ let view_lines ~sanitize json =
         Printf.sprintf "%s / %s"
           (string_value (at [ "sandbox_profile" ]))
           (string_value (at [ "network_mode" ])))
+  ; editable_value_row "Remote endpoint"
+      (fun () -> string_value (at [ "remote_endpoint" ]))
+  ; read_only_value_row "Registered SSH endpoints"
+      (fun () -> match remote_endpoint_names json with
+         | Ok [] -> "none configured"
+         | Ok names -> String.concat ", " names
+         | Error detail -> detail)
   ; editable_value_row "Mention targets"
       (fun () -> string_list_value (at [ "workspace"; "mention_targets" ]))
   ; editable_value_row "Board interests"

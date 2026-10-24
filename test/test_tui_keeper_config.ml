@@ -15,6 +15,7 @@ let observed =
       "input_policy": "small",
       "max_context_override": null,
       "sandbox_profile": "docker",
+      "remote_endpoint": null,
       "network_mode": "none",
       "sandbox_roots": ["repo-a", ".masc/playground/alpha/"],
       "prompt": {"instructions": "be exact"},
@@ -44,6 +45,7 @@ let test_editor_starts_from_observed_values () =
     ; "input_policy"
     ; "max_context_override"
     ; "sandbox_profile"
+    ; "remote_endpoint"
     ; "network_mode"
     ; "instructions"
     ; "skills"
@@ -54,6 +56,49 @@ let test_editor_starts_from_observed_values () =
   Alcotest.(check string) "stem round-trips observed projection"
     (Yojson.Safe.to_string projected)
     (editor_stem observed |> Yojson.Safe.from_string |> Yojson.Safe.to_string)
+
+let test_remote_sandbox_selection () =
+  let snapshot names endpoint profile =
+    match observed with
+    | `Assoc fields ->
+      let keys = [ "remote_ssh_endpoints"; "remote_endpoint"; "sandbox_profile" ] in
+      `Assoc
+        ([ "remote_ssh_endpoints", `Assoc
+             [ "state", `String "available"
+             ; "endpoints", `List (List.map (fun name -> `Assoc [ "name", `String name ]) names) ]
+         ; "remote_endpoint", endpoint; "sandbox_profile", `String profile ]
+         @ List.filter (fun (key, _) -> not (List.mem key keys)) fields)
+    | _ -> Alcotest.fail "invalid observed fixture" in
+  let patch_for profile snapshot = match sandbox_patch ~profile snapshot with
+    | Ok (Some patch) -> patch
+    | Ok None -> Alcotest.fail "selection did not produce a patch"
+    | Error detail -> Alcotest.fail detail in
+  let remote = snapshot [ "builder" ] `Null "docker" in
+  let patch = patch_for Keeper_sandbox_config.Remote_ssh remote in
+  Alcotest.(check string) "endpoint selected in profile change" "builder"
+    (Yojson.Safe.Util.member "remote_endpoint" patch |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string) "network changes with SSH profile" "inherit"
+    (Yojson.Safe.Util.member "network_mode" patch |> Yojson.Safe.Util.to_string);
+  Alcotest.(check bool) "revision belongs to original read" true
+    (Yojson.Safe.Util.member "expected_config_revision" patch = Yojson.Safe.Util.member "config_revision" remote);
+  List.iter (fun names ->
+    Alcotest.(check bool) "no implicit arbitrary endpoint" true
+      (Result.is_error (sandbox_patch ~profile:Keeper_sandbox_config.Remote_ssh
+         (snapshot names `Null "docker")))) [ []; [ "builder"; "gpu" ] ];
+  let selected = snapshot [ "builder"; "gpu" ] (`String "gpu") "docker" in
+  let patch = patch_for Keeper_sandbox_config.Remote_ssh selected in
+  Alcotest.(check bool) "explicit endpoint retained" false
+    (List.mem "remote_endpoint" (assoc_keys patch));
+  let patch = patch_for Keeper_sandbox_config.Micro_vm
+      (snapshot [ "builder" ] (`String "builder") "remote_ssh") in
+  Alcotest.(check bool) "leaving SSH clears endpoint in same request" true
+    (Yojson.Safe.Util.member "remote_endpoint" patch = `Null
+     && List.mem "remote_endpoint" (assoc_keys patch));
+  match patch_of_edit ~before:remote
+      ~after:(`Assoc [ "remote_endpoint", `String "builder" ]) with
+  | Ok patch -> Alcotest.(check string) "endpoint is editable" "builder"
+      (Yojson.Safe.Util.member "remote_endpoint" patch |> Yojson.Safe.Util.to_string)
+  | Error refusal -> Alcotest.fail (edit_refusal_to_string refusal)
 
 let test_patch_contains_only_changed_fields () =
   let after =
@@ -526,6 +571,7 @@ let () =
   Alcotest.run "tui keeper config"
     [ ( "projection"
       , [ Alcotest.test_case "input policy patch" `Quick test_input_policy_patch
+        ; Alcotest.test_case "complete remote sandbox selection" `Quick test_remote_sandbox_selection
         ; Alcotest.test_case "observed editor stem" `Quick
             test_editor_starts_from_observed_values
         ; Alcotest.test_case "changed-only patch" `Quick

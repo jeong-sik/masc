@@ -5,6 +5,28 @@
 open Dashboard_http_keeper_types
 open Keeper_status_bridge
 
+let remote_ssh_endpoints_json ~base_path =
+  match Keeper_sandbox_ssh.configured_endpoints ~base_path with
+  | Error detail ->
+    `Assoc [ "state", `String "unavailable"; "detail", `String detail ]
+  | Ok endpoints ->
+    let endpoint_json (endpoint : Exec_ssh_endpoint.t) =
+      `Assoc
+        [ "name", `String endpoint.name
+        ; "host", `String endpoint.host
+        ; "user", `String endpoint.user
+        ; "port", `Int endpoint.port
+        ; "remote_root", `String endpoint.remote_root
+        ; "observation",
+          Keeper_sandbox_remote.report_openssh ~base_path ~endpoint
+          |> Keeper_tool_lane_status.json_of_report
+        ]
+    in
+    `Assoc
+      [ "state", `String "available"
+      ; "endpoints", `List (List.map endpoint_json endpoints)
+      ]
+
 let keeper_config_field_presence_json config_json =
   let rec collect prefix json acc =
     match json with
@@ -408,6 +430,8 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
          ( "remote_endpoint"
          , Json_util.string_opt_to_json
              defaults.Keeper_types_profile.remote_endpoint );
+         ( "remote_ssh_endpoints"
+         , remote_ssh_endpoints_json ~base_path:config.base_path );
          ("keeper_last_error", Json_util.string_opt_to_json keeper_last_error);
          ( "sandbox_roots"
          , `List

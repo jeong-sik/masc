@@ -5,6 +5,12 @@ val resolve_endpoint_name :
   base_path:string -> name:string -> (Exec_ssh_endpoint.t, string) result
 (** Resolve one explicit endpoint name against runtime.toml. *)
 
+val configured_endpoints :
+  base_path:string -> (Exec_ssh_endpoint.t list, string) result
+(** Read the effective runtime endpoint registry without connecting, probing,
+    creating a runner or changing readiness state. An unavailable or invalid
+    registry is an error, distinct from a successfully read empty registry. *)
+
 val resolve_endpoint :
   base_path:string ->
   keeper_name:string ->

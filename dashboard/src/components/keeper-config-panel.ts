@@ -2468,6 +2468,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   `
 
+  const sshCatalog = c.remote_ssh_endpoints
+  const sshEndpoints = sshCatalog?.state === 'available' ? sshCatalog.endpoints : []
+  const selectedSshEndpoint = rd ? sshEndpoints.find(endpoint => endpoint.name === rd.remote_endpoint) : undefined
+  const sshProbe = selectedSshEndpoint?.observation.probe
+  const sshDispatch = selectedSshEndpoint?.observation.last_dispatch
+
   // access ⚿ — sandbox / network + mention targets + bound namespaces
   const accessTab = html`
     ${runtimeWriteUnsupportedNotice}
@@ -2505,15 +2511,40 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
            the refusal left the operator with nothing to change. The read-only
            branch below has always shown it on the same condition. -->
       ${rd.sandbox_profile === 'remote_ssh' || c.remote_endpoint ? html`
-        <${InlineTextRow}
+        <${InlineSelectRow}
           label="remote_endpoint"
           value=${rd.remote_endpoint}
-          placeholder="builder"
-          hint="runtime.toml 의 [exec.ssh.endpoints.<이름>] 에 등록된 이름. 등록되지 않은 이름은 저장할 때 거절됩니다."
+          options=${['', ...sshEndpoints.map(endpoint => endpoint.name)]}
+          optionLabel=${(name: string) => {
+            if (name === '') return '(선택하지 않음)'
+            const endpoint = sshEndpoints.find(endpoint => endpoint.name === name)
+            return endpoint ? `${name} · ${endpoint.user}@${endpoint.host}:${endpoint.port}` : name
+          }}
+          placeholder=${rd.remote_endpoint ? `${rd.remote_endpoint} (등록 확인 필요)` : '(선택하지 않음)'}
           onChange=${(value: string) => updateRuntimeDraft('remote_endpoint', value)}
           dirty=${dirtyFlags.remote_endpoint}
         />
         ${InlineControlError(runtimeErrorFor('remote_endpoint'))}
+        ${sshCatalog?.state !== 'available' ? html`
+          <${Callout} title="SSH endpoint 목록을 읽지 못했습니다"
+            body=${sshCatalog?.state === 'unavailable' ? sshCatalog.detail : '설정을 새로 읽어 주세요.'} tone="warn" />
+        ` : sshEndpoints.length === 0 ? html`
+          <${Callout} title="등록된 SSH endpoint가 없습니다"
+            body="Runtime 설정에 원격 실행처를 등록하고 bootstrap으로 준비한 뒤 여기서 선택하세요." tone="warn" />
+        ` : null}
+        ${selectedSshEndpoint ? html`
+          <${ConfigRow} label="원격 작업 루트" value=${selectedSshEndpoint.remote_root} />
+          <${ConfigRow} label="마지막 shim 관측" value=${sshProbe?.state === 'answered'
+            ? `${sshProbe.shim_release ?? '(버전 미보고)'} · protocol ${sshProbe.protocol_major} · ${new Date(sshProbe.observed_at_unix * 1000).toISOString()}`
+            : sshProbe?.state === 'failed' ? `${new Date(sshProbe.at_unix * 1000).toISOString()} · ${sshProbe.detail}`
+              : '이 서버에서 아직 확인하지 않았습니다'} />
+          <${ConfigRow} label="마지막 전송 결과" value=${sshDispatch
+            ? `${new Date(sshDispatch.at_unix * 1000).toISOString()} · ${sshDispatch.outcome === 'payload_finished' ? sshDispatch.status : sshDispatch.detail}`
+            : '이 서버에서 아직 전송하지 않았습니다'} />
+          ${selectedSshEndpoint.observation.operator_action ? html`
+            <${Callout} title="원격 실행처 확인이 필요합니다" body=${selectedSshEndpoint.observation.operator_action} tone="warn" />
+          ` : null}
+        ` : null}
       ` : null}
       ${rd.sandbox_profile === 'remote_ssh' ? html`
         <${Callout}

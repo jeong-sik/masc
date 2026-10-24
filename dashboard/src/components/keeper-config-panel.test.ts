@@ -2798,7 +2798,7 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
   it('shows the endpoint row for a docker keeper that still carries one', async () => {
     await openAccessTab(makeKeeperConfig({ sandbox_profile: 'docker', remote_endpoint: 'builder' }))
 
-    const input = Array.from(container.querySelectorAll('input')).find(
+    const input = Array.from(container.querySelectorAll('select')).find(
       element => element.getAttribute('aria-label') === 'remote_endpoint'
         || element.previousElementSibling?.textContent?.includes('remote_endpoint'),
     )

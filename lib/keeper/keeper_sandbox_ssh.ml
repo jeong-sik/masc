@@ -20,18 +20,16 @@ let runtime_config_path ~base_path =
   if Sys.file_exists workspace_path then Some workspace_path else Runtime.config_path ()
 ;;
 
-let resolve_endpoint_name ~base_path ~name:endpoint_name =
-  let endpoint_name = String.trim endpoint_name in
+let read_runtime_config ~base_path ~context =
   let* config_path =
     runtime_config_path ~base_path
     |> Option.to_result
          ~none:
            (Printf.sprintf
-              "remote_ssh_runtime_config_missing: endpoint %s cannot be resolved because runtime.toml is unavailable"
-              endpoint_name)
+              "remote_ssh_runtime_config_missing: %s cannot be resolved because runtime.toml is unavailable"
+              context)
   in
-  let* runtime_config =
-    Runtime_toml.parse_file config_path
+  Runtime_toml.parse_file config_path
     |> Result.map_error (fun errors ->
       let details =
         errors
@@ -39,8 +37,19 @@ let resolve_endpoint_name ~base_path ~name:endpoint_name =
         |> String.concat "; "
       in
       Printf.sprintf
-        "remote_ssh_runtime_config_invalid: endpoint %s: %s"
-        endpoint_name details)
+        "remote_ssh_runtime_config_invalid: %s: %s"
+        context details)
+;;
+
+let configured_endpoints ~base_path =
+  let* config = read_runtime_config ~base_path ~context:"endpoint catalog" in
+  Ok config.Runtime_schema.exec_ssh_endpoints
+;;
+
+let resolve_endpoint_name ~base_path ~name:endpoint_name =
+  let endpoint_name = String.trim endpoint_name in
+  let* runtime_config =
+    read_runtime_config ~base_path ~context:("endpoint " ^ endpoint_name)
   in
   Runtime_schema.exec_ssh_endpoint runtime_config endpoint_name
   |> Option.to_result

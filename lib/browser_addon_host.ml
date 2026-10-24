@@ -88,10 +88,10 @@ let dispatch ?upload_id ~required_actions t ~preference verb ~start_time =
   let unchosen ~clients error=refuse ~data:(selection_detail ~clients error) (Browser_selection.error_message error) in
   let* ()=match verb,required_actions with
     | (Browser_lane.Tabs_list|Session_open _),_ -> Ok ()
-    | (Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
+    | (Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
       |Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _
       |Page_instruct _|Page_locate _|Page_extract _),[] -> Ok ()
-    | (Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
+    | (Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
       |Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _
       |Page_instruct _|Page_locate _|Page_extract _),_::_ ->
         refuse "requiredActions applies only to initial tab discovery or session open" in
@@ -103,7 +103,7 @@ let dispatch ?upload_id ~required_actions t ~preference verb ~start_time =
         refuse Browser_lane.handoff_refused
     | Exact (Browser_lane.Live_route (Some _)),Browser_lane.Page_act (Browser_lane.Action.Control _) -> Ok ()
     | (Automatic|Exact (Live_route _|Automation_route|Stagehand_route)),
-      (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
+      (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
       |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Browser_lane.Action.Open_tab _|Open_window _|On_tab _)|Page_context _
       |Page_instruct _|Page_locate _|Page_extract _) -> Ok () in
   let* binding=match preference,required_actions with

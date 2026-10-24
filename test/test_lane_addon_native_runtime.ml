@@ -508,13 +508,27 @@ hooks = ["validate_input", "validate_output"]
        | R.Browser_ready _ -> true | Browser_refresh_needed _|Browser_unavailable|Browser_retired -> false));
   (* The host refuses these before it calls the worker; the tool-call count
      checked next stays at the one long call. *)
-  let host_refusal ?(class_=Tool_result.Workflow_rejection) name arguments =
+  let host_refusal ?message ?(class_=Tool_result.Workflow_rejection) name arguments =
     check bool name true (match Browser_addon_host.command host ~arguments with
       | Error failure -> Tool_result.failure_class failure=Some class_
           && (Keeper_tool_execution.of_tool_result failure).failure_effect_disposition=Tool_result.Proven_pre_effect
+          && (match message with None -> true | Some expected -> Tool_result.message failure=expected)
       | Ok _ -> false) in
   host_refusal "requirements ride only discovery or session open" (`Assoc ["requiredActions",`List [`String "hover"];
     "command",Browser_lane.verb_json (Browser_lane.Page_read {tab_id=Some 7;max_chars=None})]);
+  let workflow=require (Browser_lane.Native_workflow.of_json (`Assoc ["tabId",`Int 7;
+    "expectedUrl",`String "https://example.org/";"maxChars",`Int 1000;
+    "steps",`List [`Assoc ["method",`String "click";"selector",`String "#observed"]]])) in
+  let workflow_command=Browser_lane.verb_json (Browser_lane.Page_native_workflow workflow) in
+  host_refusal "native workflow requirements cannot reach the worker"
+    ~message:"requiredActions applies only to initial tab discovery or session open"
+    (`Assoc ["lane",`String "live";"clientId",`String (Browser_lane.client_id_to_string client_id);
+      "requiredActions",`List [`String "hover"];"command",workflow_command]);
+  List.iter (fun (label,selection) ->
+    host_refusal (label ^ ": native workflow retains its observed client")
+      ~message:(Browser_selection.error_message Browser_selection.Binding_required)
+      (`Assoc (selection @ ["command",workflow_command])))
+    ["automatic",[];"unnamed live",["lane",`String "live"]];
   host_refusal "a live tab is opened only on a named client" (`Assoc ["lane",`String "live";
     "command",Browser_lane.verb_json (Browser_lane.Page_act (Browser_lane.Action.Open_tab "https://example.org/"))]);
   List.iter (fun control ->

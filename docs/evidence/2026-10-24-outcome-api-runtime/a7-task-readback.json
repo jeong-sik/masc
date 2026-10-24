@@ -1,0 +1,21 @@
+{
+  "id": "task-001",
+  "title": "독립 산술 결과와 Task 승인 지표 확인",
+  "description": "alpha/beta/gamma Goal과 독립적인 산술 결과 2+2를 실제 Docker에서 실행하고, Task 승인 지표와 외부 수용 미관측을 구분한다.",
+  "priority": 3,
+  "files": [],
+  "created_at": "2026-10-24T09:40:49Z",
+  "created_by": "goal-canary-operator",
+  "handoff_context": {
+    "summary": "Actual isolated Docker computation succeeded; controlled approval boundary observation.",
+    "evidence_refs": [
+      "note:Docker Node exit0 stdout4; controlled operator-proxy fixture, no independent LLM or Goal confirmation claim."
+    ],
+    "updated_at": "2026-10-24T09:40:50Z",
+    "updated_by": "goal-canary-operator"
+  },
+  "status": "done",
+  "assignee": "goal-canary-operator",
+  "completed_at": "2026-10-24T09:40:50Z",
+  "notes": "Controlled operator-proxy fixture after evidence reread: actual Docker stdout4. No independent LLM verdict or Goal human confirmation claim."
+}

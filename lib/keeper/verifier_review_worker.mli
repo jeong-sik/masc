@@ -9,6 +9,8 @@ type error =
   | Persistence_unavailable of string
 
 val run_attempt :
+  ?prepare_observer_registration:(Task.Anti_rationalization.review_result ->
+    (Lane_addon_request_receipt.receipt, string) result) ->
   ?on_verdict:(Task.Anti_rationalization.review_result -> unit) ->
   ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
   ?sw:Eio.Switch.t option ->
@@ -26,16 +28,56 @@ val run_attempt :
     contract must still match the review protocol. [prepare_notes] belongs to
     the host and renders its captured evidence metadata before the judgment
     and notes are published atomically. Restored judgments do not rebuild or
-    validate lookup authority. *)
+    validate lookup authority. The host's actual observer registration, when
+    supplied, is published atomically with the judgment in one owner record. *)
+
+type 'error apply_failure =
+  | Outcome_unknown of { error : 'error; detail : string }
+  | Authority_refused of { error : 'error; detail : string }
+(** The host preserves its actual typed domain error. [Authority_refused]
+    authorizes one read-only reconciliation after an explicit authority
+    refusal; it never authorizes another apply. Other errors retain uncertainty.
+    [detail] is journal diagnostics, never a control discriminator. *)
+
+type 'error commit_error =
+  | Worker_error of error
+  | Apply_failed of 'error
+  | Commit_conflicted of {
+      commit : Lane_addon_request_progress.commit;
+      observed : Yojson.Safe.t;
+    }
+(** A conflict carries the authenticated original intent and the authoritative
+    third-state observation already retained in its journal. The host owns
+    domain interpretation. Cached conflicts neither observe nor apply again. *)
 
 val commit_attempt :
   store:Verifier_review_owner.store -> verification_id:string -> attempt:int ->
   installation_id:string -> package_id:string ->
   change:Lane_addon_request_progress.change ->
   observe:(Lane_addon_request_progress.change -> (Yojson.Safe.t, string) result) ->
-  apply:(Lane_addon_request_progress.change -> (unit, string) result) ->
-  (unit, error) result
+  apply:(Lane_addon_request_progress.change -> (unit, 'error apply_failure) result) ->
+  (unit, 'error commit_error) result
 (** Host-only domain commitment of the exact retained judgment. Observe and
     apply consume the retained intent on resume, never a newly generated one.
     A possible prior commit is confirmed by the exact expected after-state or
     retried only after observing its own original before-state. *)
+
+module For_testing : sig
+  val run_attempt :
+    advance_events:(store:Verifier_review_owner.store -> Verifier_review_owner.retained ->
+      Lane_addon_request_progress.event list ->
+      (Verifier_review_owner.retained, Verifier_review_owner.load_error) result) ->
+  ?prepare_observer_registration:(Task.Anti_rationalization.review_result ->
+    (Lane_addon_request_receipt.receipt, string) result) ->
+  ?on_verdict:(Task.Anti_rationalization.review_result -> unit) ->
+  ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
+  ?sw:Eio.Switch.t option ->
+  store:Verifier_review_owner.store -> verification_id:string -> attempt:int ->
+  installation_id:string -> package_id:string ->
+  prepare_notes:(Task.Anti_rationalization.review_result -> string) ->
+  authority:Verification_authority_tools.task_review ->
+  provider_rest:(string -> Task.Anti_rationalization.provider_rest) -> unit ->
+  (Task.Anti_rationalization.review_result, error) result
+end
+(** Scoped publication effect injection through the same runner; production
+    always uses the original owner's canonical publisher. No global hook. *)

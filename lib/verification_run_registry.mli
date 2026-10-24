@@ -93,12 +93,47 @@ val mark_completed
 (** Complete a registered review. An unknown [verification_id] is logged and is
     not written to the append-only log. *)
 
+type publication_source_error
+(** The original current-history error from the canonical registry transaction.
+    Its typed cause is retained; {!publication_error_to_string} renders it for
+    diagnostics. *)
+
+type publication_error =
+  | Expected_not_completed
+  | Conflict
+  | Current_source_unavailable of publication_source_error
+  | Invalid_change of string
+  | Publication_failed of Run_registry_core.persistence_failure
+
+val publication_error_to_string : publication_error -> string
+
+val publish_terminal_confirmed
+  :  t
+  -> expected:run
+  -> (unit, publication_error) result
+(** Confirm the supplied immutable terminal row in one durable current-history
+    transaction. An absent row is registered and completed with its original
+    fields; an identical running registration receives that completion; an
+    identical completed row is confirmed without appending. Every differing
+    registration, start time or completion conflicts. A running [expected] is
+    refused.
+
+    Success confirms historical durable publication even if display retention
+    immediately removes the row. Volatile, uninitialized, malformed or incomplete
+    history is refused through the canonical transaction. Change notification
+    runs only after confirmation and is separate from that transaction.
+    Cancellation propagates. *)
+
 val list_runs : t -> run list
 val get : t -> verification_id:string -> run option
 val outcome_label : outcome -> string
 val infrastructure_stage_label : infrastructure_stage -> string
 val status_label : run_status -> string
 val run_to_yojson : run -> Yojson.Safe.t
+val completed_run_of_yojson : Yojson.Safe.t -> (run, string) result
+(** Decode a terminal {!run_to_yojson} payload using the canonical registration
+    and completion codecs. Running status, unknown fields and duplicate fields
+    are refused; the original tool observations and runtime are retained. *)
 val observe_tool_result
   :  input:Yojson.Safe.t
   -> finished_at:float

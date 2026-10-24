@@ -121,8 +121,16 @@ let decision_rows_of_state (state : state) =
     | Not_read -> [Home_agenda, "Operator tasks not read · inspect sources"]
     | Read rows ->
         List.map (fun (row : Masc_tui_agenda.stalled) ->
+          let id = clean row.task_id in
+          let what = clean row.what in
+          let detail =
+            if String.starts_with ~prefix:(id ^ ":") what
+               || String.starts_with ~prefix:(id ^ " · ") what
+            then what
+            else Printf.sprintf "%s · %s" id what
+          in
           Home_request (Home_operator_task row.task_id),
-          Printf.sprintf "Operator task · %s · %s" (clean row.task_id) (clean row.what)) rows
+          Printf.sprintf "Operator task · %s" detail) rows
   in
   (* Equality is kind plus authoritative request ID, never a Keeper/task
      grouping key. Distinct calls belonging to one Keeper remain distinct. *)

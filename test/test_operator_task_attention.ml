@@ -136,10 +136,14 @@ let test_only_work_with_no_actor_is_listed () =
     set_status config ~task_id:"task-002"
       ~status:(in_progress ~assignee:vanished ~started_at:"2026-09-04T00:00:00Z");
     match project config with
-    | [ Attention.Held_without_actor { task_id; assignee; since } ] ->
+    | [ Attention.Held_without_actor { task_id; title; assignee; since } as item ] ->
       Alcotest.(check string) "the abandoned task is the row" "task-002" task_id;
+      Alcotest.(check string) "carries the task title" "held by a session that is gone" title;
       Alcotest.(check string) "named by who holds it" vanished assignee;
-      Alcotest.(check string) "waiting since it started" "2026-09-04T00:00:00Z" since
+      Alcotest.(check string) "waiting since it started" "2026-09-04T00:00:00Z" since;
+      Alcotest.(check string) "summary names id, title, and holder"
+        "task-002 · held by a session that is gone: held by codex-mcp-client, which has no Keeper queue"
+        (Attention.summary item)
     | items ->
       Alcotest.failf "a live Keeper's task is not an operator row (got %d rows)"
         (List.length items))

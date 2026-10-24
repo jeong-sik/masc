@@ -18,7 +18,7 @@ let without_spaces text =
    with wide characters. *)
 let labels =
   [ "Held call · quill [call-1] · Execute"
-  ; "Operator task · task-2183 · task-2183: held by codex-mcp-client, which has no Keeper queue"
+  ; "Operator task · task-2183 · abandoned browser upload: held by codex-mcp-client, which has no Keeper queue"
   ; "Continue with kidsnote-slack-context-collector · save durability unconfirmed"
   ; "Question · wkbl-web-leader [ask…cd6af6b5] · 운영자가 세 후보를 주며 셋 중 하나냐고 되물었다"
   ; "x"

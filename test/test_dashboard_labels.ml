@@ -337,11 +337,13 @@ let test_attention_grades_the_operators_tasks () =
     Dashboard_attention.detect_operator_tasks
       [ Masc.Operator_task_attention.Held_without_actor
           { task_id = "task-1486"
+          ; title = "abandoned browser upload"
           ; assignee = "codex-mcp-client"
           ; since = "2026-09-04T00:00:00Z"
           }
       ; Masc.Operator_task_attention.Producer_record_unreadable
           { task_id = "task-900"
+          ; title = "keeper repair task"
           ; producer = "half-written-keeper"
           ; since = "2026-09-05T00:00:00Z"
           ; detail = "this binary does not decode it"

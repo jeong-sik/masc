@@ -117,7 +117,23 @@ let task_line ~cols ~ordinal ~task_ids ~use_ordinals (task : task) =
 let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
   let width=max 1 (framed_inner_width cols - 2) in
   let history=Masc_tui_fetched.view_for ~equal:String.equal state.task_history ~key:task.id in
-  let failures=Option.to_list (Option.map (fun detail -> " Task read failed · last observation: " ^ detail) state.tasks_error)
+  let stalled_note =
+    match state.operator_stalled with
+    | Masc_tui_agenda.Read rows ->
+        Option.to_list
+          (Option.map
+             (fun (row : Masc_tui_agenda.stalled) ->
+               " Needs your decision · "
+               ^ Terminal_text.single_line row.what
+               ^ " · press x to cancel")
+             (List.find_opt
+                (fun (row : Masc_tui_agenda.stalled) ->
+                  String.equal row.task_id task.id)
+                rows))
+    | Masc_tui_agenda.Not_read | Masc_tui_agenda.Read_failed _ -> []
+  in
+  let failures=stalled_note
+    @ Option.to_list (Option.map (fun detail -> " Task read failed · last observation: " ^ detail) state.tasks_error)
     @ (match task_goal_reading state ~task_id:task.id with
       | Masc_tui_agenda.Read_failed detail -> [" Goal links unavailable: " ^ detail]
       | Not_read | Read _ -> []) in

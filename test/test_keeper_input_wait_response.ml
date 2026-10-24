@@ -83,7 +83,7 @@ let test_canonical_response_preserves_complete_checkpoint () =
          (after.messages = original.messages @ [Core.Types.user_msg "[Input timed out] Original question?"]));
     match prepare env (exact after) owned response with
     | Error (Response.Input_not_current Core.Agent_input_request.No_pending_request) -> ()
-    | Error (Source_changed _ | Input_checkpoint_failed _ | Input_not_current Request_not_current)
+    | Error (Source_changed _ | Input_checkpoint_failed _ | Resume_refused _ | Input_not_current Request_not_current)
     | Ok _ -> fail "duplicate response was accepted")
     [Core.Hooks.Answer (`String "yes"); Core.Hooks.Declined; Core.Hooks.Timeout]
 
@@ -94,7 +94,7 @@ let test_stale_run_request_and_source_are_refused () =
   List.iter (fun supplied ->
     match prepare env source supplied Core.Hooks.Declined with
     | Error (Response.Input_not_current Core.Agent_input_request.Request_not_current) -> ()
-    | Error (Source_changed _ | Input_checkpoint_failed _ | Input_not_current No_pending_request)
+    | Error (Source_changed _ | Input_checkpoint_failed _ | Resume_refused _ | Input_not_current No_pending_request)
     | Ok _ -> fail "a different run or request was accepted")
     [ {owned with run_id="run-b"}
     ; {owned with request={owned.request with request_id="request-b"}} ];
@@ -106,7 +106,7 @@ let test_stale_run_request_and_source_are_refused () =
   | Error (Response.Source_changed actual) ->
     check bool "same-turn replacement returns the actual exact source" true
       (Keeper_checkpoint_ref.equal actual (Store.exact_snapshot_reference changed))
-  | Error (Input_not_current _ | Input_checkpoint_failed _) | Ok _ ->
+  | Error (Input_not_current _ | Input_checkpoint_failed _ | Resume_refused _) | Ok _ ->
     fail "same-turn source replacement was not refused"
 
 let test_autonomous_input_owner_rejects_lost_response_lineage () =

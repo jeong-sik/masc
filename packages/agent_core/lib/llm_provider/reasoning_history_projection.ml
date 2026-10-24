@@ -137,7 +137,9 @@ let validate_resume_for_provider_config (config : Provider_config.t) messages =
           else match message.role with
           | System | User | Tool -> Error (Invalid_resume_reasoning_role {message_index})
           | Assistant ->
-            (match classification with
+            (match config.preserve_thinking with
+             | Some false -> check rest
+             | None | Some true -> match classification with
              | Types.Reasoning_source.Absent ->
                Error (Missing_resume_reasoning_source {message_index})
              | Invalid | Duplicate ->
@@ -150,9 +152,7 @@ let validate_resume_for_provider_config (config : Provider_config.t) messages =
                else Error (Incompatible_resume_reasoning_source
                  {message_index; stored; target=replay_capability.target}))
       in
-      match config.preserve_thinking with
-      | Some false -> Ok replay_capability
-      | None | Some true -> check classified)
+      check classified)
 ;;
 
 let content_has_tool_use =

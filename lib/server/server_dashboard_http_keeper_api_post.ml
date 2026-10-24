@@ -36,7 +36,7 @@ let input_response_error_status =
   | Keeper_owner_registry.Response_owner_failed
       (Keeper_owner.Response_installation_error
         (Keeper_input_wait_response.Retained_unavailable _ | Canonical_unavailable _
-        | Response_refused (Input_checkpoint_failed _) | Installation_unconfirmed _ | Installation_mismatch _)
+        | Response_refused (Input_checkpoint_failed _ | Resume_refused _) | Installation_unconfirmed _ | Installation_mismatch _)
       | Keeper_owner.Response_commit_unconfirmed _) -> `Internal_server_error
 ;;
 

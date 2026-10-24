@@ -610,7 +610,13 @@ let test_binding_missing_and_corrupt_source () = with_net (fun net ->
   (match Agent.resume ~net ~checkpoint:cp ~config ~options:(binding_options target) () with
    | Error (Agent_checkpoint.Replay_rejected (Binding_projection.Invalid_reasoning_source _)) -> ()
    | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
-   | Ok _ -> Alcotest.fail "caller replay exclusion cannot admit corrupt provenance"))
+   | Ok _ -> Alcotest.fail "caller replay exclusion cannot admit corrupt provenance");
+  let wrong_role={absent with Types.role=Types.User} in
+  (match Agent.resume ~net ~checkpoint:{cp with messages=[wrong_role]}
+      ~config ~options:(binding_options target) () with
+   | Error (Agent_checkpoint.Replay_rejected (Binding_projection.Invalid_resume_reasoning_role {message_index=0})) -> ()
+   | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
+   | Ok _ -> Alcotest.fail "caller replay exclusion cannot admit an invalid reasoning role"))
 ;;
 let test_binding_non_dispatch_restore () = with_net (fun net ->
   let provider=binding_provider "https://same.example" in

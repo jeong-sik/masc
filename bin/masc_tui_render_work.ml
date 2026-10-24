@@ -1853,53 +1853,42 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
         ]
     | _, _ -> []
   in
-  [ Ansi.bold, "  SCHEDULE"
-  ; field "Link"
-      (Link.reference Schedule
-         (Terminal_text.single_line row.sch_schedule_id))
-  ; field "Schedule" row.sch_schedule_id
-  ; field "Instance" row.sch_schedule_instance_id
-  ; field ~style:(schedule_status_color row.sch_status) "Status" row.sch_status
-  ; field "Source" row.sch_source
-  ; field "Requested by" row.sch_requested_by
-  ; field "Scheduled by" row.sch_scheduled_by
-  ; field "Requested"
-      row.sch_requested_at_iso
-  ; field "Due" (timestamp row.sch_due_at_iso)
-  ; field "Next due" (timestamp row.sch_next_due_at_iso)
-  ; field "Expires" (timestamp row.sch_expires_at_iso)
-  ; field "Recurrence" row.sch_recurrence_summary
-  ; Ansi.dim, ""
-  ; Ansi.bold, "  PAYLOAD"
-  ; field "Kind" (optional row.sch_payload_kind)
-  ; field "Support" row.sch_payload_support
-  ; field "Dispatch tool" (optional row.sch_payload_dispatch_tool)
-  ; field "Target" (optional row.sch_payload_target)
-  ]
-  @ target_link
-  @ [ field "Digest" row.sch_payload_digest
-  (* The four headings around this one -- SCHEDULE, PAYLOAD, PAYLOAD JSON and
-     DELIVERY EVIDENCE -- are drawn bold at this indent, and so are the field
-     labels. Caps are what tells the two apart: "Summary" sat directly under
-     "Digest  digest-..." with nothing beside it, which reads as a field whose
-     value is missing rather than as the section that follows. *)
-  ; Ansi.bold, "  SUMMARY"
-  ]
-  @ (Message_layout.wrap_body ~markdown:document_markdown
-       ~max_cells:(max 1 (width - 4)) ~sanitize:Terminal_text.single_line summary
-    |> List.map (fun line -> Ansi.reset, "    " ^ line))
-  @ [ Ansi.dim, ""
-    ; Ansi.bold, "  PAYLOAD JSON"
+  let hold_rows =
+    match row.sch_runner_hold with
+    | None -> []
+    | Some hold ->
+        [ field ~style:(Theme.warn ()) "Held"
+            (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
+             | Tui_decode.Hold_current ->
+                 let due = Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso in
+                 (match hold.Tui_decode.srh_reason with
+                  | Tui_decode.Hold_previous_wake_untaken ->
+                      Render_schedule.schedule_hold_reading ~due
+                  | Tui_decode.Hold_target_shutdown_fenced { target; fence_owner } ->
+                      Render_schedule.schedule_fence_hold_reading
+                        ~due ~target ~fence_owner)
+             | Tui_decode.Hold_as_of checked ->
+                 let checked = Terminal_text.short_timestamp_of_unix checked in
+                 (match hold.Tui_decode.srh_reason with
+                  | Tui_decode.Hold_previous_wake_untaken ->
+                      Render_schedule.schedule_hold_as_of_reading ~checked
+                  | Tui_decode.Hold_target_shutdown_fenced { target; fence_owner } ->
+                      Render_schedule.schedule_fence_hold_as_of_reading
+                        ~checked ~target ~fence_owner))
+        ; field "Held id" hold.Tui_decode.srh_occurrence_id
+        ; field "Held due" hold.Tui_decode.srh_due_at_iso
+        ]
+  in
+  detail_section_heading ~first:true
+    "1. 현재 상태 · 다음 실행 · 보류 진단 (Status & Delivery)"
+  @ [ field ~style:(schedule_status_color row.sch_status) "Status" row.sch_status
+    ; field "Due" (timestamp row.sch_due_at_iso)
+    ; field "Next due" (timestamp row.sch_next_due_at_iso)
+    ; field "Recurrence" row.sch_recurrence_summary
+    ; field "Expires" (timestamp row.sch_expires_at_iso)
     ]
-  @ (document_markdown ~width:(max 1 (width - 4))
-       ("```json\n" ^ Yojson.Safe.pretty_to_string row.sch_payload ^ "\n```")
-    |> List.map (fun line -> Ansi.reset, "    " ^ line))
-  @ [ (Ansi.dim, "") ]
-  @ schedule_wake_lines ~field ~timestamp ~row ~history:wake_history
-      ~history_error:wake_history_error
-  @ [ Ansi.dim, ""
-    ; Ansi.bold, "  DELIVERY EVIDENCE"
-    ; field
+  @ hold_rows
+  @ [ field
         ~style:
           (Option.fold ~none:Ansi.dim ~some:schedule_status_color
              row.sch_queue_projection_status)
@@ -1910,31 +1899,10 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
              row.sch_reaction_projection_status)
         "Reaction" reaction
     ]
-  @ (match row.sch_runner_hold with
-     | None -> []
-     | Some hold ->
-         [ field ~style:(Theme.warn ()) "Held"
-             (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
-              | Tui_decode.Hold_current ->
-                  let due = Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso in
-                  (match hold.Tui_decode.srh_reason with
-                   | Tui_decode.Hold_previous_wake_untaken ->
-                       Render_schedule.schedule_hold_reading ~due
-                   | Tui_decode.Hold_target_shutdown_fenced { target; fence_owner } ->
-                       Render_schedule.schedule_fence_hold_reading
-                         ~due ~target ~fence_owner)
-              | Tui_decode.Hold_as_of checked ->
-                  let checked = Terminal_text.short_timestamp_of_unix checked in
-                  (match hold.Tui_decode.srh_reason with
-                   | Tui_decode.Hold_previous_wake_untaken ->
-                       Render_schedule.schedule_hold_as_of_reading ~checked
-                   | Tui_decode.Hold_target_shutdown_fenced { target; fence_owner } ->
-                       Render_schedule.schedule_fence_hold_as_of_reading
-                         ~checked ~target ~fence_owner))
-         ; field "Held id" hold.Tui_decode.srh_occurrence_id
-         ; field "Held due" hold.Tui_decode.srh_due_at_iso
-         ])
   @ schedule_turn_rows ~field row
+  @ detail_section_heading "2. 최근 실행 이력 (Wake History)"
+  @ schedule_wake_lines ~field ~timestamp ~row ~history:wake_history
+      ~history_error:wake_history_error
   @ (if keeper_wake then
        [ Ansi.dim, ""
        ; Ansi.bold, "  WORK RESULT"
@@ -1944,6 +1912,33 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
            "Keeper Calls or Activity between the two recorded times"
        ]
      else [])
+  @ detail_section_heading "3. 작업 요약 · 스케줄 식별자 (Summary & Identity)"
+  @ [ Ansi.bold, "  SUMMARY" ]
+  @ (Message_layout.wrap_body ~markdown:document_markdown
+       ~max_cells:(max 1 (width - 4)) ~sanitize:Terminal_text.single_line summary
+    |> List.map (fun line -> Ansi.reset, "    " ^ line))
+  @ [ field "Target" (optional row.sch_payload_target) ]
+  @ target_link
+  @ [ field "Kind" (optional row.sch_payload_kind)
+    ; field "Dispatch tool" (optional row.sch_payload_dispatch_tool)
+    ; field "Support" row.sch_payload_support
+    ; field "Schedule" row.sch_schedule_id
+    ; field "Instance" row.sch_schedule_instance_id
+    ; field "Link"
+        (Link.reference Schedule
+           (Terminal_text.single_line row.sch_schedule_id))
+    ; field "Source" row.sch_source
+    ; field "Requested by" row.sch_requested_by
+    ; field "Scheduled by" row.sch_scheduled_by
+    ; field "Requested" row.sch_requested_at_iso
+    ]
+  @ detail_section_heading "4. 페이로드 원문 (Payload JSON & Digest)"
+  @ [ field "Digest" row.sch_payload_digest
+    ; Ansi.bold, "  PAYLOAD JSON"
+    ]
+  @ (document_markdown ~width:(max 1 (width - 4))
+       ("```json\n" ^ Yojson.Safe.pretty_to_string row.sch_payload ^ "\n```")
+    |> List.map (fun line -> Ansi.reset, "    " ^ line))
 
 let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
   let width = max 1 (framed_inner_width cols) in

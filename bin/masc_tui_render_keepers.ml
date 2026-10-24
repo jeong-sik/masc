@@ -1060,6 +1060,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          | Some band -> Masc_tui_keeper_portrait.beside band header_lines
          | None -> header_lines);
       let add_row label value = List.iter add_line (row_lines ~width:inner label value) in
+      let add_numbered_section ?(first = false) title =
+        List.iter add_line (detail_section_lines ~first title)
+      in
 
       (* The live roster owns this reading, including its absence after a
          successful turn. Neither historical last_error nor the last outcome
@@ -1067,7 +1070,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          the machine wire its summary replaced with a human sentence. It is
          drawn dimmed underneath, so the wire a log search keys on stays on
          screen without ever leading the row. *)
-      add_section "Current failure";
+      add_numbered_section ~first:true
+        "1. 현재 장애 · 보드 격리 (Current Failure & Board Attention)";
       let indent = "  " in
       let wrap ?(tone = "") text =
         Message_layout.wrap_words
@@ -1090,83 +1094,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Keeper_control.Invalid detail ->
             wrap ~tone:(Theme.bad ()) ("config error: " ^ detail)
       in
-      add_empty ();
-
-      (* Historical receipt evidence is a separate reading. A successful
-         fallback may retain earlier refusals while the live blocker is clear. *)
-      add_section "Recorded runtime walk";
-      let module Receipt = Masc.Keeper_execution_receipt in
-      let module Evidence = Keeper_runtime_walk_evidence in
-      let module Fault = Llm_provider.Candidate_fault in
-      let history_row label value = add_row label (Terminal_text.single_line value) in
-      let source (turn : Receipt.receipt_turn) =
-        history_row "Receipt trace:" turn.receipt_trace_id;
-        history_row "Receipt turn:"
-          (match turn.receipt_turn_count with
-           | Some count -> string_of_int count
-           | None -> "not recorded");
-        history_row "Receipt ended:" turn.receipt_ended_at
-      in
-      let fault = function
-        | None -> "API classification inapplicable"
-        | Some Fault.Unattributed -> "unattributed API refusal"
-        | Some Fault.Unknown_after_dispatch -> "outcome uncertain"
-        | Some (Fault.Binding binding) ->
-          match binding with
-          | Fault.Credential -> "credential"
-          | Fault.Account_access -> "account access"
-          | Fault.Account -> "account"
-          | Fault.Model_absent -> "model absent"
-          | Fault.Rate_limit -> "rate limit"
-          | Fault.Capacity -> "capacity"
-          | Fault.Server -> "server"
-          | Fault.Window -> "context window"
-          | Fault.Body_limit -> "body limit"
-          | Fault.Admission -> "admission"
-          | Fault.Deadline -> "deadline"
-          | Fault.Output_dialect -> "output dialect"
-          | Fault.Refusal_unread -> "refusal unread"
-      in
-      (match (keeper_reading state k).Keeper_control.liveness with
-       | Keeper_control.Present runtime ->
-         (match runtime.kr_runtime_lane_observation with
-          | None -> wrap ~tone:Ansi.dim "no receipt"
-          | Some (Receipt.Runtime_lane_not_observed turn) ->
-            source turn;
-            wrap ~tone:Ansi.dim "candidate walk was not captured"
-          | Some (Receipt.Runtime_lane_unreadable {turn;field}) ->
-            Option.iter source turn;
-            wrap ~tone:(Theme.warn ()) ("historical evidence unreadable: " ^ field)
-          | Some (Receipt.Runtime_lane_observed {turn;evidence}) ->
-            source turn;
-            (match evidence.failures with
-             | [] -> wrap ~tone:Ansi.dim "no candidate failure recorded"
-             | failures -> List.iter (fun (failure : Evidence.failure) ->
-                 history_row "Candidate:"
-                   (Printf.sprintf "%d · %s" failure.attempt failure.runtime_id);
-                 history_row "Invocation:"
-                   (match failure.dispatch with
-                    | Runtime_attempt_dispatch.Dispatched -> "candidate invoked"
-                    | Runtime_attempt_dispatch.Rejected_before_dispatch -> "rejected before invocation");
-                 history_row "API fact:" (fault failure.api_candidate_fault);
-                 wrap (Keeper_request_failure.summary failure.failure)) failures);
-            (match evidence.terminal with
-             | Evidence.Terminal_not_observed ->
-               history_row "Terminal origin:" "not observed"
-             | Evidence.Candidate_terminal {runtime_id;attempt;failure} ->
-               history_row "Terminal origin:" (Printf.sprintf "%d · %s" attempt runtime_id);
-               wrap (Keeper_request_failure.summary failure)))
-       | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim "live roster unread"
-       | Keeper_control.Absent -> wrap ~tone:Ansi.dim "absent from live roster"
-       | Keeper_control.Invalid detail ->
-         wrap ~tone:(Theme.warn ()) ("roster unavailable: " ^ detail));
-      add_empty ();
 
       (* Blocked Board-attention partitions wait here for an
          operator's requeue, and nothing else on the screens said they existed.
          Beside the current failure because it is one: this Keeper's Board
          judgments for those posts do not move until someone presses Q. *)
-      add_section "Board attention";
       Masc_tui_board_quarantine.lines ~now:(Unix.gettimeofday ())
         state.keeper_board_quarantines ~keeper_name:k.k_name
       |> List.iter (fun (tone, text) ->
@@ -1179,7 +1111,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            in
            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2)) text
            |> List.iter (fun line -> add_line (indent ^ color ^ line ^ Ansi.reset)));
-      add_empty ();
 
       (* Gate section. Two settings with similar names decide different things,
          so both are named rather than merged: YOLO is the in-memory stance that
@@ -1187,7 +1118,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          durable and is what an external effect -- a write to a service this
          Keeper is attached to -- is actually decided under. An operator reading
          one for the other is how a call gets made that nobody meant to allow. *)
-      add_section "Gate";
+      add_numbered_section "2. 권한 게이트 · 승인 정책 (Gate & Tool Policy)";
       (* The same word the chat header wears in capitals and the footer offers
          after g, with what it does beside it. This row said "asked" under a
          header saying AUTO. *)
@@ -1253,10 +1184,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            add_row "Gate settings:"
              (Theme.bad () ^ "unread \xc2\xb7 "
               ^ Terminal_text.single_line reason ^ Ansi.reset));
-      add_empty ();
 
-      (* Runtime section *)
-      add_section "Runtime Stats";
+      (* Runtime & 24h section *)
+      add_numbered_section "3. 런타임 배정 · 최근 24시간 활동 (Runtime & Last 24h Activity)";
       List.iter (fun (label, value) -> add_row label value)
         (keeper_operations_fields state ~keeper_name:k.k_name);
       let assignment =
@@ -1330,28 +1260,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        | Declared_keeper requirements ->
          add_row "Preparation:" (String.concat " · "
            (List.map Masc.Keeper_declared_roster.requirement_label requirements)));
-      (match k.k_activity with
-       | None -> add_row "Activity:" "not observed"
-       | Some activity ->
-      add_row "Total Turns:" (string_of_int activity.k_total_turns);
-      (* Read at a glance, the way the Acting pane's block already reads its
-         token figures. A live roster drew "75111274" here: eight digits a
-         reader counts rather than reads. Turns and tool calls keep their
-         digits -- three or four of them, and a count of things done rather
-         than a size. *)
-      add_row "Total Tokens:"
-        (Masc_tui_message_layout.compact_count activity.k_total_tokens);
-      add_row "Lifetime Cost:" (Tui_decode.keeper_cost_summary activity.k_total_cost_usd);
-      add_row "Last Turn:" (Terminal_text.short_timestamp activity.k_last_turn_ts));
-      add_empty ();
-
+      add_row "Last Outcome:"
+        (match k.k_activity with
+         | None -> "not observed"
+         | Some activity ->
+           (match activity.k_last_proactive_outcome with
+            | Some outcome -> proactive_outcome_word outcome
+            | None -> Masc_tui_theme.Glyph.no_value));
       (* Recent activity, folded from the metrics rows already read for this
          Keeper. The window is bounded by row count, so it can fall short of the
          span; when it does, say what it reached instead of implying a full day.
          With no rows there is nothing to total, so the section says why and
          draws no zeros: the same sentence the Logs tab gives for the same
          read. *)
-      add_section "Last 24h";
       let log_snapshot = keeper_log_snapshot state in
       let log_diagnostics = keeper_log_diagnostics state in
       List.iter (fun (tone, detail) ->
@@ -1399,20 +1320,91 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                        (Terminal_text.single_line tool.Keeper_activity.tu_name)
                        tool.Keeper_activity.tu_calls)
               |> String.concat "  "));
-      add_empty ();
 
-      add_section "Autonomy";
-      add_row "Last Outcome:"
-        (match k.k_activity with
-         | None -> "not observed"
-         | Some activity ->
-           (match activity.k_last_proactive_outcome with
-            | Some outcome -> proactive_outcome_word outcome
-            | None -> Masc_tui_theme.Glyph.no_value));
-      add_empty ();
+      (* Historical receipt evidence is a separate reading. A successful
+         fallback may retain earlier refusals while the live blocker is clear. *)
+      add_numbered_section "4. 최근 후보 모델 폴백 이력 (Recorded Runtime Walk)";
+      let module Receipt = Masc.Keeper_execution_receipt in
+      let module Evidence = Keeper_runtime_walk_evidence in
+      let module Fault = Llm_provider.Candidate_fault in
+      let history_row label value = add_row label (Terminal_text.single_line value) in
+      let source (turn : Receipt.receipt_turn) =
+        history_row "Receipt trace:" turn.receipt_trace_id;
+        history_row "Receipt turn:"
+          (match turn.receipt_turn_count with
+           | Some count -> string_of_int count
+           | None -> "not recorded");
+        history_row "Receipt ended:" turn.receipt_ended_at
+      in
+      let fault = function
+        | None -> "API classification inapplicable"
+        | Some Fault.Unattributed -> "unattributed API refusal"
+        | Some Fault.Unknown_after_dispatch -> "outcome uncertain"
+        | Some (Fault.Binding binding) ->
+          match binding with
+          | Fault.Credential -> "credential"
+          | Fault.Account_access -> "account access"
+          | Fault.Account -> "account"
+          | Fault.Model_absent -> "model absent"
+          | Fault.Rate_limit -> "rate limit"
+          | Fault.Capacity -> "capacity"
+          | Fault.Server -> "server"
+          | Fault.Window -> "context window"
+          | Fault.Body_limit -> "body limit"
+          | Fault.Admission -> "admission"
+          | Fault.Deadline -> "deadline"
+          | Fault.Output_dialect -> "output dialect"
+          | Fault.Refusal_unread -> "refusal unread"
+      in
+      (match (keeper_reading state k).Keeper_control.liveness with
+       | Keeper_control.Present runtime ->
+         (match runtime.kr_runtime_lane_observation with
+          | None -> wrap ~tone:Ansi.dim "no receipt"
+          | Some (Receipt.Runtime_lane_not_observed turn) ->
+            source turn;
+            wrap ~tone:Ansi.dim "candidate walk was not captured"
+          | Some (Receipt.Runtime_lane_unreadable {turn;field}) ->
+            Option.iter source turn;
+            wrap ~tone:(Theme.warn ()) ("historical evidence unreadable: " ^ field)
+          | Some (Receipt.Runtime_lane_observed {turn;evidence}) ->
+            source turn;
+            (match evidence.failures with
+             | [] -> wrap ~tone:Ansi.dim "no candidate failure recorded"
+             | failures -> List.iter (fun (failure : Evidence.failure) ->
+                 history_row "Candidate:"
+                   (Printf.sprintf "%d · %s" failure.attempt failure.runtime_id);
+                 history_row "Invocation:"
+                   (match failure.dispatch with
+                    | Runtime_attempt_dispatch.Dispatched -> "candidate invoked"
+                    | Runtime_attempt_dispatch.Rejected_before_dispatch -> "rejected before invocation");
+                 history_row "API fact:" (fault failure.api_candidate_fault);
+                 wrap (Keeper_request_failure.summary failure.failure)) failures);
+            (match evidence.terminal with
+             | Evidence.Terminal_not_observed ->
+               history_row "Terminal origin:" "not observed"
+             | Evidence.Candidate_terminal {runtime_id;attempt;failure} ->
+               history_row "Terminal origin:" (Printf.sprintf "%d · %s" attempt runtime_id);
+               wrap (Keeper_request_failure.summary failure)))
+       | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim "live roster unread"
+       | Keeper_control.Absent -> wrap ~tone:Ansi.dim "absent from live roster"
+       | Keeper_control.Invalid detail ->
+         wrap ~tone:(Theme.warn ()) ("roster unavailable: " ^ detail));
 
-      (* Timestamps section *)
-      add_section "Timestamps";
+      (* Lifetime totals & Timestamps section *)
+      add_numbered_section "5. 누적 통계 · 생성 이력 (Lifetime Totals & Timestamps)";
+      (match k.k_activity with
+       | None -> add_row "Activity:" "not observed"
+       | Some activity ->
+         add_row "Total Turns:" (string_of_int activity.k_total_turns);
+         (* Read at a glance, the way the Acting pane's block already reads its
+            token figures. A live roster drew "75111274" here: eight digits a
+            reader counts rather than reads. Turns and tool calls keep their
+            digits -- three or four of them, and a count of things done rather
+            than a size. *)
+         add_row "Total Tokens:"
+           (Masc_tui_message_layout.compact_count activity.k_total_tokens);
+         add_row "Lifetime Cost:" (Tui_decode.keeper_cost_summary activity.k_total_cost_usd);
+         add_row "Last Turn:" (Terminal_text.short_timestamp activity.k_last_turn_ts));
       (match k.k_identity with
        | Ok identity ->
          add_row "Created:" (Terminal_text.short_timestamp identity.k_created_at);

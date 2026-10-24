@@ -299,30 +299,21 @@ let verification_detail_lines ~width
                     Ansi.reset, (if index = 0 then "    - " else "      ") ^ line))
           items
   in
-  [ Ansi.bold, "  VERIFICATION REQUEST"
-  ; field "Request" request.vr_request_id
-  ; field "Task" request.vr_task_id
-  ; field "Title" request.vr_task_title
-  ; field "Submitted by" request.vr_submitted_by
-  ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
-  ; Ansi.dim, ""
-  ]
-  (* [Kind], [What is being judged] and [What moves it forward] stood here.
-     Their three fields were literals in the producer -- "normal", "" and "" --
-     so the three rows read the same on every request this pane has ever
-     drawn, two of them as "No X was recorded". The pane already tells a
-     reader how to read the request from its artifacts and evidence, which is
-     what those rows were pointing away from. *)
-  @ [ Ansi.dim, ""; Ansi.bold, "  HOW TO READ THIS" ]
-    (* Wrapped like the evidence items under it. As one row it was cut at
-       "what the verifier can …" beside the roster pane, and a reading
-       instruction that stops mid-sentence instructs nothing. *)
-  @ (Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
-       ~sanitize:Keeper_chat.terminal_safe_text
-       "Required artifacts say what must exist. Submitted evidence says what the verifier can inspect now."
-     |> List.map (fun line -> Ansi.dim, "    " ^ line))
-  @ [ Ansi.dim, ""
-    ; Ansi.bold
+  let evidence_error =
+    match request.vr_evidence_error with
+    | None -> []
+    | Some detail ->
+        (Theme.bad (), "  Evidence projection error")
+        :: (Message_layout.wrap_body
+              ~max_cells:(max 1 (width - 4))
+              ~sanitize:Keeper_chat.terminal_safe_text detail
+            |> List.map (fun line -> Theme.bad (), "    " ^ line))
+        @ [ Ansi.dim, "" ]
+  in
+  detail_section_heading ~first:true
+    "1. 제출된 증거 · 필수 산출물 (Evidence & Artifacts)"
+  @ evidence_error
+  @ [ Ansi.bold
     , Printf.sprintf "  REQUIRED ARTIFACTS (%d)"
         (List.length request.vr_required_artifacts)
     ]
@@ -333,12 +324,20 @@ let verification_detail_lines ~width
         (List.length request.vr_submitted_evidence)
     ]
   @ item_lines "none submitted" request.vr_submitted_evidence
-  @
-  match request.vr_evidence_error with
-  | None -> []
-  | Some detail ->
-      [ Ansi.dim, "" ]
-      @ wrapped_block "Evidence projection error" detail
+  @ [ Ansi.dim, ""
+    ; Ansi.bold, "  HOW TO READ THIS"
+    ]
+  @ (Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
+       ~sanitize:Keeper_chat.terminal_safe_text
+       "Required artifacts say what must exist. Submitted evidence says what the verifier can inspect now."
+     |> List.map (fun line -> Ansi.dim, "    " ^ line))
+  @ detail_section_heading "2. 검증 요청 메타데이터 (Request & Task)"
+  @ wrapped_block "Title" request.vr_task_title
+  @ [ field "Task" request.vr_task_id
+    ; field "Submitted by" request.vr_submitted_by
+    ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
+    ; field "Request" request.vr_request_id
+    ]
 
 let verification_detail_pane (state : state) ~rows ~cols
     ~origin:(origin_row, origin_col) request buf =
@@ -885,15 +884,8 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
         , String.trim
             (String.sub whole (at + 1) (String.length whole - at - 1)) )
   in
-  [ Ansi.bold, "  EVALUATOR VERDICT"
-  ; field "Task link" (Link.reference Task verdict.hv_task_id)
-  ; field "Task" verdict.hv_task_id
-  ]
-  @ wrapped "Title" verdict.hv_task_title
-  @ [ field "Agent" verdict.hv_agent
-    ; Ansi.dim, ""
-    ; Ansi.bold, "  DECISION"
-    ; field ~style:(semantic_status_color ruling) "Verdict" ruling
+  detail_section_heading ~first:true "1. 판정 결과 · 사유 (Decision & Verdict)"
+  @ [ field ~style:(semantic_status_color ruling) "Verdict" ruling
     ; field "Gate" verdict.hv_gate
     ; field "Evaluator" verdict.hv_evaluator
     ; field "Recorded"
@@ -904,8 +896,13 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
      the pane's width and the rest existed nowhere on the surface. The title
      above already wraps for the same reason. *)
   @ (if reason = "" then [] else wrapped "Reason" reason)
-  @ [ Ansi.dim, "" ]
   @ fallback
+  @ detail_section_heading "2. 대상 태스크 · 에이전트 (Task & Agent)"
+  @ wrapped "Title" verdict.hv_task_title
+  @ [ field "Task" verdict.hv_task_id
+    ; field "Task link" (Link.reference Task verdict.hv_task_id)
+    ; field "Agent" verdict.hv_agent
+    ]
 
 let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_top buf cols;
@@ -921,7 +918,8 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
        Keeping them in that order keeps the judged fact above the context. *)
     @ (match harness_goal_lines state verdict with
        | [] -> []
-       | goal_lines -> (Ansi.dim, "") :: goal_lines)
+       | goal_lines ->
+           detail_section_heading "3. 연결된 목표 (Towards Goals)" @ goal_lines)
     |> judgement_detail_rows ~width:(max 1 (framed_inner_width cols))
   in
   let content_height = max 1 (rows - framed_chrome_rows - 1) in

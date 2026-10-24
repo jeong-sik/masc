@@ -72,6 +72,10 @@ manifest is included when supplied. The same `--out` can resume only those
 unchanged inputs. Changed inputs, old unbound evidence or a foreign receipt
 are refused; use a new output directory for a new experiment. Increasing the
 repeat count with identical inputs adds new runs to the same experiment.
+Runtime aliases hash the complete original provider/model pair. Run IDs hash
+provider, model, case, repeat index, experiment digest and memory mode; names
+that differ only in punctuation remain independent. A resumed receipt must
+match every original identity field with the correct JSON type.
 
 Each run has an `evidence.json`, an `experiment_digest`, a `memory_mode` and
 per-stage grading receipts containing the captured input hashes, image ID,

@@ -1,0 +1,14 @@
+{
+  "source_sha": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+  "run_id": 40105703498,
+  "conclusion": "success",
+  "suites": [
+    "test_keeper_task_outcomes",
+    "test_taskboard_tool_toml_parity"
+  ],
+  "scope": "Exact source targeted native Task tool consumer and canonical TOML parity. Not full regression, live Keeper success, installed runtime or deployment.",
+  "executed_test_counts": {
+    "test_keeper_task_outcomes": 27,
+    "test_taskboard_tool_toml_parity": 2
+  }
+}

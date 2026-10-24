@@ -1,0 +1,48 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.64.0"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"status\":\"ok\",\"measurement\":{\"id\":\"ba5020472ae186ccd6a04eba002639d4\",\"goal_id\":\"goal-canary-three-results\",\"criterion_revision\":\"a8b64eab0d7d525cd37119c9d0c35684\",\"observed_value\":\"0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread\",\"evidence\":\"note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.\",\"actor\":\"goal-canary-operator\",\"recorded_at\":\"2026-10-24T15:21:48Z\"},\"verification\":\"reported_only\"}",
+          "status": "ok",
+          "tool": "masc_goal_measure"
+        },
+        "trace_id": "2",
+        "agent_id": "goal-canary-operator",
+        "tool": "masc_goal_measure",
+        "duration_ms": 2,
+        "attempts": 1,
+        "timestamp": "2026-10-24T15:21:48Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"status\":\"ok\",\"measurement\":{\"id\":\"ba5020472ae186ccd6a04eba002639d4\",\"goal_id\":\"goal-canary-three-results\",\"criterion_revision\":\"a8b64eab0d7d525cd37119c9d0c35684\",\"observed_value\":\"0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread\",\"evidence\":\"note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.\",\"actor\":\"goal-canary-operator\",\"recorded_at\":\"2026-10-24T15:21:48Z\"},\"verification\":\"reported_only\"}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "status": "ok",
+      "measurement": {
+        "id": "ba5020472ae186ccd6a04eba002639d4",
+        "goal_id": "goal-canary-three-results",
+        "criterion_revision": "a8b64eab0d7d525cd37119c9d0c35684",
+        "observed_value": "0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread",
+        "evidence": "note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.",
+        "actor": "goal-canary-operator",
+        "recorded_at": "2026-10-24T15:21:48Z"
+      },
+      "verification": "reported_only"
+    }
+  }
+}

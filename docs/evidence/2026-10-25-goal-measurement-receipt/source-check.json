@@ -1,6 +1,6 @@
 {
   "scope": "Execute actual measurement source with named in-memory effect ports; no Dune.\n\nThis is not native Goal-store locking, HTTP transport, SDK, or model evidence.\nAn optional frozen canary snapshot emits the new actual MCP success payload\nwhile retaining the original measurement bytes/identity for inference pairing.\n",
-  "base": "1c6205ea60bd6fc225450fdda1b9c691b92aa3a2",
+  "base": "895df663fb303ee2fa95c38bbd28b571db9abb62",
   "source_inputs": [
     {
       "compiled": "json_util.ml",
@@ -130,7 +130,6 @@
   },
   "execution": {
     "exit": 0,
-    "output": "PASS baseline names reported_only as verification without lifecycle\nPASS actual receipt preserves \"executing\"\nPASS actual receipt preserves \"verifying\"\nPASS actual receipt preserves \"awaiting_confirmation\"\nPASS actual receipt preserves \"completed\"\nPASS actual receipt preserves \"dropped\"\nPASS actual receipt preserves {\"state\":\"paused\",\"resume_phase\":\"executing\"}\nPASS actual receipt preserves {\"state\":\"paused\",\"resume_phase\":\"verifying\"}\nPASS actual receipt preserves {\"state\":\"paused\",\"resume_phase\":\"awaiting_confirmation\"}\nPASS actual receipt preserves {\"state\":\"blocked\",\"resume_phase\":\"executing\"}\nPASS actual receipt preserves {\"state\":\"blocked\",\"resume_phase\":\"verifying\"}\nPASS actual receipt preserves {\"state\":\"blocked\",\"resume_phase\":\"awaiting_confirmation\"}\nPASS issued receipt remains bound when a later Goal changes\nPASS receipt serialization performs no later authoritative read\nPASS stale criterion produces no receipt\nPASS record uses returned transaction Goal rather than post-unlock state\nPASS durable schema stores only the observation\nPASS invalid request cannot issue a receipt\nPASS a rejected request does not advance observation generation\nPASS paired receipt retains actual captured measurement identity and bytes\nPASS paired receipt names the actual captured lifecycle\n21 exact-source receipt checks passed\n"
-  },
-  "emitted_receipt_sha256": "d8d17bce7874e9b1449e51a4851b4e667c62397d43643f9045877702532483b8"
+    "output": "PASS baseline names reported_only as verification without lifecycle\nPASS actual receipt preserves \"executing\"\nPASS actual receipt preserves \"verifying\"\nPASS actual receipt preserves \"awaiting_confirmation\"\nPASS actual receipt preserves \"completed\"\nPASS actual receipt preserves \"dropped\"\nPASS actual receipt preserves {\"state\":\"paused\",\"resume_phase\":\"executing\"}\nPASS actual receipt preserves {\"state\":\"paused\",\"resume_phase\":\"verifying\"}\nPASS actual receipt preserves {\"state\":\"paused\",\"resume_phase\":\"awaiting_confirmation\"}\nPASS actual receipt preserves {\"state\":\"blocked\",\"resume_phase\":\"executing\"}\nPASS actual receipt preserves {\"state\":\"blocked\",\"resume_phase\":\"verifying\"}\nPASS actual receipt preserves {\"state\":\"blocked\",\"resume_phase\":\"awaiting_confirmation\"}\nPASS issued receipt remains bound when a later Goal changes\nPASS receipt serialization performs no later authoritative read\nPASS stale criterion produces no receipt\nPASS record uses returned transaction Goal rather than post-unlock state\nPASS durable schema stores only the observation\nPASS invalid request cannot issue a receipt\nPASS a rejected request does not advance observation generation\n19 exact-source receipt checks passed\n"
+  }
 }

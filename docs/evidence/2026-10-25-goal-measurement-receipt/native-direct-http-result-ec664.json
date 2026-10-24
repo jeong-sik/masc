@@ -1,0 +1,12 @@
+{
+  "run": "40111175993",
+  "url": "https://github.com/jeong-sik/masc/actions/runs/40111175993",
+  "source_sha": "ec664e53b7eda6a7dae4eb09daa04b56ad98997d",
+  "conclusion": "success",
+  "suite": "test_keeper_direct_goal_provider_wire",
+  "passed": 6,
+  "failed": 0,
+  "log_sha256": "3ba465b6a34e27fdcfd3a5953d325c70a8e8620d795c85e2685f573cafba126b",
+  "product_source_matches_candidate_3014": true,
+  "scope": "Six actual HTTP/provider receiver cases at test-only repaired head. Goal gate50 and tool parity1 ran at3014 separately, not all rerun at this head."
+}

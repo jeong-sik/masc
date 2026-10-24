@@ -1,0 +1,18 @@
+{
+  "source_sha": "3014cfce79636f1e41cc39f6019a3428c6912145",
+  "http_status": 200,
+  "http_and_mcp_same_receipt_fields": true,
+  "actual_phase": "executing",
+  "completion_effect": "unchanged",
+  "goal_primary_mirror_byte_equality_checked_in_issued_driver": true,
+  "goal_file_hashes_after_equal_check": {
+    ".masc/goals.json": "8fbd7b1f5d5916b77870f77dc85b612521fcba21a3610c5478fb00f1aa73f4c6",
+    ".masc/goals.json.last-good": "8fbd7b1f5d5916b77870f77dc85b612521fcba21a3610c5478fb00f1aa73f4c6"
+  },
+  "stale_http_status": 409,
+  "rejected_stale_did_not_replace_latest": true,
+  "keeper_created": false,
+  "model_called": false,
+  "fixture_final_projection_assertion": "Original driver used wrong flat measurements key and stopped after all transport/byte checks. Corrected read-only collector reads actual goals[].measurement.record; no HTTP/MCP measurement repeated.",
+  "scope": "Actual isolated HTTP/MCP transport and persisted files. Controlled operator observations, not model compliance or human Goal confirmation."
+}

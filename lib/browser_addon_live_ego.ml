@@ -195,9 +195,10 @@ let start_session t ~timeout_s =
                 | Error `Timeout -> Peer.Unobserved "the ego session closed its socket and did not exit" in
               let ask ~timeout_s ~id script =
                 let failed failure = Eio.Cancel.protect stop; Error failure in
-                match Eio.Time.with_timeout clock timeout_s (fun () ->
+                let exchange () =
                   Eio.Flow.copy_string (Yojson.Safe.to_string (`Assoc ["id",`Int id;"script",`String script]) ^ "\n") flow;
-                  Ok (Eio.Buf_read.line reader)) with
+                  Ok (Eio.Buf_read.line reader) in
+                match Eio.Time.with_timeout clock timeout_s exchange with
                 | Ok line -> (match answer_of ~id line with Ok output -> Ok output | Error failure -> failed failure)
                 | Error `Timeout -> failed Peer.Timed_out
                 | exception Eio.Buf_read.Buffer_limit_exceeded -> failed Peer.Output_exceeded
@@ -224,12 +225,11 @@ let start_session t ~timeout_s =
 (* Stopping a run spends the stop grace, so it is taken out of the window
    the peer gives. Commands come one at a time: the connection's fiber
    answers one before it takes the next. *)
-let runner t : Peer.runner = fun ~window_s script ->
+let run_session t ~window_s script =
   let clock = Eio.Stdenv.clock t.env in
   let timeout_s = window_s -. stop_grace_s in
   if timeout_s <= 0. then
-    Error (Peer.Unstarted (Printf.sprintf "%.1f s were left of the command's window, and stopping a run takes %.0f s"
-      window_s stop_grace_s))
+    Error (Peer.Unstarted "the reply window has no time left to stop its SDK process")
   else
     let deadline = Eio.Time.now clock +. timeout_s in
     let started = match t.current with
@@ -240,11 +240,14 @@ let runner t : Peer.runner = fun ~window_s script ->
     | Ok process ->
       t.current <- Some process;
       t.next_id <- t.next_id + 1;
-      (* A failed or cancelled command has stopped the process. *)
-      match process.ask ~timeout_s:(Float.max 0. (deadline -. Eio.Time.now clock)) ~id:t.next_id script with
+      let timeout_s = Float.max 0. (deadline -. Eio.Time.now clock) in
+      match process.ask ~timeout_s ~id:t.next_id script with
       | Ok _ as answered -> answered
       | Error _ as failed -> t.current <- None; failed
       | exception (Eio.Cancel.Cancelled _ as exn) -> t.current <- None; raise exn
+let runner t : Peer.runner = fun ~window_s script -> run_session t ~window_s script
+let native_runner t : Peer.runner = fun ~window_s script ->
+  run_session t ~window_s:(Float.min B.Native_workflow.max_window_s window_s) script
 
 (* The connection's end: the process leaves its loop once its socket closes. *)
 let end_session t = match t.current with
@@ -298,7 +301,7 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
     ended @@
     let* peer = Peer.open_space ~space:configuration.space ~version ~capture_directory:directory ~downloads
         ~now:(fun () -> Eio.Time.now (Eio.Stdenv.clock env))
-        ~run:(runner session) in
+        ~run:(runner session) ~run_native:(native_runner session) in
     let client_id = Uuidm.v4_gen (Random.State.make_self_init ()) () in
     let client = {B.client_id; browser = B.Ego_lite; version; engine_version; transport = B.Ego_task_space} in
     let poll window_sec = Browser_addon_owner.poll_live owner ~client ~window_sec in

@@ -961,6 +961,10 @@ let test_peer_serves_what_the_lane_table_says () =
       | Viewport_capture -> Page_capture {tab_id=1}
       | Scene_read -> Page_scene {tab_id=1; max_chars=1000; view=Content; scope=None}
       | Accessibility_snapshot -> Page_snapshot {tab_id=1; max_chars=1000; scope=Snapshot_viewport}
+      | Native_workflow ->
+      (match Native_workflow.of_json (`Assoc ["tabId",`Int 1;"expectedUrl",`String "https://example.test/";
+        "steps",`List [];"maxChars",`Int 1000]) with
+       | Ok request -> Page_native_workflow request | Error detail -> fail detail)
       | Snapshot_target_input -> interact (Click_target (Target_ref 12))
       | Dom_interaction -> interact (Click "#button")
       | Point_click -> interact (Click_at {point;viewport;button=Pointer.Primary})
@@ -989,6 +993,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | "page.elements" -> Peer.Page_elements | "page.capture" -> Peer.Page_capture
       | "page.interact" -> Peer.Page_interact | "page.act" -> Peer.Page_act | "page.goto" -> Peer.Page_goto
       | "page.context" -> Peer.Page_context | "page.snapshot" -> Peer.Page_snapshot
+      | "page.native_workflow" -> Peer.Page_native_workflow
       | "page.downloads" -> Peer.Page_downloads
       | other -> failf "the lane put a verb on the wire that the host does not forward: %s" other in
     let calls = ref [] in

@@ -7,7 +7,9 @@ let route = B.Live_route (Some id)
 let incarnation = "0b000000-0000-4000-8000-000000000001"
 let decode verb args = W.verb_of_json ~route (`Assoc ["verb",`String verb;"args",`Assoc args])
 let roundtrips () =
-  let verbs = [B.Tabs_list; Page_read {tab_id=None;max_chars=None};Page_document {tab_id=7};
+  let native=ok (B.Native_workflow.of_json (`Assoc ["tabId",`Int 7;"expectedUrl",`String "https://example.org";
+    "steps",`List [`Assoc ["method",`String "waitForSelector";"selector",`String "@12";"state",`String "visible"]];"maxChars",`Int 1000])) in
+  let verbs = [B.Page_native_workflow native;B.Tabs_list; Page_read {tab_id=None;max_chars=None};Page_document {tab_id=7};
     Page_downloads {tab_id=7};Page_capture {tab_id=7};
     Page_scene {tab_id=7;max_chars=1000;view=B.Regions;scope=Some {document_id="doc";node_id="region"}};
     Page_snapshot {tab_id=7;max_chars=1000;scope=B.Snapshot_viewport};

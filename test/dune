@@ -6613,3 +6613,5 @@
  (modules test_completion_review_immutable_input)
  (libraries alcotest masc_test_deps eio_main unix))
 (include stanzas/test_keeper_memory_execution_availability.inc)
+
+(include stanzas/test_browser_native_workflow.inc)

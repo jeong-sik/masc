@@ -52,9 +52,12 @@ type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) re
     [capture_directory], which this process owns, and removed once read.
     [now] is the time in seconds; a command that runs twice gives its
     second run what is left of its window. Downloads that agent pages start
-    are saved and published through [downloads]. *)
+    are saved and published through [downloads]. [run_native] uses the same
+    serial SDK process under the request's bounded execution budget; timeout or
+    explicit cancellation stops the process. *)
 val open_space
   :  run:runner
+  -> run_native:runner
   -> now:(unit -> float)
   -> space:string
   -> version:string

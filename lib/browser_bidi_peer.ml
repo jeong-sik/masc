@@ -37,7 +37,7 @@ let refusal_message = function
   | Unanswered why | Unsent why -> why
 type verb = Browser_live_peer.verb =
   | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
-  | Page_goto | Page_context | Page_snapshot | Page_downloads
+  | Page_goto | Page_context | Page_snapshot | Page_downloads | Page_native_workflow
 let verb_to_wire = Browser_live_peer.verb_to_wire
 let verb_of_wire = Browser_live_peer.verb_of_wire
 type session_end_failure = Connection_gone of string | Not_confirmed of string
@@ -545,7 +545,7 @@ let dispatch ?actor ?request_id t ~verb args =
         phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _) -> Browser_pointer_feedback.Refused | Error (Partial_failure _ | Outcome_unknown _) -> Browser_pointer_feedback.Unknown);
         result)
     | (Browser_info|Tabs_list|Page_read|Page_elements|Page_capture|Page_scene|Page_act|Page_goto|Page_context|Page_snapshot
-      |Page_downloads), (None|Some _)
+      |Page_downloads|Page_native_workflow), (None|Some _)
     | Page_interact,None -> use context id in
   match verb with
   | Page_snapshot -> Error (Before_effect Browser_lane.snapshot_refused)
@@ -625,6 +625,7 @@ let dispatch ?actor ?request_id t ~verb args =
         if url<>after_url || viewport<>after_viewport then Error "viewport_changed_during_capture" else
         let* title=required "title" after in let* data=string "data" png in
         Ok (obj ["tabId",`Int id;"url",str url;"title",title;"mimeType",str "image/png";"data",str data;"viewport",viewport])))
+  | Page_native_workflow -> Error (Before_effect "native workflows require an ego connection")
   | Page_interact -> on_tab (fun context id ->
       let* fields=pre (match args with `Assoc xs->Ok xs|_->Error "invalid interaction") in
       let* request=pre (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live))::fields))) in

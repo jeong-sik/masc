@@ -120,13 +120,28 @@ let prepare ~keeper_name ~upload_paths tool json =
   match tool with
   | C.Read -> prepare_read ~keeper_name json
   | Interact ->
+    (match json with
+     | `Assoc supplied when List.assoc_opt "action" supplied = Some (`String "workflow") ->
+      let* ()=if List.length supplied=List.length (List.sort_uniq String.compare (List.map fst supplied))
+        then Ok () else Error "duplicate native workflow argument" in
+      let* accepted=fields ["lane";"clientId";"tabId";"action";"expectedUrl";"steps";"snapshotScope";"maxChars"] json in
+      let fields=accepted in
+      let* request=surface fields in
+      let* ()=bound request in
+      let* cap=optional_int "maxChars" fields in
+      let* max_chars=Browser_page_script.text_cap cap in
+      let input=`Assoc (("maxChars",`Int max_chars)::List.filter (fun (key,_)->
+        not (List.mem key ["lane";"clientId";"action";"maxChars"])) fields) in
+      let* workflow=B.Native_workflow.of_json input in
+      Ok {preference=request.route;required_actions=[];projection=Raw;verb=B.Page_native_workflow workflow}
+     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
       let* request=Browser_interaction.parse json in
       let* ()=match request.route with
         | Browser_selection.Exact (B.Automation_route|B.Stagehand_route) when B.acts_on_snapshot_target request.action ->
             Error B.snapshot_target_refused
         | Automatic|Exact (Live_route _|Automation_route|Stagehand_route) -> Ok () in
       Ok {preference=request.route;required_actions=[];projection=Raw;
-        verb=B.Page_interact {tab_id=request.tab_id;frame_path=request.frame_path;expected_url=request.expected_url;action=request.action}}
+        verb=B.Page_interact {tab_id=request.tab_id;frame_path=request.frame_path;expected_url=request.expected_url;action=request.action}})
   | Act ->
       let* action=B.Action.parse json in
       let* action=match action,upload_paths with

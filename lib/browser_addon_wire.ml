@@ -104,6 +104,10 @@ let verb_of_json ~route value =
       let* root = optional_field fields "root" text in
       let* scope = B.snapshot_scope_of_wire ~scope ~root in
       Ok (B.Page_snapshot {tab_id;max_chars;scope})
+  | "page.native_workflow" ->
+      let* workflow = B.Native_workflow.of_json args in
+      let* _ = Browser_page_script.text_cap (Some workflow.max_chars) in
+      Ok (B.Page_native_workflow workflow)
   | "page.interact" ->
       let* fields = object_fields Browser_interaction.wire_fields args in
       let* request = Browser_interaction.parse (`Assoc (route_fields route @ fields)) in
@@ -229,7 +233,7 @@ let of_json value =
         let* raw = required fields "timeout_sec" in let* timeout_sec = positive raw in
         let* raw = required fields "only_if_idle" in let* only_if_idle = boolean raw in
         let* () = if only_if_idle then (match verb with B.Page_document _ -> Ok ()
-          | B.Tabs_list|Page_read _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Error "idle admission supports document reads only") else Ok () in
+          | B.Tabs_list|Page_read _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Error "idle admission supports document reads only") else Ok () in
         Ok (Issue {route;verb;actor;timeout_sec;only_if_idle})
     | _ -> Error "unknown browser worker operation" in
   Ok {incarnation;command}

@@ -28,6 +28,11 @@ val session : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> command:string -> d
     no longer than the stop is refused before anything runs. *)
 val runner : session -> Browser_ego_peer.runner
 
+(** Uses the same process under the workflow's bounded execution window
+    (capped at {!Browser_lane.Native_workflow.max_window_s}); timeout or
+    cancellation stops and reaps the process. *)
+val native_runner : session -> Browser_ego_peer.runner
+
 (** Closes the session's socket, so its process leaves its loop and exits,
     and stops what is left of it. *)
 val end_session : session -> unit

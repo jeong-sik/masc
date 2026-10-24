@@ -1,0 +1,1 @@
+tool definition masc_browser_interact: params[29] (steps).items.params must be an array of tables, got an array

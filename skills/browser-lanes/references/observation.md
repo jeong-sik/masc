@@ -31,6 +31,38 @@ text·elements·scene/regions는 목적에 맞게 추가한다. TUI에서 받은
 documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔 추측하지 않는다.
 동작 오류는 이미 효과가 있었을 수 있다. 현재 페이지를 읽기 전에 입력을 반복하지 않는다.
 
+### native 동작과 대기를 한 번에 실행하기
+
+`BrowserInteract`에 `action=workflow`, `lane=live`, 관측한 `clientId`·`tabId`, 시작
+페이지의 `expectedUrl`, `steps` 배열을 준다. 각 step은 다음 `method`와 해당 필드만 쓴다.
+
+| method | 필드 |
+|---|---|
+| click, dblclick, hover | selector |
+| fill | selector, text |
+| press | selector, key |
+| selectOption | selector, value 또는 중복 없는 values; []는 선택 해제 |
+| goto | url: 절대 HTTP(S) 주소 |
+| waitForURL | url: SDK의 문자열/glob |
+| waitForSelector | selector, state: attached/detached/visible/hidden |
+| waitForLoadState | state: domcontentloaded/load/networkidle |
+
+`selector`는 관측한 native locator를 그대로 쓴다. workflow 메서드 이름은
+단일 조작의 `double_click`·`select_option` 대신 SDK의 `dblclick`·`selectOption`이다.
+`steps`는 최대 16개, 전체 실행 예산은 최대 60,000ms(시작 URL·최종 snapshot 예비 5,000ms 포함)이다.
+각 step의 선택적 `timeoutMs`(최대 30,000ms)는 남은 실행 예산 안에서 SDK에 전달하며 생략하면 5,000ms를 예산으로 잡는다.
+실행은 기존 호스트 권한·취소·시간 경계를 따른다.
+
+`expectedUrl`은 실행을 시작할 때만 검사한다. 이후 이동이 일어나면 native wait로
+목적지·요소·로드 상태를 기다린다. 마지막에는 native snapshot이 돌아온다.
+최상위 `snapshotScope`는 viewport(기본) 또는 full_page이며, `maxChars`는 기존
+BrowserRead 크기 정책을 따른다. 반환된 url·title·snapshot·truncated로 실제 결과를 확인한다.
+
+현재 관측으로 결정 가능한 동작만 묶는다. 중간 결과에 새 판단이 필요하면 별도 호출로
+나누고, 이후 동작에 오래된 ref를 억지로 재사용하지 않는다. 단계 실패 시 뒤 단계는
+실행되지 않고 `completed`와 실패 위치가 남는다. 실패 단계에도 효과가 있었을 수 있으므로
+같은 탭을 다시 읽어 남은 작업을 정하며, workflow 전체를 재실행하지 않는다.
+
 ## scene/regions의 범위와 변경된 페이지
 
 - `expectedUrl`·`scope`·`navigationSource`는 최상위 문서의 `mode=scene` 또는

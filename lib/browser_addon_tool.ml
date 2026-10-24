@@ -12,7 +12,7 @@ let input_schema = object_schema ~required:["lane";"command"] [
   "lane",enum ["live";"automation";"stagehand"];"clientId",text_schema;"uploadId",text_schema;
   "command",object_schema ~required:["verb";"args"] [
     "verb",enum ["tabs.list";"page.read";"page.downloads";"page.console";"page.network";"page.cookies";"page.capture";
-      "page.scene";"page.snapshot";"page.interact";"session.open";"session.close";"session.status";
+      "page.scene";"page.snapshot";"page.interact";"page.native_workflow";"session.open";"session.close";"session.status";
       "page.goto";"page.elements";"page.act";"page.context";"page.instruct";"page.locate";"page.extract"];
     "args",object_schema ~open_fields:true ~required:[] []]]
 let output_schema = object_schema ~required:["reply";"answer"] [
@@ -48,7 +48,7 @@ let parse json =
     | B.Live_route (Some _|None),B.Page_act (B.Action.Control _) -> Ok ()
     | (B.Live_route _|Automation_route|Stagehand_route),
       (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_console _|Page_network _|Page_cookies _
-      |Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Session_open _|Session_close|Session_status
+      |Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Session_open _|Session_close|Session_status
       |Page_goto _|Page_elements _|Page_act (B.Action.Open_tab _|Open_window _|On_tab _)|Page_context _
       |Page_instruct _|Page_locate _|Page_extract _) -> Ok () in
   let* upload_id=match List.assoc_opt "uploadId" fields with
@@ -61,12 +61,12 @@ let transferable verb upload_id = match verb,upload_id with
   | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),Some _ -> Ok ()
   | Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),None ->
       Error "upload requires a private host snapshot grant; no command was dispatched"
-  | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
+  | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
   | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
   | Page_act (B.Action.Open_tab _|Open_window _|Control _)
   | Page_act (B.Action.On_tab {interaction=(Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests);_})
   | Page_context _|Page_instruct _|Page_locate _|Page_extract _),None -> Ok ()
-  | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
+  | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Open_tab _|Open_window _|Control _
       |On_tab {interaction=Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
     |Page_context _|Page_instruct _|Page_locate _|Page_extract _),Some _ -> Error "uploadId applies only to an upload command"

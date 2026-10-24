@@ -39,6 +39,14 @@ iframe을 찾는다. 프레임 안의 대상은 snapshot의 ref로 구분하며 
 documentId/nodeId는 TUI 관측을 이어가거나 좌표가 필요할 때 사용하며 Ego ref와 섞지 않는다.
 관측 범위·selector와 옵션 선택의 자세한 계약은 [읽기와 관측 복구](references/observation.md)를 따른다.
 
+이미 관측한 상태로 다음 동작들을 정할 수 있으면 `BrowserInteract action=workflow`로
+묶는다. `lane=live`, 관측한 `clientId`·`tabId`·`expectedUrl`, native `method`를 담은
+`steps`를 전달하면 SDK가 순서대로 실행하고 마지막 snapshot을 돌려준다. 시작 URL만
+검사하므로 이동 뒤에는 `waitForURL`·`waitForSelector` 등으로 결과를 기다린다.
+중간 화면을 보고 새 판단을 해야 하면 거기서 나눠 호출한다. 실패 응답의 `completed`는
+남은 작업을 판단하는 근거이며, 실패한 workflow 전체를 다시 실행하지 않는다.
+메서드별 필드와 native 대기 계약은 [읽기와 관측 복구](references/observation.md)를 따른다.
+
 ## TUI에서 받은 화면 이어가기
 
 TUI의 `y` 관측에 있는 lane·clientId·tabId·url을 사용한다. 같은 탭을 다시 찾으려고

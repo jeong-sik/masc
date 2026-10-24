@@ -15,6 +15,7 @@ let scenario () = Eio_main.run (fun env ->
         let model_waiting,model_wait=Eio.Promise.create () in
         let locating,locate=Eio.Promise.create () in
         let starting,start=Eio.Promise.create () in
+        let workflowing,workflow=Eio.Promise.create () in
         let never,_=Eio.Promise.create () in
         let cancellations=ref 0 in
         let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
@@ -28,6 +29,7 @@ let scenario () = Eio_main.run (fun env ->
                 match Yojson.Safe.Util.(request |> member "command" |> member "verb") with
                 | `String "page.locate" -> ignore (Eio.Promise.try_resolve locate ())
                 | `String "session.open" -> ignore (Eio.Promise.try_resolve start ())
+                | `String "page.native_workflow" -> ignore (Eio.Promise.try_resolve workflow ())
                 | _ -> ignore (Eio.Promise.try_resolve enter ()));
               if Yojson.Safe.Util.member "operation" request=`String "model_wait" then
                 ignore (Eio.Promise.try_resolve model_wait ());
@@ -60,6 +62,15 @@ let scenario () = Eio_main.run (fun env ->
               (fun () -> Eio.Promise.await starting;Eio.Time.sleep clock 0.03;`Waiting) with
              | `Waiting -> ()
              | `Returned _ -> fail "Chrome startup must retain its owner beyond the quick transport clock");
+            let native=ok (Browser_lane.Native_workflow.of_json (`Assoc ["tabId",`Int 1;
+              "expectedUrl",`String "https://example.org";"steps",`List [];"maxChars",`Int 1000])) in
+            (match Eio.Fiber.first
+              (fun () -> `Returned (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
+                (W.Issue {route=Browser_lane.Live_route None;verb=Browser_lane.Page_native_workflow native;
+                  actor=None;timeout_sec=0.001;only_if_idle=false})))
+              (fun () -> Eio.Promise.await workflowing;Eio.Time.sleep clock 0.03;`Waiting) with
+             | `Waiting -> ()
+             | `Returned _ -> fail "native workflow must retain the SDK-owned wait");
             let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
               ~max_message_bytes:4096 ~control_timeout_sec:1. ~available:(fun () -> true)) in
             let client_id=ok (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000001") in

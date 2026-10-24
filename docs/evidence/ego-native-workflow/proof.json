@@ -1,0 +1,107 @@
+{
+  "spaceId": 9,
+  "finished": false,
+  "request": {
+    "tabId": 1,
+    "expectedUrl": "http://localhost:56011/start",
+    "steps": [
+      {
+        "method": "fill",
+        "selector": "loc=css:#editor",
+        "text": "native workflow"
+      },
+      {
+        "method": "selectOption",
+        "selector": "loc=css:#choice",
+        "value": "b"
+      },
+      {
+        "method": "click",
+        "selector": "loc=css:#submit"
+      },
+      {
+        "method": "waitForURL",
+        "url": "http://localhost:56011/done?value=native%20workflow&choice=b"
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "loc=css:#done",
+        "state": "visible"
+      }
+    ],
+    "snapshotScope": "full_page",
+    "maxChars": 10000
+  },
+  "result": {
+    "completed": [
+      {
+        "index": 0,
+        "method": "fill",
+        "receipt": {}
+      },
+      {
+        "index": 1,
+        "method": "selectOption",
+        "receipt": [
+          "b"
+        ]
+      },
+      {
+        "index": 2,
+        "method": "click",
+        "receipt": {}
+      },
+      {
+        "index": 3,
+        "method": "waitForURL",
+        "receipt": null
+      },
+      {
+        "index": 4,
+        "method": "waitForSelector",
+        "receipt": null
+      }
+    ],
+    "effectStarted": true,
+    "completedEffect": true,
+    "failure": null,
+    "urlBefore": "http://localhost:56011/start",
+    "url": "http://localhost:56011/done?value=native%20workflow&choice=b",
+    "title": "Native workflow done",
+    "snapshot": "[p1 \"Native workflow done\" | space \"masc-ego-native-sdk-20261024\"(9): 2 managed, 0 untracked — p1* \"Native workflow done\", p2 \"배송 신청 완료\"]\nroot\n  heading\n    text \"Completed native workflow\"\n  text \"{\"value\":\"native workflow\",\"choice\":\"b\"}\"\n",
+    "truncated": false,
+    "chars": 240
+  },
+  "refused": {
+    "completed": [],
+    "effectStarted": false,
+    "completedEffect": false,
+    "failure": {
+      "index": 0,
+      "method": "initialUrl",
+      "message": "the tab is at http://localhost:56011/done?value=native%20workflow&choice=b, not at expectedUrl; read it again"
+    }
+  },
+  "stopped": {
+    "completed": [
+      {
+        "index": 0,
+        "method": "hover",
+        "receipt": {}
+      }
+    ],
+    "effectStarted": true,
+    "completedEffect": true,
+    "failure": {
+      "index": 1,
+      "method": "waitForSelector",
+      "message": "page.waitForSelector timed out after 1ms: loc=css:#never"
+    }
+  },
+  "state": {
+    "value": "native workflow",
+    "choice": "b"
+  },
+  "script_sha256": "ff96902e331b3b8ea0e3d07b1d4dcb8ebb2d638218104276bc29ed6b1e29d061",
+  "scope": "Production workflow JS on installed Ego plus owned local fixture; not OCaml host/Keeper dispatch or installed MASC proof."
+}

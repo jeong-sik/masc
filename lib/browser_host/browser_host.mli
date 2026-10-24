@@ -16,6 +16,7 @@ type verb = Masc.Browser_bidi_peer.verb =
   | Page_context
   | Page_snapshot
   | Page_downloads
+  | Page_native_workflow
 
 type command = { id : string; verb : verb; args : Yojson.Safe.t; actor : string option }
 

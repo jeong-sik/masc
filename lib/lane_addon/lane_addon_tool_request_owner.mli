@@ -97,10 +97,13 @@ val retain : store:Lane_addon_store.t -> scope:string -> request_id:string ->
     original record again. *)
 type update_error = Ownership_error of error | State_conflict | Invalid_transition of string
 type publication = Stored of retained | Already_stored of retained | Unconfirmed of string
-val advance : store:Lane_addon_store.t -> expected:retained ->
-  event:Lane_addon_request_progress.event -> (publication, update_error) result
-(** Check the entire original expected record before appending a canonical
-    event. Only the record is read and rewritten; the body it names is neither
+val advance_events : store:Lane_addon_store.t -> expected:retained ->
+  events:Lane_addon_request_progress.event list -> (publication, update_error) result
+(** Validate a nonempty list of canonical events in order, then check the
+    entire original expected record and publish the final progress once.
+    Empty lists and invalid transitions are refused before reading or writing
+    the record; no partial batch is published.
+    Only the record is read and rewritten; the body it names is neither
     read nor written, and the request is compared by its digest. An exact
     already-stored next history is acknowledged without writing;
     [Already_stored] does not permit another dispatch or effect. Any other tail
@@ -111,6 +114,22 @@ val advance : store:Lane_addon_store.t -> expected:retained ->
     Reload the original key; never infer absence or invent a replacement ID.
     Cancellation propagates and likewise does not prove publication absent.
     This API records trusted host facts; it performs no worker/domain effects. *)
+val advance : store:Lane_addon_store.t -> expected:retained ->
+  event:Lane_addon_request_progress.event -> (publication, update_error) result
+(** {!advance_events} for one event, with the same publication contract. *)
+module For_testing : sig
+  val advance_events :
+    save:(Lane_addon_store.t -> scope:string -> request_id:string -> Yojson.Safe.t ->
+      (unit, string) result) ->
+    store:Lane_addon_store.t -> expected:retained ->
+    events:Lane_addon_request_progress.event list -> (publication, update_error) result
+  (** The same canonical batch transition and publication path, with only the
+      final writer injected. The writer receives the original store and key
+      and the complete next record. An error, including one reported after a
+      successful write, returns [Unconfirmed]; exceptions and cancellation
+      propagate. No writer is called for a rejected or already-stored batch.
+      Production {!advance_events} uses [Lane_addon_store.save_tool_request_owner]. *)
+end
 type settle_error = Settle_unavailable of string | Settle_changed
 val settle : store:Lane_addon_store.t -> date:string -> Record.t -> (unit, settle_error) result
 (** Move one original, its record and then its body, into the settled archive

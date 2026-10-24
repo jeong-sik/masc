@@ -164,13 +164,15 @@ module Payload = struct
       ]
   ;;
 
+  let registration_fields =
+    [ "task_id"; "producer"; "authority_kind"; "authority_actor" ]
+  ;;
+
   let registration_of_yojson json =
     let ( let* ) = Result.bind in
     let* fields = Run_registry_core.Json.object_fields json in
     let* () =
-      Run_registry_core.Json.exact_fields
-        ~required:[ "task_id"; "producer"; "authority_kind"; "authority_actor" ]
-        fields
+      Run_registry_core.Json.exact_fields ~required:registration_fields fields
     in
     let* task_id = Run_registry_core.Json.string_field "task_id" fields in
     let* producer = Run_registry_core.Json.string_field "producer" fields in
@@ -226,6 +228,7 @@ module Payload = struct
       | "infrastructure_unavailable" -> Ok [ "stage"; "detail" ]
       | "commit_failed" | "raised" | "review_cancelled" -> Ok [ "detail" ]
       | "not_reviewed" -> Ok [ "gate"; "detail" ]
+      | "superseded_by" -> Ok [ "authority" ]
       | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
     in
     let* required_detail_fields = required_detail_fields in
@@ -340,6 +343,101 @@ let mark_completed t ~verification_id ~outcome ~tools ?evaluator_runtime ~elapse
   | `Persistence_failed failure -> raise (Sys_error failure.detail)
 ;;
 
+type publication_source_error = Store.current_read_error
+
+type publication_error =
+  | Expected_not_completed
+  | Conflict
+  | Current_source_unavailable of publication_source_error
+  | Invalid_change of string
+  | Publication_failed of Run_registry_core.persistence_failure
+
+let rec publication_source_error_to_string = function
+  | Store.Volatile_store ->
+    "A volatile verification registry cannot confirm durable publication"
+  | Store.Not_initialized ->
+    "Verification registry startup authority has not been established"
+  | Store.Incomplete_startup _ ->
+    "Verification registry startup history was incomplete or malformed"
+  | Store.Non_regular_history _ ->
+    "Verification registry history is not a regular file"
+  | Store.Invalid_history detail | Store.Read_failed detail -> detail
+  | Store.Incomplete_history -> "Verification registry history has an incomplete tail"
+  | Store.Snapshot_changed -> "Verification registry history changed during observation"
+  | Store.Read_cleanup_failed { primary; detail } ->
+    (match primary with
+     | None -> detail
+     | Some error -> publication_source_error_to_string error ^ "; " ^ detail)
+;;
+
+let publication_error_to_string = function
+  | Expected_not_completed -> "Terminal publication requires a completed expected run"
+  | Conflict -> "Verification registry current row differs from the expected original"
+  | Current_source_unavailable error -> publication_source_error_to_string error
+  | Invalid_change detail -> "Invalid verification publication: " ^ detail
+  | Publication_failed failure ->
+    let state =
+      match failure.Run_registry_core.state with
+      | Run_registry_core.Not_persisted -> "not persisted"
+      | Run_registry_core.Durability_unknown -> "durability unknown"
+    in
+    Printf.sprintf "Verification publication failed (%s): %s" state failure.detail
+;;
+
+let publish_terminal_confirmed t ~(expected : run) =
+  match expected.status with
+  | Running -> Error Expected_not_completed
+  | Completed completed ->
+    let registration =
+      { Payload.task_id = expected.task_id
+      ; producer = expected.producer
+      ; authority_kind = expected.authority_kind
+      ; authority_actor = expected.authority_actor
+      }
+    in
+    let completion =
+      { Payload.outcome = completed.outcome
+      ; evaluator_runtime = completed.evaluator_runtime
+      ; elapsed_s = completed.elapsed_s
+      ; tools = completed.tools
+      }
+    in
+    let same_original (entry : Store.entry) =
+      String.equal entry.id expected.verification_id
+      && entry.started_at = expected.started_at
+      && entry.registration = registration
+    in
+    (match
+       Store.reconcile_current t ~id:expected.verification_id ~decide:(function
+         | None ->
+           Ok
+             ( Store.Register_original
+                 { started_at = expected.started_at
+                 ; registration
+                 ; completion = Some completion
+                 }
+             , () )
+         | Some entry ->
+           if not (same_original entry)
+           then Error Conflict
+           else (
+             match entry.status with
+             | Store.Running -> Ok (Store.Complete_original completion, ())
+             | Store.Completed current ->
+               if current = completion
+               then Ok (Store.Confirm_current, ())
+               else Error Conflict))
+     with
+     | Ok () ->
+       notify_changed ();
+       Ok ()
+     | Error (Store.Decision_refused error) -> Error error
+     | Error (Store.Current_source_unavailable error) ->
+       Error (Current_source_unavailable error)
+     | Error (Store.Invalid_change detail) -> Error (Invalid_change detail)
+     | Error (Store.Publication_failed failure) -> Error (Publication_failed failure))
+;;
+
 let observe_tool_result ~input ~finished_at (result : Tool_result.result) =
   let disposition =
     match result with
@@ -450,6 +548,42 @@ let run_to_yojson run =
        | Some runtime -> [ "evaluator_runtime", `String runtime ])
   in
   `Assoc (base @ completion_fields)
+;;
+
+let completed_run_of_yojson json =
+  let ( let* ) = Result.bind in
+  let* fields = Run_registry_core.Json.object_fields json in
+  (* Check envelope uniqueness before splitting. Unknown fields stay with the
+     completion and are rejected by its canonical outcome-specific codec. *)
+  let* () =
+    Run_registry_core.Json.exact_fields
+      ~required:[ "verification_id"; "started_at"; "status" ]
+      ~optional:(List.map fst fields)
+      fields
+  in
+  let* verification_id = Run_registry_core.Json.string_field "verification_id" fields in
+  let* started_at = Run_registry_core.Json.float_field "started_at" fields in
+  let registration_fields, completion_fields =
+    List.partition (fun (key, _) -> List.mem key Payload.registration_fields) fields
+  in
+  let* registration = Payload.registration_of_yojson (`Assoc registration_fields) in
+  let completion_fields =
+    List.filter_map
+      (fun (key, value) ->
+        match key with
+        | "verification_id" | "started_at" -> None
+        | "status" -> Some ("outcome", value)
+        | _ -> Some (key, value))
+      completion_fields
+  in
+  let* completion = Payload.completion_of_yojson (`Assoc completion_fields) in
+  Ok
+    (run_of_entry
+       { Store.id = verification_id
+       ; started_at
+       ; registration
+       ; status = Store.Completed completion
+       })
 ;;
 
 type global_install_error = Already_installed

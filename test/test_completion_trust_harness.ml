@@ -17,6 +17,17 @@ module AR = Masc.Task.Anti_rationalization
 module Publication_availability =
   Masc.Keeper_publication_recovery_availability
 
+(* This oracle exercises actual confirmed terminal publication, so its one
+   process-global registry is backed by a private real history file. *)
+let registry_root=Filename.temp_dir "completion-trust-registry-" ""
+let () =
+  let registry=Masc.Verification_run_registry.replay
+    (Filename.concat registry_root "verification-runs.jsonl") in
+  (match Masc.Verification_run_registry.install_global registry with
+   | Ok () -> ()
+   | Error Already_installed -> fail "trust fixture registry was already installed");
+  at_exit (fun () -> Fs_compat.remove_tree registry_root)
+
 type reviewer_response =
   | Reviewer_verdict of AR.verdict
   | Reviewer_unavailable
@@ -745,8 +756,9 @@ let test_late_verdict_respects_actual_terminal_authority () =
             | Some ({task_status=Masc_domain.AwaitingVerification {verification_id;_}; _} as task) -> task,verification_id
             | Some _ | None -> fail "race fixture never reached AwaitingVerification" in
           let previous = Atomic.get AR.run_llm_reviewer_fn in
-          let racing_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_
-              ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
+          let racing_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
+              ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+              ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
             let commit verdict = Workspace.commit_verdict_r config
               ~authority:(Masc_domain.Human_operator {operator_id="race-operator"})
               ~task_id:task.id ~verification_id ~verdict () in
@@ -779,7 +791,9 @@ let test_late_verdict_respects_actual_terminal_authority () =
           (match Masc.Lane_addon_request_progress.phase (Masc.Verifier_review_owner.progress retained) with
            | Conflicted _ -> ()
            | _ -> fail "competing authority must leave an exact retained commit conflict");
-          (match Masc.Verifier_review_owner.pending_commits ~store ~installation_id ~package_id with
+          (match Masc.Verifier_review_owner.pending_commits
+             ~terminal_pending:Masc.Verifier_review_publication.needs_publication
+             ~store ~installation_id ~package_id with
            | Ok [] -> ()
            | Ok (_::_) | Error _ -> fail "resolved conflict must not reopen on boot recovery");
           check bool "no shared retry batch was armed" false

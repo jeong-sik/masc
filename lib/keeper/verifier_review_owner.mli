@@ -93,15 +93,36 @@ val load_retained : store:store -> verification_id:string -> attempt:int ->
   installation_id:string -> package_id:string -> (retained, load_error) result
 val advance : store:store -> retained -> Lane_addon_request_progress.event ->
   (retained, load_error) result
+val advance_events : store:store -> retained -> Lane_addon_request_progress.event list ->
+  (retained, load_error) result
+(** Fold existing events and publish their complete next history once. In
+    particular judgment and its actual observer facts become visible together. *)
 (** Publication must be confirmed from the exact durable owner record before
     permitting an effect. An unknown save never authorizes redispatch. *)
+module For_testing : sig
+  val advance_events :
+    publish:(store:Lane_addon_store.t -> expected:Lane_addon_tool_request_owner.retained ->
+      events:Lane_addon_request_progress.event list ->
+      (Lane_addon_tool_request_owner.publication, Lane_addon_tool_request_owner.update_error) result) ->
+    store:store -> retained -> Lane_addon_request_progress.event list -> (retained, load_error) result
+end
+
 val result_to_json : Task.Anti_rationalization.review_result -> Yojson.Safe.t
 val result_of_json : Yojson.Safe.t -> (Task.Anti_rationalization.review_result, string) result
 
-val pending_commits : store:store -> installation_id:string -> package_id:string ->
+val retained_commits : store:store -> installation_id:string -> package_id:string ->
   (retained list, load_error) result
-(** Strict recovery discovery. Retained host judgments and domain commit intents are returned;
-    this does not allocate a successor or authorize another provider. *)
+(** Strict original commit inventory including acknowledged terminal facts, so
+    a queued stale Task snapshot cannot start another registry lifecycle. *)
+
+val pending_commits :
+  terminal_pending:(retained -> (bool, string) result) ->
+  store:store -> installation_id:string -> package_id:string ->
+  (retained list, load_error) result
+(** Strict recovery discovery. Retained judgments/intents are returned, together
+    with terminal facts whose canonical host publication is not acknowledged.
+    The host's pure predicate authenticates the terminal receipt before omitting
+    it. This does not allocate a successor or authorize another provider. *)
 
 val judgment_to_json : original:Verifier_review_original.t -> notes:string ->
   Task.Anti_rationalization.review_result -> (Yojson.Safe.t, string) result

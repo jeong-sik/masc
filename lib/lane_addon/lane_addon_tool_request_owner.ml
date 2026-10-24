@@ -215,9 +215,16 @@ let retain ~store ~scope ~request_id ~installation_id ~package_id ~tool ~summary
       |> Result.map_error (fun detail -> Store_unavailable detail)
 type update_error = Ownership_error of error | State_conflict | Invalid_transition of string
 type publication = Stored of retained | Already_stored of retained | Unconfirmed of string
-let advance ~store ~(expected : retained) ~event =
-  let* progress = Lane_addon_request_progress.append expected.progress event
-    |> Result.map_error (fun detail -> Invalid_transition detail) in
+let advance_events_with ~save ~store ~(expected : retained) ~events =
+  let rec append_events progress = function
+    | [] -> Ok progress
+    | event :: rest ->
+      let* progress = Lane_addon_request_progress.append progress event
+        |> Result.map_error (fun detail -> Invalid_transition detail) in
+      append_events progress rest in
+  let* progress = match events with
+    | [] -> Error (Invalid_transition "progress event batch is empty")
+    | _ -> append_events expected.progress events in
   let next = {expected with progress} in
   let unavailable detail = Ownership_error (Store_unavailable detail) in
   let* stored = Lane_addon_store.load_tool_request_owner store ~scope:expected.scope ~request_id:expected.request_id
@@ -233,10 +240,17 @@ let advance ~store ~(expected : retained) ~event =
     let previous = with_request stored expected.request in
     if same_record previous next then Ok (Already_stored previous)
     else if not (same_record previous expected) then Error State_conflict
-    else match Lane_addon_store.save_tool_request_owner store
+    else match save store
         ~scope:expected.scope ~request_id:expected.request_id (to_json next) with
       | Ok () -> Ok (Stored next)
       | Error detail -> Ok (Unconfirmed detail)
+let advance_events ~store ~expected ~events =
+  advance_events_with ~save:Lane_addon_store.save_tool_request_owner ~store ~expected ~events
+let advance ~store ~expected ~event =
+  advance_events ~store ~expected ~events:[event]
+module For_testing = struct
+  let advance_events = advance_events_with
+end
 type settle_error = Settle_unavailable of string | Settle_changed
 let settle ~store ~date (expected : Record.t) =
   let unavailable detail = Settle_unavailable detail in

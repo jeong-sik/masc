@@ -12,7 +12,34 @@ val start :
   unit
 
 module For_testing : sig
-  val process_original_once : config:Workspace_utils_backend_setup.config -> sw:Eio.Switch.t ->
+  val unless_original_publication :
+    store:Verifier_review_owner.store -> verification_id:string -> task_id:string ->
+    producer:string -> otherwise:(unit -> unit) -> bool
+  (** The actual caller's canonical-owner guard for returned failures and
+      cancellation. [false] preserves a possibly retained publication. *)
+
+  type commit_apply_error =
+    | Invalid_commit_intent of string
+    | Workspace_commit_refused of Masc_domain.masc_error
+  val observe_original :
+    config:Workspace_utils_backend_setup.config -> original:Verifier_review_original.t ->
+    judgment:Yojson.Safe.t -> authority:Masc_domain.completion_authority ->
+    Lane_addon_request_progress.change -> (Yojson.Safe.t, string) result
+  val apply_original :
+    config:Workspace_utils_backend_setup.config -> original:Verifier_review_original.t ->
+    judgment:Yojson.Safe.t -> authority:Masc_domain.completion_authority ->
+    Lane_addon_request_progress.change ->
+    (unit, commit_apply_error Verifier_review_worker.apply_failure) result
+  (** The actual host observation/application boundaries, for deterministic
+      operator races between the worker's authoritative before-read and apply. *)
+
+  val recover_original_publications :
+    registry:Verification_run_registry.t -> config:Workspace_utils_backend_setup.config ->
+    sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t -> (int * string list, string) result
+  (** Actual production terminal-publication discovery and consumption, without
+      relying on a current Task row or dispatching another reviewer. *)
+
+  val process_original_once : registry:Verification_run_registry.t -> config:Workspace_utils_backend_setup.config -> sw:Eio.Switch.t ->
     clock:float Eio.Time.clock_ty Eio.Resource.t -> task:Masc_domain.task ->
     assignee:string -> verification_id:string -> (unit, string) result
   (** Actual production preparation/recovery ordering. An already retained host

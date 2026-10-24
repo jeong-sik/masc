@@ -168,14 +168,25 @@ let load_retained ~store ~verification_id ~attempt ~installation_id ~package_id 
     if record.request_digest = digest then Ok {record;original}
     else Error (Corrupt_original "verifier original changed during restore")
 
-let advance ~store retained event =
-  match Owner.advance ~store ~expected:retained.record ~event with
+let advance_events_with ~publish ~store retained events =
+  match publish ~store ~expected:retained.record ~events with
   | Error error -> Error (Load_store_unavailable (Owner.update_error_to_string error))
   | Ok (Owner.Unconfirmed detail) -> Error (Load_store_unavailable
       ("verifier progress publication unconfirmed; restore original before any effect: " ^ detail))
-  | Ok (Owner.Already_stored _) when event = Progress.Dispatch_intended ->
+  | Ok (Owner.Already_stored _) when List.exists (function Progress.Dispatch_intended -> true
+      | Admission_declined _ | Execution_observed _ | Judgment_retained _
+      | Preparation_intended _ | Preparation_observed _ | Replacement_intended _
+      | Replacement_observed _ | Commit_intended _ | Commit_uncertain _
+      | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _
+      | Successor_intended _ | Successor_observed _ | Observer _ -> false) events ->
     Error (Load_store_unavailable "dispatch intention was already retained; dispatch outcome must be restored")
   | Ok (Owner.Stored record | Owner.Already_stored record) -> Ok {retained with record}
+
+let advance_events = advance_events_with ~publish:Owner.advance_events
+let advance ~store retained event = advance_events ~store retained [event]
+module For_testing = struct
+  let advance_events = advance_events_with
+end
 
 let result_to_json (result:AR.review_result) =
   let optional = function None -> `Null | Some value -> `String value in
@@ -369,7 +380,7 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id =
   | first::rest when V.attempt first.original=0 -> walk first rest
   | _::_ -> Error (Corrupt_original "verifier inventory is missing its original first attempt")
 
-let pending_commits ~store ~installation_id ~package_id =
+let retained_commits ~store ~installation_id ~package_id =
   let* records=Owner.load_scope ~store ~scope
     |> Result.map_error (fun e -> Load_store_unavailable (Owner.error_to_string e)) in
   List.fold_left (fun acc (record:Owner.retained) ->
@@ -377,7 +388,19 @@ let pending_commits ~store ~installation_id ~package_id =
     let* original=V.of_json record.request |> Result.map_error (fun d -> Corrupt_original d) in
     let* retained=load_retained ~store ~verification_id:(V.verification_id original)
       ~attempt:(V.attempt original) ~installation_id ~package_id in
-    match Progress.phase record.progress with
+    match Progress.phase (progress retained) with
+    | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ -> Ok (retained::acc)
+    | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
+    | Subdividing _ | Subdivided _ -> Ok acc) (Ok []) records
+
+let pending_commits ~terminal_pending ~store ~installation_id ~package_id =
+  let* records=retained_commits ~store ~installation_id ~package_id in
+  List.fold_right (fun retained acc ->
+    let* acc=acc in
+    match Progress.phase (progress retained) with
+    | Finished _ | Conflicted _ ->
+      let* pending=terminal_pending retained |> Result.map_error (fun detail -> Corrupt_original detail) in
+      Ok (if pending then retained::acc else acc)
     | Judged _ | Committing _ | Commit_unknown _ -> Ok (retained::acc)
-    | Captured | Admission_wait _ | Dispatch_pending _ | Finished _
-    | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok acc) (Ok []) records
+    | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
+    | Subdividing _ | Subdivided _ -> Ok acc) records (Ok [])

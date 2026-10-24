@@ -18,14 +18,14 @@ let map_load_error = function
   | O.Load_store_unavailable detail -> Persistence_unavailable detail
   | O.Corrupt_original detail -> Original_corrupt detail
 
-let run_attempt ?on_verdict ?on_tool_result ?sw ~store ~verification_id ~attempt
+let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict ?on_tool_result ?sw ~store ~verification_id ~attempt
     ~installation_id ~package_id ~prepare_notes ~authority ~provider_rest () =
   let* retained = O.load_retained ~store ~verification_id ~attempt
     ~installation_id ~package_id |> Result.map_error map_load_error in
   let original = O.original retained in
   let restored json = O.judgment_of_json ~original json
     |> Result.map fst |> Result.map_error (fun detail -> Original_corrupt detail) in
-  let save record event = O.advance ~store record event |> Result.map_error map_load_error in
+  let save record event = advance_events ~store record [event] |> Result.map_error map_load_error in
   let restore_refusal evidence = match evidence with
     | `Assoc fields -> (match List.assoc_opt "result" fields with
         | Some json -> O.result_of_json json |> Result.map_error (fun detail -> Original_corrupt detail)
@@ -94,7 +94,18 @@ let run_attempt ?on_verdict ?on_tool_result ?sw ~store ~verification_id ~attempt
         | None -> Progress.Refused {stage=Progress.Execution;evidence=`Assoc [
             "schema",`String "verifier_review_refusal/v1";"certainty",`String "definite";
             "observations",`List (List.rev !observations);"result",json]} in
-      (match save !current event with
+      let events = match event,prepare_observer_registration with
+        | Progress.Judgment_retained _,Some prepare ->
+          (match prepare result with
+           | Ok receipt -> [event;Progress.Observer
+               (Lane_addon_request_receipt.Intended (Registration,receipt))]
+           | Error detail -> raise (Retention_failed (Original_corrupt detail)))
+        | _,None | (Dispatch_intended | Admission_declined _ | Execution_observed _
+          | Preparation_intended _ | Preparation_observed _ | Replacement_intended _
+          | Replacement_observed _ | Commit_intended _ | Commit_uncertain _
+          | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _
+          | Successor_intended _ | Successor_observed _ | Observer _),Some _ -> [event] in
+      (match advance_events ~store !current events |> Result.map_error map_load_error with
        | Error error -> raise (Retention_failed error)
        | Ok saved -> current := saved);
       Option.iter (fun callback -> callback result) on_verdict in
@@ -119,12 +130,38 @@ let run_attempt ?on_verdict ?on_tool_result ?sw ~store ~verification_id ~attempt
         | Error _ -> ());
       raise exn
 
+let run_attempt = run_attempt_with ~advance_events:O.advance_events
+module For_testing = struct
+  let run_attempt = run_attempt_with
+end
+
+type 'error apply_failure =
+  | Outcome_unknown of { error : 'error; detail : string }
+  | Authority_refused of { error : 'error; detail : string }
+
+type 'error commit_error =
+  | Worker_error of error
+  | Apply_failed of 'error
+  | Commit_conflicted of { commit : Progress.commit; observed : Yojson.Safe.t }
+
 let commit_attempt ~store ~verification_id ~attempt ~installation_id ~package_id
     ~change ~observe ~apply =
   let* retained = O.load_retained ~store ~verification_id ~attempt ~installation_id ~package_id
-    |> Result.map_error map_load_error in
-  let save record event = O.advance ~store record event |> Result.map_error map_load_error in
-  let pending detail = Error (Execution_pending detail) in
+    |> Result.map_error (fun error -> Worker_error (map_load_error error)) in
+  let save record event = O.advance ~store record event
+    |> Result.map_error (fun error -> Worker_error (map_load_error error)) in
+  let pending detail = Error (Worker_error (Execution_pending detail)) in
+  let conflicted record commit observed =
+    let* _ = save record (Progress.Commit_conflicted observed) in
+    Error (Commit_conflicted {commit; observed}) in
+  let observe_refusal record commit error =
+    match observe commit.Progress.change with
+    | Ok observed when Yojson.Safe.equal observed commit.change.after ->
+      let* _ = save record (Progress.Commit_observed observed) in Ok ()
+    | Ok observed when Yojson.Safe.equal observed commit.change.before ->
+      Error (Apply_failed error)
+    | Ok observed -> conflicted record commit observed
+    | Error _ -> Error (Apply_failed error) in
   let read record commit =
     match observe commit.Progress.change with
     | Error detail -> pending ("commit observation unavailable: " ^ detail)
@@ -141,37 +178,44 @@ let commit_attempt ~store ~verification_id ~attempt ~installation_id ~package_id
           | Ok value -> let* _ = save record (Progress.Commit_uncertain value) in
             pending "commit returned without matching authoritative after-state"
           | Error detail -> let* _ = save record (Progress.Commit_uncertain (`String detail)) in pending detail)
-       | Error detail -> let* _ = save record (Progress.Commit_uncertain (`String detail)) in pending detail)
-    | Ok observed -> let* _ = save record (Progress.Commit_conflicted observed) in
-      pending "original commit conflicts with authoritative current Task" in
-  let recover record commit =
+       | Error (Outcome_unknown {error; detail}) ->
+         let* _ = save record (Progress.Commit_uncertain (`String detail)) in
+         Error (Apply_failed error)
+       | Error (Authority_refused {error; detail}) ->
+         let* record = save record (Progress.Commit_uncertain (`String detail)) in
+         observe_refusal record commit error)
+    | Ok observed -> conflicted record commit observed in
+  let authenticate record commit =
     let original=O.original record in
     let* result,notes=O.judgment_of_json ~original commit.Progress.judgment
-      |> Result.map_error (fun d -> Original_corrupt d) in
-    let* digest=V.digest original |> Result.map_error (fun d -> Original_corrupt d) in
+      |> Result.map_error (fun d -> Worker_error (Original_corrupt d)) in
+    let* digest=V.digest original |> Result.map_error (fun d -> Worker_error (Original_corrupt d)) in
     let* ()=match commit.Progress.change.after with
       | `Assoc fields when List.assoc_opt "original_digest" fields=Some (`String digest)
         && (match List.assoc_opt "review" fields with
           | Some json -> Yojson.Safe.equal json (O.result_to_json result)
           | None -> false)
         && List.assoc_opt "notes" fields=Some (`String notes) -> Ok ()
-      | _ -> Error (Original_corrupt "commit intent does not bind its exact original and judgment") in
+      | _ -> Error (Worker_error (Original_corrupt "commit intent does not bind its exact original and judgment")) in
+    Ok () in
+  let recover record commit =
+    let* () = authenticate record commit in
     let* record = match Progress.phase (O.progress record) with
       | Progress.Committing _ -> save record (Progress.Commit_uncertain
           (`Assoc ["cause",`String "commit_completion_not_yet_confirmed"]))
       | Commit_unknown _ -> Ok record
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _
       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
-        Error (Original_corrupt "commit recovery lacks retained original intent") in
+        Error (Worker_error (Original_corrupt "commit recovery lacks retained original intent")) in
     read record commit in
   match Progress.phase (O.progress retained) with
-  | Progress.Finished _ -> Ok ()
+  | Progress.Finished commit -> authenticate retained commit
   | Committing commit | Commit_unknown (commit,_) -> recover retained commit
   | Judged judgment ->
     let* result,_notes = O.judgment_of_json ~original:(O.original retained) judgment
-      |> Result.map_error (fun d -> Original_corrupt d) in
+      |> Result.map_error (fun d -> Worker_error (Original_corrupt d)) in
     (match result.AR.verdict with
-     | None -> Error (Original_corrupt "non-verdict cannot authorize domain commit")
+     | None -> Error (Worker_error (Original_corrupt "non-verdict cannot authorize domain commit"))
      | Some _ ->
        let* record = save retained (Progress.Commit_intended change) in
        (* Treat even first admission as possible until its exact before-state
@@ -179,4 +223,6 @@ let commit_attempt ~store ~verification_id ~attempt ~installation_id ~package_id
        recover record {Progress.judgment;change})
   | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
     pending "review has no retained judgment to commit"
-  | Conflicted _ -> pending "original commit is conflicted; host resolution required"
+  | Conflicted (commit, observed) ->
+    let* () = authenticate retained commit in
+    Error (Commit_conflicted {commit; observed})

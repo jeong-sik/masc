@@ -1160,14 +1160,15 @@ let run_host_cycle m e (port : host_port) =
          | Ok body -> Ok (Deliver body)
          | Error (Lane_addon_host_delivery.Refused reason) -> Ok (not_allowed reason)
          | Error (Storage_failed detail) -> Error (Result_delivery_failed {request_id; detail}))
-    | Lane_addon_host_request.Web_search {request_id; query; limit} ->
-        (match !web_search_runner with
-         | None -> Error No_web_search_runner
-         | Some run ->
+    | Lane_addon_host_request.Web_search {request_id = _; query; limit} ->
+        (match e.package.web_search, !web_search_runner with
+         | false, _ ->
+             Ok (not_allowed "the package manifest does not declare [world] web_search = true")
+         | true, None -> Error No_web_search_runner
+         | true, Some run ->
              (match run ~query ~limit with
               | Ok envelope ->
-                  Ok (Deliver (Lane_addon_host_request.result_arguments ~request_id
-                    ~result:(Lane_addon_search_result.result_to_json envelope)))
+                  Ok (Deliver (Lane_addon_search_result.result_to_json envelope))
               | Error detail ->
                   Ok (not_allowed ("host web search failed: " ^ detail)))) in
   let try_request request =
@@ -4334,5 +4335,6 @@ module For_testing = struct
     Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
     Hashtbl.clear configuration_services; Hashtbl.clear managers;
     Hashtbl.iter (fun _ stop -> stop ()) fleet_services; Hashtbl.clear fleet_services;
-    fleet_backend := None; delivery_handler := None; sampling_factory := None; skill_export_handler := None
+    fleet_backend := None; delivery_handler := None; sampling_factory := None; skill_export_handler := None;
+    web_search_runner := None
 end

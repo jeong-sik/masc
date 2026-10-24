@@ -1,5 +1,26 @@
 # Completion-authority observations survive this turn's tool loop
 
+## Candidate review status
+
+Candidate `2be9d21697fb4c9da9aafd769f5fa691bae2e757` is **source FAIL, P2**.
+Its product and direct-test files match author e9f72f1. Independent execution
+found that Official Start puts the event in the vendor's fixed System; when
+the next local turn has no event, Resume sends no corresponding observation.
+The initial System event can therefore outlive its intended current-turn scope.
+The ordinary HTTP retention result remains narrower evidence. The
+[independent finding](independent-source-review-e9-fail.json) and
+[lifetime counterexample](independent-official-lifetime-counterexample.json)
+are preserved while the Official carrier is repaired.
+
+Native run [40114401559](https://github.com/jeong-sik/masc/actions/runs/40114401559)
+at this candidate stopped during compilation: the new fixture used unqualified
+constructor `Text`. None of the six selected executables ran. This is recorded
+in [the native receipt](native-result-2be9.json), not counted as six behavior
+failures. The new carrier and fixture corrections require their own review
+and check results. Latest actual acceptance remains **9/11**.
+
+## Repair implementation and scoped checks
+
 The retained Qwen canary has an actual Task-approval notice in request 21,
 including its Task, verification and authority correlation keys. Requests
 22–29 omit that notice while older AwaitingVerification tool feedback remains.

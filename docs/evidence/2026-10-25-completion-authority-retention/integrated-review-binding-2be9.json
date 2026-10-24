@@ -1,0 +1,10 @@
+{
+  "integrated_candidate": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+  "reviewed_author_head": "e9f72f1c985761e032e0fef878ce1dc6d0111ad2",
+  "reviewed_author_base": "cc5104805e3963a9ef1a4fcb0013145514466a91",
+  "root_parent": "177219da10c1b27b606c10af70b4bf6ea39211da",
+  "binding": "19 changed product/direct-test files match author; root-only additions are docs/changelog. See integration-binding-44fd.json.",
+  "source_verdict": "FAIL",
+  "finding": "P2: Completion Authority in Official Start fixed System can outlive the local turn; a later absent observation sends no clearing packet.",
+  "runtime_model_claim": "No post-fix model success inferred; latest acceptance remains9/11."
+}

@@ -91,7 +91,7 @@ let original_key original =
 let summary original run =
   let* digest = V.digest original in
   let* _ = run_of_json (run_json run) in
-  Ok (`Assoc ["schema", `String "goal_verifier_owner/v1";
+  Lane_addon_action.canonical (`Assoc ["schema", `String "goal_verifier_owner/v1";
     "original_digest", `String digest; "run", run_json run])
 
 let validate_record ~installation_id ~package_id (record : Owner.retained) =
@@ -187,13 +187,25 @@ let receipt_of_json retained json =
     Error "Goal verifier receipt differs from its original or fixed run"
   else Ok {run; result; tools; elapsed_s}
 
+(* Task reviews permit a reasonless APPROVE, but a Goal proof requires the
+   model's stated evidence. Keep the exact reply in the receipt and project
+   only its Goal admission disposition. No retryable provider failed here. *)
+let goal_admission_result (result : AR.review_result) =
+  match result.verdict with
+  | Some (AR.Approve reason | Reject reason) when String.trim reason = "" ->
+    {result with verdict=None; gate=AR.Invalid_verdict;
+      fallback_reason=Some "Goal verdict has no stated reason";
+      retryable_runtimes=[]}
+  | None | Some (Approve _ | Reject _) -> result
+
 let refusal_receipt retained evidence =
   let* fields = object_fields ["schema"; "receipt"; "disposition"] evidence in
   let* version = text "schema" fields in
   let* receipt_json = field "receipt" fields in
   let* receipt = receipt_of_json retained receipt_json in
   let* disposition = field "disposition" fields in
-  if version <> "goal_verifier_refusal/v1" || receipt.result.AR.verdict <> None then
+  if version <> "goal_verifier_refusal/v1"
+      || (goal_admission_result receipt.result).AR.verdict <> None then
     Error "Goal verifier refusal is not an original non-verdict"
   else Ok (receipt, disposition)
 
@@ -293,9 +305,10 @@ let retryable_refusal retained evidence =
   let* receipt, disposition = decode (refusal_receipt retained evidence) in
   let* fields = decode (object_fields ["schema"; "certainty"; "observations"; "result"] disposition) in
   let* result = decode (field "result" fields) in
-  let* () = if Yojson.Safe.equal result (Verifier_review_owner.result_to_json receipt.result)
+  let* () = if Yojson.Safe.equal result
+      (Verifier_review_owner.result_to_json (goal_admission_result receipt.result))
     then Ok () else invalid "Goal refusal differs from its original result" in
-  match receipt.result.AR.retryable_runtimes with
+  match (goal_admission_result receipt.result).AR.retryable_runtimes with
   | [] -> Ok false
   | _::_ -> let* () = decode (Verifier_review_owner.retry_result disposition) in Ok true
 
@@ -460,13 +473,14 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         elapsed_s=max 0. (Time_compat.now () -. retained.run.started_at)} in
       let encoded = match receipt_json retained receipt with
         | Ok json -> json | Error detail -> raise (Retention_failed (Original_invalid detail)) in
+      let admission = goal_admission_result result in
       let disposition = `Assoc (["schema", `String (if !reached then "verifier_review_refusal/v1"
           else "verifier_admission_refusal/v1");
-        "observations", `List (List.rev !facts); "result", Verifier_review_owner.result_to_json result]
+        "observations", `List (List.rev !facts); "result", Verifier_review_owner.result_to_json admission]
         @ if !reached then ["certainty", `String "definite"] else []) in
       let refusal = `Assoc ["schema", `String "goal_verifier_refusal/v1";
         "receipt", encoded; "disposition", disposition] in
-      let event = match !unknown, result.AR.verdict, !reached with
+      let event = match !unknown, admission.AR.verdict, !reached with
         | true, _, _ -> Progress.Execution_observed (Progress.Outcome_unknown
             (`Assoc ["schema", `String "goal_verifier_unknown/v1";
               "receipt", encoded; "observations", `List (List.rev !facts)]))
@@ -515,11 +529,14 @@ let commit ~store ~retained ~change ~observe ~apply =
   let validate commit =
     let* receipt = decode (receipt_of_json retained commit.Progress.judgment) in
     let* digest = decode (V.digest retained.original) in
-    let* encoded = decode (receipt_json retained receipt) in
     let* () = match receipt.result.AR.verdict, commit.change.after with
       | Some _, `Assoc fields when List.assoc_opt "original_digest" fields = Some (`String digest)
           && (match List.assoc_opt "receipt" fields with
-            | Some value -> Yojson.Safe.equal value encoded | None -> false) -> Ok ()
+            (* The owner canonicalizes integral JSON numbers when retaining
+               progress. Decoding a receipt restores typed float metadata;
+               re-encoding it would change 0 back to 0.0. Authenticate the
+               exact retained judgment after its typed validation above. *)
+            | Some value -> Yojson.Safe.equal value commit.judgment | None -> false) -> Ok ()
       | None, _ | Some _, _ -> invalid "Goal commit intent differs from its original structured judgment" in
     Ok () in
   let confirm saved commit =

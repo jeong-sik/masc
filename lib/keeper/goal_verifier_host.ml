@@ -82,23 +82,37 @@ let publish ~registry retained ~outcome =
       same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s
       && (observed = outcome || observed = R.Committed) in
   let* prior = read_registry ~registry retained in
+  let record_completion () =
+    try R.mark_completed registry ~run_id:(W.run_identity retained).run_id ~outcome
+      ~evaluated_verdict:expected.evaluated ~tools:expected.tools ?evaluator_runtime:expected.runtime
+      ~elapsed_s:expected.elapsed (); Ok ()
+    with Sys_error detail -> Error (Unavailable detail) in
   let* () = match prior with
     | Some row when confirmed row -> Ok ()
-    | Some {R.status=R.Completed {evaluated_verdict=(Some _ as evaluated_verdict);
-        evaluator_runtime; tools; elapsed_s; _}; _}
-        when not (same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s) ->
-      Error (Conflict "Goal registry already retains a different structured judgment or its observations")
-    | None | Some _ ->
-      (try R.mark_completed registry ~run_id:(W.run_identity retained).run_id ~outcome
-         ~evaluated_verdict:expected.evaluated ~tools:expected.tools ?evaluator_runtime:expected.runtime
-         ~elapsed_s:expected.elapsed (); Ok ()
-       with Sys_error detail -> Error (Unavailable detail)) in
+    | Some {R.status=R.Completed {evaluated_verdict; evaluator_runtime; tools; elapsed_s; _}; _} ->
+      if Option.is_some evaluated_verdict
+          && not (same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s)
+      then Error (Conflict "Goal registry already retains a different structured judgment or its observations")
+      else record_completion ()
+    | None | Some {R.status=R.Running; _} -> record_completion () in
   let* observed = read_registry ~registry retained in
   match observed with
   | Some row when confirmed row -> Ok ()
   | None | Some _ -> Error (Unavailable "Goal completion receipt not observed for its exact original")
 
 let needs_recovery ~registry retained =
+  let terminal ~conflicted =
+    let* expected = completion ~registry retained in
+    let* row = read_registry ~registry retained in
+    match row with
+    | None | Some {R.status=R.Running; _} -> Ok true
+    | Some {R.status=R.Completed {outcome; evaluated_verdict; evaluator_runtime; tools; elapsed_s}; _} ->
+      if not (same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s)
+      then Ok true
+      else Ok (match outcome with
+        | R.Committed -> false
+        | Superseded _ -> not conflicted
+        | Reviewed | Deferred _ | Raised _ | Review_cancelled _ -> true) in
   match P.phase (W.progress retained) with
   | P.Judged _ | Committing _ | Commit_unknown _ -> Ok true
   | Captured -> Ok false
@@ -106,19 +120,11 @@ let needs_recovery ~registry retained =
     let* expected = completion ~registry retained in
     let* row = read_registry ~registry retained in
     (match row with
-     | Some {R.status=R.Completed {evaluated_verdict; evaluator_runtime; tools; elapsed_s; _}; _}
-       when same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s -> Ok false
-     | None | Some _ -> Ok true)
-  | Finished _ | Conflicted _ ->
-    let* expected = completion ~registry retained in
-    let* row = read_registry ~registry retained in
-    (match row with
-     | Some {R.status=R.Completed {outcome; evaluated_verdict; evaluator_runtime; tools; elapsed_s}; _}
-       when same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s ->
-       (match outcome, P.phase (W.progress retained) with
-        | R.Committed, _ | Superseded _, P.Conflicted _ -> Ok false
-        | (Reviewed | Superseded _ | Deferred _ | Raised _ | Review_cancelled _), _ -> Ok true)
-     | None | Some _ -> Ok true)
+     | Some {R.status=R.Completed {evaluated_verdict; evaluator_runtime; tools; elapsed_s; _}; _} ->
+       Ok (not (same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s))
+     | None | Some {R.status=R.Running; _} -> Ok true)
+  | Finished _ -> terminal ~conflicted:false
+  | Conflicted _ -> terminal ~conflicted:true
 
 let evidence_json items = `List (List.map Workspace_verification_store.submitted_evidence_item_to_yojson items)
 let bound_pending original (record : Goal_verification.record) =

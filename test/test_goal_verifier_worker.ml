@@ -379,6 +379,42 @@ let actual_review verdict calls =
     Ok {AR.selected_runtime_id="goal-reviewer"; verdict=Some verdict}
 let actual_approve calls = actual_review (AR.Approve "actual target measured") calls
 
+let test_actual_integral_receipt_commits_after_restart () = with_workspace (fun config store _ ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 42.;
+  Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
+  Fun.protect ~finally:Time_compat.clear_clock (fun () ->
+    let authority, retained = host_prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      ignore (checked (run store retained authority));
+      let store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+      let retained = host_load store original in
+      let judgment = checked (W.retained_judgment retained) in
+      Alcotest.(check bool) "the actual owner canonicalized integral receipt metadata" true
+        (Yojson.Safe.Util.(judgment |> member "elapsed_s") = `Int 0
+          && Yojson.Safe.Util.(judgment |> member "run" |> member "started_at") = `Int 42);
+      let changed = match judgment with
+        | `Assoc fields -> `Assoc (("elapsed_s", `Int 1) :: List.remove_assoc "elapsed_s" fields)
+        | _ -> Alcotest.fail "actual retained judgment is not an object" in
+      let after = `Assoc ["original_digest", `String (get (V.digest original)); "receipt", changed] in
+      (match W.commit ~store ~retained ~change:{P.before=`Null; after}
+          ~observe:(fun _ -> Alcotest.fail "changed receipt reached domain observation")
+          ~apply:(fun _ -> Alcotest.fail "changed receipt reached domain application") with
+       | Error (W.Original_invalid _) -> ()
+       | Ok () | Error _ -> Alcotest.fail "modified original receipt was admitted");
+      drain config;
+      drain config;
+      Alcotest.(check int) "restart and repeated recovery do not ask another model" 1 !calls;
+      Alcotest.(check bool) "integral original metadata commits the actual proof" true
+        (phase config subject.goal_id=Goal_phase.Awaiting_confirmation);
+      match get (Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id) with
+      | Some {completion=Goal_verification.Proof_proven verdict; _} ->
+        Alcotest.(check string) "proof keeps the original run" (W.run_identity retained).run_id verdict.verification_run_id
+      | None | Some _ -> Alcotest.fail "actual integral receipt did not retain its proof")))
+
 let test_actual_agent_restores_before_lookup_and_registry () = with_workspace (fun config store root ->
   let authority, retained = host_prepared config store in
   let original = W.original retained in
@@ -508,6 +544,51 @@ let test_actual_explicit_retry_and_unknown_fence () =
   exercise false;
   exercise true
 
+let test_reasonless_goal_reply_requires_explicit_retry () =
+  let exercise reason = with_workspace (fun config store _ ->
+    let _, retained = host_prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (actual_review (AR.Approve reason) calls) (fun () ->
+      drain config;
+      let store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+      let config = Workspace.default_config config.base_path in
+      let restored = host_load store original in
+      (match P.phase (W.progress restored) with
+       | Rejected {stage=P.Execution; _} -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+       | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=P.Before_dispatch; _}
+       | Subdividing _ | Subdivided _ -> Alcotest.fail "reasonless Goal reply became a judgment");
+      let receipt = match checked (W.restored_receipt restored) with
+        | Some receipt -> receipt | None -> Alcotest.fail "original reply was not retained" in
+      Alcotest.(check bool) "raw model verdict and actual lookup survive reopening" true
+        (receipt.result.verdict = Some (AR.Approve reason) && receipt.tools <> []);
+      Atomic.set AR.run_llm_reviewer_fn (actual_approve calls);
+      (match Agent.process_pending_work config {Agent.goal_id=subject.goal_id} with
+       | Deferred Verdict_without_reason -> ()
+       | Deferred _ | Committed | Superseded -> Alcotest.fail "ordinary wake lost the original non-judgment");
+      Alcotest.(check int) "ordinary wake does not redispatch" 1 !calls;
+      Alcotest.(check bool) "ordinary wake leaves proof pending" true
+        (phase config subject.goal_id=Goal_phase.Verifying);
+      transition config subject.goal_id "request_complete";
+      transition config subject.goal_id "request_complete";
+      let rows = checked (W.inventory ~store ~installation_id:W.host_installation_id
+        ~package_id:W.host_package_id) in
+      Alcotest.(check int) "repeated explicit request retains one linked successor" 2 (List.length rows);
+      drain config;
+      Alcotest.(check int) "explicit request makes one new model call" 2 !calls;
+      Alcotest.(check bool) "stated evidence advances to human confirmation" true
+        (phase config subject.goal_id=Goal_phase.Awaiting_confirmation);
+      match get (Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id) with
+      | Some {completion=Goal_verification.Proof_proven verdict; _} ->
+        Alcotest.(check string) "proof binds the original pending request" subject.request_id verdict.request_id;
+        Alcotest.(check string) "proof uses the new stated evidence" "actual target measured" verdict.evidence;
+        Alcotest.(check bool) "successor has its own fixed run" true
+          (verdict.verification_run_id <> receipt.run.run_id)
+      | None | Some _ -> Alcotest.fail "explicit retry did not commit the actual Goal proof")) in
+  List.iter exercise [""; " \t\n"]
+
 let test_actual_bound_suspend_and_drop () =
   let exercise dropped = with_workspace (fun config store _ ->
     let authority, retained = host_prepared config store in
@@ -523,8 +604,12 @@ let test_actual_bound_suspend_and_drop () =
         (phase config subject.goal_id = if dropped then Goal_phase.Dropped else Paused Resume_verifying);
       if not dropped then (
         transition config subject.goal_id "resume";
+        Alcotest.(check bool) "resume restores the original verifying phase before its wake is consumed" true
+          (phase config subject.goal_id=Goal_phase.Verifying);
+        drain config;
         Alcotest.(check bool) "resume reconciles proof without human completion" true
-          (phase config subject.goal_id=Goal_phase.Awaiting_confirmation)))) in
+          (phase config subject.goal_id=Goal_phase.Awaiting_confirmation);
+        Alcotest.(check int) "the actual resume consumer reuses the committed proof" 1 !calls))) in
   exercise false;
   exercise true
 
@@ -535,8 +620,10 @@ let () = Alcotest.run "retained Goal worker" ["execution", [
   Alcotest.test_case "authority destination and strict inventory" `Quick test_destination_authority_and_inventory;
   Alcotest.test_case "linked frontier restores the original staged run" `Quick test_linked_frontier_and_staged_run_recovery;
   Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict;
+  Alcotest.test_case "actual integral receipt commits after restart and rejects alteration" `Quick test_actual_integral_receipt_commits_after_restart;
   Alcotest.test_case "actual agent restores before lookup and registry" `Quick test_actual_agent_restores_before_lookup_and_registry;
   Alcotest.test_case "actual proof partial write and phase-moved boot" `Quick test_actual_partial_proof_and_nonverifying_boot;
   Alcotest.test_case "actual explicit retry and unknown fence" `Quick test_actual_explicit_retry_and_unknown_fence;
+  Alcotest.test_case "reasonless Goal reply needs an explicit linked retry" `Quick test_reasonless_goal_reply_requires_explicit_retry;
   Alcotest.test_case "actual bound suspend and drop" `Quick test_actual_bound_suspend_and_drop;
   Alcotest.test_case "cloned workspace refuses the original judgment" `Quick test_cloned_workspace_cannot_commit_original]]

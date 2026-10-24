@@ -1178,12 +1178,12 @@ let test_load_survives_purge_checkpoint_and_resume () =
       |> require_placement
     in
     let resumed =
-      Agent_core.Agent.resume
+      (Agent_core.Agent.resume
         ~net:env#net
         ~checkpoint
         ~context:fresh_context
         ~tools:(next.tool :: next.already_used)
-        ()
+        () |> Result.get_ok)
     in
     agent_cell := Some resumed;
     let tool =

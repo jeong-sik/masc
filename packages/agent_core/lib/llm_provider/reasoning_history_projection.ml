@@ -39,6 +39,13 @@ type error =
       ; classification : Types.Reasoning_source.classification
       }
   | Invalid_response_replay of { message_index : int; detail : string }
+  | Missing_resume_reasoning_source of { message_index : int }
+  | Incompatible_resume_reasoning_source of
+      { message_index : int
+      ; stored : Types.Reasoning_source.t
+      ; target : Types.Reasoning_source.t
+      }
+  | Invalid_resume_reasoning_role of { message_index : int }
   | Unsupported_reasoning_block of
       { message_index : int
       ; block_index : int
@@ -59,6 +66,13 @@ let error_to_string = function
       "reasoning source is attached to a non-Assistant message at history index %d (%s)"
       message_index
       (Types.Reasoning_source.show_classification classification)
+  | Missing_resume_reasoning_source { message_index } ->
+    Printf.sprintf "resume reasoning has no producing source at history index %d" message_index
+  | Incompatible_resume_reasoning_source { message_index; stored; target } ->
+    Printf.sprintf "resume reasoning source is incompatible at history index %d (%s -> %s)"
+      message_index (Types.Reasoning_source.show stored) (Types.Reasoning_source.show target)
+  | Invalid_resume_reasoning_role { message_index } ->
+    Printf.sprintf "resume reasoning is on a non-Assistant message at history index %d" message_index
   | Invalid_response_replay {message_index; detail} ->
     Printf.sprintf "invalid response replay at history index %d: %s" message_index detail
   | Unsupported_reasoning_block { message_index; block_index; block_kind } ->
@@ -109,6 +123,36 @@ let content_has_reasoning =
   List.exists (function
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> true
     | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+;;
+
+let validate_resume_for_provider_config (config : Provider_config.t) messages =
+  Result.bind (validate_and_classify messages) (fun classified ->
+    match Reasoning_dialect.replay_capability_for_provider_config config with
+    | Error detail -> Error (Invalid_reasoning_target detail)
+    | Ok replay_capability ->
+      let rec check = function
+        | [] -> Ok replay_capability
+        | (message_index, (message : Types.message), classification) :: rest ->
+          if not (content_has_reasoning message.content) then check rest
+          else match message.role with
+          | System | User | Tool -> Error (Invalid_resume_reasoning_role {message_index})
+          | Assistant ->
+            (match classification with
+             | Types.Reasoning_source.Absent ->
+               Error (Missing_resume_reasoning_source {message_index})
+             | Invalid | Duplicate ->
+               Error (Invalid_reasoning_source {message_index; classification})
+             | Present stored ->
+               if Types.Reasoning_source.rotation_admits
+                   ~rotation_policy:replay_capability.rotation
+                   ~stored ~target:replay_capability.target
+               then check rest
+               else Error (Incompatible_resume_reasoning_source
+                 {message_index; stored; target=replay_capability.target}))
+      in
+      match config.preserve_thinking with
+      | Some false -> Ok replay_capability
+      | None | Some true -> check classified)
 ;;
 
 let content_has_tool_use =

@@ -5,14 +5,55 @@
 
 open Types
 
+type resume_error =
+  | Invalid_checkpoint_version of { expected : int; got : int }
+  | Invalid_checkpoint_binding of string
+  | Replay_rejected of Llm_provider.Reasoning_history_projection.error
+
+let resume_error_to_string = function
+  | Invalid_checkpoint_version {expected; got} ->
+    Printf.sprintf "checkpoint version %d does not match current version %d" got expected
+  | Invalid_checkpoint_binding detail -> "invalid checkpoint producer binding: " ^ detail
+  | Replay_rejected error -> Llm_provider.Reasoning_history_projection.error_to_string error
+;;
+
+type binding_disposition =
+  | Unconfigured_target
+  | Unrecorded_producer
+  | Identical_source
+  | Declared_endpoint_rotation
+  | Rebound_without_replay_loss
+  | Replay_disabled_by_caller
+
+let binding_disposition_to_string = function
+  | Unconfigured_target -> "unconfigured_target"
+  | Unrecorded_producer -> "unrecorded_producer"
+  | Identical_source -> "identical_source"
+  | Declared_endpoint_rotation -> "declared_endpoint_rotation"
+  | Rebound_without_replay_loss -> "rebound_without_replay_loss"
+  | Replay_disabled_by_caller -> "replay_disabled_by_caller"
+;;
+
 type resume_state =
   { state : agent_state
   ; context : Context.t
+  ; provider_config : Llm_provider.Provider_config.t option
+  ; binding_disposition : binding_disposition
   }
 
 (** Build restored state from a checkpoint.
     Returns state + context; the caller wraps these into Agent.t. *)
-let build_resume ~(checkpoint : Checkpoint.t) ?(eio_context = false) ?config ?context () =
+let build_resume ~(checkpoint : Checkpoint.t) ?(eio_context = false) ?config ?provider_config ?context () =
+  let ( let* ) = Result.bind in
+  let* () =
+    if checkpoint.version = Checkpoint.checkpoint_version then Ok ()
+    else Error (Invalid_checkpoint_version
+      {expected=Checkpoint.checkpoint_version; got=checkpoint.version}) in
+  let* () = match checkpoint.provider_binding with
+    | None -> Ok ()
+    | Some source -> Reasoning_source.of_yojson (Reasoning_source.to_yojson source)
+        |> Result.map (fun _ -> ())
+        |> Result.map_error (fun detail -> Invalid_checkpoint_binding detail) in
   let restored_config =
     match config with
     | Some caller_config -> caller_config
@@ -33,6 +74,26 @@ let build_resume ~(checkpoint : Checkpoint.t) ?(eio_context = false) ?config ?co
       ; cache_system_prompt = checkpoint.cache_system_prompt
       }
   in
+  let* provider_config, binding_disposition =
+    match provider_config with
+    | None -> Ok (None, Unconfigured_target)
+    | Some provider ->
+      let provider = Agent_turn.provider_config_with_agent_config ~config:restored_config provider
+        |> Llm_provider.Provider_config.freeze_for_request in
+      let* capability = Llm_provider.Reasoning_history_projection.validate_resume_for_provider_config
+        provider checkpoint.messages
+        |> Result.map_error (fun error -> Replay_rejected error) in
+      let disposition = match provider.preserve_thinking, checkpoint.provider_binding with
+        | Some false, _ -> Replay_disabled_by_caller
+        | (None | Some true), None -> Unrecorded_producer
+        | (None | Some true), Some stored ->
+          if Reasoning_source.equal stored capability.target then Identical_source
+          else if Reasoning_source.rotation_admits ~rotation_policy:capability.rotation
+              ~stored ~target:capability.target then Declared_endpoint_rotation
+          else Rebound_without_replay_loss
+      in
+      Ok (Some provider, disposition)
+  in
   let state =
     { config = restored_config
     ; provider_binding = checkpoint.provider_binding
@@ -46,7 +107,7 @@ let build_resume ~(checkpoint : Checkpoint.t) ?(eio_context = false) ?config ?co
     | Some c -> c
     | None -> Context.copy ~eio:eio_context checkpoint.context
   in
-  { state; context = ctx }
+  Ok { state; context = ctx; provider_config; binding_disposition }
 ;;
 
 (** Build a checkpoint from explicit state parameters.

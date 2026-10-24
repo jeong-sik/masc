@@ -266,7 +266,7 @@ let test_agent_run_stream_append_only_raw_trace () =
       | None -> Alcotest.fail "missing first raw trace run ref"
     in
     let checkpoint = Agent.checkpoint ~session_id:"sess-raw" agent in
-    let resumed = Agent.resume ~net:env#net ~checkpoint ~tools ~options () in
+    let resumed = (Agent.resume ~net:env#net ~checkpoint ~tools ~options () |> Result.get_ok) in
     let response2 = unwrap (Agent.run ~sw resumed "trace chain again") in
     let text2 = response_text response2 in
     Alcotest.(check string) "second final text" "trace complete" text2;

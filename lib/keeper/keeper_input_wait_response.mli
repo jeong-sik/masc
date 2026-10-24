@@ -6,6 +6,7 @@ type refusal =
   | Source_changed of Keeper_checkpoint_ref.t
   | Input_not_current of Agent_core.Agent_input_request.settlement_error
   | Input_checkpoint_failed of Agent_core.Error.t
+  | Resume_refused of Agent_core.Agent_checkpoint.resume_error
 
 val prepare :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

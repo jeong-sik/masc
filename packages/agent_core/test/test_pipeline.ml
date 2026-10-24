@@ -3771,7 +3771,7 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
          in
          let resumed_stages = ref [] in
          let resumed_agent =
-           Agent.resume
+           (Agent.resume
              ~net:(Eio.Stdenv.net env)
              ~checkpoint
              ~tools:resumed_tools
@@ -3780,7 +3780,7 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
              ~checkpoint_sink:(fun snapshot ->
                resumed_stages := snapshot.Agent.stage :: !resumed_stages;
                Ok ())
-             ()
+             () |> Result.get_ok)
          in
          let execution_store = Agent.execution_store ~runtime ~dir ~resume:locator () in
          (match

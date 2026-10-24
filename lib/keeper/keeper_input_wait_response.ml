@@ -7,6 +7,7 @@ type refusal =
   | Source_changed of Keeper_checkpoint_ref.t
   | Input_not_current of Agent_core.Agent_input_request.settlement_error
   | Input_checkpoint_failed of Agent_core.Error.t
+  | Resume_refused of Agent_core.Agent_checkpoint.resume_error
 
 let source_ref prepared = prepared.source_ref
 let checkpoint prepared = prepared.checkpoint
@@ -17,7 +18,9 @@ let prepare ~net ~expected_source_ref ~source ~pending ~response =
   then Error (Source_changed source_ref)
   else
     let checkpoint = Keeper_checkpoint_store.exact_snapshot_checkpoint source in
-    let agent = Agent_core.Agent.resume ~net ~checkpoint () in
+    let ( let* ) = Result.bind in
+    let* agent = Agent_core.Agent.resume ~net ~checkpoint ()
+      |> Result.map_error (fun error -> Resume_refused error) in
     Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
       match Agent_core.Agent.provide_input agent pending response with
       | Error (Agent_core.Agent.Input_not_current error) ->
@@ -68,6 +71,7 @@ let installation_error_to_string = function
   | Response_refused (Source_changed _) -> "response source changed"
   | Response_refused (Input_not_current _) -> "response request is no longer current"
   | Response_refused (Input_checkpoint_failed error) -> Agent_core.Error.to_string error
+  | Response_refused (Resume_refused error) -> Agent_core.Agent_checkpoint.resume_error_to_string error
   | Installation_unconfirmed _ -> "response file installation is unconfirmed; preserve evidence and reconcile before retry"
   | Installation_mismatch _ -> "response canonical installation differs from its retained bytes; preserve both references and reconcile"
 let rec prefix expected actual = match expected,actual with

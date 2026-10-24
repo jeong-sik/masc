@@ -218,7 +218,7 @@ let test_clone_from_resumed_agent () =
     };
   (* Simulate resume by creating checkpoint and restoring *)
   let cp = Agent.checkpoint ~session_id:"s1" agent in
-  let resumed = Agent.resume ~net:env#net ~checkpoint:cp () in
+  let resumed = (Agent.resume ~net:env#net ~checkpoint:cp () |> Result.get_ok) in
   let clone = Agent.clone ~copy_context:true resumed in
   check int "clone turn_count from resumed" 3 (Agent.state clone).turn_count;
   check int "clone messages from resumed" 2 (List.length (Agent.state clone).messages);

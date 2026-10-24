@@ -30,6 +30,13 @@ let test_connections_and_sessions () =
     (choose {opened with automation=work Lane.Browser_open}=
      Error (Selection.Ambiguous_browsers [Lane.Stagehand_route;Lane.Automation_route]))
 let test_explicit_binding () =
+  let workflow=match Lane.Native_workflow.of_json (`Assoc ["tabId",`Int 1;
+    "expectedUrl",`String "https://example.test/";"steps",`List [];"maxChars",`Int 1000]) with
+    | Ok request -> Lane.Page_native_workflow request | Error detail -> fail detail in
+  check bool "native workflow is bound to its observed tab" true (Selection.bound workflow);
+  check bool "native workflow cannot silently select another browser" true
+    (choose ~verb:workflow ~bound:(Selection.bound workflow)
+      {empty with live_clients=[client "3" Lane.Ego_task_space]}=Error Selection.Binding_required);
   check bool "automatic bound request cannot change browser" true (choose ~bound:true empty=Error Selection.Binding_required);
   let explicit=Lane.Live_route (Some (client "1" Lane.Webdriver_bidi).client_id) in
   selected {route=explicit;reason=Selection.Explicit_browser}

@@ -144,8 +144,9 @@ equivalent explicitly on every node that has one.
   plan and authorized tool/Skill contracts without publishing a Skill. Ordinary
   nodes take fixed `args` or an `input` template for upstream values, never both.
   Exact admitted child Skills take `skill_reference` and expose their declared
-  exports. Inline Read/Edit plans can overlap independent supported files after
-  inputs resolve; Write keeps its original Serial handler and publication recovery.
+  exports. Supported inline Read/Edit/Write plans can overlap independent file
+  scopes after inputs resolve; unsupported bindings keep the original schedule.
+  Original handlers, authorization and publication recovery still apply.
   Durable async plans use the admitted read-only and owned-job/Ask contracts above.
   Preparation does not execute or activate a Skill, and is not a prerequisite for
   an existing composition or a direct tool.

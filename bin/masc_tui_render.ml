@@ -128,7 +128,7 @@ let overview_header (state : state) ~cols =
     ~label:(Terminal_text.single_line state.workspace)
     ~badge:(connection_badge state)
 
-let render_overview (state : state) =
+let render_overview (state : state) home =
   let terminal_rows, full_cols = get_terminal_size () in
   let sidebar =
     if state.keeper_navigation_open then
@@ -138,9 +138,9 @@ let render_overview (state : state) =
     else None
   in
   let cols = full_cols - (match sidebar with None -> 0 | Some (width, _) -> width) in
-  let all_decisions = Masc_tui_home.home_decision_rows state in
-  let continuation = Masc_tui_home.home_continue_rows state in
-  let selected = Masc_tui_home.home_selected_action state in
+  let all_decisions = Masc_tui_home.home_decision_rows home in
+  let continuation = Masc_tui_home.home_continue_rows home in
+  let selected = Masc_tui_home.home_selected_action home in
   let overview_error, overview = overview_refresh_reading state in
   let health =
     match Terminal_text.optional_single_line overview_error, overview with
@@ -197,19 +197,20 @@ let render_overview (state : state) =
         (" " ^ pressable (Press_surface Approvals)
            (Ansi.dim ^ "p:Approvals / Questions" ^ Ansi.reset));
       (* The key loop stores the window's first row from the same number. *)
-      let budget = Masc_tui_home.home_requests_budget state ~chrome_budget in
+      let budget = Masc_tui_home.home_requests_budget home ~chrome_budget in
       let draw_row (action, label) =
         let line = "  " ^ label in
         if Option.equal equal_home_action (Some action) selected then c.push_selected line else c.push line
       in
       let selection_changed =
-        Option.is_some state.home_selected && Option.is_none selected
+        Masc_tui_home.home_selection_changed home
       in
       let warning_rows = if selection_changed then 1 else 0 in
       (* Keep continuation and new work visible while the request window
          follows the selected identity. All rows remain reachable with j/k. *)
-      let first, capacity = Masc_tui_home.home_decision_window state ~budget in
-      let notices = Masc_tui_home.home_notice_lines state
+      let first, capacity = Masc_tui_home.home_decision_window home
+          ~scroll:state.home_decision_scroll ~budget in
+      let notices = Masc_tui_home.home_notice_lines home
         |> List.take (max 0 (budget - warning_rows)) in
       List.iter c.push notices;
       let budget = max 0 (budget - List.length notices) in
@@ -496,13 +497,13 @@ let render_config = Masc_tui_render_config.render_config
 let render_about = Masc_tui_render_overlays.render_about
 let render_keeper_navigation = Masc_tui_render_overlays.render_keeper_navigation
 
-let render_surface (state : state) =
+let render_surface ~home (state : state) =
   let _, cols = get_terminal_size () in
   if state.keeper_navigation_open && cols < keeper_split_threshold_cols then
     render_keeper_navigation state
   else
   match state.view with
-  | Overview -> render_overview state
+  | Overview -> render_overview state (Lazy.force home)
   | Keepers Keeper_list ->
       if state.repository_changes_open then Masc_tui_render_repositories.render_repository_changes state
       else render_keeper_list state
@@ -675,7 +676,7 @@ let frame_choice (state : state) ~terminal_rows =
         | Some client -> `Client_detail client
         | None -> `Surface
 
-let render (state : state) =
+let render ~home (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
   (* So do the panes: a frame that ends without recording any, the
@@ -732,7 +733,7 @@ let render (state : state) =
     let frame, clamped = render_client_detail state client in
     (frame, clamped, None, Overlay_drawn)
   | `Surface ->
-    let frame, clamped = render_surface state in
+    let frame, clamped = render_surface ~home state in
     let presented_approval =
       match state.view with
       | Approvals ->

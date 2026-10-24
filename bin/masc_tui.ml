@@ -29852,7 +29852,7 @@ and is loaded on demand through keeper_skill.
        | Some ("p" | "P") when state.view = Overview ->
            goto_surface state ~mailbox:async_messages Approvals
        | Some ("\r" | "\n" | "enter") when state.view = Overview ->
-           (match Masc_tui_home.home_selected_action state with
+           (match Masc_tui_home.home_selected_action (Masc_tui_home.prepare state) with
             | None -> report_action state "system" "Selection changed; choose again"
             | Some action ->
               state.home_selected <- Some action;
@@ -33966,23 +33966,29 @@ and is loaded on demand through keeper_skill.
                  (match acting_pane_chunk_projection state ~terminal_rows ~terminal_cols with
                   | None -> ()
                   | Some projection -> state.acting_chunk_projection <- Some projection);
+                 (* This lazy belongs to one synchronous Build on the UI
+                    domain. Its first force precedes only Home focus/scroll
+                    updates, which preserve the reading used by drawing. *)
+                 let home = lazy (Masc_tui_home.prepare state) in
                  (match state.view, Masc_tui_render.frame_choice state ~terminal_rows with
                   | Overview, `Surface ->
-                      let selected = Masc_tui_home.home_selected_action state in
+                      let prepared = Lazy.force home in
+                      let selected = Masc_tui_home.home_selected_action prepared in
                       if Option.is_none state.home_selected
-                         && Masc_tui_home.home_initial_reading_ready state selected then
+                         && Masc_tui_home.home_initial_reading_ready prepared then
                         state.home_selected <- selected;
                       (* The same budget the drawing gives the window: the
                          help line and the requests link take body rows. *)
-                      let budget = Masc_tui_home.home_requests_budget state
+                      let budget = Masc_tui_home.home_requests_budget prepared
                           ~chrome_budget:
                             (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
-                      let first, _ = Masc_tui_home.home_decision_window state ~budget in
+                      let first, _ = Masc_tui_home.home_decision_window prepared
+                          ~scroll:state.home_decision_scroll ~budget in
                       state.home_decision_scroll <- first
                   | Overview, `Detail_reading _ -> ()
                   | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | `Patch)))))))))))))))
                   | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> ());
-                 render state)
+                 render ~home state)
            in
            (* The frame is what the operator will act on next, so the scroll it
               had to clamp is the scroll the next keypress moves from. Applied

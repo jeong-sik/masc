@@ -443,7 +443,7 @@ let test_home_task_survives_supplemental_source_failure () =
     state.tasks_error <- Some diagnostic;
     check bool "Home retains a current task despite supplemental failure" true
       (List.mem_assoc (Masc_tui_types.Home_request (Home_operator_task task_id))
-         (Masc_tui_home.home_decision_rows state));
+         (Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state)));
     check bool "Agenda uses the same primary reading" true
       (List.exists (fun line -> line.Agenda.goes_to = Agenda.Stuck_task task_id)
          (lines_of_state state));
@@ -463,7 +463,7 @@ let test_home_and_agenda_refuse_noncurrent_task_source () =
   check bool "Home offers no current task from a backup" false
     (List.exists (fun (action, _) -> match action with
        | Masc_tui_types.Home_request (Home_operator_task _) -> true
-       | _ -> false) (Masc_tui_home.home_decision_rows state));
+       | _ -> false) (Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state)));
   let agenda_lines = lines_of_state state in
   check bool "Agenda reports the noncurrent source" true
     (List.exists (fun line -> line.Agenda.tone = Agenda.Failed
@@ -655,13 +655,13 @@ let test_the_window_budget_follows_the_help_line () =
   let state = agenda_state () in
   state.help_hint_shown <- false;
   check int "help line and requests link take two rows" 18
-    (Masc_tui_home.home_requests_budget state ~chrome_budget:20);
+    (Masc_tui_home.home_requests_budget (Masc_tui_home.prepare state) ~chrome_budget:20);
   state.help_hint_shown <- true;
   check int "requests link takes one row" 19
-    (Masc_tui_home.home_requests_budget state ~chrome_budget:20);
+    (Masc_tui_home.home_requests_budget (Masc_tui_home.prepare state) ~chrome_budget:20);
   state.help_hint_shown <- false;
   check int "never below zero" 0
-    (Masc_tui_home.home_requests_budget state ~chrome_budget:1)
+    (Masc_tui_home.home_requests_budget (Masc_tui_home.prepare state) ~chrome_budget:1)
 
 let test_each_open_question_is_a_row_enter_opens () =
   let state = agenda_state () in
@@ -691,7 +691,7 @@ let home_questions state =
        | Masc_tui_types.Home_request (Masc_tui_types.Home_question ask) -> Some ask
        | Masc_tui_types.Home_request _ | Home_approvals | Home_agenda | Home_resume _
        | Home_read_last _ | Home_choose_keeper | Home_create_keeper -> None)
-    (Masc_tui_home.home_decision_rows state)
+    (Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state))
 
 let asker_of (ask : Masc.Tui_decode_asks.ask_key) =
   match ask.ak_asker with
@@ -732,7 +732,7 @@ let test_two_installations_asking_with_one_id_are_two_targets () =
      | Some target -> Agenda.equal_destination target second
      | None -> false);
   check bool "and so does Home" true
-    (match Masc_tui_home.home_selected_action state, asks with
+    (match Masc_tui_home.home_selected_action (Masc_tui_home.prepare state), asks with
      | Some (Masc_tui_types.Home_request (Home_question ask)), chosen :: _ ->
        Masc.Tui_decode_asks.equal_ask_key ask chosen
      | (Some _ | None), _ -> false)

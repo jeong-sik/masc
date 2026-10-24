@@ -1,0 +1,65 @@
+{
+  "observed_at": "2026-10-24T16:22:26.872650+00:00",
+  "scope": "Actual first provider request only; schema presence is not model compliance or runtime receipt execution. No raw thinking copied.",
+  "request": {
+    "path": "/tmp/masc-goal-wire-3014cfce-qwen/request-000002.request",
+    "bytes": 76907,
+    "sha256": "e282b493389e1174854c76be66d6827048f25e92b97cc82156dbc938dccf5ba9"
+  },
+  "offered_tools": [
+    "Execute",
+    "Grep",
+    "Read",
+    "Edit",
+    "Write",
+    "WebSearch",
+    "WebFetch",
+    "BrowserTabs",
+    "BrowserSession",
+    "BrowserGoto",
+    "BrowserInstruct",
+    "keeper_lane_status",
+    "keeper_tools_list",
+    "keeper_capability_search",
+    "keeper_context_status",
+    "keeper_artifact_read",
+    "keeper_memory_search",
+    "keeper_tasks_list",
+    "keeper_task_claim",
+    "keeper_task_create",
+    "keeper_task_done",
+    "masc_goal_measure",
+    "keeper_candle_balance",
+    "keeper_candle_catalog",
+    "keeper_candle_purchase",
+    "keeper_candle_equip",
+    "keeper_candle_gift",
+    "masc_board_post",
+    "masc_board_list",
+    "masc_board_post_get",
+    "masc_board_comment",
+    "masc_board_search",
+    "keeper_tool_search"
+  ],
+  "goal_measure_description": "Record an explicit observation of a Goal's declared metric. Supply the exact\ncurrent criterion_revision from masc_goal_list, the observed value, and\nsupporting evidence. This records a reported value; it does not prove\nthat the target was reached or change the Goal phase. The receipt returns\nmeasurement_status=reported_only, the actual goal_at_recording from the same\ntransaction, and completion_effect=unchanged. Report its phase accurately:\nmeasurement is not verification or completion. Goal completion requires\nseparate verifier proof and final human confirmation; Task approval does\nnot substitute for either.",
+  "receipt_fields_in_description": {
+    "measurement_status=reported_only": true,
+    "goal_at_recording": true,
+    "completion_effect=unchanged": true,
+    "final human confirmation": true
+  },
+  "task_list_description": "List backlog tasks. Rows carry id, title, priority, created_at, status, assignee and lifecycle timestamps; projection=full adds completion notes, description, files, contract, handoff_context, execution_links. awaiting_verification means the task awaits the completion-authority verdict and no Keeper can claim it; never Read producer sandbox paths. Rows are ordered by priority, then created_at, then id. When truncated is true the response carries next_cursor; pass it as cursor with the same status, include_done and projection to read the rows after that page. The last page has none. new_tasks highlights recent off-page rows only on the first page; continuation pages do not repeat that discovery window. Narrow by task_ids, assignee, goal_id or a literal query before paging; all supplied filters are ANDed and must stay the same on continuation pages. Use task_ids with projection=full for known tasks instead of scanning the whole backlog. Exact task_ids lookups include every lifecycle state when status and include_done are both omitted; general discovery excludes done and cancelled tasks. Explicit lifecycle filters keep their stated meaning.",
+  "include_done": {
+    "type": "boolean",
+    "description": "Explicit false excludes done and cancelled; true includes done but excludes cancelled. An explicit status takes precedence. When omitted, exact task_ids lookups include every state; general discovery excludes done and cancelled."
+  },
+  "include_done_required": false,
+  "goal_in_system": true,
+  "owner_user_candidates": [
+    {
+      "bytes": 613,
+      "sha256": "59e13c9bccc380d802d544b796419ba45ad721efb3c7a402f9fe0d8c9d5a11a1",
+      "goal_id_hint": false
+    }
+  ]
+}

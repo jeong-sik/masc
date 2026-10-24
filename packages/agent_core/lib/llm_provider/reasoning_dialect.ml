@@ -218,7 +218,8 @@ let apply_replay_override caps dialect =
     { dialect with replay_policy = Tool_call_assistant_messages_all_history }
   | Force_latest_user_turn_tool_calls ->
     { dialect with replay_policy = Tool_call_assistant_messages_latest_user_turn }
-  | Force_preserve_always -> { dialect with replay_policy = All_assistant_messages }
+  | Force_preserve_always | Force_preserve_with_request_tools ->
+    { dialect with replay_policy = All_assistant_messages }
 ;;
 
 let apply_streaming_format caps dialect =
@@ -593,7 +594,8 @@ let base_for_provider_config (config : Provider_config.t) =
      | Force_no_replay
      | Force_drop_without_tool_preserve_with_tool
      | Force_latest_user_turn_tool_calls
-     | Force_preserve_always -> dialect)
+     | Force_preserve_always
+     | Force_preserve_with_request_tools -> dialect)
   | Kimi | OpenAI_compat | Glm ->
     (match Provider_config.capabilities_for_config_model config with
      | Some caps -> of_capabilities caps
@@ -715,11 +717,30 @@ type replay_capability =
   ; rotation : Reasoning_replay_contract.rotation_policy
   }
 
-let replay_capability_for_provider_config config =
+let replay_capability_for_provider_config ?(tools_present = false) config =
   Result.map
     (fun target ->
        let dialect = for_provider_config config in
-       { target; contract = replay_contract dialect; rotation = rotation_policy dialect })
+       let request_tools_policy =
+         match Provider_config.capabilities_for_config_model config with
+         | Some caps ->
+           caps.Capabilities.reasoning_replay_override = Force_preserve_with_request_tools
+         | None ->
+           (provider_capabilities_of_kind config.Provider_config.kind)
+             .Capabilities.reasoning_replay_override = Force_preserve_with_request_tools
+       in
+       let contract = replay_contract dialect in
+       let contract =
+         (* Opaque Responses state has its own replay protocol. The tools gate
+            applies to replayable text, never to those provider-held handles. *)
+         match request_tools_policy, tools_present, contract.replay_policy with
+         | true, false, (No_replay | Tool_call_assistant_messages_all_history
+                        | Tool_call_assistant_messages_latest_user_turn | All_assistant_messages) ->
+           { contract with replay_policy = No_replay }
+         | (false, _, _) | (true, true, _) | (true, false, Provider_opaque_state) ->
+           contract
+       in
+       { target; contract; rotation = rotation_policy dialect })
     (reasoning_source_for_provider_config config)
 ;;
 

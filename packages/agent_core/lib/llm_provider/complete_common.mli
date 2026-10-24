@@ -79,8 +79,11 @@ val validate_all : Provider_config.t -> (unit, Http_client.http_error) result
 
 (** {1 Request serialization} *)
 
+(** [tools] is the same tool list supplied to serialization. The codec applies
+    the same tool-choice suppression before resolving request-local replay. *)
 val transmitted_history
-  :  config:Provider_config.t
+  :  ?tools:Yojson.Safe.t list
+  -> config:Provider_config.t
   -> Types.message list
   -> (Types.message list, Reasoning_history_projection.error) result
 

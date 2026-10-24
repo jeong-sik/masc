@@ -694,18 +694,26 @@ type anthropic_serialization_policy =
    [Provider_http_codec.t]: a new codec cannot be added without answering this,
    which is the point — a caller that sizes a request against unprojected
    history charges for bytes the wire drops. *)
-let transmitted_history ~(config : Provider_config.t) messages =
+let transmitted_history ?(tools = []) ~(config : Provider_config.t) messages =
+  let codec = Provider_http_codec.of_config config in
+  let effective_tools =
+    match codec with
+    | Provider_http_codec.Openai_chat | Glm_chat | Openai_responses ->
+      Backend_openai_request.effective_tools config tools
+    | Anthropic_messages | Ollama_chat | Gemini_generate_content -> tools
+  in
+  let tools_present = effective_tools <> [] in
   let projected =
-    match Provider_http_codec.of_config config with
+    match codec with
     | Provider_http_codec.Anthropic_messages ->
-      Backend_anthropic.project_history config messages
-    | Provider_http_codec.Ollama_chat -> Backend_ollama.project_history config messages
+      Backend_anthropic.project_history ~tools_present config messages
+    | Provider_http_codec.Ollama_chat -> Backend_ollama.project_history ~tools_present config messages
     | Provider_http_codec.Openai_responses ->
-      Backend_openai_responses.project_history config messages
+      Backend_openai_responses.project_history ~tools_present config messages
     | Provider_http_codec.Gemini_generate_content ->
-      Backend_gemini.project_history config messages
+      Backend_gemini.project_history ~tools_present config messages
     | Provider_http_codec.Openai_chat | Provider_http_codec.Glm_chat ->
-      Backend_openai_serialize.project_history config messages
+      Backend_openai_serialize.project_history ~tools_present config messages
   in
   Result.map
     (fun (projection : Reasoning_history_projection.t) -> projection.messages)

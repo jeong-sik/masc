@@ -922,8 +922,8 @@ let test_deepseek_replay_contract_differs_by_who_serves_it () =
          (replay_policy ~provider_label:"ollama_cloud" ~model_id);
        check
          string
-         (model_id ^ " on deepseek replays every prior turn")
-         "drop_without_tool_preserve_with_tool"
+         (model_id ^ " on deepseek has full-history replay eligibility")
+         "preserve_always"
          (replay_policy ~provider_label:"deepseek" ~model_id))
     [ "deepseek-v4-pro" ]
 ;;

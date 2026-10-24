@@ -340,12 +340,13 @@ let project
 ;;
 
 let project_for_provider_config
+      ?(tools_present = false)
       ~assistant_has_payload
       ~reasoning_block_supported
       config
       messages
   =
-  match Reasoning_dialect.replay_capability_for_provider_config config with
+  match Reasoning_dialect.replay_capability_for_provider_config ~tools_present config with
   | Error detail -> Error (Invalid_reasoning_target detail)
   | Ok replay_capability ->
     project ~assistant_has_payload ~reasoning_block_supported ~replay_capability messages

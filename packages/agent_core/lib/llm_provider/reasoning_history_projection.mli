@@ -65,7 +65,8 @@ val project
   -> (t, error) result
 
 val project_for_provider_config
-  :  assistant_has_payload:(Types.content_block list -> bool)
+  :  ?tools_present:bool
+  -> assistant_has_payload:(Types.content_block list -> bool)
   -> reasoning_block_supported:(Types.content_block -> bool)
   -> Provider_config.t
   -> Types.message list

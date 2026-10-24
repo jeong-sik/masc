@@ -10,8 +10,12 @@
 
     @stability Internal
     @since 0.93.1 *)
+(** [tools_present] is the effective outgoing tools-array presence. Omission
+    describes a request without tools; sizing callers must pass the same fact
+    as serialization. *)
 val project_history
-  :  Provider_config.t
+  :  ?tools_present:bool
+  -> Provider_config.t
   -> Types.message list
   -> (Reasoning_history_projection.t, Reasoning_history_projection.error) result
 (** The history this codec will actually serialize: reasoning blocks it cannot

@@ -2320,11 +2320,80 @@ let test_drop_summary_names_its_serialization () =
     (stream_flags = [ `Bool false; `Bool true ])
 ;;
 
+
+let test_request_tools_selects_full_history_reasoning () =
+  let caps =
+    { Capabilities.default_capabilities with
+      supports_reasoning = true
+    ; thinking_control_format = Thinking_object
+    ; reasoning_replay_override = Force_preserve_with_request_tools }
+  in
+  let config = Provider_config.make ~kind:OpenAI_compat
+      ~model_id:"request-tools-fixture" ~base_url:"https://request-tools.example"
+      ~max_tokens:1024 ~model_capabilities_override:caps () in
+  let source = source_for_config config in
+  let reasoning content = Thinking {content; signature=None} in
+  let messages =
+    [ message User [Text "First question"]
+    ; with_source source Assistant [reasoning "plain prior reasoning"; Text "First answer"]
+    ; message User [Text "Second question"]
+    ; with_source source Assistant [reasoning "prior tool reasoning";
+        ToolUse {id="lookup"; name="lookup"; input=`Assoc []}]
+    ; message Tool [ToolResult {tool_use_id="lookup"; content="result";
+        outcome=Tool_succeeded; json=None; content_blocks=None}]
+    ; message User [Text "A real later human question"]
+    ; message ~origin:Recovery_instruction User [Text "Continue the request"] ] in
+  let tools = [`Assoc ["name", `String "lookup"; "description", `String "Lookup";
+      "input_schema", `Assoc ["type", `String "object"; "properties", `Assoc []]]] in
+  let build ~config ~tools ~stream = Backend_openai_request.build_request
+      ~config ~messages ~tools ~stream () |> Yojson.Safe.from_string in
+  let wire_reasoning body =
+    let open Yojson.Safe.Util in
+    body |> member "messages" |> to_list |> List.filter_map (fun item ->
+      match member "reasoning_content" item with
+      | `String value -> Some value
+      | `Null -> None
+      | _ -> Alcotest.fail "reasoning_content must be a string") in
+  List.iter (fun stream ->
+    let enabled = build ~config ~tools ~stream in
+    Alcotest.(check (list string)) "all prior reasoning on outgoing tool request"
+      ["plain prior reasoning"; "prior tool reasoning"] (wire_reasoning enabled);
+    let without = build ~config ~tools:[] ~stream in
+    Alcotest.(check (list string)) "no replay when tools is absent" []
+      (wire_reasoning without);
+    let disabled = build ~config:{config with tool_choice=Some None_} ~tools ~stream in
+    Alcotest.(check (list string)) "tool-choice suppression also suppresses replay" []
+      (wire_reasoning disabled);
+    check_bool "disabled tools are absent on the wire" true
+      (Yojson.Safe.Util.member "tools" disabled = `Null)) [false;true];
+  let projected tools config =
+    match Complete_common.transmitted_history ~tools ~config messages with
+    | Ok messages -> reasoning_block_count messages
+    | Error error -> Alcotest.fail (Reasoning_history_projection.error_to_string error) in
+  check_int "read-only projection uses outgoing tools" 2 (projected tools config);
+  check_int "read-only projection knows tool omission" 0 (projected [] config);
+  check_int "read-only projection applies tool-choice suppression" 0
+    (projected tools {config with tool_choice=Some None_});
+  let capability tools_present =
+    match Reasoning_dialect.replay_capability_for_provider_config ~tools_present config with
+    | Ok capability -> capability
+    | Error detail -> Alcotest.fail detail in
+  let enabled = capability true and disabled = capability false in
+  check_bool "request tools never alter producing-source identity" true
+    (Reasoning_source.equal enabled.target disabled.target);
+  check_bool "enabled replay contract" true
+    (enabled.contract.replay_policy = All_assistant_messages);
+  check_bool "disabled replay contract" true
+    (disabled.contract.replay_policy = No_replay)
+;;
+
 let () =
   Alcotest.run
     "provider_agnostic_reasoning_replay"
     [ ( "typed replay projection"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "request tools select full-history replay" `Quick
+            test_request_tools_selects_full_history_reasoning
+        ; Alcotest.test_case
             "provider replay policy matrix"
             `Quick
             test_provider_replay_policy_matrix_pinned

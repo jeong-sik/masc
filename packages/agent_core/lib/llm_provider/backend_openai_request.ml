@@ -298,7 +298,8 @@ let build_request_assoc_artifact
   let dialect = Reasoning_dialect.for_provider_config config in
   let caps = capabilities_of_config config in
   let replay_capability =
-    match Reasoning_dialect.replay_capability_for_provider_config config with
+    match Reasoning_dialect.replay_capability_for_provider_config
+            ~tools_present:(tools <> []) config with
     | Ok capability -> capability
     | Error detail ->
       invalid_arg ("Backend_openai_request: invalid reasoning target: " ^ detail)

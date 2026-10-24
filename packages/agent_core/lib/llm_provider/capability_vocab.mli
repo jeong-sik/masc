@@ -37,6 +37,8 @@ type reasoning_replay_override =
   | Force_drop_without_tool_preserve_with_tool
   | Force_latest_user_turn_tool_calls
   | Force_preserve_always
+  | Force_preserve_with_request_tools
+    (** Replay all prior assistant reasoning exactly when outgoing tools are present. *)
 
 type assistant_tool_content_format =
   | Assistant_tool_content_null

@@ -636,8 +636,8 @@ let render_history_projection
    ones they drop. [Backend_openai] and [Backend_glm] both serialize through
    this module, so both read this one answer. Pure — [observe] belongs to
    whoever dispatches. *)
-let project_history config messages =
-  match Reasoning_dialect.replay_capability_for_provider_config config with
+let project_history ?(tools_present = false) config messages =
+  match Reasoning_dialect.replay_capability_for_provider_config ~tools_present config with
   | Error detail ->
     Error (Reasoning_history_projection.Invalid_reasoning_target detail)
   | Ok replay_capability ->

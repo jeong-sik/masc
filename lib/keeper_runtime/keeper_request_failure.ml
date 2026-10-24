@@ -127,7 +127,6 @@ let cause_of_core_error (error : Agent_core.Error.t) =
       | Llm_provider.Error.UnknownVariant _
       | Llm_provider.Error.ProviderUnavailable _
       | Llm_provider.Error.EmptyCompletion _
-      | Llm_provider.Error.RepeatingGeneration _
       | Llm_provider.Error.HardQuota _
       | Llm_provider.Error.CapacityExhausted _
       | Llm_provider.Error.AuthError _

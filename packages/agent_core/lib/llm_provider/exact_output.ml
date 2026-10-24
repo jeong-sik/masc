@@ -882,7 +882,6 @@ let execution_error_cause ~http_status ~dispatch = function
                | Http_client.Provider_reported_error _
                | Http_client.Provider_interrupted
                | Http_client.Response_body_too_large _
-               | Http_client.Repeating_generation _
                | Http_client.Unknown_provider_failure _ )
            ; _
            } ) as error) -> Completion_failed { error; dispatch }
@@ -1027,7 +1026,6 @@ let provider_failure_is_binding_rest : Http_client.provider_failure_kind -> bool
   | Http_client.Response_body_too_large _
   | Http_client.Empty_completion _
   | Http_client.Context_overflow _
-  | Http_client.Repeating_generation _
   | Http_client.Unknown_provider_failure _ -> false
 ;;
 

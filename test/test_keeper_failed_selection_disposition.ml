@@ -119,7 +119,6 @@ let test_a_suffix_on_a_serving_path_continues_without_waiting () =
       , KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None } )
     ; ( "hard quota"
       , KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 600.0 } )
-    ; "repeated generation", KFR.Rotate_now { rotate = KFR.Generation_repeated }
     ; ( "provider capacity (#38061)"
       , KFR.Retry_after_observed { retry_class = KFR.Provider_capacity; retry_after = Some 5.0 } )
     ]

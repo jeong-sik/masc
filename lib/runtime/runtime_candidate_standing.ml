@@ -95,7 +95,6 @@ let observe_http_error ~now ~candidate ~quota_scope error =
      | Llm_provider.Http_client.Response_body_too_large _
      | Llm_provider.Http_client.Empty_completion _
      | Llm_provider.Http_client.Context_overflow _
-     | Llm_provider.Http_client.Repeating_generation _
      | Llm_provider.Http_client.Unknown_provider_failure _ -> ())
   | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.TimeoutError _
   | Llm_provider.Http_client.AcceptRejected _ | Llm_provider.Http_client.ProviderTerminal _ -> ()

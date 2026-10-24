@@ -20,7 +20,6 @@ type rotate_class =
   | No_progress_thinking_only
   | No_progress_truncated
   | Refusal_body_not_received
-  | Generation_repeated
   | Admission
   | Provider_reported_failure
   | Request_refused
@@ -86,7 +85,6 @@ let core_error_is_hard_quota (err : Agent_core.Error.t) =
   | Agent_core.Error.Provider (Llm_provider.Error.UnknownVariant _)
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)
   | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion _)
-  | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _)
   | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _)
   | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _)
   | Agent_core.Error.Provider (Llm_provider.Error.AuthError _)
@@ -130,7 +128,6 @@ let core_error_is_model_absent : Agent_core.Error.t -> bool = function
   | Agent_core.Error.Provider (Llm_provider.Error.UnknownVariant _)
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)
   | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion _)
-  | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _)
   | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _)
   | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)
   | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _)
@@ -372,17 +369,10 @@ let route_of_provider_error (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.AuthError _ -> rotate Auth_failed
   | Llm_provider.Error.AuthorizationError _ -> rotate Authorization_refused
   | Llm_provider.Error.NotFound _ -> rotate Model_unavailable
-  (* The model repeated itself and the stream was ended for it. The bytes
-     were intact, so this is not a provider integration defect: the lane
-     rotates to a different model. Crash accounting is class-blind (#32105)
-     and unchanged by this route; what changes is the class label and that
-     the model is known to have answered ([response_observed]). *)
-  | Llm_provider.Error.RepeatingGeneration _ -> rotate Generation_repeated
   (* The provider reported a structured failure of its own for this attempt
      (a CLI-adapter turn failure, an RPC error, a post-activity context-window
      report). [Runtime_attempt_fsm.should_try_next] already rotates on every
-     [Http_client.ProviderFailure] kind, the same wire family as
-     [RepeatingGeneration] above; calling this class terminal disagreed with
+     [Http_client.ProviderFailure] kind; calling this class terminal disagreed with
      a walk that was already moving on (task-1642, census
      "provider:reported_error" rotates=true). Unlike the wire-format defects
      below, the same bytes do not have to arrive again: a different candidate
@@ -539,7 +529,6 @@ let rotate_class_label = function
   | No_progress_truncated -> "no_progress_truncated"
   | Admission -> "admission"
   | Refusal_body_not_received -> "refusal_body_not_received"
-  | Generation_repeated -> "generation_repeated"
   | Provider_reported_failure -> "provider_reported_failure"
   | Request_refused -> "request_refused"
   | Provider_wire_defect -> "provider_wire_defect"
@@ -624,7 +613,7 @@ let response_observed = function
         arrived, and a refusal is not an answer. *)
      | Provider_reported_failure
      (* the provider reported its own structured failure for this attempt;
-        unlike [Generation_repeated] below, nothing here says the model
+        nothing here says the model
         produced content the turn's input carried into. *)
      | Request_refused
      (* the provider refused the body before any generation. *)
@@ -644,12 +633,9 @@ let response_observed = function
      | No_progress_thinking_only
      (* the provider answered with thinking only; rejected by the accept
         gate. *)
-     | No_progress_truncated
+     | No_progress_truncated ->
      (* the provider answered and stopped at MaxTokens; rejected by the
         accept gate. *)
-     | Generation_repeated ->
-       (* the model answered and kept repeating one unit; the client ended
-          the stream, so the input was seen. *)
        true)
   | Exhausted_visible_alive { terminal } ->
     (match terminal with
@@ -743,7 +729,7 @@ let route_resumes_on_same_path = function
          } ->
        (* Refusal, content filtering, and repetition truncation are
           deterministic for the same input, matching
-          [Refusal_body_not_received] and [Generation_repeated] below.
+          [Refusal_body_not_received] below.
           [PauseTurn] and [Compaction] require replaying the provider's actual
           assistant response. An [EmptyCompletion] error carries no response
           content, so replaying the pre-response checkpoint is not that
@@ -770,7 +756,6 @@ let route_resumes_on_same_path = function
      | No_progress_thinking_only
      | No_progress_truncated
      | Refusal_body_not_received
-     | Generation_repeated
      | Admission
      | Provider_reported_failure
      | Request_refused

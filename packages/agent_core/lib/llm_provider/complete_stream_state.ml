@@ -46,8 +46,6 @@ type block =
   ; signature_chunks_rev : string list
   ; reasoning_details_rev : Types.reasoning_detail list
   ; media : media option
-  ; repeat_checked_bytes : int
-        (** Text bytes the block held when the reasoning repeat rule last ran. *)
   }
 
 type completion =
@@ -106,7 +104,6 @@ let empty_block =
   ; signature_chunks_rev = []
   ; reasoning_details_rev = []
   ; media = None
-  ; repeat_checked_bytes = 0
   }
 ;;
 
@@ -251,43 +248,6 @@ let block_header_equal left right =
 
 let text_of_block block = String.concat "" (List.rev block.text_chunks_rev)
 
-(* A generation that starts repeating one paragraph does not stop on its own;
-   it runs to the token ceiling. Measured on a live collapse (29,788 bytes, 234
-   paragraphs, 11 distinct): the third occurrence of a repeated paragraph
-   landed at 1,691 bytes — 5% of what the provider was eventually paid for.
-   The remaining 95% wrote the same eleven paragraphs 221 more times.
-
-   Three is the same threshold the Keeper turn loop already uses for repeated
-   assistant text between rounds; this is that rule one layer in, where a
-   single generation can be stopped before it is finished.
-
-   Only whole paragraphs count. A repeated word or line is ordinary prose —
-   lists, tables and code all repeat short strings — and the collapse this
-   catches repeats units large enough to be a paragraph. Blank and very short
-   paragraphs are skipped for the same reason. *)
-let repeat_threshold = 3
-let repeat_min_paragraph_bytes = 40
-
-let repeating_paragraph text =
-  let paragraphs =
-    String.split_on_char '\n' text
-    |> List.filter_map (fun line ->
-      let trimmed = String.trim line in
-      if String.length trimmed < repeat_min_paragraph_bytes then None else Some trimmed)
-  in
-  let counts = Hashtbl.create 64 in
-  List.fold_left
-    (fun found paragraph ->
-       match found with
-       | Some _ -> found
-       | None ->
-         let seen = (try Hashtbl.find counts paragraph with Not_found -> 0) + 1 in
-         Hashtbl.replace counts paragraph seen;
-         if seen >= repeat_threshold then Some (paragraph, seen) else None)
-    None
-    paragraphs
-;;
-
 let block_has_payload block =
   block.text_chunks_rev <> []
   || block.input_piece_count > 0
@@ -394,68 +354,6 @@ let capture_failure failure state =
   | None -> { state with failure = Some failure }
 ;;
 
-(* A reasoning block is guarded by a different rule from a text block. The
-   paragraph count above is for an answer: whole paragraphs recurring anywhere
-   in the block, which prose does not do. A model thinking is allowed to come
-   back to a line — a plan header, "let me check the file again" — and cutting
-   it there would end a turn that was about to answer. What ends a reasoning
-   block is the shape of a generation that has stopped moving: its tail is one
-   unit written verbatim over and over, whatever the unit is ("!!!!", "the the
-   the ", a five-line chant). Only the newest bytes are examined, so the cost
-   per delta is bounded by the window, not by the block.
-
-   Measured 2026-09-14 on every thinking stream in keeper_chat_events since
-   2026-08-29 (1,385 blocks, 6.4 MB), with the window and stride below. Nine
-   were loops: verbatim cycles of 35 to 2,491 bytes repeated 6.5 to 1,872
-   times, periodic tails of 15 KB to the full window. The longest periodic
-   tail in the other 1,376 blocks was 5 bytes (a run of one byte), so 1,024
-   is the bound the paragraph-scale loops clear by 15x and prose never
-   approaches. The window is 64 KB rather than the 8 KB it started at: the
-   rule reads units up to a third of the window, the sangsu loops' units of
-   2,330 to 2,491 bytes sat within 10% of the old 2,730-byte ceiling, and a
-   601,318-byte thinking block on 2026-09-14 08:50Z (geek-scout,
-   deepseek-v4.1-flash) ran to the token ceiling under it unseen. The rule
-   runs once per 1,024 new bytes: checking more often than the span can grow
-   into a verdict buys nothing, and each run reads the whole window. Three
-   copies is the same count the paragraph rule and the Keeper turn loop use. *)
-let reasoning_repeat_window_bytes = 65536
-let reasoning_repeat_min_span_bytes = 1024
-let reasoning_repeat_min_copies = 3
-let reasoning_repeat_check_stride_bytes = 1024
-
-(* The newest [bytes] of the block's text, assembled from as few of its
-   reversed chunks as reach that many bytes. *)
-let block_tail ~bytes block =
-  let rec newest acc collected = function
-    | [] -> acc
-    | chunk :: rest ->
-      if collected >= bytes
-      then acc
-      else newest (chunk :: acc) (collected + String.length chunk) rest
-  in
-  let joined = String.concat "" (newest [] 0 block.text_chunks_rev) in
-  let length = String.length joined in
-  if length <= bytes then joined else String.sub joined (length - bytes) bytes
-;;
-
-let block_text_bytes block =
-  List.fold_left (fun total chunk -> total + String.length chunk) 0 block.text_chunks_rev
-;;
-
-let repeating_reasoning_cycle block =
-  let tail = block_tail ~bytes:reasoning_repeat_window_bytes block in
-  match
-    Periodic_suffix.find
-      tail
-      ~max_period:(reasoning_repeat_window_bytes / reasoning_repeat_min_copies)
-      ~min_copies:reasoning_repeat_min_copies
-  with
-  | Some ({ Periodic_suffix.span; period } as suffix)
-    when span >= reasoning_repeat_min_span_bytes ->
-    Some (Periodic_suffix.cycle tail suffix, span / period)
-  | Some _ | None -> None
-;;
-
 (* The kind the provider announced for block [index], whether the block is
    still open or already closed; [None] for a block never announced. *)
 let block_kind_at state index =
@@ -463,57 +361,6 @@ let block_kind_at state index =
   | Some { header = Announced { kind; _ }; _ } -> Some kind
   | Some { header = Unannounced; _ } | None -> None
 ;;
-
-let guard_repeating_generation ~index state =
-  match Blocks.find_opt index state.blocks with
-  | None -> state
-  | Some block ->
-    (match block.header with
-     | Announced { kind = Text_block; _ } ->
-       let text = text_of_block block in
-       (match repeating_paragraph text with
-        | None -> state
-        | Some (paragraph, occurrences) ->
-          capture_failure
-            (Types.Stream_repeating
-               { repeated = paragraph
-               ; occurrences
-               ; bytes_seen = String.length text
-               ; shape = Types.Repeated_paragraph
-               })
-            state)
-     | Announced { kind = Thinking_block | Reasoning_details_block; _ } ->
-       let text_bytes = block_text_bytes block in
-       if text_bytes - block.repeat_checked_bytes < reasoning_repeat_check_stride_bytes
-       then state
-       else (
-         let state =
-           update_block index (fun block -> { block with repeat_checked_bytes = text_bytes }) state
-         in
-         match repeating_reasoning_cycle block with
-         | None -> state
-         | Some (cycle, occurrences) ->
-           capture_failure
-             (Types.Stream_repeating
-                { repeated = cycle
-                ; occurrences
-                ; bytes_seen = text_bytes
-                ; shape = Types.Repeated_reasoning_cycle
-                })
-             state)
-     (* An unannounced block has no declared kind yet; a repeat there is
-        indistinguishable from a provider that has not said what it is
-        sending. Redacted thinking carries no text to compare. *)
-     | Unannounced
-     | Announced { kind = Redacted_thinking_block; _ }
-     | Announced { kind = Tool_use_block; _ }
-     | Announced { kind = Tool_result_block _; _ }
-     | Announced { kind = Image_block; _ }
-     | Announced { kind = Document_block; _ }
-     | Announced { kind = Audio_block; _ }
-     | Announced { kind = Unknown_block _; _ } -> state)
-;;
-
 
 let close_all_blocks state =
   { state with
@@ -715,7 +562,7 @@ let normalize_event state event =
   | Types.SSEUnsupportedResponse _
   | Types.Connected
   | Types.Timeout _
-  | Types.StreamIncomplete _ | Types.StreamRepeating _ -> Ok (Some event)
+  | Types.StreamIncomplete _ -> Ok (Some event)
 ;;
 
 let transition_open state = function
@@ -897,9 +744,7 @@ let transition_open state = function
          | Types.InputJsonDelta _
          | Types.InputJsonSnapshot _
          | Types.MediaDelta _ ) ) ->
-       guard_repeating_generation
-         ~index
-         (update_block
+       update_block
             index
             (fun block ->
                match delta with
@@ -947,7 +792,7 @@ let transition_open state = function
                  ; tool_name = None
                  }
            })
-            state))
+            state)
   | Types.ContentBlockStop { index } ->
     if state.message_lifecycle = Message_stopped
     then terminal_event_failure "content_block_stop_after_message_stop" state
@@ -1019,13 +864,6 @@ let transition_open state = function
       state
   | Types.StreamIncomplete { reason } ->
     { state with disposition = Incomplete reason }
-  (* An inbound repeat event is the transport telling us what this module
-     already decides for itself; it is captured as the same sticky failure so
-     both paths end one way. *)
-  | Types.StreamRepeating { repeated; occurrences; bytes_seen; shape } ->
-    capture_failure
-      (Types.Stream_repeating { repeated; occurrences; bytes_seen; shape })
-      state
   | Types.MessageStop ->
     (match state.message_lifecycle with
      | Message_stopped -> state
@@ -1526,7 +1364,7 @@ let%test "terminal sentinel without stop semantics remains incomplete" =
   | Failed (Types.Stream_incomplete { reason }) ->
     reason = "stream_terminal_without_stop_reason"
   | Failed (Types.Stream_provider_error _) | Completed _ | Failed (Types.Stream_parse_failed _)
-  | Failed (Types.Stream_ndjson_parse_failed _) | Failed (Types.Stream_repeating _)
+  | Failed (Types.Stream_ndjson_parse_failed _)
   | Failed (Types.Stream_unknown_event _) | Failed (Types.Stream_unsupported_part _)
   | Failed (Types.Stream_unsupported_response _) -> false
 ;;

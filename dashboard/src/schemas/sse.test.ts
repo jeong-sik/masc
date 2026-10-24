@@ -713,7 +713,7 @@ describe('SSEMessageSchema', () => {
 
   // Attempt failures carry no quarantined occurrence: the attempt ended and
   // the next one follows in the same bubble, so the frame must decode.
-  it.each(['sse_timeout', 'sse_stream_repeating'])(
+  it.each(['sse_timeout', 'sse_stream_incomplete'])(
     'accepts the %s attempt-failure kind without a quarantined occurrence',
     kind => {
       const r = SSEMessageSchema.safeParse(

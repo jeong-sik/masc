@@ -215,16 +215,6 @@ type provider_failure_kind =
       only the consumer's context recovery (compaction/shrink) can make
       progress. [limit] is the provider-reported token limit when the
       envelope carries one. *)
-  | Repeating_generation of
-      { shape : Types.repeating_shape
-      ; occurrences : int
-      ; unit_bytes : int
-      }
-      (** The model's generation repeated one unit — a paragraph of the
-          answer, or a reasoning cycle — past the threshold and this client
-          ended the stream. Bytes and framing were fine, so this is not a
-          [Provider_wire_error]: what failed is the model, and the same model
-          reached through another provider repeats the same way. *)
   | Unknown_provider_failure of { reason : string option }
 
 (** The body of a refusing response. [Received] is what the provider sent,

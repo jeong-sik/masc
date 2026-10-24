@@ -253,7 +253,6 @@ let%test "sync: an error finish without a provider condition is provider-reporte
                | Http_client.Response_body_too_large _
                | Http_client.Empty_completion _
                | Http_client.Context_overflow _
-               | Http_client.Repeating_generation _
                | Http_client.Unknown_provider_failure _ )
            ; _
            }) -> false)
@@ -283,7 +282,6 @@ let%test "sync: an error finish without a provider condition is provider-reporte
                | Http_client.Response_body_too_large _
                | Http_client.Empty_completion _
                | Http_client.Context_overflow _
-               | Http_client.Repeating_generation _
                | Http_client.Unknown_provider_failure _ )
            ; _
            }) -> false)
@@ -312,7 +310,6 @@ let%test "sync: an error finish without a provider condition is provider-reporte
                | Http_client.Response_body_too_large _
                | Http_client.Empty_completion _
                | Http_client.Context_overflow _
-               | Http_client.Repeating_generation _
                | Http_client.Unknown_provider_failure _ )
            ; _
            }) -> false
@@ -375,7 +372,6 @@ let%test "sync: an unreadable response is a provider parse failure" =
                | Http_client.Response_body_too_large _
                | Http_client.Empty_completion _
                | Http_client.Context_overflow _
-               | Http_client.Repeating_generation _
                | Http_client.Unknown_provider_failure _ )
            ; _
            }) -> false
@@ -417,7 +413,6 @@ let%test "glm quota exhaustion is a typed hard quota" =
                | Http_client.Response_body_too_large _
                | Http_client.Empty_completion _
                | Http_client.Context_overflow _
-               | Http_client.Repeating_generation _
                | Http_client.Unknown_provider_failure _ )
            ; _
            }) -> false)

@@ -200,7 +200,7 @@ let runtime_blocker_surface_of_failure_reason
          }
      | Keeper_provider_runtime_boundary.No_timeout_observed ->
        (* The record already says what happened: [code] is the typed wire
-          ([provider_error_repeating_generation:...], [provider_error_rate_limited],
+          ([provider_error_wire:...], [provider_error_rate_limited],
           ...) and [detail] is the provider boundary's own sentence, which for
           a lane failure also says where the input went next. The summary
           used to call this a catch-all and tell the operator to go and find

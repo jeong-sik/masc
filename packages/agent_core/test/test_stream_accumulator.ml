@@ -32,7 +32,6 @@ let stream_error_to_string = function
   | Stream_parse_failed { reason; _ } -> reason
   | Stream_ndjson_parse_failed { reason; _ } -> reason
   | Stream_incomplete { reason } -> reason
-  | Stream_repeating { repeated; _ } -> repeated
   | Stream_unknown_event { event_type; _ } -> "unknown_event:" ^ event_type
   | Stream_unsupported_part { part; _ } -> "unsupported_part:" ^ part
   | Stream_unsupported_response { response; _ } -> "unsupported_response:" ^ response
@@ -142,155 +141,58 @@ let test_accumulate_content_block_start_tool () =
   | _ -> Alcotest.fail "expected typed tool block"
 ;;
 
-(* ── accumulate: repeating generation ─────────────────────── *)
-
-(* Measured on a live collapse: 29,788 bytes, 234 paragraphs, 11 distinct, and
-   the third occurrence of a repeated paragraph landed at 1,691 bytes — 5% of
-   what the provider was eventually paid for. The stream ends at that third
-   occurrence instead of at the token ceiling. *)
-
-let long_paragraph =
-  "lesson 03:20:12Z를 다시 정확히 읽자: due 전 금지는 dashboard 보고에만 적용된다"
-;;
-
-let feed_paragraphs acc lines =
-  Streaming.accumulate_event
-    acc
-    (ContentBlockStart
-       { index = 0; content_type = "text"; tool_id = None; tool_name = None });
+(* Repeated content remains deliverable until an authoritative terminal. *)
+let test_repeated_text_and_reasoning_reach_provider_terminal () =
   List.iter
-    (fun line ->
-       Streaming.accumulate_event
-         acc
-         (ContentBlockDelta { index = 0; delta = TextDelta (line ^ "\n") }))
-    lines
+    (fun (content_type, make_delta) ->
+       let acc = Streaming.create_stream_acc () in
+       let repeated = "The proof carries this premise into each independent case.\n" in
+       let chunks = List.init 96 (fun _ -> repeated) @ [ "The next step resolves the case.\n" ] in
+       Streaming.accumulate_event acc
+         (ContentBlockStart {index=0; content_type; tool_id=None; tool_name=None});
+       List.iter (fun content ->
+         let delta = make_delta content in
+         Streaming.accumulate_event acc (ContentBlockDelta {index=0; delta})) chunks;
+       Alcotest.(check bool) "content does not invent a failure" true
+         (Option.is_none (Streaming.failure acc));
+       (* Content alone cannot turn an unfinished generation into completion. *)
+       (match Streaming.finalize_stream_acc acc with
+        | Error (Stream_incomplete _) -> ()
+        | Error error -> fail_unexpected_stream_error error
+        | Ok _ -> Alcotest.fail "a provider terminal is still required");
+       Streaming.accumulate_event acc (ContentBlockStop {index=0});
+       Streaming.accumulate_event acc
+         (MessageDelta {stop_reason=Some EndTurn; usage=None});
+       Streaming.accumulate_event acc MessageStop;
+       let response = match Streaming.finalize_stream_acc acc with
+         | Ok response -> response
+         | Error error -> fail_unexpected_stream_error error in
+       let content = match response.content with
+         | [Text text] | [Thinking {content=text; _}]
+         | [ReasoningDetails {reasoning_content=Some text; _}] -> text
+         | _ -> Alcotest.fail "the announced content block must remain intact" in
+       Alcotest.(check string) "every repetition and subsequent output survives"
+         (String.concat "" chunks) content;
+       Alcotest.(check bool) "provider end turn is preserved" true
+         (response.stop_reason = EndTurn))
+    ["text", (fun text -> TextDelta text);
+     "thinking", (fun text -> ThinkingDelta text);
+     "reasoning_details", (fun text -> ReasoningDetailsDelta {reasoning_content=Some text; details=[]})]
 ;;
 
-let test_repeating_paragraph_ends_the_stream () =
+let test_repeated_content_preserves_provider_stop_reasons () =
+  List.iter (fun stop_reason ->
   let acc = Streaming.create_stream_acc () in
-  feed_paragraphs acc [ long_paragraph; "다른 문단이 사이에 하나 들어간다 " ^ long_paragraph; long_paragraph; long_paragraph ];
-  match Streaming.failure acc with
-  | Some (Stream_repeating { repeated; occurrences; bytes_seen; shape = Repeated_paragraph }) ->
-    Alcotest.(check string) "the repeated paragraph" long_paragraph repeated;
-    Alcotest.(check int) "stopped at the threshold" 3 occurrences;
-    if bytes_seen <= 0 then Alcotest.fail "bytes_seen must record what was read"
-  | Some (Stream_repeating { shape = Repeated_reasoning_cycle; _ }) ->
-    Alcotest.fail "a text paragraph repeat is not a reasoning cycle"
-  | Some _ -> Alcotest.fail "a repeat must not be reported as another failure"
-  | None -> Alcotest.fail "three identical paragraphs must end the stream"
-;;
-
-let test_two_occurrences_do_not_end_the_stream () =
-  let acc = Streaming.create_stream_acc () in
-  feed_paragraphs acc [ long_paragraph; long_paragraph ];
-  match Streaming.failure acc with
-  | None -> ()
-  | Some _ -> Alcotest.fail "two occurrences are repetition, not a collapse"
-;;
-
-(* Prose repeats short strings all the time — list markers, table cells, a
-   bare "ok". Only paragraph-sized units count, or ordinary answers would be
-   cut off. *)
-let test_short_repeated_lines_are_left_alone () =
-  let acc = Streaming.create_stream_acc () in
-  feed_paragraphs acc [ "- ok"; "- ok"; "- ok"; "- ok"; "- ok" ];
-  match Streaming.failure acc with
-  | None -> ()
-  | Some _ -> Alcotest.fail "short repeated lines must not end a stream"
-;;
-
-(* ── accumulate: repeating reasoning ─────────────────────── *)
-
-(* A reasoning block is not under the paragraph rule; it ends when its tail is
-   one unit written verbatim over and over. The unit here is the one a Keeper
-   on deepseek-v4.1-flash produced on 2026-09-14 for 447,360 bytes before the
-   token ceiling ended the turn. *)
-let chant = "Let me write.\n\nNow.\n\nGo.\n\nProducing.\n\nOK.\n\n"
-
-let feed_thinking acc deltas =
-  Streaming.accumulate_event
-    acc
-    (ContentBlockStart
-       { index = 0; content_type = "thinking"; tool_id = None; tool_name = None });
-  List.iter
-    (fun delta ->
-       Streaming.accumulate_event acc (ContentBlockDelta { index = 0; delta = ThinkingDelta delta }))
-    deltas
-;;
-
-let repeat n s = List.init n (fun _ -> s)
-
-let test_reasoning_cycle_ends_the_stream () =
-  let acc = Streaming.create_stream_acc () in
-  let header = "Now I have the full rejection. 4 reasons:\n\n" in
-  (* The rule runs once per 1,024 new bytes. With a 43-byte header the first
-     run is at the 23rd chant (43 + 989 = 1,032 bytes), where the periodic
-     tail is 991 bytes (23 chants plus the two header bytes the chant also
-     ends in) and under the 1,024-byte bound; the second run is at the 47th
-     chant (43 + 2,021 = 2,064 bytes), tail 2,023 bytes, and ends the stream. *)
-  let fires_at = 47 in
-  feed_thinking acc (header :: repeat (fires_at + 200) chant);
-  match Streaming.failure acc with
-  | Some (Stream_repeating { repeated; occurrences; bytes_seen; shape = Repeated_reasoning_cycle }) ->
-    Alcotest.(check int) "the unit is the chant" (String.length chant) (String.length repeated);
-    Alcotest.(check int) "stopped at the second run of the rule" fires_at occurrences;
-    Alcotest.(check int)
-      "bytes_seen is what had been read when it stopped"
-      (String.length header + (fires_at * String.length chant))
-      bytes_seen
-  | Some (Stream_repeating { shape = Repeated_paragraph; _ }) ->
-    Alcotest.fail "a reasoning cycle is not a paragraph repeat"
-  | Some _ -> Alcotest.fail "a repeat must not be reported as another failure"
-  | None -> Alcotest.fail "a reasoning block chanting one unit must end the stream"
-;;
-
-(* The unit may be a single byte. GLM-5.3-Flash fills reasoning_content with
-   "!" runs (opencrabs#1351, 2026-09-04); a run of that length is not a thought.
-   The first run of the rule is at 1,024 bytes, and the whole tail is periodic. *)
-let test_reasoning_same_byte_run_ends_the_stream () =
-  let acc = Streaming.create_stream_acc () in
-  feed_thinking acc (repeat 300 "!!!!");
-  match Streaming.failure acc with
-  | Some (Stream_repeating { repeated = "!"; shape = Repeated_reasoning_cycle; _ }) -> ()
-  | Some (Stream_repeating { repeated; _ }) ->
-    Alcotest.failf "the unit of a same-byte run is the byte, not %S" repeated
-  | Some _ -> Alcotest.fail "a repeat must not be reported as another failure"
-  | None -> Alcotest.fail "1,200 bytes of one byte must end the stream"
-;;
-
-(* Coming back to a line is thinking, not a loop: four verbatim copies of a
-   99-byte line are 396 bytes of periodic tail, under the 1,024-byte bound
-   that every measured loop cleared. *)
-let test_reasoning_restating_a_line_is_left_alone () =
-  let acc = Streaming.create_stream_acc () in
-  feed_thinking acc (repeat 4 (long_paragraph ^ "\n"));
-  match Streaming.failure acc with
-  | None -> ()
-  | Some _ -> Alcotest.fail "restating a line four times must not end a reasoning block"
-;;
-
-(* A paragraph recurring with other thinking between recurrences is what the
-   text rule counts and the reasoning rule does not: the tail is not periodic. *)
-let test_reasoning_recurring_paragraph_is_left_alone () =
-  let acc = Streaming.create_stream_acc () in
-  let between = List.init 40 (fun i -> Printf.sprintf "step %d differs from the last\n" i) in
-  feed_thinking
-    acc
-    ((long_paragraph ^ "\n") :: (between @ [ long_paragraph ^ "\n" ] @ between @ [ long_paragraph ^ "\n" ]));
-  match Streaming.failure acc with
-  | None -> ()
-  | Some _ -> Alcotest.fail "a paragraph recurring between other thoughts is not a cycle"
-;;
-
-(* The reasoning rule reads reasoning blocks only. A text block with 1,200
-   bytes of identical table rows is ordinary output under the paragraph rule
-   (each row is under its 40-byte floor) and must not be ended as a cycle. *)
-let test_text_rows_are_not_read_as_a_cycle () =
-  let acc = Streaming.create_stream_acc () in
-  feed_paragraphs acc (repeat 60 "| a | b | c | d |");
-  match Streaming.failure acc with
-  | None -> ()
-  | Some _ -> Alcotest.fail "identical short rows in an answer must not end the stream"
+    let repeated = "A repeated answer is still the provider's output to finish.\n" in
+    acc_events acc
+      [ContentBlockStart {index=0;content_type="text";tool_id=None;tool_name=None};
+       ContentBlockDelta {index=0;delta=TextDelta (String.concat "" (List.init 8 (fun _ -> repeated)))};
+       ContentBlockStop {index=0}; MessageDelta {stop_reason=Some stop_reason;usage=None}; MessageStop];
+    match Streaming.finalize_stream_acc acc with
+    | Ok response -> Alcotest.(check bool) "the provider owns the stop reason" true
+        (response.stop_reason = stop_reason)
+    | Error error -> fail_unexpected_stream_error error)
+    [MaxTokens; RepetitionTruncation; Refusal; ContentFilter]
 ;;
 
 (* ── accumulate: ContentBlockDelta ────────────────────────── *)
@@ -1503,39 +1405,11 @@ let () =
   Alcotest.run
     "stream_accumulator"
     [ "create", [ Alcotest.test_case "initial state" `Quick test_create_initial_state ]
-    ; ( "repeating"
-      , [ Alcotest.test_case
-            "three identical paragraphs end the stream"
-            `Quick
-            test_repeating_paragraph_ends_the_stream
-        ; Alcotest.test_case
-            "two do not"
-            `Quick
-            test_two_occurrences_do_not_end_the_stream
-        ; Alcotest.test_case
-            "short repeated lines are left alone"
-            `Quick
-            test_short_repeated_lines_are_left_alone
-        ; Alcotest.test_case
-            "a reasoning block chanting one unit ends the stream"
-            `Quick
-            test_reasoning_cycle_ends_the_stream
-        ; Alcotest.test_case
-            "a same-byte run in reasoning ends the stream"
-            `Quick
-            test_reasoning_same_byte_run_ends_the_stream
-        ; Alcotest.test_case
-            "restating a line in reasoning is left alone"
-            `Quick
-            test_reasoning_restating_a_line_is_left_alone
-        ; Alcotest.test_case
-            "a paragraph recurring between thoughts is left alone"
-            `Quick
-            test_reasoning_recurring_paragraph_is_left_alone
-        ; Alcotest.test_case
-            "identical short rows in an answer are left alone"
-            `Quick
-            test_text_rows_are_not_read_as_a_cycle
+    ; ( "content continuation"
+      , [ Alcotest.test_case "text and reasoning preserve repeated content through provider terminal"
+            `Quick test_repeated_text_and_reasoning_reach_provider_terminal
+        ; Alcotest.test_case "repeated content preserves explicit provider stop reasons"
+            `Quick test_repeated_content_preserves_provider_stop_reasons
         ] )
     ; ( "accumulate"
       , [ Alcotest.test_case "message_start" `Quick test_accumulate_message_start

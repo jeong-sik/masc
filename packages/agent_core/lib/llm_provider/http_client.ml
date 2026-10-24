@@ -130,16 +130,6 @@ type provider_failure_kind =
      kept typed so consumers reach their compaction/shrink path instead of
      seeing a generic invalid-request. *)
   | Context_overflow of { limit : int option }
-  (* agent-core boundary: the model's own generation repeated itself and the
-     stream was ended for it. The bytes arrived intact, so this is not a wire
-     error: the same model called through another provider repeats the same
-     way, and a caller rotating candidates needs to know that it is the model,
-     not the connection, that failed. *)
-  | Repeating_generation of
-      { shape : Types.repeating_shape
-      ; occurrences : int
-      ; unit_bytes : int
-      }
   | Unknown_provider_failure of { reason : string option }
 
 type refusal_body =
@@ -226,12 +216,6 @@ let provider_failure_kind_to_string = function
   | Context_overflow { limit = Some limit } ->
     Printf.sprintf "context_overflow:limit_%d" limit
   | Context_overflow { limit = None } -> "context_overflow"
-  | Repeating_generation { shape; occurrences; unit_bytes } ->
-    Printf.sprintf
-      "repeating_generation:%s:%dx%d"
-      (Types.repeating_shape_to_string shape)
-      occurrences
-      unit_bytes
   | Unknown_provider_failure { reason = Some reason } ->
     Printf.sprintf "unknown_provider_failure:%s" reason
   | Unknown_provider_failure { reason = None } -> "unknown_provider_failure"
@@ -3724,7 +3708,6 @@ let%test "oversized response is typed without draining" =
               | Provider_interrupted
               | Empty_completion _
               | Context_overflow _
-              | Repeating_generation _
               | Unknown_provider_failure _ )
           ; message = _
           } ) -> false

@@ -292,7 +292,6 @@ let candidate_capacity_http_error = function
           | Llm_provider.Http_client.Provider_interrupted
           | Llm_provider.Http_client.Response_body_too_large _
           | Llm_provider.Http_client.Empty_completion _
-          | Llm_provider.Http_client.Repeating_generation _
           | Llm_provider.Http_client.Unknown_provider_failure _ )
       ; _
       } -> false

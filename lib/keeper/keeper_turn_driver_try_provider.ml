@@ -2579,9 +2579,9 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
          with
          | Ok _ as accepted -> accepted
          | Error _ as rejected ->
-           (* A rejected thinking-only response is a reasoning block the
-              stream repeat guard did not end; keep the window it read so the
-              miss can be explained (writes nothing for other shapes). *)
+           (* Keep the reasoning observation for a rejected thinking-only
+              response. This records evidence after the provider finished;
+              it writes nothing for other response shapes. *)
            Keeper_wire_capture.capture_rejected_reasoning
              ~base_path:ctx.base_path
              ~keeper_name:ctx.keeper_name

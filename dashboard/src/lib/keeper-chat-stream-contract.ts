@@ -101,7 +101,6 @@ export const KEEPER_STREAM_PROTOCOL_ERROR_KINDS = [
   'sse_unsupported_part',
   'sse_unsupported_response',
   'sse_stream_incomplete',
-  'sse_stream_repeating',
   'sse_timeout',
 ] as const
 

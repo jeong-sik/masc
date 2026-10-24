@@ -239,15 +239,9 @@ let stored_output_identity_json ~sha256 ~bytes ~mime =
     ]
 ;;
 
-(* What is hashed is the tool's answer, not its receipt. A field that changes
-   on every call -- Execute's execution time, a memory write's snapshot
-   revision and timestamp -- would otherwise make two identical results hash
-   apart, and the repeated-call yield in keeper_agent_run.ml (threshold 3)
-   would never see the loop: [gh auth status] four times on 2026-08-24, twelve
-   memory claims rewritten 1,861 times on 2026-10-05. Which part of an output
-   is the answer is the tool's to say ({!Keeper_tool_answer}); this module
-   names no field. A tool that reads the whole output as its answer keeps the
-   canonical JSON digest, and output that is not JSON keeps the byte hash. *)
+(* Each tool declares which part of its output is the answer
+   ({!Keeper_tool_answer}). This observation preserves the canonical JSON
+   digest, or the original byte hash when the answer is not JSON. *)
 let inline_output_fingerprint value =
   match Yojson.Safe.from_string value with
   | json -> Some (digest_json json)

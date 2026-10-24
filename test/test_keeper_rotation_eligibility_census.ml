@@ -456,7 +456,6 @@ let route_claim = function
           | Keeper_runtime_failure_route.Authorization_refused
           | Keeper_runtime_failure_route.Model_unavailable
           | Keeper_runtime_failure_route.Refusal_body_not_received
-          | Keeper_runtime_failure_route.Generation_repeated
           | Keeper_runtime_failure_route.Admission
           | Keeper_runtime_failure_route.Provider_reported_failure
           | Keeper_runtime_failure_route.Request_refused

@@ -152,9 +152,8 @@ val capture_rejected_reasoning :
   unit
 (** Appends one redacted [kind:"rejected_reasoning"] record when the accept
     gate rejected a response whose only content is reasoning: the response's
-    newest 64 KiB of reasoning (the window the stream repeat guard reads),
+    newest 64 KiB of reasoning,
     its total length, the provider stop reason, and the longest periodic
     suffix {!Agent_core.Llm_provider.Periodic_suffix.find} sees in that
-    window, so a block the guard did not end can be re-run against the rule
-    offline. Any other response shape writes nothing. [turn_id] is the keeper
+    window for offline observation. This capture does not stop generation. Any other response shape writes nothing. [turn_id] is the keeper
     turn when the caller has one. No-op unless {!enabled}. *)

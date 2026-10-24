@@ -96,12 +96,6 @@ type rotate_class =
           ({!Llm_provider.Retry.Refusal_body_not_received}); the lane moves
           to its next candidate, the refusal's reason being unread rather
           than determinate *)
-  | Generation_repeated
-      (** the model's generation repeated one unit past the threshold and the
-          client ended the stream ([Llm_provider.Error.RepeatingGeneration]).
-          The connection delivered every byte, so this is neither a wire
-          fault nor a provider integration defect: the lane rotates, and the
-          driver leaves the model, not only the provider, behind *)
   | Admission
       (** this binding's own pre-dispatch admission refused the prepared
           request (RFC-one-slot-fault-judgment-for-every-walk.md §3.2:
@@ -115,9 +109,8 @@ type rotate_class =
       (** the provider itself reported a structured failure for this attempt
           ([Llm_provider.Error.ProviderReportedError]: a CLI-adapter turn
           failure, an RPC error, or a post-activity context-window report).
-          The fact is scoped to this candidate's attempt, matching
-          [Llm_provider.Error.RepeatingGeneration]'s [Generation_repeated]
-          sibling: [Runtime_attempt_fsm.should_try_next] already rotates on
+          The fact is scoped to this candidate's attempt, where
+          [Runtime_attempt_fsm.should_try_next] already rotates on
           every [Http_client.ProviderFailure] kind, so a route that called
           this terminal disagreed with the walk that already moves on
           (task-1642) *)
@@ -299,7 +292,7 @@ val route_resumes_on_same_path : route -> bool
     [RepetitionTruncation], [StopToolUse], [PauseTurn], [Compaction],
     [ContextWindowExceeded], [UnmatchedToolCalls], or [Unknown _]. The first
     three are deterministic for the same input, matching
-    [Refusal_body_not_received] and [Generation_repeated]. [PauseTurn] and
+    [Refusal_body_not_received]. [PauseTurn] and
     [Compaction] need the provider's assistant response to continue; an empty
     completion error carries no such response, so replaying its pre-response
     checkpoint is not a valid continuation. [Hard_quota] without a reset,

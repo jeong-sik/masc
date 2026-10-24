@@ -600,7 +600,6 @@ module For_testing : sig
     ?on_lane_terminal_error:(lane_terminal_error -> unit) ->
     ?provider_answered:('result -> bool) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
-    ?model_of:('candidate -> string option) ->
     ?candidate_backpressure_of:('candidate -> Runtime_candidate_backpressure.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
     ?read_usage_after_account_refusal:('candidate -> unit) ->

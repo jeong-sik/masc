@@ -2878,124 +2878,55 @@ let test_complete_stream_preserves_repeated_incremental_text () =
   | Exit -> ()
 ;;
 
-(* The repeat guard from #32997 lives in the stream state machine. This is the
-   wiring that makes it stop the socket: the accumulator failing has to end the
-   read, not just discard what the read keeps delivering.
-
-   The provider repeats one paragraph three times and then goes quiet for
-   [quiet_s] before sending more. A client that stops at the third occurrence
-   answers in well under that. One that keeps reading waits for a frame it has
-   already decided to throw away — which is what the deleted
-   [Eio.Time.Timeout when stream_failed acc -> Ok ()] arm used to paper over.
-
-   Timing rather than frame counting: TCP buffering means "the server wrote it"
-   does not tell us whether the client read it, while the wall clock does. *)
-let test_complete_stream_stops_reading_a_repeating_generation () =
-  Eio_main.run
-  @@ fun env ->
-  try
-    Eio.Switch.run
-    @@ fun sw ->
-    (* Whole lines of 40 bytes or more are what the guard counts. *)
-    let paragraph = "the premise this rests on has not changed since" in
-    let repeated = anthropic_sse_frame_delta (paragraph ^ "\\n") in
-    let quiet_s = 2.0 in
-    let url =
-      start_raw_sse_server
-        ~sw
-        ~net:env#net
-        ~clock:env#clock
-        [ 0.0, anthropic_sse_frame_message_start
-        ; 0.0, anthropic_sse_frame_content_block_start
-        ; 0.0, repeated
-        ; 0.0, repeated
-        ; 0.0, repeated
-        ; quiet_s, anthropic_sse_frame_delta "a frame the client must never wait for"
-        ; 0.0, anthropic_sse_frame_stop
-        ]
-    in
-    let started = Eio.Time.now env#clock in
-    let result =
-      Complete.complete_stream
-        ~sw
-        ~net:env#net
-        ~config:(make_config url)
-        ~messages
-        ~on_event:(fun _ -> ())
-        ()
-    in
-    let elapsed = Eio.Time.now env#clock -. started in
-    (match result with
-     | Error
-         (Http_client.ProviderFailure
-            { kind = Http_client.Repeating_generation _; _ }) -> ()
-     | Error _ ->
-       fail "a repeating generation must be reported as one, not as a timeout"
-     | Ok _ -> fail "three identical paragraphs must not finalize as an answer");
-    if elapsed >= quiet_s
-    then
-      failf
-        "the stream spent %.2fs on a provider it had stopped reading (it went \
-         quiet for %.2fs)"
-        elapsed
-        quiet_s;
+let complete_stream_preserves_repeated_content ~reasoning () =
+  Eio_main.run @@ fun env ->
+  try Eio.Switch.run @@ fun sw ->
+    let unit = "Each independent case uses the same starting premise.\n" in
+    let repeated = String.concat "" (List.init 96 (fun _ -> unit)) in
+    let later = "The cases now yield the answer." in
+    let frame event fields =
+      Printf.sprintf "event: %s\ndata: %s\n\n" event
+        (Yojson.Safe.to_string (`Assoc (("type", `String event) :: fields))) in
+    let initial_kind, delta_kind, content_key =
+      if reasoning then "thinking", "thinking_delta", "thinking"
+      else "text", "text_delta", "text" in
+    let start index kind = frame "content_block_start"
+      ["index",`Int index;"content_block",`Assoc ["type",`String kind;kind,`String ""]] in
+    let delta index kind key text = frame "content_block_delta"
+      ["index",`Int index;"delta",`Assoc ["type",`String kind;key,`String text]] in
+    let stop index = frame "content_block_stop" ["index",`Int index] in
+    let frames =
+      [0.0,anthropic_sse_frame_message_start; 0.0,start 0 initial_kind]
+      @ List.init 96 (fun _ -> 0.0,delta 0 delta_kind content_key unit)
+      @ [0.0,stop 0; 0.0,start 1 "text"; 0.0,delta 1 "text_delta" "text" later;
+         0.0,stop 1;0.0,anthropic_sse_frame_usage_only;0.0,anthropic_sse_frame_message_stop] in
+    let url = start_raw_sse_server ~sw ~net:env#net ~clock:env#clock frames in
+    let delivered = ref [] in
+    let on_event = function
+      | Types.ContentBlockDelta {delta=Types.TextDelta text | Types.ThinkingDelta text;_} ->
+        delivered := text :: !delivered
+      | _ -> () in
+    (match Complete.complete_stream ~sw ~net:env#net ~config:(make_config url)
+             ~messages ~on_event () with
+     | Error _ -> fail "valid repeating content must reach the provider terminal"
+     | Ok response ->
+       check bool "explicit provider terminal survives" true (response.stop_reason=Types.EndTurn);
+       let canonical = List.filter_map (function
+         | Types.Text text | Types.Thinking {content=text;_} -> Some text
+         | _ -> None) response.content |> String.concat "" in
+       check string "canonical repeated content and later answer" (repeated ^ later) canonical;
+       check string "callbacks deliver every repeated fragment and later answer"
+         (repeated ^ later) (String.concat "" (List.rev !delivered)));
     Eio.Switch.fail sw Exit
-  with
-  | Exit -> ()
+  with Exit -> ()
 ;;
 
-(* The same wiring for a reasoning block: the cycle guard lives in the state
-   machine, and the socket has to stop when it fires. The provider chants one
-   43-byte unit; the guard fires on the 24th copy (1,032 bytes of periodic
-   tail), and the client must not wait out the quiet gap for the frame after
-   it. *)
-let test_complete_stream_stops_reading_a_chanting_reasoning_block () =
-  Eio_main.run
-  @@ fun env ->
-  try
-    Eio.Switch.run
-    @@ fun sw ->
-    let chant = anthropic_sse_frame_thinking_delta "Let me write.\\n\\nNow.\\n\\nGo.\\n\\nProducing.\\n\\nOK.\\n\\n" in
-    let quiet_s = 2.0 in
-    let url =
-      start_raw_sse_server
-        ~sw
-        ~net:env#net
-        ~clock:env#clock
-        ([ 0.0, anthropic_sse_frame_message_start; 0.0, anthropic_sse_frame_thinking_block_start ]
-         @ List.init 24 (fun _ -> 0.0, chant)
-         @ [ quiet_s, anthropic_sse_frame_thinking_delta "a frame the client must never wait for"
-           ; 0.0, anthropic_sse_frame_stop
-           ])
-    in
-    let started = Eio.Time.now env#clock in
-    let result =
-      Complete.complete_stream
-        ~sw
-        ~net:env#net
-        ~config:(make_config url)
-        ~messages
-        ~on_event:(fun _ -> ())
-        ()
-    in
-    let elapsed = Eio.Time.now env#clock -. started in
-    (match result with
-     | Error
-         (Http_client.ProviderFailure
-            { kind = Http_client.Repeating_generation _; _ }) -> ()
-     | Error _ ->
-       fail "a chanting reasoning block must be reported as a repeat, not as a timeout"
-     | Ok _ -> fail "a reasoning block chanting one unit must not finalize as an answer");
-    if elapsed >= quiet_s
-    then
-      failf
-        "the stream spent %.2fs on a provider it had stopped reading (it went \
-         quiet for %.2fs)"
-        elapsed
-        quiet_s;
-    Eio.Switch.fail sw Exit
-  with
-  | Exit -> ()
+let test_complete_stream_preserves_repeated_text () =
+  complete_stream_preserves_repeated_content ~reasoning:false ()
+;;
+
+let test_complete_stream_preserves_repeated_reasoning () =
+  complete_stream_preserves_repeated_content ~reasoning:true ()
 ;;
 
 let test_complete_stream_replaces_invalid_content_with_typed_failure () =
@@ -4853,13 +4784,13 @@ let () =
             `Quick
             test_complete_stream_preserves_repeated_incremental_text
         ; test_case
-            "built-in stream stops reading a repeating generation"
+            "built-in stream preserves repeated text and later output"
             `Quick
-            test_complete_stream_stops_reading_a_repeating_generation
+            test_complete_stream_preserves_repeated_text
         ; test_case
-            "built-in stream stops reading a chanting reasoning block"
+            "built-in stream preserves repeated reasoning and later output"
             `Quick
-            test_complete_stream_stops_reading_a_chanting_reasoning_block
+            test_complete_stream_preserves_repeated_reasoning
         ; test_case
             "built-in stream replaces invalid content with typed failure"
             `Quick

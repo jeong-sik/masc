@@ -577,7 +577,7 @@ let failure_of_agent_core_error error =
           ( Route.Resumable_cli_session | Route.Candidates_filtered
           | Route.Runtime_exhausted | Route.No_progress_empty
           | Route.No_progress_thinking_only | Route.No_progress_truncated
-          | Route.Refusal_body_not_received | Route.Generation_repeated
+          | Route.Refusal_body_not_received
           | Route.Admission | Route.Provider_reported_failure
           | Route.Request_refused | Route.Provider_wire_defect
           | Route.Server_error_not_transient | Route.Context_window_exceeded )
@@ -865,7 +865,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                         | Llm_provider.Error.UnknownVariant _
                         | Llm_provider.Error.ProviderUnavailable _
                         | Llm_provider.Error.EmptyCompletion _
-                        | Llm_provider.Error.RepeatingGeneration _
                         | Llm_provider.Error.RateLimit _
                         | Llm_provider.Error.HardQuota _
                         | Llm_provider.Error.CapacityExhausted _

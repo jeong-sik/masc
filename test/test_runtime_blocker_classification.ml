@@ -67,18 +67,11 @@ let test_reason_none_provider_error_falls_through () =
     (KSB.runtime_blocker_class_to_string surface.KSB.blocker_class)
 ;;
 
-(* A typed provider code that is not a timeout: the summary carries the
-   record's own code and detail and nothing else. It used to call the record
-   a catch-all and send the operator to find a typed cause the code already
-   named (msx-retro-mania, 2026-09-22: a repeated-generation stop the lane
-   had already moved past). *)
+(* A typed provider code that is not a timeout retains the boundary's
+   code and detail in the operator summary. *)
 let test_typed_provider_code_summary_is_the_record () =
-  let code = "provider_error_repeating_generation:repeated_reasoning_cycle" in
-  let detail =
-    "Provider 'ollama_cloud' model repeated itself (repeated_reasoning_cycle: one \
-     270-byte unit 4 times); the stream was ended and the next candidate must be a \
-     different model"
-  in
+  let code = "provider_error_reported:rpc_error" in
+  let detail = "The provider reported that the RPC request failed." in
   let surface = provider_runtime_surface_exn ~reason:None ~code ~detail () in
   check string "class" "provider_runtime_error" (KSB.runtime_blocker_class_to_string surface.KSB.blocker_class);
   check string "the summary is the record's code and detail"

@@ -263,7 +263,6 @@ let%test "glm quota envelopes promote to hard quota" =
                     | Http_client.Response_body_too_large _
                     | Http_client.Empty_completion _
                     | Http_client.Context_overflow _
-                    | Http_client.Repeating_generation _
                     | Http_client.Unknown_provider_failure _ )
                 ; _
                 }) -> false)

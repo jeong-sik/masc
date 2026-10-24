@@ -41,7 +41,7 @@ let protocol_error_full : E.stream_protocol_error =
   }
 
 let protocol_error_sparse : E.stream_protocol_error =
-  { kind = E.Sse_stream_repeating
+  { kind = E.Sse_stream_incomplete
   ; quarantined_occurrence = None
   ; index = None
   ; tool_call_id = None

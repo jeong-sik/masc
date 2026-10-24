@@ -66,3 +66,9 @@ val parse_updates_response : status:int -> body:string -> (update list, error) r
 val parse_message_response : status:int -> body:string -> (message, error) result
 (** Shared strict duplicate-key response boundary. Unknown Telegram fields are
     allowed, but required/known fields are never coerced or defaulted. *)
+
+val get_me :
+  ?post:post -> ?clock:[> float Eio.Time.clock_ty] Eio.Resource.t ->
+  ?timeout_sec:float -> t -> unit -> (user, error) result
+(** Resolve the authenticated bot identity. Polling cursor ownership must use
+    this actual identity, not a token string/hash or configured chat ID. *)

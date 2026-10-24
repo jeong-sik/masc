@@ -28,6 +28,7 @@
   slack_socket_client
   slack_rest_client
   telegram_rest_client
+  telegram_poll_custody
   slack_user_directory
   slack_observability
   gate_rest_json

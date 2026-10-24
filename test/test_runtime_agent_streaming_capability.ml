@@ -217,7 +217,7 @@ let run_case ?(callbacks = Persist_callbacks) ?(observer_failure = false)
    call precedes the admitted one: synthesizing the filtered AfterTurn
    response would lose its original inventory and assign the wrong block. *)
 let completed_media_and_tools ?(execution_actor = Some "actual-keeper")
-    ?(reported_model = model_id) entry () =
+    ?(reported_model = model_id) ?(duplicate_rejected_id = false) entry () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -233,7 +233,7 @@ let completed_media_and_tools ?(execution_actor = Some "actual-keeper")
     `Assoc ["type", `String "image"; "source", `Assoc [
       "type", `String "base64"; "media_type", `String "image/png";
       "data", `String (Base64.encode_string media_payload)]];
-    `Assoc ["type", `String "tool_use"; "id", `String "rejected-call";
+    `Assoc ["type", `String "tool_use"; "id", `String (if duplicate_rejected_id then "accepted-call" else "rejected-call");
       "name", `String "unregistered_fixture_tool"; "input", `Assoc []];
     `Assoc ["type", `String "tool_use"; "id", `String "accepted-call";
       "name", `String "fixture_effect"; "input", `Assoc []]] in
@@ -343,6 +343,8 @@ let completed_media_and_tools ?(execution_actor = Some "actual-keeper")
      check string "the tool belongs to the earlier response, not the final one"
        "media-tools" identity.response_id;
      check string "the admitted invocation owns the identity" "accepted-call" identity.tool_use_id;
+     check int "the source ordinal survives removal of the preceding ToolUse"
+       1 identity.source_tool_use_ordinal;
      check string "actual provider identity is retained" "fixture" identity.provider_id;
      check string "the host actor is independent of its synthetic agent name" actor identity.actor;
      check string "actual reported model is retained" reported_model identity.model_id);
@@ -388,7 +390,7 @@ let failed_completion_has_no_progress () =
   check int "one refused JSON request" 1 (Exact_output_fixture.post_count server);
   check int "refusal does not synthesize a successful response" 0 (List.length !events)
 
-let duplicate_wire_ids_across_names_have_no_occurrence_identity () =
+let missing_admission_map_has_no_occurrence_identity () =
   Eio_main.run @@ fun _ ->
   Runtime_response_identity_scope.with_scope ~actor:(Some "actual-keeper")
     ~runtime_id:"runtime" ~provider_id:(Some "provider") (fun ~hooks ~wrap_tool ->
@@ -402,7 +404,7 @@ let duplicate_wire_ids_across_names_have_no_occurrence_identity () =
       let ran = ref false in
       let tool=Agent_core.Tool.create ~name:"first" ~description:"probe" ~parameters:[] (fun _ ->
         ran:=true;
-        check bool "duplicate IDs cannot identify an exact occurrence" true
+        check bool "wire IDs alone cannot replace the missing admission map" true
           (Option.is_none (Runtime_response_identity_scope.current ()));
         Ok {Agent_core.Types.content="ok";content_blocks=None;_meta=None}) |> wrap_tool in
       let invocation=Agent_core.Tool_contract.Invocation.create ~tool_use_id:"duplicate" ~turn:1
@@ -443,8 +445,10 @@ let () =
            (completed_media_and_tools ~execution_actor:None Fresh)
          ; test_case "a blank reported model remains unknown after presentation fallback" `Quick
            (completed_media_and_tools ~reported_model:"" Fresh)
-         ; test_case "duplicate wire IDs across tool names remain unknown" `Quick
-           duplicate_wire_ids_across_names_have_no_occurrence_identity]
+         ; test_case "registered and rejected tools sharing an ID retain the admitted source ordinal" `Quick
+           (completed_media_and_tools ~duplicate_rejected_id:true Fresh)
+         ; test_case "a missing admission map keeps exact occurrence unknown" `Quick
+           missing_admission_map_has_no_occurrence_identity]
        ; "callback persistence failures",
          [ test_case "fresh JSON scope failure admits no provider request" `Quick
              (run_case ~callbacks:Fail_scope_sink Fresh

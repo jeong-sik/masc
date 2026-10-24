@@ -88,3 +88,30 @@ Browser procedure: ego-browser skill, one task space (26), navigate to
 `/dashboard/#connectors?section=connector-status&connector=telegram`, inspect
 semantic snapshot, open Config, wait for the native config panel, capture that
 panel's actual DOM rectangle and visually inspect it. No page mocks were used.
+
+## Follow-up: persisted coordinate ordering failure and repair
+
+Run **40108964093 failed**. The Keeper Owner executable compiled and ran 92
+cases; the new Telegram case was its sole failure (the suite ran in 2.266s after
+compilation). The real poll/acceptor path had queued an operation, but its stored
+source could not be decoded: `Telegram Keeper operation surface differs from
+its exact route`. This invalidated the earlier integration SOURCE PASS, and an
+append-only FAIL correction was posted to #45831.
+
+The operation store recursively canonicalizes JSON object keys. A generic Gate
+surface's address is represented in OCaml as an association list; structural
+list equality had mistaken changed key order for a changed destination. Repair
+`0f228cdaf5a407e5326b87aabd26d659c5b20b71` gives the producer canonical address
+order and uses exact sorted-map equality at both strict source validation and
+terminal stored-row selection. Duplicate, missing, unknown and changed
+coordinates remain refusals. The native fixture now exercises the actual
+canonical JSON transformation and full-map adversarial cases. Its missing direct
+Ids dependency was also declared; the previous native-test batch had stopped at
+that compile error, so no passing result is attributed to it.
+
+The repaired native source received independent source review; this does not
+prove that the repaired Owner scenario has executed successfully. A new focused
+request at upper source `9a9109d9c5c34dbfbe457f2e0a0e8ebfb092051c` selects only
+`test_telegram_native_gateway,test_keeper_owner,test_telegram_poll_custody,test_telegram_rest_client`.
+The result remains pending at this update. Frontend source is unchanged from the
+140-test and candidate screenshot observations above.

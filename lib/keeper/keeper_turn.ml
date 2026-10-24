@@ -669,6 +669,13 @@ let run_keeper_invocation_turn_admitted_inner
             let world_observation =
               direct_turn_observation ~config:ctx.config meta
             in
+            let active_goal_summaries =
+              match world_observation.active_goals with
+              | Error unavailable -> Error unavailable
+              | Ok _ ->
+                Keeper_unified_prompt.active_goal_summaries
+                  ~config:ctx.config ~keeper_name:meta.name
+            in
             let {Keeper_turn_shared_inputs.lane_updates;workspace_memory;wiki_contents} =
               Keeper_turn_shared_inputs.observe ~preview ~config:ctx.config ~keeper_name:meta.name () in
             let build_turn_prompt ~base_system_prompt:_ ~messages:_
@@ -731,6 +738,7 @@ let run_keeper_invocation_turn_admitted_inner
               in
               let prepared_context =
                 Keeper_direct_turn_context.prepare
+                  ~active_goal_summaries
                   ~current_task
                   ~held_task_skills
                   ~task_skill_surfaces

@@ -124,3 +124,22 @@ run 40110391139's selected source (verified by an empty diff). A separate narrow
 follow-up runs only the native gateway/custody/REST suites at source
 `145ef89b52a1b5bf6296c4e4d1a805b2dedec045`; no running job was cancelled and the
 Owner suite is not needlessly repeated for this fixture-only change.
+
+## Observed repair execution: Keeper Owner passed, fixture build remains separate
+
+Run [40110391139](https://github.com/jeong-sik/masc/actions/runs/40110391139)
+subsequently **compiled and passed all 92 Keeper Owner cases**, including the
+real Telegram poll → Gate → queued SQLite operation → strict source reload
+scenario that had failed. The suite executed in 2.228s; see the retained
+[excerpt](owner-persistence-followup.txt). This is actual acceptance/persistence
+proof with injected Bot API HTTP, no model run, real Telegram or installed server.
+
+The overall run still **FAILED** because its later native fixture referenced
+the private formatter described above. Follow-up run
+[40111004227](https://github.com/jeong-sik/masc/actions/runs/40111004227)
+progressed past that repair but **FAILED** on the fixture's undeclared direct
+configuration module. The native fixture now uses the repository's shared
+`masc_test_deps` integration dependencies plus its explicit markup leaf, keeping
+module ownership in the existing test SSOT. Production and Owner sources remain
+unchanged. A new narrow request covers native gateway/custody/REST execution;
+no native gateway suite PASS is attributed to these failed builds.

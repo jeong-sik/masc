@@ -1,0 +1,165 @@
+{
+  "observation": "/tmp/masc-goal-canary-3badb881/observations/20261024T142958741793Z.json",
+  "wire": [
+    {
+      "request": "request-000002.request",
+      "request_sha256": "288b9e57d10372e4c6b608d484ef36a92d951d62578016ab8a71796623847ad7",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "user",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_p15lyef2",
+          "function": {
+            "index": 0,
+            "name": "Read",
+            "arguments": {
+              "file_path": "workspace/acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "d469e051989737060ee2bc73967c0d2f0acfb77934b9b3374ba532daf6026cb3"
+    },
+    {
+      "request": "request-000003.request",
+      "request_sha256": "e7d6889d5280d08718cd6d391e2485e973d2f1b03c0665483b94b2472ad181b1",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_amvl548x",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 2,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "5f0a87f8e948bdda16242a74ecca86358de3baeec84e1e0ae9606c0a5d9ec5f3"
+    },
+    {
+      "request": "request-000004.request",
+      "request_sha256": "2578aee7d596987ba4c5a2496a3f7ce09f5e25304db654b7374b30e074342420",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_apne6jpe",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 2,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "659d84559501032d571b9e9dee945e9c46527278c8c92567c76039f24f852b77"
+    },
+    {
+      "request": "request-000005.request",
+      "request_sha256": "6683d8196e6079996982aae77200c2455608269bf12c93706554869069df72a0",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_cjzotm1v",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "description": "Read workspace/acceptance.json. Change the value of the \"alpha\" field to true. Ensure \"beta\" and \"gamma\" remain false. Use artifact:workspace/acceptance.json as evidence for verification. Do not modify \"beta\" or \"gamma\" until this task is approved.",
+              "goal_id": "goal-canary-three-results",
+              "priority": 2,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "9bf02c0d9472a04ce45df348d43404a12628f15fefc325063a6bf3a6215ecf01"
+    },
+    {
+      "request": "request-000006.request",
+      "request_sha256": "5e15efb75fae20c2b45453680ae79c49df42d9c114c7a2fd15249c1c3957f72e",
+      "system_goal_present": true,
+      "goal_in_fresh_user_carrier": false,
+      "newest_message_role": "tool",
+      "current_carriers": 0,
+      "criterion_in_current_carrier": false,
+      "goal_in_current_carrier": false,
+      "offered_tool_count": 33,
+      "tools": [],
+      "response_sha256": "169bf1c9f3db2096b847ab7e3366e6568028ec66bb6cadb069d9e810c2f587d4"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-001",
+      "title": "Set alpha to true in acceptance.json",
+      "description": "Read workspace/acceptance.json. Change the value of the \"alpha\" field to true. Ensure \"beta\" and \"gamma\" remain false. Use artifact:workspace/acceptance.json as evidence for verification. Do not modify \"beta\" or \"gamma\" until this task is approved.",
+      "priority": 2,
+      "files": [],
+      "created_at": "2026-10-24T14:29:27Z",
+      "created_by": "goal-canary",
+      "contract": {
+        "strict": true,
+        "required_evidence": [
+          "artifact:workspace/acceptance.json"
+        ]
+      },
+      "status": "todo"
+    }
+  ],
+  "artifact": {
+    "alpha": false,
+    "beta": false,
+    "gamma": false
+  },
+  "actual_system_capture_sha256": "0843cd91a6d874e10ce9d693012fc2fbca0f19e1b9933f9edb2e0e54e248adf5",
+  "capture_matches_actual_wire_system": true,
+  "goal_id_absent_from_owner_request": true
+}

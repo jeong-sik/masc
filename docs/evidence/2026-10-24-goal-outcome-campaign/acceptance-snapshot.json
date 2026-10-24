@@ -67,9 +67,13 @@
     {
       "id": "G2",
       "requirement": "Keeper chooses a matching Goal for related work and creates a Task with its goal_id",
-      "state": "reproduced_failure_repair_in_progress",
-      "evidence": [],
-      "scope": "Actual1eef wire retains Goal/revision through all15 provider requests and repeatedly chooses matching Goal ID, but Gemma omitted required description despite correct schema and errors. No Task persisted; file remained false/false/false. Controlled run explicitly stopped and pause reread. One-seed frozen replay: trailing User omitsdescription, same text at leading System/leading User includesdescription. This is diagnostic, not Task success. Stable system carrier repair underway; G3 remains unproven.",
+      "state": "measured_pass",
+      "evidence": [
+        "docs/evidence/2026-10-24-goal-system-runtime/g2-observation.json",
+        "docs/evidence/2026-10-24-goal-system-runtime/g2-goal-links.json",
+        "docs/evidence/2026-10-24-goal-system-runtime/g2-task.json"
+      ],
+      "scope": "Actual local Gemma Read→Task-create emitted matching delivered Goal ID, self-corrected required description after two rejected calls, actual handler accepted and authoritative Goal registry links task-001. Owner request contained no Goal ID. Captured System bytes/hash equal actual provider wire; no Goal in trailing User. Task stillTodo at this snapshot; first-turn execution and G3 are not inferred. Single Goal, changed staged prompt cohort, no multi-Goal selection-rate claim.",
       "counterevidence": [
         "/tmp/masc-goal-wire-7501aec0/request-000003.request",
         "/tmp/masc-goal-wire-7501aec0/request-000006.response",
@@ -78,13 +82,21 @@
         "/tmp/masc-goal-canary-c6e54ff5/failed-g2-observation.json",
         "docs/evidence/2026-10-24-goal-retention-runtime/failed-gemma-observation.json",
         "docs/evidence/2026-10-24-goal-carrier-diagnostic/README.md"
-      ]
+      ],
+      "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a"
     },
     {
       "id": "G3",
       "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
-      "state": "not_measured",
-      "evidence": []
+      "state": "measured_fail",
+      "evidence": [
+        "docs/evidence/2026-10-24-goal-system-runtime/g3-after-approval-observation.json",
+        "/tmp/masc-goal-wire-3badb881/request-000019.request",
+        "/tmp/masc-goal-canary-3badb881/operator-observations/approval-receipt.json"
+      ],
+      "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+      "measured_at": "2026-10-24T14:45:45.548135+00:00",
+      "scope": "Real gemma4:e2b linked partial Task approved by controlled operator proxy after exact immutable artifact inspection; approval event and current Goal reach actual request000019, 33 tools offered including goal_measure. Model returns text claiming still awaiting verification and calls no tools; artifact remains1/3 and Goal reported measurement0/3. No Keeper message after approval. One pre-approval execution reminder disclosed."
     },
     {
       "id": "G4",
@@ -196,14 +208,15 @@
   "limits": [
     "No production deployment performed by this campaign. Isolated candidate observations and native fixtures are explicitly scoped.",
     "Historical Task counts include legitimate independent Tasks; linkage ratio is diagnostic, not a target or gate.",
-    "No full regression. Native scopes remain distinct:7501 26/29; b9 4targetedrepairsPASS;1eef6/7 (fixturefailure), correctedHTTP6casesPASS9f. Actual Gemma workflow failed despite Goal delivery; no G2/G3 pass."
+    "G2 measured pass at3bad single-Goal Gemma canary. G3 measured failure: delivered approval ignored by model; no Goal completion, population success, model independence or microVM end-to-end grading claim."
   ],
-  "measured_at": "2026-10-24T13:48:45.917702+00:00",
+  "measured_at": "2026-10-24T14:45:45.548135+00:00",
   "summary": {
     "required": 11,
-    "measured_pass": 9,
+    "measured_pass": 10,
     "passed_case_ids": [
       "G1",
+      "G2",
       "G4",
       "A1",
       "A2",
@@ -214,7 +227,6 @@
       "A7"
     ],
     "remaining": [
-      "G2",
       "G3"
     ],
     "goal_complete": false,
@@ -227,6 +239,13 @@
     "eager_build_result": "SUCCESS40095081238; exact c6 server firstwire33tools confirms both eager schemas. Real G2 failed association after post-tool Goal context loss; G3 unproven. Keeper explicitly stopped and pause reread.",
     "retention_candidate": "1eef45b69f395b1819537c116c7df839023da110",
     "retention_native_result": "Initial40097972974 at1eef6PASS1FAIL; correctedHTTP6testsPASS40098831581 at9f024959528a5c0ea12ce59f0c1a63b2a364695d; productdiffempty, not whole7rerunonehead.",
-    "retention_build_result": "SUCCESS40097972842 source1eef; serverSHA24e409da4e773983b10bb0e7d5af0d1c93ce1e7257c5ba4083e93bd649083cb6; checked compatible dca support reused; isolated49916, roots match."
+    "retention_build_result": "SUCCESS40097972842 source1eef; serverSHA24e409da4e773983b10bb0e7d5af0d1c93ce1e7257c5ba4083e93bd649083cb6; checked compatible dca support reused; isolated49916, roots match.",
+    "stable_system_candidate": "3badb88117794510dac576bf3fc34f0336e17d8a",
+    "stable_system_native": "40101087040: six selected suites passed at3bad",
+    "stable_system_build": "40101087227: macOS server build/extraction checked at3bad; not full bundle installation",
+    "official_resume_native": "40102214212: two selected suites passed atd3a242837194e94c435a228228ac0eaab10724aa",
+    "measured_fail_case_ids": [
+      "G3"
+    ]
   }
 }

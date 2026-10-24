@@ -37,6 +37,75 @@ let phase_name = function
 let max_frames_per_phase = 512
 let max_stage_samples = 4096
 
+type ask_owner = Keeper of string | Installation of string
+type ask_identity = {
+  owner : ask_owner;
+  ask_id : string;
+  source_turn_ref : string option;
+  is_open : bool;
+}
+type asks_application =
+  | Applied of { open_count : int; rows : ask_identity list }
+  | Reset
+
+type questions_reading =
+  | Questions_current
+  | Questions_unread
+  | Questions_stale
+  | Questions_failed
+  | Questions_unavailable
+
+let questions_reading_json = function
+  | Questions_current -> `String "current"
+  | Questions_unread -> `String "unread"
+  | Questions_stale -> `String "stale"
+  | Questions_failed -> `String "failed"
+  | Questions_unavailable -> `String "unavailable"
+
+let json_line fields = Yojson.Safe.to_string (`Assoc fields)
+let ns value = `String (Int64.to_string value)
+let optional_text = function None -> `Null | Some value -> `String value
+
+module Ask_samples = struct
+  type event = { epoch : int; at_ns : int64; before_build : int; application : asks_application }
+  type t = { events : event list; count : int; first_dropped_build : int option }
+  type view = Unknown | Cleared of int | Current of int
+  let empty = { events = []; count = 0; first_dropped_build = None }
+  let add t ~at_ns ~before_build application =
+    let count = t.count + 1 in
+    if count <= max_frames_per_phase then
+      { t with count; events = {epoch=count; at_ns; before_build; application} :: t.events }
+    else { t with count; first_dropped_build = (match t.first_dropped_build with
+        | Some _ as prior -> prior | None -> Some before_build) }
+  let for_build t frame =
+    match t.first_dropped_build with
+    | Some first when frame >= first -> Unknown
+    | Some _ | None ->
+        (match List.find_opt (fun event -> event.before_build <= frame) t.events with
+         | None -> Unknown
+         | Some {epoch;application=Reset;_} -> Cleared epoch
+         | Some {epoch;application=Applied _;_} -> Current epoch)
+  let row_json row =
+    let owner = match row.owner with
+      | Keeper name -> `Assoc ["kind",`String "keeper";"name",`String name]
+      | Installation id -> `Assoc ["kind",`String "installation";"declaration_id",`String id] in
+    `Assoc ["owner",owner;"ask_id",`String row.ask_id;
+      "source_turn_ref",optional_text row.source_turn_ref;"is_open",`Bool row.is_open]
+  let raw_lines t =
+    let events = List.rev_map (fun event ->
+      let application = match event.application with
+        | Reset -> `Assoc ["kind",`String "reset"]
+        | Applied {open_count;rows} -> `Assoc ["kind",`String "applied";
+            "open_count",`Int open_count;"row_count",`Int (List.length rows);
+            "rows",`List (List.map row_json rows)] in
+      json_line ["schema",`String "masc.tui.asks_application.v1";"epoch",`Int event.epoch;
+        "at_ns",ns event.at_ns;"before_build",`Int event.before_build;"application",application]) t.events in
+    match t.first_dropped_build with
+    | None -> events
+    | Some first -> events @ [json_line ["schema",`String "masc.tui.asks_application_omissions.v1";
+        "omitted",`Int (t.count - List.length t.events);"unknown_from_build",`Int first]]
+end
+
 module Samples = struct
   type output = {
     write_ms : float;
@@ -46,12 +115,23 @@ module Samples = struct
     flushes : int;
   }
 
+  type raw_output = {
+    write_ns : int64;
+    flush_ns : int64;
+    bytes : int;
+    writes : int;
+    flushes : int;
+  }
+  type timing = { started_ns : int64; completed_ns : int64;
+    home_questions : questions_reading option; raw_output : raw_output option }
+
   type sample =
     { phase : phase;
       tag : string option;
       ordinal : int;
       ms : float;
       output : output option;
+      timing : timing option;
     }
 
   (* Newest first among the captured prefix. Total counts keep the frame
@@ -67,14 +147,14 @@ module Samples = struct
   (* Frame ordinal alongside the cost: a 192 ms outlier is a different problem
      depending on whether it is frame 1 -- first paint, once per session -- or
      frame 900. The number is what tells those apart. *)
-  let add_sample t phase ~tag ~ms ~output =
+  let add_sample t phase ~tag ~ms ~output ~timing =
     match phase with
     | Build ->
         let ordinal = t.build_count + 1 in
         { t with
           samples =
             (if ordinal <= max_frames_per_phase
-             then { phase; tag; ordinal; ms; output } :: t.samples
+             then { phase; tag; ordinal; ms; output; timing } :: t.samples
              else t.samples);
           build_count = ordinal
         }
@@ -83,17 +163,46 @@ module Samples = struct
         { t with
           samples =
             (if ordinal <= max_frames_per_phase
-             then { phase; tag; ordinal; ms; output } :: t.samples
+             then { phase; tag; ordinal; ms; output; timing } :: t.samples
              else t.samples);
           present_count = ordinal
         }
   ;;
 
-  let add t phase ~tag ~ms = add_sample t phase ~tag ~ms ~output:None
+  let add t phase ~tag ~ms = add_sample t phase ~tag ~ms ~output:None ~timing:None
 
   let add_present t ~tag ~ms ~output =
-    add_sample t Present ~tag:(Some tag) ~ms ~output:(Some output)
+    add_sample t Present ~tag:(Some tag) ~ms ~output:(Some output) ~timing:None
   ;;
+
+  let add_timed t phase ~tag ~started_ns ~completed_ns ~home_questions ~output =
+    let ms value = Int64.to_float value /. 1e6 in
+    let aggregate_output = Option.map (fun (value : raw_output) ->
+      ({write_ms=ms value.write_ns;flush_ms=ms value.flush_ns;
+        bytes=value.bytes;writes=value.writes;flushes=value.flushes} : output)) output in
+    add_sample t phase ~tag ~ms:(ms (Int64.sub completed_ns started_ns)) ~output:aggregate_output
+      ~timing:(Some {started_ns;completed_ns;home_questions;raw_output=output})
+
+  let raw_lines ~asks t =
+    t.samples |> List.rev |> List.filter_map (fun sample ->
+      Option.map (fun timing ->
+        let application = match sample.phase with
+          | Present -> `Null
+          | Build -> (match Ask_samples.for_build asks sample.ordinal with
+              | Ask_samples.Unknown -> `Assoc ["kind",`String "unknown"]
+              | Ask_samples.Cleared epoch -> `Assoc ["kind",`String "reset";"epoch",`Int epoch]
+              | Ask_samples.Current epoch -> `Assoc ["kind",`String "applied";"epoch",`Int epoch]) in
+        let output = match timing.raw_output with
+          | None -> `Null
+          | Some value -> `Assoc ["write_ns",ns value.write_ns;"flush_ns",ns value.flush_ns;
+              "bytes",`Int value.bytes;"writes",`Int value.writes;"flushes",`Int value.flushes] in
+        json_line ["schema",`String "masc.tui.frame.v2";"phase",`String (phase_name sample.phase);
+          "frame",`Int sample.ordinal;"surface",optional_text sample.tag;
+          "started_ns",ns timing.started_ns;"completed_ns",ns timing.completed_ns;
+          "elapsed_ns",ns (Int64.sub timing.completed_ns timing.started_ns);
+          "home_forced",`Bool (Option.is_some timing.home_questions);
+          "home_questions_reading",(match timing.home_questions with
+            | None -> `Null | Some reading -> questions_reading_json reading);"asks",application;"output",output]) sample.timing)
 
   let percentile sorted p =
     match sorted with
@@ -198,7 +307,8 @@ module Samples = struct
 end
 
 module Stage_samples = struct
-  type sample = { frame : int option; name : string; ms : float option }
+  type sample = { frame : int option; name : string; ms : float option;
+    window : (int64 * int64) option }
   type t =
     { samples : sample list;
       recorded : int;
@@ -209,14 +319,14 @@ module Stage_samples = struct
   let empty =
     { samples = []; recorded = 0; dropped = 0; first_dropped_frame = None }
 
-  let add t ~frame ~name ~ms =
+  let add_sample t ~frame ~name ~ms ~window =
     if t.recorded < max_stage_samples
        && (match frame with
           | None -> true
           | Some frame -> frame <= max_frames_per_phase)
     then
       { t with
-        samples = { frame; name; ms } :: t.samples;
+        samples = { frame; name; ms; window } :: t.samples;
         recorded = t.recorded + 1;
       }
     else
@@ -227,6 +337,22 @@ module Stage_samples = struct
         | Some prior, None -> Some prior
       in
       { t with dropped = t.dropped + 1; first_dropped_frame }
+  let add t ~frame ~name ~ms = add_sample t ~frame ~name ~ms ~window:None
+  let add_timed t ~frame ~name ~started_ns ~completed_ns =
+    add_sample t ~frame ~name
+      ~ms:(Some (Int64.to_float (Int64.sub completed_ns started_ns) /. 1e6))
+      ~window:(Some (started_ns, completed_ns))
+  let raw_lines t =
+    t.samples |> List.rev |> List.filter_map (fun sample ->
+      let frame = match sample.frame with None -> `Null | Some value -> `Int value in
+      match sample.window, sample.ms with
+      | Some (started, completed), _ -> Some (json_line
+          ["schema",`String "masc.tui.stage.v1";"frame",frame;
+           "name",`String sample.name;"started_ns",ns started;"completed_ns",ns completed;
+           "elapsed_ns",ns (Int64.sub completed started)])
+      | None, None -> Some (json_line ["schema",`String "masc.tui.stage_note.v1";
+          "frame",frame;"name",`String sample.name])
+      | None, Some _ -> None)
 
   let summary_lines t =
     let samples = List.rev t.samples in
@@ -330,6 +456,16 @@ end
 let samples = ref Samples.empty
 let stage_samples = ref Stage_samples.empty
 let active_build_frame = ref None
+let active_home_questions = ref None
+let asks_samples = ref Ask_samples.empty
+
+let note_asks_application application =
+  if enabled then
+    asks_samples := Ask_samples.add !asks_samples ~at_ns:(Mtime_clock.elapsed_ns ())
+      ~before_build:((!samples).Samples.build_count + 1) application
+
+let note_home_forced reading =
+  if enabled && Option.is_some !active_build_frame then active_home_questions := Some reading
 
 let record_stage ~name ~ms =
   stage_samples :=
@@ -340,13 +476,17 @@ let note_stage ~name =
   if enabled then record_stage ~name ~ms:None
 ;;
 
+let record_stage_timed ~name ~started_ns ~completed_ns =
+  stage_samples := Stage_samples.add_timed !stage_samples ~frame:!active_build_frame
+    ~name ~started_ns ~completed_ns
+
 let time_stage_tagged ~name f =
   if not enabled then f ()
   else begin
     let started = Mtime_clock.elapsed_ns () in
     let result = f () in
-    let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started in
-    record_stage ~name:(name result) ~ms:(Some (Int64.to_float elapsed_ns /. 1e6));
+    let completed_ns = Mtime_clock.elapsed_ns () in
+    record_stage_timed ~name:(name result) ~started_ns:started ~completed_ns;
     result
   end
 ;;
@@ -360,28 +500,31 @@ let start_stage () =
 let finish_stage ~name = function
   | None -> ()
   | Some started ->
-      let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started in
-      record_stage ~name ~ms:(Some (Int64.to_float elapsed_ns /. 1e6))
+      record_stage_timed ~name ~started_ns:started ~completed_ns:(Mtime_clock.elapsed_ns ())
 ;;
 
-let record phase ~tag ~elapsed_ns =
+let record phase ~tag ~started_ns ~completed_ns ~home_questions =
   if enabled
   then
     samples :=
-      Samples.add
+      Samples.add_timed
         !samples
         phase
         ~tag
-        ~ms:(Int64.to_float elapsed_ns /. 1e6)
+        ~started_ns ~completed_ns ~home_questions ~output:None
 ;;
 
 let within_phase phase f =
   match phase with
-  | Present -> f ()
+  | Present -> f (), None
   | Build ->
       let previous = !active_build_frame in
+      let previous_home = !active_home_questions in
       active_build_frame := Some ((!samples).Samples.build_count + 1);
-      Fun.protect ~finally:(fun () -> active_build_frame := previous) f
+      active_home_questions := None;
+      Fun.protect ~finally:(fun () ->
+        active_build_frame := previous; active_home_questions := previous_home)
+        (fun () -> let result = f () in result, !active_home_questions)
 ;;
 
 let time_tagged phase ~tag f =
@@ -389,9 +532,9 @@ let time_tagged phase ~tag f =
   then f ()
   else begin
     let started = Mtime_clock.elapsed_ns () in
-    let result = within_phase phase f in
-    let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started in
-    record phase ~tag:(Some (tag result)) ~elapsed_ns;
+    let result, home_questions = within_phase phase f in
+    let completed_ns = Mtime_clock.elapsed_ns () in
+    record phase ~tag:(Some (tag result)) ~started_ns:started ~completed_ns ~home_questions;
     result
   end
 ;;
@@ -401,8 +544,8 @@ let time phase f =
   then f ()
   else begin
     let started = Mtime_clock.elapsed_ns () in
-    let result = within_phase phase f in
-    record phase ~tag:None ~elapsed_ns:(Int64.sub (Mtime_clock.elapsed_ns ()) started);
+    let result, home_questions = within_phase phase f in
+    record phase ~tag:None ~started_ns:started ~completed_ns:(Mtime_clock.elapsed_ns ()) ~home_questions;
     result
   end
 ;;
@@ -429,11 +572,11 @@ let time_present ~tag ~write ~flush f =
     in
     let started = Mtime_clock.elapsed_ns () in
     let result = f ~write:timed_write ~flush:timed_flush in
-    let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started in
-    let ms ns = Int64.to_float ns /. 1e6 in
-    samples := Samples.add_present !samples ~tag ~ms:(ms elapsed_ns)
-      ~output:{ write_ms = ms !write_ns; flush_ms = ms !flush_ns;
-                bytes = !bytes; writes = !writes; flushes = !flushes };
+    let completed_ns = Mtime_clock.elapsed_ns () in
+    samples := Samples.add_timed !samples Present ~tag:(Some tag)
+      ~started_ns:started ~completed_ns ~home_questions:None
+      ~output:(Some { write_ns = !write_ns; flush_ns = !flush_ns;
+                bytes = !bytes; writes = !writes; flushes = !flushes });
     result
   end
 ;;
@@ -455,5 +598,8 @@ let report () =
              (fun line -> output_string out (line ^ "\n"))
              (Samples.summary_lines !samples
               @ Stage_samples.summary_lines !stage_samples
-              @ Stage_samples.residual_lines !stage_samples !samples)))
+              @ Stage_samples.residual_lines !stage_samples !samples
+              @ Ask_samples.raw_lines !asks_samples
+              @ Samples.raw_lines ~asks:!asks_samples !samples
+              @ Stage_samples.raw_lines !stage_samples)))
 ;;

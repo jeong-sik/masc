@@ -236,6 +236,94 @@ let test_present_keeps_callback_semantics () =
     ["written"; "flush-fails"] (List.rev !calls)
 ;;
 
+let test_raw_nanoseconds_and_original_owners () =
+  let first = 9_007_199_254_740_993L in
+  let last = Int64.add first 100_001L in
+  let asks = Timing.Ask_samples.add Timing.Ask_samples.empty ~at_ns:1L ~before_build:1
+    (Timing.Applied {open_count=2;rows=[
+      {owner=Timing.Keeper "keeper";ask_id="shared";source_turn_ref=Some "trace#7";is_open=true};
+      {owner=Timing.Installation "installation";ask_id="shared";source_turn_ref=None;is_open=true}]}) in
+  let samples = Timing.Samples.add_timed Timing.Samples.empty Timing.Build ~tag:(Some "overview")
+    ~started_ns:first ~completed_ns:last ~home_questions:(Some Timing.Questions_current) ~output:None in
+  let json = Timing.Samples.raw_lines ~asks samples |> List.hd |> Yojson.Safe.from_string in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "exact start beyond float integer precision"
+    (Int64.to_string first) (json |> member "started_ns" |> to_string);
+  Alcotest.(check string) "exact end" (Int64.to_string last) (json |> member "completed_ns" |> to_string);
+  Alcotest.(check string) "no rounded reconstruction" "100001" (json |> member "elapsed_ns" |> to_string);
+  Alcotest.(check bool) "actual Home force" true (json |> member "home_forced" |> to_bool);
+  Alcotest.(check int) "same Build applied event" 1 (json |> member "asks" |> member "epoch" |> to_int);
+  let application = Timing.Ask_samples.raw_lines asks |> List.hd |> Yojson.Safe.from_string
+    |> member "application" in
+  let rows = application |> member "rows" |> to_list in
+  Alcotest.(check int) "same ID keeps distinct original owners" 2 (List.length rows);
+  Alcotest.(check string) "original source turn" "trace#7"
+    (List.hd rows |> member "source_turn_ref" |> to_string);
+  Alcotest.(check bool) "installation keeps explicit absent turn" true
+    ((List.nth rows 1 |> member "source_turn_ref") = `Null)
+;;
+
+let test_reset_and_dropped_application_identity () =
+  let applied = Timing.Applied {open_count=0;rows=[]} in
+  let asks = Timing.Ask_samples.empty
+    |> fun t -> Timing.Ask_samples.add t ~at_ns:1L ~before_build:1 applied
+    |> fun t -> Timing.Ask_samples.add t ~at_ns:1L ~before_build:2 Timing.Reset
+    |> fun t -> Timing.Ask_samples.add t ~at_ns:1L ~before_build:3 applied in
+  let view frame = match Timing.Ask_samples.for_build asks frame with
+    | Timing.Ask_samples.Unknown -> "unknown"
+    | Timing.Ask_samples.Cleared epoch -> "reset:" ^ string_of_int epoch
+    | Timing.Ask_samples.Current epoch -> "applied:" ^ string_of_int epoch in
+  Alcotest.(check (list string)) "clock ties use successful Build boundaries"
+    ["unknown";"applied:1";"reset:2";"applied:3"] (List.map view [0;1;2;3]);
+  let rec fill n t = if n=0 then t else fill (n-1)
+    (Timing.Ask_samples.add t ~at_ns:1L ~before_build:1 Timing.Reset) in
+  let full = fill Timing.max_frames_per_phase Timing.Ask_samples.empty in
+  let dropped = Timing.Ask_samples.add full ~at_ns:1L ~before_build:2 applied in
+  Alcotest.(check bool) "dropped payload cannot lend stale identity" true
+    (Timing.Ask_samples.for_build dropped 2 = Timing.Ask_samples.Unknown);
+  Alcotest.(check bool) "earlier Build keeps its original reset" true
+    (Timing.Ask_samples.for_build dropped 1 = Timing.Ask_samples.Cleared Timing.max_frames_per_phase)
+;;
+
+let test_stale_reading_keeps_snapshot_identity () =
+  let asks = Timing.Ask_samples.add Timing.Ask_samples.empty ~at_ns:1L ~before_build:1
+    (Timing.Applied {open_count=1;rows=[{owner=Timing.Keeper "owner";ask_id="original";
+      source_turn_ref=Some "seed#1";is_open=true}]}) in
+  let add samples home_questions = Timing.Samples.add_timed samples Timing.Build
+    ~tag:(Some "overview") ~started_ns:1L ~completed_ns:2L ~home_questions ~output:None in
+  (* Successful read, failed refresh, and recovery force different actual
+     readings. No new application is fabricated for the failed refresh. *)
+  let samples = add Timing.Samples.empty (Some Timing.Questions_current)
+    |> fun t -> add t (Some Timing.Questions_stale)
+    |> fun t -> add t (Some Timing.Questions_current)
+    |> fun t -> add t None in
+  let open Yojson.Safe.Util in
+  let rows = Timing.Samples.raw_lines ~asks samples |> List.map Yojson.Safe.from_string in
+  Alcotest.(check (list int)) "failure does not advance application epoch" [1;1;1;1]
+    (List.map (fun row -> row |> member "asks" |> member "epoch" |> to_int) rows);
+  Alcotest.(check (list string)) "actual reading excludes stale and unforced Home" ["current";"stale";"current";"unforced"]
+    (List.map (fun row -> match member "home_questions_reading" row with
+       | `Null -> "unforced" | value -> to_string value) rows)
+;;
+
+let test_raw_frame_and_stage_prefix_caps () =
+  let rec add n t = if n=0 then t else add (n-1)
+    (Timing.Samples.add_timed t Timing.Build ~tag:None ~started_ns:1L ~completed_ns:2L
+       ~home_questions:None ~output:None) in
+  let frames = add (Timing.max_frames_per_phase+1) Timing.Samples.empty in
+  Alcotest.(check int) "all retained raw frames, no extra cap" Timing.max_frames_per_phase
+    (Timing.Samples.raw_lines ~asks:Timing.Ask_samples.empty frames |> List.length);
+  let stage = Timing.Stage_samples.add_timed Timing.Stage_samples.empty
+    ~frame:(Some 1) ~name:"numeric" ~started_ns:7L ~completed_ns:8L in
+  let stage = Timing.Stage_samples.add_timed stage ~frame:(Some (Timing.max_frames_per_phase+1))
+    ~name:"omitted" ~started_ns:7L ~completed_ns:8L in
+  let json = Timing.Stage_samples.raw_lines stage |> List.hd |> Yojson.Safe.from_string in
+  Alcotest.(check int) "late stage omitted under existing cap" 1
+    (Timing.Stage_samples.raw_lines stage |> List.length);
+  Alcotest.(check string) "one nanosecond stage preserved" "1"
+    Yojson.Safe.Util.(json |> member "elapsed_ns" |> to_string)
+;;
+
 let () =
   Alcotest.run
     "tui frame timing"
@@ -257,7 +345,14 @@ let () =
           Alcotest.test_case "output stays with its present" `Quick
             test_output_stays_with_its_present;
           Alcotest.test_case "presentation keeps callback semantics" `Quick
-            test_present_keeps_callback_semantics
+            test_present_keeps_callback_semantics;
+          Alcotest.test_case "raw time and original owner identities" `Quick
+            test_raw_nanoseconds_and_original_owners;
+          Alcotest.test_case "reset and dropped identity" `Quick
+            test_reset_and_dropped_application_identity;
+          Alcotest.test_case "stale reading retains snapshot identity" `Quick test_stale_reading_keeps_snapshot_identity;
+          Alcotest.test_case "raw frame and stage prefix caps" `Quick
+            test_raw_frame_and_stage_prefix_caps
         ] )
     ]
 ;;

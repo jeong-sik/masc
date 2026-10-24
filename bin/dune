@@ -1211,7 +1211,7 @@
  (name masc_tui_frame_timing)
  (wrapped false)
  (modules masc_tui_frame_timing)
- (libraries mtime.clock.os))
+ (libraries yojson mtime.clock.os))
 
 (library
  (name masc_tui_lru)

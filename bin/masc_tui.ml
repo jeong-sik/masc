@@ -12559,6 +12559,23 @@ let notify_new_asks (arrived : Masc.Tui_decode_asks.ask_key list) =
   in
   write_to_terminal (Printf.sprintf "\x07\x1b]9;%s\x07" message)
 
+let record_applied_asks (snapshot : Masc.Tui_decode_asks.asks_snapshot) =
+  if Masc_tui_frame_timing.enabled then begin
+    let rows = List.map (fun (row : Masc.Tui_decode_asks.ask_row) ->
+      let owner = match row.ar_asker with
+        | Masc.Tui_decode_asks.Ask_keeper name -> Masc_tui_frame_timing.Keeper name
+        | Masc.Tui_decode_asks.Ask_installation {ai_declaration_id;_} ->
+            Masc_tui_frame_timing.Installation ai_declaration_id in
+      let is_open = match row.ar_resolution with
+        | Masc.Tui_decode_asks.Ask_open -> true
+        | Masc.Tui_decode_asks.Ask_answered _ | Masc.Tui_decode_asks.Ask_withdrawn _ -> false in
+      Masc_tui_frame_timing.{owner;ask_id=row.ar_id;
+        source_turn_ref=Option.map Masc.Ids.Turn_ref.to_string row.ar_source_turn_ref;is_open})
+      snapshot.asn_rows in
+    Masc_tui_frame_timing.note_asks_application
+      (Masc_tui_frame_timing.Applied {open_count=snapshot.asn_open_count;rows})
+  end
+
 let apply_asks_load state = function
   | Ok snapshot ->
       (* The delta against the last snapshot, so a poll that re-reads the same
@@ -12583,6 +12600,7 @@ let apply_asks_load state = function
             | None -> ()));
 
       state.asks_snapshot <- Some snapshot;
+      record_applied_asks snapshot;
       state.asks_error <- None;
       (* Silent while the operator is on the Approvals surface -- the panel is
          already in front of them there. A question that arrives on any other
@@ -13619,6 +13637,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.approvals_summary_read <- Snapshot_read.invalidate state.approvals_summary_read;
   state.approval_detail_open <- false;
   state.asks_snapshot <- None;
+  Masc_tui_frame_timing.note_asks_application Masc_tui_frame_timing.Reset;
   state.asks_error <- None;
   Masc_tui_home.clear_ask_answering state;
   state.ask_cursor <- Ask.initial_cursor;
@@ -14055,6 +14074,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
     state.gate_snapshot_observed <- false;
     state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
     state.asks_snapshot <- None;
+    Masc_tui_frame_timing.note_asks_application Masc_tui_frame_timing.Reset;
     Masc_tui_types.retire_asks_read state;
     apply_asks_load state (Error reason);
     apply_planning_load state (Error reason);
@@ -33990,7 +34010,17 @@ and is loaded on demand through keeper_skill.
                  (* This lazy belongs to one synchronous Build on the UI
                     domain. Its first force precedes only Home focus/scroll
                     updates, which preserve the reading used by drawing. *)
-                 let home = lazy (Masc_tui_home.prepare state) in
+                 let home = lazy (
+                   if Masc_tui_frame_timing.enabled then begin
+                     let reading = match Masc_tui_approvals_model.approvals_questions_reading state with
+                       | Masc_tui_approvals_model.List_read -> Masc_tui_frame_timing.Questions_current
+                       | List_not_read Approval_unread -> Masc_tui_frame_timing.Questions_unread
+                       | List_not_read (Approval_stale _) -> Masc_tui_frame_timing.Questions_stale
+                       | List_not_read (Approval_failed _) -> Masc_tui_frame_timing.Questions_failed
+                       | List_not_read (Approval_unavailable _) -> Masc_tui_frame_timing.Questions_unavailable in
+                     Masc_tui_frame_timing.note_home_forced reading
+                   end;
+                   Masc_tui_home.prepare state) in
                  (match state.view, Masc_tui_render.frame_choice state ~terminal_rows with
                   | Overview, `Surface ->
                       let prepared = Lazy.force home in

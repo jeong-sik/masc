@@ -1229,7 +1229,9 @@ type document_render = {
 let original_positions base positions =
   Array.map (Option.map (fun byte -> Original {start_byte=base + byte; end_byte=base + byte + 1})) positions
 
-let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
+type diagram_slot = { source : string; first_row : int; row_count : int }
+
+let render_streaming_internal ?on_diagram ?on_semantic ?on_unmapped ~palette ~width text =
   let width = max 1 width in
   let rows = ref [] in
   let rendered_rows = ref 0 in
@@ -1322,8 +1324,12 @@ let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
             visible_rows=[!rendered_rows, [{start_byte=0;end_byte=visible}]];
             reading=Source_order}) on_semantic in
         emit_all [code_header ?on_language palette ~width label]) language;
-    (match language, lexer with
-     | Some "mermaid", _ ->
+    let prepared = match closed, language, on_diagram with
+      | true, Some "mermaid", Some prepare -> prepare ~row:!rendered_rows (body_text ())
+      | (true | false), (Some _ | None), (Some _ | None) -> None in
+    (match prepared, language, lexer with
+     | Some height, _, _ -> emit_all (List.init height (fun _ -> ""))
+     | None, Some "mermaid", _ ->
          let body_width = max 1 (width - Layout.display_width palette.code_gutter) in
          (match on_semantic with
           | None -> (match Masc_tui_mermaid.render ~cols:body_width (body_text ()) with
@@ -1364,7 +1370,7 @@ let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
                         Some (Original {start_byte=body_base+range.start_byte;end_byte=body_base+range.end_byte})) label.ranges;
                       visible_rows=Option.value (Hashtbl.find_opt visible label.identity) ~default:[] |> List.rev;
                       reading=Drawn_diagram {block_start}}) labels))
-     | Some tag, Some lexer when is_alphatex_tag tag ->
+     | None, Some tag, Some lexer when is_alphatex_tag tag ->
          let source = body_text () in
          let body_width = max 1 (width - Layout.display_width palette.code_gutter) in
          (* A score outside the drawn subset shows its source with the reason,
@@ -1388,8 +1394,8 @@ let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
                | Some _ ->
                    emit_generated ~block_start ~field:Alphatex_diagnostic diagnostic);
               emit_lexed_body source lexer)
-     | _, Some lexer -> emit_lexed_body (body_text ()) lexer
-     | _, None -> List.iteri (fun i line -> emit_code ~joins_previous:(i>0) ~base:line.source_start line.source_text) body);
+     | None, _, Some lexer -> emit_lexed_body (body_text ()) lexer
+     | None, _, None -> List.iteri (fun i line -> emit_code ~joins_previous:(i>0) ~base:line.source_start line.source_text) body);
     if closed && Option.is_some language then emit_all [code_footer palette ~width]
   in
   let previous_inline=ref false in
@@ -1479,6 +1485,16 @@ let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
 
 let render_streaming ~palette ~width text =
   render_streaming_internal ~palette ~width text
+
+let render_with_diagrams ~palette ~width ~diagram_rows text =
+  let slots = ref [] in
+  let on_diagram ~row source = match diagram_rows source with
+    | Some height when height > 0 ->
+        slots := {source;first_row=row;row_count=height} :: !slots;
+        Some height
+    | Some _ | None -> None in
+  let rendered = render_streaming_internal ~on_diagram ~palette ~width text in
+  rendered.rows, List.rev !slots
 
 let render_document_with_spans ~palette ~width text =
   let runs=ref [] and unmapped=ref [] in

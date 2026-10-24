@@ -48,6 +48,8 @@ let image_id = function
 let evidence_images =
   [ Evidence_image_1; Evidence_image_2; Evidence_image_3; Evidence_image_4 ]
 
+let resource_image_id index = 0x10000 + index
+
 let query_id = image_id Graphics_query
 
 (* f=100 says the payload is a PNG file's bytes. The query sends the smallest

@@ -77,6 +77,14 @@ val mermaid_sources : string -> string list
 (** Closed Mermaid fence bodies in document order, preserving source bytes
     between the opening and closing lines. Incomplete streams are excluded. *)
 
+type diagram_slot = { source : string; first_row : int; row_count : int }
+val render_with_diagrams :
+  palette:palette -> width:int -> diagram_rows:(string -> int option) ->
+  string -> string list * diagram_slot list
+(** Reserve blank rows for prepared closed Mermaid blocks in the canonical
+    block walk. Unprepared and incomplete fences retain ordinary text drawing.
+    Slot offsets belong to these returned rows only; no processes or I/O. *)
+
 val non_colliding_fence_marker : string list -> string option
 (** Choose a Markdown fence marker that none of [lines] can close under this
     renderer's own fence grammar. [None] means both supported markers collide.

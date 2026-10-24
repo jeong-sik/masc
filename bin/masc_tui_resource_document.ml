@@ -32,6 +32,13 @@ let current (state : state) =
         ~image_cursor:state.resource_image_cursor ~text_cursor:state.resource_text_cursor
         ~revisions:state.resource_revision_history ~presentation:state.resource_presentation
         ~metadata_expanded:state.resource_metadata_expanded
+        ~diagrams:(match state.resource_diagrams, contents, requested, error,
+            state.resource_presentation with
+          | Some diagrams, Some parts, false, None, Catalog.Document
+              when Masc_tui_resource_diagrams.owns parts diagrams
+                && Option.value state.search ~default:state.search_last = "" -> Some diagrams
+          | (Some _ | None), (Some _ | None), (true | false), (Some _ | None),
+            (Catalog.Document | Source) -> None)
         ~confirmation:(match entry with Catalog.Mcp _ -> None
           | Report report -> Some (resource_check_status state report)))
       (Catalog.entry_for_key entries key))
@@ -204,20 +211,67 @@ let resource_document entry
     | Some status -> "\n\n**Confirmation:** " ^ Masc_tui_artifact_checks.description status in
   Markdown_text (metadata ^ confirmation ^ "\n\n---") :: body
 
-let rows ~cols (reading : t) =
+type diagram = {
+  first_row : int;
+  row_count : int;
+  columns : int;
+  image : Masc_tui_resource_diagrams.image;
+}
+
+let layout ~cols (reading : t) =
   let width = max 1 (framed_inner_width cols - 4) in
-  resource_document reading.entry reading.contents ~error:reading.error
+  let diagram_size image diagrams =
+    let cw,ch = Masc_tui_resource_diagrams.cell_pixels diagrams in
+    let columns = max 1 (min width ((image.Masc_tui_resource_diagrams.width + cw - 1) / cw)) in
+    let rows = max 1 (int_of_float (ceil
+      (float_of_int image.height *. float_of_int (columns*cw)
+       /. float_of_int image.width /. float_of_int ch))) in
+    columns,rows in
+  let offset = ref 0 and pictures = ref [] in
+  let pieces = resource_document reading.entry reading.contents ~error:reading.error
     ~requested:reading.requested ~image_cursor:reading.image_cursor
     ~text_cursor:reading.text_cursor ~revisions:reading.revisions
     ~presentation:reading.presentation ~metadata_expanded:reading.metadata_expanded
-    ~confirmation:reading.confirmation
-  |> List.concat_map (function
+    ~confirmation:reading.confirmation in
+  let pieces = match reading.diagrams with
+    | None -> pieces
+    | Some diagrams ->
+      let completed,total = Masc_tui_resource_diagrams.progress diagrams in
+      let progress = if completed < total then
+        [Markdown_text (Printf.sprintf "Preparing diagrams · %d/%d" completed total)] else [] in
+      let failures = Masc_tui_resource_diagrams.failures diagrams
+        |> List.map (fun detail -> Markdown_text ("Diagram preview unavailable: " ^ detail
+            ^ " · r: reread and retry · Ctrl-O: preview selected diagram")) in
+      progress @ failures @ pieces in
+  let rows = List.concat_map (fun piece ->
+    let rows = match piece with
     | Markdown_text document ->
-      Message_layout.wrap_body ~markdown:Masc_tui_markdown_theme.document
-        ~max_cells:width ~sanitize:Terminal_text.single_line document @ [""]
+      (match reading.diagrams with
+       | None -> Message_layout.wrap_body ~markdown:Masc_tui_markdown_theme.document
+           ~max_cells:width ~sanitize:Terminal_text.single_line document
+       | Some diagrams ->
+         let diagram_rows source = Option.map (fun image -> snd (diagram_size image diagrams))
+           (Masc_tui_resource_diagrams.image_for_display ~source diagrams) in
+         let rows,slots = Masc_tui_markdown.render_with_diagrams
+           ~palette:(Masc_tui_markdown_theme.palette ~closing:Ansi.reset)
+           ~width ~diagram_rows (String.split_on_char '\n' document
+             |> List.map Terminal_text.single_line |> String.concat "\n") in
+         List.iter (fun (slot : Masc_tui_markdown.diagram_slot) ->
+           match Masc_tui_resource_diagrams.image_for_display ~source:slot.source diagrams with
+           | Some image ->
+               let columns,_ = diagram_size image diagrams in
+               pictures := {first_row= !offset + slot.first_row;
+                 row_count=slot.row_count;columns;image} :: !pictures
+           | None -> ()) slots;
+         rows) @ [""]
     | Html_text source ->
       Masc_tui_artifact_html.project source
-      |> Masc_tui_artifact_html_rows.render ~width)
+      |> Masc_tui_artifact_html_rows.render ~width in
+    offset := !offset + List.length rows;
+    rows) pieces in
+  rows,List.rev !pictures
+
+let rows ~cols reading = fst (layout ~cols reading)
 
 let search_rows ~cols state =
   match current state with
@@ -225,15 +279,19 @@ let search_rows ~cols state =
       Some (List.map Masc_tui_theme.strip_sgr (rows ~cols:(resource_content_cols state ~cols) reading))
   | Some _ | None -> None
 
-let rows_with_search ~cols state (reading : t) =
+let layout_with_search ~cols state (reading : t) =
   let query = Option.value state.search ~default:state.search_last in
   let admitted = state.resource_focus=Right_pane && Reading.searchable reading in
   let landing = if admitted then Reading.landing ~cols ~query reading
       state.resource_search_position else None in
-  rows ~cols reading |> List.mapi (fun index text ->
+  let rows,pictures = layout ~cols reading in
+  let marked = rows |> List.mapi (fun index text ->
     let mark =
       if admitted && query<>"" && Masc_tui_pick_list.lowercase_contains ~needle:query
           (Masc_tui_theme.strip_sgr text) then
         if landing=Some index then Masc_tui_detail_reading.Current_match else Match
       else Masc_tui_detail_reading.No_match in
-    text, mark)
+    text, mark) in
+  marked,pictures
+
+let rows_with_search ~cols state reading = fst (layout_with_search ~cols state reading)

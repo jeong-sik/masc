@@ -1,0 +1,95 @@
+{
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2715,
+      "sha256": "df6b69d2cd9ad904c74bfaed6c24460cd0c814a7a5bbae07d01356cb04fb39a3"
+    },
+    {
+      "path": "alpha-request-input.json",
+      "bytes": 658,
+      "sha256": "2e743234a3834c010b3e20c09d5f261bb0910780c7d003e336e522b4c4aff418"
+    },
+    {
+      "path": "alpha-request.json",
+      "bytes": 1162,
+      "sha256": "d8c24d74a1a4c4528817e7965d3f140e177735eb54b2ce990a895d9ada132f21"
+    },
+    {
+      "path": "approval-intent.json",
+      "bytes": 337,
+      "sha256": "9188d5f5ea68d0f4007e649c79990e86dbc5f12b8c97491f798a935201555528"
+    },
+    {
+      "path": "approval-receipt.json",
+      "bytes": 118,
+      "sha256": "03f878421a564b40272bfffd05d1a9f1f5871e660acec76c2393b7128e0f3112"
+    },
+    {
+      "path": "goal-baseline.json",
+      "bytes": 2431,
+      "sha256": "2b6441dc7e53cbbfde732cbb67ae3a4026a5068c0b84483df26ef8b80faf7087"
+    },
+    {
+      "path": "goal-create.json",
+      "bytes": 4523,
+      "sha256": "1f0517c828afe46c556da9b3920c614c65588246a4277657d977ee72f5dbaa03"
+    },
+    {
+      "path": "goal-link-setup-intent.json",
+      "bytes": 1376,
+      "sha256": "97eb041ec7fe19e363c51c7155c8be1b1a2a49e1ae7b99872234d67ec5f88ef4"
+    },
+    {
+      "path": "goal-link-setup-receipt.json",
+      "bytes": 1045,
+      "sha256": "ea26bb1b271688866d0005bef9f64d1e25d75579c5e539ebb0a42a504f397cce"
+    },
+    {
+      "path": "health.json",
+      "bytes": 34617,
+      "sha256": "bf8707ec1ec4ae1257d1a50aac5d3e06336f6a584e4f3c70039eda52543d17e1"
+    },
+    {
+      "path": "identity.json",
+      "bytes": 295,
+      "sha256": "2b6e583ee9d5f3d8e9280eeea3ec6067ceb5ca4db04d7920da39854bf8c46a38"
+    },
+    {
+      "path": "keeper-create.json",
+      "bytes": 2214,
+      "sha256": "8870ae74952f555cb4b8ac0dc070021182eeb1291201468a74c03fe91c0e5923"
+    },
+    {
+      "path": "partial-artifact.json",
+      "bytes": 55,
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+    },
+    {
+      "path": "partial-inspection.json",
+      "bytes": 2718,
+      "sha256": "03aee6c60bfb7dde3f13f88b32b6d98f1ebc230da4c48adf49ab1f062640ff5b"
+    },
+    {
+      "path": "postapproval-observation.json",
+      "bytes": 15583,
+      "sha256": "4b9c6946199d27f179f8da2f32eebccccade1887a88ee27b02f022e33a9dd4c4"
+    },
+    {
+      "path": "preapproval-artifact.json",
+      "bytes": 55,
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+    },
+    {
+      "path": "preapproval-snapshot.json",
+      "bytes": 23018,
+      "sha256": "d2382fa998020db359c5a4ae9eabbdd2c9a535593f99544225d68e7d1d51d81c"
+    },
+    {
+      "path": "wire-tool-observations.json",
+      "bytes": 11799,
+      "sha256": "51e8f3dc8f9fda7f155814c2bf9bb1cc5b1e8b86d0333147d18c5d8382339dc5"
+    }
+  ],
+  "scope": "Selected real-model cohort evidence; no private client tokens or raw thinking; excludes manifest itself"
+}

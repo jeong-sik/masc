@@ -1,0 +1,7 @@
+{
+  "author_baseline": "44c28d74fbfb22279a1e47877736fb102e51645c",
+  "published_baseline": "0596143ca7393557f072662e11d7e8359d23743b",
+  "byte_identical_file": "lib/keeper/keeper_tool_task_runtime.ml",
+  "sha256": "c8ff32e34dbfef8e5a7f93b1d87672f4c95c7b1e612e8381136f2c1562cfd81b",
+  "scope": "Executable baseline uses published ancestry; unrelated source unchanged; no product delta"
+}

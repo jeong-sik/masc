@@ -7,7 +7,7 @@ let refusal disposition message = W.Service_refusal {disposition;message}
 let decode text =
   match Yojson.Safe.from_string text with
   | value -> W.of_json value
-  | exception Yojson.Json_error message -> Error message
+  | exception Yojson.Json_error _ -> Error "invalid browser worker JSON"
 let handle owner raw =
   match decode raw with
   | Error message -> refusal W.Not_started message
@@ -15,10 +15,10 @@ let handle owner raw =
     match Owner.dispatch owner request with
     | reply -> reply
     | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-    | exception exn ->
+    | exception _ ->
       (* At the process edge an unexpected exception may follow browser input.
          It cannot establish a pre-effect refusal or authorize replay. *)
-      Printf.eprintf "browser addon request failed: %s\n%!" (Printexc.to_string exn);
+      Printf.eprintf "browser addon request failed; outcome unknown\n%!";
       refusal W.Outcome_unknown "browser worker request failed; outcome unknown"
 let check_path socket_path =
   let parent = Filename.dirname socket_path in
@@ -41,7 +41,7 @@ let serve ~net ~owner ~socket_path ~max_message_bytes =
   check_path socket_path;
   Eio.Switch.check sw;
   let socket = Eio.Net.listen ~sw ~backlog:(Int32.to_int Int32.max_int) net (`Unix socket_path) in
-  let on_error exn = Printf.eprintf "browser addon connection failed: %s\n%!" (Printexc.to_string exn) in
+  let on_error _ = Printf.eprintf "browser addon connection failed\n%!" in
   while true do
     Eio.Switch.check sw;
     Eio.Net.accept_fork ~sw socket ~on_error (fun flow _address ->

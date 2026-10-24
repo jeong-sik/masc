@@ -42,6 +42,9 @@ let test_invalid_pages () =
       {|{"ok":true,"result":[{"update_id":1},{"message":{}}]}|};
       {|{"ok":true,"result":[{"update_id":1,"message":null}]}|};
       {|{"ok":true,"result":[{"update_id":1,"message":{},"edited_message":{}}]}|};
+      {|{"ok":true,"result":[{"update_id":1,"message":{},"callback_query":{}}]}|};
+      {|{"ok":true,"result":[{"update_id":1,"poll":{},"callback_query":{}}]}|};
+      {|{"ok":true,"result":[{"update_id":1,"callback_query":null}]}|};
       {|{"ok":true,"result":[{"update_id":1,"message":{"message_id":1,"chat":{"id":1,"id":2}}}]}|};
       {|{"ok":true,"result":[{"update_id":1,"message":{"message_id":1,"chat":{"id":1.0}}}]}|};
       {|{"ok":true,"ok":false,"result":[]}|};

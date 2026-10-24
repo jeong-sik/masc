@@ -64,14 +64,31 @@ let message json =
   let* text = optional "text" string fields in
   let* caption = optional "caption" string fields in
   Ok {chat_id;message_id;message_thread_id;from_user;text;caption}
+(* Decode Update's JSON field discriminants once at the wire boundary.
+   Known alternatives are mutually exclusive, including events not subscribed
+   to now: Telegram may still return a previously queued update. *)
+type update_payload = Incoming of Yojson.Safe.t | Edited of Yojson.Safe.t | Ignored of Yojson.Safe.t
+let update_payload (key,json) = match key with
+  | "message" -> Some (Incoming json)
+  | "edited_message" -> Some (Edited json)
+  | "channel_post" | "edited_channel_post" | "business_connection"
+  | "business_message" | "edited_business_message" | "deleted_business_messages"
+  | "guest_message" | "message_reaction" | "message_reaction_count"
+  | "inline_query" | "chosen_inline_result" | "callback_query"
+  | "shipping_query" | "pre_checkout_query" | "purchased_paid_media"
+  | "poll" | "poll_answer" | "my_chat_member" | "chat_member"
+  | "chat_join_request" | "chat_boost" | "removed_chat_boost"
+  | "managed_bot" | "subscription" | "stopped_message_generation" -> Some (Ignored json)
+  | _ -> None
 let update json =
   let* fields = object_fields "update" json in
   let* update_id = required "update_id" nonnegative64 fields in
-  let* kind = match List.assoc_opt "message" fields,List.assoc_opt "edited_message" fields with
-    | Some json,None -> Result.map (fun m -> Message m) (message json)
-    | None,Some json -> Result.map (fun m -> Edited_message m) (message json)
-    | None,None -> Ok Unsupported
-    | Some _,Some _ -> invalid "multiple update kinds" in
+  let* kind = match List.filter_map update_payload fields with
+    | [Incoming json] -> Result.map (fun m -> Message m) (message json)
+    | [Edited json] -> Result.map (fun m -> Edited_message m) (message json)
+    | [Ignored json] -> Result.map (fun _ -> Unsupported) (object_fields "update payload" json)
+    | [] -> Ok Unsupported
+    | _ :: _ -> invalid "multiple update kinds" in
   Ok {update_id;kind}
 
 let api_result ~status ~body =

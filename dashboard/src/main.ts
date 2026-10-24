@@ -38,7 +38,7 @@ import './styles/paper-theme.css'
 import './styles/keeper-workspace.css'
 import './styles/copilot-dock.css'
 import './styles/states.css'
-// ide-v2.css / work-v2.css / connectors-v2.css / telemetry-v2.css /
+// ide-v2.css / work-v2.css / connectors-v2.css /
 // craft-v2.css load via the *-v2.css glob below.
 
 // v2 skin (skin-v2.css) — cool-charcoal palette + voltage accent

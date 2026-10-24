@@ -68,7 +68,9 @@ browser-client snapshot starts the configured SDK and owns the task space.
 [scope.json](host-34cbedbe/scope.json) records that the two owner-related source
 files are unchanged between the executed34c candidate and source12c001e. The new
 shared-client transport cache is outside this binary proof. Its focused run
-[40112787489](https://github.com/jeong-sik/masc/actions/runs/40112787489) was still
-running when this evidence was recorded. These observations establish the scoped
+[40112787489](https://github.com/jeong-sik/masc/actions/runs/40112787489) completed
+successfully on source12c: actual client4, reply-policy1 and lane14 tests
+(19 total; [receipt](current-client-policy-ci.json)). This compiles and exercises
+the new socket boundary, but does not execute its current-policy Keeper path. These observations establish the scoped
 owner-loss repair, not current-head full regression, release, installation or
 all browser behavior.

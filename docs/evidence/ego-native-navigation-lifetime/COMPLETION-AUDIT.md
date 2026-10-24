@@ -17,8 +17,10 @@ transport observations instead. Navigation commit
 coverage for click/goto/reload/open-tab across Ego and other routes.
 
 Independent source review passes at top
-`12c001e55e27c7a9340ae27f956e112fd5360c76`; actual focused execution remains
-pending [40112787489](https://github.com/jeong-sik/masc/actions/runs/40112787489).
+`12c001e55e27c7a9340ae27f956e112fd5360c76`; focused execution passed19 tests in
+[40112787489](https://github.com/jeong-sik/masc/actions/runs/40112787489).
+The exact12c macOS candidate build40113070920 and current-policy real-host
+integration are still pending.
 The goal remains active until that evidence and the current-source integration
 scope are audited. Earlier real Keeper results do not execute this new client
 metadata path.

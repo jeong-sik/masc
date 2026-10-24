@@ -23,8 +23,9 @@ A new snapshot clears the previous transport observation. Only the latest
 snapshot may publish metadata, so overlapping replies cannot restore stale
 entries after replacement, failure or revocation. Socket tests exercise actual
 writes, silent peers, SDK-owned waiting and controlled overlapping snapshots.
-These new tests are pending execution; parsing and independent source review
-are separate evidence.
+The full-stack12c focused run40112787489 passes all19 selected tests, including
+four actual client cases. Parsing and independent source review are separate
+evidence. Real Keeper execution of this new metadata path remains pending.
 
 The independent audit also found a poll-lifetime boundary. Ego polls between
 SDK commands. A legitimate long command could outlive the idle 120-second

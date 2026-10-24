@@ -34,7 +34,11 @@ concurrent request and all messages have durable operation IDs. The harness
 reads their Queued/Running states before release, then checks exact typed
 replies and operation identities. Legitimate input batching is allowed.
 After graceful shutdown, offline read-only SQLite reads and backup integrity
-checks join every public operation and outcome reference to its actual owner.
+checks join every original input, public operation and outcome reference to
+its actual owner. Admission and terminal identities use `(Keeper, operation
+ID)` pairs; two inputs cannot silently collapse to one operation. Closed
+backups are reopened read-only, checked with `PRAGMA integrity_check` and
+compared across all operation columns using their Python SQLite value types.
 Provider handlers must drain and the owned process must be reaped.
 
 One admin producer encounters the existing server rate limiter. Only explicit
@@ -50,6 +54,20 @@ It also contains a copied executable and ephemeral authentication data;
 keep the packet local rather than committing it. `owned-process.json` and
 `workload-phases.jsonl` support a separate read-only profiler. Such observers
 add overhead and their success/failure is independent of workload completion.
+
+New packets declare `masc.keeper-scale-evidence.v2`. Validate the evidence
+boundary without launching MASC, or independently audit a completed v2 packet:
+
+```sh
+python3 scripts/harness/perf/keeper_scale_fault_probe.py \
+  --output /tmp/keeper-evidence-faults.json
+python3 scripts/harness/perf/keeper_scale_packet_audit.py /tmp/keeper-session-new
+```
+
+The fault probe covers duplicate identities/inputs, ownership, missing replies
+and corrupt or changed backups. The independent reader writes derived audit
+reports while preserving raw receipts and the original workload verdict. It
+accepts v2 only; older packets retain their frozen original readers and results.
 
 Report held, released and settled phases separately. Creation-to-completion
 includes deliberate provider hold, admission pacing, queueing and runtime

@@ -33,6 +33,9 @@ import tomllib
 from urllib.parse import urlsplit
 import uuid
 
+EVIDENCE_SCHEMA = "masc.keeper-scale-evidence.v2"
+OPERATION_FIELDS = ("operation_id", "state", "started_at", "completed_at", "outcome_ref", "failure_kind")
+
 
 class ProbeError(RuntimeError):
     def __init__(self, detail, row=None):
@@ -52,6 +55,117 @@ def write_json(path, value):
 def digest(path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def operation_key(operation):
+    return operation["keeper"], operation["operation_id"]
+
+
+def index_operations(operations):
+    indexed = {}
+    inputs = set()
+    for operation in operations:
+        key = operation_key(operation)
+        require(key not in indexed, "two original inputs share one authoritative Keeper operation identity")
+        original_input = operation["keeper"], operation["sequence"]
+        require(original_input not in inputs, "original workload input occurs more than once")
+        indexed[key] = operation
+        inputs.add(original_input)
+    return indexed
+
+
+def terminal_receipt(operations, terminal):
+    return {"schema": EVIDENCE_SCHEMA, "operations": [
+        {"keeper": operation["keeper"], "sequence": operation["sequence"],
+         "operation_id": operation["operation_id"], "status": terminal[operation_key(operation)]}
+        for operation in operations if operation_key(operation) in terminal]}
+
+
+def validate_completed_operation(operation, status, marker):
+    require(status.get("operation_id") == operation["operation_id"], "public operation identity differs from requested input")
+    require(status.get("state") == "Succeeded", "operation failed; inspect terminal.json/requests.jsonl")
+    replies = [obj for obj in objects(status.get("completed_reply"))
+               if obj.get("schema") == "masc.keeper-scale-reply.v1"
+               and obj.get("marker") == marker and obj.get("keeper") == operation["keeper"]
+               and isinstance(obj.get("sequences"), list)
+               and all(type(sequence) is int for sequence in obj["sequences"])
+               and operation["sequence"] in obj["sequences"]]
+    require(len(replies) == 1, "full completed reply does not cover its exact original queued input")
+
+
+def typed_rows(columns, rows):
+    return [[(column, type(row[column]).__name__, row[column]) for column in columns] for row in rows]
+
+
+def typed_rows_digest(columns, rows):
+    canonical = [[(column, kind, value.hex() if isinstance(value, bytes) else repr(value))
+                  for column, kind, value in row] for row in typed_rows(columns, rows)]
+    return hashlib.sha256(json.dumps(canonical, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+
+def read_operation_store(path):
+    connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        require(connection.execute("PRAGMA integrity_check").fetchall() == [("ok",)],
+                "operation store integrity_check failed: " + str(path))
+        connection.row_factory = sqlite3.Row
+        cursor = connection.execute("SELECT * FROM operations ORDER BY sequence")
+        columns = [item[0] for item in cursor.description]
+        return columns, [dict(row) for row in cursor]
+    finally:
+        connection.close()
+
+
+def verify_operation_backup(source_columns, source_rows, backup_path):
+    columns, rows = read_operation_store(backup_path)
+    require(columns == source_columns and typed_rows(columns, rows) == typed_rows(source_columns, source_rows),
+            "closed backup rows differ from closed source store")
+    return {"backup_path": str(backup_path), "integrity_check": "ok", "read_only_reopened": True,
+            "source_connection_closed": True, "exact_typed_rows_equal": True,
+            "columns": columns, "row_count": len(rows), "typed_rows_sha256": typed_rows_digest(columns, rows)}
+
+
+def copy_operation_store(database, backup_path):
+    columns, source_rows = read_operation_store(database)
+    connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        backup = sqlite3.connect(backup_path)
+        try:
+            connection.backup(backup)
+            backup.commit()
+        finally:
+            backup.close()
+    finally:
+        connection.close()
+    # Both source and writable backup connections are closed before verification.
+    validation = verify_operation_backup(columns, source_rows, backup_path)
+    rows = [{field: row[field] for field in OPERATION_FIELDS} for row in source_rows]
+    return rows, validation
+
+
+def validate_durable_operations(operations, names, durable, terminal, marker):
+    expected = index_operations(operations)
+    require(set(terminal) == set(expected), "public terminal coverage differs from original inputs")
+    require(Counter(item["keeper"] for item in durable) == Counter(names), "durable Keeper population differs")
+    stored = {}
+    for item in durable:
+        owner = item["keeper"]
+        owned = {key for key in expected if key[0] == owner}
+        keys = [(owner, row["operation_id"]) for row in item["rows"]]
+        require(len(keys) == len(set(keys)) and set(keys) == owned,
+                "durable rows do not cover each exact original Keeper input")
+        for row in item["rows"]:
+            key = owner, row["operation_id"]
+            public = terminal[key]
+            validate_completed_operation(expected[key], public, marker)
+            require(row["state"] == "succeeded" and row["outcome_ref"]
+                    and row["outcome_ref"] == public["outcome_ref"]
+                    and row["started_at"] is not None and row["completed_at"] is not None
+                    and row["completed_at"] == public["completed_at"] and row["failure_kind"] is None,
+                    "offline operation state/outcome differs from exact public input")
+            stored[key] = row
+    require(set(stored) == set(expected) and len(stored) == len(operations), "durable original input coverage differs")
+    return stored
 
 
 def denied_inventory_kind(row, guard_dir, names):
@@ -446,6 +560,7 @@ def run(args, owner):
                 "copied_binary": str(pinned), "base": str(base), "port": port,
                 "model_port": model.server_port, "environment_keys": sorted(env),
                 "runner_sha256": digest(Path(__file__)), "runtime_fixture_sha256": digest(runtime_fixture),
+                "evidence_schema": EVIDENCE_SCHEMA,
                 "sandbox_scope": "Explicit lazy microVM declaration, unexecuted fixture image pin; no daemon preflight disabled and no guest execution proven."}
     write_json(out / "identity.json", identity)
     process = None
@@ -538,6 +653,7 @@ def run(args, owner):
                                        "admission": accepted, "admission_wire_ms": row["wire_ms"],
                                        "first_attempt_to_accepted_ms": row["first_attempt_to_response_ms"]})
             write_json(out / "operations-admitted.json", operations)
+            indexed_operations = index_operations(operations)
 
             def all_model_started():
                 with fixture.lock:
@@ -558,6 +674,8 @@ def run(args, owner):
                         status, _ = client.tool("masc_keeper_delegate_status", {
                             "target": {"kind": "keeper", "name": operation["keeper"]},
                             "operation_id": operation["operation_id"]}, label)
+                        require(status.get("operation_id") == operation["operation_id"],
+                                "public operation identity differs from requested input")
                         return status
                     except (OSError, http.client.HTTPException) as error:
                         # This is a read of an exact already-admitted operation.
@@ -587,25 +705,20 @@ def run(args, owner):
                                     "active_provider_requests": fixture.active})
             change_phase("running_model_released")
             fixture.release.set()
-            pending = {operation["operation_id"]: operation for operation in operations}
+            pending = dict(indexed_operations)
             deadline = time.monotonic() + args.settle_timeout
             while pending:
                 require(process.poll() is None, "owned server exited during workload")
                 with fixture.lock:
                     require(not fixture.errors, "scripted provider failed; inspect model-outcomes.jsonl")
-                for operation_id, operation in list(pending.items()):
+                for key, operation in list(pending.items()):
                     status = observe_operation(operation, "settlement", deadline)
                     state = status.get("state")
                     if state in ("Succeeded", "Failed", "Cancelled"):
-                        terminal[operation_id] = status
-                        require(state == "Succeeded", "operation failed; inspect terminal.json/requests.jsonl")
-                        replies = [obj for obj in objects(status.get("completed_reply"))
-                                   if obj.get("schema") == "masc.keeper-scale-reply.v1"
-                                   and obj.get("marker") == marker and obj.get("keeper") == operation["keeper"]
-                                   and operation["sequence"] in obj.get("sequences", [])]
-                        require(len(replies) == 1, "full completed reply does not cover its exact queued input")
-                        pending.pop(operation_id)
-                write_json(out / "terminal.json", terminal)
+                        terminal[key] = status
+                        validate_completed_operation(operation, status, marker)
+                        pending.pop(key)
+                write_json(out / "terminal.json", terminal_receipt(operations, terminal))
                 require(not pending or time.monotonic() < deadline, "Keeper operation observation deadline")
                 if pending:
                     time.sleep(.1)
@@ -632,7 +745,7 @@ def run(args, owner):
             sampler.join(timeout=args.request_timeout + 1)
         write_json(out / "latency-samples.json", samples)
         write_json(out / "workload-phases.json", phase_events)
-        write_json(out / "terminal.json", terminal)
+        write_json(out / "terminal.json", terminal_receipt(operations, terminal))
         forced = False
         if process is not None and process.poll() is None:
             os.killpg(process.pid, signal.SIGTERM)
@@ -656,18 +769,11 @@ def run(args, owner):
         write_json(out / "denied-inventory.json", denied_inventory)
         durable = []
         for database in sorted((base / ".masc").rglob("chat-operations.sqlite3")):
-            connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)
-            connection.row_factory = sqlite3.Row
-            try:
-                rows = [dict(row) for row in connection.execute(
-                    "SELECT operation_id, state, started_at, completed_at, outcome_ref, failure_kind FROM operations ORDER BY sequence")]
-                target = out / "durable" / database.parent.name
-                target.mkdir(parents=True, exist_ok=True)
-                with sqlite3.connect(target / database.name) as backup:
-                    connection.backup(backup)
-                durable.append({"keeper": database.parent.name, "source_path": str(database), "rows": rows})
-            finally:
-                connection.close()
+            target = out / "durable" / database.parent.name
+            target.mkdir(parents=True, exist_ok=True)
+            rows, validation = copy_operation_store(database, target / database.name)
+            durable.append({"keeper": database.parent.name, "source_path": str(database),
+                            "rows": rows, "backup_validation": validation})
         write_json(out / "durable-operations.json", durable)
         cleanup = {"server_returncode": None if process is None else process.poll(),
                    "server_reaped": process is not None and process.poll() is not None,
@@ -682,19 +788,7 @@ def run(args, owner):
             and cleanup["server_returncode"] == 0 and not cleanup["forced_kill"]
             and cleanup["server_reaped"] and cleanup["model_server_stopped"] and cleanup["sampler_stopped"]
             and cleanup["base_removed"], "workload or owned cleanup incomplete")
-    stored = {row["operation_id"]: row for item in durable for row in item["rows"]}
-    require({item["keeper"] for item in durable} == set(names), "durable Keeper population differs")
-    for item in durable:
-        expected = {operation["operation_id"] for operation in operations if operation["keeper"] == item["keeper"]}
-        require({row["operation_id"] for row in item["rows"]} == expected,
-                "operation was persisted under a different Keeper target")
-        require(all(row["outcome_ref"] == terminal[row["operation_id"]]["outcome_ref"]
-                    for row in item["rows"]), "durable outcome differs from exact public operation")
-    require(set(stored) == {operation["operation_id"] for operation in operations}
-            and all(row["state"] == "succeeded" and row["outcome_ref"]
-                    and row["started_at"] is not None and row["completed_at"] is not None
-                    and row["failure_kind"] is None for row in stored.values()),
-            "offline authoritative SQLite reread did not prove all exact operations succeeded")
+    stored = validate_durable_operations(operations, names, durable, terminal, marker)
     valid = sorted(row["wire_ms"] for row in samples if row.get("valid"))
     summary = {"keepers": args.keepers, "messages": len(operations), "succeeded_operations": len(stored),
                "actual_model_calls": len(fixture.requests), "max_provider_requests_in_flight": fixture.max_active,

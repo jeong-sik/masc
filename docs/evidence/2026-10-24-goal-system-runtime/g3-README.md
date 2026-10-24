@@ -14,4 +14,4 @@ The queue acknowledged `turn_completed` at2026-10-24T14:36:23.388188+00:00 and h
 
 The strongest immediate cause is failure to use a correctly delivered approval. Stale-state anchoring remains a model-behavior hypothesis. No forced requeue, new gate, prompt edit or live mutation was performed. A frozen inference-only model comparison can diagnose capability; a new actual Keeper cohort is still required for G3 success.
 
-`diagnosis.json` contains exact hashes, timestamps, public output, typed queue/execution state, model aliases and configuration/source evidence. It contains thinking counts only, no raw thinking.
+`g3-diagnosis.json` contains exact hashes, timestamps, public output, typed queue/execution state, model aliases and configuration/source evidence. It contains thinking counts only, no raw thinking.

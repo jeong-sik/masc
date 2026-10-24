@@ -96,7 +96,14 @@
       ],
       "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
       "measured_at": "2026-10-24T14:45:45.548135+00:00",
-      "scope": "Real gemma4:e2b linked partial Task approved by controlled operator proxy after exact immutable artifact inspection; approval event and current Goal reach actual request000019, 33 tools offered including goal_measure. Model returns text claiming still awaiting verification and calls no tools; artifact remains1/3 and Goal reported measurement0/3. No Keeper message after approval. One pre-approval execution reminder disclosed."
+      "scope": "Real gemma4:e2b linked partial Task approved by controlled operator proxy after exact immutable artifact inspection; approval event and current Goal reach actual request000019, 33 tools offered including goal_measure. Model returns text claiming still awaiting verification and calls no tools; artifact remains1/3 and Goal reported measurement0/3. No Keeper message after approval. One pre-approval execution reminder disclosed.",
+      "additional_cohort_counterevidence": {
+        "model": "qwen3:8b",
+        "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+        "evidence": "docs/evidence/2026-10-24-goal-qwen-runtime/README.md",
+        "result": "measured_fail",
+        "scope": "Fresh real Keeper executes partial Task, omits Goal association. Controlled pre-approval public-MCP link establishes G3 fixture condition. Approval delivered; three exact-ID default queries omit Done and return empty; model ends stale-awaiting without actual Goal measurement or remaining work. No postapproval message; model/tool default interaction not proven sole cause."
+      }
     },
     {
       "id": "G4",
@@ -210,7 +217,7 @@
     "Historical Task counts include legitimate independent Tasks; linkage ratio is diagnostic, not a target or gate.",
     "G2 measured pass at3bad single-Goal Gemma canary. G3 measured failure: delivered approval ignored by model; no Goal completion, population success, model independence or microVM end-to-end grading claim."
   ],
-  "measured_at": "2026-10-24T14:45:45.548135+00:00",
+  "measured_at": "2026-10-24T15:04:01.051125+00:00",
   "summary": {
     "required": 11,
     "measured_pass": 10,
@@ -246,6 +253,8 @@
     "official_resume_native": "40102214212: two selected suites passed atd3a242837194e94c435a228228ac0eaab10724aa",
     "measured_fail_case_ids": [
       "G3"
-    ]
+    ],
+    "followup_task_id": "task-2620",
+    "task_ledger_note": "Prior four session Tasks2595–2598 were externally cancelled by local-admin at13:39Z orphan cleanup; cancellation is not completion. Task2620 is a Goal-linked, claimed/started successor to2595 for remaining G3."
   }
 }

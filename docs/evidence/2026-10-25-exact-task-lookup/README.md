@@ -1,6 +1,6 @@
 # Exact Task IDs remain readable after completion
 
-Base: `44c28d74fbfb22279a1e47877736fb102e51645c`.
+Author base: `44c28d74fbfb22279a1e47877736fb102e51645c`. The reproducible probe uses byte-identical published baseline `0596143ca7393557f072662e11d7e8359d23743b`; see `probe-baseline-binding.json`.
 
 The failed actual Qwen canary used candidate
 `3badb88117794510dac576bf3fc34f0336e17d8a`. After the controlled linked-Task

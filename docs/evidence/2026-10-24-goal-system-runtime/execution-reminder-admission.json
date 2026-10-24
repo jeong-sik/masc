@@ -1,0 +1,41 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.64.0"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"operation_id\":\"kmsg-ad6e2e930d8b54d31e0a031f0e117cb4\",\"state\":\"queued\",\"queued_count\":1,\"existing\":false}",
+          "status": "ok",
+          "tool": "masc_keeper_msg"
+        },
+        "trace_id": "2",
+        "agent_id": "goal-canary-operator",
+        "tool": "masc_keeper_msg",
+        "duration_ms": 9,
+        "attempts": 1,
+        "timestamp": "2026-10-24T14:33:39Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"operation_id\":\"kmsg-ad6e2e930d8b54d31e0a031f0e117cb4\",\"state\":\"queued\",\"queued_count\":1,\"existing\":false}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "operation_id": "kmsg-ad6e2e930d8b54d31e0a031f0e117cb4",
+      "state": "queued",
+      "queued_count": 1,
+      "existing": false
+    }
+  }
+}

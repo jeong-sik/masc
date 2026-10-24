@@ -58,7 +58,8 @@ type envelope =
       (** CDP omits [params] for an event that has none. *)
 
 (** One inbound text frame. [Error] for anything that is neither a reply nor an
-    event. *)
+    event. Parser errors are fixed protocol messages: raw frame fragments must
+    not reach connection-ended events, public status or operator logs. *)
 val decode : string -> (envelope, string) result
 
 val encode_command : id:int -> ?session:session_id -> string -> Yojson.Safe.t -> string
@@ -93,7 +94,9 @@ val create :
 
 val receive : t -> string -> unit
 
-(** Ends the connection: every waiting command returns [Connection_lost],
+(** [reason] must be safe for public status and logs, never a raw frame or
+    exception containing private command data.
+    Ends the connection: every waiting command returns [Connection_lost],
     every later one returns it without writing, and [on_event] receives
     [Connection_ended]. The first reason is kept. *)
 val lost : t -> string -> unit

@@ -22,6 +22,10 @@ type 'session opened =
 type 'session state = Closed | Opening | Open of 'session opened
   | Closing of string option ref
   | Quarantined of 'session opened
+  | Private_unsettled of 'session opened
+
+type private_error = Private_not_started | Private_session_fenced | Private_outcome_unknown
+type 'session private_session = { owner : unit ref; opened : 'session opened }
 
 type request =
   { verb : Browser_lane.verb
@@ -29,16 +33,19 @@ type request =
   ; reply : Browser_lane.answer Eio.Promise.u
   ; caller_left : unit Eio.Promise.t
   }
+type queued_request = Page_request of request | Private_request of (unit -> unit)
 
 type 'session t =
   { sw : Eio.Switch.t
   ; sleep : float -> unit
   ; open_session : 'session opener
   ; call : 'session -> Executor.call
+  ; private_ready : 'session -> bool
   ; shutdown : 'session -> (unit, string) result
   ; pid : 'session -> int
   ; log : Session.event -> unit
-  ; requests : request Eio.Stream.t
+  ; requests : queued_request Eio.Stream.t
+  ; private_owner : unit ref
   ; tabs : Executor.Tabs.t  (* for the backend's life, so an id is never reused *)
   ; verbs : Eio.Semaphore.t  (* one page verb at a time *)
   ; mutable state : 'session state
@@ -56,7 +63,7 @@ let set_state t state =
     | Closed -> (match t.last_settlement with
       | Ok () -> Browser_lane.Browser_closed | Error _ -> Browser_lane.Browser_unknown)
     | Opening | Closing _ -> Browser_lane.Browser_changing
-    | Quarantined _ -> Browser_lane.Browser_unknown
+    | Quarantined _ | Private_unsettled _ -> Browser_lane.Browser_unknown
     | Open opened -> match !(opened.ended) with
       | None -> Browser_lane.Browser_open | Some _ -> Browser_lane.Browser_unknown)
 
@@ -81,6 +88,8 @@ let no_session =
 
 let keyboard_quarantined = Browser_lane.Rejected_before_effect
   "native keyboard release is unconfirmed; this browser is quarantined without closing its pages; explicitly close and reopen the stagehand session before new work"
+let private_unsettled = Browser_lane.Rejected_before_effect
+  "private browser operation outcome is unknown; explicitly close the original session before new page work"
 
 (* See [run_session]: an ended session may already be let go; a later release then does nothing. *)
 let release_session release = ignore (Eio.Promise.try_resolve release ())
@@ -194,6 +203,7 @@ let run_session t ~headless ~opened ~resolve_opened =
 let open_session t ~headless =
   match t.state with
   | Quarantined _ -> keyboard_quarantined
+  | Private_unsettled _ -> private_unsettled
   (* An ended session is being let go; the next open after that starts anew. *)
   | Open { ended = { contents = Some _ }; _ } | Opening | Closing _ -> in_transition
   | Open { ended = { contents = None }; _ } ->
@@ -215,7 +225,7 @@ let close_session t =
     | Ok () -> answered (`Assoc [ "closed", `Bool true ])
     | Error detail -> Browser_lane.Refused ("browser shutdown unconfirmed: " ^ detail))
   | Opening | Closing _ -> in_transition
-  | Open opened | Quarantined opened ->
+  | Open opened | Quarantined opened | Private_unsettled opened ->
     set_state t (Closing opened.ended);
     (* The browser stops whatever the runtime answers: a close that raised
        would otherwise leave the backend Closing, and every later open and
@@ -251,6 +261,8 @@ let status t =
     | Quarantined opened -> ["open",`Bool true;"quarantined",`Bool true;
         "backend",`String backend_name;"pid",`Int (t.pid opened.session);
         "reason",`String "native keyboard release is unconfirmed; explicitly close and reopen before new work"]
+    | Private_unsettled opened -> ["open",`Bool true;"private_operation_unsettled",`Bool true;
+        "backend",`String backend_name;"pid",`Int (t.pid opened.session)]
     | Open opened ->
       [ "open", `Bool true; "backend", `String backend_name; "pid", `Int (t.pid opened.session) ]
       @ (match !(opened.ended) with Some reason -> [ "ended", `String reason ] | None -> [])
@@ -263,12 +275,15 @@ let status t =
    session's one-call slot alone allows: a click would land on a page its
    guard never checked. The automation lane holds its session lock for a
    whole verb the same way. *)
-let page t ~began ~actor verb =
+let with_verb_slot t work =
   Eio.Semaphore.acquire t.verbs;
   (* fun-protect-finally-ok: [Eio.Semaphore.release] does not suspend; the
      slot comes back on return, exception and cancellation, and unlike
      [Eio.Mutex] the semaphore is not poisoned by an exception. *)
-  Fun.protect ~finally:(fun () -> Eio.Semaphore.release t.verbs) (fun () ->
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release t.verbs) work
+
+let page t ~began ~actor verb =
+  with_verb_slot t (fun () ->
     match t.state with
     | Open opened ->
       began opened;
@@ -277,7 +292,7 @@ let page t ~began ~actor verb =
         Eio.Switch.on_release sw (fun () ->
           if !keyboard_pending then match t.state with
             | Open current when current == opened -> set_state t (Quarantined current)
-            | Closed | Opening | Closing _ | Quarantined _ | Open _ -> ());
+            | Closed | Opening | Closing _ | Quarantined _ | Private_unsettled _ | Open _ -> ());
         let call request =
           let keyboard = match request with
             | Wire.Page_key_press _ | Wire.Page_type _ -> true
@@ -291,12 +306,13 @@ let page t ~began ~actor verb =
           (match result with
            | Ok _ -> if keyboard then keyboard_pending := false
            | Error (Session.Not_attached | Session.Detached | Session.Connection_gone _
-               | Session.Abandoned_call_pending | Session.Not_delivered _) ->
+               | Session.Abandoned_call_pending | Session.Delivery_unsettled | Session.Not_delivered _) ->
              if keyboard then keyboard_pending := false
            | Error (Session.Rejected _ | Session.Lost _) -> ());
           result in
         Executor.execute ~tabs:t.tabs ~call ?actor verb)
     | Quarantined _ -> keyboard_quarantined
+    | Private_unsettled _ -> private_unsettled
     | Closed | Opening | Closing _ -> no_session)
 ;;
 
@@ -335,7 +351,7 @@ let retire_sentence_session t expected =
     set_state t (Closing current.ended);
     release_session current.release;
     ignore (Eio.Promise.await current.stopped)
-  | Closed | Opening | Closing _ | Quarantined _ | Open _ -> ()
+  | Closed | Opening | Closing _ | Quarantined _ | Private_unsettled _ | Open _ -> ()
 ;;
 
 let retire_unanswered_sentence t ~expected ~answers_before =
@@ -398,16 +414,18 @@ let serve t { verb; actor; reply; caller_left } =
         | Began | Queued -> ()))
 ;;
 
-let create ~sw ~clock ~open_session ~call ~shutdown ~pid ~log =
+let create ~sw ~clock ~open_session ~call ~private_ready ~shutdown ~pid ~log =
   let t =
     { sw
     ; sleep = Eio.Time.sleep clock
     ; open_session
     ; call
+    ; private_ready
     ; shutdown
     ; pid
     ; log
     ; requests = Eio.Stream.create max_int
+    ; private_owner = ref ()
     ; tabs = Executor.Tabs.create ()
     ; verbs = Eio.Semaphore.make 1
     ; state = Closed
@@ -422,7 +440,7 @@ let create ~sw ~clock ~open_session ~call ~shutdown ~pid ~log =
       (* A request waiting on a call that never answers must not hold the
          switch open either; the session it waits on ends with the switch. *)
       Eio.Fiber.fork_daemon ~sw (fun () ->
-        serve t request;
+        (match request with Page_request request -> serve t request | Private_request work -> work ());
         `Stop_daemon);
       next ()
     in
@@ -433,7 +451,7 @@ let create ~sw ~clock ~open_session ~call ~shutdown ~pid ~log =
 let execute t ?actor verb =
   let answer, reply = Eio.Promise.create () in
   let caller_left, leave = Eio.Promise.create () in
-  Eio.Stream.add t.requests { verb; actor; reply; caller_left };
+  Eio.Stream.add t.requests (Page_request { verb; actor; reply; caller_left });
   match Eio.Promise.await answer with
   | answer -> answer
   | exception (Eio.Cancel.Cancelled _ as exn) ->
@@ -443,4 +461,71 @@ let execute t ?actor verb =
 
 let settlement t = match t.state with
   | Closed -> t.last_settlement
-  | Opening|Open _|Closing _|Quarantined _ -> Error "browser lifetime has not joined"
+  | Opening|Open _|Closing _|Quarantined _|Private_unsettled _ -> Error "browser lifetime has not joined"
+
+(* Like ordinary verbs, private work is confined to this backend's owner
+   fiber. A cancellation signal does not expose the callback, arguments or
+   result through the public Browser_lane answer/observation path. *)
+let private_request t work =
+  let answer, reply = Eio.Promise.create () in
+  let caller_left, leave = Eio.Promise.create () in
+  Eio.Stream.add t.requests (Private_request (fun () ->
+    if not (Eio.Promise.is_resolved caller_left) then
+      match Watched_work.run
+        ~watcher:(fun () -> Eio.Promise.await caller_left; None)
+        (fun () -> Some (work ())) with
+      | Some result -> Eio.Promise.resolve reply result
+      | None -> ()));
+  match Eio.Promise.await answer with
+  | result -> result
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+      ignore (Eio.Promise.try_resolve leave ());
+      raise exn
+
+let capture_private_session t =
+  private_request t (fun () -> with_verb_slot t (fun () ->
+    match t.state with
+    | Open opened when Option.is_none !(opened.ended) && t.private_ready opened.session ->
+        Ok {owner=t.private_owner;opened}
+    | Quarantined _ | Private_unsettled _ -> Error Private_session_fenced
+    | Closed | Opening | Closing _ | Open _ -> Error Private_not_started))
+
+let execute_private t ~session ~tab_id ~run =
+  private_request t (fun () -> with_verb_slot t (fun () ->
+    let ( let* ) = Result.bind in
+    let* opened = match t.state with
+      | Open opened when session.owner == t.private_owner && session.opened == opened
+          && Option.is_none !(opened.ended) && t.private_ready opened.session -> Ok opened
+      | Quarantined _ | Private_unsettled _ -> Error Private_session_fenced
+      | Closed | Opening | Closing _ | Open _ -> Error Private_not_started in
+    let* page_id = Option.to_result ~none:Private_not_started (Executor.Tabs.page_of_id t.tabs tab_id) in
+    let fence () = match t.state with
+      | Open current when current == opened -> set_state t (Private_unsettled current)
+      | Closed | Opening | Closing _ | Quarantined _ | Private_unsettled _ | Open _ -> () in
+    let began = ref false in
+    let unknown () =
+      if !began then (fence (); Error Private_outcome_unknown)
+      else Error Private_not_started in
+    (* The callback may have sent extension input even if its return or error
+       is lost. Fence the original session synchronously before returning the
+       page slot; status and explicit owned shutdown remain available. The
+       adapter may await a broker unrelated to the browser transport. Stop and
+       join it once this exact browser has terminated, rather than retaining
+       the backend-wide page slot through a later session's entire lifetime. *)
+    match Watched_work.run
+      ~watcher:(fun () -> ignore (Eio.Promise.await opened.stopped); None)
+      (fun () ->
+        Eio.Fiber.check ();
+        match t.state with
+        | Open current when current == opened && Option.is_none !(opened.ended)
+            && t.private_ready opened.session ->
+          began := true;
+          Some (run opened.session ~page_id)
+        | Closed | Opening | Closing _ | Quarantined _ | Private_unsettled _ | Open _ -> None)
+    with
+    | Some (Ok value) -> Ok value
+    | Some (Error ()) | None -> unknown ()
+    | exception (Eio.Cancel.Cancelled _ as exn) ->
+      if !began then fence ();
+      raise exn
+    | exception _ -> unknown ()))

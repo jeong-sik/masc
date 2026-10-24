@@ -47,6 +47,7 @@ val create :
   -> clock:_ Eio.Time.clock
   -> open_session:'session opener
   -> call:('session -> Browser_stagehand_executor.call)
+  -> private_ready:('session -> bool)
   -> shutdown:('session -> (unit, string) result)
   -> pid:('session -> int)
   -> log:(Browser_stagehand_session.event -> unit)
@@ -72,3 +73,33 @@ val settlement : 'session t -> (unit, string) result
       reaches no page of a later one. *)
 val execute : 'session t -> ?actor:string -> Browser_lane.verb -> Browser_lane.answer
 (** The actor stays with this queued request through the serialized page verb. *)
+
+type private_error = Private_not_started | Private_session_fenced | Private_outcome_unknown
+type 'session private_session
+val capture_private_session : 'session t -> ('session private_session, private_error) result
+(** Trusted host-only capture of this exact opened session. Does not open a
+    browser, adopt a replacement or send a page/extension operation. The opaque
+    pin is process-local and belongs to one backend's original session. *)
+val execute_private : 'session t -> session:'session private_session -> tab_id:int ->
+  run:('session -> page_id:string -> (Yojson.Safe.t, unit) result) ->
+  (Yojson.Safe.t, private_error) result
+(** Trusted companion integration, never a model tool. Runs on the backend's
+    owner fiber under the same whole-verb serializer as page reads/captures.
+    The original MASC tab resolves to its exact CDP page id; this is not a Chrome
+    numeric tab id. The adapter must resolve the extension's tab identity.
+    [private_ready] must also confirm that an abandoned public extension call
+    has settled; it is checked at capture and immediately before callback entry.
+    The callback receives the original owned session and may use only its
+    verified transport. Its argument/result stays on this private call path.
+
+    Every callback error/exception is an unknown effect: fixed errors contain
+    no callback prose, and further page/companion work is fenced until explicit
+    close and confirmed original-session retirement. Cancellation before the
+    callback begins sends nothing; cancellation after entry fences before the
+    page slot is released. Confirmed termination of the original session also
+    cancels the callback and joins its cleanup before releasing that slot. A
+    reopened browser never inherits the callback or its late fence. The callback
+    must allow cancellation and finish its cleanup without waiting for a reply
+    from the terminated browser. No automatic retry or replacement-session lookup.
+    A successful adapter response must mean the extension operation has settled,
+    not merely that it was queued. *)

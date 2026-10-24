@@ -8,8 +8,10 @@ val with_scope :
     authoritative AfterTurn response before tool dispatch. [wrap_tool] freezes
     that response with the exact invocation for each handler (including its
     resource-scoped handler). Capture requires the raw parser's reported-model
-    fact and one globally unique tool-use ID in that response; configured model
-    fallback, missing evidence and ambiguous occurrences stay unobserved. *)
+    fact and Agent Core's admitted source map. The exact invocation's planned
+    index binds to its original ToolUse ordinal, retained in the identity even
+    when admission removed earlier calls sharing its ID. Configured model
+    fallback, missing evidence and ambiguous mappings stay unobserved. *)
 
 val current : unit -> Runtime_response_identity.t option
 (** Copy of the current native response's immutable identity. Absent outside

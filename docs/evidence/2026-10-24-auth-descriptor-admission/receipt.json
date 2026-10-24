@@ -1,0 +1,45 @@
+{
+  "schema": "masc.auth-descriptor-admission.v1",
+  "recorded_at": "2026-10-24T04:35:12.441459+00:00",
+  "repair_code_head": "1f59cd9eacb4e372970e64b583448de81fe1c5ed",
+  "original_run": {
+    "id": 40060431903,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/40060431903",
+    "source": "c2dfa238ebd318a9152e70d874ac2cbf68ae2ad8",
+    "conclusion": "failure",
+    "full_log_sha256": "d5b5fd8c680916c05d709f78a035f5d519ad1d0a65649bb6e2dbec6ebb5616b5",
+    "full_log_bytes": 522665,
+    "excerpt": "main-run-excerpt.log",
+    "scope": "Selected auth and bootstrap execution, not whole-repo regression",
+    "results": {
+      "Auth": "65 passed",
+      "Auth_login": "12 passed",
+      "bootstrap": "129 tests run, one failure; unrelated cases113,114,116 skipped",
+      "required_slow_case105": "Actually executed and passed; readiness and existing client/Admin byte/inode/bearer assertions reached",
+      "failure110": "Supplied-bearer directory scenario did not retain expected typed ValidationError"
+    }
+  },
+  "repaired_execution": "Not yet observed; exact-source request will be recorded on the PR",
+  "independent_source_review": {
+    "reviewer": "goal_verifier subagent",
+    "verdict": "No P0-P2 in inspected production/test diff",
+    "scope": "Not a formal guarded GitHub approval, nor an execution result"
+  },
+  "local_checks": [
+    "OCaml parser on the two changed ML files",
+    "git diff --check",
+    "Changed changelog fragment validation"
+  ],
+  "limits": [
+    "No local Dune build or full regression",
+    "No installed process/token changes or live reconnect claim",
+    "Original strict expectedValidationError retained; no test exclusion or widened timeout"
+  ],
+  "local_descriptor_diagnostic": {
+    "platform": "macOS OCaml5.5.1 interpreter",
+    "before": "Raw directory fd admitted by open; stream transfer raised Unix.EINVAL and raw fd remained open until diagnostic cleanup",
+    "after": "Exact current reader function returned ValidationError and actual fd was EBADF",
+    "source_function_sha256": "18693aafa15df10f097e7f0ab64ad717b773f7bec3af3c303c7149ceafb4fe1e",
+    "limits": "Selected descriptor function with synchronous I/O and local error wrappers, not full Auth library/bootstrap suite or Linux proof"
+  }
+}

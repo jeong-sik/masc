@@ -133,6 +133,15 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
        resolves the reply target against its own binding store at send time.
        Claiming a stronger check by reading strings out of the address would
        look like the Discord and Slack arms above without being one. *)
+    | ( Keeper_continuation_channel.Telegram {bot_user_id;chat_id;message_thread_id;direct_messages_topic_id;reply_to_message_id;user_id}
+      , (Surface_ref.Gate _ as actual_surface) ) ->
+      if channel<>"telegram" || channel_user_id<>Int64.to_string user_id
+        || channel_workspace_id<>"" || workspace_id<>None
+      then Error "Telegram Keeper operation speaker/channel/workspace differs from route"
+      else if actual_surface<>Keeper_telegram_coordinates.surface
+        ~bot_user_id ~chat_id ~message_thread_id ~direct_messages_topic_id ~reply_to_message_id
+      then Error "Telegram Keeper operation surface differs from its exact route"
+      else Ok ()
     | ( Keeper_continuation_channel.Imessage { user_id; _ }
       , Surface_ref.Gate { label = surface_label; _ } ) ->
       if not (String.equal (String.lowercase_ascii channel) "imessage")
@@ -161,6 +170,7 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
     | (Keeper_continuation_channel.Dashboard _
       | Keeper_continuation_channel.Discord _
       | Keeper_continuation_channel.Slack _
+      | Keeper_continuation_channel.Telegram _
       | Keeper_continuation_channel.Imessage _
       | Keeper_continuation_channel.Keeper _), _ ->
       Error "Keeper chat operation surface kind does not match continuation"

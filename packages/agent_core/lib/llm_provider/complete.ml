@@ -259,6 +259,7 @@ let complete_prepared_sync
                ~messages
                ~tools
                ()
+             |> fun outcome -> outcome.Completion_outcome.result
            in
            { Llm_transport.response = resp; latency_ms = lat }
        in
@@ -639,6 +640,7 @@ let complete_prepared_stream
           ~tools
           ~on_event
           ()
+        |> fun outcome -> outcome.Completion_outcome.result
     in
     let result =
       (* The permit spans the entire stream: the provider holds the
@@ -856,6 +858,7 @@ let make_http_transport
             ~messages:req.messages
             ~tools:req.tools
             ()
+          |> fun outcome -> outcome.Completion_outcome.result
         in
         { Llm_transport.response; latency_ms })
   ; complete_stream =
@@ -878,6 +881,7 @@ let make_http_transport
           ~tools:req.tools
           ~on_event
           ?on_telemetry
-          ())
+          ()
+        |> fun outcome -> outcome.Completion_outcome.result)
   }
 ;;

@@ -13,6 +13,17 @@ open Alcotest
 open Masc
 open Workspace_types
 
+(* Exercise host publication against an actual replayed durable registry.
+   The global registry is process-wide, as in the production bootstrap. *)
+let () =
+  let directory = Filename.temp_dir "goal-review-registry-" "" in
+  at_exit (fun () -> Fs_compat.clear_fs (); Fs_compat.remove_tree directory);
+  let registry = Goal_verification_run_registry.replay
+    (Filename.concat directory Goal_verification_run_registry.storage_filename) in
+  match Goal_verification_run_registry.install_global registry with
+  | Ok () -> ()
+  | Error Already_installed -> Alcotest.fail "Goal review fixture registry already installed"
+
 module AR = Task.Anti_rationalization
 module Agent = Goal_verification_agent.For_testing
 

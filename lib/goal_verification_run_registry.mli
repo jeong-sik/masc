@@ -82,6 +82,22 @@ val mark_completed :
   unit ->
   unit
 
+val mark_completed_confirmed :
+  t ->
+  run_id:string ->
+  outcome:outcome ->
+  evaluated_verdict:evaluated_verdict option ->
+  tools:Verification_run_registry.tool_observation list ->
+  ?evaluator_runtime:string ->
+  elapsed_s:float ->
+  unit ->
+  [ `Completed | `Unknown ]
+(** Confirm the completion through the current complete history under the
+    existing durable registry transaction, before finite display retention.
+    Volatile, uninitialized or malformed history refuses publication. A completed
+    publication can immediately leave the retained projection; Unknown never
+    confirms publication. Persistence failures raise Sys_error. *)
+
 val record_scan_skipped :
   t ->
   run_id:string ->

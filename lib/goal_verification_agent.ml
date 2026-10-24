@@ -348,7 +348,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
   let store = owner_store config in
   let registry = Registry.global () in
   let active = ref None in
-  let publish retained outcome = Host.publish ~registry retained ~outcome
+  let publish retained outcome = Host.publish ~store ~registry retained ~outcome
     |> Result.map_error Host.error_to_string in
   let fail_original detail = defer ~goal_id:work.goal_id (Proof_lookup_unavailable {detail}) in
   let conflict_outcome retained detail =

@@ -12,11 +12,13 @@ val ensure_registered :
     resetting its completion, and confirm the exact registration by readback. *)
 
 val publish :
-  registry:Goal_verification_run_registry.t -> Goal_verifier_worker.retained ->
+  store:Lane_addon_store.t -> registry:Goal_verification_run_registry.t -> Goal_verifier_worker.retained ->
   outcome:Goal_verification_run_registry.outcome -> (unit, error) result
 (** Publish the retained result/runtime/tools and confirm the completed row.
     Reviewed must be durable before proof commit. Existing exact Committed
-    history is never downgraded by a later observation or lifecycle change. *)
+    history is never downgraded by a later observation or lifecycle change.
+    Final committed publication is acknowledged on its durable original;
+    finite display retention does not create unfinished work. *)
 
 val needs_recovery :
   registry:Goal_verification_run_registry.t -> Goal_verifier_worker.retained ->

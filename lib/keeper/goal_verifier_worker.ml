@@ -19,6 +19,12 @@ type receipt = {
 }
 type error = Store_unavailable of string | Original_invalid of string
   | Authority_changed of string | Execution_pending of string
+type interruption = Cancelled | Raised
+let interruption_label = function Cancelled -> "review_cancelled" | Raised -> "review_raised"
+let interruption_of_label = function
+  | "review_cancelled" -> Ok Cancelled
+  | "review_raised" -> Ok Raised
+  | _ -> Error "unknown Goal review interruption"
 type retry_grant = {parent_digest : string; requested_by : string}
 type retained = {record : Owner.retained; original : V.t; run : run_identity}
 let error_to_string = function Store_unavailable d | Original_invalid d | Authority_changed d | Execution_pending d -> d
@@ -268,11 +274,12 @@ let tool_observations retained =
        | `Assoc _ ->
          let* fields = decode (object_fields ["cause"; "run"; "tools"; "observations"] evidence) in
          let* cause = decode (text "cause" fields) in
+         let* _ = decode (interruption_of_label cause) in
          let* encoded_run = decode (field "run" fields) in
          let* run = decode (run_of_json encoded_run) in
          let* tools = decode (field "tools" fields) in
-         if cause = "review_cancelled" && run = retained.run then decode (tools_of_json tools)
-         else invalid "Goal cancellation observation differs from its fixed run"
+         if run = retained.run then decode (tools_of_json tools)
+         else invalid "Goal interrupted observation differs from its fixed run"
        | _ -> invalid "Goal unknown observation is malformed")
     | Captured | Admission_wait _ | Dispatch_pending None -> Ok []
     | Dispatch_pending (Some (Waiting _ | Absent _)) ->
@@ -300,6 +307,10 @@ let reload ~store retained =
   | Some current when current.record.request_digest = retained.record.request_digest
       && Yojson.Safe.equal current.record.summary retained.record.summary -> Ok current
   | Some _ -> invalid "Goal original or fixed run changed before execution"
+
+let record_observer ~store ~retained event =
+  let* retained = reload ~store retained in
+  advance ~store retained (Progress.Observer event)
 
 let retryable_refusal retained evidence =
   let* receipt, disposition = decode (refusal_receipt retained evidence) in
@@ -509,19 +520,26 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
            match receipt with Some receipt -> Ok receipt | None -> invalid "Goal reviewer returned without retained reply")
     with
     | Retention_failed error -> Error error
-    | Eio.Cancel.Cancelled _ as exn ->
+    | exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      let cause = match exn with
+        | Eio.Cancel.Cancelled _ -> Cancelled
+        | _ -> Raised in
       Eio.Cancel.protect (fun () ->
         match reload ~store retained with
         | Ok saved -> (match Progress.phase (progress saved) with
-            | Dispatch_pending _ -> ignore (advance ~store saved (Progress.Execution_observed
-                (Progress.Outcome_unknown (`Assoc ["cause", `String "review_cancelled";
+            | Dispatch_pending _ ->
+              (match advance ~store saved (Progress.Execution_observed
+                (Progress.Outcome_unknown (`Assoc ["cause", `String (interruption_label cause);
                   "run", run_json retained.run;
                   "tools", `List (List.map Verification_run_registry.tool_observation_to_yojson (List.rev !tools));
-                  "observations", `List (List.rev !facts)]))))
+                  "observations", `List (List.rev !facts)]))) with
+               | Ok _ -> ()
+               | Error error -> Log.Misc.error "Goal interrupted review retention failed: %s" (error_to_string error))
             | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
             | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> ())
-        | Error _ -> ());
-      raise exn
+        | Error error -> Log.Misc.error "Goal interrupted review reload failed: %s" (error_to_string error));
+      Printexc.raise_with_backtrace exn backtrace
 
 let commit ~store ~retained ~change ~observe ~apply =
   let* retained = reload ~store retained in

@@ -2790,11 +2790,18 @@ let test_tool_image_followups_preserve_batch_order () =
   check_string "original result summary" "read a"
     (List.nth wire 2 |> member "content" |> to_string);
   let ollama = ollama_messages ~supports_image_input:true messages in
-  check_bool "Ollama batch closes before image" true
+  check_bool "Ollama tool images introduce no caller-query boundary" true
     (List.map (fun item -> item |> member "role" |> to_string) ollama
-     = [ "user"; "assistant"; "tool"; "tool"; "user" ]);
-  check_bool "Ollama gets image bytes" true
-    (List.nth ollama 4 |> member "images" = `List [ `String png ]);
+     = [ "user"; "assistant"; "tool"; "tool" ]);
+  check_bool "Ollama keeps image on the owning result" true
+    (List.nth ollama 2 |> member "images" = `List [ `String png ]);
+  check_string "Ollama image retains resolved tool name" "Read"
+    (List.nth ollama 2 |> member "tool_name" |> to_string);
+  check_bool "Ollama retains structured text without duplicating image bytes" true
+    (List.nth ollama 2 |> member "content" |> to_string |> Yojson.Safe.from_string
+     = `List [ Api_common.content_block_to_json (Text "first image") ]);
+  check_bool "Ollama does not attach an image to the next result" true
+    (List.nth ollama 3 |> member "images" = `Null);
   let caps = Capabilities.default_capabilities in
   check_bool "unsupported image capability still rejects" true
     (Result.is_error
@@ -2810,9 +2817,16 @@ let test_tool_image_followups_preserve_batch_order () =
    | exception Invalid_argument _ -> ());
   let native_request = Backend_ollama.build_request
       ~config:(native_config true) ~messages () |> Yojson.Safe.from_string in
-  check_bool "production request carries image under declared capability" true
-    (native_request |> member "messages" |> to_list
-     |> List.exists (fun item -> item |> member "images" = `List [ `String png ]));
+  let native_messages = native_request |> member "messages" |> to_list in
+  check_bool "production request carries image on tool without a synthetic user" true
+    (List.map (fun item -> item |> member "role" |> to_string) native_messages
+       = [ "user"; "assistant"; "tool"; "tool" ]
+     && (List.nth native_messages 2 |> member "images" = `List [ `String png ]));
+  let with_human = ollama_messages ~supports_image_input:true
+      (messages @ [msg User [Text "Now inspect the next artifact"]]) in
+  check_bool "a real later human still creates its own query boundary" true
+    (List.map (fun item -> item |> member "role" |> to_string) with_human
+     = [ "user"; "assistant"; "tool"; "tool"; "user" ]);
   let gemini, _ = Backend_gemini.contents_of_messages messages in
   let parts = List.concat_map (fun item -> item |> member "parts" |> to_list) gemini in
   let rec check_after_results count = function
@@ -2830,6 +2844,42 @@ let test_tool_image_followups_preserve_batch_order () =
     (match (List.nth messages 2).content with
      | [ ToolResult { content_blocks = Some [ Text "first image"; actual ]; _ } ] -> actual = image
      | _ -> false)
+;;
+
+let test_ollama_tool_media_occurrence_ownership () =
+  let image data = image_block ~media_type:"image/png" ~data () in
+  let result id blocks =
+    ToolResult { tool_use_id = id; content = "summary"; outcome = Tool_succeeded
+               ; json = None; content_blocks = Some blocks }
+  in
+  let use name = msg Assistant [ ToolUse { id="reused"; name; input=`Assoc [] } ] in
+  let first = result "reused" [image "first"; image "second"] in
+  let nested = result "nested" [Text "nested text"; image "third"] in
+  let history = [msg User [Text "Inspect"]; use "Read"; msg Tool [first]
+               ; use "Screenshot"; msg Tool [result "reused" [nested]]] in
+  let wire = ollama_messages ~supports_image_input:true history in
+  check_bool "image-only response preserves its summary" true
+    (List.nth wire 2 |> member "content" = `String "summary");
+  check_bool "images retain source order inside one occurrence" true
+    (List.nth wire 2 |> member "images" = `List [`String "first"; `String "second"]);
+  check_bool "reused id owns only its current result images" true
+    (List.nth wire 4 |> member "images" = `List [`String "third"]);
+  check_string "later occurrence resolves its own name" "Screenshot"
+    (List.nth wire 4 |> member "tool_name" |> to_string);
+  let nested_wire = List.nth wire 4 |> member "content" |> to_string
+      |> Yojson.Safe.from_string |> to_list |> List.hd in
+  check_bool "nested result retains its text and identity without image duplication" true
+    (nested_wire = Api_common.content_block_to_json (result "nested" [Text "nested text"]));
+  let invalid_image = image_block ~source_type:Url ~media_type:"image/png"
+      ~data:"https://example.test/image.png" () in
+  expect_invalid_arg "native tool URL image" (fun () ->
+    ollama_messages ~supports_image_input:true
+      [msg User [Text "Inspect"]; use "Read"; msg Tool [result "reused" [invalid_image]]]);
+  let caps = Capabilities.default_capabilities in
+  check_bool "orphaned tool media is still rejected" true
+    (Result.is_error (Serialize.ollama_messages_of_history
+      ~modality_priority:caps.modality_priority ~supports_image_input:true
+      ~supports_document_input:false [msg Tool [first]]))
 ;;
 
 let test_tool_image_degrades_without_declared_capability () =
@@ -3170,6 +3220,8 @@ let () =
     [ ( "serialize"
       , [ Alcotest.test_case "tool PNG followups keep parallel batch order" `Quick
             test_tool_image_followups_preserve_batch_order
+        ; Alcotest.test_case "Ollama tool media retains occurrence ownership" `Quick
+            test_ollama_tool_media_occurrence_ownership
         ; Alcotest.test_case "tool images degrade without declared capability" `Quick
             test_tool_image_degrades_without_declared_capability
         ; Alcotest.test_case

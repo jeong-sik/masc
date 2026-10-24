@@ -732,17 +732,55 @@ let ollama_native_user_message ~modality_priority content : Yojson.Safe.t option
           ])
 ;;
 
+(* Native Message.images is role-independent. Keep media with its owning tool
+   occurrence instead of manufacturing a new user query. Retain all non-image
+   structured blocks, including nested result structure, in scalar content. *)
+let rec ollama_tool_images blocks =
+  let rec split retained images = function
+    | [] -> List.rev retained, List.rev images
+    | Image { data; source_type = Base64; _ } :: rest ->
+      split retained (data :: images) rest
+    | Image { source_type = (Url | File_id) as source_type; _ } :: _ ->
+      Api_common.unsupported_media_source
+        ~backend:"ollama_native" ~block:"image" source_type
+    | ToolResult ({ content_blocks = Some nested; _ } as result) :: rest ->
+      let nested, nested_images = ollama_tool_images nested in
+      split
+        (ToolResult { result with content_blocks = Some nested } :: retained)
+        (List.rev_append nested_images images)
+        rest
+    | ((Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+       | ToolResult { content_blocks = None; _ } | Document _ | Audio _) as block)
+      :: rest -> split (block :: retained) images rest
+  in
+  split [] [] blocks
+;;
+
 let ollama_tool_messages_of_blocks blocks =
   let rec loop messages = function
     | [] -> Ok (List.rev messages)
     | (ToolResult { content; content_blocks; _ }, Some tool_name) :: rest ->
+      let content_blocks, images =
+        match content_blocks with
+        | None -> None, []
+        | Some blocks ->
+          let blocks, images = ollama_tool_images blocks in
+          (match blocks, images with
+           | [], _ :: _ -> None
+           | [], [] | _ :: _, _ -> Some blocks), images
+      in
       let content = tool_result_content_string ~content ~content_blocks in
+      let fields =
+        [ "role", `String "tool"
+        ; "tool_name", `String tool_name
+        ; "content", `String content
+        ]
+      in
       let message =
-        `Assoc
-          [ "role", `String "tool"
-          ; "tool_name", `String tool_name
-          ; "content", `String content
-          ]
+        match images with
+        | _ :: _ ->
+          `Assoc (fields @ [ "images", `List (List.map (fun data -> `String data) images) ])
+        | [] -> `Assoc fields
       in
       loop (message :: messages) rest
     | (ToolResult { tool_use_id; _ }, None) :: _ ->
@@ -848,7 +886,6 @@ let ollama_messages_of_history
   match validate messages with
   | Error _ as error -> error
   | Ok () ->
-    let messages = Tool_result_projection.with_image_followups messages in
     (match Tool_result_projection.of_messages messages with
      | Error error -> Error (Tool_result_projection.error_to_string error)
      | Ok projection ->

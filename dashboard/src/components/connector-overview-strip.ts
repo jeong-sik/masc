@@ -68,7 +68,7 @@ function deriveHeartbeatState(
   connector: GateConnectorInfo | null,
 ): HeartbeatState {
   if (connector === null) return 'unknown'
-  if (connector.available === true) return 'up'
+  if (connector.connected === true) return 'up'
   return 'down'
 }
 
@@ -483,7 +483,7 @@ export function countConfiguredConnectors(connectors: GateConnectorInfo[]): numb
 }
 
 interface ConnectorStripSummary {
-  runningCount: number
+  configuredCount: number
   healthyCount: number
   connectorTotal: number
   bindingCount: number
@@ -502,7 +502,7 @@ export function summarizeConnectorStrip(
   connectors: GateConnectorInfo[],
   _keeperCount: number,
 ): ConnectorStripSummary {
-  const runningCount = countConfiguredConnectors(connectors)
+  const configuredCount = countConfiguredConnectors(connectors)
   const healthyCount = KNOWN_CONNECTOR_IDS.filter(id => {
     const connector = findConnector(connectors, id)
     return connector !== null
@@ -515,7 +515,7 @@ export function summarizeConnectorStrip(
     return acc + (c?.configured_bindings?.length ?? 0)
   }, 0)
   return {
-    runningCount,
+    configuredCount,
     healthyCount,
     connectorTotal: KNOWN_CONNECTOR_IDS.length,
     bindingCount,
@@ -577,8 +577,8 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
         testId="overview-strip-live"
       />
       <span>
-        <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-running>${summary.runningCount}/${summary.connectorTotal}</span>
-        <span> running</span>
+        <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-configured>${summary.configuredCount}/${summary.connectorTotal}</span>
+        <span> configured</span>
         ${offlineLabel !== null
           ? html`<span
               class="ml-1 text-[var(--bad-light)]/80"

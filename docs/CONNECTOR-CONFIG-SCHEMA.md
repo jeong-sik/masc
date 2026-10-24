@@ -1,9 +1,12 @@
 # Connector Config Schema (SSOT)
 
 Discord, iMessage, Slack and Telegram run inside the MASC server. Credentials
-and paths resolve through the server configuration boundary: an explicitly set
-nonblank environment value takes precedence over its runtime.toml override.
-Relative binding and audit paths resolve against the effective base path.
+and paths use each connector's documented configuration reader. Discord and
+Slack credentials come from the server process environment. Telegram first
+reads the environment value (including an explicit blank); only an absent value
+falls back to its runtime.toml override. Telegram binding path resolution then
+skips blank values and tries the next alias/default. Relative binding and audit
+paths resolve against the effective base path.
 The dashboard exposes connection state, setup instructions and Keeper bindings.
 
 ## Connector settings

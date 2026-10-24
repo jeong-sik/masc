@@ -230,7 +230,7 @@ describe('formatConnectorUptime', () => {
 describe('summarizeConnectorStrip', () => {
   it('returns zeros for empty input', () => {
     expect(summarizeConnectorStrip([], 0)).toEqual({
-      runningCount: 0,
+      configuredCount: 0,
       healthyCount: 0,
       connectorTotal: 4,
       bindingCount: 0,
@@ -244,7 +244,7 @@ describe('summarizeConnectorStrip', () => {
       mkConnector({ connector_id: 'unknown-bridge', available: true, configured_bindings: ['x', 'y', 'z'] as any }),
     ]
     const s = summarizeConnectorStrip(list, 5)
-    expect(s.runningCount).toBe(2)
+    expect(s.configuredCount).toBe(2)
     expect(s.healthyCount).toBe(2)
     expect(s.connectorTotal).toBe(4)
     expect(s.bindingCount).toBe(3) // unknown-bridge's 3 excluded
@@ -277,6 +277,13 @@ describe('summarizeOverviewTile', () => {
 })
 
 describe('countConfiguredConnectors', () => {
+  it('counts configured but disconnected Telegram separately from connectivity', () => {
+    const disconnected = mkConnector({connector_id:'telegram', available:true, connected:false, gate_healthy:false})
+    const summary = summarizeConnectorStrip([disconnected],0)
+    expect(summary.configuredCount).toBe(1)
+    expect(summary.healthyCount).toBe(0)
+  })
+
   it('returns 0 for empty list', () => {
     expect(countConfiguredConnectors([])).toBe(0)
   })

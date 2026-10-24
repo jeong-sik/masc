@@ -11,17 +11,20 @@ interface InProcessConfigGuide {
   // alongside it. Each is looked up in FIELD_HINTS for a "where to find it" card.
   envVars: string[]
   docsRef: string
+  supportsRuntimeToml: boolean
 }
 
 const IN_PROCESS_CONFIG_GUIDES: Record<string, InProcessConfigGuide> = {
-  telegram: {displayName: 'Telegram', envVars: ['TELEGRAM_BOT_TOKEN'], docsRef: 'docs/CONNECTOR-CONFIG-SCHEMA.md'},
-  imessage: {displayName: 'iMessage', envVars: [], docsRef: 'docs/CONNECTOR-CONFIG-SCHEMA.md'},
+  telegram: {supportsRuntimeToml:true, displayName: 'Telegram', envVars: ['TELEGRAM_BOT_TOKEN'], docsRef: 'docs/CONNECTOR-CONFIG-SCHEMA.md'},
+  imessage: {supportsRuntimeToml:false, displayName: 'iMessage', envVars: [], docsRef: 'docs/CONNECTOR-CONFIG-SCHEMA.md'},
   discord: {
+    supportsRuntimeToml: false,
     displayName: 'Discord',
     envVars: ['DISCORD_BOT_TOKEN'],
     docsRef: 'docs/CONNECTOR-CONFIG-SCHEMA.md',
   },
   slack: {
+    supportsRuntimeToml: false,
     displayName: 'Slack',
     envVars: ['SLACK_APP_TOKEN', 'SLACK_BOT_TOKEN'],
     docsRef: 'docs/rfc/RFC-0317-slack-builtin-gateway.md',
@@ -87,7 +90,7 @@ export function ConnectorConfigForm({connectorId}: {connectorId:string}) {
         <div class="text-[var(--color-fg-secondary)]">
           ${inProcess.displayName}는 서버 프로세스 내부 gateway로 실행됩니다. 설정 항목:
           <span class="mx-1 font-mono text-[var(--color-fg-primary)]">${inProcess.envVars.join(', ')}</span>
-          환경변수 또는 runtime.toml에서 설정하세요.
+          ${inProcess.supportsRuntimeToml ? '환경변수 또는 runtime.toml에서 설정하세요.' : '서버 프로세스의 환경변수에 설정하세요.'}
         </div>
         ${inProcess.envVars.map((envVar) => {
           const hint = getFieldHint(envVar)

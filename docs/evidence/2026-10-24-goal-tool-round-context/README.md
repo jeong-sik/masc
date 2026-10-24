@@ -5,10 +5,10 @@ current Goal in raw request 000002. After its first tool result, requests
 000003 through 000010 contained no fresh system-context carrier and neither
 the criterion revision nor measurement ID. The accepted Task-create response
 000007 was therefore driven by a request without those Goal observations.
-The Task was created with no Goal link. `baseline.json` aligns raw request and
+The Task was created with no Goal link. These are co-observed facts; they do not establish that missing context alone caused that model choice. `baseline.json` aligns raw request and
 response hashes, Goal markers and emitted tool names. It retains no provider
 Thinking text. Goal ID alone still appeared elsewhere in later requests and
-would falsely suggest the full snapshot was present.
+would falsely suggest the full snapshot was present. The retained `actual-unlinked-task.json` includes the authoritative backlog, empty-link observation and failed artifact state; it was not approved as success.
 
 The cause is the existing `Dynamic_context` post-tool policy. That policy
 deliberately avoids rebroadcasting Task, Gate, Lane, inbox and other world
@@ -43,8 +43,11 @@ Executed checks:
   producer-hook or SDK-network execution claim.
 - Existing dashboard turn-record decoder tests: 126 passed, including every
   known prompt-block ID through the full decoder path.
-- All 18 changed OCaml interfaces/implementations parsed; `git diff --check`
-  passed. No local Dune build was run.
+- All 18 changed OCaml interfaces/implementations parsed; product-source
+  `git diff --check BASE HEAD -- lib bin test dashboard` passed. The captured
+  dashboard stdout retains its original trailing blank line; an evidence-inclusive
+  diff check reports that whitespace, so no blanket clean-diff claim is made.
+  No local Dune build was run.
 
 The native `test_keeper_direct_goal_provider_wire` feature regression is
 extended to three actual HTTP requests: a metric Read, actual bundled Task
@@ -56,3 +59,5 @@ an explicit fixture port; Task creation uses the real bundled handler. This
 deterministic peer does not prove that a model chooses the correct association.
 The native receiver test and post-fix live Keeper canary were not run by this
 author; the parent integration session owns that exact-build validation.
+
+Parent native run [40097972974](https://github.com/jeong-sik/masc/actions/runs/40097972974) at1eef45b69f395b1819537c116c7df839023da110 completed6 selected suites PASS and this receiver suite FAIL. Its3 request Goal/world assertions passed, but actual Task creation refused with `MASC not initialized`: the fixture had not initialized Workspace. The authoritative link assertion correctly failed; it is not waived. native-first-run.json/txt preserve that scope; fixture repair and rerun remain pending.

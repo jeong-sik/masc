@@ -1,0 +1,10 @@
+{
+  "source_sha": "1eef45b69f395b1819537c116c7df839023da110",
+  "binary": "/tmp/masc-goal-runtime-1eef45b6/masc",
+  "base_path": "/private/tmp/masc-goal-canary-1eef45b6",
+  "pid": 17854,
+  "port": 49916,
+  "provider_proxy_port": 49741,
+  "model": "gemma4:e2b",
+  "production_deployment": false
+}

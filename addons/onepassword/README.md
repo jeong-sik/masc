@@ -57,13 +57,26 @@ its public result does not certify website authentication. A process lease
 prevents another engine from recovering an active owner's operations. Restart
 records lost original bindings as unknown rather than adopting a new session.
 
+`service.py` owns a joined background executor for private request/check/fill/release
+steps. Public state reads use the last committed snapshot. Cancellation interrupts
+the original socket immediately and reports a request receipt; durable cancellation
+settlement follows on the owner. Queued fill and release intents are committed
+before admission returns. Closing rejects new work, cancels original handles and
+joins the worker. Unexpected background errors expose a fixed failure without
+printing private tracebacks.
+
+Initial host bind is still synchronous admission. The public MCP connection must
+preserve an original grant while binding moves to the worker before claiming
+nonblocking end-to-end dispatch. Worker exports and the approval UI are not yet
+connected to this executor.
+
 The approval checker follows the [vendor schedule](https://docs.browserbase.com/integrations/1password/agentic-autofill):
 the private link can be retrieved again, and a separate opened acknowledgement
 starts the five-second wait. It uses the declared
 2/5/10-second windows, pauses for the user after two minutes and respects a
 one-minute rate-limit wait. Pausing does not expire the task or create another
-request. The engine supplies individual steps; its worker tools, private approval
-UI, scheduler and Keeper continuation are still to be connected.
+request. The service schedules the engine's steps with one checker per request.
+Its worker tools, private approval UI and Keeper continuation are still to be connected.
 
 The Browser private wire and original-CDP extension loader are now source
 implementation. Package-owned `prepare.js` waits for extension readiness and

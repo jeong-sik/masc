@@ -112,9 +112,20 @@ class LoginTests(unittest.TestCase):
         return engine
 
     def start(self, **changes):
-        return self.engine.start(**{**dict(descriptor={"private": "PRIVATE_CAPABILITY_MARKER"},
+        arguments = {**dict(descriptor={"private": "PRIVATE_CAPABILITY_MARKER"},
             caller=CALLER, browser_instance_id=BROWSER, tab_id=7,
-            website="https://example.test/login", goal="Sign in", reason="Continue the task"), **changes})
+            website="https://example.test/login", goal="Sign in", reason="Continue the task"), **changes}
+        admitted, reserved = self.engine.reserve(**arguments)
+        return (self.engine.request(admitted["operation_id"], arguments["caller"],
+                goal=arguments["goal"], reason=arguments["reason"]) if reserved else admitted)
+
+    def fill_next(self, operation, caller):
+        self.engine.reserve_fill(operation, caller)
+        return self.engine.fill(operation, caller)
+
+    def finish(self, operation, caller):
+        self.engine.reserve_finish(operation, caller)
+        return self.engine.finish(operation, caller)
 
     def ready(self):
         operation = self.start()["operation_id"]
@@ -141,18 +152,18 @@ class LoginTests(unittest.TestCase):
         self.assertEqual(self.engine.status(operation, CALLER), filled)
         self.assertEqual(self.engine.advance(operation, CALLER), filled)
         for _ in range(3):
-            self.assertEqual(self.engine.fill_next(operation, CALLER), filled)
+            self.assertEqual(self.fill_next(operation, CALLER), filled)
         fills = [arguments for name, arguments in bridge.calls if name == "fill"]
         self.assertEqual(len(fills), 4)
         self.assertTrue(all(args["reference"] == REFERENCE for args in fills))
         self.assertEqual(len({args["access_token"] for args in fills}), 4)
         self.assertEqual(len([1 for name, _ in bridge.calls if name == "bind"]), 1)
-        released = self.engine.finish(operation, CALLER)
+        released = self.finish(operation, CALLER)
         self.assertEqual(released["phase"], "released")
         self.assert_public(released)
         self.assertEqual([name for name, _ in bridge.calls].count("release"), 1)
         with self.assertRaises(LoginError):
-            self.engine.fill_next(operation, CALLER)
+            self.fill_next(operation, CALLER)
         record = json.loads((self.directory / "operations.json").read_text())["operations"][0]
         self.assertIsNone(record["app_link"])
         self.assertIsNone(record["reference"])
@@ -255,7 +266,7 @@ class LoginTests(unittest.TestCase):
         self.grant(bridge)
         self.engine.advance(operation, CALLER)
         bridge.release_error = True
-        result = self.engine.finish(operation, CALLER)
+        result = self.finish(operation, CALLER)
         self.assertEqual(result["phase"], "outcome_unknown")
         self.assertTrue(result["fill_submitted"])
         self.assert_public(result)
@@ -267,7 +278,7 @@ class LoginTests(unittest.TestCase):
                 if submitted:
                     self.grant(bridge)
                     self.engine.advance(operation, CALLER)
-                    settle = lambda: self.engine.finish(operation, CALLER)
+                    settle = lambda: self.finish(operation, CALLER)
                 else:
                     bridge.responses.append({"state": "denied"})
                     settle = lambda: self.engine.advance(operation, CALLER)
@@ -522,14 +533,17 @@ class LoginTests(unittest.TestCase):
         self.addCleanup(host.close)
         engine = Logins(self.connector, self.journal, self.extension, clock=lambda: self.now)
         self.addCleanup(engine.close)
-        pending = engine.start(descriptor=host.descriptor, caller=CALLER, browser_instance_id=BROWSER,
+        pending, reserved = engine.reserve(descriptor=host.descriptor, caller=CALLER, browser_instance_id=BROWSER,
             tab_id=7, website="https://example.test/login", goal="Sign in", reason="Continue task")
+        self.assertTrue(reserved)
+        pending = engine.request(pending["operation_id"], CALLER, goal="Sign in", reason="Continue task")
         self.assert_public(pending)
         operation = pending["operation_id"]
         self.assertEqual(engine.approval(operation), {"open_url": APP_LINK})
         engine.opened(operation)
         self.now += 5.
         self.assert_public(engine.advance(operation, CALLER))
+        engine.reserve_finish(operation, CALLER)
         self.assertEqual(engine.finish(operation, CALLER)["phase"], "released")
         host.thread.join(2)
         self.assertFalse(host.thread.is_alive())

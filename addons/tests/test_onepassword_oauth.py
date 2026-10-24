@@ -91,11 +91,14 @@ class ConnectionTests(unittest.TestCase):
 
     def test_code_is_not_replayed_after_exchange_response_is_lost(self):
         parameters = self.begin()
+        original = self.retained()
         def lose(path, fields, configuration):
             raise oauth.ConnectionError("oauth_transport_or_response_failure")
         self.connector.transport = lose
         with self.assertRaises(oauth.ConnectionError):
             self.connector.complete(state=parameters["state"][0], code="AUTH_CODE", integration_key="KEY")
+        self.assertEqual(self.retained()["connection_id"], original["connection_id"])
+        self.assertEqual(self.retained()["integration_key"], "KEY")
         restarted = oauth.Connector(self.configuration, oauth.PrivateStore(self.directory), transport=self.transport)
         self.assertEqual(restarted.status()["phase"], "reconnect_required")
         with self.assertRaises(oauth.ConnectionError):
@@ -104,11 +107,13 @@ class ConnectionTests(unittest.TestCase):
 
     def test_concurrent_refreshes_rotate_once_and_keep_key(self):
         self.connect()
+        connection_id = self.connector.connection_identity()
         self.clock += 901
         second = oauth.Connector(self.configuration, oauth.PrivateStore(self.directory),
                                   transport=self.transport, now=lambda: self.clock)
         with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = [pool.submit(connector.credentials, lambda access, key: (access, key))
+            futures = [pool.submit(connector.credentials, lambda access, key: (access, key),
+                                   expected_connection_id=connection_id)
                        for connector in [self.connector, second]]
             results = [future.result() for future in futures]
         self.assertEqual(results, [("ACCESS_2", "INTEGRATION_KEY")] * 2)
@@ -118,22 +123,26 @@ class ConnectionTests(unittest.TestCase):
 
     def test_lost_rotating_refresh_response_fences_reuse_across_restart(self):
         self.connect()
+        connection_id = self.connector.connection_identity()
         self.clock += 901
         def lose(path, fields, configuration):
             self.calls.append((path, fields))
             raise oauth.ConnectionError("oauth_transport_or_response_failure")
         self.connector.transport = lose
         with self.assertRaises(oauth.ConnectionError):
-            self.connector.credentials(lambda access, key: self.fail("must not use old token"))
+            self.connector.credentials(lambda access, key: self.fail("must not use old token"),
+                                       expected_connection_id=connection_id)
         restarted = oauth.Connector(self.configuration, oauth.PrivateStore(self.directory),
                                      transport=self.transport, now=lambda: self.clock)
         with self.assertRaisesRegex(oauth.ConnectionError, "connection_not_ready"):
-            restarted.credentials(lambda access, key: self.fail("must not replay refresh"))
+            restarted.credentials(lambda access, key: self.fail("must not replay refresh"),
+                                  expected_connection_id=connection_id)
         self.assertEqual(len(self.calls), 2)
         self.assertEqual(restarted.status()["phase"], "reconnect_required")
 
     def test_disconnect_waits_for_private_use_and_revokes_before_erasing(self):
         self.connect()
+        connection_id = self.connector.connection_identity()
         entered, release = threading.Event(), threading.Event()
         revocations = []
         def use(access, key):
@@ -141,7 +150,7 @@ class ConnectionTests(unittest.TestCase):
             self.assertTrue(release.wait(5))
             return "safe browser receipt"
         with ThreadPoolExecutor(max_workers=2) as pool:
-            in_use = pool.submit(self.connector.credentials, use)
+            in_use = pool.submit(self.connector.credentials, use, expected_connection_id=connection_id)
             self.assertTrue(entered.wait(5))
             stopped = pool.submit(self.connector.disconnect, lambda access, key: revocations.append((access, key)))
             self.assertFalse(stopped.done())
@@ -149,18 +158,199 @@ class ConnectionTests(unittest.TestCase):
             self.assertEqual(in_use.result(), "safe browser receipt")
             self.assertEqual(stopped.result(), {"phase": "disconnected", "connected": False})
         self.assertEqual(revocations, [("ACCESS_1", "INTEGRATION_KEY")])
-        self.assertEqual(self.retained(), {"phase": "disconnected"})
+        self.assertEqual(self.retained(), {"phase": "disconnected",
+                                           "configuration_id": self.configuration.identity})
+
+    def test_disconnect_refreshes_an_expired_token_before_revoking(self):
+        self.connect()
+        original = self.retained()
+        self.clock += 901
+        revocations = []
+
+        def revoke(access, key):
+            retained = self.retained_record_bytes()
+            self.assertEqual(retained["phase"], "revoking")
+            self.assertEqual(retained["connection_id"], original["connection_id"])
+            self.assertEqual(retained["refresh_token"], "REFRESH_2")
+            self.assertGreater(retained["expires_at"], self.clock)
+            revocations.append((access, key))
+
+        self.assertEqual(self.connector.disconnect(revoke),
+                         {"phase": "disconnected", "connected": False})
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.calls[1][1]["grant_type"], "refresh_token")
+        self.assertEqual(self.calls[1][1]["refresh_token"], "REFRESH_1")
+        self.assertEqual(revocations, [("ACCESS_2", "INTEGRATION_KEY")])
+        self.assertEqual(set(self.retained()), {"phase", "configuration_id"})
+
+    def retained_record_bytes(self):
+        # Used only by an in-flight fixture callback that already holds the
+        # connection lock; reacquiring another flock would block that callback.
+        return json.loads((self.directory / "connection.json").read_text())
+
+    def test_lost_refresh_during_disconnect_is_not_replayed_or_revoked(self):
+        self.connect()
+        self.clock += 901
+
+        def lose(path, fields, configuration):
+            self.calls.append((path, fields))
+            raise oauth.ConnectionError("oauth_transport_or_response_failure")
+
+        self.connector.transport = lose
+        with self.assertRaises(oauth.ConnectionError):
+            self.connector.disconnect(lambda *args: self.fail("must not revoke an unknown token"))
+        self.assertEqual(self.retained()["phase"], "refreshing")
+        restarted = oauth.Connector(self.configuration, oauth.PrivateStore(self.directory),
+                                     transport=self.transport, now=lambda: self.clock)
+        with self.assertRaisesRegex(oauth.ConnectionError, "remote_connection_reconciliation_required"):
+            restarted.disconnect(lambda *args: self.fail("must not replay an uncertain operation"))
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(restarted.status(), {"phase": "reconnect_required", "connected": False})
 
     def test_failed_revocation_keeps_private_recovery_authority_but_blocks_use(self):
         self.connect()
+        connection_id = self.connector.connection_identity()
+        revocations = []
         def failed(access, key):
+            revocations.append((access, key))
             raise oauth.ConnectionError("revocation_unconfirmed")
         with self.assertRaises(oauth.ConnectionError):
             self.connector.disconnect(failed)
         self.assertEqual(self.connector.status()["phase"], "reconnect_required")
         self.assertEqual(self.retained()["refresh_token"], "REFRESH_1")
         with self.assertRaises(oauth.ConnectionError):
-            self.connector.credentials(lambda access, key: None)
+            self.connector.credentials(lambda access, key: None, expected_connection_id=connection_id)
+        restarted = oauth.Connector(self.configuration, oauth.PrivateStore(self.directory),
+                                     transport=self.transport, now=lambda: self.clock)
+        with self.assertRaisesRegex(oauth.ConnectionError, "remote_connection_reconciliation_required"):
+            restarted.disconnect(failed)
+        self.assertEqual(revocations, [("ACCESS_1", "INTEGRATION_KEY")])
+
+    def test_connection_records_are_bound_to_the_configured_oauth_client(self):
+        self.connect()
+        original = self.retained()
+        for configuration in [
+            oauth.Configuration("another-client", "CLIENT_SECRET", self.configuration.redirect_uri),
+            oauth.Configuration(self.configuration.client_id, "CLIENT_SECRET", "https://other.example/callback"),
+        ]:
+            with self.subTest(configuration=configuration):
+                other = oauth.Connector(configuration, oauth.PrivateStore(self.directory),
+                                        transport=self.transport, now=lambda: self.clock)
+                for operation in [other.status, other.begin,
+                                  lambda: other.credentials(lambda *args: self.fail("must not use tokens"),
+                                                            expected_connection_id=original["connection_id"]),
+                                  lambda: other.disconnect(lambda *args: self.fail("must not revoke tokens"))]:
+                    with self.assertRaisesRegex(oauth.ConnectionError, "connection_configuration_mismatch"):
+                        operation()
+                self.assertEqual(self.retained(), original)
+        self.assertEqual(len(self.calls), 1)
+        self.connector.disconnect(lambda *args: None)
+        with self.assertRaisesRegex(oauth.ConnectionError, "connection_configuration_mismatch"):
+            other.status()
+
+    def test_pending_authorization_is_bound_to_its_configuration(self):
+        parameters = self.begin()
+        other = oauth.Connector(oauth.Configuration("another-client", "secret", self.configuration.redirect_uri),
+                                oauth.PrivateStore(self.directory), transport=self.transport)
+        with self.assertRaisesRegex(oauth.ConnectionError, "connection_configuration_mismatch"):
+            other.complete(state=parameters["state"][0], code="code", integration_key="key")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.retained()["phase"], "authorizing")
+
+    def test_client_secret_rotation_preserves_the_logical_connection(self):
+        self.connect()
+        original = self.retained()
+        configuration = oauth.Configuration(self.configuration.client_id, "ROTATED_SECRET",
+                                              self.configuration.redirect_uri)
+        self.assertEqual(configuration.identity, self.configuration.identity)
+        self.clock += 901
+        rotated = oauth.Connector(configuration, oauth.PrivateStore(self.directory),
+                                  transport=self.transport, now=lambda: self.clock)
+        self.assertEqual(rotated.credentials(lambda access, key: (access, key),
+                                              expected_connection_id=original["connection_id"]),
+                         ("ACCESS_2", "INTEGRATION_KEY"))
+        self.assertEqual(self.retained()["connection_id"], original["connection_id"])
+        self.assertEqual(self.retained()["configuration_id"], original["configuration_id"])
+        self.assertNotIn("ROTATED_SECRET", json.dumps(self.retained()))
+
+    def test_connection_identity_survives_operations_and_changes_on_new_connection(self):
+        self.begin()
+        authorizing = self.retained()
+        self.connector.complete(state=authorizing["state"], code="code", integration_key="key")
+        self.assertEqual(self.retained()["connection_id"], authorizing["connection_id"])
+        self.clock += 901
+
+        def refresh(path, fields, configuration):
+            record = self.retained_record_bytes()
+            self.assertEqual(record["phase"], "refreshing")
+            self.assertEqual(record["connection_id"], authorizing["connection_id"])
+            return self.transport(path, fields, configuration)
+
+        self.connector.transport = refresh
+        self.connector.credentials(lambda *args: None, expected_connection_id=authorizing["connection_id"])
+        self.connector.disconnect(lambda *args: None)
+        self.begin()
+        self.assertNotEqual(self.retained()["connection_id"], authorizing["connection_id"])
+
+    def test_old_operation_cannot_use_or_refresh_a_reconnected_accounts_credentials(self):
+        self.connect()
+        original_connection = self.connector.connection_identity()
+        self.connector.disconnect(lambda *args: None)
+        self.connect()
+        current_connection = self.connector.connection_identity()
+        self.assertNotEqual(original_connection, current_connection)
+        self.clock += 901
+        calls_before = len(self.calls)
+        with self.assertRaisesRegex(oauth.ConnectionError, "connection_identity_mismatch"):
+            self.connector.credentials(lambda *args: self.fail("must not retarget an old operation"),
+                                       expected_connection_id=original_connection)
+        self.assertEqual(len(self.calls), calls_before)
+        self.assertEqual(self.connector.credentials(lambda access, key: access,
+                                                     expected_connection_id=current_connection), "ACCESS_3")
+
+    def test_connection_identity_is_available_only_for_a_ready_connection(self):
+        with self.assertRaisesRegex(oauth.ConnectionError, "connection_not_ready"):
+            self.connector.connection_identity()
+        parameters = self.begin()
+        with self.assertRaisesRegex(oauth.ConnectionError, "connection_not_ready"):
+            self.connector.connection_identity()
+        self.connector.complete(state=parameters["state"][0], code="code", integration_key="key")
+        self.assertEqual(self.connector.connection_identity(), self.retained()["connection_id"])
+
+    def test_full_record_schema_is_validated_before_connected_projection_or_use(self):
+        self.connect()
+        original = self.retained()
+        damaged = [
+            {"phase": "connected"},
+            {key: value for key, value in original.items() if key != "integration_key"},
+            {**original, "unexpected": "secret"},
+            {**original, "configuration_id": "not-a-configuration-identity"},
+            {**original, "connection_id": "not-a-connection-id"},
+            {**original, "refresh_token": []},
+            {**original, "expires_at": True},
+            {**original, "expires_at": -1},
+            {**original, "expires_at": float("inf")},
+            {**original, "phase": "reconnect_required"},
+        ]
+        target = self.directory / "connection.json"
+        for record in damaged:
+            with self.subTest(record=record):
+                target.write_text(json.dumps(record))
+                for operation in [self.connector.status,
+                                  lambda: self.connector.credentials(lambda *args: self.fail("must not use corrupt tokens"),
+                                                                     expected_connection_id=original["connection_id"]),
+                                  lambda: self.connector.disconnect(lambda *args: self.fail("must not revoke corrupt tokens"))]:
+                    with self.assertRaisesRegex(oauth.ConnectionError, "invalid_connection_record"):
+                        operation()
+        self.assertEqual(len(self.calls), 1)
+
+    def test_duplicate_json_fields_are_not_accepted_as_authoritative_records(self):
+        self.connect()
+        original = self.retained()
+        target = self.directory / "connection.json"
+        target.write_text('{"phase":"connected",' + json.dumps(original)[1:])
+        with self.assertRaisesRegex(oauth.ConnectionError, "invalid_connection_record"):
+            self.connector.status()
 
     def test_invalid_provider_tokens_do_not_establish_connection(self):
         for invalid in [
@@ -168,6 +358,10 @@ class ConnectionTests(unittest.TestCase):
             {"access_token": "a", "refresh_token": "r", "token_type": "Bearer", "expires_in": True},
             {"access_token": "a", "token_type": "Bearer", "expires_in": 900},
             {"access_token": "a", "refresh_token": "r", "token_type": "Other", "expires_in": 900},
+            {"access_token": "a", "refresh_token": "r", "token_type": {"secret": "body"}, "expires_in": 900},
+            {"access_token": "a", "refresh_token": "r", "token_type": 42, "expires_in": 900},
+            {"access_token": "a", "refresh_token": "r", "token_type": None, "expires_in": 900},
+            [],
         ]:
             with self.subTest(invalid=invalid):
                 other_path = Path(self.temporary.name) / ("case-" + str(len(os.listdir(self.temporary.name))))

@@ -23,8 +23,11 @@ A new snapshot clears the previous transport observation. Only the latest
 snapshot may publish metadata, so overlapping replies cannot restore stale
 entries after replacement, failure or revocation. Socket tests exercise actual
 writes, silent peers, SDK-owned waiting and controlled overlapping snapshots.
-These new tests are pending execution; parsing and independent source review
-are separate evidence.
+The full-stack12c focused run40112787489 passes all19 selected tests, including
+four actual client cases. Parsing and independent source review are separate
+evidence. [Actual12c Keeper evidence](../ego-sdk-owner-disconnect/keeper-12c001e5/)
+now binds ordinary native navigation/ref-input success and recovery to the new
+metadata path; it does not claim another long-duration result.
 
 The independent audit also found a poll-lifetime boundary. Ego polls between
 SDK commands. A legitimate long command could outlive the idle 120-second
@@ -139,7 +142,8 @@ the Keeper's operation succeeded; this is not described as a Keeper image-tool
 capture. Provider reasoning and bearer credentials are not copied into the
 artifacts. Keeper shutdown was accepted after the form goal, then the same
 Keeper and space25/p1 were resumed for a separate marker lifetime test. Final
-connection/server cleanup remains pending. This candidate predates the native
+connection/server cleanup was still pending at that observation; its final
+result is recorded below. This candidate predates the native
 navigation layer and is not evidence that its new binary ran.
 
 The separate marker operation also succeeded on the same candidate and25/p1.

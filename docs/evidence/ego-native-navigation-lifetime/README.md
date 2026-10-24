@@ -8,9 +8,13 @@ these extra clocks. This is an identified contract inconsistency, not a claim
 of a reproduced production navigation outage.
 
 These three peer paths now use the existing native runner and the authenticated
-Ego transport selects `Executor_owned`. The private Add-on client retains the
-shared reply policy; a live client ID cannot prove an Ego transport. The worker
-independently selects the policy from its admitted actual transport. Existing running-request ownership,
+Ego transport selects `Executor_owned`. The private Add-on client observes the
+exact live transport in its original worker's validated Snapshot before choosing
+Ego-specific waiting. A live UUID alone is insufficient; unknown differing-policy
+calls refuse before writing, and other transports retain shared reply windows.
+Only the latest snapshot can replace metadata; stale replies cannot undo a newer
+failure or revocation. The worker independently validates its admitted actual
+transport. Existing running-request ownership,
 settlement, cancellation and explicit disconnect apply without a new lifetime
 mechanism. Generated Page scripts and partial-effect/created-tab receipts are
 unchanged. An uncertain new-page result still requires tab observation before
@@ -66,6 +70,8 @@ a subsequent listTaskSpaces showed25 absent. Both private servers and two
 owned fixtures were then stopped. The old idle14c9 SDK remained after its
 server's SIGTERM; its recorded executable path/hash were reverified and that
 owned PID alone was terminated. All eight recorded server/worker/SDK/fixture
-PIDs were absent in the final census. This documents a remaining generic
-server-signal cleanup limitation, not a repair of it. The actual new candidate's
-explicit detach path completed. No production installation or restart occurred.
+PIDs were absent in the final census. At those candidate sources this documented
+a generic server-signal cleanup limitation. The later [owner-disconnect
+repair](../ego-sdk-owner-disconnect/) now has separate compiled34c and12c cleanup
+evidence; it does not rewrite that earlier failure. The a96 candidate's explicit
+detach path completed. No production installation or restart occurred.

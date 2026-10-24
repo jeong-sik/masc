@@ -1582,8 +1582,9 @@ let backend ~store ~artifact_store () = match !override with
               | Mcp_tools -> Ok (None,None)
               | Browser_service -> offload (fun () ->
                   let configuration=Runtime.browser_configuration () in
-                  (* Nothing in an ego connection needs cleanup after the
-                     worker, so it rides the worker's arguments. *)
+                  (* Ego owns its browser; the SDK session follows the worker's
+                     IPC lifetime. Its configuration rides the worker's arguments
+                     without a separate browser-process cleanup descriptor. *)
                   let live_ego=match configuration with
                     | Some {live_enabled=true;live_ego=Some ego;_} -> Some ego
                     | None | Some {live_enabled=false;_}

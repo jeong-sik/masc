@@ -1,0 +1,30 @@
+{
+  "source": "12c001e55e27c7a9340ae27f956e112fd5360c76",
+  "operation": {
+    "schema": "masc.keeper_chat_operation.v1",
+    "operation_id": "ego-native-proof-12c-policy-1",
+    "state": "Succeeded",
+    "created_at": 1792860859.625744,
+    "completed_at": 1792860939.070774
+  },
+  "actual_model": "glm-5.3-flash",
+  "space_id": 30,
+  "page": "p1",
+  "client_id": "fdc0b51b-520d-48ec-9e84-49a2498890b5",
+  "tab_id": 1,
+  "ordinary_native_calls": [
+    "BrowserGoto",
+    "BrowserAct",
+    "BrowserInteract"
+  ],
+  "completed_tools": 9,
+  "predispatch_read_refusals": 1,
+  "recovered": true,
+  "fixture_clicks": 1,
+  "reviewer_screenshot_sha256": "add3d980d9af7400c27ea34718066dd225e5346386ff65894ae9c4c32f3542c3",
+  "screenshot_visually_inspected": true,
+  "new_long_call_timing_claim": false,
+  "full_regression_run": false,
+  "installed": false,
+  "production_state_changed": false
+}

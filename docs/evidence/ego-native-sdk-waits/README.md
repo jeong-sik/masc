@@ -32,10 +32,12 @@ socket-path boundaries remain.
 
 ## Installed Ego, two separate local fixtures
 
-The user-authorized continuing goal space is now **20**. The earlier verified
-space 14 had been explicitly retired and was absent from discovery; no other
-agent's space was used. Space 20 remains open for the goal's subsequent host
-verification, with its existing `p1`. Reuse it rather than starting a new space.
+At this SDK-only proof boundary the user-authorized continuing space was **20**.
+The earlier verified space14 had been retired and was absent from discovery;
+no other agent's space was used. Space20 was later found missing, as the input
+lifetime follow-up records. The continuing replacement authorization covered
+subsequent host verification. Historical space IDs here are not current resume
+instructions; the final12c run used30/p1 and normal shutdown removed it.
 
 `probe.mjs` executed production `nativeWorkflow` against a private local
 fixture. Nineteen steps completed and its Save click applied once, but the

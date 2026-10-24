@@ -1,0 +1,41 @@
+{
+  "build": {
+    "release_version": "0.64.0",
+    "binary_version": "0.64.0",
+    "repo_version": "0.64.0",
+    "commit": "12c001e55e27c7a9340ae27f956e112fd5360c76",
+    "commit_source": "embedded",
+    "binary_commit": "12c001e55e27c7a9340ae27f956e112fd5360c76",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "a06ae16b9b56be7d24b89ed122db185f3d41a7936cec9e9f94a77dce53eb7d40",
+    "binary_commit_unix_ts": 1792860089.0,
+    "binary_commit_age_seconds": 760,
+    "repo_head_commit": "9d6b65f4358",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1792860614.0,
+    "repo_head_commit_age_seconds": 235,
+    "executable_path": "/private/tmp/masc-ego-runtime-12c001e5/masc",
+    "executable_dir": "/private/tmp/masc-ego-runtime-12c001e5",
+    "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-sdk-waits-20261024",
+    "runtime_instance_id": "01a16ed5-641d-7000-9327-16926a083001",
+    "started_at": "2026-10-24T16:54:00Z",
+    "uptime_seconds": 8
+  },
+  "paths": {
+    "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-sdk-waits-20261024",
+    "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-client-policy-proof-20261025",
+    "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-client-policy-proof-20261025/.masc",
+    "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-client-policy-proof-20261025/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": true,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-client-policy-proof-20261025",
+    "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-client-policy-proof-20261025",
+    "resolution_source": "explicit_cli"
+  },
+  "status": "ok"
+}

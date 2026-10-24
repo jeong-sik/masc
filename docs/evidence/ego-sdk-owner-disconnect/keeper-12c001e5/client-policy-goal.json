@@ -1,0 +1,5 @@
+{
+  "request_id": "ego-native-proof-12c-policy-1",
+  "name": "ego-native-proof",
+  "message": "제가 소유한 로컬 검증 앱 http://127.0.0.1:9457/ 에서 연결 검증을 수행하세요. 제공된 브라우저 스킬과 BrowserTabs를 읽고 현재 연결된 Ego 공간 30의 기존 p1을 재사용하세요. 새 탭이나 공간을 만들지 마세요. 일반 BrowserGoto로 앱에 이동한 뒤 일반 BrowserAct reload로 같은 탭을 새로고침하세요. 이 두 동작은 workflow로 대체하지 마세요. 실제 UI를 관측하고 일반 BrowserInteract의 native target click으로 연결 검증 확인 버튼을 한 번 누르세요. 이것도 workflow로 대체하지 마세요. 이후 native snapshot을 받아 네이티브 연결 검증 완료 문구와 제목을 보고하세요. 관측한 같은 clientId/tabId를 계속 사용하세요. 앱의 서버 파일이나 내부 API로 UI를 대신 조작하지 마세요. 이 앱은 배송 신청과 무관한 새 검증 페이지입니다."
+}

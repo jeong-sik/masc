@@ -222,12 +222,14 @@ class PrivateStore:
     All file operations are relative to the original directory descriptor.
     Symlinks, hard-linked files and a replaced directory are refused. This is
     backend storage under the operator's UID, not an OS isolation boundary.
+    Provisioning is explicit; readers never create a missing directory.
     """
-    def __init__(self, directory: Path, *, records=None):
+    def __init__(self, directory: Path, *, records=None, provision: bool = False):
         if not directory.is_absolute():
             raise ConnectionError("store_path_not_absolute")
         self.directory = directory
-        self.directory.mkdir(mode=0o700, exist_ok=True)
+        if provision:
+            self.directory.mkdir(mode=0o700, exist_ok=True)
         self.identity = self._directory_identity()
         self.thread_lock = threading.RLock()
         namespace = json.dumps([os.getuid(), str(directory.resolve()), *self.identity],
@@ -402,22 +404,57 @@ class Connector:
             return {"phase": phase.value, "connected": phase is Phase.CONNECTED}
 
     def begin(self) -> dict:
-        """Operator-only result: MUST NOT enter MCP results or Lane rows."""
+        """Operator-only result: MUST NOT enter public MCP results or Lane rows."""
         with self.store.locked() as root:
             old = self._read(root)
             if Phase(old["phase"]) is not Phase.DISCONNECTED:
                 raise ConnectionError("disconnect_before_connecting")
             state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(64)
+            connection_id = str(uuid.uuid4())
             challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
             self.store.write(root, {"phase": Phase.AUTHORIZING.value,
                                     "configuration_id": self.configuration.identity,
-                                    "connection_id": str(uuid.uuid4()),
+                                    "connection_id": connection_id,
                                     "state": state, "verifier": verifier})
             parameters = {"response_type": "code", "client_id": self.configuration.client_id,
                           "redirect_uri": self.configuration.redirect_uri, "scope": SCOPES,
                           "state": state, "code_challenge": challenge,
                           "code_challenge_method": "S256"}
-            return {"authorization_url": WEB_ORIGIN + "/oauth/authorize?" + parse.urlencode(parameters)}
+            return {"authorization_url": WEB_ORIGIN + "/oauth/authorize?" + parse.urlencode(parameters),
+                    "connection_id": connection_id}
+
+    def authorization_identity(self) -> dict:
+        """Private operator continuation; never includes PKCE verifier/tokens."""
+        with self.store.locked() as root:
+            record = self._read(root)
+            if Phase(record["phase"]) is not Phase.AUTHORIZING:
+                raise ConnectionError("authorization_not_pending")
+            return {"state": record["state"], "connection_id": record["connection_id"]}
+
+    def cancel_authorization(self, *, expected_state: str, expected_connection_id: str) -> dict:
+        """Cancel exactly the pending authorization the operator was shown.
+
+        The authoritative phase and both identities are checked under the
+        same lock as the write. A late UI request cannot cancel a later
+        attempt or revoke an authorization whose callback has already begun.
+        This private operation never sends a provider request.
+        """
+        with self.store.locked() as root:
+            record = self._read(root)
+            if (Phase(record["phase"]) is not Phase.AUTHORIZING
+                    or not isinstance(expected_state, str)
+                    or not isinstance(expected_connection_id, str)):
+                raise ConnectionError("authorization_cancel_refused")
+            try:
+                matches_state = secrets.compare_digest(expected_state.encode(), record["state"].encode())
+                matches_connection = secrets.compare_digest(expected_connection_id.encode(),
+                                                              record["connection_id"].encode())
+            except UnicodeError:
+                raise ConnectionError("authorization_cancel_refused") from None
+            if not matches_state or not matches_connection:
+                raise ConnectionError("authorization_cancel_refused")
+            self.store.write(root, self._disconnected())
+            return {"phase": Phase.DISCONNECTED.value, "connected": False}
 
     def _tokens(self, value: dict) -> dict:
         if not isinstance(value, dict):
@@ -511,7 +548,7 @@ class Connector:
             if phase is Phase.DISCONNECTED:
                 return {"phase": phase.value, "connected": False}
             if phase is Phase.AUTHORIZING:
-                self.store.write(root, self._disconnected())
+                raise ConnectionError("authorization_cancel_required")
             elif phase is Phase.CONNECTED:
                 # Revocation also needs a current access token. Only a known
                 # CONNECTED record can rotate; unknown refresh/revoke states

@@ -532,14 +532,14 @@ let complete_http
                           path"
                      })
               else
-                Ok
-                  ( Prepared_completion_request.admitted_body_http_codec admitted_body
-                  , Prepared_completion_request.admitted_body_contents admitted_body ))
-           (fun (http_codec, body_str) -> Ok (body_deadline, http_codec, body_str)))
+                Ok (Prepared_completion_request.admitted_body_request admitted_body))
+           (fun serialized -> Ok (body_deadline, serialized)))
   in
   match preflight with
   | Error err -> Error err, None
-  | Ok (body_deadline, http_codec, body_str) ->
+  | Ok (body_deadline, serialized) ->
+    let http_codec = serialized.Complete_common.http_codec in
+    let body_str = serialized.body in
     if requires_non_http_transport config.kind
     then
       ( Error

@@ -91,7 +91,7 @@ let original_key original =
 let summary original run =
   let* digest = V.digest original in
   let* _ = run_of_json (run_json run) in
-  Ok (`Assoc ["schema", `String "goal_verifier_owner/v1";
+  Lane_addon_action.canonical (`Assoc ["schema", `String "goal_verifier_owner/v1";
     "original_digest", `String digest; "run", run_json run])
 
 let validate_record ~installation_id ~package_id (record : Owner.retained) =
@@ -529,11 +529,14 @@ let commit ~store ~retained ~change ~observe ~apply =
   let validate commit =
     let* receipt = decode (receipt_of_json retained commit.Progress.judgment) in
     let* digest = decode (V.digest retained.original) in
-    let* encoded = decode (receipt_json retained receipt) in
     let* () = match receipt.result.AR.verdict, commit.change.after with
       | Some _, `Assoc fields when List.assoc_opt "original_digest" fields = Some (`String digest)
           && (match List.assoc_opt "receipt" fields with
-            | Some value -> Yojson.Safe.equal value encoded | None -> false) -> Ok ()
+            (* The owner canonicalizes integral JSON numbers when retaining
+               progress. Decoding a receipt restores typed float metadata;
+               re-encoding it would change 0 back to 0.0. Authenticate the
+               exact retained judgment after its typed validation above. *)
+            | Some value -> Yojson.Safe.equal value commit.judgment | None -> false) -> Ok ()
       | None, _ | Some _, _ -> invalid "Goal commit intent differs from its original structured judgment" in
     Ok () in
   let confirm saved commit =

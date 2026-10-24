@@ -78,6 +78,7 @@ let run ?(package=package_id) store authority attempt =
 
 let pending ~store ~installation_id ~package_id =
   O.pending_commits ~terminal_pending:Publication.needs_publication
+    ~selection:O.All_verifications
     ~store ~installation_id ~package_id
 
 let execution_observer ~clock ~started_at ~before ~original result =

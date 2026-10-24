@@ -981,6 +981,7 @@ let with_original_publication_guard ~store ~verification_id ~attempt ~installati
 
 let preserve_original_publication ~store ~verification_id ~task_id ~producer =
   match Eio.Cancel.protect (fun () -> Verifier_review_owner.pending_commits
+    ~selection:(Verifier_review_owner.Verification verification_id)
     ~terminal_pending:Verifier_review_publication.needs_publication ~store
     ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review") with
   | Error _ -> true
@@ -1056,6 +1057,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
   let defer_unavailable ~stage ~detail = stop (Infrastructure_unavailable { stage; detail }) in
   try
     match Verifier_review_owner.retained_commits ~store
+      ~selection:(Verifier_review_owner.Verification verification_id)
       ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review" with
     | Error _ -> defer_unavailable ~stage:Verification_run_registry.Review_preparation
         ~detail:"original host judgment inventory unavailable"
@@ -1495,6 +1497,7 @@ let recover_terminal_publications (runtime:runtime) ~registry ~scope =
   let module P=Lane_addon_request_progress in
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons") in
   let* pending=O.pending_commits ~terminal_pending:Verifier_review_publication.needs_publication
+    ~selection:O.All_verifications
     ~store ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review"
     |> Result.map_error (function O.Not_found -> "review publication inventory absent"
       | Load_store_unavailable detail | Corrupt_original detail -> detail) in
@@ -1545,6 +1548,7 @@ let process_scope (runtime : runtime) ~scope =
     in
     let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons") in
     let entries = match Verifier_review_owner.pending_commits
+      ~selection:Verifier_review_owner.All_verifications
       ~terminal_pending:Verifier_review_publication.needs_publication ~store
       ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review" with
       | Error _ ->

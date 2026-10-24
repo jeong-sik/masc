@@ -44,6 +44,8 @@ type load_error =
   | Not_found
   | Corrupt_original of string
 
+type verification_scope = All_verifications | Verification of string
+
 let map_retain_error ~request_id (err : Owner.error) : retain_error =
   match err with
   | Owner.Binding_conflict -> Already_retained request_id
@@ -313,9 +315,56 @@ let retry_result evidence =
   | _::_ -> Ok ()
   | [] -> Error "original refusal has no typed safe retry"
 
-let next_attempt ~store ~verification_id ~installation_id ~package_id =
+(* Routing metadata proves only which verification owns these immutable bytes.
+   It never constructs an Original or grants execution of an unsupported body. *)
+let routing_verification (record : Owner.retained) =
+  let invalid detail = Error (Corrupt_original detail) in
+  let text key fields = match List.assoc_opt key fields with
+    | Some (`String value) when String.trim value <> "" -> Ok value
+    | Some _ | None -> invalid ("invalid verifier routing " ^ key) in
+  let attempt fields = match List.assoc_opt "attempt" fields with
+    | Some (`Int value) when value >= 0 -> Ok value
+    | Some _ | None -> invalid "invalid verifier routing attempt" in
+  let* summary = match record.summary with
+    | `Assoc fields when List.sort String.compare (List.map fst fields) =
+        ["attempt"; "original_digest"; "schema"; "verification_id"] -> Ok fields
+    | _ -> invalid "invalid verifier routing summary" in
+  let* body = match record.request with
+    | `Assoc fields when List.length fields =
+        List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields
+    | _ -> invalid "invalid verifier routing body" in
+  let* schema = text "schema" summary in
+  let* verification_id = text "verification_id" summary in
+  let* number = attempt summary in
+  let* digest = text "original_digest" summary in
+  let* body_schema = text "schema" body in
+  let* body_verification_id = text "verification_id" body in
+  let* body_attempt = attempt body in
+  let* request_id = attempt_request_id ~verification_id ~attempt:number
+    |> Result.map_error (fun detail -> Corrupt_original detail) in
+  if record.scope = scope && record.tool = tool_name
+    && record.request_id = request_id && digest = record.request_digest
+    && schema = body_schema && verification_id = body_verification_id
+    && number = body_attempt
+  then Ok verification_id
+  else invalid "verifier routing metadata differs from its original key or body"
+
+let selected_records ~store ~selection =
   let* records = Owner.load_scope ~store ~scope
     |> Result.map_error (fun e -> Load_store_unavailable (Owner.error_to_string e)) in
+  match selection with
+  | All_verifications -> Ok records
+  | Verification verification_id when String.trim verification_id = "" ->
+    Error (Corrupt_original "verifier selection requires a non-blank verification_id")
+  | Verification verification_id ->
+    let* selected = List.fold_left (fun acc record ->
+      let* selected = acc in
+      let* owner = routing_verification record in
+      Ok (if owner = verification_id then record :: selected else selected)) (Ok []) records in
+    Ok (List.rev selected)
+
+let next_attempt ~store ~verification_id ~installation_id ~package_id =
+  let* records = selected_records ~store ~selection:(Verification verification_id) in
   let* related = List.fold_left (fun acc (record:Owner.retained) ->
     let* acc = acc in
     let* original = V.of_json record.request |> Result.map_error (fun d -> Corrupt_original d) in
@@ -385,9 +434,8 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id =
   | first::rest when V.attempt first.original=0 -> walk first rest
   | _::_ -> Error (Corrupt_original "verifier inventory is missing its original first attempt")
 
-let retained_commits ~store ~installation_id ~package_id =
-  let* records=Owner.load_scope ~store ~scope
-    |> Result.map_error (fun e -> Load_store_unavailable (Owner.error_to_string e)) in
+let retained_commits ~store ~selection ~installation_id ~package_id =
+  let* records = selected_records ~store ~selection in
   List.fold_left (fun acc (record:Owner.retained) ->
     let* acc=acc in
     let* original=V.of_json record.request |> Result.map_error (fun d -> Corrupt_original d) in
@@ -398,8 +446,8 @@ let retained_commits ~store ~installation_id ~package_id =
     | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
     | Subdividing _ | Subdivided _ -> Ok acc) (Ok []) records
 
-let pending_commits ~terminal_pending ~store ~installation_id ~package_id =
-  let* records=retained_commits ~store ~installation_id ~package_id in
+let pending_commits ~terminal_pending ~store ~selection ~installation_id ~package_id =
+  let* records=retained_commits ~store ~selection ~installation_id ~package_id in
   List.fold_right (fun retained acc ->
     let* acc=acc in
     match Progress.phase (progress retained) with

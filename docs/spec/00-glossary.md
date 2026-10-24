@@ -895,6 +895,16 @@ status: reference
   [Agent_input_request](../../packages/agent_core/lib/base/agent_input_request.mli) ·
   [agent-input-wait-ownership 설계](../../docs/design/agent-input-wait-ownership.md)
 
+**Keeper Input Wait Observation (retained-input 대기 관측)**
+: 턴이 완전한 입력으로 진행할 수 있는지를 판단하는 관측 계약(`Keeper_input_wait_observation`).
+  진행 가능이 아니면 이유를 세 갈래 불리언으로 돌려준다 — `trace_changed`(이전 관측
+  뒤 trace가 바뀌어 판단 근거가 오래됐다), `prior_input_unavailable`(이전 턴의
+  관측 입력을 지금 읽을 수 없다), `retained_unavailable`(retained export
+  authority로 지연된 Add-on export를 아직 받지 못해 도구 목록이 불완전하다).
+  세 갈래는 서로 다른 층의 대기다 — trace 신선도, 관측 입력 도달, 도구 지연 로딩
+  도달을 섞어 부르지 않는다(#44963).
+  → [Keeper_input_wait_observation](../../lib/keeper/keeper_input_wait_observation.mli)
+
 **Ask (질문)**
 : Keeper가 운영자에게 묻는 durable 질문 묶음. `masc_ask`가 만들고,
   `masc_ask_status`·`masc_ask_withdraw`가 조회·철회하며, 답변은 별도 wake로
@@ -1723,8 +1733,15 @@ status: reference
   `config/tools/` 파일은 composition에 읽히지 않는다. 선언이 없으면 `Always_loaded`이고,
   TOML 파일 없이 OCaml로 만든 도구는 지연을 선언할 수 없다. 목록은 description 첫 줄
   (80바이트까지)로 도구를 소개한다. Agent Core lane에만 적용된다 — codex·antigravity·
-  claude_code runtime은 도구 배열 전체를 받는다. Execution Disposition의 `Deferred`(도구
-  호출의 결과)와 이름이 겹치지만 다른 개념이다. 이쪽은 스키마를 언제 싣느냐다.
+  claude_code runtime은 도구 배열 전체를 받는다. 단, `keeper_tool_search` 목록의
+  Add-on export는 턴의 retained export authority로 지연될 수 있다
+  (#45449, [Keeper_tool_descriptor](../../lib/keeper/keeper_tool_descriptor.mli)의
+  "Add-on exports are deferrable through the turn's retained export authority") —
+  그래서 "Agent Core에만 적용된다"는 단정은 폐기한다. Codex의 `deferLoading`
+  정책([Runtime_official_client_tool](../../lib/runtime/runtime_official_client_tool.mli))
+  처럼 클라이언트 차원의 지연 정책도 별도로 존재한다. Execution Disposition의
+  `Deferred`(도구 호출의 결과)와 이름이 겹치지만 다른 개념이다. 이쪽은 스키마를
+  언제 싣느냐다.
   → [Tool_loading_declarations](../../lib/tool_surface/tool_loading_declarations.mli)
 
 **Tool-host failure report**
@@ -2404,6 +2421,14 @@ status: reference
   성립한다. **Keeper hook**(매 turn 턴별 문맥을 조립해 얹는 관행)과는 다른 층의
   용어다.
   → [Hooks_agent_core](../../packages/agent_core/lib/base/hooks.mli)
+
+**Lane Add-on release 분류 (Native_released·Native_retained)**
+: Native Stack이 운영하는 Lane Add-on release가 도달한 상태를 가리키는 닫힌 어휘
+  (`lane_addon_lifecycle.mli`). `Native_released`는 release·settlement까지
+  확인된 상태고, `Native_retained`는 운영자 retain으로 남아 자원 회수가 아직
+  확인되지 않은 상태다(#45216). retire·retain을 섞어 부르지 않는다 — retire는
+  목적, retain은 상태다.
+  → [Lane_addon_lifecycle](../../lib/lane_addon/lane_addon_lifecycle.mli)
 
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계·머신 호스팅 레이어. `msx-machine`·`dos-machine` Add-on worker가 호스팅하는 MSX·DOS 머신,
@@ -4361,6 +4386,14 @@ status: reference
   역사적 발췌일 뿐이며, 완료 상태를 증명하거나 새로운 할 일 목록·열린 의무를 규정하지 않는다.
   → [Keeper_recent_work](../../lib/keeper/keeper_recent_work.mli) ·
   [Keeper Unified Prompt](../../lib/keeper/keeper_unified_prompt.mli)
+
+**Own_recent_actions (자기 직후 행동 기억)**
+: 현재 컨텍스트 층의 한 종류로, 이 Keeper 자신이 직후 맥락에서 한 행동의 기억
+  (`Keeper_context_layers.Own_recent_actions`). 최근 작업의 발췌·범위를 담는
+  Recent Work Context와 다른 층이다 — 이쪽은 발췌가 아니라 행동 자체의 기억이고,
+  두 층은 함께 실려도 서로를 대체하지 않는다(#36935 도입, #41351·#45145 경유
+  확장).
+  → [Keeper_context_layers](../../lib/keeper/keeper_context_layers.mli)
 
 **Extra System Context (턴별 문맥)**
 : Keeper hook이 매 turn 새로 조립해 provider 지시 표면에 얹는 `System` 메시지.

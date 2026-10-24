@@ -1,5 +1,11 @@
 let mailbox_capacity = 128
 
+type cooling_retry_wake =
+  { at : float
+  ; superseded : unit Eio.Promise.t
+  ; supersede : unit Eio.Promise.u
+  }
+
 let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
 let install_state_change_observer observer = Atomic.set state_change_observer observer
 
@@ -1315,7 +1321,7 @@ let start
      retry. Restart loses the witness, never treating lost provider evidence
      as recovery; the persisted deadline still schedules its wake. *)
   let retry_waits = ref [] in
-  let cooling_wake_armed = ref false in
+  let cooling_wake : cooling_retry_wake option ref = ref None in
   let revalidate_retry_waits () =
     let changed_any = ref false in
     let rec loop retained pending =
@@ -1346,37 +1352,54 @@ let start
     in
     loop [] !retry_waits
   in
-  (* One armed wake per owner. Use the existing Keeper observation interval
+  (* Keep the earliest armed wake per owner. Use the existing observation interval
      to recheck live dispatch/rest dependencies while a retry is cooling.
      This observes evidence only; the store still enforces not_before unless
      an exact witness authorizes a durable release. *)
   let schedule_cooling_retry_wake ~delay =
-    if !cooling_wake_armed then ()
-    else
-      (match Eio_context.get_clock_opt () with
+    match Eio_context.get_clock_opt () with
        | None ->
          Log.Keeper.warn "keeper_owner: no clock to re-arm cooling retry wake keeper=%s" keeper_name
        | Some clock ->
-         cooling_wake_armed := true;
+         let at = Eio.Time.now clock +. delay in
+         match !cooling_wake with
+         | Some pending when pending.at <= at -> ()
+         | previous ->
+         let superseded, supersede = Eio.Promise.create () in
+         let wake = { at; superseded; supersede } in
+         cooling_wake := Some wake;
+         (* Physical identity names this private reservation, not a timestamp:
+            a superseded fiber must never clear its replacement's wake. *)
+         let clear_current () =
+           match !cooling_wake with
+           | Some current when current == wake -> cooling_wake := None; true
+           | Some _ | None -> false
+         in
+         (match previous with
+          | None -> ()
+          | Some previous -> Eio.Promise.resolve previous.supersede ());
          (try
             Eio.Fiber.fork_daemon ~sw (fun () ->
               (try
-                 Eio.Time.sleep clock delay;
-                 cooling_wake_armed := false;
-                 notify t Observe_runtime_retry_waits
+                 match Eio.Fiber.first
+                   (fun () -> Eio.Time.sleep_until clock wake.at; `Due)
+                   (fun () -> Eio.Promise.await wake.superseded; `Superseded)
+                 with
+                 | `Due -> if clear_current () then notify t Observe_runtime_retry_waits
+                 | `Superseded -> ()
                with
                | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
                | exn ->
-                 cooling_wake_armed := false;
+                 ignore (clear_current ());
                  Log.Keeper.warn "keeper_owner: cooling retry wake fiber failed keeper=%s error=%s"
                    keeper_name (Printexc.to_string exn));
               `Stop_daemon)
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
-            cooling_wake_armed := false;
+            ignore (clear_current ());
             Log.Keeper.warn "keeper_owner: cooling retry wake not scheduled keeper=%s error=%s"
-              keeper_name (Printexc.to_string exn)))
+              keeper_name (Printexc.to_string exn))
   in
   let rearm_cooling_retry_wake () =
     match (Atomic.get t.operation_projection).next_runtime_retry_wake with

@@ -36,6 +36,11 @@ describe('saved prompt preset protocol', () => {
     expect(promptPresetReportNeedsAttention(parsePromptPresetReport(report))).toBe(false)
     expect(promptPresetReportNeedsAttention(parsePromptPresetReport({ ...report,
       instructions: { ...part, skipped: [{ key: 'retired-keeper', reason: 'not configured' }] } }))).toBe(true)
+    const skipped = [{ keeper: 'analyst', reason: 'saved Runtime is no longer configured' }]
+    const partial = parsePromptPresetReport({ ...report, skipped_assignments: skipped })
+    expect(partial.skipped_assignments).toEqual(skipped)
+    expect(promptPresetReportNeedsAttention(partial)).toBe(true)
+    expect(() => parsePromptPresetReport({ ...report, skipped_assignments: [{ keeper: 'analyst' }] })).toThrow()
     const committed = { effect: 'runtime_commit', status: 'committed', commit: {
       source_revision: 'a'.repeat(64), order: '1', durability: 'durable', durability_detail: null, warnings: [],
     }, exact_output_registry: { status: 'applied', requires_restart: false, targets: 'runtime_bindings' } }

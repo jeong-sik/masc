@@ -54,8 +54,10 @@ enables whole-browser agentic mode while the page slot remains held.
 `autofill.js` runs request/status/fill, matches grants by entry identity and
 rechecks the exact Chrome tab before filling. A fill failure after entry fences
 the original session. Their results stay on the private backend path; these
-programs are not model tools. Python-to-host brokering, installed-host execution
-and real account verification remain unfinished.
+programs are not model tools. The independent host socket broker and two-phase
+Python client are [source implementation](../../docs/design/lane-addon-companion-broker.md).
+Runtime/private-context authority wiring, the login lifecycle, installed-host
+execution and real account verification remain unfinished.
 
 1. Extend the private connection controls with approval links, confirmed remote
    revocation and explicit interrupted-exchange recovery. A new account must not

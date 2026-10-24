@@ -880,7 +880,7 @@ let fold ~head messages =
   Reasoning_history_projection.verify_prefix_binding
     ~head
     ~encode_block:Api_common.content_block_to_json
-    ~role_tag:fold_role_tag
+    ~message_header:(fun (message : message) -> ["role",`String (fold_role_tag message.role)])
     messages
 ;;
 
@@ -2500,11 +2500,103 @@ let test_initial_system_control_lowering () =
     (member "text" (List.rev followup |> List.hd) = `String "</tool_response>")
 ;;
 
+
+(* Native scoped context must retain the exact signed creation prefix after its
+   origin becomes historical and a client tool result clears its effect. *)
+let native_context_config () =
+  anthropic_build_config_variant
+    ~cap_override:{ (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+      reasoning_replay_override = Force_turn_scoped_system_context_preserve_always }
+    ()
+;;
+
+let test_native_context_signed_tool_round_trip () =
+  let open Yojson.Safe.Util in
+  let config = native_context_config () in
+  let tools = [prefix_test_tool_schema] in
+  let caller = message User [Text "inspect workspace"] in
+  let fresh = message ~origin:System_context User [Text "workspace version one"] in
+  let response_content =
+    [ Thinking {content="inspect first";signature=Some "synthetic-fixture-signature"}
+    ; ToolUse {id="call-1";name="inspect";input=`Assoc []} ] in
+  let assistant = stamped_assistant ~config ~request_messages:[caller;fresh] ~tools response_content in
+  let historical = {fresh with origin=Historical_system_context} in
+  let result = message Tool [tool_result "call-1"] in
+  let next = message ~origin:System_context User [Text "workspace version two"] in
+  let history = [caller;historical;assistant;result;next] in
+  let wire history = Backend_anthropic.build_request ~config ~messages:history ~tools ()
+      |> Yojson.Safe.from_string |> member "messages" |> to_list in
+  let first = wire [caller;fresh] and second = wire history in
+  Alcotest.(check string) "historical carrier is identical to its creation frame"
+    (Yojson.Safe.to_string (List.nth first 1))
+    (Yojson.Safe.to_string (List.nth second 1));
+  let context = List.nth second 4 in
+  Alcotest.(check string) "fresh context is a system message" "system" (context |> member "role" |> to_string);
+  Alcotest.(check string) "tool results also clear the preceding context" "next_user_message"
+    (context |> member "clear_at" |> to_string);
+  check_bool "scoped content has no cache marker" true
+    (List.for_all (fun block -> member "cache_control" block = `Null) (context |> member "content" |> to_list));
+  check_bool "thinking survives the native tool continuation" true
+    (List.mem "thinking" (List.nth (wire_content_types (Backend_anthropic.build_request ~config ~messages:history ~tools ())) 2));
+  (match Backend_anthropic.retained_prefix_reasoning_indices ~config ~tools history with
+   | Ok (Some indices) -> check_bool "source occurrence stays at index two" true (List.mem 2 indices)
+   | _ -> Alcotest.fail "expected retained native reasoning occurrence");
+  let changed = {historical with content=[Text "edited old workspace"]} in
+  check_bool "editing the historical prefix drops its reasoning" false
+    (List.mem "thinking" (List.nth (wire_content_types (Backend_anthropic.build_request
+       ~config ~messages:[caller;changed;assistant;result;next] ~tools ())) 2));
+  check_bool "canonical context retains its User role" true (historical.role=User);
+  let count_body = Backend_anthropic.build_count_tokens_request ~config ~messages:history ~tools () in
+  let count_frames = Yojson.Safe.from_string count_body |> member "messages" |> to_list in
+  Alcotest.(check string) "count tokens uses the same scoped messages"
+    (Yojson.Safe.to_string (`List second)) (Yojson.Safe.to_string (`List count_frames));
+  let headers = Backend_anthropic.request_headers ~body:count_body ["Anthropic-Beta","custom-beta"] in
+  let beta = List.assoc "anthropic-beta" headers in
+  check_bool "count-token transport adds the scoped beta" true
+    (List.mem "mid-conversation-system-clear-at-2026-08-21" (String.split_on_char ',' beta));
+  check_bool "required betas merge idempotently" true
+    (headers = Backend_anthropic.request_headers ~body:count_body headers)
+;;
+
+let test_native_context_placement_and_removed_assistant () =
+  let module Lower = Message_origin_lowering in
+  let policy = Lower.Turn_scoped_system_context in
+  let caller = message User [Text "caller"] in
+  let context = message ~origin:System_context User [Text "current context"] in
+  let text_assistant = message Assistant [Text "answer"] in
+  let valid history = Result.is_ok (Lower.lower policy history) in
+  check_bool "context group may end the request" true (valid [caller;context;context]);
+  List.iter (fun (label,history) -> check_bool label false (valid history))
+    ["no leading context",[context;caller]
+    ;"no context after an assistant",[caller;text_assistant;context]
+    ;"no context before another caller",[caller;context;caller]
+    ;"no context between tool use and result",
+       [caller;message Assistant [ToolUse {id="call-1";name="inspect";input=`Assoc []}];context;message Tool [tool_result "call-1"]]
+    ;"no nontext context",[caller;{context with content=[RedactedThinking "opaque"]}]];
+  let config = native_context_config () in
+  let unbound = with_source (source_for_config config) Assistant
+      [Thinking {content="unbound";signature=Some "synthetic"}] in
+  let history = [caller;context;unbound;caller] in
+  (match Backend_anthropic.retained_prefix_reasoning_indices ~config ~tools:[] history with
+   | Error (Reasoning_history_projection.Invalid_control_lowering _) -> ()
+   | _ -> Alcotest.fail "removing an empty assistant must revalidate context placement");
+  check_bool "invalid post-filter transcript cannot stamp a response" true
+    (Backend_anthropic.transmitted_reasoning_prefix ~config ~messages:history ~tools:[]
+       ~response_content:[Text "answer"] () = None);
+  let empty_assistant = message Assistant [Thinking {content="orphan";signature=Some "synthetic"}] in
+  check_bool "removed assistant leaves no phantom header" true
+    ((fold ~head:[] [caller;empty_assistant]).final_digest = (fold ~head:[] [caller]).final_digest)
+;;
+
 let () =
   Alcotest.run
     "provider_agnostic_reasoning_replay"
     [ ( "typed replay projection"
-      , [ Alcotest.test_case "initial System preserves the native caller boundary" `Quick
+      , [ Alcotest.test_case "native context preserves the signed tool prefix" `Quick
+            test_native_context_signed_tool_round_trip
+        ; Alcotest.test_case "native context validates post-filter placement" `Quick
+            test_native_context_placement_and_removed_assistant
+        ; Alcotest.test_case "initial System preserves the native caller boundary" `Quick
             test_initial_system_control_lowering
         ; Alcotest.test_case "request tools select full-history replay" `Quick
             test_request_tools_selects_full_history_reasoning

@@ -244,7 +244,7 @@ let project
     Result.bind (validate_and_classify messages) (fun canonical ->
       match control_lowering with
       | Message_origin_lowering.Preserve_positions -> Ok canonical
-      | Initial_system_native_tools | Initial_system_tool_response_media ->
+      | Initial_system_native_tools | Initial_system_tool_response_media | Turn_scoped_system_context ->
         Result.bind
           (Message_origin_lowering.lower control_lowering messages
            |> Result.map_error (fun error -> Invalid_control_lowering error))
@@ -467,7 +467,7 @@ let content_wire_digest ~encode_block content =
   sha256_hex ("msg\000" ^ material)
 ;;
 
-let verify_prefix_binding ~head ~encode_block ~role_tag messages =
+let verify_prefix_binding ~head ~encode_block ~message_header messages =
   let head_bytes = Yojson.Safe.to_string (`Assoc head) in
   let chain = ref (sha256_hex ("head\000" ^ head_bytes)) in
   let rec loop message_index projected drops removed reasoning_messages = function
@@ -521,11 +521,13 @@ let verify_prefix_binding ~head ~encode_block ~role_tag messages =
                standalone caller gets the same fail-closed answer. *)
             dropped Prefix_source_not_present)
       in
-      chain := chain_extend !chain "role" (role_tag message.role);
-      List.iter
-        (fun block ->
-           chain := chain_extend !chain "blk" (block_bytes ~encode_block block))
-        content;
+      (* An emptied assistant is absent from the wire, including its header. *)
+      (match message.role, content with
+       | Assistant, [] -> ()
+       | (System | User | Tool), _ | Assistant, _ :: _ ->
+         chain := chain_extend !chain "header" (Yojson.Safe.to_string (`Assoc (message_header message)));
+         List.iter (fun block ->
+           chain := chain_extend !chain "blk" (block_bytes ~encode_block block)) content);
       let metadata = match Response_replay.retain_metadata
           ~original_content:message.content ~content ~retained_indices message.metadata with
         | Ok metadata -> metadata

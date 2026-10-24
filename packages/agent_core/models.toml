@@ -75,6 +75,7 @@ cache_read_multiplier = 0.1
 [[models]]
 id_prefix = "claude-fable-5-1"
 base = "anthropic"
+reasoning_replay = "turn_scoped_system_context_preserve_always"
 supports_top_k = false
 ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
 supports_assistant_prefill = false
@@ -207,6 +208,7 @@ max_output_tokens = 128000
 [[models]]
 id_prefix = "claude-opus-5-5"
 base = "anthropic"
+reasoning_replay = "turn_scoped_system_context_preserve_always"
 supports_top_k = false
 ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
 supports_assistant_prefill = false
@@ -236,6 +238,7 @@ cache_read_multiplier = 0.05
 [[models]]
 id_prefix = "claude-sonnet-5-5"
 base = "anthropic"
+reasoning_replay = "turn_scoped_system_context_preserve_always"
 supports_top_k = false
 ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
 supports_assistant_prefill = false
@@ -292,6 +295,7 @@ cache_read_multiplier = 0.1
 [[models]]
 id_prefix = "claude-haiku-5-5"
 base = "anthropic"
+reasoning_replay = "turn_scoped_system_context_preserve_always"
 # Even thinking=disabled rejects a final assistant continuation (migration guide).
 supports_assistant_prefill = false
 anthropic_thinking_control = "adaptive_disabled_through_high"

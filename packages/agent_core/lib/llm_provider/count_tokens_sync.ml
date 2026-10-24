@@ -65,7 +65,7 @@ let count_anthropic_staged
             ~net
             ~url:(count_tokens_url config)
             ~headers:
-              (config.headers
+              (Backend_anthropic.request_headers ~body config.headers
                @ auth_headers
                @ [ "Content-Type", "application/json"
                  ; "Content-Length", string_of_int (String.length body)

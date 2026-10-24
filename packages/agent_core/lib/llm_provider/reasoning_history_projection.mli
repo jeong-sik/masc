@@ -148,7 +148,8 @@ val content_wire_digest
     {!content_wire_digest} of its current content.
 
     Callers pass post-projection, post-merge messages with the exact encoder
-    the wire serializes with; [role_tag] is the wire's role spelling. The
+    the wire serializes with; [message_header] contains the exact native role and semantic message
+    fields such as clear_at, excluding cache markers. The
     fold mirrors {!project}: emptied assistants are removed, other roles
     never are. [final_digest] is the chain after the last message — the
     value the record side stamps as the new response's request digest.
@@ -162,7 +163,7 @@ val content_wire_digest
 val verify_prefix_binding
   :  head:(string * Yojson.Safe.t) list
   -> encode_block:(Types.content_block -> Yojson.Safe.t)
-  -> role_tag:(Types.role -> string)
+  -> message_header:(Types.message -> (string * Yojson.Safe.t) list)
   -> Types.message list
   -> prefix_verdict
 

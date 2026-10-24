@@ -2,6 +2,7 @@ open Types
 
 type policy =
   | Preserve_positions
+  | Turn_scoped_system_context
   | Initial_system_native_tools
   | Initial_system_tool_response_media
 
@@ -12,10 +13,12 @@ type error =
   | Non_text_control of { message_index : int }
   | Invalid_system_frame
   | Invalid_user_frame
+  | Context_must_follow_user of { message_index : int }
+  | Context_must_precede_assistant of { message_index : int }
 [@@deriving show]
 
 let error_to_string = function
-  | Unsupported_codec -> "initial-system control lowering requires a chat-template codec"
+  | Unsupported_codec -> "declared control lowering is unsupported by this request codec"
   | Missing_caller_query -> "initial-system template requires an actual caller query"
   | Invalid_control_role {message_index; role} ->
     Printf.sprintf "control at history index %d has invalid role %s"
@@ -25,23 +28,30 @@ let error_to_string = function
       message_index
   | Invalid_system_frame -> "initial system frame must have scalar text content"
   | Invalid_user_frame -> "user message has invalid wire content"
+  | Context_must_follow_user {message_index} ->
+    Printf.sprintf "turn-scoped context at history index %d must follow a user/tool-result span" message_index
+  | Context_must_precede_assistant {message_index} ->
+    Printf.sprintf "turn-scoped context at history index %d must precede an assistant or end the request" message_index
 ;;
 
 let policy_for_provider_config config =
   let declared =
     match Provider_config.capabilities_for_config_model config with
-    | None -> false
-    | Some caps ->
-      caps.Capabilities.reasoning_replay_override
-      = Force_initial_system_latest_user_turn_tool_calls
+    | Some {Capabilities.reasoning_replay_override=Force_initial_system_latest_user_turn_tool_calls;_} -> `Initial
+    | Some {Capabilities.reasoning_replay_override=Force_turn_scoped_system_context_preserve_always;_} -> `Turn_scoped
+    | Some {Capabilities.reasoning_replay_override=
+        (Default_reasoning_replay | Force_no_replay | Force_drop_without_tool_preserve_with_tool
+         | Force_latest_user_turn_tool_calls | Force_preserve_always | Force_preserve_with_request_tools);_}
+    | None -> `Preserve
   in
-  if not declared then Ok Preserve_positions
-  else
-    match Provider_http_codec.of_config config with
-    | Openai_chat | Glm_chat -> Ok Initial_system_tool_response_media
-    | Ollama_chat -> Ok Initial_system_native_tools
-    | Anthropic_messages | Gemini_generate_content | Openai_responses ->
-      Error Unsupported_codec
+  match declared, Provider_http_codec.of_config config with
+  | `Preserve, _ -> Ok Preserve_positions
+  | `Initial, (Openai_chat | Glm_chat) -> Ok Initial_system_tool_response_media
+  | `Initial, Ollama_chat -> Ok Initial_system_native_tools
+  | `Turn_scoped, Anthropic_messages -> Ok Turn_scoped_system_context
+  | `Initial, (Anthropic_messages | Gemini_generate_content | Openai_responses)
+  | `Turn_scoped, (Openai_chat | Glm_chat | Ollama_chat | Gemini_generate_content | Openai_responses) ->
+    Error Unsupported_codec
 ;;
 
 type t = { messages : Types.message list; source_indices : int list }
@@ -57,10 +67,68 @@ let text_content ~message_index content =
   collect [] content
 ;;
 
+let is_turn_scoped_context policy (message : Types.message) =
+  match policy, message.origin with
+  | Turn_scoped_system_context, (System_context | Historical_system_context) -> true
+  | Turn_scoped_system_context, (Conversation | Recovery_instruction | Tool_result_followup | Agent_instruction)
+  | (Preserve_positions | Initial_system_native_tools | Initial_system_tool_response_media), _ -> false
+;;
+
+type native_role = Native_user | Native_assistant | Native_system
+
+let native_role policy (message : Types.message) =
+  if is_turn_scoped_context policy message then Native_system
+  else match message.role with Assistant -> Native_assistant | User | System | Tool -> Native_user
+;;
+
+let anthropic_message_header policy message =
+  match native_role policy message with
+  | Native_system -> ["role",`String "system"; "clear_at",`String "next_user_message"]
+  | Native_user -> ["role",`String "user"]
+  | Native_assistant -> ["role",`String "assistant"]
+;;
+
+let validate_turn_scoped_contexts policy messages =
+  match policy with
+  | Preserve_positions | Initial_system_native_tools | Initial_system_tool_response_media -> Ok ()
+  | Turn_scoped_system_context ->
+    let rec group index = function
+      | (message : Types.message) :: rest when is_turn_scoped_context policy message ->
+        (match message.role, message.content with
+         | (Assistant | Tool), _ -> Error (Invalid_control_role {message_index=index;role=message.role})
+         | (User | System), [] -> Error (Non_text_control {message_index=index})
+         | (User | System), _ :: _ ->
+           Result.bind (text_content ~message_index:index message.content) (fun _ -> group (index+1) rest))
+      | rest -> Ok (index,rest)
+    in
+    let rec loop previous index = function
+      | [] -> Ok ()
+      | message :: rest when is_turn_scoped_context policy message ->
+        (match previous with
+         | Some Native_user ->
+           Result.bind (group index (message::rest)) (fun (next_index,remaining) ->
+             match remaining with
+             | [] -> Ok ()
+             | next :: _ ->
+               (match native_role policy next with
+                | Native_assistant -> loop (Some Native_system) next_index remaining
+                | Native_user | Native_system -> Error (Context_must_precede_assistant {message_index=index})))
+         | None | Some (Native_assistant | Native_system) -> Error (Context_must_follow_user {message_index=index}))
+      | message :: rest -> loop (Some (native_role policy message)) (index+1) rest
+    in
+    loop None 0 messages
+;;
+
 let lower policy messages =
   match policy with
   | Preserve_positions ->
     Ok {messages; source_indices = List.mapi (fun index _ -> index) messages}
+  | Turn_scoped_system_context ->
+    Result.map (fun () ->
+      {messages=List.map (fun (message : Types.message) ->
+          if is_turn_scoped_context policy message then {message with role=System} else message) messages;
+       source_indices=List.mapi (fun index _ -> index) messages})
+      (validate_turn_scoped_contexts policy messages)
   | Initial_system_native_tools | Initial_system_tool_response_media ->
     let latest_caller =
       List.fold_left (fun latest (index, (message : Types.message)) ->
@@ -190,7 +258,7 @@ let encode_user_boundary policy ~(message : Types.message) wire =
       | _ :: _ -> Error Invalid_user_frame
     in
     loop [] wire
-  | Preserve_positions, _, _
+  | (Preserve_positions | Turn_scoped_system_context), _, _
   | (Initial_system_native_tools | Initial_system_tool_response_media), (System | Assistant | Tool), _
   | (Initial_system_native_tools | Initial_system_tool_response_media), User,
       (System_context | Historical_system_context | Recovery_instruction | Agent_instruction) ->
@@ -207,7 +275,7 @@ let prepend_system_prompt policy ~system_prompt messages =
       Ok (`Assoc ["role", `String "system"; "content", `String prompt] :: messages)
     in
     match policy, messages with
-    | Preserve_positions, _
+    | (Preserve_positions | Turn_scoped_system_context), _
     | (Initial_system_native_tools | Initial_system_tool_response_media), [] -> prepend ()
     | (Initial_system_native_tools | Initial_system_tool_response_media), first :: rest ->
       (match first with

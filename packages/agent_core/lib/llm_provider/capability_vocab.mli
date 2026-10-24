@@ -38,6 +38,7 @@ type reasoning_replay_override =
   | Force_latest_user_turn_tool_calls
   | Force_initial_system_latest_user_turn_tool_calls
   | Force_preserve_always
+  | Force_turn_scoped_system_context_preserve_always
   | Force_preserve_with_request_tools
     (** Replay all prior assistant reasoning exactly when outgoing tools are present. *)
 

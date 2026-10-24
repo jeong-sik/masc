@@ -1,8 +1,9 @@
-(** Request-only lowering of typed controls for initial-system chat templates.
+(** Request-only lowering of typed controls at provider boundaries.
     Canonical messages are never mutated. No source is inferred from text. *)
 
 type policy =
   | Preserve_positions
+  | Turn_scoped_system_context
   | Initial_system_native_tools
   | Initial_system_tool_response_media
 
@@ -13,6 +14,8 @@ type error =
   | Non_text_control of { message_index : int }
   | Invalid_system_frame
   | Invalid_user_frame
+  | Context_must_follow_user of { message_index : int }
+  | Context_must_precede_assistant of { message_index : int }
 [@@deriving show]
 
 val error_to_string : error -> string
@@ -27,7 +30,11 @@ type t =
         retain their exact occurrence coordinates. *)
   }
 
-(** Controls become a single initial System frame. Fresh system context and
+(** [Turn_scoped_system_context] preserves context positions/content, lowers
+    typed current/historical context to native System, and requires a text-only
+    group after a native user and before an assistant or request end.
+
+    Initial-system policies consolidate controls into a single initial frame. Fresh system context and
     agent instructions are active. Historical system context is quoted data;
     a recovery instruction is active only after both the latest Conversation User
     and the latest assistant response.
@@ -57,3 +64,13 @@ val prepend_system_prompt
   -> system_prompt:string option
   -> Yojson.Safe.t list
   -> (Yojson.Safe.t list, error) result
+
+(** Native Messages header, shared by serialization and creation-prefix hashing.
+    Dynamic current/historical context has identical role/clear_at encoding. *)
+val anthropic_message_header : policy -> Types.message -> (string * Yojson.Safe.t) list
+
+val is_turn_scoped_context : policy -> Types.message -> bool
+
+(** Validate the exact post-projection/post-prefix transcript again, since a
+    removed empty assistant can otherwise invalidate System placement. *)
+val validate_turn_scoped_contexts : policy -> Types.message list -> (unit, error) result

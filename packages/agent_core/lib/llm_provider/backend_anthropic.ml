@@ -12,6 +12,7 @@ let request_payload = Request_artifact_internal.payload
 let request_output_token_receipt = Request_artifact_internal.output_token_receipt
 
 let binding_controls_beta = "thinking-binding-controls-2026-08-01"
+let turn_scoped_context_beta = "mid-conversation-system-clear-at-2026-08-21"
 
 (* Measurement switch (RFC-AC-041 Q15, task-2306): set to a false value to stop
    sending [thinking.block_binding.prefix_mismatch_behavior = "drop_block"] on
@@ -20,28 +21,31 @@ let binding_controls_beta = "thinking-binding-controls-2026-08-01"
 let drop_block_env_var = "AGENT_CORE_ANTHROPIC_DROP_BLOCK"
 
 let request_headers ~body headers =
-  let has_binding =
+  let required =
     match Yojson.Safe.from_string body with
     | `Assoc fields ->
-      (match List.assoc_opt "thinking" fields with
-       | Some (`Assoc fields) -> List.mem_assoc "block_binding" fields
-       | _ -> false)
-    | _ -> false
+      let binding =
+        match List.assoc_opt "thinking" fields with
+        | Some (`Assoc fields) when List.mem_assoc "block_binding" fields -> [binding_controls_beta]
+        | _ -> [] in
+      let scoped =
+        match List.assoc_opt "messages" fields with
+        | Some (`List messages) when List.exists (function
+            | `Assoc fields -> List.assoc_opt "clear_at" fields = Some (`String "next_user_message")
+            | _ -> false) messages -> [turn_scoped_context_beta]
+        | _ -> [] in
+      binding @ scoped
+    | _ -> []
   in
-  if has_binding then (
-    let betas, other =
-      List.partition
-        (fun (name, _) -> String.equal (String.lowercase_ascii name) "anthropic-beta")
-        headers
-    in
-    let values =
-      List.concat_map
-        (fun (_, value) -> String.split_on_char ',' value |> List.map String.trim)
-        betas
-    in
-    let values = List.sort_uniq String.compare (binding_controls_beta :: values) in
-    ("anthropic-beta", String.concat "," values) :: other)
-  else headers
+  match required with
+  | [] -> headers
+  | _ :: _ ->
+    let betas, other = List.partition
+        (fun (name, _) -> String.equal (String.lowercase_ascii name) "anthropic-beta") headers in
+    let values = List.concat_map (fun (_, value) ->
+        String.split_on_char ',' value |> List.map String.trim) betas in
+    let values = List.sort_uniq String.compare (required @ values) in
+    ("anthropic-beta", String.concat "," values) :: other
 ;;
 
 let observe_input_transformations json =
@@ -450,16 +454,16 @@ and anthropic_tool_result_content_block_to_json = function
       ]
 ;;
 
-let anthropic_role_tag = function
-  | Assistant -> "assistant"
-  | User | System | Tool -> "user"
+let control_policy config =
+  match Message_origin_lowering.policy_for_provider_config config with
+  | Ok policy -> policy
+  | Error error -> invalid_arg ("Backend_anthropic: " ^ Message_origin_lowering.error_to_string error)
 ;;
 
-let anthropic_message_to_json (msg : message) =
+let anthropic_message_to_json ~policy (msg : message) =
   `Assoc
-    [ "role", `String (anthropic_role_tag msg.role)
-    ; "content", `List (List.map anthropic_content_block_to_json msg.content)
-    ]
+    (Message_origin_lowering.anthropic_message_header policy msg
+     @ ["content", `List (List.map anthropic_content_block_to_json msg.content)])
 ;;
 
 (* The Anthropic Messages API rejects a tool whose input_schema carries a
@@ -565,37 +569,44 @@ let prefix_head ~tools (config : Provider_config.t) =
   List.filter_map Fun.id [ system; tools ]
 ;;
 
-let verify_prefix_binding ~head messages =
+let verify_prefix_binding ~policy ~head messages =
   Reasoning_history_projection.verify_prefix_binding
     ~head
     ~encode_block:anthropic_content_block_to_json
-    ~role_tag:anthropic_role_tag
+    ~message_header:(Message_origin_lowering.anthropic_message_header policy)
     messages
 ;;
 
 (* The serializer and read-only callers share both merge and prefix verification.
    Source groups name input occurrences, including repeated identical records. *)
-let prefix_bound_history ~tools (config : Provider_config.t) projected_messages =
+let prefix_bound_history ~policy ~tools (config : Provider_config.t) projected_messages =
   let merged =
     Api_common.merge_tool_result_followup_user_messages_with_source_indices projected_messages
   in
   let messages = List.map fst merged in
   let verdict =
     match config.kind with
-    | Provider_config.Anthropic -> Some (verify_prefix_binding ~head:(prefix_head ~tools config) messages)
+    | Provider_config.Anthropic -> Some (verify_prefix_binding ~policy ~head:(prefix_head ~tools config) messages)
     | Provider_config.Kimi | Provider_config.OpenAI_compat | Provider_config.Ollama
     | Provider_config.Gemini | Provider_config.Glm -> None
   in
-  merged, verdict
+  let actual_messages = match verdict with
+    | Some verdict -> verdict.Reasoning_history_projection.messages
+    | None -> List.map fst merged in
+  Result.map (fun () -> merged, verdict)
+    (Message_origin_lowering.validate_turn_scoped_contexts policy actual_messages)
 ;;
 
 module Message_indices = Set.Make (Int)
 
 let retained_prefix_reasoning_indices ~config ~tools messages =
-  Result.map
-    (fun (projection : Reasoning_history_projection.t) ->
-       let merged, verdict = prefix_bound_history ~tools config projection.messages in
-       Option.map
+  let ( let* ) = Result.bind in
+  let* projection = project_history ~tools_present:(tools <> []) config messages in
+  let* policy = Message_origin_lowering.policy_for_provider_config config
+    |> Result.map_error (fun error -> Reasoning_history_projection.Invalid_control_lowering error) in
+  let* merged, verdict = prefix_bound_history ~policy ~tools config projection.messages
+    |> Result.map_error (fun error -> Reasoning_history_projection.Invalid_control_lowering error) in
+  Ok (Option.map
          (fun (verdict : Reasoning_history_projection.prefix_verdict) ->
             let removed = Message_indices.of_list projection.removed_empty_assistant_indices in
             let dropped = Message_indices.of_list
@@ -616,7 +627,6 @@ let retained_prefix_reasoning_indices ~config ~tools messages =
               merged
             |> List.concat)
          verdict)
-    (project_history ~tools_present:(tools <> []) config messages)
 ;;
 
 let build_request_payload
@@ -696,7 +706,12 @@ let build_request_payload
         projection;
       projection.messages
   in
-  let merged, prefix_verdict = prefix_bound_history ~tools config projected_messages in
+  let policy = control_policy config in
+  let merged, prefix_verdict =
+    match prefix_bound_history ~policy ~tools config projected_messages with
+    | Ok history -> history
+    | Error error -> invalid_arg ("Backend_anthropic.build_request: " ^ Message_origin_lowering.error_to_string error)
+  in
   (* Prefix binding runs on the merged list the wire serializes: only the
      Anthropic kind verifies here. Its thinking toggle always resolves
      Require_identical_source, while Kimi — the one other kind reaching
@@ -731,8 +746,11 @@ let build_request_payload
      , ([] | { role = System | User | Assistant | Tool; _ } :: _) ) -> ());
   let message_to_json =
     match config.kind with
-    | Provider_config.Anthropic -> anthropic_message_to_json
-    | Provider_config.Kimi -> Api_common.kimi_message_to_json
+    | Provider_config.Anthropic -> anthropic_message_to_json ~policy
+    | Provider_config.Kimi -> (fun message ->
+      if Message_origin_lowering.is_turn_scoped_context policy message
+      then anthropic_message_to_json ~policy message
+      else Api_common.kimi_message_to_json message)
     | Provider_config.OpenAI_compat
     | Provider_config.Ollama
     | Provider_config.Gemini
@@ -1057,21 +1075,12 @@ let transmitted_reasoning_prefix
       match project_history ~tools_present:(tools <> []) config messages with
       | Error _ -> None
       | Ok projection ->
-        let merged =
-          Api_common.merge_tool_result_followup_user_messages projection.messages
-        in
-        let head = prefix_head ~tools config in
-        let verdict = verify_prefix_binding ~head merged in
-        let message_digest =
-          Reasoning_history_projection.content_wire_digest
-            ~encode_block:anthropic_content_block_to_json
-            response_content
-        in
-        Some
-          { Types.Reasoning_prefix.request_digest =
-              verdict.Reasoning_history_projection.final_digest
-          ; message_digest
-          }))
+        (match prefix_bound_history ~policy:(control_policy config) ~tools config projection.messages with
+         | Error _ | Ok (_, None) -> None
+         | Ok (_, Some verdict) ->
+           let message_digest = Reasoning_history_projection.content_wire_digest
+               ~encode_block:anthropic_content_block_to_json response_content in
+           Some {Types.Reasoning_prefix.request_digest = verdict.final_digest; message_digest})))
   | Provider_config.Kimi
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama

@@ -284,6 +284,13 @@ module For_testing : sig
     rejected_path_of:(string -> string) -> (unit, string) result
   (** Call-scoped failure/interruption seam through production quarantine. *)
 
+  val move_aside_with_read_interleave :
+    after_read:(unit -> unit) ->
+    base_path:string -> keeper_name:string ->
+    rejected_path_of:(string -> string) -> (unit, string) result
+  (** Interleave the authoritative snapshot read and its identity check under
+      the same lock and admission policy used by explicit quarantine. *)
+
   val enqueue_stimulus_once_with_confirmation :
     confirm_snapshot:(string -> Keeper_event_queue_state.t -> (unit, string) result) ->
     already_delivered:(unit -> (bool, string) result) ->
@@ -359,10 +366,22 @@ type durable_file =
   | Transition_wal
   | Quarantine_intent
 
+type file_failure_cause =
+  | Io_failure
+  | Inspection_failure
+  | Coherence_failure
+  | Invalid_json
+  | Invalid_content
+  | Invalid_entry
+  | Incomplete_wal_tail
+  | Quarantine_incomplete
+
 type file_failure =
   { file : durable_file
   ; path : string  (** The file the read failed on. *)
+  ; cause : file_failure_cause
   ; detail : string
+  ; cleanup_failure : Fs_compat.private_jsonl_operation_failure option
   }
 
 type state_failure =
@@ -377,6 +396,21 @@ type read_only_failure =
   | Read_raised of string
   | State_failed of state_failure
 
+type recovery_decision =
+  | Refuse_recovery
+  | Start_quarantine
+  | Resume_quarantine
+
+val recovery_decision : read_only_failure -> recovery_decision
+(** One recovery policy for boot and the locked re-read. I/O, inspection,
+    coherence, owner, missing-state and descriptor cleanup failures refuse
+    recovery. JSON/content, deliberate entry-kind and incomplete WAL-tail
+    rejection permit starting an explicit quarantine. Only an actually
+    observed quarantine intent without cleanup failure permits explicit
+    resume; its journal must still validate, and each entry identity must
+    validate before that entry moves. Ordinary readers never resume a journal
+    implicitly. *)
+
 val read_only_failure_to_string : read_only_failure -> string
 
 val validate_existing_state_read_only_classified_result :
@@ -384,7 +418,9 @@ val validate_existing_state_read_only_classified_result :
   keeper_name:string ->
   (Keeper_event_queue_state.t, read_only_failure) result
 (** {!validate_existing_state_read_only_result} with the failure kept typed,
-    so a boot refusal names the file that failed. The string form is
+    including its original read/parse/content cause and any independent
+    descriptor cleanup failure, so a boot refusal names the file that failed.
+    No diagnostic re-read supplies this cause. The string form is
     [read_only_failure_to_string] of this one. *)
 
 type moved_aside =
@@ -400,7 +436,9 @@ val move_aside_undecodable_result :
   rejected_path_of:(string -> string) ->
   (moved_aside, string) result
 (** Explicit boot quarantine. Re-read under the owner lock; readable or absent
-    state is left in place. Before moving either entry, strict-sync an intent
+    state and operational read failures are left in place. Only an original
+    JSON, content, deliberate entry-kind or incomplete WAL-tail rejection can
+    start a new quarantine. Before moving either entry, strict-sync an intent
     recording both original entries and their unused rejected sibling paths.
     Move the WAL first, then the snapshot, preserving dangling links as entries.
     Every ordinary read, mutation and boot scan refuses while the intent exists,

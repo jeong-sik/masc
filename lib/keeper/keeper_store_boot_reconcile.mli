@@ -82,9 +82,10 @@ val examine : Workspace.config -> examination
     the [Degrade_typed] store once. [Preflight_only] stores are not read.
     No file is created, renamed or written, so calling it twice gives the
     same answer. Keeper metadata and official-client session I/O failures
-    are [unreadable], while invalid JSON or a rejected current schema is
-    [undecodable]. The other stores retain their existing rejection
-    classification. These lists count
+    are [unreadable], as are event-queue operational read, owner, coherence,
+    missing-state and cleanup failures. Invalid JSON or rejected content is
+    [undecodable]; an observed queue quarantine journal also remains there
+    for explicit validated resume. These lists count
     per-keeper files only.
 
     The goal store is read through [Goal_store.load_source]. When it is
@@ -143,3 +144,11 @@ val quarantine : now:float -> Workspace.config -> examination -> report
 
 val summary : report -> string
 (** One line for the boot log. *)
+
+module For_testing : sig
+  val record_event_queue_failure :
+    keeper:string -> Keeper_event_queue_persistence.read_only_failure ->
+    examination -> examination
+  (** The production pure mapping from an original classified queue read to
+      boot policy. No reader, rendered-message classification or I/O hook. *)
+end

@@ -10,9 +10,14 @@ type moved =
   }
 val filename : string
 val path : snapshot:string -> string
-val guard : snapshot:string -> (unit, string) result
+type guard_failure =
+  | Intent_present of string  (** The journal path. *)
+  | Inspection_failed of string
+val guard_failure_to_string : guard_failure -> string
+val guard : snapshot:string -> (unit, guard_failure) result
 (** Refuse every present journal entry, including malformed or indirect entries.
-    Only physical absence permits access. *)
+    Only physical absence permits access. An inspection failure is distinct
+    from an observed journal; it never authorizes a new quarantine. *)
 val read : snapshot:string -> wal:string -> (t option, string) result
 val start :
   snapshot:string -> wal:string -> rejected:slot ->

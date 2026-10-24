@@ -423,16 +423,45 @@ let undecodable_message ~path ~surface detail =
   Printf.sprintf "%s at %s cannot be decoded: %s" surface path detail
 ;;
 
+type file_failure_cause =
+  | Io_failure
+  | Inspection_failure
+  | Coherence_failure
+  | Invalid_json
+  | Invalid_content
+  | Invalid_entry
+  | Incomplete_wal_tail
+  | Quarantine_incomplete
+
+type read_failure =
+  { cause : file_failure_cause
+  ; detail : string
+  ; cleanup_failure : Fs_compat.private_jsonl_operation_failure option
+  }
+
+let read_failure cause detail = { cause; detail; cleanup_failure = None }
+let failure_detail_to_string ~detail ~cleanup_failure =
+  match cleanup_failure with
+  | None -> detail
+  | Some cleanup -> Printf.sprintf "%s; descriptor cleanup failed: %s"
+      detail (Fs_compat.private_jsonl_operation_failure_to_string cleanup)
+;;
+
+let read_failure_to_string (failure : read_failure) =
+  failure_detail_to_string ~detail:failure.detail ~cleanup_failure:failure.cleanup_failure
+;;
+
 let read_json_if_present ~after_read path =
   try
     match Unix.lstat path with
     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
     | stat when stat.Unix.st_kind <> Unix.S_REG ->
-        Error (Printf.sprintf "event queue snapshot at %s is not a regular file" path)
+        Error (read_failure Invalid_entry
+          (Printf.sprintf "event queue snapshot at %s is not a regular file" path))
     | before ->
       (match Safe_ops.read_file_safe path with
        | Error message ->
-         Error (Printf.sprintf "failed to read %s: %s" path message)
+         Error (read_failure Io_failure (Printf.sprintf "failed to read %s: %s" path message))
        | Ok bytes ->
          (try
             let json = Yojson.Safe.from_string bytes in
@@ -440,16 +469,18 @@ let read_json_if_present ~after_read path =
             let after = Unix.lstat path in
             if after.Unix.st_kind = Unix.S_REG && same_snapshot_file before after
             then Ok (Some (json, before))
-            else Error (Printf.sprintf "event queue snapshot changed while reading %s" path)
+            else Error (read_failure Coherence_failure
+              (Printf.sprintf "event queue snapshot changed while reading %s" path))
           with
           | Yojson.Json_error detail ->
             Error
-              (Printf.sprintf "event queue snapshot at %s contains invalid JSON: %s"
-                 path detail)))
+              (read_failure Invalid_json
+                 (Printf.sprintf "event queue snapshot at %s contains invalid JSON: %s"
+                    path detail))))
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Error (Printf.sprintf "failed to inspect %s: %s" path (Printexc.to_string exn))
+  | (Unix.Unix_error _ | Sys_error _ | Eio.Io _) as exn ->
+    Error (read_failure Inspection_failure
+      (Printf.sprintf "failed to inspect %s: %s" path (Printexc.to_string exn)))
 ;;
 
 let schema_field = function
@@ -499,8 +530,9 @@ let read_primary_current_unlocked ?(after_read = fun () -> ()) owner =
        Returning an error prevents any later transform from overwriting its
        pending sources and disposition evidence with an empty state. *)
     let decode_error detail =
-      Error (Printf.sprintf "event queue snapshot at %s cannot be decoded; \
-                            snapshot and transition WAL retained: %s" path detail)
+      Error (read_failure Invalid_content
+        (Printf.sprintf "event queue snapshot at %s cannot be decoded; \
+                        snapshot and transition WAL retained: %s" path detail))
     in
     (match schema_field json with
      | Error message -> decode_error message
@@ -514,8 +546,10 @@ let read_primary_current_unlocked ?(after_read = fun () -> ()) owner =
 
 let read_primary_unlocked ?after_read owner =
   let ( let* ) = Result.bind in
-  let* () = Quarantine.guard ~snapshot:(snapshot_path_of_owner owner) in
+  let* () = Quarantine.guard ~snapshot:(snapshot_path_of_owner owner)
+    |> Result.map_error Quarantine.guard_failure_to_string in
   read_primary_current_unlocked ?after_read owner
+  |> Result.map_error read_failure_to_string
 ;;
 
 let bump_revision state =
@@ -590,16 +624,16 @@ let replay_transition_wal_bytes ~wal_only owner state bytes =
   in
   let rec replay ~saw_row ~all_rows_already_projected state = function
     | [] | [ "" ] -> Ok (state, saw_row && all_rows_already_projected)
-    | "" :: _ -> Error "transition WAL contains an empty row"
+    | "" :: _ -> Error (read_failure Invalid_content "transition WAL contains an empty row")
     | line :: rest ->
       (match
          try Ok (Yojson.Safe.from_string line) with
          | Yojson.Json_error detail -> Error detail
        with
-       | Error detail -> Error ("invalid transition WAL JSON: " ^ detail)
+       | Error detail -> Error (read_failure Invalid_json ("invalid transition WAL JSON: " ^ detail))
        | Ok json ->
          (match transition_wal_entry_of_json owner json with
-          | Error _ as error -> error
+          | Error detail -> Error (read_failure Invalid_content detail)
           | Ok { pre_state; outbox_entry = entry } ->
             let state = if wal_only && not saw_row then pre_state else state in
             let already_projected = row_is_already_projected entry state in
@@ -609,9 +643,10 @@ let replay_transition_wal_bytes ~wal_only owner state bytes =
               || State.to_yojson state = State.to_yojson pre_state
             in
             if not pre_state_matches
-            then Error "transition WAL pre-state conflicts with its durable snapshot"
+            then Error (read_failure Invalid_content
+              "transition WAL pre-state conflicts with its durable snapshot")
             else (match State.replay_transition_outbox_entry entry state with
-             | Error _ as error -> error
+             | Error detail -> Error (read_failure Invalid_content detail)
              | Ok state ->
                replay
                  ~saw_row:true
@@ -636,41 +671,37 @@ let read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state =
     | Ok (Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_REG) -> Ok ()
     | Ok (Fs_compat.Exact_kind
             (Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) ->
-      Error (Printf.sprintf "%s at %s is not a regular file" surface path)
-    | Ok Fs_compat.Exact_unknown -> Error ("could not inspect event queue path: " ^ path)
-    | Error _ as error -> error
+      Error (read_failure Invalid_entry (Printf.sprintf "%s at %s is not a regular file" surface path))
+    | Ok Fs_compat.Exact_unknown ->
+      Error (read_failure Inspection_failure ("could not inspect event queue path: " ^ path))
+    | Error detail -> Error (read_failure Inspection_failure detail)
   in
   let replay_slice slice =
     match slice.Fs_compat.Private_jsonl_slice.bytes with
     | "" -> Ok (state, false)
     | bytes ->
        (match replay_transition_wal_bytes ~wal_only owner state bytes with
-        | Error detail ->
+        | Error failure ->
           Error
-            (undecodable_message
-               ~path
-               ~surface
-               detail)
+            { failure with detail = undecodable_message ~path ~surface failure.detail }
         | Ok replayed -> Ok replayed)
   in
+  let slice_failure ?cleanup_failure error =
+    let cause = match error with
+      | Fs_compat.Private_jsonl_slice.Incomplete_tail _ -> Incomplete_wal_tail
+      | Io_failed _ -> Io_failure
+      | Negative_offset _ | Missing_file_after_offset _ | Offset_beyond_end _
+      | Offset_not_at_row_boundary _ -> Coherence_failure
+    in
+    let detail = Printf.sprintf "failed to read %s keeper=%s path=%s: %s"
+      surface (keeper_name_of_owner owner) path
+      (Fs_compat.Private_jsonl_slice.error_to_string error) in
+    Error { cause; detail; cleanup_failure }
+  in
   match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
-  | Private_file_failed error ->
-    Error
-      (Printf.sprintf
-         "failed to read %s keeper=%s path=%s: %s"
-         surface
-         (keeper_name_of_owner owner)
-         path
-         (Fs_compat.Private_jsonl_slice.error_to_string error))
+  | Private_file_failed error -> slice_failure error
   | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-    Error
-      (Printf.sprintf
-         "failed to read %s keeper=%s path=%s: %s; descriptor cleanup failed: %s"
-         surface
-         (keeper_name_of_owner owner)
-         path
-         (Fs_compat.Private_jsonl_slice.error_to_string error)
-         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+    slice_failure ~cleanup_failure error
   | Private_file_succeeded slice -> replay_slice slice
   | Private_file_succeeded_with_cleanup_failure
       { value = slice; cleanup_failure } ->
@@ -681,11 +712,12 @@ let read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state =
       path
       (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
     replay_slice slice
+    |> Result.map_error (fun failure -> { failure with cleanup_failure = Some cleanup_failure })
 ;;
 
 let replay_wal_unlocked ~wal_only ~path ~surface owner state =
   match read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state with
-  | Error _ as error -> error
+  | Error failure -> Error (read_failure_to_string failure)
   | Ok (replayed, all_rows_already_projected) ->
     if all_rows_already_projected
     then
@@ -754,7 +786,9 @@ type durable_file =
 type file_failure =
   { file : durable_file
   ; path : string
+  ; cause : file_failure_cause
   ; detail : string
+  ; cleanup_failure : Fs_compat.private_jsonl_operation_failure option
   }
 
 type state_failure =
@@ -766,8 +800,30 @@ type read_only_failure =
   | Read_raised of string
   | State_failed of state_failure
 
+type recovery_decision =
+  | Refuse_recovery
+  | Start_quarantine
+  | Resume_quarantine
+
+let recovery_decision = function
+  | Owner_unresolved _ | Read_raised _ | State_failed (State_missing _) -> Refuse_recovery
+  | State_failed (File_rejected { cleanup_failure = Some _; _ }) -> Refuse_recovery
+  | State_failed (File_rejected { file; cause; cleanup_failure = None; _ }) ->
+    match file, cause with
+    | Quarantine_intent, Quarantine_incomplete -> Resume_quarantine
+    | (Snapshot | Transition_wal),
+        (Invalid_json | Invalid_content | Invalid_entry | Incomplete_wal_tail) -> Start_quarantine
+    | Quarantine_intent,
+        (Io_failure | Inspection_failure | Coherence_failure | Invalid_json
+        | Invalid_content | Invalid_entry | Incomplete_wal_tail)
+    | (Snapshot | Transition_wal),
+        (Io_failure | Inspection_failure | Coherence_failure | Quarantine_incomplete) -> Refuse_recovery
+;;
+
 let state_failure_to_string = function
-  | State_missing detail | File_rejected { detail; _ } -> detail
+  | State_missing detail -> detail
+  | File_rejected { detail; cleanup_failure; _ } ->
+    failure_detail_to_string ~detail ~cleanup_failure
 ;;
 
 let read_only_failure_to_string = function
@@ -777,23 +833,31 @@ let read_only_failure_to_string = function
 
 (* The one read-only read. A failure names its file or incomplete quarantine
    record, so boot and preflight share the same recovery authority. *)
-let read_state_read_only_classified_unlocked ~require_existing owner =
-  let rejected file path detail = File_rejected { file; path; detail } in
-  let wal_rejected detail =
-    rejected Transition_wal (transition_wal_path_of_owner owner) detail
+let read_state_read_only_classified_unlocked ?after_read ~require_existing owner =
+  let rejected file path (failure : read_failure) =
+    File_rejected { file; path; cause = failure.cause; detail = failure.detail;
+      cleanup_failure = failure.cleanup_failure } in
+  let wal_rejected failure =
+    rejected Transition_wal (transition_wal_path_of_owner owner) failure
+  in
+  let guard_rejected failure =
+    let cause = match failure with
+      | Quarantine.Intent_present _ -> Quarantine_incomplete
+      | Quarantine.Inspection_failed _ -> Inspection_failure in
+    rejected Quarantine_intent (Quarantine.path ~snapshot:(snapshot_path_of_owner owner))
+      (read_failure cause (Quarantine.guard_failure_to_string failure))
   in
   let read () =
     match Quarantine.guard ~snapshot:(snapshot_path_of_owner owner) with
-    | Error detail ->
-    Error (rejected Quarantine_intent (Quarantine.path ~snapshot:(snapshot_path_of_owner owner)) detail)
+    | Error failure -> Error (guard_rejected failure)
     | Ok () ->
-  match read_primary_current_unlocked owner with
-    | Error detail -> Error (rejected Snapshot (snapshot_path_of_owner owner) detail)
+  match read_primary_current_unlocked ?after_read owner with
+    | Error failure -> Error (rejected Snapshot (snapshot_path_of_owner owner) failure)
     | Ok (Primary_current state) ->
     replay_transition_wal_read_only_unlocked owner state |> Result.map_error wal_rejected
     | Ok Primary_absent ->
     (match path_exists_exact (transition_wal_path_of_owner owner) with
-     | Error detail -> Error (wal_rejected detail)
+     | Error detail -> Error (wal_rejected (read_failure Inspection_failure detail))
      | Ok false when require_existing ->
        Error
          (State_missing
@@ -812,10 +876,15 @@ let read_state_read_only_classified_unlocked ~require_existing owner =
   let result = read () in
   (* Lock-free observers may overlap a quarantine beginning after the first
      guard check. Do not publish that sample as ordinary queue authority. *)
-  match Quarantine.guard ~snapshot:(snapshot_path_of_owner owner) with
-  | Ok () -> result
-  | Error detail ->
-    Error (rejected Quarantine_intent (Quarantine.path ~snapshot:(snapshot_path_of_owner owner)) detail)
+  match result, Quarantine.guard ~snapshot:(snapshot_path_of_owner owner) with
+  | (Ok _ | Error _), Ok () -> result
+  | Ok _, Error failure -> Error (guard_rejected failure)
+  | Error original, Error failure ->
+    (* A journal appearing after an operational/cleanup failure cannot
+       erase that failure and promote this observation to explicit resume. *)
+    (match recovery_decision (State_failed original) with
+     | Refuse_recovery -> Error original
+     | Start_quarantine | Resume_quarantine -> Error (guard_rejected failure))
 ;;
 
 let read_state_read_only_unlocked ~require_existing owner =
@@ -913,25 +982,32 @@ type moved_aside =
 (* The durable intent is the refusal authority across every partial move,
    including a crash after both originals disappeared. Only explicit quarantine
    enters this recovery path; ordinary loaders never complete it implicitly. *)
-let move_aside_with ~sync_intent ~rename ~before_clear ~base_path ~keeper_name ~rejected_path_of =
+let move_aside_with ~after_read ~sync_intent ~rename ~before_clear ~base_path ~keeper_name ~rejected_path_of =
   let ( let* ) = Result.bind in
   let* owner = resolve_owner ~base_path ~keeper_name in
   let snapshot = snapshot_path_of_owner owner in
   let wal = transition_wal_path_of_owner owner in
   try
     Owner_lock.with_durable_lock owner (fun () ->
-      let* existing = Quarantine.read ~snapshot ~wal in
-      let* intent = match existing with
-        | Some intent -> Ok intent
-        | None ->
-          match read_state_read_only_classified_unlocked ~require_existing:true owner with
-          | Ok (_ : State.t) -> Error "the event queue decodes now; it was left in place"
-          | Error (State_missing _) -> Error "the event queue has no durable state; nothing was moved"
-          | Error (File_rejected {file=Quarantine_intent; detail; _}) -> Error detail
-          | Error (File_rejected {file=Snapshot; _}) ->
-            Quarantine.start ~snapshot ~wal ~rejected:Quarantine.Snapshot ~rejected_path_of
-          | Error (File_rejected {file=Transition_wal; _}) ->
-            Quarantine.start ~snapshot ~wal ~rejected:Quarantine.Transition_wal ~rejected_path_of
+      let* intent =
+        match read_state_read_only_classified_unlocked ?after_read ~require_existing:true owner with
+        | Ok (_ : State.t) -> Error "the event queue decodes now; it was left in place"
+        | Error failure ->
+          match recovery_decision (State_failed failure) with
+          | Refuse_recovery -> Error (state_failure_to_string failure)
+          | Resume_quarantine ->
+            let* existing = Quarantine.read ~snapshot ~wal in
+            (match existing with
+             | Some intent -> Ok intent
+             | None -> Error "the event queue quarantine intent disappeared; nothing was moved")
+          | Start_quarantine ->
+            (match failure with
+             | File_rejected {file=Snapshot; _} ->
+               Quarantine.start ~snapshot ~wal ~rejected:Quarantine.Snapshot ~rejected_path_of
+             | File_rejected {file=Transition_wal; _} ->
+               Quarantine.start ~snapshot ~wal ~rejected:Quarantine.Transition_wal ~rejected_path_of
+             | State_missing _ | File_rejected {file=Quarantine_intent; _} ->
+               Error (state_failure_to_string failure))
       in
       forget_snapshot snapshot;
       let* moved = Quarantine.finish ~sync_intent ~rename ~before_clear ~snapshot ~wal intent in
@@ -944,9 +1020,10 @@ let move_aside_with ~sync_intent ~rename ~before_clear ~base_path ~keeper_name ~
       keeper_name (Quarantine.path ~snapshot) (Printexc.to_string exn))
 ;;
 
-let move_aside_undecodable_result =
-  move_aside_with ~sync_intent:Fs_compat.sync_file_and_parent_strict
+let move_aside_undecodable_result ~base_path ~keeper_name ~rejected_path_of =
+  move_aside_with ~after_read:None ~sync_intent:Fs_compat.sync_file_and_parent_strict
     ~rename:Fs_compat.rename_noreplace ~before_clear:(fun () -> ())
+    ~base_path ~keeper_name ~rejected_path_of
 ;;
 
 let load_with_projection ~projection ~base_path ~keeper_name =
@@ -1904,14 +1981,21 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
 
 module For_testing = struct
   let move_aside_with_sync ~sync_intent ~base_path ~keeper_name ~rejected_path_of =
-    move_aside_with ~sync_intent ~rename:Fs_compat.rename_noreplace
+    move_aside_with ~after_read:None ~sync_intent ~rename:Fs_compat.rename_noreplace
       ~before_clear:ignore ~base_path ~keeper_name ~rejected_path_of
     |> Result.map (fun _ -> ())
   ;;
 
   let move_aside_with_rename ~rename ~before_clear ~base_path ~keeper_name ~rejected_path_of =
-    move_aside_with ~sync_intent:Fs_compat.sync_file_and_parent_strict
+    move_aside_with ~after_read:None ~sync_intent:Fs_compat.sync_file_and_parent_strict
       ~rename ~before_clear ~base_path ~keeper_name ~rejected_path_of
+    |> Result.map (fun _ -> ())
+  ;;
+
+  let move_aside_with_read_interleave ~after_read ~base_path ~keeper_name ~rejected_path_of =
+    move_aside_with ~after_read:(Some after_read) ~sync_intent:Fs_compat.sync_file_and_parent_strict
+      ~rename:Fs_compat.rename_noreplace ~before_clear:ignore
+      ~base_path ~keeper_name ~rejected_path_of
     |> Result.map (fun _ -> ())
   ;;
 

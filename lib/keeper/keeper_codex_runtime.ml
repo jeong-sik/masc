@@ -1002,7 +1002,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               images )
     in
     let posture_notes = native_posture_note native_posture in
-    let composed_context = Option.bind composed_context (fun read -> read ()) in
+    let composed_context = prepared.composed_context in
     let compose_developer_instructions developer_messages =
       (List.map Keeper_context_submission_link.literal (prepared.system_prompt :: posture_notes)) @ developer_messages
       |> List.filter (fun piece -> String.trim (Keeper_context_submission_link.text piece) <> "")
@@ -1076,8 +1076,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let prompt, held_context, prompt_projection =
       match thread_mode with
       | Runtime_codex_app_server.Start ->
-        prompt, Host.start_held_context ?composed_context prepared.messages,
-        Keeper_context_submission_link.literal prompt
+        let projection = Host.start_prompt prepared prompt in
+        Keeper_context_submission_link.text projection,
+        Host.start_held_context ?composed_context prepared.messages, projection
       | Runtime_codex_app_server.Resume _ ->
         let delivery = Host.resume_prompt ~goal:prompt ?composed_context
           ~held:(Keeper_official_client_session_store.held_context_for_resume
@@ -1087,8 +1088,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let context_frontier = { context_frontier with held_context } in
     let settled_held_context = ref held_context in
     let developer_instructions = Some (Keeper_context_submission_link.text composed_developer_instructions) in
-    (* No developer items: a Start carries the per-turn context in
-       [developerInstructions], a Resume in front of its goal. *)
+    (* Completion Authority is current-turn User context on Start and Resume;
+       it never enters the vendor's persistent developerInstructions. Other
+       Start System context keeps its existing instruction surface. *)
     let developer_context = [] in
     (* Reported only after the complete turn/start write. A Resume sent none of
        the conversation; the thread holds it. *)

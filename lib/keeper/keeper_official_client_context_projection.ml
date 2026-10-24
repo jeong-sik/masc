@@ -121,6 +121,36 @@ let history_role_label = function
   | Agent_core.Types.Tool -> "TOOL:\n"
 ;;
 
+(* A vendor may keep its first System for the whole session. Keep Goal's
+   existing Start/held policy, but deliver a current Completion Authority event
+   in User only. Select the closed observation from the exact issuer; never
+   search the selected text or borrow a receipt from another composition. *)
+let project_start_system ~system_prompt ~composed_context =
+  match Option.bind composed_context (fun assembly ->
+      Option.map (fun issued -> assembly, issued)
+        assembly.Keeper_context_assembly.system_prompt) with
+  | Some (assembly, issued) when String.equal issued.text system_prompt ->
+    let standing = List.filter (function
+      | Keeper_context_assembly.Active_goals _ -> true
+      | Completion_authority _ -> false) issued.observations in
+    let system_prompt = Keeper_context_assembly.with_system_observations
+        ~base_text:issued.base_text ~observations:standing assembly
+      |> Keeper_context_assembly.effective_system_prompt ~base_text:issued.base_text in
+    let observations = List.filter_map (function
+      | Keeper_context_assembly.Active_goals _ -> None
+      | Completion_authority text ->
+        let message = user_message text in
+        Some (Keeper_context_submission_link.concat ~separator:""
+          [Keeper_context_submission_link.literal (history_role_label message.role);
+           Keeper_context_submission_link.encoded_system_observation
+             ~target:Official_start_user ~block:Prompt_block_id.Completion_authority
+             ~assembly:(Some assembly) message])) issued.observations in
+    system_prompt, Keeper_context_submission_link.concat ~separator:"\n\n" observations,
+    Some assembly
+  | Some _ -> system_prompt, Keeper_context_submission_link.literal "", None
+  | None -> system_prompt, Keeper_context_submission_link.literal "", composed_context
+;;
+
 (* A blank line between rendered messages and before the goal. *)
 let resume_section_separator = "\n\n"
 
@@ -674,7 +704,7 @@ let resume_prompt ~goal ~held ?composed_context messages =
         [Keeper_context_submission_link.literal (history_role_label message.role);
          (match source with
           | Issued_system_observation block -> Keeper_context_submission_link.encoded_system_observation
-              ~block ~assembly:composed_context message
+              ~target:Official_resume_user ~block ~assembly:composed_context message
           | Message_context -> Keeper_context_submission_link.encoded_carrier ~assembly:composed_context
               ~selected_blocks:(Option.map (fun (ids, _, _) -> ids) selection)
               ?omitted_sections:(Option.map (fun (_, unchanged, _) -> unchanged) selection)

@@ -120,7 +120,7 @@ jobs:
           if [[ "$COMPANION_CHECKS" == true ]]; then
             tests=(test_browser_stagehand_backend test_browser_extension_companion
               test_lane_addon_companion_broker test_lane_addon_companion_allocation
-              test_lane_addon_worker_protocol)
+              test_lane_addon_worker_protocol test_lane_addon_companion_origin)
             printf '%s\n' "${tests[@]}" > proof/native-browser/companion-tests.txt
             targets+=(bin/main_eio.exe)
             for name in "${tests[@]}"; do targets+=("test/$name.exe"); done

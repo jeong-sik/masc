@@ -229,9 +229,11 @@ gh workflow run browser-stagehand-proof.yml --ref WORKFLOW_REF \
 
 Set `-f companion_checks=true` for a candidate containing the original-session
 companion implementation. This additionally builds the server and executes the
-Stagehand backend, extension companion, Unix broker, allocation cleanup and
-worker protocol suites, including actual package initialization when that
-candidate includes it. The artifact records the selected build targets and
+Stagehand backend, extension companion, Unix broker, allocation cleanup,
+worker protocol and original Keeper invocation retention suites. The candidate
+must contain all six fixtures; the worker protocol suite initializes the actual
+package, while origin retention covers immutable source ownership and refuses
+duplicate dispatch. The artifact records the selected build targets and
 test names, retains individual test logs and packages the matching server.
 These fixtures use fabricated CDP/provider edges; the separate browser probe
 still exercises its selected real browser. Neither proves real 1Password

@@ -95,6 +95,34 @@ let test_enqueue_writes_directly_to_sqlite () =
        |> List.map (string_field "disposition")
        |> List.sort String.compare))
 
+let test_retained_metric_time_windows () =
+  with_tmp_dir (fun base_path ->
+    let root = masc_root base_path in
+    List.iter (fun (record_id, ts) ->
+      let row : Tool_metrics_store.row =
+        { record_id; ts; tool_name = "windowed"; disposition = "completed"; duration_ms = 1.0 }
+      in
+      Tool_metrics_store.insert ~masc_root:root row |> get_ok "insert window fixture")
+      ["older", 10.; "same-a", 20.; "same-b", 20.; "newer", 30.];
+    let read ?since_ts ?until_ts ?(n = 10) () =
+      Tool_metrics_store.read_recent ~masc_root:root ?since_ts ?until_ts ~n ()
+      |> get_ok "read metric time window"
+      |> List.map (fun (row : Tool_metrics_store.row) -> row.record_id)
+    in
+    let check label expected actual = Alcotest.(check (list string)) label expected actual in
+    check "unbounded retains timestamp and identity ordering"
+      ["newer"; "same-b"; "same-a"; "older"] (read ());
+    check "lower boundary is inclusive" ["newer"; "same-b"; "same-a"] (read ~since_ts:20. ());
+    check "upper boundary is inclusive" ["same-b"; "same-a"; "older"] (read ~until_ts:20. ());
+    check "both bounds and limit bind independently" ["same-b"]
+      (read ~since_ts:20. ~until_ts:20. ~n:1 ());
+    check "empty future window" [] (read ~since_ts:31. ());
+    check "inverted window" [] (read ~since_ts:30. ~until_ts:10. ());
+    check "zero limit" [] (read ~since_ts:20. ~n:0 ());
+    check "SQLite NULL lower bound remains unbounded"
+      ["same-b"; "same-a"; "older"] (read ~since_ts:nan ~until_ts:20. ());
+    check "infinite lower bound has no stored timestamps" [] (read ~since_ts:infinity ()))
+
 let test_restart_hydrates_without_duplicates () =
   with_tmp_dir (fun base_path ->
     P.enqueue
@@ -286,6 +314,9 @@ let () =
         , [ eio_test
               "enqueue commits directly to SQLite"
               test_enqueue_writes_directly_to_sqlite
+          ; eio_test
+              "retained metric time windows preserve bounds and ordering"
+              test_retained_metric_time_windows
           ; eio_test
               "restart hydration replaces the aggregate"
               test_restart_hydrates_without_duplicates

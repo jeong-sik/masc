@@ -23,10 +23,10 @@ let content_block (content : Mcp_protocol.Mcp_types.tool_content) =
       Llm_provider.Types.Text
         (Yojson.Safe.to_string (Mcp_protocol.Mcp_types.tool_content_to_yojson content))
 
-let call ~config ~keeper_name ~(export : Lane_addon_tool_export.t) ~arguments =
+let call ~continuation ~config ~keeper_name ~(export : Lane_addon_tool_export.t) ~arguments =
   let start_time = Tool_timing.start () in
   let tool_name = export.tool.name in
-  let result = match Machine_addon_host.call ~principal:(Lane_addon_call_context.Keeper keeper_name) ~config
+  let result = match Machine_addon_host.call ~continuation ~principal:(Lane_addon_call_context.Keeper keeper_name) ~config
       ~access:(Lane_addon_sources.Keeper keeper_name) ~reserved:(reserved_names ())
       ~export ~arguments with
     | Error (Lane_addon_runtime.Host_refusal refusal) ->

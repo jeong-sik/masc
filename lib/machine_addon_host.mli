@@ -1,6 +1,7 @@
 (** Host-mediated machine calls. Published activity and credential policy belong here; emulator state
     stays in the worker. Other exported tools pass through unchanged. *)
 val call :
+  continuation:(Lane_addon_companion_origin.source, Lane_addon_companion_origin.error) result option ->
   principal:Lane_addon_call_context.principal -> config:Workspace.config ->
   access:Lane_addon_sources.access -> reserved:string list ->
   export:Lane_addon_tool_export.t -> arguments:Yojson.Safe.t ->

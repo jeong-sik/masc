@@ -1137,7 +1137,7 @@ let keeper_call ~base_path who name arguments =
   let config = Workspace.default_config base_path in
   let exports = (Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:who).exports in
   let export = List.find (fun (export : Lane_addon_tool_export.t) -> export.tool.name=name) exports in
-  Keeper_lane_addon_runtime.call ~config ~keeper_name:who ~export ~arguments
+  Keeper_lane_addon_runtime.call ~continuation:None ~config ~keeper_name:who ~export ~arguments
 ;;
 
 let keeper_press ~base_path who key =

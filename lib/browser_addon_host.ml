@@ -27,7 +27,7 @@ let connect ~config ~access ~principal ~reserved =
     | [export] -> Ok export
     | []|_::_::_ -> Error (R.Unavailable "the original browser Add-on command is unavailable") in
   Ok {config;access;principal;reserved;service;export}
-let call t ~arguments = Machine_addon_host.call ~principal:t.principal ~config:t.config
+let call t ~arguments = Machine_addon_host.call ~continuation:None ~principal:t.principal ~config:t.config
   ~access:t.access ~reserved:t.reserved ~export:t.export ~arguments
 let error_result ~start_time error =
   let class_,effect_disposition,detail=match error with

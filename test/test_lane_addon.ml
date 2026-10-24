@@ -1908,7 +1908,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
       | Runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message) -> message)));
   check bool "model arguments cannot replace operator authority" true
     (List.hd !(state.principals) = Lane_addon_call_context.Operator);
-  let keeper_call () = Keeper_lane_addon_runtime.call ~config ~keeper_name:"fixture-keeper"
+  let keeper_call () = Keeper_lane_addon_runtime.call ~continuation:None ~config ~keeper_name:"fixture-keeper"
       ~export:handle ~arguments:(`Assoc []) in
   check bool "Keeper adapter calls a visible live installation" true
     (match (keeper_call ()).disposition with Tool_result.Completed () -> true | _ -> false);
@@ -1981,7 +1981,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   check bool "raw host catalog entry remains available" true
     (List.exists (fun (schema : Masc_domain.tool_schema) -> schema.name = reserved_name)
        Config.raw_all_tool_schemas);
-  let unaffected_call = Keeper_lane_addon_runtime.call ~config ~keeper_name:"fixture-keeper"
+  let unaffected_call = Keeper_lane_addon_runtime.call ~continuation:None ~config ~keeper_name:"fixture-keeper"
     ~export:(List.hd isolated.exports) ~arguments:(`Assoc []) in
   check bool "unrelated Keeper export remains callable during collisions" true
     (match unaffected_call.disposition with Tool_result.Completed () -> true | _ -> false);
@@ -2049,7 +2049,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
     Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () ->
       Eio.Promise.resolve mark_cleanup_started ();
       Eio.Promise.await cleanup_allowed)) (fun () -> invoke None) in
-  let remote_call () = Runtime.call_exported_tool_with_authority
+  let remote_call () = Runtime.call_exported_tool_with_authority ~continuation:None
     ~on_complete:(fun () -> Atomic.set owner_complete true) ~on_result:(fun _ -> ())
     ~authorize:(Some authorize) ~principal:None ~config ~access ~reserved:[]
     ~export:remote_handle ~arguments:(`Assoc []) in
@@ -2144,7 +2144,7 @@ let test_machine_activity_applies_to_worker_calls () = with_fixture (fun env _sw
   await (Eio.Stdenv.clock env) (fun () -> List.length (exports ()) = List.length names);
   let call name arguments =
     let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name=name) (exports ()) in
-    Machine_addon_host.call ~principal:(Lane_addon_call_context.Host_actor "fixture")
+    Machine_addon_host.call ~continuation:None ~principal:(Lane_addon_call_context.Host_actor "fixture")
       ~config ~access ~reserved:[] ~export ~arguments in
   List.iter (fun name -> check bool "enabled machine can execute" true (Result.is_ok (call name (`Assoc []))))
     ["masc_msx_step";"masc_dos_step"];
@@ -2198,7 +2198,7 @@ let test_machine_export_host_admission () = with_fixture (fun env _sw config dir
     await clock (fun () -> List.length (exports ()) = 2);
     let call ~principal name arguments =
       let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name = name) (exports ()) in
-      Machine_addon_host.call ~principal ~config ~access ~reserved:[] ~export ~arguments in
+      Machine_addon_host.call ~continuation:None ~principal ~config ~access ~reserved:[] ~export ~arguments in
     let principal = Lane_addon_call_context.Authenticated_agent "fixture-operator" in
     let denied = call ~principal "masc_dos_pass" (`Assoc ["to", `String "not-invited"]) in
     check bool "unknown recipient is a typed pre-effect host refusal" true

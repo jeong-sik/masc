@@ -2377,7 +2377,7 @@ let private_companion_binding ~sw m ~access ~principal provider original provide
        | Some _ -> Error "private browser settlement unconfirmed")) |> Result.map_error (fun _ -> C.Not_started) in
   Ok {C.execute;finish}
 
-let invoke_companion_export ~sw m ~access ~principal e original invoke =
+let invoke_companion_export ~sw m ~config ~access ~principal ~continuation ~(export:tool_export) ~arguments e original invoke =
   let module C=Lane_addon_companion_broker in
   let unavailable ()=Error (Lane_addon_call_context.Host_refusal (Unavailable "private companion is unavailable")) in
   let configuration=e.configuration in
@@ -2387,6 +2387,33 @@ let invoke_companion_export ~sw m ~access ~principal e original invoke =
     (match confirm_companion_owner m ~access ~principal e original configuration,Eio_context.get_net_opt () with
      | Error (),_ | Ok _,None -> unavailable ()
      | Ok _,Some _ ->
+       let* ()=match continuation with
+         | None -> Ok ()
+         | Some (Error error) -> Error (Lane_addon_call_context.Host_refusal (Unavailable
+             (Lane_addon_companion_origin.error_to_string error)))
+         | Some (Ok source) ->
+             let module O=Lane_addon_companion_origin in
+             let* ()=match principal with
+               | Lane_addon_call_context.Keeper keeper_name when keeper_name=source.O.keeper_name -> Ok ()
+               | Keeper _|Authenticated_agent _|Host_actor _|Operator|Anonymous ->
+                   Error (Lane_addon_call_context.Host_refusal (Rejected "companion continuation principal differs")) in
+             let* fs=match Fs_compat.get_fs_opt () with
+               | Some fs -> Ok fs
+               | None -> Error (Lane_addon_call_context.Host_refusal (Unavailable
+                   "original companion filesystem is unavailable")) in
+             let destination=O.{instance_id=e.instance_id;package_id=e.package.id;
+               package_revision=e.package.revision;tool=export.tool.name;
+               declaration_id=Option.map (fun (owner:configuration_owner) -> owner.id) configuration;
+               configuration_revision=Option.map (fun (owner:configuration_owner) -> owner.revision) configuration} in
+             (match O.reserve ~fs ~config ~source ~destination ~arguments with
+              | Ok (O.Fresh _) -> Ok ()
+              | Ok (O.Existing _) -> Error (Lane_addon_call_context.Host_refusal (Unavailable
+                  "original companion invocation is retained; reconcile it before another login"))
+              | Error error -> Error (Lane_addon_call_context.Host_refusal (Unavailable (O.error_to_string error)))) in
+       (* Persistence yields. Reconfirm the same owner before issuing private
+          authority; retained origin is evidence, never a replacement grant. *)
+       let* ()=confirm_companion_owner m ~access ~principal e original configuration
+         |> Result.map_error (fun () -> Lane_addon_call_context.Host_refusal (Unavailable "private companion is unavailable")) in
        let allocation=match original.companion with
          | Some allocation -> allocation
          | None ->
@@ -2418,7 +2445,7 @@ let invoke_companion_export ~sw m ~access ~principal e original invoke =
                | Eio.Cancel.Cancelled _ as exn -> C.cancel grant;raise exn
                | _ -> C.cancel grant;Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown")))
 
-let call_exported_tool_on_owner ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
+let call_exported_tool_on_owner ~continuation ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
     Fun.protect ~finally:on_complete (fun () ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m = match Hashtbl.find_opt managers root with
@@ -2447,7 +2474,7 @@ let call_exported_tool_on_owner ~on_complete ~on_result ~authorize ~principal ~c
           | Lane_addon_sources.Unauthenticated -> Lane_addon_call_context.Anonymous in
       let connection=original.worker in
       let result = if List.mem export.tool.name (connection.companion_tools ()) then
-          invoke_companion_export ~sw m ~access ~principal e original
+          invoke_companion_export ~sw m ~config ~access ~principal ~continuation ~export ~arguments e original
             (fun companion -> connection.call_exported_tool ~companion:(Some companion)
               ~on_result ~authorize ~principal ~name:export.tool.name ~arguments)
         else connection.call_exported_tool ~companion:None ~on_result ~authorize ~principal ~name:export.tool.name ~arguments in
@@ -2481,9 +2508,9 @@ let call_exported_tool_on_owner ~on_complete ~on_result ~authorize ~principal ~c
         stop_entry ~sw ~backend:worker_backend m e);
       raise exn))
 
-let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~principal
+let call_exported_tool_with_authority ~continuation ~on_complete ~on_result ~authorize ~principal
     ~config ~access ~reserved ~export ~arguments =
-  with_tool_call_owner (fun () -> call_exported_tool_on_owner ~on_complete ~on_result
+  with_tool_call_owner (fun () -> call_exported_tool_on_owner ~continuation ~on_complete ~on_result
     ~authorize ~principal ~config ~access ~reserved ~export ~arguments)
 
 let call_captured_tool_request ~config ~access ~reserved ~export ~installation_id
@@ -2505,11 +2532,11 @@ let call_captured_tool_request ~config ~access ~reserved ~export ~installation_i
           ~summary:original.summary ~request:original.request) |> Result.map_error (fun error ->
             Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
         Ok ())
-      ~use:(fun () -> call_exported_tool_on_owner ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())
+      ~use:(fun () -> call_exported_tool_on_owner ~continuation:None ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())
           ~authorize:None ~principal:(Some Lane_addon_call_context.Operator)
           ~config ~access ~reserved ~export ~arguments))
 
-let call_exported_tool_with_principal = call_exported_tool_with_authority ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:None
+let call_exported_tool_with_principal = call_exported_tool_with_authority ~continuation:None ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:None
 
 let call_exported_tool = call_exported_tool_with_principal ~principal:None
 

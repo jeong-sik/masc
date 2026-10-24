@@ -149,6 +149,13 @@ verification remain unfinished.
    cancel/unknown outcomes and resumed Keeper work. Fixture checks do not prove
    installed-runtime or real account behavior.
 
+The host now retains the original Keeper turn/tool-use/task/conversation before
+issuing a private companion grant. An existing source binding permits only
+reconciliation, not another login dispatch. This is source implementation of
+[original invocation capture](../../docs/design/lane-addon-keeper-continuation.md),
+not a delivered wake or resumed Keeper turn. Private progress publication and the
+original Keeper's actual continuation remain to be connected.
+
 ## Verification
 
 Run `python3 -m unittest discover -s addons/tests -p 'test_onepassword_*.py'`.

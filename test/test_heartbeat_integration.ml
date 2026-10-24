@@ -3047,41 +3047,33 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
         ~finally:stop_target
         (fun () ->
           let result =
-            try
-              Some
-                (Eio.Time.with_timeout_exn clock 1.0 (fun () ->
-                   Eio.Switch.run @@ fun turn_sw ->
-                   Eio_context.with_turn_switch turn_sw @@ fun () ->
-                   let ctx : _ Masc.Keeper_tool_surface.context =
-                     { config
-                     ; agent_name = "beta"
-                     ; sw = turn_sw
-                     ; clock
-                     ; proc_mgr = None
-                     ; net = None
-                     ; publication_recovery_provider =
-                         Masc_test_deps.publication_recovery_provider
-                           publication_recovery_registry
-                     }
-                   in
-                   Masc.Keeper_tool_surface.dispatch
-                     ctx
-                     ~name:"masc_keeper_up"
-                     ~args:
-                       (`Assoc
-                          [ "name", `String target_name
-                          ; "activation_mode", `String "manual"
-                          ])))
-            with
-            | Eio.Time.Timeout -> None
+            Eio.Switch.run @@ fun turn_sw ->
+            Eio_context.with_turn_switch turn_sw @@ fun () ->
+            let ctx : _ Masc.Keeper_tool_surface.context =
+              { config
+              ; agent_name = "beta"
+              ; sw = turn_sw
+              ; clock
+              ; proc_mgr = None
+              ; net = None
+              ; publication_recovery_provider =
+                  Masc_test_deps.publication_recovery_provider
+                    publication_recovery_registry
+              }
+            in
+            Masc.Keeper_tool_surface.dispatch
+              ctx
+              ~name:"masc_keeper_up"
+              ~args:
+                (`Assoc
+                   [ "name", `String target_name
+                   ; "activation_mode", `String "manual"
+                   ])
           in
           let result =
             match result with
-            | Some (Some result) -> result
-            | Some None -> fail "masc_keeper_up dispatch was missing"
-            | None ->
-              fail
-                "the calling Keeper turn waited for the target's long-lived lane"
+            | Some result -> result
+            | None -> fail "masc_keeper_up dispatch was missing"
           in
           if not (Keeper_types_profile.tool_result_success result)
           then

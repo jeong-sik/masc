@@ -64,6 +64,15 @@
  (action (run python3 %{dep:test_dashboard_observation_quota.py} --binary %{dep:../bin/main_eio.exe})))
 
 (rule
+ (alias runtest-test_exec_ssh_bootstrap)
+ (deps test_exec_ssh_bootstrap.py ../bin/masc_exec_ssh_bootstrap.exe)
+ (action (run python3 %{dep:test_exec_ssh_bootstrap.py} %{dep:../bin/masc_exec_ssh_bootstrap.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_exec_ssh_bootstrap)))
+
+(rule
  (alias runtest-test_sandbox_image_cli)
  (deps test_sandbox_image_cli.py ../bin/main_eio.exe)
  (action (run python3 %{dep:test_sandbox_image_cli.py} %{dep:../bin/main_eio.exe})))

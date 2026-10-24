@@ -365,6 +365,23 @@ let authorize_key endpoint ~known_hosts_file public_file =
     ]
 ;;
 
+let endpoint_shim_config ssh (endpoint : Exec_ssh_endpoint.t) =
+  let default = "remote_root=" ^ endpoint.remote_root ^ "\n" in
+  let* content =
+    run_capture_stdout
+      (pinned_ssh ssh
+         ("if test -e /etc/masc-exec-shim.conf || test -L /etc/masc-exec-shim.conf; then "
+          ^ "test -f /etc/masc-exec-shim.conf && test ! -L /etc/masc-exec-shim.conf "
+          ^ "&& cat /etc/masc-exec-shim.conf; else printf %s "
+          ^ shell_quote default ^ "; fi"))
+  in
+  let* config = Exec_shim.parse_config content in
+  Ok
+    (Exec_shim.render_config
+       { config with remote_root = endpoint.remote_root
+       ; env_allowlist = endpoint.env_allowlist })
+;;
+
 let install_shim ssh endpoint shim_path =
   let* stat =
     try Ok (Unix.lstat shim_path) with
@@ -376,36 +393,50 @@ let install_shim ssh endpoint shim_path =
   if stat.Unix.st_kind <> Unix.S_REG
   then Error (Printf.sprintf "shim artifact is not a regular file: %s" shim_path)
   else
+    let* config = endpoint_shim_config ssh endpoint in
     let remote_temp = Printf.sprintf "/tmp/masc-exec-shim.%d" (Unix.getpid ()) in
     let upload = "umask 077; cat > " ^ shell_quote remote_temp in
     let* () = run_with_file_stdin (pinned_ssh ssh upload) shim_path in
-    let allowlist = String.concat "," endpoint.Exec_ssh_endpoint.env_allowlist in
-    let config =
-      Printf.sprintf "remote_root=%s\nenv_allowlist=%s\n"
-        endpoint.remote_root allowlist
-    in
     let command =
       String.concat " && "
-        [ "sudo -n install -m 0755 " ^ shell_quote remote_temp
+        [ "config_temp=$(sudo -n mktemp /etc/masc-exec-shim.conf.XXXXXX)"
+        ; "trap 'sudo -n rm -f \"$config_temp\"' EXIT"
+        ; "printf %s " ^ shell_quote config
+          ^ " | sudo -n tee \"$config_temp\" >/dev/null"
+        ; "sudo -n chmod 0644 \"$config_temp\""
+        ; "sudo -n install -m 0755 " ^ shell_quote remote_temp
           ^ " /usr/local/bin/masc-exec-shim"
         ; "rm -f " ^ shell_quote remote_temp
-        ; "printf %s " ^ shell_quote config
-          ^ " | sudo -n tee /etc/masc-exec-shim.conf >/dev/null"
-        ; "sudo -n chmod 0644 /etc/masc-exec-shim.conf"
+        ; "sudo -n mv -f \"$config_temp\" /etc/masc-exec-shim.conf"
         ; "sudo -n install -d -m 0755 " ^ shell_quote endpoint.remote_root
         ; "sudo -n install -d -m 0755 /usr/local/share/masc"
-        ; "masc-exec-shim --probe | sudo -n tee /usr/local/share/masc/exec-shim.version >/dev/null"
+        ; "probe=$(masc-exec-shim --probe)"
+        ; "printf '%s\\n' \"$probe\" | sudo -n tee /usr/local/share/masc/exec-shim.version >/dev/null"
         ]
     in
     run_inherited (pinned_ssh ssh command)
 ;;
 
-let provision_keeper ssh endpoint ~base_path (keeper, token_file) =
+let validate_keeper_name keeper =
   let keeper = String.trim keeper in
   let safe_keeper = Workspace_utils.safe_filename keeper in
-  if keeper = "" || not (String.equal keeper safe_keeper)
+  if keeper = "" || keeper = "." || keeper = ".."
+     || not (String.equal keeper safe_keeper)
   then Error (Printf.sprintf "invalid keeper name for remote provisioning: %S" keeper)
-  else
+  else Ok keeper
+;;
+
+let provision_keeper_workspace ssh (endpoint : Exec_ssh_endpoint.t) keeper =
+  let keeper_root = Filename.concat endpoint.remote_root keeper in
+  run_inherited
+    (pinned_ssh ssh
+       (String.concat " && "
+          [ "sudo -n install -d -m 0700 " ^ shell_quote keeper_root
+          ; "sudo -n chown " ^ shell_quote endpoint.user ^ " " ^ shell_quote keeper_root
+          ]))
+;;
+
+let provision_keeper_identity ssh endpoint ~base_path (keeper, token_file) =
   let keeper_root = Filename.concat endpoint.Exec_ssh_endpoint.remote_root keeper in
   let gh_dir = Filename.concat keeper_root ".config/gh" in
   let* raw_token = read_regular_file token_file in
@@ -424,9 +455,7 @@ let provision_keeper ssh endpoint ~base_path (keeper, token_file) =
   else
     let prepare =
       String.concat " && "
-        [ "sudo -n install -d -m 0700 " ^ shell_quote keeper_root
-        ; "sudo -n chown " ^ shell_quote endpoint.user ^ " " ^ shell_quote keeper_root
-        ; "mkdir -p " ^ shell_quote gh_dir
+        [ "mkdir -p " ^ shell_quote gh_dir
         ; "chmod 0700 " ^ shell_quote gh_dir
         ; "env GH_CONFIG_DIR=" ^ shell_quote gh_dir
           ^ " gh auth login --hostname github.com --with-token"
@@ -474,7 +503,7 @@ let validate_endpoint_for_bootstrap (endpoint : Exec_ssh_endpoint.t) =
     | None -> Ok ()
 ;;
 
-let run base_path endpoint_name shim_path replace_host_key keeper_tokens =
+let run base_path endpoint_name shim_path replace_host_key keepers keeper_tokens =
   let base_path =
     match base_path with
     | Some path -> path
@@ -485,6 +514,30 @@ let run base_path endpoint_name shim_path replace_host_key keeper_tokens =
       Keeper_sandbox_ssh.resolve_endpoint_name ~base_path ~name:endpoint_name
     in
     let* () = validate_endpoint_for_bootstrap endpoint in
+    (* Validate all local declarations before writing keys or touching the host. *)
+    let* keeper_tokens =
+      List.fold_left
+        (fun acc value ->
+           let* parsed = acc in
+           match parse_keeper_token value with
+           | Error _ ->
+             Error "--github-token-file must be KEEPER=PATH"
+           | Ok (keeper, token_file) ->
+             let* keeper = validate_keeper_name keeper in
+             let* () = require_regular_file token_file in
+             Ok ((keeper, token_file) :: parsed))
+        (Ok []) keeper_tokens
+      |> Result.map List.rev
+    in
+    let* keepers =
+      List.fold_left
+        (fun acc keeper ->
+           let* names = acc in
+           let* keeper = validate_keeper_name keeper in
+           Ok (keeper :: names))
+        (Ok (List.map fst keeper_tokens)) keepers
+      |> Result.map (List.sort_uniq String.compare)
+    in
     let identity_file =
       if Filename.is_relative endpoint.identity_file
       then Filename.concat base_path endpoint.identity_file
@@ -503,28 +556,19 @@ let run base_path endpoint_name shim_path replace_host_key keeper_tokens =
       Keeper_sandbox_ssh.create ~base_path ~keeper_name:"bootstrap" ~endpoint ()
     in
     let* () = install_shim ssh endpoint shim_path in
-    let* keeper_tokens =
-      keeper_tokens
-      |> List.fold_left
-           (fun acc value ->
-             let* parsed = acc in
-             match parse_keeper_token value with
-             | Ok item -> Ok (item :: parsed)
-             | Error _ ->
-               Error
-                 (Printf.sprintf
-                    "--github-token-file must be KEEPER=PATH, got %S" value))
-           (Ok [])
-      |> Result.map List.rev
+    let* () =
+      List.fold_left
+        (fun acc keeper -> let* () = acc in provision_keeper_workspace ssh endpoint keeper)
+        (Ok ()) keepers
     in
     let* () =
       List.fold_left
-        (fun acc item -> let* () = acc in provision_keeper ssh endpoint ~base_path item)
+        (fun acc item -> let* () = acc in provision_keeper_identity ssh endpoint ~base_path item)
         (Ok ()) keeper_tokens
     in
     Printf.printf
       "SSH endpoint %s provisioned. shim=%s keepers=%d\n%!"
-      endpoint.name shim_path (List.length keeper_tokens);
+      endpoint.name shim_path (List.length keepers);
     Ok ()
   in
   match result with
@@ -533,7 +577,7 @@ let run base_path endpoint_name shim_path replace_host_key keeper_tokens =
 ;;
 
 let base_path =
-  let doc = "Workspace base path containing .masc/runtime.toml." in
+  let doc = "Workspace base path containing .masc/config/runtime.toml." in
   Arg.(value & opt (some dir) None & info [ "base-path" ] ~docv:"PATH" ~doc)
 ;;
 
@@ -559,11 +603,18 @@ let keeper_tokens =
   Arg.(value & opt_all string [] & info [ "github-token-file" ] ~docv:"KEEPER=PATH" ~doc)
 ;;
 
+let keepers =
+  let doc =
+    "Prepare a Keeper workspace without a GitHub login. Repeat for each Keeper. A --github-token-file also prepares its named Keeper."
+  in
+  Arg.(value & opt_all string [] & info [ "keeper" ] ~docv:"NAME" ~doc)
+;;
+
 let command =
   let doc = "Provision a pinned MASC SSH execution endpoint." in
   let info = Cmd.info "masc-exec-ssh-bootstrap" ~doc in
   Cmd.v info
-    Term.(ret (const run $ base_path $ endpoint $ shim $ replace_host_key $ keeper_tokens))
+    Term.(ret (const run $ base_path $ endpoint $ shim $ replace_host_key $ keepers $ keeper_tokens))
 ;;
 
 let () =

@@ -292,6 +292,11 @@ val jail_for_request
 
 val parse_config : string -> (config, string) result
 
+val render_config : config -> string
+(** Serialize a decoded config, including the endpoint-owned tool path,
+    environment file and scratch root. Bootstrap replaces the declared root
+    and allowlist without erasing these independent host settings. *)
+
 type endpoint_file_writers =
   | Its_group
   | Every_user

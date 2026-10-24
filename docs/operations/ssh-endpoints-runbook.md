@@ -18,7 +18,7 @@ Do not put private keys, token files, or generated `artifacts/` in git.
 
 ## 1. Declare the endpoint
 
-Add one table to the effective `<base>/.masc/runtime.toml`:
+Add one table to the effective `<base>/.masc/config/runtime.toml`:
 
 ```toml
 [exec.ssh.endpoints.builder]
@@ -74,7 +74,23 @@ and no dynamic interpreter. The build script enforces this check.
 
 ## 3. Bootstrap trust and keeper identity
 
-Store each GitHub token in a temporary local 0600 file. Then run:
+Prepare a workspace without a GitHub login:
+
+```sh
+masc-exec-ssh-bootstrap \
+  --base-path /path/to/base \
+  --endpoint builder \
+  --shim /path/to/masc/artifacts/masc-exec-shim \
+  --keeper keeper-a
+```
+
+Repeat `--keeper` for each Keeper. This creates its private directory without
+removing existing work. GitHub login is optional for commands and file tools;
+preflight skips identity validation only when the endpoint confirms that the
+Keeper has no `hosts.yml`. An unavailable probe remains a failure.
+
+For a Keeper that needs GitHub, store its token in a temporary local 0600
+file and use the same command with `--github-token-file` instead:
 
 ```sh
 masc-exec-ssh-bootstrap \
@@ -96,9 +112,11 @@ The bootstrap then:
 2. proves the pinned key works in batch mode;
 3. uploads and installs the shim and `/etc/masc-exec-shim.conf`;
 4. records the remote shim probe under `/usr/local/share/masc/`;
-5. creates `remote_root/<keeper>/.config/gh` and sends the token only on SSH
-   stdin;
-6. writes the token value to `.masc/ssh/redaction/<keeper>.token` at 0600 so
+5. prepares `remote_root/<keeper>` for every `--keeper` and
+   `--github-token-file` name; when a token is supplied, creates `.config/gh`
+   there and sends the token only on SSH stdin;
+6. for each supplied token, writes its value to
+   `.masc/ssh/redaction/<keeper>.token` at 0600 so
    output redaction knows it, without adding it to any execution environment.
 
 Delete the input token file after successful provisioning using the
@@ -166,9 +184,12 @@ sudo mv /etc/masc-exec-shim.env.tmp /etc/masc-exec-shim.env
 When a line is malformed the shim reports the file and the line number, not
 the line itself, since a line in the wrong place may be a secret.
 
-The bootstrap rewrites `/etc/masc-exec-shim.conf` with `remote_root` and
-`env_allowlist` only, so add these lines again after every bootstrap run
-(masc#36918).
+Bootstrap updates `remote_root` and `env_allowlist` from the endpoint
+declaration and preserves the existing `path`, `env_file`, and `scratch_root`.
+It parses the existing config before installing anything; an invalid config
+is reported rather than silently replaced. The replacement config is installed
+atomically at `0644`, owned by the non-interactive sudo account (root).
+The referenced environment file stays on the endpoint and is not copied.
 
 ## 4. Create or migrate a keeper
 
@@ -247,7 +268,7 @@ sentence saying so is not.
 |---|---|---|
 | `remote_ssh_no_network_mode` | `remote_ssh` was combined with a Docker-only network mode. | Remove `network_mode`; endpoint networking is host policy. |
 | `remote_endpoint_requires_remote_ssh` | A non-SSH profile still has `remote_endpoint`. | Clear it with JSON `null` or select `remote_ssh`. |
-| `remote_ssh_runtime_config_missing` | Effective runtime TOML cannot be found. | Verify the base path and `.masc/runtime.toml`. |
+| `remote_ssh_runtime_config_missing` | Effective runtime TOML cannot be found. | Verify the base path and `.masc/config/runtime.toml`. |
 | `remote_ssh_runtime_config_invalid` | Runtime TOML or endpoint registry failed strict parsing. | Fix the named path/key/value; do not bypass the decoder. |
 | `remote_ssh_endpoint_missing` | The keeper has no endpoint name. | Set `remote_endpoint` in the same keeper update. |
 | `remote_ssh_endpoint_unknown` | The name is absent from the endpoint registry. | Declare the exact table or correct the keeper name. |

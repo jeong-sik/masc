@@ -13,11 +13,18 @@ type receipt =
   ; sha256 : string
   ; spans : span list
   }
+type system_prompt =
+  { base_text : string
+  ; goal_text : string option
+  ; text : string
+  ; partition : receipt
+  }
 type t =
   { extra_system_context : string option
   ; blocks : (Prompt_block_id.t * string) list
   ; receipt : receipt option
   ; dynamic_context_partition : Keeper_context_layers.rendered option
+  ; system_prompt : system_prompt option
   }
 
 let sha256 text = Digestif.SHA256.(digest_string text |> to_hex)
@@ -68,7 +75,7 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
     | Some _ | None -> None
   in
   if not !present
-  then { extra_system_context = None; blocks; receipt = None; dynamic_context_partition }
+  then { extra_system_context = None; blocks; receipt = None; dynamic_context_partition; system_prompt = None }
   else
     let text = Buffer.contents buffer in
     { extra_system_context = Some text
@@ -76,7 +83,36 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
     ; receipt =
         Some { bytes = String.length text; sha256 = sha256 text; spans = List.rev !spans }
     ; dynamic_context_partition
+    ; system_prompt = None
     }
+;;
+
+let with_goal_system_prompt ~base_text ~goal_text assembly =
+  let issued = assemble ~dynamic_context_partition:None
+      ~existing_extra_system_context:(Some base_text)
+      ~blocks:(match goal_text with None -> [] | Some text -> [Prompt_block_id.Active_goals, text]) in
+  let system_prompt = match issued.extra_system_context, issued.receipt with
+    | Some text, Some partition -> Some {base_text; goal_text; text; partition}
+    | Some _, None | None, _ -> assert false in
+  { assembly with system_prompt }
+;;
+
+let logical_blocks assembly =
+  (match assembly.system_prompt with
+   | None -> []
+   | Some {goal_text = None; _} -> []
+   | Some {goal_text = Some text; _} -> [Prompt_block_id.Active_goals, text])
+  @ assembly.blocks
+;;
+
+let effective_system_prompt ~base_text assembly =
+  match assembly.system_prompt with None -> base_text | Some issued -> issued.text
+;;
+
+let system_prompt_override ~previous assembly =
+  match assembly.system_prompt with
+  | None | Some {goal_text = None; _} -> previous
+  | Some ({goal_text = Some _; _} as issued) -> Some issued.text
 ;;
 
 let dynamic_context_sections assembly =
@@ -145,4 +181,9 @@ let receipt_to_json (receipt : receipt) =
     ; "sha256", `String receipt.sha256
     ; "spans", `List (List.map span_to_json receipt.spans)
     ]
+;;
+
+let system_prompt_receipt_to_json issued =
+  `Assoc ["carrier", `String "system_prompt";
+    "partition", receipt_to_json issued.partition]
 ;;

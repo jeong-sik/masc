@@ -965,8 +965,8 @@ let assemble_hooks
                    answer). Which blocks still ride a post-tool round is the
                    typed declaration [Prompt_block_id.injected_on_post_tool_round];
                    request assembly below enforces it. The renderer's Goal
-                   layer is issued separately and retained through this turn's
-                   tool loop, without rebroadcasting the other world state.
+                   observation uses a separate stable system suffix, so a tool
+                   result remains the newest message in ordinary tool rounds.
 
                    The predicate is the position of the conversation's last
                    message, not [last_tool_results]: that hook payload reports
@@ -1137,8 +1137,11 @@ let assemble_hooks
                        record_block Prompt_block_id.Operator_note block;
                        true)
                 in
+                let base_system_prompt = Option.value
+                    ~default:turn_system_prompt current_params.system_prompt_override in
                 let extra_system_context_assembly =
                   Keeper_run_prompt.assemble_request_context
+                    ~base_system_prompt
                     ~post_tool_round
                     ~previous_assembly:acc.extra_system_context_assembly
                     ~dynamic_context_partition:(Some dynamic_context_partition)
@@ -1147,8 +1150,10 @@ let assemble_hooks
                     ~blocks:(List.rev !recorded_blocks)
                 in
                 let ctx = extra_system_context_assembly.extra_system_context in
+                let effective_system_prompt = Keeper_context_assembly.effective_system_prompt
+                    ~base_text:base_system_prompt extra_system_context_assembly in
                 let recorded_blocks_for_receipt =
-                  extra_system_context_assembly.blocks
+                  Keeper_context_assembly.logical_blocks extra_system_context_assembly
                 in
                 (* The assembled text exists only here. The turn record keeps
                    each block's bytes and digest, which answers "how much" but
@@ -1172,8 +1177,12 @@ let assemble_hooks
                         run. Stamping the provider round here made one request
                         read as #721 in last-prompt and #13 in turn-records. *)
                      ~absolute_turn:keeper_turn_id
-                     ~blocks:recorded_blocks_for_receipt
-                     ~assembled:ctx);
+                     ~blocks:(match extra_system_context_assembly.system_prompt with
+                       | None -> recorded_blocks_for_receipt
+                       | Some issued -> (Prompt_block_id.Keeper_instructions, issued.base_text)
+                           :: recorded_blocks_for_receipt)
+                     ~assembled:ctx
+                     ~system_prompt:extra_system_context_assembly.system_prompt);
                 if consumed_operator_note
                 then
                   Keeper_operator_note.mark_consumed
@@ -1263,14 +1272,14 @@ let assemble_hooks
                   Digestif.SHA256.(digest_string text |> to_hex)
                 in
                 let keeper_instruction_blocks =
-                  match prompt_metrics.system_prompt_segment.fingerprint with
-                  | Some digest ->
+                  match Inference_utils.sanitize_text_utf8 base_system_prompt with
+                  | "" -> []
+                  | text ->
                     [ { Turn_record.block = Prompt_block_id.Keeper_instructions
-                      ; bytes = prompt_metrics.system_prompt_segment.bytes
-                      ; digest
+                      ; bytes = String.length text
+                      ; digest = sha256_hex text
                       }
                     ]
-                  | None -> []
                 in
                 acc.prompt_blocks
                 <- keeper_instruction_blocks
@@ -1318,6 +1327,10 @@ let assemble_hooks
                                    match extra_system_context_assembly.receipt with
                                    | None -> `Null
                                    | Some receipt -> Keeper_context_assembly.receipt_to_json receipt )
+                               ; ( "system_prompt_partition",
+                                   match extra_system_context_assembly.system_prompt with
+                                   | None -> `Null
+                                   | Some issued -> Keeper_context_assembly.system_prompt_receipt_to_json issued )
                                ]))
                         ())
                  | _ -> ());
@@ -1330,7 +1343,7 @@ let assemble_hooks
                   ~turn_id:keeper_turn_id
                   ~trace_id:meta.runtime.trace_id
                   ~agent_core_turn:turn
-                  ~system_prompt:turn_system_prompt
+                  ~system_prompt:effective_system_prompt
                   ~extra_system_context:ctx
                   ~user_message
                   ~history_messages:messages
@@ -1341,6 +1354,8 @@ let assemble_hooks
                 Agent_core.Hooks.AdjustParams
                   { current_params with
                     extra_system_context = ctx
+                  ; system_prompt_override = Keeper_context_assembly.system_prompt_override
+                      ~previous:current_params.system_prompt_override extra_system_context_assembly
                   ; tool_choice
                   }
               | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue))

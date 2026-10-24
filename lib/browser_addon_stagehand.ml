@@ -340,6 +340,9 @@ let run ~env ~owner ~directory work =
           let* ()=Browser_addon_owner.attach_stagehand owner ~models:(Option.is_some selected_model)
             ~execute:(fun ~actor verb -> Browser_stagehand_backend.execute backend ?actor verb)
             ~session:(fun () -> Browser_stagehand_backend.session_observation backend) ~cleanup in
+          let* ()=Browser_addon_owner.attach_extensions owner
+            (Browser_extension_companion.create ~sw ~backend
+              ~transport:(fun opened run -> Session.with_private_transport opened.session run)) in
           Eio.Promise.resolve resolve_ready (Ok ());
           Eio.Promise.await stopping;Ok ()) in
         (match result with Error _ -> result | Ok () -> !backend_settlement ())

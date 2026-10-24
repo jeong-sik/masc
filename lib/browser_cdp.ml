@@ -135,6 +135,7 @@ type t =
   ; pending : (int, (Yojson.Safe.t, failure) result Eio.Promise.u) Hashtbl.t
   ; mutable next_id : int
   ; mutable lost : string option
+  ; mutable listeners : (unit ref * (event -> unit)) list
   }
 
 let create ~send ~close ~clock ~command_deadline_s ~on_event =
@@ -146,10 +147,18 @@ let create ~send ~close ~clock ~command_deadline_s ~on_event =
   ; pending = Hashtbl.create 8
   ; next_id = 0
   ; lost = None
+  ; listeners = []
   }
 ;;
 
 let lost_reason t = t.lost
+let subscribe_events t listener =
+  let identity=ref () in
+  t.listeners <- (identity,listener)::t.listeners;
+  fun () -> t.listeners <- List.filter (fun (current,_) -> current != identity) t.listeners
+let publish t event =
+  t.on_event event;
+  List.iter (fun (_,listener) -> listener event) t.listeners
 
 let lost t reason =
   match t.lost with
@@ -160,7 +169,7 @@ let lost t reason =
     Hashtbl.reset t.pending;
     List.iter (fun resolver -> Eio.Promise.resolve resolver (Error (Connection_lost reason))) waiting;
     t.close ();
-    t.on_event (Connection_ended { reason })
+    publish t (Connection_ended { reason })
 ;;
 
 let receive t frame =
@@ -176,7 +185,7 @@ let receive t frame =
           Hashtbl.remove t.pending id;
           Eio.Promise.resolve resolver
             (Result.map_error (fun (code, message) -> Command_rejected { code; message }) result))
-     | Ok (Event { method_; session; params }) -> t.on_event (event_of ~method_ ~session params))
+     | Ok (Event { method_; session; params }) -> publish t (event_of ~method_ ~session params))
 ;;
 
 let deadline_exceeded = "CDP command deadline exceeded"

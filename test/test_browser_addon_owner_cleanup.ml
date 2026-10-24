@@ -6,7 +6,7 @@ let ok = function Ok value -> value | Error message -> fail message
 let unknown = function
   | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
   | W.Service_refusal {disposition=W.Not_started;_}
-  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false
+  | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false
 
 let scenario () =
   let root=Unix.realpath (Filename.temp_dir ~perms:0o700 "browser-owner-download-" "") in
@@ -44,7 +44,7 @@ let scenario () =
       engine_version="fixture";transport=B.Webdriver_bidi} in
     (match Owner.dispatch owner {W.incarnation;command=W.Poll {client;window_sec=0.001}} with
      | W.Poll_result _ -> ()
-     | Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> fail "live registration refused");
+     | Service_refusal _|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _ -> fail "live registration refused");
     ok (Owner.attach_live owner ~client_id ~cleanup:(fun () ->
       incr live_calls;Eio.Promise.resolve start_live ();Eio.Promise.await live_settled;Ok ()));
     ok (Owner.attach_automation owner ~locate:false
@@ -85,7 +85,7 @@ let scenario () =
       (match reply with
        | W.Service_refusal {message;_} ->
          message="automation settlement unconfirmed; Stagehand backend cleanup raised; settlement is unconfirmed; download cleanup requires confirmed backend teardown"
-       | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+       | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
     check bool "repeated Retire retains the same failure" true (send ()=reply);
     check int "failed automation cleanup is not replayed" 1 !automation_calls;
     check int "owned live cleanup is not replayed" 1 !live_calls;

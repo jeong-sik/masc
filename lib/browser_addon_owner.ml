@@ -10,6 +10,8 @@ type t = {
   mutable clients : B.client_id list;
   mutable automation : cleanup option;
   mutable stagehand : cleanup option;
+  mutable extensions : (Browser_extension_protocol.command ->
+    (Yojson.Safe.t, Browser_extension_protocol.error) result) option;
   (* The live connections this worker runs, one per transport. *)
   mutable live : (B.live_transport * cleanup) list;
   mutable models : Browser_addon_models.t option;
@@ -29,7 +31,7 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;live=[];models=None;uploads=None;downloads=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;extensions=None;live=[];models=None;uploads=None;downloads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Serving,B.Lane_name.Automation -> if Option.is_some t.automation then B.Enabled else B.Disabled
@@ -109,6 +111,12 @@ let attach_stagehand t ~models ~execute ~session ~cleanup =
       B.install_stagehand_executor ~models (Some execute);
       B.install_server_session_observer B.Server_stagehand (Some session);
       t.stagehand <- Some (owned_cleanup "Stagehand" cleanup);Ok ())
+let attach_extensions t execute =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.stagehand,t.extensions with
+    | Retired,_,_ -> Error "browser owner is retired"
+    | Serving,None,_ -> Error "owned Chrome backend is unavailable"
+    | Serving,Some _,Some _ -> Error "private extension executor is already attached"
+    | Serving,Some _,None -> t.extensions<-Some execute;Ok ())
 let attach_live t ~client_id ~cleanup =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase with
     | Retired -> Error "browser owner is retired"
@@ -126,6 +134,7 @@ let revoke t =
     | Retired -> ()
     | Serving ->
       t.phase <- Retired;
+      t.extensions <- None;
       Option.iter Browser_addon_models.retire t.models;
       Option.iter Browser_addon_uploads.revoke t.uploads;
       Option.iter Browser_addon_downloads.revoke t.downloads;
@@ -269,6 +278,17 @@ let dispatch t (request : W.request) =
           Browser_addon_downloads.release downloads ~id ~actor ~route ~verb) with
           | Ok () -> W.Receipt | Error detail -> refusal ~disposition:W.Outcome_unknown detail))
   | W.Model_requests -> model_port t request.incarnation Browser_addon_models.listing
+  | W.Extension command ->
+    (match with_admission t request.incarnation (fun () -> match t.extensions with
+      | Some execute -> Ok execute
+      | None -> Error (refusal "private extension executor is unavailable")) with
+     | Error reply -> reply
+     | Ok execute -> waiting t ~disposition:W.Outcome_unknown (fun () ->
+         match execute command with
+         | Ok value -> W.Extension_reply value
+         | Error Browser_extension_protocol.Not_started -> refusal "private extension operation was not started"
+         | Error Browser_extension_protocol.Outcome_unknown ->
+             refusal ~disposition:W.Outcome_unknown "private extension outcome is unknown"))
   | W.Model_result arguments -> model_port t request.incarnation (fun models ->
       Browser_addon_models.deliver models ~arguments
       |> Result.map (fun accepted -> `Assoc ["accepted",`Bool accepted]))
@@ -307,9 +327,9 @@ let live t command = dispatch t {W.incarnation=t.incarnation;command}
 let poll_live t ~client ~window_sec = match live t (W.Poll {client;window_sec}) with
   | W.Poll_result {command;_} -> Ok command
   | W.Service_refusal {message;_} -> if is_retired t then Ok None else Error message
-  | W.Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> Error "unexpected reply to a live poll"
+  | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _ -> Error "unexpected reply to a live poll"
 let deliver_live t ~client_id ~id ~payload = match live t (W.Deliver {client_id;id;payload}) with
   | W.Receipt -> Ok ()
   | W.Service_refusal {message;_} -> Error message
-  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ -> Error "unexpected reply to a live delivery"
+  | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Issue_result _ -> Error "unexpected reply to a live delivery"
 let disconnect_live t client_id = ignore (live t (W.Disconnect client_id))

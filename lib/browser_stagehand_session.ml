@@ -99,6 +99,10 @@ let quiescent t = match t.link, t.calls with
   | (Unattached | Attaching | Initialising _ | Worker_gone | Ended _),
     (Idle | In_flight _ | Abandoned _ | Unsettled_delivery) -> false
 
+let with_private_transport t run = match t.link with
+  | Attached link when quiescent t -> run link.cdp ~worker:link.worker
+  | Unattached | Attaching | Initialising _ | Attached _ | Worker_gone | Ended _ -> Error ()
+
 (* The service worker is looked for this often after the extension loads; it
    appeared within half a second in the runs of 2026-09-24. *)
 let worker_poll_s = 0.1

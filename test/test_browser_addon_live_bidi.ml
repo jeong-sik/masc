@@ -141,12 +141,12 @@ let scenario mode =
             check bool "actual owned queue answers on its original connection" true
               (match issue () with W.Issue_result (Ok (B.Answered _)) -> true
                | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-               | Issue_result (Error _) | Snapshot_result _|Model_reply _|Download_reply _
+               | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
                | Poll_result _|Receipt|Service_refusal _ -> false);
             check bool "retirement joins the original guardian and peer" true (dispatch W.Retire=W.Receipt);
             check bool "the exact original client cannot register again" true
               (match dispatch (W.Poll {client;window_sec=0.}) with W.Service_refusal _ -> true
-               | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+               | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
             check bool "retirement exposes no replacement UUID" true (B.connected_clients ()=[]);
             check bool "repeated retirement observes the same receipt" true (dispatch W.Retire=W.Receipt)) in
         let failure=try Live.For_testing.run ~before_command_validation:(fun () ->
@@ -158,7 +158,7 @@ let scenario mode =
       check bool "only verified metadata admits caller work" (mode="normal" || mode="lost" || mode="gate") !entered;
       if mode="gate" then check bool "blocked validation retirement remains unknown after original stop" true
         (match !retirement with Some (W.Service_refusal {disposition=W.Outcome_unknown;_}) -> true
-         | None | Some (Service_refusal {disposition=Not_started;_}|Snapshot_result _|Model_reply _
+         | None | Some (Service_refusal {disposition=Not_started;_}|Snapshot_result _|Model_reply _|Extension_reply _
              |Download_reply _|Poll_result _|Receipt|Issue_result _) -> false);
       check string "operator profile is never cleared" "preserved" (read sentinel);
       let commands=Filename.concat root "commands" in

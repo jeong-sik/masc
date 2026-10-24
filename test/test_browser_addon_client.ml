@@ -13,6 +13,7 @@ let scenario () = Eio_main.run (fun env ->
         let socket=Eio.Net.listen ~sw ~backlog:1 net (`Unix path) in
         let entered,enter=Eio.Promise.create () in
         let model_waiting,model_wait=Eio.Promise.create () in
+        let extension_waiting,extension_wait=Eio.Promise.create () in
         let locating,locate=Eio.Promise.create () in
         let starting,start=Eio.Promise.create () in
         let workflowing,workflow=Eio.Promise.create () in
@@ -33,6 +34,8 @@ let scenario () = Eio_main.run (fun env ->
                 | _ -> ignore (Eio.Promise.try_resolve enter ()));
               if Yojson.Safe.Util.member "operation" request=`String "model_wait" then
                 ignore (Eio.Promise.try_resolve model_wait ());
+              if Yojson.Safe.Util.member "operation" request=`String "extension" then
+                ignore (Eio.Promise.try_resolve extension_wait ());
               Eio.Promise.await never)
           done))
           (fun () ->
@@ -46,6 +49,12 @@ let scenario () = Eio_main.run (fun env ->
               (fun () -> Eio.Promise.await model_waiting;Eio.Time.sleep clock 0.03;`Waiting) with
              | `Waiting -> ()
              | `Returned _ -> fail "model state watch must outlive the quick control timeout");
+            (match Eio.Fiber.first
+              (fun () -> `Returned (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
+                (W.Extension (Masc.Browser_extension_protocol.Release "0b000000-0000-4000-8000-000000000001"))))
+              (fun () -> Eio.Promise.await extension_waiting;Eio.Time.sleep clock 0.03;`Waiting) with
+             | `Waiting -> ()
+             | `Returned _ -> fail "private extension execution must retain the original caller-owned wait");
             (match Eio.Fiber.first
               (fun () -> `Returned (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
                 (W.Issue {route=Browser_lane.Automation_route;
@@ -85,5 +94,29 @@ let scenario () = Eio_main.run (fun env ->
             check bool "revoked connection refuses before dispatch" true
               (match Client.call client ~on_cancel_after_dispatch:(fun () -> incr cancellations) W.Snapshot with
                | Error (Client.Unavailable _) -> true | Ok _|Error (Client.Outcome_unknown _) -> false)))))))
+let private_reply_boundary () = Eio_main.run (fun env ->
+  let directory=Filename.temp_dir "bac-private-" "" in
+  let path=Filename.concat directory "s" in
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path;Unix.rmdir directory)
+    (fun () -> Eio.Switch.run (fun sw ->
+      let net=Eio.Stdenv.net env and clock=Eio.Stdenv.clock env in
+      Eio_context.with_test_env ~sw ~clock ~net ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+        let socket=Eio.Net.listen ~sw ~backlog:1 net (`Unix path) in
+        let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
+          ~max_message_bytes:4096 ~control_timeout_sec:1. ~available:(fun () -> true)) in
+        let once raw command =
+          let server=Eio.Fiber.fork_promise ~sw (fun () ->
+            let flow,_=Eio.Net.accept ~sw socket in
+            ignore (Eio.Buf_read.line (Eio.Buf_read.of_flow flow ~max_size:4096));
+            Eio.Flow.copy_string (raw ^ "\n") flow) in
+          let result=Client.call client ~on_cancel_after_dispatch:(fun () -> ()) command in
+          Eio.Promise.await_exn server;result in
+        check bool "extension reply cannot be accepted as a model reply" true
+          (once (Yojson.Safe.to_string (W.reply_to_json (W.Extension_reply (`String "PRIVATE_REFERENCE_MARKER"))))
+            W.Model_requests=Error (Client.Outcome_unknown "unexpected browser service reply"));
+        check bool "malformed private reply never echoes payload fragments" true
+          (once {|{"reply":"extension","value":"PRIVATE_TOKEN_MARKER|} W.Model_requests
+            =Error (Client.Outcome_unknown "malformed browser service reply"))))))
 let ()=run "browser addon private client" ["transport",[
-  test_case "silent peer timeout cancellation and revoked connection" `Quick scenario]]
+  test_case "silent peer timeout cancellation and revoked connection" `Quick scenario;
+  test_case "private payload errors and distinct reply kinds" `Quick private_reply_boundary]]

@@ -103,7 +103,7 @@ let invoke ~owner ~principal arguments =
             (Browser_page_script.check_scoped_elements ~filter:(B.elements_filter verb)
                (Option.value (List.assoc_opt "data" fields) ~default:`Null))
       | Issue_result (Ok (B.Answered _|Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-      | Issue_result (Error _)|Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _
+      | Issue_result (Error _)|Service_refusal _|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
       | Poll_result _|Receipt -> None in
     match unscoped with
     | Some detail -> refused ~start_time detail
@@ -120,7 +120,7 @@ let invoke ~owner ~principal arguments =
       | Service_refusal {disposition=W.Not_started;_}|Issue_result (Error _)
       | Issue_result (Ok (B.Lane_absent|Rejected_before_effect _)) -> true,Tool_result.Proven_pre_effect
       | Service_refusal {disposition=W.Outcome_unknown;_}|Issue_result (Ok (B.Timed_out|Refused _|Answered _))
-      | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt -> true,Tool_result.Effect_outcome_unknown in
+      | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt -> true,Tool_result.Effect_outcome_unknown in
     (* A read leaves browser content unchanged, but can still publish a host
        artifact. Keep the original receipt's evidence of partial or unknown
        effects instead of authorizing replay from the verb classification. *)

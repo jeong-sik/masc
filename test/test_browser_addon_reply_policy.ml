@@ -58,7 +58,7 @@ let policy_at_the_actual_tool_boundary () =
                  | Rejected_before_effect _), (true | false) ->
                   fail (label ^ ": expected the original typed answer or timeout"))
          | W.Issue_result (Error _) | Service_refusal _ | Receipt | Snapshot_result _
-         | Model_reply _ | Download_reply _ | Poll_result _ ->
+         | Model_reply _|Extension_reply _ | Download_reply _ | Poll_result _ ->
              fail (label ^ ": expected the original typed answer or timeout"));
         if not answered then
           check bool (label ^ ": timeout keeps the original effect uncertainty") true

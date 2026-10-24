@@ -720,6 +720,78 @@ let test_private_read_exclusion () = with_backend (fun h -> Eio.Switch.run (fun 
   ignore (private_ok (Eio.Promise.await_exn operation));
   ignore (data (Eio.Promise.await_exn reading))))
 
+let test_private_synchronous_fence_discards_success () = with_backend (fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  let original = the_session h in
+  let session = private_ok (Backend.capture_private_session h.backend) in
+  let returned = ref false in
+  let result = Backend.execute_private h.backend ~session ~tab_id:0
+    ~run:(fun _ ~page_id:_ ->
+      Backend.fence_private_session h.backend ~session;
+      returned := true;
+      Ok (`Assoc ["private", `String "PRIVATE_SYNCHRONOUS_RESULT_MARKER"])) in
+  check bool "the callback returned synchronously after fencing its pin" true !returned;
+  check bool "a success returned with its own fence is discarded" true
+    (result = Error Backend.Private_outcome_unknown);
+  check bool "the original fenced browser cannot be privately recaptured" true
+    (Backend.capture_private_session h.backend = Error Backend.Private_session_fenced);
+  check bool "fencing never silently closes the unsaved original browser" false original.stopped;
+  ignore (data (Backend.execute h.backend Lane.Session_close));
+  check bool "explicit close still joins the exact original browser" true original.stopped)
+
+let test_private_worker_loss_joins_and_discards_returned_success () =
+  with_backend (fun h -> Eio.Switch.run (fun sw ->
+    ignore (data (Backend.execute h.backend open_));
+    ignore (data (Backend.execute h.backend Lane.Tabs_list));
+    let original = the_session h in
+    let session = private_ok (Backend.capture_private_session h.backend) in
+    let entered, enter = Eio.Promise.create () in
+    let broker_reply, _ = Eio.Promise.create () in
+    let cleanup_allowed, allow_cleanup = Eio.Promise.create () in
+    let cancelled = ref false and joined = ref false and resumed = ref false in
+    let operation = Eio.Fiber.fork_promise ~sw (fun () ->
+      Backend.execute_private h.backend ~session ~tab_id:0 ~run:(fun _ ~page_id:_ ->
+        Eio.Promise.resolve enter ();
+        match Eio.Promise.await broker_reply with
+        | () -> resumed := true; Ok (`Assoc ["private", `String "PRIVATE_RESUMED_RESULT_MARKER"])
+        | exception (Eio.Cancel.Cancelled _) ->
+          cancelled := true;
+          Eio.Cancel.protect (fun () -> Eio.Promise.await cleanup_allowed);
+          joined := true;
+          Ok (`Assoc ["private", `String "PRIVATE_CANCELLED_RESULT_MARKER"]))) in
+    (* Resolving this promise never suspends; a failed assertion must not
+       strand the callback's protected cancellation cleanup. *)
+    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve allow_cleanup ()))
+      (fun () ->
+        Eio.Promise.await entered;
+        Backend.fence_private_session h.backend ~session;
+        h.settle ();
+        check bool "worker loss cancels an already entered private callback" true !cancelled;
+        check bool "private callback cleanup is still being joined" false !joined;
+        check bool "private result is withheld until cancellation cleanup joins" false
+          (Eio.Promise.is_resolved operation);
+        check bool "worker loss fences without stopping the unsaved browser" false original.stopped;
+        check bool "status remains available while private cleanup joins" true
+          (flag "private_operation_unsettled" (data (Backend.execute h.backend Lane.Session_status)));
+        ignore (data (Backend.execute h.backend Lane.Session_close));
+        check bool "explicit close joins the original resources while callback cleanup waits" true original.stopped;
+        ignore (data (Backend.execute h.backend open_));
+        let next_page = Eio.Fiber.fork_promise ~sw (fun () -> Backend.execute h.backend Lane.Tabs_list) in
+        h.settle ();
+        check bool "successor pages retain the serializer until private cleanup joins" false
+          (Eio.Promise.is_resolved next_page);
+        Eio.Promise.resolve allow_cleanup ();
+        check bool "a cancellation-ignoring private success cannot escape its original fence" true
+          (Eio.Promise.await_exn operation = Error Backend.Private_outcome_unknown);
+        check bool "callback cleanup finishes before the private slot returns" true !joined;
+        check bool "the broker wait never resumes normally on a successor" false !resumed;
+        ignore (data (Eio.Promise.await_exn next_page));
+        Backend.fence_private_session h.backend ~session;
+        check bool "late original cleanup and repeated old loss leave the successor open" true
+          (Backend.session_observation h.backend = Lane.Browser_open);
+        ignore (private_ok (Backend.capture_private_session h.backend)))))
+
 let test_private_unknown_fences_and_never_rebinds () = with_backend (fun h ->
   ignore (data (Backend.execute h.backend open_));
   ignore (data (Backend.execute h.backend Lane.Tabs_list));
@@ -859,9 +931,135 @@ let test_private_requires_settled_public_input () =
     ignore (private_ok (Backend.execute_private h.backend ~session ~tab_id:0 ~run));
     check int "the exact original session remains usable after settlement" 1 !calls)
 
+let private_page_discarded = function
+  | Lane.Refused detail ->
+    check string "only a fixed refusal leaves the original page operation"
+      "the original browser was fenced during page work; its result was discarded; explicitly close the original session before new work"
+      detail
+  | Lane.Answered _ | Lane.Lane_absent | Lane.Timed_out | Lane.Rejected_before_effect _ ->
+    fail "an active fenced page operation must discard its result with a fixed refusal"
+
+let test_companion_loss_cancels_and_joins_active_page ~capture =
+  let entered, enter = Eio.Promise.create () in
+  let broker_reply, _ = Eio.Promise.create () in
+  let cleanup_allowed, allow_cleanup = Eio.Promise.create () in
+  let armed = ref false and cancelled = ref false and joined = ref false in
+  let calls = ref 0 and followups = ref 0 in
+  let call_hook = function
+    | Wire.Page_evaluate _ when !armed ->
+      incr calls;
+      Eio.Promise.resolve enter ();
+      (match Eio.Promise.await broker_reply with
+       | () -> fail "the held page operation must not resume normally"
+       | exception (Eio.Cancel.Cancelled _) ->
+         cancelled := true;
+         Eio.Cancel.protect (fun () -> Eio.Promise.await cleanup_allowed);
+         joined := true;
+         (* A transport adapter can return a value while handling cancellation.
+            Neither that value nor a later executor call may leave the fence. *)
+         Some (Ok (`Assoc ["value", `String {|{"url":"http://127.0.0.1:1/","title":"PRIVATE_READ_MARKER","viewport":null}|} ])))
+    | Wire.Page_screenshot _ ->
+      incr followups;
+      Some (Ok (`Assoc ["data", `String "PRIVATE_CAPTURE_MARKER"]))
+    | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages
+    | Wire.Context_active_page | Wire.Context_new_page
+    | Wire.Page_close _ | Wire.Page_reload _ | Wire.Page_go_back _ | Wire.Page_go_forward _ | Wire.Page_goto _
+    | Wire.Page_evaluate _ | Wire.Page_hover _ | Wire.Page_set_viewport_size _
+    | Wire.Page_click _ | Wire.Page_double_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _
+    | Wire.Page_type _ | Wire.Page_key_press _ -> None in
+  with_backend ~call_hook (fun h -> Eio.Switch.run (fun sw ->
+    ignore (data (Backend.execute h.backend open_));
+    ignore (data (Backend.execute h.backend Lane.Tabs_list));
+    let original = the_session h in
+    let session = private_ok (Backend.capture_private_session h.backend) in
+    armed := true;
+    let reading = Eio.Fiber.fork_promise ~sw (fun () ->
+      let verb = if capture then Lane.Page_capture {tab_id=0}
+        else Lane.Page_read {tab_id=Some 0; max_chars=None} in
+      Backend.execute h.backend verb) in
+    (* Promise resolution cannot suspend: an assertion failure must still let
+       the callback's protected cancellation cleanup finish. *)
+    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve allow_cleanup ()))
+      (fun () ->
+        Eio.Promise.await entered;
+        Backend.fence_private_session h.backend ~session;
+        h.settle ();
+        check bool "companion loss reaches the already active page callback" true !cancelled;
+        check bool "the page callback's cancellation cleanup is joined" false !joined;
+        check bool "no page result is published before cleanup joins" false (Eio.Promise.is_resolved reading);
+        check int "no later ordinary call follows companion loss" 1 !calls;
+        check bool "fencing keeps the unsaved original browser running" false original.stopped;
+        check bool "status remains available while page cancellation joins" true
+          (flag "private_operation_unsettled" (data (Backend.execute h.backend Lane.Session_status)));
+        ignore (data (Backend.execute h.backend Lane.Session_close));
+        check bool "explicit close joins the exact original browser" true original.stopped;
+        ignore (data (Backend.execute h.backend open_));
+        armed := false;
+        Backend.fence_private_session h.backend ~session;
+        check bool "a repeated old companion loss cannot fence the successor" true
+          (Backend.session_observation h.backend = Lane.Browser_open);
+        let next_page = Eio.Fiber.fork_promise ~sw (fun () -> Backend.execute h.backend Lane.Tabs_list) in
+        h.settle ();
+        check bool "successor pages wait for original page cleanup" false (Eio.Promise.is_resolved next_page);
+        Eio.Promise.resolve allow_cleanup ();
+        private_page_discarded (Eio.Promise.await_exn reading);
+        check bool "cancellation-ignoring callback finishes before slot release" true !joined;
+        ignore (data (Eio.Promise.await_exn next_page));
+        check int "the old callback never dispatches another ordinary call" 1 !calls;
+        check int "cancelled capture never dispatches its later screenshot" 0 !followups;
+        check bool "late page cleanup leaves the successor open" true
+          (Backend.session_observation h.backend = Lane.Browser_open);
+        ignore (private_ok (Backend.capture_private_session h.backend)))))
+
+let test_companion_loss_discards_synchronous_capture ~during_screenshot =
+  let armed = ref false and observations = ref 0 and screenshots = ref 0 in
+  let notify_loss = ref ignore in
+  let call_hook = function
+    | Wire.Page_evaluate _ when !armed ->
+      incr observations;
+      if not during_screenshot then !notify_loss ();
+      Some (Ok summary)
+    | Wire.Page_screenshot _ when !armed ->
+      incr screenshots;
+      !notify_loss ();
+      Some (Ok (`Assoc ["data", `String "PRIVATE_CAPTURE_MARKER"]))
+    | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages
+    | Wire.Context_active_page | Wire.Context_new_page
+    | Wire.Page_close _ | Wire.Page_reload _ | Wire.Page_go_back _ | Wire.Page_go_forward _ | Wire.Page_goto _
+    | Wire.Page_screenshot _ | Wire.Page_evaluate _ | Wire.Page_hover _ | Wire.Page_set_viewport_size _
+    | Wire.Page_click _ | Wire.Page_double_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _
+    | Wire.Page_type _ | Wire.Page_key_press _ -> None in
+  with_backend ~call_hook (fun h ->
+    ignore (data (Backend.execute h.backend open_));
+    ignore (data (Backend.execute h.backend Lane.Tabs_list));
+    let session = private_ok (Backend.capture_private_session h.backend) in
+    notify_loss := (fun () -> Backend.fence_private_session h.backend ~session);
+    armed := true;
+    private_page_discarded (Backend.execute h.backend (Lane.Page_capture {tab_id=0}));
+    check int "a synchronous fence prevents all capture follow-up observations" 1 !observations;
+    check int "loss during the initial observation prevents screenshot dispatch"
+      (if during_screenshot then 1 else 0) !screenshots;
+    check bool "queued page work is refused before any effect" true
+      (match Backend.execute h.backend Lane.Tabs_list with
+       | Lane.Rejected_before_effect _ -> true
+       | Lane.Answered _ | Lane.Lane_absent | Lane.Timed_out | Lane.Refused _ -> false);
+    ignore (data (Backend.execute h.backend Lane.Session_close)))
+
 let () =
   run "browser_stagehand_backend" [
     "private companion", [
+      test_case "synchronous private success is discarded after fencing its pin" `Quick
+        test_private_synchronous_fence_discards_success;
+      test_case "worker loss joins private cleanup and discards returned success" `Quick
+        test_private_worker_loss_joins_and_discards_returned_success;
+      test_case "companion loss cancels active reads and joins returned cleanup" `Quick
+        (fun () -> test_companion_loss_cancels_and_joins_active_page ~capture:false);
+      test_case "companion loss cancels capture before later dispatch" `Quick
+        (fun () -> test_companion_loss_cancels_and_joins_active_page ~capture:true);
+      test_case "synchronous companion loss discards capture bytes" `Quick
+        (fun () -> test_companion_loss_discards_synchronous_capture ~during_screenshot:true);
+      test_case "synchronous companion loss blocks later capture dispatch" `Quick
+        (fun () -> test_companion_loss_discards_synchronous_capture ~during_screenshot:false);
       test_case "private work waits for public extension settlement" `Quick test_private_requires_settled_public_input;
       test_case "original session and CDP target are pinned" `Quick test_private_original_session_and_tab;
       test_case "private operations exclude page observations" `Quick test_private_read_exclusion;

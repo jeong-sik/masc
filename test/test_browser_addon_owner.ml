@@ -9,14 +9,14 @@ let id = ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000001")
 let client = {B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi}
 let receipt = function
   | W.Receipt -> true
-  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _|Service_refusal _ -> false
+  | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Issue_result _|Service_refusal _ -> false
 let pre_effect = function
   | W.Service_refusal {disposition=W.Not_started;_} -> true
   | W.Service_refusal {disposition=W.Outcome_unknown;_}
-  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false
+  | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false
 let command = function
   | W.Poll_result {command=Some command;_} -> command
-  | W.Poll_result {command=None;_}|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _|Service_refusal _ -> fail "expected dispatched command"
+  | W.Poll_result {command=None;_}|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _|Service_refusal _ -> fail "expected dispatched command"
 let scenario () = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () -> Eio.Switch.run (fun sw ->
@@ -46,7 +46,7 @@ let scenario () = Eio_main.run (fun env ->
       (match Eio.Promise.await_exn pending with
        | W.Issue_result (Ok (B.Answered actual)) -> actual=payload
        | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-       | W.Issue_result (Error _)|Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Service_refusal _ -> false);
+       | W.Issue_result (Error _)|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Service_refusal _ -> false);
     check bool "identical result retry is idempotent" true
       (receipt (send (W.Deliver {client_id=id;id=issued.id;payload})));
     check bool "changed retry is refused" true
@@ -78,6 +78,8 @@ let scenario () = Eio_main.run (fun env ->
     check bool "unattached Chrome refuses before dispatch" true
       (pre_effect (send (W.Issue {route=B.Stagehand_route;verb=B.Session_status;
         actor=Some "keeper";timeout_sec=2.;only_if_idle=false})));
+    check bool "companion cannot attach without the owned Chrome backend" true
+      (Result.is_error (Owner.attach_extensions owner (fun _ -> fail "unattached companion ran")));
     ok (Owner.attach_stagehand owner ~models:true
       ~execute:(fun ~actor verb ->
         incr chrome_calls;chrome_actors:=actor:: !chrome_actors;
@@ -92,6 +94,24 @@ let scenario () = Eio_main.run (fun env ->
       (Result.is_error (Owner.attach_stagehand owner ~models:true
         ~execute:(fun ~actor:_ _ -> fail "replacement must not run")
         ~session:(fun () -> B.Browser_open) ~cleanup:(fun () -> fail "replacement must not close")));
+    let extension_entered,enter_extension=Eio.Promise.create ()
+    and extension_wait,_=Eio.Promise.create () in
+    let extension_calls=ref 0 and extension_cancelled=ref false in
+    ok (Owner.attach_extensions owner (fun _ ->
+      incr extension_calls; Eio.Promise.resolve enter_extension ();
+      Fun.protect ~finally:(fun () -> extension_cancelled:=true)
+        (fun () -> Eio.Promise.await extension_wait)));
+    check bool "a second companion cannot replace the owner" true
+      (Result.is_error (Owner.attach_extensions owner (fun _ -> fail "replacement companion ran")));
+    let extension=W.Extension (Masc.Browser_extension_protocol.Release incarnation) in
+    check bool "wrong incarnation cannot reach the private companion" true
+      (pre_effect (Owner.dispatch owner {W.incarnation=other_incarnation;command=extension}));
+    let extension_pending=Eio.Fiber.fork_promise ~sw (fun () -> send extension) in
+    Eio.Promise.await extension_entered;
+    check int "private extension executes once" 1 !extension_calls;
+    check bool "private extension wait does not hold owner admission" true
+      (match send W.Snapshot with W.Snapshot_result _ -> true
+       | Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _ -> false);
     let owned=Owner.snapshot owner |> Yojson.Safe.Util.member "owned_backends" |> Masc.Browser_addon_inventory.owned_of_json |> ok in
     check bool "ready backend is visible without inventing an open session" true
       (let automation,chrome=owned in automation.registered && chrome.registered
@@ -119,6 +139,14 @@ let scenario () = Eio_main.run (fun env ->
       (pre_effect (send (W.Issue {route=B.Automation_route;verb=B.Session_status;actor=None;timeout_sec=2.;only_if_idle=false})));
     check bool "retirement fences Chrome before cleanup" true
       (pre_effect (send (W.Issue {route=B.Stagehand_route;verb=B.Session_status;actor=None;timeout_sec=2.;only_if_idle=false})));
+    check bool "retirement revokes private extension admission" true (pre_effect (send extension));
+    check bool "in-flight private extension outcome remains unknown" true
+      (match Eio.Promise.await_exn extension_pending with
+       | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
+       | Service_refusal {disposition=W.Not_started;_}
+       | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+    check bool "retirement joins private extension cancellation" true !extension_cancelled;
+    check int "private extension is never replayed" 1 !extension_calls;
     check bool "retirement removes both registry callbacks" true
       (B.inventory_observation B.Lane_name.Automation |> fun automation ->
         let chrome=B.inventory_observation B.Lane_name.Stagehand in
@@ -140,7 +168,7 @@ let scenario () = Eio_main.run (fun env ->
       (match Eio.Promise.await_exn chrome_pending with
        | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
        | W.Service_refusal {disposition=W.Not_started;_}
-       | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+       | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
     check int "Chrome input was not replayed" 2 !chrome_calls;
     let result = Eio.Promise.await_exn pending in
     check bool "retirement does not prove no effect" true
@@ -150,7 +178,7 @@ let scenario () = Eio_main.run (fun env ->
            payload=`Assoc ["ok",`Bool false;"error",`String "client_disconnected"]
        | W.Service_refusal {disposition=W.Not_started;_}
        | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-       | W.Issue_result (Error _)|Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt -> false);
+       | W.Issue_result (Error _)|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt -> false);
     check bool "late result cannot attach to retired owner" true
       (pre_effect (send (W.Deliver {client_id=id;id=issued.id;payload})));
     check bool "retired owner cannot register again" true

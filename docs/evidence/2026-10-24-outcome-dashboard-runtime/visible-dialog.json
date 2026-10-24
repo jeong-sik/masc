@@ -1,0 +1,5 @@
+{
+  "url": "http://127.0.0.1:59235/dashboard/#overview",
+  "captured_at": "2026-10-24T13:20:37.188Z",
+  "text": "🤖\nGOAL-CANARY-OPERATOR\n실행 중\n프로세스 활성\n마지막 확인: 6분 전\n새로고침\n완전 삭제\n닫기\n세션 활동 리포트\n활동 시간\n221분\n1\n완료\n4\n메시지\n4시간 전\n\nNew quest: 독립 산술 결과와 Task 승인 지표 확인\n\n12분 전\n\ngoal-canary-operator bound the namespace session\n\n태스크 이력\nDONE\n독립 산술 결과와 Task 승인 지표 확인\n4시간 전\n활동 추적\n통합 타임라인\n작업 필터\n할당된 작업\ntask-001\n독립 산술 결과와 Task 승인 지표 확인\n완료\n최근 활동\n[2026-10-24 13:08] goal-canary-operator: goal-canary-operator bound the namespace session\n[2026-10-24 09:40] goal-canary-operator: Started task-001\n[2026-10-24 09:40] goal-canary-operator: Claimed task-001\n[2026-10-24 09:40] goal-canary-operator: New quest: 독립 산술 결과와 Task 승인 지표 확인\n실시간 활동 스트림\n활동 타임라인 (22)\n기억\n관측된 작업 성과 (시작일 기준 7일)\n\nTask 생명주기 기록입니다. 외부 수용 여부는 이 통계에서 미관측이며, Goal의 사람 확인은 별도입니다.\n\n완료율\n100%\n작업 승인률\n100%\n인계 관련 작업 성공률\n미관측\n작업 이력 (1)\n직접 멘션\n전송하기"
+}

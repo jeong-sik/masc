@@ -1,0 +1,155 @@
+{
+  "run": 40101567388,
+  "head": "2c3a9f701afd57cd0f62deb853325cb0197e0432",
+  "case17_path": "case17-critical.json",
+  "fixed_test_features": {
+    "provider_7_rows_x_2_serializer_stream_settings_one_case": {
+      "wire_assertions": 14,
+      "roundtrip_assertions": 14,
+      "semantics": "OpenAI chat/responses, Anthropic, Kimi, Gemini, Ollama, Glm; stream=false,true; wire100/requested200/effective100 clamp and canonical receipt. Serializer-only provider.invalid fixture, not external HTTP/SSE calls."
+    },
+    "optional_omission_and_required_fallback_one_case": {
+      "optional_absent": 2,
+      "required_present": 2,
+      "roundtrip": 4
+    },
+    "native4": {
+      "actual_cases": [
+        {
+          "status": "OK",
+          "group": "scope and occurrence",
+          "case": 0,
+          "title_in_log": "prior identical result.",
+          "runner_line": 2003
+        },
+        {
+          "status": "OK",
+          "group": "scope and occurrence",
+          "case": 1,
+          "title_in_log": "repeated invocation.",
+          "runner_line": 2006
+        },
+        {
+          "status": "OK",
+          "group": "scope and occurrence",
+          "case": 2,
+          "title_in_log": "exact transcript and payload.",
+          "runner_line": 2009
+        },
+        {
+          "status": "OK",
+          "group": "scope and occurrence",
+          "case": 3,
+          "title_in_log": "provider-only projection.",
+          "runner_line": 2011
+        }
+      ],
+      "semantics": [
+        "old identical vs current occurrence",
+        "one vs two repeated invocations",
+        "exact transcript and payload refusal",
+        "provider-only no-settled-result projection"
+      ],
+      "actual_assertions": [
+        {
+          "line": 2001,
+          "assertion": "prior identical receipt cannot close current checkpoint gap"
+        },
+        {
+          "line": 2002,
+          "assertion": "current occurrence closes this call"
+        },
+        {
+          "line": 2004,
+          "assertion": "one occurrence for two canonical invocations remains fenced"
+        },
+        {
+          "line": 2005,
+          "assertion": "both current occurrences are retained"
+        },
+        {
+          "line": 2007,
+          "assertion": "receipt in an unrelated transcript does not authorize fallback"
+        },
+        {
+          "line": 2008,
+          "assertion": "different result body does not satisfy journal receipt"
+        },
+        {
+          "line": 2010,
+          "assertion": "provider-only media projection has no settled results to lose"
+        }
+      ]
+    },
+    "reviewer_lookup3": {
+      "actual_cases": [
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 0,
+          "title_in_log": "failed lookup handoff uses the f...",
+          "runner_line": 2076
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 1,
+          "title_in_log": "oversized lookup handoff retains...",
+          "runner_line": 2094
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 2,
+          "title_in_log": "lookup evidence survives failove...",
+          "runner_line": 2181
+        }
+      ],
+      "failed_envelope_actual_counts": {
+        "one_supplied_failed_lookup": 3,
+        "slot_order": 3,
+        "large_typed_refusal": 2,
+        "small_exact_error_envelope": 1
+      },
+      "oversized_actual_counts": {
+        "one_lookup_dispatch": 1,
+        "next_slot": 1,
+        "typed_inline_refusal": 1
+      },
+      "two_review_invocations_actual_counts": {
+        "fresh_lookup": 2,
+        "slot_order": 2,
+        "new_read_cannot_replace_old_view": 2,
+        "invocation_observations": 6
+      },
+      "semantics": "Injected reviewers with real typed Tool_bridge fixture projection:3 failure envelopes; oversized completed result refusal;3 slots and2 lookups per review, two separate reviews reset prior observations. No external LLM or transport claim."
+    }
+  },
+  "source_files": [
+    {
+      "path": "source/test_anti_rationalization_empty_reject.at-2c3a9f7.ml",
+      "bytes": 43890,
+      "sha256": "277228998bb5b9024e4aa791ca03e143596d1fb41e016b4864c0e6d375649d60",
+      "git_source_head": "2c3a9f701afd57cd0f62deb853325cb0197e0432"
+    },
+    {
+      "path": "source/test_keeper_native_result_retention.at-2c3a9f7.ml",
+      "bytes": 2530,
+      "sha256": "0bb9212f1badb40634138c399a0ccbfae439b9a3af7b930a9a5aee6bfe18a38f",
+      "git_source_head": "2c3a9f701afd57cd0f62deb853325cb0197e0432"
+    },
+    {
+      "path": "source/test_output_token_receipt.at-2c3a9f7.ml",
+      "bytes": 21670,
+      "sha256": "fc2e2891f9732eb345b6909984ae6f5c81f35f9d8d83de1057fd2df0091aacee",
+      "git_source_head": "2c3a9f701afd57cd0f62deb853325cb0197e0432"
+    },
+    {
+      "path": "source/test_verifier_review_worker.at-2c3a9f7.ml",
+      "bytes": 62181,
+      "sha256": "6ce0b54dc1f259c9052d3b525327d19e419766538339e91225ed01885e61fa90",
+      "git_source_head": "2c3a9f701afd57cd0f62deb853325cb0197e0432"
+    }
+  ],
+  "counting_scope": "Critical subfixtures are contained within the146 actual cases, not extra PASS. Source and actual emitted assertions interpreted together; source alone is not execution."
+}

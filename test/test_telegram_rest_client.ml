@@ -79,10 +79,14 @@ let test_failures_keep_typed_directives () =
   check string "error has only typed directives"
     "telegram API 429 (HTTP 429, retry_after=17, migrate_to_chat_id=-1001234567890)" rendered;
   List.iter (fun body -> match R.parse_updates_response ~status:429 ~body with
-    | Error (R.Invalid_response _) -> () | _ -> fail "bad retry directive admitted")
+    | Error (R.Invalid_response "retry_after") -> () | _ -> fail "bad retry directive admitted")
     [ {|{"ok":false,"error_code":429,"parameters":{"retry_after":-1}}|};
-      {|{"ok":false,"error_code":429,"parameters":{"retry_after":"17"}}|};
-      {|{"ok":false,"error_code":429,"parameters":{"retry_after":1,"retry_after":2}}|} ]
+      {|{"ok":false,"error_code":429,"parameters":{"retry_after":"17"}}|} ];
+  (* A duplicate document is rejected by the shared JSON boundary before its
+     envelope can authorize any API directive; only the HTTP status is trusted. *)
+  (match R.parse_updates_response ~status:429
+    ~body:{|{"ok":false,"error_code":429,"parameters":{"retry_after":1,"retry_after":2}}|} with
+   | Error (R.Http_status 429) -> () | _ -> fail "duplicate retry directive admitted")
 let () = run "Telegram Bot API"
   ["protocol",[test_case "poll coordinates before effects" `Quick test_poll_coordinates;
     test_case "credential path identity" `Quick test_credential_is_one_segment;

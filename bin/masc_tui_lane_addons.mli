@@ -15,6 +15,7 @@ type host_issue =
   | Host_exact_record_failed of { request_id : string; detail : string }
   | Host_ask_record_failed of { request_id : string; detail : string }
   | Host_no_exact_runner
+  | Host_no_web_search_runner
 type host_requests = {
   hr_cycles : int;
   hr_waiting : (string * host_wait) list;

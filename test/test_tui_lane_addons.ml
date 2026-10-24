@@ -181,7 +181,8 @@ let every_host_issue_reads_back () =
       UI.Host_exact_record_failed { request_id = "r"; detail = "disk" };
       R.Ask_record_failed { request_id = "r"; detail = "disk" },
       UI.Host_ask_record_failed { request_id = "r"; detail = "disk" };
-      R.No_exact_runner, UI.Host_no_exact_runner ]
+      R.No_exact_runner, UI.Host_no_exact_runner;
+      R.No_web_search_runner, UI.Host_no_web_search_runner ]
 
 (* The jump reads the inventory fresh and lands on the live worker; a
    retained run is not where the reveal appears. *)

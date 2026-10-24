@@ -165,7 +165,7 @@ let test_capture_save_load_round_trip () =
       snapshot.Preset.assignments;
     check (list string) "the exact-output lanes are captured"
       [ "librarian_exact"; "hitl_auto_judge" ]
-      (List.map (fun (l : Preset.lane) -> (Runtime_schema.exact_lane_key l.owner)) snapshot.Preset.lanes);
+      (List.map (fun (l : Preset.lane) -> (Preset.lane_key l.owner)) snapshot.Preset.lanes);
     or_fail (Preset.save ~base_path snapshot);
     let loaded = or_fail (Preset.load ~base_path "morning") in
     check string "description survives" "as of 09:00" loaded.Preset.description;
@@ -593,13 +593,13 @@ let test_runtime_text_transform () =
     Preset.runtime_text_with
       ~current_assignments:[ "routingtest", "openai.gpt"; "budgettest", "openai.gpt" ]
       ~current_lanes:
-        [ { Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian; enabled = true; slots = [ "openai.gpt"; "runpod_mtp.qwen" ]; cli_slots = []; max_output_tokens = None; thinking = None }
-        ; { Preset.owner = Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge; enabled = true; slots = [ "openai.gpt" ]; cli_slots = []; max_output_tokens = None; thinking = None }
+        [ { Preset.owner = Preset.Current_lane (Runtime_schema.Builtin Standalone_lane.Librarian); enabled = true; slots = [ "openai.gpt"; "runpod_mtp.qwen" ]; cli_slots = []; max_output_tokens = Preset.Recorded None; thinking = Preset.Recorded None }
+        ; { Preset.owner = Preset.Current_lane (Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge); enabled = true; slots = [ "openai.gpt" ]; cli_slots = []; max_output_tokens = Preset.Recorded None; thinking = Preset.Recorded None }
         ]
       ~assignments:[ "routingtest", "runpod_mtp.qwen" ]
       ~lanes:
-        [ { Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian; enabled = true; slots = [ "runpod_mtp.qwen" ]; cli_slots = []; max_output_tokens = None; thinking = None }
-        ; { Preset.owner = Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge; enabled = true; slots = [ "openai.gpt" ]; cli_slots = []; max_output_tokens = None; thinking = None }
+        [ { Preset.owner = Preset.Current_lane (Runtime_schema.Builtin Standalone_lane.Librarian); enabled = true; slots = [ "runpod_mtp.qwen" ]; cli_slots = []; max_output_tokens = Preset.Recorded None; thinking = Preset.Recorded None }
+        ; { Preset.owner = Preset.Current_lane (Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge); enabled = true; slots = [ "openai.gpt" ]; cli_slots = []; max_output_tokens = Preset.Recorded None; thinking = Preset.Recorded None }
         ]
       runtime_fixture
   in
@@ -640,17 +640,17 @@ let test_runtime_text_carries_addon_lanes () =
   in
   check bool "capture includes the add-on lane" true
     (List.exists (fun (lane : Preset.lane) ->
-         Runtime_schema.equal_exact_lane_owner lane.Preset.owner author) captured);
+         lane.Preset.owner = Preset.Current_lane author) captured);
   let text =
     Preset.runtime_text_with ~current_assignments:[] ~current_lanes:captured ~assignments:[]
-      ~lanes:[ { Preset.owner = author; enabled = false; slots = [ "runpod_mtp.qwen" ]; cli_slots = []; max_output_tokens = None; thinking = None } ]
+      ~lanes:[ { Preset.owner = Preset.Current_lane author; enabled = false; slots = [ "runpod_mtp.qwen" ]; cli_slots = []; max_output_tokens = Preset.Recorded None; thinking = Preset.Recorded None } ]
       source
   in
   match Preset.runtime_of_text text with
   | Error message -> fail ("restored runtime.toml does not parse: " ^ message)
   | Ok (_, lanes) ->
     (match List.find_opt (fun (lane : Preset.lane) ->
-         Runtime_schema.equal_exact_lane_owner lane.Preset.owner author) lanes with
+         lane.Preset.owner = Preset.Current_lane author) lanes with
      | Some lane ->
        check (list string) (declaration_id ^ ": the add-on table takes the preset's slots")
          [ "runpod_mtp.qwen" ] lane.Preset.slots;
@@ -660,18 +660,22 @@ let test_runtime_text_carries_addon_lanes () =
       "team.quiz", "[runtime.addon_exact_lanes.\"team.quiz\".author]" ]
 ;;
 
-(* The lane's two optional request settings are part of what a preset carries
-   (#38216): present in the preset they are written into the lane table, absent
-   in the preset they are removed from it, and the lane notes around them stay. *)
+(* A recorded request setting restores its value or explicit absence. A setting
+   the snapshot did not record is left alone, and surrounding lane notes stay. *)
+let recorded_value = function
+  | Preset.Recorded value -> value
+  | Preset.Unrecorded -> Alcotest.fail "expected a recorded declaration"
+;;
+
 let test_runtime_text_carries_the_lane_request_settings () =
   let open Alcotest in
   let lane ~max_output_tokens ~thinking =
-    { Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian
+    { Preset.owner = Preset.Current_lane (Runtime_schema.Builtin Standalone_lane.Librarian)
     ; enabled = true
     ; slots = [ "openai.gpt"; "runpod_mtp.qwen" ]
     ; cli_slots = []
-    ; max_output_tokens
-    ; thinking
+    ; max_output_tokens = Preset.Recorded max_output_tokens
+    ; thinking = Preset.Recorded thinking
     }
   in
   let apply ~current ~wanted content =
@@ -685,7 +689,7 @@ let test_runtime_text_carries_the_lane_request_settings () =
     in
     match Preset.runtime_of_text text with
     | Ok (_, lanes) ->
-      (match List.find_opt (fun (l : Preset.lane) -> l.Preset.owner = Runtime_schema.Builtin Standalone_lane.Librarian) lanes with
+      (match List.find_opt (fun (l : Preset.lane) -> l.Preset.owner = Preset.Current_lane (Runtime_schema.Builtin Standalone_lane.Librarian)) lanes with
        | Some found -> text, found
        | None -> fail "the lane is gone after the edit")
     | Error message -> fail ("edited runtime.toml does not parse: " ^ message)
@@ -694,15 +698,15 @@ let test_runtime_text_carries_the_lane_request_settings () =
   let undeclared = lane ~max_output_tokens:None ~thinking:None in
   (* A lane table that declares neither: the preset's values are added. *)
   let text, found = apply ~current:undeclared ~wanted:declared runtime_fixture in
-  check (option int) "the budget is written" (Some 4096) found.Preset.max_output_tokens;
-  check (option bool) "thinking is written" (Some false) found.Preset.thinking;
+  check (option int) "the budget is written" (Some 4096) (recorded_value found.Preset.max_output_tokens);
+  check (option bool) "thinking is written" (Some false) (recorded_value found.Preset.thinking);
   check bool "the operator note survives" true
     (contains_substring text "# operator note that must survive");
   (* The file holds them, the preset declares none: they are removed, so the
      restored file reads back as the preset captured it. *)
   let text, found = apply ~current:declared ~wanted:undeclared text in
-  check (option int) "the budget is removed" None found.Preset.max_output_tokens;
-  check (option bool) "thinking is removed" None found.Preset.thinking;
+  check (option int) "the budget is removed" None (recorded_value found.Preset.max_output_tokens);
+  check (option bool) "thinking is removed" None (recorded_value found.Preset.thinking);
   check bool "the budget line is gone from the text" false
     (contains_substring text "max_output_tokens");
   (* A different value replaces the old one. *)
@@ -711,8 +715,8 @@ let test_runtime_text_carries_the_lane_request_settings () =
     apply ~current:declared
       ~wanted:(lane ~max_output_tokens:(Some 8192) ~thinking:(Some true)) text
   in
-  check (option int) "the budget is replaced" (Some 8192) found.Preset.max_output_tokens;
-  check (option bool) "thinking is replaced" (Some true) found.Preset.thinking;
+  check (option int) "the budget is replaced" (Some 8192) (recorded_value found.Preset.max_output_tokens);
+  check (option bool) "thinking is replaced" (Some true) (recorded_value found.Preset.thinking);
   (* A setting that already holds is not rewritten: the integer writer replaces
      the whole line, so rewriting an unchanged budget would drop its comment. *)
   let commented =
@@ -733,31 +737,47 @@ let test_runtime_text_carries_the_lane_request_settings () =
       (Toml_line_editor.edit_table_bool commented
          ~path:"runtime.exact_output_lanes.librarian_exact" ~key:"thinking" ~value:false)
   in
-  check (option int) "the unchanged budget still reads 4096" (Some 4096) found.Preset.max_output_tokens;
-  check (option bool) "the changed flag is rewritten" (Some true) found.Preset.thinking;
+  check (option int) "the unchanged budget still reads 4096" (Some 4096) (recorded_value found.Preset.max_output_tokens);
+  check (option bool) "the changed flag is rewritten" (Some true) (recorded_value found.Preset.thinking);
   check bool "the unchanged budget keeps its trailing comment" true
     (contains_substring text "max_output_tokens = 4096 # provider cap, do not raise")
 ;;
 
+let with_runtime_catalog f =
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  let previous_runtime = Runtime.For_testing.snapshot () in
+  let catalog = or_fail (Llm_provider.Model_catalog.of_toml_string ~source:"preset activity fixture"
+    "[[models]]\nid_prefix = \"qwen\"\nprovider_name = \"runpod_mtp\"\nbase = \"openai_chat\"\nmax_context_tokens = 128000\n\n[[models]]\nid_prefix = \"gpt\"\nprovider_name = \"openai\"\nbase = \"openai_chat\"\nmax_context_tokens = 64000\n") in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore previous_runtime;
+    match previous_catalog with
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+    | None -> Llm_provider.Model_catalog.clear_global ()) @@ fun () ->
+  Llm_provider.Model_catalog.set_global catalog;
+  f ()
+;;
+
 let test_saved_lane_request_settings_shape () =
+  with_runtime_catalog @@ fun () ->
   with_base (fun ~base_path ~keepers:_ ~config ->
     let path = Filename.concat config "runtime.toml" in
     let librarian = "runtime.exact_output_lanes.librarian_exact" in
+    let fixture = runtime_fixture ^ "\n[runpod_mtp.qwen]\n\n[openai.gpt]\n" in
     write_file path
       (Toml_line_editor.edit_table_bool
-         (Toml_line_editor.edit_table_int runtime_fixture ~path:librarian
+         (Toml_line_editor.edit_table_int fixture ~path:librarian
             ~key:"max_output_tokens" ~value:4096)
          ~path:librarian ~key:"thinking" ~value:false);
     let saved = or_fail (Preset.capture ~base_path ~name:"settings" ~description:"") in
     let lane_of (snapshot : Preset.snapshot) id =
-      List.find (fun (l : Preset.lane) -> Runtime_schema.exact_lane_key l.Preset.owner = id) snapshot.Preset.lanes
+      List.find (fun (l : Preset.lane) -> Preset.lane_key l.Preset.owner = id) snapshot.Preset.lanes
     in
     Alcotest.(check (option int)) "capture reads the budget" (Some 4096)
-      (lane_of saved "librarian_exact").Preset.max_output_tokens;
+      (recorded_value (lane_of saved "librarian_exact").Preset.max_output_tokens);
     Alcotest.(check (option bool)) "capture reads thinking" (Some false)
-      (lane_of saved "librarian_exact").Preset.thinking;
+      (recorded_value (lane_of saved "librarian_exact").Preset.thinking);
     Alcotest.(check (option int)) "a lane that declares none captures none" None
-      (lane_of saved "hitl_auto_judge").Preset.max_output_tokens;
+      (recorded_value (lane_of saved "hitl_auto_judge").Preset.max_output_tokens);
     or_fail (Preset.save ~base_path saved);
     let loaded = or_fail (Preset.load ~base_path "settings") in
     Alcotest.(check bool) "the lanes read back as saved" true
@@ -779,10 +799,8 @@ let test_saved_lane_request_settings_shape () =
       (List.assoc_opt "max_output_tokens" (saved_lane "hitl_auto_judge") = Some `Null);
     Alcotest.(check bool) "an undeclared thinking flag is written as null" true
       (List.assoc_opt "thinking" (saved_lane "hitl_auto_judge") = Some `Null);
-    (* A preset saved before these were kept has no keys. Restoring it would
-       have to guess between keeping and removing what the file declares, so it
-       is refused with what to do. A value of another type, or a budget that is
-       not positive, is refused rather than coerced. *)
+    (* Missing settings preserve current declarations. Null still clears them;
+       malformed present values remain errors. *)
     let runtime_json = Filename.concat (Preset.source_directory ~base_path saved) "runtime.json" in
     let original = Yojson.Safe.from_file runtime_json in
     let with_lane_fields change =
@@ -800,13 +818,45 @@ let test_saved_lane_request_settings_shape () =
     List.iter (fun key ->
       Yojson.Safe.to_file runtime_json
         (with_lane_fields (fun fields -> List.remove_assoc key fields));
-      match Preset.load ~base_path "settings" with
-      | Error detail ->
-        Alcotest.(check bool) ("a preset without " ^ key ^ " is refused naming it") true
-          (contains_substring detail key);
-        Alcotest.(check bool) "and the reason says how to get past it" true
-          (contains_substring detail "save the current state as a new preset")
-      | Ok _ -> Alcotest.failf "a preset without %s was accepted" key)
+      let loaded = or_fail (Preset.load ~base_path "settings") in
+      let lane = lane_of loaded "librarian_exact" in
+      Alcotest.(check bool) ("missing " ^ key ^ " is unrecorded") true
+        (if key = "max_output_tokens" then lane.max_output_tokens = Preset.Unrecorded
+         else lane.thinking = Preset.Unrecorded);
+      (* Listing, inspection and applying an old save all use the same reader. *)
+      Alcotest.(check bool) "the preset is selectable" true
+        (List.exists (fun (row : Preset.manifest) -> row.preset_name = "settings")
+          (Preset.list ~base_path).presets);
+      let original_bytes = Fs_compat.load_file runtime_json in
+      write_file path
+        (Toml_line_editor.edit_table_bool
+          (Toml_line_editor.edit_table_int fixture ~path:librarian
+             ~key:"max_output_tokens" ~value:8192)
+          ~path:librarian ~key:"thinking" ~value:true);
+      let report = or_fail (Preset.restore ~base_path "settings") in
+      (match report.runtime_result with
+       | Preset.Runtime_committed _ -> ()
+       | Preset.Runtime_unchanged -> Alcotest.fail "the recorded sibling drift must commit"
+       | Preset.Runtime_failed detail -> Alcotest.fail detail);
+      Alcotest.(check bool) "restore reports the preserved setting" true
+        (List.mem ("librarian_exact", key) report.preserved_lane_settings);
+      let current = or_fail (Preset.capture ~base_path ~name:"after" ~description:"") in
+      let current_lane = lane_of current "librarian_exact" in
+      Alcotest.(check bool) "missing setting keeps its current declaration" true
+        (if key = "max_output_tokens" then current_lane.max_output_tokens = Preset.Recorded (Some 8192)
+         else current_lane.thinking = Preset.Recorded (Some true));
+      Alcotest.(check bool) "recorded sibling restores its saved declaration" true
+        (if key = "max_output_tokens" then current_lane.thinking = Preset.Recorded (Some false)
+         else current_lane.max_output_tokens = Preset.Recorded (Some 4096));
+      Alcotest.(check bool) "restored saved intent matches durable settings" true
+        (or_fail (Preset.matches_saved_settings ~base_path loaded));
+      Alcotest.(check string) "restore leaves the original preset bytes intact"
+        original_bytes (Fs_compat.load_file runtime_json);
+      (* Re-saving a loaded snapshot must not turn 'not recorded' into null. *)
+      or_fail (Preset.save ~base_path loaded);
+      let reloaded = or_fail (Preset.load ~base_path "settings") in
+      Alcotest.(check bool) "save/load keeps the snapshot's intent" true
+        (reloaded.lanes = loaded.lanes))
       [ "max_output_tokens"; "thinking" ];
     List.iter (fun (label, key, bad) ->
       Yojson.Safe.to_file runtime_json
@@ -820,6 +870,32 @@ let test_saved_lane_request_settings_shape () =
       ; "a zero budget", "max_output_tokens", `Int 0
       ; "a negative budget", "max_output_tokens", `Int (-1)
       ; "a string thinking flag", "thinking", `String "false" ])
+;;
+
+let test_unavailable_saved_lane_is_visible_and_skipped () =
+  with_base (fun ~base_path ~keepers:_ ~config ->
+    let snapshot = or_fail (Preset.capture ~base_path ~name:"with-unavailable" ~description:"") in
+    let unavailable =
+      { Preset.owner = Preset.Unavailable_lane "not_in_this_runtime"
+      ; enabled = true; slots = ["gone.model"]; cli_slots = []
+      ; max_output_tokens = Preset.Unrecorded; thinking = Preset.Recorded (Some false) } in
+    let snapshot = { snapshot with lanes = unavailable :: snapshot.lanes } in
+    or_fail (Preset.save ~base_path snapshot);
+    let loaded = or_fail (Preset.load ~base_path snapshot.name) in
+    Alcotest.(check bool) "unavailable contents survive save/load" true
+      (loaded.lanes = snapshot.lanes);
+    let before = Fs_compat.load_file (Filename.concat config "runtime.toml") in
+    let report = or_fail (Preset.restore ~base_path snapshot.name) in
+    Alcotest.(check bool) "unavailable lane is reported" true
+      (List.mem_assoc "not_in_this_runtime" report.skipped_lanes);
+    (match report.runtime_result with
+     | Preset.Runtime_unchanged -> ()
+     | Preset.Runtime_committed _ -> Alcotest.fail "unavailable lane must not trigger a write"
+     | Preset.Runtime_failed detail -> Alcotest.fail detail);
+    Alcotest.(check string) "runtime declarations remain byte-identical" before
+      (Fs_compat.load_file (Filename.concat config "runtime.toml"));
+    Alcotest.(check bool) "supported saved settings still match" true
+      (or_fail (Preset.matches_saved_settings ~base_path loaded)))
 ;;
 
 let test_saved_lane_activity_shape () =
@@ -846,7 +922,7 @@ let test_saved_lane_activity_shape () =
      | Ok legacy ->
        Alcotest.(check bool) "a legacy preset lists lanes" true (legacy.Preset.lanes <> []);
        List.iter (fun (lane : Preset.lane) ->
-         Alcotest.(check bool) ("legacy lane " ^ (Runtime_schema.exact_lane_key lane.owner) ^ " is enabled") true lane.enabled)
+         Alcotest.(check bool) ("legacy lane " ^ (Preset.lane_key lane.owner) ^ " is enabled") true lane.enabled)
          legacy.Preset.lanes
      | Error detail -> Alcotest.failf "a legacy preset without activity must load: %s" detail);
     (* A present value that is not a boolean is still refused, not coerced. *)
@@ -855,20 +931,6 @@ let test_saved_lane_activity_shape () =
     | Error detail -> Alcotest.(check bool) "mistyped activity is explicitly refused" true
         (contains_substring detail "enabled must be a boolean")
     | Ok _ -> Alcotest.fail "mistyped activity was coerced")
-;;
-
-let with_runtime_catalog f =
-  let previous_catalog = Llm_provider.Model_catalog.global () in
-  let previous_runtime = Runtime.For_testing.snapshot () in
-  let catalog = or_fail (Llm_provider.Model_catalog.of_toml_string ~source:"preset activity fixture"
-    "[[models]]\nid_prefix = \"qwen\"\nprovider_name = \"runpod_mtp\"\nbase = \"openai_chat\"\nmax_context_tokens = 128000\n\n[[models]]\nid_prefix = \"gpt\"\nprovider_name = \"openai\"\nbase = \"openai_chat\"\nmax_context_tokens = 64000\n") in
-  Fun.protect ~finally:(fun () ->
-    Runtime.For_testing.restore previous_runtime;
-    match previous_catalog with
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-    | None -> Llm_provider.Model_catalog.clear_global ()) @@ fun () ->
-  Llm_provider.Model_catalog.set_global catalog;
-  f ()
 ;;
 
 let test_restore_preserves_lane_activity_and_autosave () =
@@ -895,7 +957,7 @@ let test_restore_preserves_lane_activity_and_autosave () =
       let saved = or_fail (Preset.capture ~base_path ~name:"activity" ~description:"") in
       or_fail (Preset.save ~base_path saved);
       let loaded = or_fail (Preset.load ~base_path "activity") in
-      let librarian lanes = List.find (fun (lane : Preset.lane) -> (Runtime_schema.exact_lane_key lane.owner) = "librarian_exact") lanes in
+      let librarian lanes = List.find (fun (lane : Preset.lane) -> (Preset.lane_key lane.owner) = "librarian_exact") lanes in
       check bool "saved activity survives preset JSON" saved_enabled (librarian loaded.lanes).enabled;
       set_activity (not saved_enabled);
       check bool "same candidates with changed activity are a drift" false
@@ -1248,6 +1310,8 @@ let () =
             test_unreadable_default_does_not_block_preset_operations
         ; Alcotest.test_case "missing baseline is unknown; corrupt hashes are refused" `Quick test_default_baseline_missing_or_invalid
         ; Alcotest.test_case "legacy lane activity loads; mistyped activity is refused" `Quick test_saved_lane_activity_shape
+        ; Alcotest.test_case "unavailable saved lane stays visible without mutation" `Quick
+            test_unavailable_saved_lane_is_visible_and_skipped
         ; Alcotest.test_case "activity restore and autosave roundtrip" `Quick test_restore_preserves_lane_activity_and_autosave
         ; Alcotest.test_case "capture, save, load, list round trip" `Quick
             test_capture_save_load_round_trip
@@ -1272,7 +1336,7 @@ let () =
             test_runtime_text_carries_addon_lanes
         ; Alcotest.test_case "the runtime.toml text carries the lane request settings" `Quick
             test_runtime_text_carries_the_lane_request_settings
-        ; Alcotest.test_case "a saved lane keeps its request settings; older presets declare none" `Quick
+        ; Alcotest.test_case "saved lane settings restore; unrecorded settings preserve current values" `Quick
             test_saved_lane_request_settings_shape
         ; Alcotest.test_case "an override written against an older default still restores" `Quick
             test_override_written_against_an_older_default_still_restores

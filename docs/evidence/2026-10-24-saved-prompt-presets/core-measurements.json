@@ -1,0 +1,25 @@
+{
+  "source_base": "fd75478aa3146c4e3910773ad00336dd0adba472",
+  "candidate_files_sha256": {
+    "lib/prompt_preset.ml": "9e4ef093920f813a69951a32abfb05a84901b1177c9ddb1dfee0ef06e754d64c",
+    "lib/prompt_preset.mli": "a82c2088e07f2ee725e96c872589e9db6001eca77a9cd0beab112014664fa003",
+    "test/test_prompt_preset.ml": "1502742a07ea52c1e6c8760831dc62725217df7c56bc8f137d688fc8d11069d4"
+  },
+  "live_before": {
+    "readable": 0,
+    "unreadable": 2
+  },
+  "candidate_copied_data": {
+    "readable": 2,
+    "unreadable": 0,
+    "original_files": 63,
+    "live_original_bytes_unchanged": true
+  },
+  "focused_execution": {
+    "runner": "Native Candidate_preset compiled from changed source and linked with existing dependency artifacts; test file changes only module alias to candidate",
+    "cases_passed": 30,
+    "elapsed_s": 0.214,
+    "whole_server_build": false,
+    "installed_runtime_updated": false
+  }
+}

@@ -178,16 +178,12 @@ function rasterRequest(value) {
 function rasterWindow(svg, raster, natural) {
   const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
   const root = document.documentElement;
-  const original = root.hasAttribute('viewBox')
-    ? root.getAttribute('viewBox').trim().split(/[\s,]+/).map(Number)
-    : [0, 0, natural.width, natural.height];
-  if (original.length !== 4 || !original.every(Number.isFinite)
-      || original[2] <= 0 || original[3] <= 0) {
-    throw new TypeError('SVG viewBox must contain finite coordinates and positive dimensions');
+  const { width, height } = natural;
+  if (![width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+    throw new TypeError('SVG viewport must have finite positive dimensions');
   }
-  const [x, y, width, height] = original;
   const { left, top, right, bottom } = raster.crop;
-  const visible = [x + width * left, y + height * top, width * (right - left), height * (bottom - top)];
+  const visible = [width * left, height * top, width * (right - left), height * (bottom - top)];
   if (!visible.every(Number.isFinite) || visible[2] <= 0 || visible[3] <= 0) {
     throw new TypeError('raster.crop cannot be represented in the SVG coordinate system');
   }
@@ -197,8 +193,9 @@ function rasterWindow(svg, raster, natural) {
   const output = aspect >= raster.width / raster.height
     ? [raster.width, Math.max(1, Math.floor(raster.width / aspect))]
     : [Math.max(1, Math.floor(raster.height * aspect)), raster.height];
-  // Keep the original viewport inside the display window. Changing its viewBox
-  // directly would reflow percentage lengths and nested SVG viewport units.
+  // Crop the rendered viewport, not the source viewBox: their aspect ratios may
+  // differ. Keep the authored viewBox/preserveAspectRatio mapping and percentage
+  // geometry inside the unchanged original viewport.
   const window = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   window.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
   window.setAttribute('viewBox', visible.join(' '));
@@ -207,11 +204,10 @@ function rasterWindow(svg, raster, natural) {
   window.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   document.replaceChild(window, root);
   window.appendChild(root);
-  root.setAttribute('x', String(x));
-  root.setAttribute('y', String(y));
+  root.setAttribute('x', '0');
+  root.setAttribute('y', '0');
   root.setAttribute('width', String(width));
   root.setAttribute('height', String(height));
-  root.setAttribute('viewBox', original.join(' '));
   return new XMLSerializer().serializeToString(document);
 }
 

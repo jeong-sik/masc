@@ -47,7 +47,8 @@ test('normalized crop corners retain original nonzero SVG coordinates and visibl
     '-100 50 400 200');
   const rendered = renderDocument({ format: 'svg', source, maxWidth: 100,
     raster: { width: 80, height: 40, crop: { left: 0.5, top: 0, right: 1, bottom: 1 } } });
-  assert.equal(rootOf(rendered).getAttribute('viewBox'), '100 50 200 200');
+  assert.equal(rootOf(rendered).getAttribute('viewBox'), '200 0 200 200');
+  assert.equal(rootOf(rendered).firstChild.getAttribute('viewBox'), '-100 50 400 200');
   assert.deepEqual(geometry(rendered), [40, 40]);
   assert.deepEqual([rendered.width, rendered.height], [400, 200]);
   assert.deepEqual(firstPixel(rendered.png), [255, 0, 0, 255]);
@@ -60,6 +61,31 @@ test('normalized crop corners retain original nonzero SVG coordinates and visibl
   assert.deepEqual(firstPixel(intrinsic.png), [255, 0, 0, 255]);
 });
 
+test('raster windows retain authored viewport aspect mapping and nonzero viewBox origins', () => {
+  for (const [mode, expected] of [[undefined, [0, 0, 0, 0]],
+    ['none', [0, 0, 255, 255]], ['xMidYMid slice', [255, 0, 0, 255]]]) {
+    const source = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"'
+      + ' viewBox="-50 20 100 100"'
+      + (mode === undefined ? '' : ` preserveAspectRatio="${mode}"`) + '>'
+      + '<rect x="-50" y="20" width="100" height="100" fill="#ff0000"/>'
+      + '<rect x="-50" y="20" width="100" height="25" fill="#0000ff"/></svg>';
+    const request = { format: 'svg', source, maxWidth: 800 };
+    const normal = renderDocument(request);
+    assert.deepEqual(geometry(normal), [400, 200]);
+    assert.deepEqual(firstPixel(normal.png), expected);
+    const full = renderDocument({ ...request, raster: { width: 800, height: 400 } });
+    assert.deepEqual(geometry(full), [800, 400]);
+    assert.deepEqual([full.width, full.height], [400, 200]);
+    assert.deepEqual(firstPixel(full.png), expected);
+    assert.equal(rootOf(full).firstChild.getAttribute('viewBox'), '-50 20 100 100');
+    assert.equal(rootOf(full).firstChild.getAttribute('preserveAspectRatio'), mode ?? '');
+    const cropped = renderDocument({ ...request, raster: { width: 200, height: 200,
+      crop: { left: 0, top: 0, right: 0.5, bottom: 0.25 } } });
+    assert.deepEqual(geometry(cropped), [200, 50]);
+    assert.deepEqual(firstPixel(cropped.png), expected);
+  }
+});
+
 test('cropping preserves percentage lengths in the original SVG viewport', () => {
   const result = renderDocument({ format: 'svg', maxWidth: 800,
     source: markup(400, 200,
@@ -70,7 +96,8 @@ test('cropping preserves percentage lengths in the original SVG viewport', () =>
   assert.deepEqual(geometry(result), [100, 100]);
   assert.deepEqual(firstPixel(result.png), [0, 0, 255, 255]);
   const original = rootOf(result).firstChild;
-  assert.equal(original.getAttribute('viewBox'), '0 0 400 200');
+  assert.equal(original.hasAttribute('viewBox'), false);
+  assert.equal(original.getAttribute('width'), '400');
   assert.equal(original.firstChild.getAttribute('width'), '100%');
 });
 

@@ -34,11 +34,12 @@ Optional `raster` requests a display surface independently of that layout:
 Raster width and height are positive safe integer pixel bounds. Omit `crop`
 for the full diagram; otherwise all four corners must be finite numbers with
 `0 <= left < right <= 1` and `0 <= top < bottom <= 1`. Both source formats
-support explicit raster requests. The helper changes the SVG root viewBox,
-including its original nonzero origin, and rasterizes only that visible window
+support explicit raster requests. Corners refer to the original rendered
+viewport, including any letterboxing or clipping from the authored viewBox and
+`preserveAspectRatio`. The helper rasterizes only that visible window
 at an aspect-preserving size inside the requested bounds. It does not allocate
-a full zoomed bitmap before cropping. Without a viewBox, the original intrinsic
-SVG dimensions define the coordinate system. `renderDocument` retains natural
+a full zoomed bitmap before cropping. The original intrinsic SVG dimensions
+define the viewport coordinate system. `renderDocument` retains natural
 layout width/height metadata while its returned SVG and PNG describe the
 requested window. The original SVG viewport remains nested inside that window,
 so percentage lengths retain their original layout. Without `raster`, static

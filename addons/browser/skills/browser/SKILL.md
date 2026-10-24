@@ -23,6 +23,23 @@ The exported `browser_command` tool runs one command on a browser you name:
 `requiredActions`. Tool arguments contain browser work, never caller identity
 or a worker incarnation. The host supplies those.
 
+When the selected client's transport is `ego_task_space`, start with native
+`page.snapshot` (`args: {"tabId":7,"scope":"viewport","maxChars":12000}`),
+and reuse its refs or observed Ego locators for input. Ego owns locator
+resolution, actionability, automatic scrolling and frame/shadow traversal;
+do not resolve a native target to coordinates or add a separate selector wait.
+After page changes or a stale ref, read a fresh snapshot on the same page.
+
+For actions already determined from that observation, use one
+`page.native_workflow` command with `tabId`, initial `expectedUrl`, `steps`,
+`snapshotScope` and `maxChars`. Each step names a native `method` such as
+`fill`, `click`, `waitForURL` or `waitForSelector`, with that method's fields.
+The SDK executes the known sequence and returns one final snapshot. Split the
+call when intermediate results require a new decision. Retain `completed`
+progress on failure and never replay the sequence after uncertain effects.
+The public BrowserRead/BrowserInteract tools reach this same worker; the
+available `browser-lanes` skill describes their field-level contracts.
+
 Commands use `{"lane":"live","clientId":"<observed UUID>","command":
 {"verb":"page.read","args":{"tabId":7,"maxChars":12000}}}`. Use
 `page.scene`/`page.capture` before coordinate input. `page.interact` retains URL,

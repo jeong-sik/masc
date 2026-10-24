@@ -11,6 +11,13 @@
 `BrowserInteract`의 `expectedUrl`은 안쪽 frame 문서의 URL이다. 자동화 Firefox와
 live BiDi 연결이 처리한다. 확장과 Stagehand는 `framePath`가 있는 요청을 효과 전에
 거절하므로 최상위 문서만 조작할 수 있다.
+
+ego 연결은 `framePath` 를 받지 않는다. `BrowserRead mode=snapshot` 의 viewport
+snapshot 에 iframe 내용이 ref 와 함께 들어 있고, 다른 출처 프레임도 같다. 한 프레임만
+읽으려면 `snapshotScope: "subtree"` 와 그 iframe 의 ref 를 `root` 로 준다.
+조작은 `BrowserInteract` click/fill 의 `target` 으로 한다. 프레임 snapshot 의 ref 는
+그 프레임 안에서 행동하고, role·text 대상은 최상위 문서에 없으면 프레임까지 찾는다.
+`expectedUrl` 은 최상위 페이지의 URL 이다.
 탭 이동, 히스토리, JS 대화상자와 screenshot에는 넣지 않는다. screenshot은
 최상위 viewport를 캡처하므로 스크롤한 프레임의 입력란이 화면 밖일 수 있다.
 

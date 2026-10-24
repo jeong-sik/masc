@@ -41,7 +41,7 @@ description = "text: page text; elements: controls (or explicit CSS matches with
 name = "framePath"
 type = "array"
 items = { type = "string" }
-description = "Text/elements/frames on an automation Firefox or a live BiDi connection, explicit tabId: observed outer-to-inner selectors; preserve CSS escapes. Omit for top-level."
+description = "Text/elements/frames on an automation Firefox or a live BiDi connection, explicit tabId: observed outer-to-inner selectors; preserve CSS escapes. Omit for top-level. An ego connection takes none: its snapshot holds iframe content, and snapshotScope subtree with the iframe's ref reads one frame."
 
 [[params]]
 name = "within"

@@ -1,5 +1,7 @@
 # Audit policy dependency repair
 
+Repair PR #45702 is the sixth layer of Native Stack #45554, above #45608.
+
 Native Stack #45554 previously failed actual focused execution
 [40059615886](https://github.com/jeong-sik/masc/actions/runs/40059615886)
 at combined head `121f51ef10cb1ea48ce9499582cb9925d11ef9c7`, before its six

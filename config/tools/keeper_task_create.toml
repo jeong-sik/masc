@@ -35,7 +35,11 @@ default = 3
 [[params]]
 name = "goal_id"
 type = "string"
-description = "Optional structured goal linkage."
+description = """
+Link to an existing Goal when this task advances that Goal's success criterion, \
+including a single-task contribution. Read Active Goals first and state the \
+unmet criterion and evidence in description/contract. Omit for independent work \
+with no related Goal; never attach unrelated work to increase a count."""
 
 [[params]]
 name = "contract"

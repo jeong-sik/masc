@@ -88,7 +88,11 @@ type held_task_link =
   | Not_served_by_held_task
   | Held_task_link_unreadable
 
-(** Stored criterion and review note travel with the goal, so the model can
+(** Stored criterion, review note and current-revision measurement travel with
+    the goal. A missing measurement is [Ok None]; an unreadable measurement
+    source is [Error] and does not hide the Goal or stop independent work.
+    This is an observation, never verified completion or mutation authority.
+    The model can
     pursue its success conditions without a second read. [summary_criterion]
     and [summary_phase] are options for a caller that states a summary
     directly; {!active_goal_summaries} always fills both from the store.
@@ -101,6 +105,7 @@ type goal_summary = {
   summary_phase : Goal_phase.t option;
   summary_criterion : Goal_store.criterion option;
   summary_review_note : string option;
+  summary_measurement : (Goal_measurement.t option, string) result;
   summary_held_task_link : held_task_link;
 }
 

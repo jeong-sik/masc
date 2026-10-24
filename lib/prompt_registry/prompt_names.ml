@@ -178,6 +178,12 @@ let keeper_world_active_goals_unavailable = "keeper.world.active_goals.unavailab
 let keeper_world_active_goals_heading = "keeper.world.active_goals.heading"
 let keeper_world_active_goals_criterion = "keeper.world.active_goals.criterion"
 let keeper_world_active_goals_review = "keeper.world.active_goals.review"
+let keeper_world_active_goals_measurement_not_recorded =
+  "keeper.world.active_goals.measurement_not_recorded"
+let keeper_world_active_goals_measurement_reported =
+  "keeper.world.active_goals.measurement_reported"
+let keeper_world_active_goals_measurement_unavailable =
+  "keeper.world.active_goals.measurement_unavailable"
 let keeper_world_active_goals_row = "keeper.world.active_goals.row"
 let keeper_world_active_goals_row_untitled = "keeper.world.active_goals.row_untitled"
 

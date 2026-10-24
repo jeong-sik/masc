@@ -21423,6 +21423,11 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
           (* Nothing to reload, now or later this session: the v1 rows are
              the turn. *)
           ()
+      | Error (Keeper_chat_log.Journal_unsupported_version detail) ->
+          add_event state "error"
+            (Printf.sprintf "journal for %s has an unsupported version: %s"
+               (Keeper_chat.compact_request_id journal_id)
+               (Keeper_chat.terminal_safe_text detail))
       | Error (Keeper_chat_log.Journal_unavailable detail) ->
           add_event state "error"
             (Printf.sprintf "journal for %s unavailable: %s"

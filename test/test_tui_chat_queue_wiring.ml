@@ -3949,7 +3949,7 @@ let test_journal_endpoints_preserve_terminal_and_failure_boundaries () =
     check bool "unavailability does not invent termination" false (Tui_types.turn_log_has_ended log);
     check bool "transient failures remain followable" unavailable (follow state = Tui_types.Follow_nothing))
     [Log.Journal_pruned, true; Journal_missing, true; Unknown_operation, true;
-     Journal_unavailable "read failed", true; Events_denied "denied", true;
+     Journal_unsupported_version "stored v1", true; Journal_unavailable "read failed", true; Events_denied "denied", true;
      Events_undecodable "invalid page", true; Events_transport "offline", false]
 ;;
 

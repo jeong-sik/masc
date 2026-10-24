@@ -27,6 +27,7 @@ let read_journal ~base_path ~keeper_name ~operation_id =
   | Ok entries -> entries
   | Error Journal.Journal_missing -> fail "settled operation has no journal"
   | Error (Journal_unreadable detail | Journal_corrupt detail) -> fail detail
+  | Error (Journal_unsupported_version version) -> fail (Journal.version_mismatch_to_string version)
 
 let error_entries entries = List.filter (fun (entry : Journal.journaled_event) ->
   match entry.event with Events.Event_error _ -> true | _ -> false) entries
@@ -705,7 +706,7 @@ let test_record_terminal_error_cuts_a_torn_tail () =
   append 1 (Events.Text_delta {text="partial"; response=Unobserved_scope (None)});
   let path = Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id in
   let oc = open_out_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path in
-  output_string oc "{\"v\":1,\"seq\":2,\"ts\":1.5,\"event\":{\"type\":\"text_del";
+  output_string oc "{\"v\":2,\"seq\":2,\"ts\":1.5,\"event\":{\"type\":\"text_del";
   close_out oc;
   (match Journal.record_terminal_error journal ~ts:2.0 ~message:"cut by restart" with
    | Ok (Journal.Recorded_terminal_error { seq; _ }) ->

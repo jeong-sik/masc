@@ -356,7 +356,7 @@ let test_decode_events_page () =
       (`Assoc
          [ "schema", `String "masc.keeper_chat_events.v2"
          ; "operation_id", `String "x"
-         ; "events", `List [ `Assoc [ "v", `Int 1; "seq", `Int 9 ] ]
+         ; "events", `List [ `Assoc [ "v", `Int 2; "seq", `Int 9 ] ]
          ; "has_more", `Bool false
          ; "next_since_seq", `Int 9
          ; "next_since_offset", `Int 0
@@ -611,6 +611,9 @@ let test_decode_events_error_by_code () =
   check events_error "503 journal_corrupt keeps the message"
     (Log.Journal_unavailable "bad line 7")
     (decode ~status:503 (envelope "journal_corrupt" "bad line 7"));
+  check events_error "409 unsupported persisted epoch stays distinct from corruption"
+    (Log.Journal_unsupported_version "stored version is unsupported")
+    (decode ~status:409 (envelope "journal_unsupported_version" "stored version is unsupported"));
   check events_error "an unknown code is undecodable with the status and message"
     (Log.Events_undecodable "400 operation_id is required")
     (decode ~status:400 (envelope "invalid_input" "operation_id is required"));

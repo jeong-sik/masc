@@ -344,6 +344,7 @@ module Make (Payload : Payload) = struct
              Durability_unknown
            | Incomplete_jsonl_tail
            | Incomplete_jsonl_tail_truncate_failed _
+           | Existing_jsonl_refused _
            | Invalid_jsonl_suffix
            | Negative_expected_end_offset _
            | End_offset_mismatch _
@@ -366,6 +367,7 @@ module Make (Payload : Payload) = struct
              Durability_unknown
            | Incomplete_jsonl_tail
            | Incomplete_jsonl_tail_truncate_failed _
+           | Existing_jsonl_refused _
            | Invalid_jsonl_suffix
            | Negative_expected_end_offset _
            | End_offset_mismatch _

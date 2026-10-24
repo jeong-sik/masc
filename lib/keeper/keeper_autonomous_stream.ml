@@ -35,7 +35,8 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
     | Error failure ->
       let detail = match failure with
         | Journal.Journal_missing -> "journal disappeared"
-        | Journal.Journal_unreadable detail | Journal.Journal_corrupt detail -> detail in
+        | Journal.Journal_unreadable detail | Journal.Journal_corrupt detail -> detail
+        | Journal.Journal_unsupported_version version -> Journal.version_mismatch_to_string version in
       Log.Keeper.error ~keeper_name "autonomous stream journal unavailable: %s" detail;
       None
     | Ok first_seq -> Some (Events.create ~first_seq ~on_publish:(fun ~seq ~ts event ->

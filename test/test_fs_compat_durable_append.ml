@@ -761,6 +761,21 @@ let test_private_jsonl_append_at_end_offset_refuses_incomplete_tail () =
   check string "incomplete bytes unchanged" original (Fs_compat.load_file path)
 ;;
 
+let test_validated_jsonl_append_preserves_rejected_bytes () =
+  let original = "{\"v\":1}\n{\"torn\":" in
+  with_temp_jsonl original @@ fun path ->
+  let observed = ref None in
+  let validate_first_row row = observed := Some row; Error "unsupported epoch" in
+  (match Fs_compat.append_private_jsonl_durable_locked_validated_result
+      ~validate_first_row path "{\"v\":2}\n" with
+   | Fs_compat.Private_file_failed (Fs_compat.Existing_jsonl_refused detail) ->
+       check string "validator refusal stays explicit" "unsupported epoch" detail
+   | _ -> fail "rejected existing row was appended or reclassified");
+  check (option string) "validator sees the first row, not the entire file"
+    (Some "{\"v\":1}") !observed;
+  check string "refusal precedes torn-tail truncation" original (Fs_compat.load_file path)
+;;
+
 let test_private_jsonl_append_rejects_incomplete_suffix () =
   with_temp_jsonl "" @@ fun path ->
   match Fs_compat.append_private_jsonl_durable_locked_result path "{\"row\":1}" with
@@ -1680,6 +1695,10 @@ let () =
             "private JSONL stable append cuts incomplete tail"
             `Quick
             test_private_jsonl_stable_append_cuts_incomplete_tail
+        ; test_case
+            "validated JSONL append preserves rejected bytes"
+            `Quick
+            test_validated_jsonl_append_preserves_rejected_bytes
         ; test_case
             "private JSONL append rejects incomplete suffix"
             `Quick

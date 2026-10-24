@@ -39,6 +39,7 @@ let append_failure_detail : Fs_compat.private_jsonl_append_error -> string =
     "the ledger does not end at a line boundary"
   | Fs_compat.Incomplete_jsonl_tail_truncate_failed _ ->
     "the ledger's unfinished last line could not be cut"
+  | Fs_compat.Existing_jsonl_refused _ -> "the existing entry was refused"
   | Fs_compat.Invalid_jsonl_suffix -> "the entry is not one complete JSONL line"
   | Fs_compat.Negative_expected_end_offset offset ->
     Printf.sprintf "the caller passed a negative end offset (%d)" offset
@@ -81,6 +82,7 @@ let append_at ~base_path ~expected_end_offset entry =
     | Fs_compat.Private_file_failed
         (( Fs_compat.Incomplete_jsonl_tail
          | Fs_compat.Incomplete_jsonl_tail_truncate_failed _
+         | Fs_compat.Existing_jsonl_refused _
          | Fs_compat.Invalid_jsonl_suffix
          | Fs_compat.Negative_expected_end_offset _
          | Fs_compat.Durable_jsonl_append_failed _ ) as error)
@@ -88,6 +90,7 @@ let append_at ~base_path ~expected_end_offset entry =
         { error =
             ( Fs_compat.Incomplete_jsonl_tail
             | Fs_compat.Incomplete_jsonl_tail_truncate_failed _
+            | Fs_compat.Existing_jsonl_refused _
             | Fs_compat.Invalid_jsonl_suffix
             | Fs_compat.Negative_expected_end_offset _
             | Fs_compat.Durable_jsonl_append_failed _ ) as error

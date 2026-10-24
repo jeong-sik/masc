@@ -3170,6 +3170,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                failed Keeper_chat_operation.Store_unavailable "operation journal cursor disappeared"
              | Error (Journal_unreadable detail | Journal_corrupt detail) ->
                failed Keeper_chat_operation.Store_unavailable detail
+             | Error (Journal_unsupported_version version) ->
+               failed Keeper_chat_operation.Store_unavailable
+                 (Keeper_chat_event_log.version_mismatch_to_string version)
              | Ok first_seq ->
             let journal_redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
             let events = Keeper_chat_events.create ~first_seq
@@ -3677,6 +3680,8 @@ let journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq =
   match Keeper_chat_event_log.read_journal_path_result path with
   | Error Keeper_chat_event_log.Journal_missing -> []
   | Error (Journal_unreadable detail | Journal_corrupt detail) -> skipped detail
+  | Error (Journal_unsupported_version version) ->
+      skipped (Keeper_chat_event_log.version_mismatch_to_string version)
   | Ok entries ->
     (match
        let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in

@@ -13060,7 +13060,7 @@ let receive_journal_result state ~keeper_name ~source ~started_at journal =
   | Error error ->
       (match error with
        | Masc_tui_keeper_chat_log.Unknown_operation | Journal_pruned | Journal_missing
-       | Journal_unavailable _ | Events_denied _ | Events_undecodable _ ->
+       | Journal_unsupported_version _ | Journal_unavailable _ | Events_denied _ | Events_undecodable _ ->
            remember_journal_unavailable state key
        | Cursor_refused _ | Events_refused _ | Events_transport _ -> ());
       Error error

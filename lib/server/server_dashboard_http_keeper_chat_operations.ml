@@ -210,7 +210,8 @@ let parse_since_offset request =
 
 (* A cursor the journal cannot place is the client's request, 400 under the
    refusal's own name; a corrupt row is the journal, the same 503 a whole read
-   reports. The three cursor codes are spelled once, in the journal
+   reports. An unsupported persisted codec is a stable 409 refusal. The three
+   cursor codes are spelled once, in the journal
    ([Keeper_chat_event_log.cursor_refusal_to_wire]), so this and the TUI's
    decoder cannot drift. *)
 let page_failure_error failure =
@@ -224,6 +225,7 @@ let page_failure_error failure =
   | Page_cursor_mismatch _ -> cursor Keeper_chat_event_log.Cursor_pair_mismatch
   | Page_limit_not_positive _ -> invalid_input message
   | Page_corrupt _ -> unavailable Public_error.Journal_corrupt message
+  | Page_unsupported_version _ -> public_error Public_error.Journal_unsupported_version message
 ;;
 
 let parse_limit request =
@@ -396,6 +398,9 @@ let handle_get state request reqd = function
               | Some _ | None -> Error (public_error Public_error.Journal_missing "No autonomous event journal exists for this turn"))
          | Error (Journal_unreadable detail) -> Error (unavailable Public_error.Journal_unreadable detail)
          | Error (Journal_corrupt detail) -> Error (unavailable Public_error.Journal_corrupt detail)
+         | Error (Journal_unsupported_version version) ->
+             Error (public_error Public_error.Journal_unsupported_version
+               (Keeper_chat_event_log.version_mismatch_to_string version))
        in
        (match page with
         | Ok body -> Server_auth.respond_json_value_with_cors request reqd body
@@ -489,6 +494,9 @@ let handle_get state request reqd = function
           (* This endpoint exists to serve the log, so the log's failure is
              the response (RFC-0412 §3.5: loud from day one on v2). *)
           respond_error request reqd (unavailable Public_error.Journal_unreadable detail)
+        | Error (Journal_unsupported_version version) ->
+          respond_error request reqd (public_error Public_error.Journal_unsupported_version
+            (Keeper_chat_event_log.version_mismatch_to_string version))
         | Error (Journal_corrupt detail) ->
           respond_error request reqd (unavailable Public_error.Journal_corrupt detail)))
   | Operation_exact { keeper_name; raw_operation_id } ->

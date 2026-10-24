@@ -21,6 +21,7 @@ type verdict =
   | Journal_missing
   | Journal_unreadable of string
   | Journal_truncated
+  | Journal_unsupported_version of Keeper_chat_event_log.version_mismatch
   | Journal_corrupt of string
   | Store_unreadable of string
   | Liveness_unknown of string
@@ -36,6 +37,7 @@ let verdict_label = function
   | Journal_unreadable _ -> "journal_unreadable"
   | Journal_truncated -> "journal_truncated"
   | Journal_corrupt _ -> "journal_corrupt"
+  | Journal_unsupported_version _ -> "journal_unsupported_version"
   | Store_unreadable _ -> "store_unreadable"
   | Liveness_unknown _ -> "liveness_unknown"
 ;;
@@ -457,6 +459,7 @@ let audit_operation ~base_dir ~keeper_name ~operation_id =
   | Error Journal.Journal_missing -> Journal_missing
   | Error (Journal.Journal_unreadable detail) -> Journal_unreadable detail
   | Error (Journal.Journal_corrupt detail) -> Journal_corrupt detail
+  | Error (Journal.Journal_unsupported_version version) -> Journal_unsupported_version version
   | Ok entries ->
     let rows = Store.load_all ~base_dir ~keeper_name in
     audit_loaded ~base_dir ~keeper_name ~operation_id ~rows entries
@@ -488,6 +491,7 @@ let sweep_file ~base_dir ~keeper_name ~operation_id ~path ~liveness ~rows =
          Leave
        | Error (Journal.Journal_unreadable detail) -> Report (Journal_unreadable detail)
        | Error (Journal.Journal_corrupt detail) -> Report (Journal_corrupt detail)
+       | Error (Journal.Journal_unsupported_version version) -> Report (Journal_unsupported_version version)
        | Ok entries ->
          Report
            (audit_loaded
@@ -565,6 +569,7 @@ let sweep ~base_dir ~lookback_sec ~liveness ~audited () =
                      | Journal_missing
                      | Journal_unreadable _
                      | Journal_truncated
+                     | Journal_unsupported_version _
                      | Journal_corrupt _
                      | Store_unreadable _ ) as verdict) ->
                   ( (keeper_name, operation_id, verdict) :: results

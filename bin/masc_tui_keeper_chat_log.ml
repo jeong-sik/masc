@@ -449,7 +449,8 @@ let decode_events_page (json : Yojson.Safe.t) =
       List.fold_left
         (fun acc raw ->
            let* acc = acc in
-           let* event = Journal.journaled_event_of_json raw in
+           let* event = Journal.journaled_event_of_json raw
+             |> Result.map_error Journal.decode_failure_to_string in
            Ok (event :: acc))
         (Ok [])
         raw_events
@@ -502,6 +503,7 @@ type events_error =
   | Unknown_operation
   | Journal_pruned
   | Journal_missing
+  | Journal_unsupported_version of string
   | Journal_unavailable of string
   | Cursor_refused of
       { refusal : Journal.cursor_refusal
@@ -522,6 +524,7 @@ let events_error_to_string = function
   | Unknown_operation -> "unknown operation"
   | Journal_pruned -> "journal pruned"
   | Journal_missing -> "journal not recorded"
+  | Journal_unsupported_version detail -> "unsupported journal version: " ^ detail
   | Journal_unavailable detail -> "journal unavailable: " ^ detail
   | Cursor_refused { refusal; message } ->
     Printf.sprintf
@@ -577,6 +580,7 @@ let decode_events_error ~status ~credential_sent body =
      | Some (`String "unknown_operation") -> Unknown_operation
      | Some (`String "journal_pruned") -> Journal_pruned
      | Some (`String "journal_missing") -> Journal_missing
+     | Some (`String "journal_unsupported_version") -> Journal_unsupported_version message
      | Some (`String ("journal_unreadable" | "journal_corrupt")) ->
        Journal_unavailable message
      | Some (`String code) ->

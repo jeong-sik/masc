@@ -63,7 +63,7 @@ let snapshots t =
   let lines = List.mapi (fun seq event ->
     let line : Journal.journaled_event = {seq; ts=1000. +. float_of_int seq; event} in
     match Journal.journaled_event_of_json (Journal.journaled_event_to_json line) with
-    | Ok decoded -> decoded | Error detail -> fail detail) events in
+    | Ok decoded -> decoded | Error detail -> fail (Journal.decode_failure_to_string detail)) events in
   let _, wire = List.fold_left (fun (state, wire) (line : Journal.journaled_event) ->
     let state, projected = Projection.project ~timestamp:line.ts
       ~redact_text:Fun.id state line.event in

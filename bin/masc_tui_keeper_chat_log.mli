@@ -146,7 +146,7 @@ val journal_path :
 
 (** Why a v2 events request did not return a page. The codes are the
     endpoint's ([unknown_operation] 404, [journal_pruned] 410,
-    [journal_unreadable] / [journal_corrupt] 503); a body this build cannot
+    [journal_unreadable] / [journal_corrupt] 503, [journal_unsupported_version] 409); a body this build cannot
     read and a request that never got an answer are the two remaining
     shapes. *)
 type events_error =
@@ -158,6 +158,8 @@ type events_error =
           there is. *)
   | Journal_missing
       (** No autonomous journal was recorded for this turn. *)
+  | Journal_unsupported_version of string
+      (** 409: this server does not decode the preserved journal epoch. *)
   | Journal_unavailable of string
       (** The journal exists and could not be read now; the server's message. *)
   | Cursor_refused of

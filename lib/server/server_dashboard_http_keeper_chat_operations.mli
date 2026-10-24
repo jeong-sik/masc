@@ -80,7 +80,8 @@ val chat_events_page :
     page — the row before the offset already past [since_seq], the row at it
     not past [since_seq], or an offset sent with no [since_seq] — is 400
     [cursor_mismatch] ({!Keeper_chat_event_log.cursor_refusal_to_wire}). Only the rows the page needs are
-    decoded; a corrupt one among them is 503 [journal_corrupt]. Exposed so the
+    decoded; a corrupt one among them is 503 [journal_corrupt], and a foreign
+    persisted epoch is 409 [journal_unsupported_version]. Exposed so the
     wire contract is tested without an HTTP listener. *)
 
 val turn_events_page :

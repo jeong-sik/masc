@@ -60,6 +60,54 @@ function color(value, name) {
   return value;
 }
 
+function rgb(hex) {
+  return [1, 3, 5].map(start => Number.parseInt(hex.slice(start, start + 2), 16));
+}
+
+function mix(background, foreground, weight) {
+  const bg = rgb(background);
+  return '#' + rgb(foreground).map((channel, index) =>
+    Math.round(bg[index] + (channel - bg[index]) * weight).toString(16).padStart(2, '0')).join('');
+}
+
+function luminance(hex) {
+  const linear = rgb(hex).map(channel => {
+    const srgb = channel / 255;
+    return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+  });
+  return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+}
+
+function contrast(first, second) {
+  const a = luminance(first), b = luminance(second);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+function terminalTheme(foreground, background) {
+  // Neutral tints follow the observed terminal palette in either light or dark
+  // mode. Recede only while retaining WCAG text (4.5) / boundary (3) contrast.
+  // An already low-contrast user palette stays intact rather than being inverted.
+  const surface = weight => {
+    const tinted = mix(background, foreground, weight);
+    return contrast(foreground, tinted) >= 4.5 ? tinted : background;
+  };
+  const node = surface(0.06), group = surface(0.12);
+  const readable = (weight, minimum) => {
+    const tinted = mix(background, foreground, weight);
+    return [background, node, group].every(bg => contrast(tinted, bg) >= minimum)
+      ? tinted : foreground;
+  };
+  return new Map(Object.entries({
+    '--pele-fg': foreground,
+    '--pele-bg': background,
+    '--pele-line': foreground,
+    '--pele-muted': readable(0.7, 4.5),
+    '--pele-border': readable(0.55, 3),
+    '--pele-surface': node,
+    '--pele-surface-alt': group,
+  }));
+}
+
 function retainedSvg(source) {
   const document = new DOMParser({ onError() { throw new Error('Malformed SVG XML'); } })
     .parseFromString(source, 'image/svg+xml');
@@ -106,13 +154,12 @@ export function renderDocument(request) {
   if (!Number.isSafeInteger(request.maxWidth) || request.maxWidth <= 0) {
     throw new TypeError('maxWidth must be a positive pixel width');
   }
-  const colors = new Map();
+  let colors = new Map();
   let background;
   if (request.colors !== undefined) {
     const fg = color(request.colors.foreground, 'foreground');
     background = color(request.colors.background, 'background');
-    for (const name of ['fg', 'line', 'muted', 'border']) colors.set(`--pele-${name}`, fg);
-    for (const name of ['bg', 'surface', 'surface-alt']) colors.set(`--pele-${name}`, background);
+    colors = terminalTheme(fg, background);
   }
   let result, svg, renderer;
   switch (request.format) {

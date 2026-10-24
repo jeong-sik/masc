@@ -1462,10 +1462,12 @@ let lane_run_summary_lines ~cols (detail : Tui_decode.lane_run_detail) =
     match detail.lrd_tool_evidence, detail.lrd_skill_evidence with
     | Tui_decode.Lane_run_no_tools_by_contract, Tui_decode.Lane_run_no_skills_by_contract ->
       [ Theme.muted (), "도구/스킬: 미사용 (Exact-output 계약)" ], []
-    | Tui_decode.Lane_run_tools_observed _, _ ->
+    | Tui_decode.Lane_run_tools_observed _,
+      (Tui_decode.Lane_run_no_skills_by_contract | Tui_decode.Lane_run_skills_contract_unknown) ->
       [ skill_style, skills ], [ tool_style, "  " ^ tools ]
     | (Tui_decode.Lane_run_tools_pending | Tui_decode.Lane_run_no_tools_by_contract
-      | Tui_decode.Lane_run_tools_contract_unknown), _ ->
+      | Tui_decode.Lane_run_tools_contract_unknown),
+      (Tui_decode.Lane_run_no_skills_by_contract | Tui_decode.Lane_run_skills_contract_unknown) ->
       [ tool_style, tools; skill_style, skills ], []
   in
   let gate_judgment =

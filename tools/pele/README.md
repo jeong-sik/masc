@@ -21,6 +21,20 @@ width. Optional `colors` contains observed `foreground` and `background` as
 six-digit RGB hex strings. Without an observed palette, the standalone preview
 uses Pele's light defaults. Failure writes diagnostics to stderr and exits
 nonzero without an image. The caller retains source and owns preview selection.
+
+Observed terminal colours seed separate node and group surfaces, muted labels
+and borders instead of flattening every fill into the background. Derived text
+and borders retain 4.5:1 and 3:1 contrast respectively; if a tint cannot retain
+that contrast, its original foreground/background role is used. An already
+low-contrast terminal palette is preserved, not repaired. Authored `classDef`,
+`style` and `linkStyle` colours, line widths and dashes override these defaults;
+their contrast remains the author's choice. Static SVG keeps its own colours.
+
+See [the colour and diagram example](examples/color-and-themes.md) for a
+publishable Markdown artifact with coloured states, shapes, grouped flow,
+sequence, Gantt, mindmap, pie and bar chart fences. The controls below work with
+each prepared diagram; the original Mermaid source stays available.
+
 SVG keeps its authored colours and aspect ratio, scales down to the available
 width, and is not enlarged. It requires a well-formed SVG document, without a
 DOCTYPE, processing instruction, foreign namespace, script, embedded image,

@@ -6154,6 +6154,8 @@
 
 (include stanzas/test_candle_appraisal_flow.inc)
 
+(include stanzas/test_verifier_review_worker.inc)
+
 (include stanzas/test_verifier_review_original.inc)
 
 (include stanzas/test_verifier_review_owner.inc)

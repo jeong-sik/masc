@@ -67,3 +67,18 @@ val load
     [Not_found] means no original was retained here; a malformed, changed or
     unreadable record, or one whose body does not round-trip to the original,
     is an error, never a silent default. The caller owns workspace authority. *)
+
+val load_for_destination :
+  store:store -> verification_id:string -> attempt:int ->
+  installation_id:string -> package_id:string ->
+  (Verifier_review_original.t, load_error) result
+(** Strict load plus the original installation, package, tool and summary
+    binding. A different destination is refused before reviewer dispatch. *)
+
+val next_attempt :
+  store:store -> verification_id:string -> installation_id:string -> package_id:string ->
+  (int, load_error) result
+(** Allocate the next identity from the strictly validated durable inventory.
+    The host holds its workspace process lease and serializes this verification
+    through allocation, retain and dispatch. Missing inventory starts at zero;
+    unreadable or malformed records never authorize a partial allocation. *)

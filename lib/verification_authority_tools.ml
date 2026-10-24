@@ -709,3 +709,83 @@ let dispatch t ~name ~args =
            | Tool_result.Failed _ | Tool_result.Deferred _ -> Rejected);
        result)
 ;;
+
+(* This capability is constructed from the host's submitted snapshot, never
+   from a caller's dispatch closure or tool-name/layout assertions. *)
+type task_review =
+  { review_tools : t
+  ; subject : Workspace_verification_store.request_header
+  ; layout : Task.Anti_rationalization.lookup_root
+  ; route : Yojson.Safe.t
+  ; binding : string
+  }
+
+let review_route t =
+  let open Result.Syntax in
+  match t.producer_scope with
+  | Workspace_producer -> Ok (`Assoc ["kind", `String "workspace"])
+  | Keeper_producer meta ->
+    let profile = Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile in
+    let* route = match meta.sandbox_profile with
+      | Docker -> Ok (`Assoc ["kind", `String "shared_mount"])
+      | Remote_ssh ->
+        let* endpoint = Keeper_sandbox_ssh.resolve_endpoint
+          ~base_path:t.config.base_path ~keeper_name:meta.name in
+        Ok (`Assoc ["kind", `String "ssh"; "endpoint", `String (Exec_ssh_endpoint.to_toml endpoint)])
+      | Micro_vm ->
+        let* endpoint = Keeper_sandbox_remote_lane.attached_guest_endpoint ~config:t.config ~meta () in
+        Ok (`Assoc ["kind", `String "microvm";
+          "argv", `List (List.map (fun x -> `String x) (Keeper_sandbox_remote.transport_argv endpoint));
+          "root", `String (Keeper_sandbox_remote.workspace_root endpoint)]) in
+    Ok (`Assoc ["kind", `String "keeper"; "name", `String meta.name;
+      "profile", `String profile;
+      "network", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode);
+      "route", route])
+
+let create_task_review ~config ~verification_id ~task_id ~producer ~evidence_access =
+  let open Result.Syntax in
+  match evidence_access with
+  | Workspace_verification_store.Evidence_unavailable {request_id; reason} ->
+    Error (Workspace_verification_store.evidence_access_failure_to_string ~request_id reason)
+  | Evidence_available {request; items} ->
+    if not (String.equal request.id verification_id && String.equal request.task_id task_id
+      && String.equal request.worker producer)
+    then Error "submitted evidence does not name this verification, task and producer"
+    else
+      let* review_tools = create ~config ~producer ~submitted_evidence:items in
+      let* layout = root_layout review_tools in
+      let* route = review_route review_tools in
+      let tool_json (tool : Types_core.tool_schema) =
+        `Assoc ["name", `String tool.name; "description", `String tool.description;
+          "input_schema", tool.input_schema] in
+      let projection = `Assoc ["purpose", `String "task_review";
+        "subject", Workspace_verification_store.request_header_to_yojson request;
+        "base_path", `String config.Workspace.base_path;
+        "ownership_root", `String review_tools.ownership_root;
+        "route", route;
+        "schemas", `List (List.map tool_json (schemas review_tools));
+        "submitted_evidence", `List (List.map Workspace_verification_store.submitted_evidence_item_to_yojson items)] in
+      let* canonical = Lane_addon_action.canonical projection in
+      let binding = Lane_addon_store.digest (Yojson.Safe.to_string canonical) in
+      Ok {review_tools; subject=request; layout; route; binding}
+
+let task_review_binding t = t.binding
+let task_review_base_path t = t.review_tools.config.base_path
+let task_review_root t = t.layout
+let task_review_tools t = t.review_tools
+let task_review_subject t = t.subject
+
+let validate_task_review t =
+  let open Result.Syntax in
+  let* route = review_route t.review_tools in
+  if Yojson.Safe.equal route t.route then Ok ()
+  else Error "verifier lookup route changed after authority preparation"
+
+let task_review_lookup t : Task.Anti_rationalization.lookup_surface =
+  { schemas = schemas t.review_tools
+  ; dispatch = (fun ~name ~args ->
+      match validate_task_review t with
+      | Ok () -> dispatch t.review_tools ~name ~args
+      | Error detail -> Tool_result.error ~failure_class:Tool_result.Policy_rejection
+          ~tool_name:name ~start_time:(Tool_timing.start ()) detail)
+  }

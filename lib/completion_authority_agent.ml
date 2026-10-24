@@ -924,31 +924,14 @@ let process_task_once
         ~stage:Verification_run_registry.Review_preparation
         ~detail:reason
     | Ok prepared ->
-      (match
-         (match prepared.evidence_access with
-          | Workspace_verification_store.Evidence_available {items; _} ->
-              Verification_authority_tools.create ~config:runtime.config
-                ~producer:assignee ~submitted_evidence:items
-          | Workspace_verification_store.Evidence_unavailable {request_id; reason} ->
-              Error (Workspace_verification_store.evidence_access_failure_to_string ~request_id reason))
-       with
+      (match Verification_authority_tools.create_task_review
+         ~config:runtime.config ~verification_id ~task_id:task.id ~producer:assignee
+         ~evidence_access:prepared.evidence_access with
        | Error reason ->
-         defer_unavailable
-           ~stage:Verification_run_registry.Lookup_surface
-           ~detail:reason
-       | Ok lookup_tools ->
-         (match Verification_authority_tools.root_layout lookup_tools with
-          | Error reason ->
-            defer_unavailable
-              ~stage:Verification_run_registry.Lookup_surface
-              ~detail:reason
-          | Ok lookup_root ->
-            let lookup =
-              { Task.Anti_rationalization.schemas =
-                  Verification_authority_tools.schemas lookup_tools
-              ; dispatch = Verification_authority_tools.dispatch lookup_tools
-              }
-            in
+         defer_unavailable ~stage:Verification_run_registry.Lookup_surface ~detail:reason
+       | Ok lookup_authority ->
+            let lookup_tools = Verification_authority_tools.task_review_tools lookup_authority in
+            let lookup_root = Verification_authority_tools.task_review_root lookup_authority in
             (* Human labels close the judge's own loop: where an operator
                disagreed with a past verdict, the divergence returns to the
                judge as a few-shot example, false positives first. Filled
@@ -964,17 +947,71 @@ let process_task_once
                   evidence_posture_of_snapshot prepared.evidence_access
               }
             in
-            let result =
-              Task.Anti_rationalization.review
-                ~base_path:runtime.config.base_path
-                ~sw:(Some runtime.sw)
-                ~lookup
-                ~lookup_root
-                ~provider_rest:Verification_retry.provider_rest
-                ~question
-                ~on_tool_result
-                prepared.review_request
+            (* E06: retain the immutable original of this review attempt, then
+               hand the review to the worker bridge. The original freezes the
+               subject and the lookup grants; the worker can only answer the
+               review, never widen the subject or reapply another
+               verification's evidence. The verdict extraction, verdict tool
+               and Task/Goal transition stay on this host side below. *)
+            let owner_store =
+              Lane_addon_store.create
+                ~root:(Filename.concat runtime.config.base_path "request-ownership")
             in
+            let installation_id = "masc.completion-authority" in
+            let package_id = "masc.completion-authority.review" in
+            let run_result : (Task.Anti_rationalization.review_result, string) result =
+              let* attempt =
+                Verifier_review_owner.next_attempt ~store:owner_store ~verification_id
+                  ~installation_id ~package_id
+                |> Result.map_error (function
+                  | Verifier_review_owner.Not_found -> "attempt inventory not found"
+                  | Verifier_review_owner.Load_store_unavailable d -> "store: " ^ d
+                  | Verifier_review_owner.Corrupt_original d -> "original_corrupt: " ^ d) in
+              let* original =
+                Verifier_review_original.prepare
+                  ~verification_id
+                  ~attempt
+                  ~question
+                  ~lookup_root
+                  ~lookup_binding:(Verification_authority_tools.task_review_binding lookup_authority)
+                  ~lookup_schemas:(List.map (fun (s : Types_core.tool_schema) -> s.name)
+                                     (Verification_authority_tools.schemas lookup_tools))
+                  prepared.review_request
+                |> Result.map_error (fun reason -> "original_invalid: " ^ reason)
+              in
+              let* () =
+                Verifier_review_owner.retain
+                  ~store:owner_store
+                  ~verification_id
+                  ~attempt
+                  ~installation_id
+                  ~package_id
+                  original
+                |> Result.map_error (function
+                  | Verifier_review_owner.Original_invalid d -> "original_invalid: " ^ d
+                  | Verifier_review_owner.Identity_mismatch d -> "identity_mismatch: " ^ d
+                  | Verifier_review_owner.Retain_store_unavailable d -> "store: " ^ d
+                  | Verifier_review_owner.Already_retained d -> "already_retained: " ^ d)
+              in
+              Verifier_review_worker.run_attempt
+                ~on_tool_result
+                ~sw:(Some runtime.sw)
+                ~store:owner_store
+                ~verification_id
+                ~attempt
+                ~installation_id
+                ~package_id
+                ~authority:lookup_authority
+                ~provider_rest:Verification_retry.provider_rest
+                ()
+              |> Result.map_error (function
+                | Verifier_review_worker.Original_not_found -> "original_not_found"
+                | Verifier_review_worker.Original_corrupt d -> "original_corrupt: " ^ d
+                | Verifier_review_worker.Grants_mismatch d -> "grants_mismatch: " ^ d)
+            in
+            match run_result with
+            | Error detail -> stop (Raised { detail = "verifier review attempt failed: " ^ detail })
+            | Ok result ->
             (* Every verdict lands in the calibration ledger the Harness
                surface reads — which evaluator judged, and whether a fallback
                answered for the intended one. The judge kept running after the
@@ -1022,7 +1059,7 @@ let process_task_once
               ~verdict_label:
                 (Task.Anti_rationalization.verdict_constructor_name review_verdict)
               ~on_commit
-              ~evaluator_runtime:(Some evaluator_runtime))))
+              ~evaluator_runtime:(Some evaluator_runtime)))
   with
   | Eio.Cancel.Cancelled _ as exn ->
     (* Mirror the four exact lanes: a cancelled review completes its

@@ -50,6 +50,7 @@ let prepare_original ~request ~verification_id ~attempt =
       ~attempt
       ~question:sample_question
       ~lookup_root:sample_root
+      ~lookup_binding:(String.make 64 'a')
       ~lookup_schemas:sample_schemas
       request
   with

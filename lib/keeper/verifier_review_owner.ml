@@ -129,3 +129,58 @@ let load ~store ~verification_id ~attempt =
                  verification_id
                  attempt))
      | Error detail -> Error (Corrupt_original detail))
+
+let load_for_destination ~store ~verification_id ~attempt ~installation_id ~package_id =
+  let* original = load ~store ~verification_id ~attempt in
+  let* request_id = attempt_request_id ~verification_id ~attempt
+    |> Result.map_error (fun detail -> Corrupt_original detail) in
+  let* existing = Owner.load ~store ~scope ~request_id
+    |> Result.map_error (fun error -> Load_store_unavailable (Owner.error_to_string error)) in
+  match existing with
+  | None -> Error Not_found
+  | Some record ->
+    let* expected_summary = summary_of original
+      |> Result.map_error (fun detail -> Corrupt_original detail) in
+    let* expected_digest = V.digest original
+      |> Result.map_error (fun detail -> Corrupt_original detail) in
+    if String.equal record.installation_id installation_id
+      && String.equal record.package_id package_id && String.equal record.tool tool_name
+      && String.equal record.request_digest expected_digest
+      && Yojson.Safe.equal record.summary expected_summary
+    then Ok original
+    else Error (Corrupt_original "retained verifier destination or summary does not match")
+
+let next_attempt ~store ~verification_id ~installation_id ~package_id =
+  let* records = Owner.discover ~store ~scope
+    |> Result.map_error (fun error -> Load_store_unavailable (Owner.error_to_string error)) in
+  let step result record =
+    let* highest = result in
+    let corrupt detail = Error (Corrupt_original detail) in
+    match Owner.Record.summary record with
+    | `Assoc fields when
+        List.sort String.compare (List.map fst fields) =
+          ["attempt"; "original_digest"; "schema"; "verification_id"] ->
+      (match List.assoc "schema" fields, List.assoc "verification_id" fields,
+          List.assoc "attempt" fields, List.assoc "original_digest" fields with
+       | `String version, `String id, `Int attempt, `String digest
+           when String.equal version V.schema && attempt >= 0
+             && String_util.is_lowercase_sha256_hex digest ->
+         let* key = attempt_request_id ~verification_id:id ~attempt
+           |> Result.map_error (fun detail -> Corrupt_original detail) in
+         if not (String.equal key (Owner.Record.request_id record)
+           && String.equal digest (Owner.Record.request_digest record)
+           && String.equal tool_name (Owner.Record.tool record))
+         then corrupt "verifier inventory summary does not match its record"
+         else if not (String.equal id verification_id) then Ok highest
+         else if not (String.equal installation_id (Owner.Record.installation_id record)
+           && String.equal package_id (Owner.Record.package_id record))
+         then corrupt "verification attempts belong to another destination"
+         else Ok (Some (match highest with None -> attempt | Some previous -> max previous attempt))
+       | _ -> corrupt "verifier inventory summary is invalid")
+    | _ -> corrupt "verifier inventory summary has an unexpected field set" in
+  let* highest = List.fold_left step (Ok None) records in
+  match highest with
+  | None -> Ok 0
+  | Some highest when highest = Int.max_int ->
+    Error (Corrupt_original "verifier attempt identity exhausted")
+  | Some highest -> Ok (highest + 1)

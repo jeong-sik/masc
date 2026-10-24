@@ -60,7 +60,7 @@ let with_temp_model_catalog contents f =
 ;;
 
 let isolate_ambient_runtime_sources () =
-  Capability_manifest.set_global [];
+  Capability_manifest.set_global Capability_manifest.empty;
   Model_catalog_test_support.install_embedded_model_catalog ~suite:"Capabilities"
 ;;
 
@@ -1871,7 +1871,8 @@ let test_example_manifest_base_labels_are_canonical () =
   in
   match Capability_manifest.load_file path with
   | Error msg -> failf "example manifest should parse: %s" msg
-  | Ok entries ->
+  | Ok manifest ->
+    let entries = Capability_manifest.entries manifest in
     List.iter
       (fun (entry : Capability_manifest.entry) ->
          let id_prefix = Model_identifiers.Id_prefix.to_string entry.id_prefix in
@@ -2035,7 +2036,7 @@ let test_apply_manifest_entry_all_none_uses_base () =
       {|{"schema_version":1,"models":[{"id_prefix":"x","base":"anthropic"}]}|}
   in
   let manifest = Capability_manifest.of_json json |> Result.get_ok in
-  let entry = List.hd manifest in
+  let entry = List.hd (Capability_manifest.entries manifest) in
   let caps = Capabilities.apply_manifest_entry entry in
   let base = Capabilities.anthropic_capabilities in
   check bool "tools matches base" base.supports_tools caps.supports_tools;
@@ -2178,7 +2179,7 @@ let test_manifest_accepts_ollama_think_policy_string () =
     Yojson.Safe.from_string
       {|{"schema_version":1,"models":[{"id_prefix":"ollama-manifest","thinking_control_format":"ollama_think"}]}|}
   in
-  match Capability_manifest.of_json json with
+  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
     let caps = Capabilities.apply_manifest_entry entry in
     check_thinking_control
@@ -2194,7 +2195,7 @@ let test_manifest_accepts_thinking_control_token () =
     Yojson.Safe.from_string
       {|{"schema_version":1,"models":[{"id_prefix":"token-model","thinking_control_format":"chat_template_token","thinking_control_token":"<|custom_think|>"}]}|}
   in
-  match Capability_manifest.of_json json with
+  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
     Alcotest.(check bool)
       "token carried by the constructor"
@@ -2246,7 +2247,7 @@ let test_manifest_accepts_thinking_object_adaptive_policy_string () =
     Yojson.Safe.from_string
       {|{"schema_version":1,"models":[{"id_prefix":"adaptive-manifest","thinking_control_format":"thinking_object_adaptive"}]}|}
   in
-  match Capability_manifest.of_json json with
+  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
     let caps = Capabilities.apply_manifest_entry entry in
     check_thinking_control
@@ -2262,7 +2263,7 @@ let test_manifest_accepts_reasoning_output_format () =
     Yojson.Safe.from_string
       {|{"schema_version":1,"models":[{"id_prefix":"split-manifest","reasoning_output_format":"split_reasoning_fields"}]}|}
   in
-  match Capability_manifest.of_json json with
+  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
     let caps = Capabilities.apply_manifest_entry entry in
     check
@@ -2279,7 +2280,7 @@ let test_manifest_accepts_reasoning_streaming_format () =
     Yojson.Safe.from_string
       {|{"schema_version":1,"models":[{"id_prefix":"stream-manifest","reasoning_streaming_format":"delta:reasoning"}]}|}
   in
-  match Capability_manifest.of_json json with
+  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
     let caps = Capabilities.apply_manifest_entry entry in
     check
@@ -2296,7 +2297,7 @@ let test_manifest_applies_ignored_sampling_parameters () =
     Yojson.Safe.from_string
       {|{"schema_version":1,"models":[{"id_prefix":"sampling-manifest","ignored_sampling_parameters":["temperature","top_p"]}]}|}
   in
-  match Capability_manifest.of_json json with
+  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
     let caps = Capabilities.apply_manifest_entry entry in
     check
@@ -2388,7 +2389,7 @@ let test_manifest_applies_accepted_reasoning_efforts () =
     Yojson.Safe.from_string
       {|{"schema_version":1,"models":[{"id_prefix":"effort-ok","supports_reasoning":true,"accepted_reasoning_efforts":["none","low","high"]}]}|}
   in
-  match Capability_manifest.of_json json with
+  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
     Alcotest.(check (option (list string)))
       "accepted subset"
@@ -2427,7 +2428,7 @@ let test_manifest_intlit_in_range_accepted () =
             ] )
       ]
   in
-  match Capability_manifest.of_json json with
+  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
     check (option int) "max_int intlit accepted" (Some max_int) entry.max_context_tokens
   | Ok _ -> Alcotest.fail "expected one manifest entry"
@@ -2457,7 +2458,7 @@ let test_manifest_intlit_out_of_range_rejects () =
 ;;
 
 let parse_single_manifest_entry json_text =
-  match Capability_manifest.of_json (Yojson.Safe.from_string json_text) with
+  match Capability_manifest.of_json (Yojson.Safe.from_string json_text) |> Result.map Capability_manifest.entries with
   | Ok [ entry ] -> entry
   | Ok _ -> Alcotest.fail "expected one manifest entry"
   | Error msg -> Alcotest.failf "unexpected parse error: %s" msg
@@ -2837,7 +2838,7 @@ let test_manifest_and_catalog_common_override_parity () =
           }]
         }|}
     in
-    match Capability_manifest.of_json json with
+    match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
     | Ok [ entry ] -> Capabilities.apply_manifest_entry entry
     | Ok _ -> Alcotest.fail "expected one capability manifest entry"
     | Error msg -> Alcotest.failf "manifest parse failed: %s" msg
@@ -3006,7 +3007,7 @@ let test_a_declared_effort_ladder_survives_its_own_row () =
     Yojson.Safe.from_string
       {|{"schema_version":1,"models":[{"id_prefix":"declares-efforts","supports_reasoning":true,"accepted_reasoning_efforts":["none","low","high"]}]}|}
   in
-  match Capability_manifest.of_json json with
+  match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
     check
       (option (list string))

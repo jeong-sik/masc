@@ -39,7 +39,7 @@ let with_manifest json f =
   | Error msg -> fail ("manifest parse failed: " ^ msg)
   | Ok manifest ->
     CM.set_global manifest;
-    Fun.protect ~finally:(fun () -> CM.set_global []) f
+    Fun.protect ~finally:(fun () -> CM.set_global CM.empty) f
 ;;
 
 let install_repository_catalog () =
@@ -48,7 +48,7 @@ let install_repository_catalog () =
 ;;
 
 let without_ambient_manifest f =
-  CM.set_global [];
+  CM.set_global CM.empty;
   install_repository_catalog ();
   Fun.protect
     ~finally:(fun () ->

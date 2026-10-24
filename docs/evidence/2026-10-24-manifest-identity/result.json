@@ -1,0 +1,69 @@
+{
+  "scope": "actual manifest/identifier/vocabulary/effort modules and interfaces with inline-test declarations excluded",
+  "sources": {
+    "model_identifiers.mli": {
+      "source_sha256": "16b93bcb13adfe5262930ae761d1f771b2469dd4f00a2d05c59401ac2c3e1ba3",
+      "compiled_sha256": "16b93bcb13adfe5262930ae761d1f771b2469dd4f00a2d05c59401ac2c3e1ba3",
+      "inline_tests_excluded": 0
+    },
+    "model_identifiers.ml": {
+      "source_sha256": "8ce8c2ae936b7d6f141f7dc864acaaf0742b4f15a32e31f7272b61d77f02f779",
+      "compiled_sha256": "8ce8c2ae936b7d6f141f7dc864acaaf0742b4f15a32e31f7272b61d77f02f779",
+      "inline_tests_excluded": 0
+    },
+    "capability_vocab.mli": {
+      "source_sha256": "844922ec61e208962545ac791d9b84459f484e0ae12a7acddd2416aadceaf2c8",
+      "compiled_sha256": "844922ec61e208962545ac791d9b84459f484e0ae12a7acddd2416aadceaf2c8",
+      "inline_tests_excluded": 0
+    },
+    "capability_vocab.ml": {
+      "source_sha256": "c9fa478c24b8a42ce6d92a926985292ade36f28b90aea738ffdeeef61b99798f",
+      "compiled_sha256": "3bd5ff7e36f8e064bdfee4e9617a790cc8373da60178f2cedbcb2ea3c3fe2137",
+      "inline_tests_excluded": 19
+    },
+    "reasoning_effort.mli": {
+      "source_sha256": "302d79716c15353863683fb278b09b3948d96729074027269efc489e2d93e666",
+      "compiled_sha256": "302d79716c15353863683fb278b09b3948d96729074027269efc489e2d93e666",
+      "inline_tests_excluded": 0
+    },
+    "reasoning_effort.ml": {
+      "source_sha256": "143a311cbd071ba7834b5d9e83f910afe12ad2d6b77033477b06454a2d4fc601",
+      "compiled_sha256": "143a311cbd071ba7834b5d9e83f910afe12ad2d6b77033477b06454a2d4fc601",
+      "inline_tests_excluded": 0
+    },
+    "capability_manifest.mli": {
+      "source_sha256": "9c4c31a4028ba5d91daedaf54650f2b327f825cfb25164c0ae513902f5c295a5",
+      "compiled_sha256": "9c4c31a4028ba5d91daedaf54650f2b327f825cfb25164c0ae513902f5c295a5",
+      "inline_tests_excluded": 0
+    },
+    "capability_manifest.ml": {
+      "source_sha256": "aa587859c9636d49dde8f4e91e1b83223f393a3753e8dae87b07780285c29430",
+      "compiled_sha256": "27535972879048dcdf12a8442fd24b09484f3cd2bf883d02c81d2376f5a0393e",
+      "inline_tests_excluded": 18
+    }
+  },
+  "checks": {
+    "identical_model_identity_rejected": true,
+    "case_variant_identity_rejected": true,
+    "reverse_order_also_rejected": true,
+    "identical_facts_do_not_hide_duplicate_identity": true,
+    "distinct_identities_accepted": true,
+    "lookup_uses_declared_identity_comparison": true,
+    "lookup_excludes_unrelated_identity": true,
+    "original_identity_bytes_preserved": true,
+    "failed_admission_cannot_replace_installed_snapshot": true,
+    "empty_is_explicit_validated_manifest": true,
+    "distinct_prefix_order_unchanged": true,
+    "duplicate_json_fields_still_rejected": true,
+    "raw_list_install_is_type_rejected": true,
+    "entry_view_reinstall_is_type_rejected": true
+  },
+  "expected_compile_rejections": {
+    "raw_list_install": "File \"raw_list_install.ml\", line 1, characters 40-42:\n1 | let () = Capability_manifest.set_global []\n                                            ^^\nError: The constructor [] has type 'a list\n       but an expression was expected of type Capability_manifest.t\n",
+    "entry_view_reinstall": "File \"entry_view_reinstall.ml\", line 1, characters 40-95:\n1 | let () = Capability_manifest.set_global (Capability_manifest.entries Capability_manifest.empty)\n                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nError: This expression has type Capability_manifest.entry list\n       but an expression was expected of type Capability_manifest.t\n"
+  },
+  "fixture_dependencies": false,
+  "project_linked": false,
+  "capability_request_resolver_executed": false,
+  "provider_called": false
+}

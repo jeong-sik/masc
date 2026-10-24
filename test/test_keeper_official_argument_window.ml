@@ -61,7 +61,7 @@ let projection ?(history_prefix=[]) ?tools source base_path =
   Option.bind source (fun source -> Host.argument_projection source ~tools ~history_prefix)
 let project ?argument_projection ?(capacity_bytes=max_int) ?carried_front_seed
     ?(librarian_front=progress) ?on_carried_front ?on_model_input_window_observation messages =
-  Host.start_range_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "official-arguments" }) ?argument_projection ~measure_message_bytes:measure
+  Host.start_range_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "official-arguments" }) ?argument_projection ~measure_message_bytes:measure
     ~capacity_bytes ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
     ?carried_front_seed ~librarian_front:(fun _ -> Ok librarian_front)
     ?on_carried_front ?on_model_input_window_observation
@@ -251,7 +251,7 @@ let test_completion_review_preserves_the_full_evidence_without_history_reads () 
     let seed_reads = ref 0 and librarian_reads = ref 0 and measured = ref 0 in
     let windows = ref 0 and carried_fronts = ref 0 in
     let sent = Host.start_range_projection
-        ~input_source:Keeper_request_source.Completion_review ~argument_projection
+        ~input_source:Masc.Keeper_request_source.Completion_review ~argument_projection
         ~measure_message_bytes:(fun message -> incr measured; measure message)
         ~capacity_bytes:1 ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
         ~carried_front_seed:(fun () -> incr seed_reads;

@@ -466,7 +466,7 @@ let test_second_call_after_a_verdict_is_a_violation () =
 
 let actual_inline_review_view ~base_path result =
   let refusal = ref None in
-  let projected = Tool_bridge.to_agent_core_typed_result ~base_path
+  let projected = Masc.Tool_bridge.to_agent_core_typed_result ~base_path
       ~model_projection:(Tool_output.Inline_up_to
         { maximum_bytes = Tool_shard_limits.verification_evidence_max_bytes })
       ~on_externalization_error:(fun error -> refusal := Some error) result in
@@ -611,8 +611,8 @@ let test_oversized_lookup_handoff_preserves_the_inline_refusal () =
       let _, _, actual_refusal = actual_inline_review_view
           ~base_path:(Filename.get_temp_dir_name ()) raw in
       let refusal_message = match actual_refusal with
-        | Some { Tool_bridge.kind = Inline_budget_exceeded; message } -> message
-        | Some { Tool_bridge.kind = Artifact_storage_failure; _ } -> Alcotest.fail "inline guard attempted storage"
+        | Some { Masc.Tool_bridge.kind = Inline_budget_exceeded; message } -> message
+        | Some { Masc.Tool_bridge.kind = Artifact_storage_failure; _ } -> Alcotest.fail "inline guard attempted storage"
         | None -> Alcotest.fail "the full bridge must refuse the SSOT limit-plus-one fixture"
       in
       let reads = ref 0 and calls = ref [] in
@@ -741,10 +741,10 @@ let test_failed_lookup_handoff_uses_the_full_bridge_envelope () =
               Alcotest.(check bool) "failure disposition remains authoritative" true
                 (member "disposition" entry = `String (Tool_result.string_of_disposition raw));
               (match actual_refusal with
-               | Some { Tool_bridge.kind; message } ->
+               | Some { Masc.Tool_bridge.kind; message } ->
                  let wire_kind = match kind with
-                   | Tool_bridge.Inline_budget_exceeded -> "inline_budget_exceeded"
-                   | Tool_bridge.Artifact_storage_failure -> "artifact_storage_failure" in
+                   | Masc.Tool_bridge.Inline_budget_exceeded -> "inline_budget_exceeded"
+                   | Masc.Tool_bridge.Artifact_storage_failure -> "artifact_storage_failure" in
                  Alcotest.(check bool) "a rejected full failure envelope cannot be smuggled as raw result" true
                    (member "result" entry = `Null);
                  Alcotest.(check bool) "failure handoff carries the actual bridge refusal" true

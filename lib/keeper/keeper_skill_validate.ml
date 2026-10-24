@@ -52,7 +52,7 @@ let failure ~class_ ~code ~message fields =
 (* The verdict names the exact bytes it judged by a digest computed here from
    the bytes [Keeper_peer_artifact.fetch] returned, never by the caller's
    reference metadata and never as a normalized artifact reference. A
-   normalized reference anywhere in a result makes [Tool_bridge.project_result]
+   normalized reference anywhere in a result makes [Tool_projection.project_result]
    require a durable result manifest, and a manifest projection would replace
    this inline verdict with a blob marker whose preview is empty. Without the
    manifest every call failed as "tool output artifact storage failed"

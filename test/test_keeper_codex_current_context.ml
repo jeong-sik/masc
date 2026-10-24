@@ -157,7 +157,7 @@ default = "codex.context"
           (Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks)) prompt_blocks;
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world;tool_choice}
       | _ -> Agent_core.Hooks.Continue) } in
-    Keeper_codex_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = "context-fixture" })
+    Keeper_codex_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "context-fixture" })
       ?argument_source
       ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
       ~composed_context:(fun () -> !composed_context)
@@ -846,7 +846,7 @@ let native_unread_messages
 let carried ?carried_front_seed ?librarian_front
     ?(unread = unavailable_native_unread) ?(capacity_bytes = Keeper_codex_runtime.For_testing.unbounded_capacity_bytes) turn_start =
   match
-    Keeper_codex_runtime.For_testing.carried_projection ~input_source:(Keeper_request_source.Keeper_history { trace_id = "context-fixture" })
+    Keeper_codex_runtime.For_testing.carried_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "context-fixture" })
       ~capacity_bytes ?carried_front_seed ?librarian_front ~turn_start
       ~keeper_name:"context-fixture" ~runtime_id:"codex.context" large_history
   with
@@ -1053,7 +1053,7 @@ let turn_start_to_string = Keeper_carried_front.turn_start_to_string
 let test_completion_evidence_without_a_keeper_boundary_keeps_every_atom () =
   let seed_reads = ref 0 and librarian_reads = ref 0 in
   let sent = Keeper_codex_runtime.For_testing.carried_projection
-      ~input_source:Keeper_request_source.Completion_review ~capacity_bytes:1
+      ~input_source:Masc.Keeper_request_source.Completion_review ~capacity_bytes:1
       ~carried_front_seed:(fun () -> incr seed_reads; (seed_at 60) ())
       ~librarian_front:(fun _ -> incr librarian_reads;
         Error (Agent_core.Error.Internal "completion evidence has no Keeper continuity"))

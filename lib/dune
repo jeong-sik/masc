@@ -98,6 +98,9 @@
   ; Tool_args / Tool_result live in a (wrapped false) leaf and are referenced
   ; unqualified here, so the dependency has to be spelled out.
   masc.tool_types
+  ; Result projection lives below this library so masc_task_handlers can use
+  ; it without a cycle (the root masc library depends on masc_task_handlers).
+  masc.tool_projection
   masc.browser_lane
   masc.slack_lane
   masc.machine_live_publication

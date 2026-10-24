@@ -80,7 +80,7 @@ let run_refusal ~body_limit () =
    | Ok () -> () | Error detail -> Alcotest.fail detail);
   let reads = ref 0 in
   let result = Keeper_turn_driver_wrappers.run_named_with_masc_tools
-    ~input_source:Keeper_request_source.Completion_review
+    ~input_source:Masc.Keeper_request_source.Completion_review
     ~runtime_id:"fixture.sample" ~keeper_name:"completion-evidence"
     ~walk_owner:Keeper_turn_driver.One_shot_walk ~base_path ~goal
     ~system_prompt:"Review the original evidence."

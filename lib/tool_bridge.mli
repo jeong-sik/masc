@@ -7,6 +7,10 @@
     Also converts MASC JSON schemas to AGENT_CORE [{!Agent_core.Types.tool_param}] lists,
     and creates AGENT_CORE [{!Agent_core.Tool.t}] from MASC handler functions.
 
+    The result-projection surface (externalization, artifact manifests,
+    failure-class sentences, result conversion) is implemented in
+    {!Tool_projection} and re-exported here unchanged.
+
     @since 2.95.1 — result conversion
     @since 2.110.0 — schema conversion + AGENT_CORE Tool.t creation *)
 
@@ -28,11 +32,15 @@
 val default_externalize_threshold_bytes : int
 (** Canonical MASC tool-output budget used by the default projection. *)
 
-type projection_error_kind =
+(* Re-exported from {!Tool_projection}; the constructors and record fields
+   are re-exported with the types so existing
+   [Tool_bridge.Inline_budget_exceeded] and [Tool_bridge.kind] references
+   keep resolving. *)
+type projection_error_kind = Tool_projection.projection_error_kind =
   | Artifact_storage_failure
   | Inline_budget_exceeded
 
-type externalization_error =
+type externalization_error = Tool_projection.externalization_error =
   { kind : projection_error_kind
   ; message : string
   }

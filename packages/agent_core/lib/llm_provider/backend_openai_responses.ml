@@ -427,8 +427,9 @@ let add_sampling_field = Backend_openai_request.add_sampling_field
    request before building it gets the same answer the wire will give;
    the diagnostic [observe] stays at the call site, which keeps this a
    function of its arguments. *)
-let project_history config messages =
+let project_history ?(tools_present = false) config messages =
   Reasoning_history_projection.project_for_provider_config
+    ~tools_present
     ~assistant_has_payload:(fun content -> content <> [])
     ~reasoning_block_supported:(function
       | RedactedThinking _ -> true
@@ -453,7 +454,7 @@ let build_request_artifact
   =
   let tools = Backend_openai_request.effective_tools config tools in
   let projected_messages =
-    match project_history config messages with
+    match project_history ~tools_present:(tools <> []) config messages with
     | Error error ->
       invalid_arg
         ("Backend_openai_responses.build_request: "

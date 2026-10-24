@@ -1372,6 +1372,7 @@ type request_view =
   }
 
 let unchecked_request_view
+      ~tools
       ?(input_policy = Keeper_input_policy.Wide)
       ?continuity
       ?completed_arguments
@@ -1409,7 +1410,7 @@ let unchecked_request_view
   let wire =
     offload_model_input_cpu (fun () ->
       Agent_core.Llm_provider.Complete_common.transmitted_history
-        ~config:provider_config
+        ~tools ~config:provider_config
         carried)
   in
   { composed; carried; wire; completed_arguments; argument_prefix_protected = false }
@@ -1443,7 +1444,7 @@ let request_view
       ~history_digest_at ~current_turn_results ~base_path ~demote_before
       ~turn_boundary ~materialize messages =
   let build ?(materialize = materialize) completed_arguments =
-    unchecked_request_view ~input_policy ?continuity ?completed_arguments
+    unchecked_request_view ~tools ~input_policy ?continuity ?completed_arguments
       ~provider_config ~measure_message_bytes ~front ~accepted ~history_digest_at
       ~current_turn_results ~base_path ~demote_before ~turn_boundary ~materialize messages
   in

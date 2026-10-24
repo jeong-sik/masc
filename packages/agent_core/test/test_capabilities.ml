@@ -922,8 +922,8 @@ let test_deepseek_replay_contract_differs_by_who_serves_it () =
          (replay_policy ~provider_label:"ollama_cloud" ~model_id);
        check
          string
-         (model_id ^ " on deepseek replays every prior turn")
-         "drop_without_tool_preserve_with_tool"
+         (model_id ^ " on deepseek has full-history replay eligibility")
+         "preserve_always"
          (replay_policy ~provider_label:"deepseek" ~model_id))
     [ "deepseek-v4-pro" ]
 ;;
@@ -1551,14 +1551,14 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , "deepseek-v4-pro"
       , Extended_thinking
       , Response_format_json
-      , Replay_tool_turn_only
+      , Replay_every_turn
       , Delta_stream "reasoning_content" )
     ; ( "DeepSeek V4 Flash"
       , Provider_qualified "deepseek"
       , "deepseek-v4-flash"
       , Extended_thinking
       , Response_format_json_schema
-      , Replay_tool_turn_only
+      , Replay_every_turn
       , Delta_stream "reasoning_content" )
     ; ( "MiniMax M3 native/openai-compatible"
       , Direct_model

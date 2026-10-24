@@ -142,8 +142,12 @@ type replay_capability =
     (** What a stored artifact from a different source may still do. *)
   }
 
+(** [tools_present] describes the effective outgoing tools array after any
+    tool-choice suppression. Omission describes a request without tools. It
+    changes selection only; the stable producing-source stamp is unchanged. *)
 val replay_capability_for_provider_config
-  :  Provider_config.t
+  :  ?tools_present:bool
+  -> Provider_config.t
   -> (replay_capability, string) result
 
 val with_preserve_thinking : preserve_thinking:bool option -> t -> t
@@ -191,7 +195,9 @@ val sampling_params_ignored_when_thinking : t -> Capabilities.sampling_parameter
     intentionally explicit: DeepSeek-style thinking requires replay after tool
     calls but can drop reasoning between plain user turns. Position-sensitive
     policies are finalized by {!Reasoning_history_projection} from the typed
-    {!replay_contract}; this function reports only shape eligibility. *)
+    {!replay_contract}; request-tools selection is resolved by
+    {!replay_capability_for_provider_config}. This function reports only shape
+    eligibility, not the final request decision. *)
 val should_replay_reasoning : t -> assistant_had_tool_call:bool -> bool
 
 val requires_reasoning_replay_on_tool_call : t -> bool

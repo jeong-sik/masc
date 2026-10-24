@@ -765,12 +765,12 @@ let test_deepseek_reasoning_dialect_semantics () =
   check
     string
     "replay policy"
-    "drop_without_tool_preserve_with_tool"
+    "preserve_always"
     (RD.replay_policy_to_string dialect.replay_policy);
   check
     bool
-    "plain assistant reasoning may be dropped"
-    false
+    "plain assistant reasoning is eligible on tool-enabled requests"
+    true
     (RD.should_replay_reasoning dialect ~assistant_had_tool_call:false);
   check
     bool
@@ -779,8 +779,8 @@ let test_deepseek_reasoning_dialect_semantics () =
     (RD.should_replay_reasoning dialect ~assistant_had_tool_call:true);
   check
     bool
-    "requires tool-call replay"
-    true
+    "eligibility is not restricted to tool-call messages"
+    false
     (RD.requires_reasoning_replay_on_tool_call dialect);
   check
     (option string)

@@ -734,7 +734,7 @@ let render_direct_context ~current_task ~held_task_skills ~task_skill_surfaces
     ~workspace_memory ~workspace_memory_access ~wiki_contents ~lane_updates
     ~approval_authority_text ~recent_direct_conversation_text ~worktree_text
     ~telemetry_feedback_text ~turn_instructions_text =
-  let prepared = Direct_context.prepare ~current_task ~held_task_skills
+  let prepared = Direct_context.prepare ~active_goal_summaries:(Ok []) ~current_task ~held_task_skills
       ~task_skill_surfaces ~workspace_memory ~wiki_contents ~lane_updates
       ~approval_authority_text ~recent_direct_conversation_text ~worktree_text
       ~telemetry_feedback_text ~turn_instructions_text () in
@@ -1588,7 +1588,7 @@ let test_prepared_direct_context_keeps_original_work_and_request_routes () =
         { (make_task ~task_status:(Masc_domain.InProgress
              { assignee = meta.name; started_at = "2026-10-17T00:00:00Z" }) ())
           with id = task_id } in
-      Direct_context.prepare ~current_task:(Inputs.Current_task task)
+      Direct_context.prepare ~active_goal_summaries:(Ok []) ~current_task:(Inputs.Current_task task)
         ~held_task_skills:
           [{ Inputs.held_task_id = "direct-held-task";
              held_skills = [skill_reference "direct-held-skill" 'a'] }]

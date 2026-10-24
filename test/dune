@@ -6627,3 +6627,4 @@
 (include stanzas/test_keeper_memory_execution_availability.inc)
 
 (include stanzas/test_browser_native_workflow.inc)
+(include stanzas/test_keeper_direct_goal_provider_wire.inc)

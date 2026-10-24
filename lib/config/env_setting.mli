@@ -51,9 +51,7 @@ module Float_knob : sig
   type t =
     | Sse_reconnect_min_interval_s
     | Sse_connect_window_s
-    | Sidecar_reconcile_backoff_sec
     | Sidecar_control_timeout_sec
-    | Sidecar_schema_timeout_sec
     | Full_health_refresh_timeout_sec
     | Repo_sync_interval_sec
     | Snapshot_interval_sec
@@ -72,7 +70,6 @@ module String_opt_knob : sig
     | Imessage_self_chat_guid
     | Imessage_poll_interval_sec
     | Imessage_cursor_path
-    | Sidecar_root
     | Voice_realtime_ws_url
   [@@deriving enumerate]
 

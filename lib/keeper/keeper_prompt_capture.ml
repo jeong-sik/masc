@@ -11,6 +11,8 @@ type capture =
   ; absolute_turn : int
   ; blocks : block list
   ; assembled : string option
+  ; system_prompt : string option
+  ; system_prompt_partition : Yojson.Safe.t option
   }
 
 type read_error =
@@ -56,6 +58,8 @@ let to_json capture =
         | Some text -> `String text )
     ; ( "assembled_bytes"
       , `Int (match capture.assembled with None -> 0 | Some text -> String.length text) )
+    ; "system_prompt", (match capture.system_prompt with None -> `Null | Some text -> `String text)
+    ; "system_prompt_partition", Option.value ~default:`Null capture.system_prompt_partition
     ]
 ;;
 
@@ -98,7 +102,19 @@ let capture_of_json = function
             | Some `Null | None -> None
             | Some _ -> None
           in
-          Ok { captured_at; trace_id; absolute_turn; blocks; assembled })
+          (match List.assoc_opt "system_prompt" fields, List.assoc_opt "system_prompt_partition" fields with
+           | None, None | Some `Null, Some `Null ->
+             Ok { captured_at; trace_id; absolute_turn; blocks; assembled;
+                  system_prompt=None; system_prompt_partition=None }
+           | Some (`String text), Some (`Assoc binding as partition)
+             when List.assoc_opt "carrier" binding = Some (`String "system_prompt")
+               && (match List.assoc_opt "partition" binding with
+                   | Some (`Assoc fields) ->
+                     List.assoc_opt "schema" fields = Some (`String "masc.logical-context-partition.v2")
+                   | None | Some _ -> false) ->
+             Ok { captured_at; trace_id; absolute_turn; blocks; assembled;
+                  system_prompt=Some text; system_prompt_partition=Some partition }
+           | _ -> Error "capture system prompt and partition must be present together"))
      | _ -> Error "capture is missing captured_at/trace_id/absolute_turn/blocks")
   | _ -> Error "capture is not a JSON object"
 ;;
@@ -106,13 +122,15 @@ let capture_of_json = function
 (* The turn this describes is already proceeding. Losing its capture is an
    observation gap, not a reason to fail dispatch. Cancellation is never
    absorbed. *)
-let write ~config ~keeper ~trace_id ~absolute_turn ~blocks ~assembled =
+let write ~config ~keeper ~trace_id ~absolute_turn ~blocks ~assembled ~system_prompt =
   let capture =
     { captured_at = Time_compat.now ()
     ; trace_id
     ; absolute_turn
     ; blocks = List.map (fun (id, text) -> { id; text }) blocks
     ; assembled
+    ; system_prompt = Option.map (fun (issued : Keeper_context_assembly.system_prompt) -> issued.text) system_prompt
+    ; system_prompt_partition = Option.map Keeper_context_assembly.system_prompt_receipt_to_json system_prompt
     }
   in
   let path = path_for config keeper in

@@ -29,6 +29,8 @@ export type PromptCapture = {
   readonly blocks: readonly PromptCaptureBlock[]
   readonly assembled: string | null
   readonly assembledBytes: number
+  readonly systemPrompt: string | null
+  readonly systemPromptPartition: Readonly<Record<string, unknown>> | null
 }
 
 function decodeCaptureBlock(raw: unknown): PromptCaptureBlock | null {
@@ -62,7 +64,19 @@ function decodeCapture(raw: unknown): PromptCapture | null {
   }
   const assembled = raw.assembled === null ? null : typeof raw.assembled === 'string' ? raw.assembled : null
   if (raw.assembled !== null && assembled === null) return null
-  return { keeper, capturedAt, traceId, absoluteTurn, blocks, assembled, assembledBytes }
+  let systemPrompt: string | null = null
+  let systemPromptPartition: Readonly<Record<string, unknown>> | null = null
+  const systemUnrecorded = !Object.hasOwn(raw, 'system_prompt') && !Object.hasOwn(raw, 'system_prompt_partition')
+  if (!systemUnrecorded && (raw.system_prompt !== null || raw.system_prompt_partition !== null)) {
+    if (typeof raw.system_prompt !== 'string' || !isRecord(raw.system_prompt_partition)) return null
+    if (raw.system_prompt_partition.carrier !== 'system_prompt'
+      || !isRecord(raw.system_prompt_partition.partition)
+      || raw.system_prompt_partition.partition.schema !== 'masc.logical-context-partition.v2') return null
+    systemPrompt = raw.system_prompt
+    systemPromptPartition = raw.system_prompt_partition
+  }
+  return { keeper, capturedAt, traceId, absoluteTurn, blocks, assembled, assembledBytes,
+    systemPrompt, systemPromptPartition }
 }
 
 export async function fetchKeeperLastPrompt(

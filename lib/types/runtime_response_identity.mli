@@ -7,6 +7,10 @@ type t = private
   ; actor : string
   ; runtime_id : string
   ; response_id : string
+      (** SDK [api_response.id] correlation label. It may be synthesized or
+          repeated, including an Ollama JSON response's model name; it is not
+          an attestation of a provider-native or globally unique ID. The host
+          execution, turn and original ToolUse ordinal bind the occurrence. *)
   ; provider_id : string
   ; model_id : string
   ; tool_use_id : string

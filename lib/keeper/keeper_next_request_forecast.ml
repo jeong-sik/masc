@@ -540,7 +540,7 @@ let boundary_forecast ~config ~keeper_name ~meta ~trace_id ~(boundary : atom_bou
                ~readings
                ~records_read
                ~seed
-               ~continuity
+               ~continuity:Keeper_turn_driver_try_provider.without_snapshot
                ~turn_start
                ~place:
                  { walks_at

@@ -164,11 +164,12 @@ let board_event_note_fields = function
     [ "job_id", Keeper_owned_job_identity.Job_id.to_string completion.oj_job_id
     ; "source", Yojson.Safe.to_string (Keeper_owned_job_identity.source_to_json completion.oj_source)
     ; "channel", Yojson.Safe.to_string (Keeper_continuation_channel.to_yojson completion.oj_channel) ]
-  | Keeper_world_observation.Addon_operation_changed change ->
+  | Keeper_world_observation.Addon_operation_changed {source=change;publication} ->
     [ "origin_id", change.ao_origin_id
     ; "publication_id", change.ao_publication_id
     ; "source", Yojson.Safe.to_string (Keeper_owned_job_identity.source_to_json change.ao_source)
-    ; "channel", Yojson.Safe.to_string (Keeper_continuation_channel.to_yojson change.ao_channel) ]
+    ; "channel", Yojson.Safe.to_string (Keeper_continuation_channel.to_yojson change.ao_channel)
+    ; "publication", Yojson.Safe.to_string (Lane_addon_companion_publication.event_json publication) ]
 ;;
 
 let board_event_fields

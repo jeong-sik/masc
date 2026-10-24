@@ -80,7 +80,7 @@ let build_resume ~(checkpoint : Checkpoint.t) ?(eio_context = false) ?config ?pr
     | Some provider ->
       let provider = Agent_turn.provider_config_with_agent_config ~config:restored_config provider
         |> Llm_provider.Provider_config.freeze_for_request in
-      let* capability = Llm_provider.Reasoning_history_projection.validate_resume_for_provider_config
+      let* capability = Llm_provider.Reasoning_history_projection.validate_replay_continuity_for_provider_config
         provider checkpoint.messages
         |> Result.map_error (fun error -> Replay_rejected error) in
       let disposition = match provider.preserve_thinking, checkpoint.provider_binding with

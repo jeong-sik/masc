@@ -509,7 +509,7 @@ let binding_resume_ok = function
   | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
 let expect_binding_incompatible = function
   | Error (Agent_checkpoint.Replay_rejected
-      (Binding_projection.Incompatible_resume_reasoning_source {message_index;_})) -> message_index
+      (Binding_projection.Incompatible_reasoning_artifact {message_index;_})) -> message_index
   | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
   | Ok _ -> Alcotest.fail "incompatible reasoning was admitted"
 ;;
@@ -532,7 +532,7 @@ let test_binding_provider_model_and_contract_mismatch () = with_net (fun net ->
   let original=binding_provider "https://same.example" in
   let cp=binding_checkpoint original [binding_message(binding_source original)] in
   let no_replay={original with Binding_provider.model_capabilities_override=Some
-    Llm_provider.Capabilities.{openai_compat_chat_capabilities with reasoning_replay_override=Force_drop}} in
+    Llm_provider.Capabilities.{openai_compat_chat_capabilities with reasoning_replay_override=Force_no_replay}} in
   let targets=[binding_provider ~kind:Binding_provider.Kimi "https://same.example";
     binding_provider ~model:"other-model" "https://same.example";no_replay] in
   List.iter(fun target ->
@@ -601,7 +601,7 @@ let test_binding_missing_and_corrupt_source () = with_net (fun net ->
   let absent={ (binding_message source) with Types.metadata=[]} in
   let cp=binding_checkpoint target [absent] in
   (match Agent.resume ~net ~checkpoint:cp ~options:(binding_options target) () with
-   | Error (Agent_checkpoint.Replay_rejected (Binding_projection.Missing_resume_reasoning_source {message_index=0})) -> ()
+   | Error (Agent_checkpoint.Replay_rejected (Binding_projection.Unbound_reasoning_artifact {message_index=0})) -> ()
    | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
    | Ok _ -> Alcotest.fail "session source must not be invented as an artifact source");
   let duplicate={ (binding_message source) with Types.metadata=Binding_source.metadata source @ Binding_source.metadata source} in
@@ -614,7 +614,7 @@ let test_binding_missing_and_corrupt_source () = with_net (fun net ->
   let wrong_role={absent with Types.role=Types.User} in
   (match Agent.resume ~net ~checkpoint:{cp with messages=[wrong_role]}
       ~config ~options:(binding_options target) () with
-   | Error (Agent_checkpoint.Replay_rejected (Binding_projection.Invalid_resume_reasoning_role {message_index=0})) -> ()
+   | Error (Agent_checkpoint.Replay_rejected (Binding_projection.Invalid_reasoning_artifact_role {message_index=0})) -> ()
    | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
    | Ok _ -> Alcotest.fail "caller replay exclusion cannot admit an invalid reasoning role"))
 ;;
@@ -643,6 +643,43 @@ let test_binding_direct_old_or_invalid_checkpoint () = with_net (fun net ->
    | Ok _ -> Alcotest.fail "invalid direct binding must be rejected"))
 ;;
 
+let test_binding_hook_cannot_reenable_incompatible_replay () = with_net (fun net ->
+  Eio.Switch.run (fun sw ->
+    List.iter(fun (stream, reenable) ->
+      let original=binding_provider "https://original.example" in
+      let target=binding_provider ~kind:Binding_provider.Kimi "https://other.example" in
+      let cp=binding_checkpoint original [binding_message(binding_source original)] in
+      let before=Checkpoint.to_json cp in
+      let calls=ref 0 in
+      let response=Provider_mock.text_response "continued without replay" in
+      let transport=Llm_provider.Llm_transport.custom ({
+        complete_sync=(fun _ -> incr calls; {response=Ok response;latency_ms=Some 0});
+        complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> incr calls;Ok response)}) in
+      let hooks={Hooks.empty with before_turn_params=Some(function
+        | Hooks.BeforeTurnParams {current_params;_} when reenable ->
+          Hooks.AdjustParams {current_params with preserve_thinking=Some true}
+        | _ -> Hooks.Continue)} in
+      let options={ (binding_options target) with transport=Some transport;hooks} in
+      let config={ (Types.default_config ~model:target.model_id) with
+        preserve_thinking=Some false;max_tokens=Some 16} in
+      let agent=Agent.resume ~net ~checkpoint:cp ~config ~options () |> binding_resume_ok in
+      let result=if stream then Agent.run_stream ~sw ~on_event:ignore agent "next"
+        else Agent.run ~sw agent "next" in
+      (match reenable,result with
+       | true,Error (Error.Config (Error.InvalidConfig {field="reasoning_replay";_})) -> ()
+       | false,Ok _ -> ()
+       | _,Error error -> Alcotest.fail(Error.to_string error)
+       | true,Ok _ -> Alcotest.fail "hook re-enabled incompatible replay"
+       );
+      Alcotest.(check int) "rejected hook never reaches transport; explicit exclusion does"
+        (if reenable then 0 else 1) !calls;
+      Alcotest.(check bool) "checkpoint remains unchanged" true (before=Checkpoint.to_json cp);
+      Alcotest.(check bool) "native artifact remains canonical" true
+        (List.hd (Agent.state agent).messages=List.hd cp.messages);
+      Agent.close agent)
+      [false,false;false,true;true,false;true,true]))
+;;
+
 (* ── Test runner ─────────────────────────────────────────────── *)
 
 let () =
@@ -659,7 +696,8 @@ let () =
         test_case "explicit caller replay exclusion" `Quick test_binding_explicit_disable;
         test_case "missing and corrupt artifact provenance" `Quick test_binding_missing_and_corrupt_source;
         test_case "non-dispatch restoration" `Quick test_binding_non_dispatch_restore;
-        test_case "direct old and invalid checkpoint" `Quick test_binding_direct_old_or_invalid_checkpoint]
+        test_case "direct old and invalid checkpoint" `Quick test_binding_direct_old_or_invalid_checkpoint;
+        test_case "hook cannot silently re-enable incompatible replay" `Quick test_binding_hook_cannot_reenable_incompatible_replay]
     ; ( "Session.resume_from"
       , [ test_case "generates new id" `Quick test_resume_from_generates_new_id
         ; test_case "links session_id" `Quick test_resume_from_links_session_id

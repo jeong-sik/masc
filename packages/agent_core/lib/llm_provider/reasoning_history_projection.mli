@@ -46,13 +46,13 @@ type error =
       ; classification : Types.Reasoning_source.classification
       }
   | Invalid_response_replay of { message_index : int; detail : string }
-  | Missing_resume_reasoning_source of { message_index : int }
-  | Incompatible_resume_reasoning_source of
+  | Unbound_reasoning_artifact of { message_index : int }
+  | Incompatible_reasoning_artifact of
       { message_index : int
       ; stored : Types.Reasoning_source.t
       ; target : Types.Reasoning_source.t
       }
-  | Invalid_resume_reasoning_role of { message_index : int }
+  | Invalid_reasoning_artifact_role of { message_index : int }
   | Unsupported_reasoning_block of
       { message_index : int
       ; block_index : int
@@ -62,12 +62,13 @@ type error =
 
 val error_to_string : error -> string
 
-val validate_resume_for_provider_config
+val validate_replay_continuity_for_provider_config
   :  Provider_config.t
   -> Types.message list
   -> (Reasoning_dialect.replay_capability, error) result
 (** Validate canonical history and admit its stored reasoning producers before
-    restoring a provider-bound Agent. Uses the target's declared rotation rule,
+    restoring a provider-bound Agent and again before dispatch after hooks and
+    caller input projection. Uses the target's declared rotation rule,
     including every reasoning-bearing message in mixed-producer history. A
     target that cannot replay the old source does not silently discard it.
     Explicit [preserve_thinking = Some false] is caller-owned replay exclusion;

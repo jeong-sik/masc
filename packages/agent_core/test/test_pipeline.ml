@@ -327,7 +327,11 @@ let test_provider_context_retention () =
       ~config:{ (Types.default_config ~model:"test-model") with max_tokens = Some 64 }
       ~options:next_options () in
   Internal_agent.set_state resumed
-    { (Internal_agent.state agent) with messages = saved @ [Types.user_msg "next"] };
+    { (Internal_agent.state agent) with
+      config = { (Internal_agent.state agent).config with
+        preserve_thinking = (if signed && kind<>next_kind then Some false
+          else (Internal_agent.state agent).config.preserve_thinking) };
+      messages = saved @ [Types.user_msg "next"] };
   run resumed (Internal_pipeline.Stream { on_event = ignore; on_telemetry = None });
   match !captured with
   | second :: first :: [] ->

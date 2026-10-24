@@ -1,0 +1,12 @@
+{
+  "head": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+  "command": [
+    "python3",
+    "scripts/tests/test_coding_eval_boundary.py",
+    "-v",
+    "CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index",
+    "CodingBoundary.test_frozen_resume_rejects_changed_inputs"
+  ],
+  "exit_code": 1,
+  "scope": "actual production Python capture/collect functions and collect CLI; no grader/Docker change"
+}

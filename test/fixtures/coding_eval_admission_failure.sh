@@ -9,6 +9,12 @@ source "${repo}/scripts/harness_coding_eval.sh" --models fixture:model --out "${
 TARGET_DIR="${proof_dir}/target"
 CONFIG_DIR="${proof_dir}/config"
 export PORT=0 MCP_TOKEN=fixture-only
+EXPERIMENT_DIGEST="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+assert_experiment_inputs() { :; }
+# Controlled transport fixtures do not exercise the Docker grader.
+grade_case_stages() {
+  printf '%s\n' '{"verify":0,"regression":null,"build":null}' > "$3/grading.json"
+}
 case_dir="${proof_dir}/case"
 mkdir -p "${case_dir}" "${CONFIG_DIR}"
 printf '%s' '{"id":"l1-calc-add","timeout_sec":60,"verify":"verify.sh","prompt":"controlled failed admission"}' > "${case_dir}/case.json"

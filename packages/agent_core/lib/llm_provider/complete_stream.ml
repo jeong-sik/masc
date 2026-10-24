@@ -404,8 +404,9 @@ let complete_stream_http
                   }))
   in
   match request with
-  | Error err -> Error err
+  | Error err -> Completion_outcome.before_serialization (Error err)
   | Ok serialized ->
+    let result =
     let http_codec = serialized.Complete_common.http_codec in
     let body_with_stream = serialized.body in
     if requires_non_http_transport config.kind
@@ -1312,4 +1313,6 @@ let complete_stream_http
         in
         publish_summary ~terminal ();
         Error err)
+    in
+    Completion_outcome.after_serialization ~request:serialized result
 ;;

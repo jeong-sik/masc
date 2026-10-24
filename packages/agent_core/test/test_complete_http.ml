@@ -1388,6 +1388,7 @@ let test_complete_stream_http_error_metrics_uses_fallback () =
          ~tools:[]
          ~on_event:(fun _ -> ())
          ()
+       |> fun outcome -> outcome.Completion_outcome.result
      with
      | Error (Http_client.HttpError { code = 400; _ }) -> ()
      | Error _ -> fail "expected streaming HTTP 400"
@@ -3572,6 +3573,7 @@ let test_complete_stream_unknown_latency_stays_unknown () =
         ~tools:[]
         ~on_event:(fun _evt -> ())
         ()
+      |> fun outcome -> outcome.Completion_outcome.result
     in
     (match result with
      | Ok resp ->
@@ -4541,10 +4543,94 @@ let test_vertex_native_transport () =
       with Exit -> ())) [false; true]
 ;;
 
+let test_native_completion_outcome () =
+  Eio_main.run @@ fun env ->
+  try Eio.Switch.run @@ fun sw ->
+    List.iter (fun stream ->
+      List.iter (fun succeeds ->
+        List.iter (fun observer ->
+          let captured = ref None in
+          let url =
+            if stream && succeeds then
+              start_sse_server ~sw ~net:env#net ~capture_body:captured
+                (anthropic_sse_response "ok")
+            else start_mock_server ~sw ~net:env#net ~capture_body:captured
+                ~status:(if succeeds then `OK else `Bad_request)
+                (anthropic_response "ok")
+          in
+          let capabilities =
+            { Capabilities.default_capabilities with max_output_tokens = Some 100 } in
+          let config = Provider_config.make ~kind:Anthropic ~model_id:"outcome-fixture"
+              ~request_path:"/v1/messages" ~base_url:url ~max_tokens:200
+              ~model_capabilities_override:capabilities () in
+          let response, provenance =
+            if stream then
+              let outcome = Complete_stream.complete_stream_http ~sw ~net:env#net
+                  ?request_wire_observer:observer ~config ~messages ~tools:[]
+                  ~on_event:(fun _ -> ()) () in
+              outcome.result, outcome.request_provenance
+            else
+              let outcome = Complete_sync.complete_http ~sw ~net:env#net
+                  ?request_wire_observer:observer ~config ~messages ~tools:[] () in
+              let response, _latency = outcome.result in
+              response, outcome.request_provenance
+          in
+          (match succeeds, response with
+           | true, Ok _ | false, Error (Http_client.HttpError {code=400;_}) -> ()
+           | _ -> fail "native outcome changed the provider result");
+          let body = match !captured with Some body -> body
+            | None -> fail "peer did not receive the generation body" in
+          match provenance with
+          | Completion_outcome.Not_serialized -> fail "serialized evidence was lost"
+          | Completion_outcome.Serialized actual ->
+            check int "actual peer body length" (String.length body) actual.body_bytes;
+            check string "actual peer body digest"
+              Digestif.SHA256.(digest_string body |> to_hex) actual.body_sha256;
+            check (option int) "caller intent retained" (Some 200)
+              (Types.output_token_receipt_requested actual.output_token_receipt);
+            check (option int) "actual wire decision retained"
+              (Some Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "max_tokens" |> to_int))
+              (Types.output_token_receipt_effective actual.output_token_receipt))
+          [ None
+          ; Some (fun _ -> Error {Request_wire_observer.reason="observer rejected"})
+          ; Some (fun _ -> raise (Invalid_argument "observer failed")) ])
+        [true; false])
+      [false; true];
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
+let test_native_completion_before_serialization () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let config = Provider_config.make ~kind:Anthropic
+      ~model_id:"receipt-required-missing" ~base_url:"http://127.0.0.1:1" () in
+  let check_provenance = function
+    | Completion_outcome.Not_serialized -> ()
+    | Completion_outcome.Serialized _ -> fail "failed serializer invented a receipt"
+  in
+  let sync = Complete_sync.complete_http ~sw ~net:env#net
+      ~config ~messages ~tools:[] () in
+  check_provenance sync.request_provenance;
+  (match fst sync.result with
+   | Error (Http_client.AcceptRejected _) -> ()
+   | Error _ | Ok _ -> fail "missing required limit must fail before dispatch");
+  let stream = Complete_stream.complete_stream_http ~sw ~net:env#net
+      ~config ~messages ~tools:[] ~on_event:(fun _ -> ()) () in
+  check_provenance stream.request_provenance;
+  match stream.result with
+  | Error (Http_client.AcceptRejected _) -> ()
+  | Error _ | Ok _ -> fail "missing required stream limit must fail before dispatch"
+;;
+
 let () =
   run
     "complete_http"
-    [ ( "Vertex native", [test_case "OAuth native sync and streaming tool response" `Quick test_vertex_native_transport; test_case "refresh failure blocks HTTP" `Quick test_refresh_failure_prevents_http] )
+    [ ( "native_request_provenance"
+      , [ test_case "success/error retain receipt without observer delivery"
+            `Quick test_native_completion_outcome
+        ; test_case "failed serialization invents no receipt"
+            `Quick test_native_completion_before_serialization ] )
+    ; ( "Vertex native", [test_case "OAuth native sync and streaming tool response" `Quick test_vertex_native_transport; test_case "refresh failure blocks HTTP" `Quick test_refresh_failure_prevents_http] )
     ; ( "Responses tool image wire"
       , [ test_case "sync native tool images and history" `Quick
             (test_responses_tool_images_on_http ~stream:false)

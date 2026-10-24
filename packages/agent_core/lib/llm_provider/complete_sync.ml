@@ -536,8 +536,9 @@ let complete_http
            (fun serialized -> Ok (body_deadline, serialized)))
   in
   match preflight with
-  | Error err -> Error err, None
+  | Error err -> Completion_outcome.before_serialization (Error err, None)
   | Ok (body_deadline, serialized) ->
+    let result =
     let http_codec = serialized.Complete_common.http_codec in
     let body_str = serialized.body in
     if requires_non_http_transport config.kind
@@ -777,6 +778,8 @@ let complete_http
         in
         let latency_ms = latency_ms_int latency_counter in
         result, latency_ms))
+    in
+    Completion_outcome.after_serialization ~request:serialized result
 ;;
 
 (* body_balanced else-branch *)

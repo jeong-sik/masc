@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
   fetchDashboardPrompts: vi.fn(),
   savePromptOverride: vi.fn(async () => ({ ok: true, message: 'override set' } as Awaited<ReturnType<typeof import('../../api').savePromptOverride>>)),
 }))
+const presetView = vi.hoisted(() => ({ onRestored: null as (() => void) | null }))
+vi.mock('./prompt-saved-presets-panel', () => ({
+  PromptSavedPresetsPanel: (props: { onRestored?: () => void }) => { presetView.onRestored = props.onRestored ?? null; return null },
+}))
 
 vi.mock('../../api', () => ({
   clearPromptOverride: mocks.clearPromptOverride,
@@ -462,9 +466,7 @@ describe('PromptRegistryPanel', () => {
     const textarea = () => container.querySelector('textarea') as HTMLTextAreaElement
     await fireEvent.input(textarea(), { target: { value: 'stale keeper draft' } })
 
-    const refreshButton = Array.from(container.querySelectorAll('button')).find(button =>
-      button.textContent?.includes('새로고침'),
-    ) as HTMLButtonElement
+    const refreshButton = container.querySelector('[data-testid="prompt-registry-refresh"]') as HTMLButtonElement
     await fireEvent.click(refreshButton)
 
     await waitFor(() => {
@@ -479,6 +481,23 @@ describe('PromptRegistryPanel', () => {
     await waitFor(() => {
       expect(mocks.savePromptOverride).toHaveBeenCalledWith('analysis.dry_run', 'dry run prompt')
     })
+  })
+
+  it('keeps a later editor selection and its draft when a preset restore finishes', async () => {
+    render(html`<${PromptRegistryPanel} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+    const finished = presetView.onRestored!
+    const target = Array.from(container.querySelectorAll('button')).find(button =>
+      button.querySelector('.font-mono')?.textContent === 'analysis.dry_run')!
+    fireEvent.click(target)
+    await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('dry run prompt'))
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: 'new editor draft' } })
+    finished()
+    await waitFor(() => expect(mocks.fetchDashboardPrompts).toHaveBeenCalledTimes(2))
+    expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('new editor draft')
+    const apply = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === '오버라이드 적용')!
+    fireEvent.click(apply)
+    await waitFor(() => expect(mocks.savePromptOverride).toHaveBeenCalledWith('analysis.dry_run', 'new editor draft'))
   })
 
   it('toggles from the registry editor to the read-only prompt library', async () => {

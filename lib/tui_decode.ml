@@ -5188,6 +5188,8 @@ type preset_settings_match =
   | Preset_settings_differ
   | Preset_settings_unavailable of string
 
+type preset_lane_setting = Preset_max_output_tokens | Preset_thinking
+
 type preset_detail =
   { pd_name : string
   ; pd_directory : string
@@ -5198,6 +5200,8 @@ type preset_detail =
   ; pd_instructions : (string * int) list  (** keeper TOML file name, bytes *)
   ; pd_assignments : (string * string) list  (** keeper, runtime id *)
   ; pd_lanes : string list
+  ; pd_preserved_lane_settings : (string * preset_lane_setting) list
+  ; pd_skipped_lanes : (string * string) list
   }
 
 type preset_part =
@@ -5237,6 +5241,8 @@ type preset_restore_report =
   ; prr_instructions : preset_part
   ; prr_runtime : preset_runtime_status
   ; prr_default_prompts : Prompt_preset.default_comparison
+  ; prr_preserved_lane_settings : (string * preset_lane_setting) list
+  ; prr_skipped_lanes : (string * string) list
   }
 
 (* The routes answer [{ok:false, error}] on a refused request; read that
@@ -5317,8 +5323,37 @@ let decode_preset_defaults json =
       | _ -> Error ("invalid default prompt comparison: " ^ status)
 ;;
 
+let decode_preset_preserved_lane_settings json =
+  match json with
+  | `Assoc fields when not (List.mem_assoc "preserved_lane_settings" fields) -> Ok []
+  | _ ->
+    let* rows = required_list_field json "preserved_lane_settings" in
+    decode_list "preserved_lane_settings" (fun row ->
+      let* lane = required_string_field row "lane" in
+      let* setting = required_string_field row "setting" in
+      let* setting = match setting with
+        | "max_output_tokens" -> Ok Preset_max_output_tokens
+        | "thinking" -> Ok Preset_thinking
+        | value -> Error ("unknown preserved lane setting: " ^ value)
+      in
+      Ok (lane, setting)) rows
+;;
+
+let decode_preset_skipped_lanes json =
+  match json with
+  | `Assoc fields when not (List.mem_assoc "skipped_lanes" fields) -> Ok []
+  | _ ->
+    let* rows = required_list_field json "skipped_lanes" in
+    decode_list "skipped_lanes" (fun row ->
+      let* lane = required_string_field row "lane" in
+      let* reason = required_string_field row "reason" in
+      Ok (lane, reason)) rows
+;;
+
 let decode_preset_detail json =
   let* preset = required_object_field json "preset" in
+  let* pd_preserved_lane_settings = decode_preset_preserved_lane_settings preset in
+  let* pd_skipped_lanes = decode_preset_skipped_lanes preset in
   let* pd_name = required_string_field preset "name" in
   let* pd_directory = required_string_field json "directory" in
   let* pd_default_prompts = decode_preset_defaults json in
@@ -5379,7 +5414,7 @@ let decode_preset_detail json =
         items
     | _ -> []
   in
-  Ok { pd_name; pd_directory; pd_settings_match; pd_default_prompts; pd_prompt_files; pd_overrides; pd_instructions; pd_assignments; pd_lanes }
+  Ok { pd_name; pd_directory; pd_settings_match; pd_default_prompts; pd_prompt_files; pd_overrides; pd_instructions; pd_assignments; pd_lanes; pd_preserved_lane_settings; pd_skipped_lanes }
 ;;
 
 let decode_name_reason_list json key ~name_key ~reason_key =
@@ -5564,7 +5599,9 @@ let decode_preset_restore json =
     let* prr_instructions = decode_preset_part report "instructions" in
     let* prr_runtime = decode_preset_runtime report in
     let* prr_default_prompts = decode_preset_defaults report in
-    Ok { prr_restored; prr_autosave; prr_prompt_overrides; prr_instructions; prr_runtime; prr_default_prompts }
+    let* prr_preserved_lane_settings = decode_preset_preserved_lane_settings report in
+    let* prr_skipped_lanes = decode_preset_skipped_lanes report in
+    Ok { prr_restored; prr_autosave; prr_prompt_overrides; prr_instructions; prr_runtime; prr_default_prompts; prr_preserved_lane_settings; prr_skipped_lanes }
 ;;
 
 type librarian_run_page =

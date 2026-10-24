@@ -1,0 +1,39 @@
+{
+  "tested_source_commit": "fc2825969c5bb129a06b41a88d5e22735c2fc02e",
+  "rebased_ui_source_commit": "858537b5595d4ae568c931b6d1744cb922260f99",
+  "all_13_tested_files_byte_identical_after_rebase": true,
+  "checks": {
+    "dashboard_behavior_tests": 31,
+    "tui_decode_and_result_behavior_tests": 4,
+    "changed_file_eslint": "pass",
+    "typecheck": "same two existing errors as fd754 baseline; no changed-file errors",
+    "native_dependency_artifact_source": "90269c9233e34ab22940a4e8d5ca386033916d8c"
+  },
+  "browser_scope": {
+    "browser": "Ego Lite via ego-browser",
+    "surface": "Actual saved preset component at a dedicated candidate fixture entry",
+    "api": "Loopback adapter invokes the compiled Candidate_preset against copied operator presets",
+    "auth_and_full_server_integration": false,
+    "native_tui_visible_capture": false,
+    "installed_runtime_update": false
+  },
+  "browser_observations": {
+    "saved_new_preset": true,
+    "saved_preset_persisted_reread": true,
+    "explicit_restore_confirmation": true,
+    "restore_instruction_applied_count": 28,
+    "restore_instruction_skipped_count": 0,
+    "restore_runtime_status": "failed",
+    "restore_unavailable_lane_count": 1,
+    "partial_result_marked_needs_attention": true,
+    "duplicate_create": {
+      "status": 409,
+      "existing_file_count": 40,
+      "all_existing_bytes_preserved": true
+    }
+  },
+  "live_originals": {
+    "files": 63,
+    "changed_files": 0
+  }
+}

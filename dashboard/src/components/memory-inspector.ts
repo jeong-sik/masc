@@ -74,6 +74,7 @@ interface BlockMeta {
 const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
   keeper_instructions: { lbl: 'Keeper 지침', color: 'var(--text-dim)', mem: false },
   dynamic_context: { lbl: '동적 컨텍스트', color: 'var(--volt)', mem: false },
+  active_goals: { lbl: '현재 Goal', color: 'var(--volt)', mem: false },
   temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)', mem: false },
   librarian_working_context: { lbl: 'Librarian 작업 맥락', color: 'var(--info)', mem: false },
   memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)', mem: true },

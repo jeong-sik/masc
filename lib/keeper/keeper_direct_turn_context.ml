@@ -51,7 +51,7 @@ let prepare ~active_goal_summaries ~current_task ~held_task_skills ~task_skill_s
           telemetry_feedback_text; turn_instructions_text]) in
   { goal_context; task_context; remaining_context; workspace_memory; wiki_contents }
 
-let project prepared ~workspace_memory_access =
+let project_partition prepared ~workspace_memory_access =
   let dynamic =
     Option.to_list (Keeper_unified_prompt.format_workspace_memory_observation
       ?access:workspace_memory_access prepared.workspace_memory)
@@ -61,6 +61,14 @@ let project prepared ~workspace_memory_access =
   (* Common fragments have already been filtered and coalesced. Do not scan
      their text again for each request; concatenation retains the original
      Goal / Task / memory / wiki / Lane-and-conversation order and exact separators. *)
-  String.concat "\n\n"
-    (Option.to_list prepared.goal_context @ Option.to_list prepared.task_context @ dynamic
-     @ Option.to_list prepared.remaining_context)
+  let remaining = String.concat "\n\n"
+      (Option.to_list prepared.task_context @ dynamic @ Option.to_list prepared.remaining_context) in
+  match prepared.goal_context with
+  | None -> Keeper_context_layers.unattributed Direct_turn remaining
+  | Some goals ->
+    Keeper_context_layers.singleton Active_goals goals
+    |> fun rendered -> Keeper_context_layers.append_unattributed rendered Direct_turn
+         (if remaining = "" then "" else "\n\n" ^ remaining)
+
+let project prepared ~workspace_memory_access =
+  project_partition prepared ~workspace_memory_access |> Keeper_context_layers.text

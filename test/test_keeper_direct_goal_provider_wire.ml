@@ -170,10 +170,119 @@ let run_case source () =
       | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
       | ToolResult _ | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
 
+let test_goal_survives_read_then_task_creation () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  install_catalog ~sw;
+  let base_path = Filename.temp_dir "goal-tool-loop-wire-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let config = Workspace.default_config base_path in
+  Fs_compat.mkdir_p (Workspace.masc_dir config);
+  install_prompts base_path;
+  let goal = create_goal config in
+  let measurement = observe config goal in
+  let prepared = Direct.prepare
+      ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"goal-loop-wire")
+      ~current_task:Keeper_world_observation_inputs.No_current_task ~held_task_skills:[]
+      ~task_skill_surfaces:[] ~workspace_memory:Workspace_memory_ledger.Missing
+      ~wiki_contents:Keeper_wiki_contents.Off ~lane_updates:(Ok (`List []))
+      ~approval_authority_text:"INITIAL_GATE_SNAPSHOT"
+      ~recent_direct_conversation_text:"INITIAL_OWNER_CONVERSATION"
+      ~worktree_text:"INITIAL_WORKTREE_SNAPSHOT" ~telemetry_feedback_text:""
+      ~turn_instructions_text:"INITIAL_TURN_INSTRUCTIONS" () in
+  let partition = Direct.project_partition prepared ~workspace_memory_access:None in
+  let dynamic = Keeper_context_layers.text partition in
+  let previous = ref None in
+  let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params; messages; _} ->
+      let post_tool_round = Keeper_run_prompt.is_later_round_of_this_turn
+          ~injected_this_turn:(Option.is_some !previous) messages in
+      let issued = Keeper_run_prompt.assemble_request_context ~post_tool_round
+          ~previous_assembly:!previous ~dynamic_context_partition:(Some partition)
+          ~existing_extra_system_context:current_params.extra_system_context
+          ~blocks:[Prompt_block_id.Dynamic_context, dynamic;
+                   Prompt_block_id.Temporal_summary, "INITIAL_CLOCK"] in
+      previous := Some issued;
+      AdjustParams {current_params with extra_system_context = issued.extra_system_context}
+    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _
+    | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> Continue) } in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String "goal-loop-wire"; "trace_id", `String "trace-goal-loop-wire"]) with
+    | Ok meta -> meta | Error detail -> fail detail in
+  let bundle = Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle ~config ~meta
+      ~publication_recovery:{provider=Keeper_publication_recovery_availability.non_runtime_provider;
+                             keeper_name=meta.name}
+      ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"") () in
+  Fun.protect ~finally:bundle.cleanup @@ fun () ->
+  let create_tool = match List.find_opt (fun (tool : Agent_core.Tool.t) ->
+      tool.schema.name = "keeper_task_create") bundle.tools with
+    | Some tool -> tool | None -> fail "actual Task creation tool is unavailable" in
+  let metric_path = Filename.concat base_path "metric.json" in
+  Fs_compat.save_file metric_path {|{"inspected":1,"required":2}|};
+  let read_tool = Agent_core.Tool.create ~name:"Read" ~description:"Read the fixture metric"
+      ~parameters:[] (fun _ -> Ok {Agent_core.Types.content=Fs_compat.load_file metric_path;
+                                  content_blocks=None; _meta=None}) in
+  let answer message finish = Yojson.Safe.to_string (`Assoc ["id",`String "goal-loop";
+    "model",`String model_id; "choices",`List [`Assoc ["index",`Int 0;
+      "message",message;"finish_reason",`String finish]];
+    "usage",`Assoc ["prompt_tokens",`Int 1;"completion_tokens",`Int 1;"total_tokens",`Int 2]]) in
+  let call id name args = answer (`Assoc ["role",`String "assistant";"content",`Null;
+    "tool_calls",`List [`Assoc ["id",`String id;"type",`String "function";
+      "function",`Assoc ["name",`String name;"arguments",`String (Yojson.Safe.to_string args)]]]]) "tool_calls" in
+  let responses = [|
+    call "read-metric" "Read" (`Assoc []);
+    call "create-linked-task" "keeper_task_create" (`Assoc ["title",`String "Inspect the remaining result";
+      "description",`String "Inspect the remaining declared Goal result and retain its persisted evidence.";
+      "goal_id",`String goal.id]);
+    answer (`Assoc ["role",`String "assistant";"content",`String "Task recorded."]) "stop" |] in
+  let received = ref [] in
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply_with (fun index body ->
+         received := body :: !received;
+         if index < Array.length responses then `OK,responses.(index)
+         else `Bad_request,"unexpected provider request")) in
+  let provider_cfg = Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture" ~model_id
+      ~base_url:server.base_url ~request_path:"/v1/chat/completions" ~tool_stream:false () in
+  let runtime = Runtime_agent.default_config ~name:"goal-loop-wire" ~provider_cfg
+      ~system_prompt:"Read the metric, then record the remaining work as a Task."
+      ~tools:[read_tool;create_tool] in
+  let result = match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
+      owner_request with
+    | Ok ({stop_reason=Runtime_agent.Completed _;_} as result) -> result
+    | Ok _ -> fail "tool-loop fixture did not complete"
+    | Error error -> fail (Agent_core.Error.to_string error) in
+  let bodies = List.rev !received in
+  check int "Read and actual Task creation traverse three provider requests" 3 (List.length bodies);
+  List.iteri (fun index body ->
+    let messages = Json.member "messages" (Yojson.Safe.from_string body) |> Json.to_list in
+    let contexts = List.filter_map (fun message -> match Json.member "content" message with
+      | `String text when contains ~needle:"[system context]" text -> Some text
+      | `String _ | `Null | `List _ | `Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> None) messages in
+    let context = match contexts with [context] -> context | _ -> fail "one current context carrier required" in
+    List.iter (fun needle -> check bool "every receiver request retains the exact Goal snapshot" true
+      (contains ~needle context)) [goal.id;goal.criterion_revision;measurement.id;reported_value];
+    List.iter (fun needle -> check bool "other world context stays first-request only" (index=0)
+      (contains ~needle context)) ["INITIAL_GATE_SNAPSHOT";"INITIAL_OWNER_CONVERSATION";
+        "INITIAL_WORKTREE_SNAPSHOT";"INITIAL_TURN_INSTRUCTIONS";"INITIAL_CLOCK"]) bodies;
+  let links = match Workspace_goal_index.read_goal_task_links_authoritative_r config with
+    | Ok links -> links | Error detail -> fail detail in
+  check bool "real Task creation persisted its explicit Goal association" true
+    (match List.assoc_opt goal.id links with Some [_] -> true | None | Some [] | Some (_::_::_) -> false);
+  let checkpoint = match result.checkpoint with Some checkpoint -> checkpoint | None -> fail "checkpoint missing" in
+  check bool "Goal snapshot carrier stays out of returned durable conversation" false
+    (List.exists (fun (message : Agent_core.Types.message) ->
+      List.exists (function Agent_core.Types.Text text -> contains ~needle:measurement.id text
+        | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content) checkpoint.messages)
+
 let () = run "direct Goal context on actual provider wire"
   ["direct owner requests",[
     test_case "current criterion and measurement reach HTTP receiver" `Quick (run_case Current);
     test_case "changed criterion never receives a stale measurement" `Quick (run_case Revised);
     test_case "measurement failure is explicit and does not hide Goal" `Quick (run_case Measurement_unavailable);
     test_case "Goal primary failure never borrows recovery context" `Quick (run_case Goal_unavailable);
-    test_case "independent work needs no synthetic Goal" `Quick (run_case Empty)]]
+    test_case "independent work needs no synthetic Goal" `Quick (run_case Empty);
+    test_case "Goal survives Read and actual Task creation without other world replay" `Quick
+      test_goal_survives_read_then_task_creation]]

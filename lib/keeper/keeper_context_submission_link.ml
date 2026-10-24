@@ -78,7 +78,7 @@ let selected_block_text assembly ~omitted_sections ~omitted_rows (id, text) =
         else Some (String.concat "" (List.filter_map Fun.id texts))
       else None)
   | Prompt_block_id.(
-      Dynamic_context | Keeper_instructions | Temporal_summary | Memory_os_recall
+      Dynamic_context | Active_goals | Keeper_instructions | Temporal_summary | Memory_os_recall
       | Librarian_working_context | Operator_note | Skill_compositions) -> Some text
 
 let source assembly selected_blocks ~omitted_sections ~omitted_rows

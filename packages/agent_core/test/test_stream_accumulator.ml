@@ -62,6 +62,9 @@ let test_create_initial_state () =
   let response = finalize_with_end_turn acc in
   Alcotest.(check string) "msg_id empty" "" response.id;
   Alcotest.(check string) "msg_model empty" "" response.model;
+  Alcotest.(check bool) "no stream prelude leaves reported model explicitly absent" true
+    (Option.bind response.telemetry (fun telemetry -> telemetry.reported_model)
+      = Some Provider_model_not_reported);
   check_unreported_usage response.usage
 ;;
 
@@ -77,6 +80,9 @@ let test_accumulate_message_start () =
   let response = finalize_with_end_turn acc in
   Alcotest.(check string) "id set" "msg_123" response.id;
   Alcotest.(check string) "model set" "claude-sonnet-4" response.model;
+  Alcotest.(check bool) "the raw stream prelude retains reported model evidence" true
+    (Option.bind response.telemetry (fun telemetry -> telemetry.reported_model)
+      = Some (Provider_reported_model "claude-sonnet-4"));
   match response.usage with
   | Some usage -> Alcotest.(check int) "input_tokens" 100 usage.input_tokens
   | None -> Alcotest.fail "expected usage"

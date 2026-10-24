@@ -3192,7 +3192,7 @@ let test_submitting_response_identity_survives_later_responses_and_reload () =
         { id; model; stop_reason = StopToolUse
         ; content = [ToolUse {id="submit-call"; name="submit-fixture"; input=`Assoc []}]; usage = None
         ; telemetry = Some { Llm_provider.Types.default_inference_telemetry with
-            canonical_model_id = Some model } } in
+            canonical_model_id = Some model; reported_model = Some (Provider_reported_model model) } } in
       let collect response = ignore (Agent_core.Hooks.invoke_validated hooks.after_turn
         (Agent_core.Hooks.AfterTurn { turn = 1; response; tool_source_map = None })) in
       collect (observed "original-model" "original-response");

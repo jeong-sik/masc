@@ -446,13 +446,14 @@ let parse_openai_response_result_json_raw
         ~has_tool_blocks:(tool_blocks <> [])
       |> Stop_reason_wire.with_refusal ~has_refusal
     in
+    let model = Cli_common_json.member_str "model" json in
     Ok
       { id = Cli_common_json.member_str "id" json
-      ; model = Cli_common_json.member_str "model" json
+      ; model
       ; stop_reason
       ; content
       ; usage = usage_of_openai_json json
-      ; telemetry
+      ; telemetry = Some (Types.with_reported_model ~model telemetry)
       }
   | err ->
     (match Openai_error_envelope.of_error_value err with

@@ -403,7 +403,10 @@ let store_artifact store ~reusable ~mime { payload_bytes = bytes; payload_sha256
   match Artifact_map.find_opt (sha256, mime) reusable with
   | Some artifact when artifact.art_bytes = bytes_length -> artifact, reusable
   | Some _ | None ->
-    let reference = Tool_blob_store.put_durable store ~bytes ~mime in
+    let reference =
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        Tool_blob_store.put_durable store ~bytes ~mime)
+    in
     let reference = Tool_output.with_preview reference "" in
     let artifact =
       { art_bytes = bytes_length
@@ -428,8 +431,8 @@ let write_best_effort
   let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn in
   let write () =
     (* Serialising and hashing every message and tool schema is pure, so the
-       pool does it. The reuse lookup, the blob writes and the append stay on
-       this fiber, which owns the file I/O. *)
+       CPU pool does it. Reuse lookup, map updates and the append stay on
+       this fiber; each new blob's addressing and durable put use the IO pool. *)
     let system_payload, message_payloads, tool_payloads =
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         ( (if String.equal system_prompt "" then None else Some (payload_of_string system_prompt))

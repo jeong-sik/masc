@@ -63,7 +63,7 @@
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.6.0",
-    "happy-dom": "^20.9.0",
+    "happy-dom": "^21.0.4",
     "jest-axe": "^9.0.0",
     "jsdom": "^29.1.1",
     "magic-string": "0.30.21",

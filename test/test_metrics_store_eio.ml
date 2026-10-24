@@ -347,20 +347,27 @@ let test_invalid_observations_and_real_zero () =
     record_ok config zero;
     assert ((aggregate config "validated").avg_completion_time_s = Some 0.0);
     let invalid = [ { metric with task_id = " " }; { metric with handoff_to = Some " " };
-      { metric with collaborators = [""] }; { metric with started_at = Float.nan };
+      { metric with collaborators = [""] };
       { metric with success = true };
       { metric with completed_at = Some (metric.started_at -. 1.0) };
       { metric with started_at = -. Float.max_float; completed_at = Some Float.max_float } ] in
     List.iter (fun row ->
       match Metrics_store_eio.record config row with
       | Error (Metrics_store_eio.Invalid_metric_record _) -> ()
-      | Error _ | Ok _ -> failwith "invalid observation was recorded") invalid;
+      | Error _ | Ok _ -> failwith "invalid observation was recorded")
+      ({ metric with started_at = Float.nan } :: invalid);
     let file = Filename.concat (Metrics_store_eio.agent_metrics_dir config "validated") "invalid.jsonl" in
-    List.iter (fun row ->
-      Fs_compat.save_file file (Yojson.Safe.to_string (Metrics_store_eio.task_metric_to_yojson row));
+    let invalid_sources =
+      List.map (fun row -> Yojson.Safe.to_string (Metrics_store_eio.task_metric_to_yojson row)) invalid
+      (* NaN cannot pass the standard JSON writer. Inject its corrupt bytes
+         directly so this scenario exercises the authoritative source reader. *)
+      @ [ {|{"id":"invalid-nan","agent_id":"validated","task_id":"zero","started_at":NaN,"success":false,"collaborators":[]}|} ]
+    in
+    List.iter (fun bytes ->
+      Fs_compat.save_file file bytes;
       match Metrics_store_eio.get_recent config ~agent_id:"validated" ~days:1 with
       | Error (Metrics_store_eio.Invalid_record _) -> ()
-      | Error _ | Ok _ -> failwith "invalid stored observation was accepted") invalid)
+      | Error _ | Ok _ -> failwith "invalid stored observation was accepted") invalid_sources)
 
 let test_generate_id () =
   let ids = List.init 128 (fun _ -> Metrics_store_eio.generate_id ()) in

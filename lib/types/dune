@@ -17,6 +17,7 @@
   health_status
   types_core
   task_status_observation
+  task_outcome_measurement
   types_auth
   masc_domain
   goal_store_unavailable

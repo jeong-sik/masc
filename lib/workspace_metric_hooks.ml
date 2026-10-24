@@ -160,11 +160,11 @@ let observe_task_transition_event
          Telemetry_eio.track_task_started config ~task_id ~agent_id:agent_name
        | Masc_domain.Done_action ->
          let duration_ms = Safe_ops.json_int ~default:0 "duration_ms" details in
-         Telemetry_eio.track_task_completed config ~task_id ~duration_ms ~success:true;
+         Telemetry_eio.track_task_completed config ~task_id ~duration_ms ~terminal:Task_outcome_measurement.Approved;
          Otel_metric_store.record_task_completed ()
        | Masc_domain.Cancel ->
          let duration_ms = Safe_ops.json_int ~default:0 "duration_ms" details in
-         Telemetry_eio.track_task_completed config ~task_id ~duration_ms ~success:false;
+         Telemetry_eio.track_task_completed config ~task_id ~duration_ms ~terminal:Task_outcome_measurement.Cancelled;
          Otel_metric_store.record_task_failed ()
        | Masc_domain.Release | Masc_domain.Submit_for_verification -> ())
    with
@@ -413,14 +413,14 @@ let install () =
     | Error err ->
       Error err);
 
-  Atomic.set Workspace_hooks.record_task_metric_fn (fun config ~agent_id ~task_id ~started_at ~completed_at ~success ~error_message ~collaborators ~handoff_from ~handoff_to ->
+  Atomic.set Workspace_hooks.record_task_metric_fn (fun config ~agent_id ~task_id ~started_at ~completed_at ~terminal ~error_message ~collaborators ~handoff_from ~handoff_to ->
     let metric : Metrics_store_eio.task_metric = {
       id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));
       agent_id;
       task_id;
       started_at;
       completed_at;
-      success;
+      success = Task_outcome_measurement.lifecycle_success terminal;
       error_message;
       collaborators;
       handoff_from;

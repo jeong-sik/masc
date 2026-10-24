@@ -27,6 +27,8 @@ type task_metric = {
   completed_at : float option; [@default None]
       (** [None] iff still in progress. *)
   success : bool;
+      (** Recorded Task lifecycle success (approval), not external acceptance
+          or Goal confirmation. The durable boolean format is unchanged. *)
   error_message : string option; [@default None]
   collaborators : string list;
       (** Other agents involved — for Hebbian collaboration learning. *)
@@ -45,6 +47,8 @@ type agent_metrics = {
   period_start : float;
   period_end : float;
   record_count : int; (** Raw observations before grouping by exact Task ID. *)
+  outcome_basis : Task_outcome_measurement.basis;
+  external_acceptance : Task_outcome_measurement.external_acceptance;
   total_tasks : int;
   conflicting_tasks : int; (** Tasks whose start or latest terminal evidence disagrees. *)
   completed_tasks : int;
@@ -52,7 +56,9 @@ type agent_metrics = {
   failed_tasks : int;
   avg_completion_time_s : float option; (** [None] when no Task completed. *)
   task_completion_rate : float;  (** Range [\[0.0, 1.0\]]. *)
-  task_success_rate : float option; (** Successful / completed; [None] if none completed. *)
+  task_success_rate : float option;
+      (** Lifecycle-successful / completed; [None] if none completed. This
+          does not measure delivery, external acceptance, or Goal success. *)
   error_rate : float option; (** Failed / completed; [None] if none completed. *)
   handoff_tasks : int;
   completed_handoff_tasks : int;
@@ -227,6 +233,9 @@ val calculate_agent_metrics :
       Such Tasks stay in [total_tasks] and relationship unions, but contribute no
       completed outcome or duration. A later unambiguous terminal supersedes an
       older contradictory terminal. Source corruption remains an error.
+    - [outcome_basis] is [Task_lifecycle]. [external_acceptance] remains
+      [Unobserved] for every completed Task; this stream has no acceptance
+      evidence and never infers a Goal observation or human confirmation.
     - [completed_tasks = successful_tasks + failed_tasks]. Completion rate is
       completed / total; success and error rates use completed as denominator.
     - Average duration uses completed Tasks, including genuine zero durations.

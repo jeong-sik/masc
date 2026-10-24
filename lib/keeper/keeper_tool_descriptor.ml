@@ -1842,6 +1842,13 @@ let agent_metrics_output_properties =
   [ "agent_id", `Assoc [ "type", `String "string" ]
   ; "period_start", metric_number_schema
   ; "period_end", metric_number_schema
+  ; "outcome_basis", `Assoc
+      [ "type", `String "string"; "enum", `List [ `String "task_lifecycle" ] ]
+  ; "external_acceptance", object_output_schema
+      ~properties:
+        [ "kind", `Assoc [ "type", `String "string"; "enum", `List [ `String "unobserved" ] ]
+        ; "completed_tasks", `Assoc [ "type", `String "integer" ] ]
+      ~required:[ "kind"; "completed_tasks" ]
   ]
   @ List.map (fun name -> name, `Assoc [ "type", `String "integer" ])
       [ "record_count"; "total_tasks"; "conflicting_tasks"; "completed_tasks"; "successful_tasks"; "failed_tasks";
@@ -1888,11 +1895,11 @@ let agent_fitness_output_schema =
             "components", nullable_object
               ~properties:[
                 "completion", `Assoc [ "type", `String "number" ];
-                "reliability", nullable_metric_number_schema;
+                "task_lifecycle_success", nullable_metric_number_schema;
                 "speed", nullable_metric_number_schema;
                 "handoff_task_success", nullable_metric_number_schema;
               ]
-              ~required:[ "completion"; "reliability"; "speed"; "handoff_task_success" ];
+              ~required:[ "completion"; "task_lifecycle_success"; "speed"; "handoff_task_success" ];
             "metrics", nullable_object ~properties:agent_metrics_output_properties
               ~required:agent_metrics_output_required;
           ] ~required:[ "agent_id"; "components"; "metrics" ];

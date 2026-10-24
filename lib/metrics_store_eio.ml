@@ -19,7 +19,7 @@ type task_metric = {
   task_id: string;          (* Task being measured *)
   started_at: float;        (* Unix timestamp *)
   completed_at: float option [@default None];  (* None if still in progress *)
-  success: bool;            (* Task succeeded? *)
+  success: bool;            (* Recorded Task lifecycle approval, not external acceptance. *)
   error_message: string option [@default None];  (* Error if failed *)
   collaborators: string list;  (* Other agents involved - for Hebbian *)
   handoff_from: string option [@default None];  (* Previous agent if handoff *)
@@ -32,6 +32,8 @@ type agent_metrics = {
   period_start: float;      (* Start of measurement period *)
   period_end: float;        (* End of measurement period *)
   record_count: int;
+  outcome_basis: Task_outcome_measurement.basis;
+  external_acceptance: Task_outcome_measurement.external_acceptance;
   total_tasks: int;
   conflicting_tasks: int;
   completed_tasks: int;
@@ -591,6 +593,8 @@ let calculate_agent_metrics config ~agent_id ~days =
       period_start = now -. Masc_time_constants.days_to_seconds days;
       period_end = now;
       record_count = List.length metrics;
+      outcome_basis = Task_outcome_measurement.Task_lifecycle;
+      external_acceptance = Task_outcome_measurement.Unobserved { completed_tasks };
       total_tasks; conflicting_tasks; completed_tasks; successful_tasks; failed_tasks;
       avg_completion_time_s;
       task_completion_rate = Float.of_int completed_tasks /. Float.of_int total_tasks;

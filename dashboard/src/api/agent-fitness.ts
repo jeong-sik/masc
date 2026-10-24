@@ -3,7 +3,7 @@ import { callMcpTool } from './mcp'
 
 export interface AgentFitnessComponents {
   readonly completion: number
-  readonly reliability: number | null
+  readonly task_lifecycle_success: number | null
   readonly speed: number | null
   readonly handoff_task_success: number | null
 }
@@ -41,12 +41,12 @@ export function parseAgentFitness(raw: unknown, agentName: string): AgentFitness
   if (row.agent_id !== agentName) throw new Error('Fitness identity differs from selection')
   if (row.metrics === null && row.components === null) return null
   const metrics = object(row.metrics, [
-    'agent_id', 'period_start', 'period_end', 'record_count', 'total_tasks', 'conflicting_tasks', 'completed_tasks',
+    'agent_id', 'period_start', 'period_end', 'record_count', 'outcome_basis', 'external_acceptance', 'total_tasks', 'conflicting_tasks', 'completed_tasks',
     'successful_tasks', 'failed_tasks', 'avg_completion_time_s', 'task_completion_rate',
     'task_success_rate', 'error_rate', 'handoff_tasks', 'completed_handoff_tasks',
     'successful_handoff_tasks', 'handoff_task_success_rate', 'unique_collaborators',
   ])
-  const components = object(row.components, ['completion', 'reliability', 'speed', 'handoff_task_success'])
+  const components = object(row.components, ['completion', 'task_lifecycle_success', 'speed', 'handoff_task_success'])
   const count = (key: string): number => {
     const value = number(metrics[key])
     if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid fitness count')
@@ -55,13 +55,16 @@ export function parseAgentFitness(raw: unknown, agentName: string): AgentFitness
   const records = count('record_count'), total = count('total_tasks'), completed = count('completed_tasks')
   const successful = count('successful_tasks'), failed = count('failed_tasks')
   const conflicting = count('conflicting_tasks')
+  const acceptance = object(metrics.external_acceptance, ['kind', 'completed_tasks'])
   const handoffs = count('handoff_tasks'), completedHandoffs = count('completed_handoff_tasks')
   const successfulHandoffs = count('successful_handoff_tasks')
   const average = nullableNumber(metrics.avg_completion_time_s)
-  const completion = number(components.completion), reliability = rate(components.reliability)
+  const completion = number(components.completion), lifecycleSuccess = rate(components.task_lifecycle_success)
   const speed = rate(components.speed), handoff = rate(components.handoff_task_success)
   const ratio = (n: number, d: number): number | null => d === 0 ? null : n / d
   if (metrics.agent_id !== agentName || number(metrics.period_start) > number(metrics.period_end)
+    || metrics.outcome_basis !== 'task_lifecycle' || acceptance.kind !== 'unobserved'
+    || acceptance.completed_tasks !== completed
     || total === 0 || records < total || completed + conflicting > total || successful + failed !== completed
     || handoffs > total || completedHandoffs > Math.min(handoffs, completed)
     || successfulHandoffs > Math.min(completedHandoffs, successful)
@@ -69,7 +72,7 @@ export function parseAgentFitness(raw: unknown, agentName: string): AgentFitness
     || handoffs - completedHandoffs > total - completed
     || (completed === 0 ? average !== null : average === null || average < 0)
     || completion !== completed / total || metrics.task_completion_rate !== completion
-    || reliability !== ratio(successful, completed) || metrics.task_success_rate !== reliability
+    || lifecycleSuccess !== ratio(successful, completed) || metrics.task_success_rate !== lifecycleSuccess
     || metrics.error_rate !== ratio(failed, completed)
     || handoff !== ratio(successfulHandoffs, completedHandoffs) || metrics.handoff_task_success_rate !== handoff
     || (average === null || average === 0 ? speed !== null : speed !== 1)
@@ -77,7 +80,7 @@ export function parseAgentFitness(raw: unknown, agentName: string): AgentFitness
     || !metrics.unique_collaborators.every(value => typeof value === 'string')) {
     throw new Error('Inconsistent named fitness observations')
   }
-  return { completion, reliability, speed, handoff_task_success: handoff }
+  return { completion, task_lifecycle_success: lifecycleSuccess, speed, handoff_task_success: handoff }
 }
 
 export async function fetchAgentFitness(agentName: string): Promise<AgentFitnessComponents | null> {

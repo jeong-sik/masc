@@ -45,8 +45,7 @@ let test_producer_exact_route_and_receipt () =
       ~external_message_id:delivery.external_message_id ~workspace_id:None ~extra_mentions:[] ~sender_keeper:None
       ~user_row_origin:Keeper_chat_store.Needs_append in
     let source = make delivery.surface |> ok in
-    let canonical = Keeper_chat_operation.canonical_json source
-      |> Result.map_error Keeper_chat_operation.canonical_json_error_to_string |> ok in
+    let canonical = Keeper_chat_operation.canonical_json_string source |> ok |> Yojson.Safe.from_string in
     ignore(Keeper_chat_operation_payload.source_of_json canonical |> ok);
     let actual=Surface_ref.of_json(Surface_ref.to_json delivery.surface) |> ok in
     check bool "terminal consumer accepts persisted coordinates" true

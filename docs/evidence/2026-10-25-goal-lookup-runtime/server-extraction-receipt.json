@@ -1,0 +1,17 @@
+{
+  "source_sha": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+  "binary_sha256": "6a2266ee62065039dfd4f37651b21122f8a239041bd762532392f9f46b5f0b57",
+  "embedded_source": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+  "artifact_id": 12564538854,
+  "extraction": "HTTP ranges, ZIP per-entry CRC and artifact SHA256SUMS",
+  "support_bundle_source": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+  "support_upstream_libraries_equal": true,
+  "support_python_equal": true,
+  "scope": "server-only isolated test runtime; not full new package extraction, installation or deployment",
+  "support_files": {
+    "lib/libssl.3.dylib": "9d45d4d26429c3faec633e9d8d3e31021b12ee2863661e489a80375f3c4f1686",
+    "lib/libcrypto.3.dylib": "7d9422a02bff88f27af94a129740bf39768c4565e72fd9c1df8928bdec81259b",
+    "lib/libgmp.10.dylib": "e7bc574f0e15f6d085c87986941d01507f560e49325f19f100ed26e0de7523c0",
+    "lib/libzstd.1.5.7.dylib": "33754b103ba91fe54165a8673c7ed98e1f75030a29a6942d4174e34af24da5ec"
+  }
+}

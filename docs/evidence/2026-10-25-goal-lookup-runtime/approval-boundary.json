@@ -1,0 +1,43 @@
+{
+  "observed_at": "2026-10-24T15:37:07.641063+00:00",
+  "task": {
+    "id": "task-001",
+    "title": "Set alpha to true in acceptance.json",
+    "description": "Set alpha to true in acceptance.json while keeping beta and gamma as false. Verify the modified file as evidence.",
+    "priority": 3,
+    "files": [],
+    "created_at": "2026-10-24T15:30:17Z",
+    "created_by": "goal-canary",
+    "contract": {
+      "completion_contract": [
+        "artifact:workspace/acceptance.json"
+      ],
+      "inspect_gate_evidence": [
+        "artifact:workspace/acceptance.json"
+      ],
+      "verify_gate_evidence": [
+        "artifact:workspace/acceptance.json"
+      ]
+    },
+    "handoff_context": {
+      "summary": "alpha set to true in acceptance.json",
+      "evidence_refs": [
+        "artifact:workspace/acceptance.json"
+      ],
+      "updated_at": "2026-10-24T15:33:20Z",
+      "updated_by": "goal-canary"
+    },
+    "status": "done",
+    "assignee": "goal-canary",
+    "completed_at": "2026-10-24T15:36:18Z",
+    "notes": "Controlled operator-proxy canary approval after exact retained artifact inspection: alpha=true, beta=false, gamma=false; first Task only. No independent LLM verdict or human Goal completion confirmation claim."
+  },
+  "verification_id": "vrf-bde76407212408089e633b68d1a153be",
+  "partial_artifact_sha256": "5fa852df4c27a68cc7e0c127b94c0fe2169a33f55201d50b20618a9ba45e9f06",
+  "partial_artifact_bytes": 46,
+  "controlled_operator_approval": true,
+  "model_selected_goal_link": true,
+  "owner_execution_reminders": 0,
+  "postapproval_keeper_messages": 0,
+  "scope": "Partial Task approval only; no independent model verdict or human Goal completion confirmation. G3 still requires actual postapproval measurement/remaining work."
+}

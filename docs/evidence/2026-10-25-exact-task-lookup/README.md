@@ -52,7 +52,7 @@ This is not full native Task-tool or Keeper execution.
 The existing native `test_keeper_task_outcomes` consumer fixture is extended
 through the real Task tool to cover all six persisted states, explicit filters,
 page traversal through Done/Cancelled, cursor refusal and revision identity.
-Its native execution is pending. Parsing and TOML validation are recorded in
+The parent integration executed both `test_keeper_task_outcomes` and `test_taskboard_tool_toml_parity` successfully at54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8 in run40105703498. This is a targeted native consumer result, not a real model G3 verdict. Parsing and TOML validation are recorded in
 `parse-check.json`. No local Dune, CI watch, old-canary mutation or new model
 experiment was performed. New-candidate G3 success requires actual runtime
 evidence after integration; these source checks do not establish it.

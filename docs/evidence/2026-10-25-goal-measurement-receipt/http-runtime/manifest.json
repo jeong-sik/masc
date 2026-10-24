@@ -1,0 +1,44 @@
+{
+  "files": {
+    "goal-create.json": {
+      "sha256": "d9b81163908b5f7fdba0b689ba643446e6cd1da3ab5731c04fba1f1abc955682",
+      "bytes": 471
+    },
+    "goal-detail-final.json": {
+      "sha256": "c2760d11d80cfe3846dbae5fd1c8262075364a96315f5b28c4f6ec6afa94200a",
+      "bytes": 2958
+    },
+    "goals-after.json": {
+      "sha256": "7341c7ae2468abdb954ec9bf42cd407ec87637cbf85969843ff02fa05fb7f02f",
+      "bytes": 1527
+    },
+    "health.json": {
+      "sha256": "10d6bfef8ccc59e83bc8c322d3f606a3685f3af76bcd824ad947a87739230ba0",
+      "bytes": 34711
+    },
+    "http-request.json": {
+      "sha256": "48990ef37b31020124a186f4818612075550712b91611e7a52bf311dfdafd9aa",
+      "bytes": 227
+    },
+    "http-response.json": {
+      "sha256": "76edce015b057f75f66065399edac624315bffe4f3c4adffbcf65a40fc94cee4",
+      "bytes": 996
+    },
+    "mcp-response.json": {
+      "sha256": "ad8df50716174ecb34d24e43f50f295120666bf7470e437241136c09e98553ea",
+      "bytes": 999
+    },
+    "preflight-correction.json": {
+      "sha256": "c29784fa0e42d79c849008cfebba4d3a083e9058a1d46fe79ef2c7f0042a807b",
+      "bytes": 315
+    },
+    "stale-http-response.json": {
+      "sha256": "5abdfc129af7c654912d9f08907cfca626dc40e93f14cf578352ae89ef28cc50",
+      "bytes": 113
+    },
+    "summary.json": {
+      "sha256": "2121ec022578ec3c7dbf23b9427978ec4da058a73be059478725e86b91dafaa7",
+      "bytes": 1030
+    }
+  }
+}

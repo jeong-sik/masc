@@ -1,0 +1,8 @@
+{
+  "author_baseline": "1c6205ea60bd6fc225450fdda1b9c691b92aa3a2",
+  "published_baseline": "895df663fb303ee2fa95c38bbd28b571db9abb62",
+  "baseline_file": "lib/workspace_goals.ml",
+  "byte_identical": true,
+  "sha256": "3371bab23f8d2be38a1e5df2414ef922fae8fd6e8d950aab09c471a43c89d800",
+  "scope": "Repeatable baseline handler from published parent; no product delta"
+}

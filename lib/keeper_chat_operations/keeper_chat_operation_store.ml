@@ -1730,41 +1730,41 @@ let has_claimable_queued store ~now =
   let* () = ensure_open store in
   claimable_queued_with_db store.db ~now |> Result.map Option.is_some
 
-(* A direct turn may hand its slot to a later person's original input, but a
-   yielded continuation must not make the next turn yield back to it. The
-   operations table does not delete rows or VACUUM, so its insertion rowid
-   keeps admission order even when queue priority or a checkpoint changes
-   sequence. Wall-clock created_at can repeat or move backwards. A queued
-   operation with a semantic execution has already been claimed and is a
-   continuation, regardless of its current queue position. *)
-let has_newer_original_queued store ~operation_id =
+(* A scheduling notice promises that the next slot can deliver new input.
+   A fresh original behind a continuation cannot accept that slot under FIFO;
+   resuming and yielding each continuation only burns provider turns. Use the
+   claim selector itself, without changing queue order or reserving a claim. *)
+let has_queued_handoff_recipient store ~now ~operation_id =
   let* () = ensure_open store in
+  let* () = Operation.validate_timestamp ~field:"now" now
+    |> Result.map_error (fun detail -> Invalid_input detail) in
   let* running = operation_or_unknown store.db operation_id in
   match running.Operation.state with
   | Operation.Queued | Operation.Succeeded _ | Operation.Failed _
   | Operation.Cancelled _ -> Error (Not_running operation_id)
   | Operation.Running _ ->
-    with_statement store.db ~operation:"read newer original chat operations"
-      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' "
-       ^ "AND rowid > (SELECT rowid FROM operations WHERE operation_id = ?) "
-       ^ "AND NOT EXISTS (SELECT 1 FROM operation_batch_members b "
-       ^ "WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) "
-       ^ "ORDER BY sequence")
-      (fun statement ->
-        let* () = bind_text store.db statement ~operation:"bind running admission identity"
-          1 (Id.to_string operation_id) in
-        let rec read () =
-          let rc = Sqlite3.step statement in
-          if rc = Sqlite3.Rc.DONE then Ok false
-          else if rc = Sqlite3.Rc.ROW then
-            let* candidate = decode_operation statement in
-            let* execution = semantic_get_with_db store.db
-              (Keeper_execution_scope_id.direct_operation candidate.operation_id) in
-            (match execution with Some _ -> read () | None -> Ok true)
-          else Error (Store_unavailable
-            (sqlite_error store.db "read newer original chat operations" rc))
-        in
-        read ())
+    let* head = claimable_queued_with_db store.db ~now in
+    match head with
+    | None -> Ok false
+    | Some head ->
+      let* binding = batch_execution_with_db store.db head.operation_id in
+      let* execution = semantic_get_with_db store.db
+        (Keeper_execution_scope_id.direct_operation head.operation_id) in
+      match binding, execution with
+      | Some _, _ | None, Some _ -> Ok false
+      | None, None ->
+        (* Admission order survives queue moves and repeated/rewound clocks. *)
+        with_statement store.db ~operation:"read queued handoff recipient"
+          "SELECT 1 FROM operations WHERE operation_id = ? AND state = 'queued' AND rowid > (SELECT rowid FROM operations WHERE operation_id = ?)"
+          (fun statement ->
+            let* () = bind_text store.db statement ~operation:"bind handoff recipient"
+              1 (Id.to_string head.operation_id) in
+            let* () = bind_text store.db statement ~operation:"bind running admission"
+              2 (Id.to_string operation_id) in
+            let rc = Sqlite3.step statement in
+            if rc = Sqlite3.Rc.ROW then Ok true
+            else if rc = Sqlite3.Rc.DONE then Ok false
+            else Error (Store_unavailable (sqlite_error store.db "read queued handoff recipient" rc)))
 ;;
 
 (* The wake scheduled at defer time rides the process's pool switch and dies

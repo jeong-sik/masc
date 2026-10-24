@@ -1,0 +1,74 @@
+{
+  "scope": "native durable operation store + two Owner condition-waiter cases; no model/provider throughput measurement",
+  "base": "9c2256fea8fad3bb8ca7e5aed8a92cd803fcbdda",
+  "candidate_source_sha256": {
+    "lib/keeper/keeper_chat_yield_request.ml": "55b810057a84629c50a2c86af1de65a632b43db93fb23baafb7581036f137909",
+    "lib/keeper/keeper_codex_runtime.ml": "4b42fe108a794f42d7217ec9b2c3949a426f8b28ca015d46edb77203e74e53c5",
+    "lib/keeper/keeper_owner.ml": "35b024593d88b945a0186df0ac78bf7141c52305b3ea5f23d2e5ece510441d4e",
+    "lib/keeper/keeper_owner.mli": "6f97a2283276c8626e7cfc16ce8be0d7f2c4f028a1a787ffb8cef4d921d7ae6a",
+    "lib/keeper/keeper_owner_registry.ml": "8fe5187baba35185cf7102ce51f32cd0d378d88e38a7bad2b79f777cc774b096",
+    "lib/keeper/keeper_owner_registry.mli": "87d1f392fb91c42ab128b5957faf2463d6138243f066e4da8ec56510be782050",
+    "lib/keeper_chat_operations/keeper_chat_operation_store.ml": "cca3c317cf18679adcb8086c196f210f15c17c9471ad66f81c2bd1908c005c72",
+    "lib/keeper_chat_operations/keeper_chat_operation_store.mli": "4ef294f6002d024e5ec9af6a671389d72fbfa67fde91ebc724019f248cb30e0b",
+    "test/keeper_chat_operations/test_keeper_direct_runtime_continuation.ml": "7bd9863dc4a7ce1fe971b14d14312bd160e14cab10320de88b395fb978a21edb",
+    "test/test_keeper_owner.ml": "6ada16024d559f03f50c5f9e1930879131e1c27354b840f7dc49071dd44625da"
+  },
+  "baseline_production_sha256": {
+    "lib/keeper/keeper_chat_yield_request.ml": "7f38e6319c3138e00e16587adb1d28ac0741bddc9bdccc3688f616e708849ebf",
+    "lib/keeper/keeper_codex_runtime.ml": "1c70d8e8cf274d892ac25e20a1fb2a6da1a350d8458ffb8709abd3d68f171d0c",
+    "lib/keeper/keeper_owner.ml": "8897df94bb5f407764adce95568c776ba8009d309b0300ab22cbb0a3d09c6b60",
+    "lib/keeper/keeper_owner.mli": "6664b922d10ea5d6c513c806cde23c9379ae6268639743ebb67bea9364f5fe46",
+    "lib/keeper/keeper_owner_registry.ml": "d0d67815099d9044e58d9d91457a890dbdbc768f26ebb1c1a59cc961d4fc775a",
+    "lib/keeper/keeper_owner_registry.mli": "a0913853f07d4ea83c2d68c2f09e9ffcd85dff71b90d7d1ba4d857c20077f60c",
+    "lib/keeper_chat_operations/keeper_chat_operation_store.ml": "ecb58334cba8550f647f36ce704ce2053869886d9cb502db82bed8d391cf4b25",
+    "lib/keeper_chat_operations/keeper_chat_operation_store.mli": "f5a022851ff45338ee30fda829d735875620e2297ee2451a8089d1bd5c998c8e"
+  },
+  "candidate_checks": [
+    {
+      "command": "_build/default/test/keeper_chat_operations/test_keeper_direct_runtime_continuation.exe",
+      "log": "candidate-store.log",
+      "exit_code": 0,
+      "passed": 20
+    },
+    {
+      "command": "_build/default/test/test_keeper_owner.exe test reducer 0-1",
+      "log": "candidate-owner-waiter.log",
+      "exit_code": 0,
+      "passed": 2
+    }
+  ],
+  "candidate_build": {
+    "command": "opam exec --switch=5.5.1 -- dune build test/keeper_chat_operations/test_keeper_direct_runtime_continuation.exe test/test_keeper_owner.exe",
+    "exit_code": 0
+  },
+  "baseline_cases": [
+    {
+      "log": "baseline-readiness.log",
+      "expected": false,
+      "observed": true,
+      "api": "has_newer_original_queued"
+    },
+    {
+      "log": "baseline-recipient-order.log",
+      "expected_next": "waiting-original",
+      "observed_next": "another-checkpoint",
+      "note": "separate original queue-order demonstration, not the same assertion as readiness"
+    }
+  ],
+  "baseline_runner_note": "Reproduction cases were added before production changes. Their exact original test-source hash was not captured; final runner renames the API, passes explicit observation time and adds controls. No baseline runner hash or identical runner claim is made.",
+  "log_sha256": {
+    "baseline-recipient-order.log": "645b2d48687d560ed9b95c8b181267889a796ffdf3b63ca5e2d0434b0b73915b",
+    "baseline-readiness.log": "82b569e1d0feadb8bc1193a2a2450ac1fde7540bf38d24ffb686a7e385750199",
+    "candidate-store.log": "724afd87e29a33c4e608cf6b9539ee205e20f8aca2711ef670ca191669505541",
+    "candidate-owner-waiter.log": "511741afa55e64cd3f1c0a51e2e2f2b63c206ccaeddaf38d179855cdfae73e17"
+  },
+  "candidate_executable_sha256": {
+    "test/keeper_chat_operations/test_keeper_direct_runtime_continuation.exe": "f98491a2a22c5379f4d40d244290dc31e6d29a34eaeb0e5adc2091eb7279a080",
+    "test/test_keeper_owner.exe": "b5f0c345491d5eacbbbb24d67d511f83e9f0343632dc6d4cf793317ad886b431"
+  },
+  "full_regression": "not run; latest full regression identity not inspected",
+  "ci": "not run",
+  "installed": "candidate not installed",
+  "latency_and_productivity": "not measured for candidate",
+  "reservation": "readiness is a read-only observation, not next-claim reservation"
+}

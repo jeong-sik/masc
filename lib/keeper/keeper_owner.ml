@@ -229,7 +229,7 @@ type _ command =
       -> (Keeper_meta_contract.keeper_meta option, error) result command
   | Exact_operation :
       Operation_id.t -> (Chat_operation.t option, error) result command
-  | Has_newer_original_queued :
+  | Has_queued_handoff_recipient :
       Operation_id.t -> (bool, error) result command
   | Direct_checkpoint : Operation_id.t ->
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
@@ -655,7 +655,7 @@ let answer : type response. response command -> answer = function
   | Exact_projection -> In_its_drain_step
   | Apply_meta _ -> In_its_drain_step
   | Exact_operation _ -> In_its_drain_step
-  | Has_newer_original_queued _ -> In_its_drain_step
+  | Has_queued_handoff_recipient _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
   | Begin_direct_input_response _ | Prepare_direct_input_response _ | Commit_direct_input_response _ -> In_its_drain_step
   | Direct_native_call _ | Direct_input_wait _ | Defer_direct_input_wait _ -> In_its_drain_step
@@ -1877,11 +1877,11 @@ let start
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
-        | Command (Has_newer_original_queued operation_id, resolve) ->
+        | Command (Has_queued_handoff_recipient operation_id, resolve) ->
           let response =
-            run_operation_read t ~label:"read newer original Keeper chat" (fun () ->
-              Chat_operation_store.has_newer_original_queued
-                t.operation_store ~operation_id)
+            run_operation_read t ~label:"read next Keeper handoff recipient" (fun () ->
+              Chat_operation_store.has_queued_handoff_recipient
+                t.operation_store ~now:(t.now ()) ~operation_id)
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
@@ -2844,16 +2844,16 @@ let resume_direct_runtime_retry t ~operation_id ~observed =
   request t (Resume_direct_runtime_retry {operation_id; observed})
 
 let exact_operation t operation_id = request t (Exact_operation operation_id)
-let has_newer_original_queued t ~operation_id =
-  request t (Has_newer_original_queued operation_id)
-let await_newer_original_operation t ~operation_id =
+let has_queued_handoff_recipient t ~operation_id =
+  request t (Has_queued_handoff_recipient operation_id)
+let await_queued_handoff_recipient t ~operation_id =
   Eio.Condition.loop_no_mutex t.operation_changed (fun () ->
     if Atomic.get t.closed || (Atomic.get t.operation_projection).store_unavailable
     then Some false
     else
       (* The mailbox owns the durable predicate. loop_no_mutex also observes
          broadcasts during this yielding read, closing the check/wait race. *)
-      match has_newer_original_queued t ~operation_id with
+      match has_queued_handoff_recipient t ~operation_id with
       | Ok true -> Some true
       | Ok false -> None
       | Error _ -> Some false)

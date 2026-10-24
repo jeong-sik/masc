@@ -468,10 +468,13 @@ val has_claimable_queued : t -> now:float -> (bool, error) result
     identities are indexed only for this observation; queue selection retains
     sequence order and evaluates retry deadlines at [now]. *)
 
-(** True only if a still-queued original chat was inserted after the named
-    running operation. Queued direct continuations are excluded even when a
-    cooperative checkpoint moved them behind later operations. *)
-val has_newer_original_queued : t -> operation_id:Operation.Operation_id.t -> (bool, error) result
+(** True only when the exact claimable head at [now] is an unclaimed original
+    admitted after the named running operation. Uses the same head selector as
+    [claim_next]; Gate/retry blocks are handled identically. A continuation or
+    frozen batch at the head is a FIFO barrier, even if fresh input follows it.
+    This read does not reserve or reorder anything: cancellation, priority or
+    retry eligibility may change the next claim after the observation. *)
+val has_queued_handoff_recipient : t -> now:float -> operation_id:Operation.Operation_id.t -> (bool, error) result
 
 val next_runtime_retry_wake : t -> now:float -> (float option, error) result
 (** Earliest future [not_before] among cooling deferred runtime retries, so the

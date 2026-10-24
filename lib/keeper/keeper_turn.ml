@@ -60,11 +60,12 @@ let restart_keepalive_after_message_turn ctx meta =
       (start_keepalive_outcome_to_string outcome)
 ;;
 
-let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
+let direct_turn_observation ~(config : Workspace.config) ~active_goals (meta : keeper_meta) :
     Keeper_world_observation.world_observation =
   Keeper_world_observation.observe_direct_keeper_msg
     ~config
     ~meta
+    ~active_goals
 
 let direct_owner_conversation_context
       ~(config : Workspace.config)
@@ -666,15 +667,18 @@ let run_keeper_invocation_turn_admitted_inner
                autonomous turns. Build it before the prompt callback so the
                model-facing projection and the receipt classifier share one
                observation snapshot. *)
-            let world_observation =
-              direct_turn_observation ~config:ctx.config meta
-            in
             let active_goal_summaries =
-              match world_observation.active_goals with
-              | Error unavailable -> Error unavailable
-              | Ok _ ->
-                Keeper_unified_prompt.active_goal_summaries
-                  ~config:ctx.config ~keeper_name:meta.name
+              Keeper_unified_prompt.active_goal_summaries
+                ~config:ctx.config ~keeper_name:meta.name
+            in
+            let active_goals =
+              Result.map
+                (List.map (fun (summary : Keeper_unified_prompt.goal_summary) ->
+                   summary.summary_goal_id))
+                active_goal_summaries
+            in
+            let world_observation =
+              direct_turn_observation ~config:ctx.config ~active_goals meta
             in
             let {Keeper_turn_shared_inputs.lane_updates;workspace_memory;wiki_contents} =
               Keeper_turn_shared_inputs.observe ~preview ~config:ctx.config ~keeper_name:meta.name () in

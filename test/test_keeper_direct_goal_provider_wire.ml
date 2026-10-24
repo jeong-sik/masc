@@ -60,7 +60,7 @@ let observe config (goal : Goal_store.goal) =
       ~criterion_revision:goal.criterion_revision ~observed_value:reported_value
       ~evidence:"note:fixture operator inspected the persisted first result"
       ~actor:"fixture-operator" with
-  | Ok observation -> observation
+  | Ok receipt -> receipt.measurement
   | Error error -> fail (Goal_measurement.error_to_string error)
 
 let run_case source () =

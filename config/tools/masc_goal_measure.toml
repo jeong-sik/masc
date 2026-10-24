@@ -3,7 +3,12 @@ description = """
 Record an explicit observation of a Goal's declared metric. Supply the exact
 current criterion_revision from masc_goal_list, the observed value, and
 supporting evidence. This records a reported value; it does not prove
-that the target was reached or change the Goal phase."""
+that the target was reached or change the Goal phase. The receipt returns
+measurement_status=reported_only, the actual goal_at_recording from the same
+transaction, and completion_effect=unchanged. Report its phase accurately:
+measurement is not verification or completion. Goal completion requires
+separate verifier proof and final human confirmation; Task approval does
+not substitute for either."""
 additional_properties = false
 
 [[params]]

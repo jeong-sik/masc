@@ -3981,7 +3981,7 @@
 (test
  (name test_tui_frame_timing)
  (modules test_tui_frame_timing)
- (libraries alcotest masc_tui_frame_timing)
+ (libraries alcotest yojson masc_tui_frame_timing)
  (action
   (setenv MASC_TUI_FRAME_TIMING test-tui-frame-timing.report
    (run %{test}))))

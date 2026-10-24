@@ -22,6 +22,51 @@ val enabled : bool
 (** Whether the environment asked for timing. False costs one boolean test per
     frame and nothing else. *)
 
+type ask_owner = Keeper of string | Installation of string
+type ask_identity = {
+  owner : ask_owner;
+  ask_id : string;
+  source_turn_ref : string option;
+  is_open : bool;
+}
+type asks_application =
+  | Applied of { open_count : int; rows : ask_identity list }
+  | Reset
+
+val note_asks_application : asks_application -> unit
+(** Record only an actual successful application or clearing of the UI's Ask
+    snapshot. Failed loads retain its identity and epoch, but the actual Home
+    reading below separately determines current/stale eligibility. Callers
+    guard payload construction with {!enabled}; no snapshot traversal when off.
+    UI-domain use only, between synchronous Builds. This is diagnostic history,
+    never read authority or a snapshot cache. *)
+
+type questions_reading =
+  | Questions_current
+  | Questions_unread
+  | Questions_stale
+  | Questions_failed
+  | Questions_unavailable
+
+val note_home_forced : questions_reading -> unit
+(** Mark the current synchronous Build only when its Home lazy is forced,
+    with the actual [approvals_questions_reading] used by Home. This reading
+    is separate from retained snapshot identity: a failed refresh keeps the
+    application epoch while changing current to stale. Does not force Home,
+    traverse a snapshot, read a clock or perform I/O. *)
+
+module Ask_samples : sig
+  type t
+  type view = Unknown | Cleared of int | Current of int
+  val empty : t
+  val add : t -> at_ns:int64 -> before_build:int -> asks_application -> t
+  val for_build : t -> int -> view
+  val raw_lines : t -> string list
+  (** Retain the first {!max_frames_per_phase} application/reset events with
+      actual ordered identities. Omitted metadata makes later Builds Unknown.
+      [before_build] uses the next Build ordinal, avoiding clock-tie inference. *)
+end
+
 val time : phase -> (unit -> 'a) -> 'a
 (** Run [f], recording how long it took when {!enabled}. Returns what [f]
     returns either way. *)
@@ -83,6 +128,24 @@ module Samples : sig
   (** Record a Present with its own output measurements. An unchanged frame
       has zero calls and bytes; it still occupies a Present ordinal. *)
 
+  type raw_output = {
+    write_ns : int64;
+    flush_ns : int64;
+    bytes : int;
+    writes : int;
+    flushes : int;
+  }
+
+  val add_timed : t -> phase -> tag:string option ->
+    started_ns:int64 -> completed_ns:int64 -> home_questions:questions_reading option ->
+    output:raw_output option -> t
+  val raw_lines : asks:Ask_samples.t -> t -> string list
+  (** All retained actual timer samples, with exact decimal-string int64
+      start/end/elapsed nanoseconds. Build records carry the applied event
+      identity and actual typed reading at Home force; [None] means Home was
+      not forced. Present does not infer a Build or reading.
+      Aggregate-only synthetic [add] values have no fabricated raw clock. *)
+
   val summary_lines : t -> string list
   (** One line per phase with frames, mean, p50, p95, p99 and max; then one
       line per tag of that phase, most frames first; then the five worst
@@ -94,6 +157,11 @@ module Stage_samples : sig
   type t
   val empty : t
   val add : t -> frame:int option -> name:string -> ms:float option -> t
+  val add_timed : t -> frame:int option -> name:string ->
+    started_ns:int64 -> completed_ns:int64 -> t
+  val raw_lines : t -> string list
+  (** Actual stage timers retain exact nanosecond windows; branch notes have
+      no fabricated timer. The existing stage/frame caps and omissions apply. *)
   val summary_lines : t -> string list
   val residual_lines : t -> Samples.t -> string list
   (** Build minus measured disjoint stages. It includes unmeasured work and

@@ -119,7 +119,8 @@ let host_issue_json issue =
     | Result_delivery_failed {request_id;_} -> "result_delivery_failed",Some request_id
     | Exact_record_failed {request_id;_} -> "exact_record_failed",Some request_id
     | Ask_record_failed {request_id;_} -> "ask_record_failed",Some request_id
-    | No_exact_runner -> "no_exact_runner",None in
+    | No_exact_runner -> "no_exact_runner",None
+    | No_web_search_runner -> "no_web_search_runner",None in
   `Assoc ["kind",`String code;"request_id",Option.fold ~none:`Null ~some:(fun id -> `String id) request]
 let problem_json = function
   | Configuration_unreadable issues -> "configuration_unreadable",true,

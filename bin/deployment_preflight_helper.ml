@@ -1117,7 +1117,7 @@ let judge_runtime_config ~base_path ~config_root path =
          new deployment/turn gate. Explicitly disabled Memory stays disabled;
          a route admitted here still has no running worker/provider proof. *)
       let memory = Masc.Keeper_memory_execution_availability.snapshot
-          ~config:(Workspace.default_config base_path) ~mode:`Preflight
+          ~config:(Masc.Workspace.default_config base_path) ~mode:`Preflight
         |> Masc.Keeper_memory_execution_availability.to_json in
       Printf.printf "memory execution preflight: %s\n%!" (Yojson.Safe.to_string memory);
       Ok ()

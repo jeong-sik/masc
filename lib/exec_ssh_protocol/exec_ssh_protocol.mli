@@ -293,8 +293,8 @@ val parse_trailer : string -> (trailer, string) result
 
     CONTRACT NOTE — {!parse_trailer} output is authoritative ONLY when
     the ssh channel closed cleanly (full EOF on both streams observed).
-    On any ssh-level failure (client exit 255, channel reset, dropped
-    ControlMaster) the runner MUST classify the outcome as
+    On any ssh-level failure (client exit 255 or channel reset) the runner
+    MUST classify the outcome as
     [remote_ssh_transport_error] itself, regardless of any trailer it
     managed to parse from the partial tail.
 

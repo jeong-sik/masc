@@ -24,8 +24,8 @@ val openssh_configuration :
   endpoint:Exec_ssh_endpoint.t ->
   unit ->
   Keeper_sandbox_remote.openssh
-(** Resolve the transport's binary, credential path references and control
-    directory exactly as {!create} does. This does not validate, read key
+(** Resolve the transport's binary and credential path references
+    exactly as {!create} does. This does not validate, read key
     contents, create directories, start a runner or contact an endpoint. *)
 
 val create :
@@ -35,8 +35,9 @@ val create :
   endpoint:Exec_ssh_endpoint.t ->
   unit ->
   (Keeper_sandbox_remote.t, string) result
-(** Validate the destination, create the 0700 ControlPath directory, and
-    build the endpoint value the runner and preflight take. Relative identity
+(** Validate the destination and build the endpoint value the runner and
+    preflight take. Every SSH invocation authenticates a fresh connection,
+    without a ControlMaster socket. Relative identity
     and known-hosts paths resolve against [base_path]. *)
 
 val sandbox_endpoint :

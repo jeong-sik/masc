@@ -375,15 +375,12 @@ let endpoint_config ~host =
 let declared_fixture ~mode =
   let f = fixture ~mode in
   let base = f.config.Workspace.base_path in
-  let control_path_dir = Filename.concat base "ssh-control" in
-  Unix.mkdir control_path_dir 0o700;
   let endpoint =
     Keeper_sandbox_remote.of_openssh ~base_path:base ~keeper_name:"keeper-a"
       { endpoint = endpoint_config ~host:"host-a.invalid"
       ; ssh_bin = Filename.concat base ("cli-" ^ mode)
       ; identity_file = Filename.concat base "id"
       ; known_hosts_file = Filename.concat base "known_hosts"
-      ; control_path_dir
       }
   in
   { f with endpoint }

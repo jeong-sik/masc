@@ -1,0 +1,25 @@
+{
+  "before_proof": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-duplicate-before-20261024-igdabpvn",
+  "after": [
+    {
+      "field": "provider",
+      "exit_code": 1,
+      "error": "coding_eval_report_cli: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-duplicate-before-20261024-igdabpvn/provider.jsonl:1: run row has duplicate object keys"
+    },
+    {
+      "field": "model",
+      "exit_code": 1,
+      "error": "coding_eval_report_cli: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-duplicate-before-20261024-igdabpvn/model.jsonl:1: run row has duplicate object keys"
+    },
+    {
+      "field": "memory_mode",
+      "exit_code": 1,
+      "error": "coding_eval_report_cli: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-duplicate-before-20261024-igdabpvn/memory_mode.jsonl:1: run row has duplicate object keys"
+    },
+    {
+      "field": "experiment_digest",
+      "exit_code": 1,
+      "error": "coding_eval_report_cli: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-duplicate-before-20261024-igdabpvn/experiment_digest.jsonl:1: run row has duplicate object keys"
+    }
+  ]
+}

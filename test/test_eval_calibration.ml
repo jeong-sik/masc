@@ -387,31 +387,38 @@ let test_calibration_stats () =
   check int "total = 3" 3 total;
   check int "approves = 2" 2 approves;
   check int "rejects = 1" 1 rejects;
-  (* None of the above passed ~gen_runtime, so the cross-model
-     counters should be zero and the rate degenerate to 0.0. *)
+  (* No producer runtime was recorded. Missing observations cannot be
+     presented as a measured zero rate. *)
   let with_gen =
     Yojson.Safe.Util.(stats |> member "verdicts_with_generator_runtime" |> to_int) in
-  let cross_match =
-    Yojson.Safe.Util.(stats |> member "cross_model_match_count" |> to_int) in
-  let cross_rate =
-    Yojson.Safe.Util.(stats |> member "cross_model_rate" |> to_number) in
+  let distinct_count =
+    Yojson.Safe.Util.(stats |> member "distinct_runtime_count" |> to_int) in
   check int "verdicts_with_generator_runtime = 0 when not recorded" 0 with_gen;
-  check int "cross_model_match_count = 0 when no generator" 0 cross_match;
-  check (float 1e-6) "cross_model_rate = 0.0 when no generator" 0.0 cross_rate;
+  check int "no distinct runtime pairs were observed" 0 distinct_count;
+  check bool "an unmeasured rate is null" true
+    Yojson.Safe.Util.((stats |> member "distinct_runtime_rate") = `Null);
+  let observation = Yojson.Safe.Util.member "model_identity_observation" stats in
+  check string "model identities are unobserved" "unobserved"
+    Yojson.Safe.Util.(observation |> member "kind" |> to_string);
+  check int "all verdicts lack bound model identities" 3
+    Yojson.Safe.Util.(observation |> member "verdict_count" |> to_int);
+  check bool "the misleading model-rate field is absent" false
+    (List.mem_assoc "cross_model_rate" (Yojson.Safe.Util.to_assoc stats));
   Cal.For_testing.reset_store ()
 
-let test_calibration_stats_cross_model_mix () =
+let test_calibration_stats_runtime_aliases_do_not_establish_model_independence () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.For_testing.set_store ~base_path:dir;
   Fun.protect ~finally:Cal.For_testing.reset_store @@ fun () ->
   (* Four verdicts:
-     - same runtime (generator = evaluator)     → NOT cross-model
-     - distinct runtime (generator ≠ evaluator) → cross-model
-     - distinct runtime                          → cross-model
+     - same runtime (generator = evaluator)
+     - distinct runtime (generator ≠ evaluator)
+     - distinct runtime
      - no generator recorded                     → excluded from denominator
-     Expected: denominator=3, cross_match=2, rate=2/3 ≈ 0.667. *)
+     Runtime-only measurement: denominator=3, distinct=2, rate=2/3.
+     None of these aliases binds an actual model pair to the verdict. *)
   let same_runtime =
     make_result ~runtime:"verifier" ~gen_runtime:"verifier" () in
   let cross_a =
@@ -430,13 +437,18 @@ let test_calibration_stats_cross_model_mix () =
   let stats = Cal.calibration_stats () in
   let with_gen =
     Yojson.Safe.Util.(stats |> member "verdicts_with_generator_runtime" |> to_int) in
-  let cross_match =
-    Yojson.Safe.Util.(stats |> member "cross_model_match_count" |> to_int) in
-  let cross_rate =
-    Yojson.Safe.Util.(stats |> member "cross_model_rate" |> to_number) in
+  let distinct_count =
+    Yojson.Safe.Util.(stats |> member "distinct_runtime_count" |> to_int) in
+  let distinct_rate =
+    Yojson.Safe.Util.(stats |> member "distinct_runtime_rate" |> to_number) in
   check int "verdicts_with_generator_runtime = 3 (one was Null)" 3 with_gen;
-  check int "cross_model_match_count = 2 (two distinct)" 2 cross_match;
-  check (float 1e-3) "cross_model_rate approx 0.667" (2.0 /. 3.0) cross_rate
+  check int "two runtime pairs use distinct aliases" 2 distinct_count;
+  check (float 1e-3) "the runtime-only rate is two thirds" (2.0 /. 3.0) distinct_rate;
+  let observation = Yojson.Safe.Util.member "model_identity_observation" stats in
+  check string "aliases leave model identities unobserved" "unobserved"
+    Yojson.Safe.Util.(observation |> member "kind" |> to_string);
+  check int "all four verdicts lack model identity evidence" 4
+    Yojson.Safe.Util.(observation |> member "verdict_count" |> to_int)
 
 (* ================================================================ *)
 (* AGENT_CORE Harness.verdict conversion tests (#3165)                      *)
@@ -484,6 +496,7 @@ let () =
     ];
     "stats", [
       test_case "counts" `Quick test_calibration_stats;
-      test_case "cross_model mix" `Quick test_calibration_stats_cross_model_mix;
+      test_case "runtime aliases do not establish model independence" `Quick
+        test_calibration_stats_runtime_aliases_do_not_establish_model_independence;
     ];
               ]

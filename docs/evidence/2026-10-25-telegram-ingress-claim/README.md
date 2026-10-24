@@ -37,7 +37,7 @@ fallback is introduced. Claims are bot-scoped alongside the resolved cursor.
 ## Validation scope
 
 Six new/changed OCaml source/interface files parse; whitespace checks pass.
-No local Dune build or passing execution of this repair is claimed yet.
+The initial entry recorded parse-only evidence. Subsequent execution is separated below; no local Dune build was run.
 
 The new Owner fixture uses actual A/B Owner registry installation, real binding
 storage, Gate/Owner admission and durable operation databases. It injects a
@@ -64,10 +64,28 @@ The native gateway suite passed all 10 cases. The overall run failed because
 the new Owner fixture expected `Ok ()` from the binding API, whose success
 payload is JSON. No Owner cases executed in this run. The fixture now accepts
 that success payload; production code is unchanged. Owner reopen/A1-B0 behavior
-still requires execution. Invalid-UTF-8 and explicit-error fixture refinements
-made after the executed source are not certified by the 10-case result.
+still requires execution. The malformed-UTF-8 assertion was already present in executed source 3fb24f2;
+only explicit error-match refinements came later. Native10 includes that UTF-8
+refusal. Those subsequent exhaustive-pattern refinements were not rerun there.
 
 The external reviewer dismissed the prior change request and recorded a
 [source-only resolution](https://github.com/jeong-sik/masc/pull/45831#pullrequestreview-5639183657)
 at `61f899c1e6cf2fd79df833189dbc8e6a59ee2e27`. That is not formal approval,
 execution evidence or approval for the current complete stack.
+
+## Actual Owner recovery execution
+
+[Run 40117878485](https://github.com/jeong-sik/masc/actions/runs/40117878485)
+checked out exactly `f2d8447e218dd222a508cafa81365cc4dc0466c0` and completed
+SUCCESS: all 93 actual Keeper Owner cases passed in 2.149s. The log includes
+A's real queued operation, B rejection before Gate admission, A1/B0 after
+registry/store/cursor reopen, and exact original-A retry confirming custody.
+The committed excerpt preserves the checkout and original assertion lines.
+This uses actual durable Owner databases and injected Bot API/cursor failure,
+not a model call, Telegram account, OS process crash or installed server.
+
+The later documentation-only evidence update does not alter production or
+fixture inputs. Native10 and Owner93 remain separate executions at the sources
+above. Earlier unexecuted statements describe their initial entries and are
+superseded only for the exact observed scenarios, not full native delivery or
+original #24497 acceptance. No full regression, installation or merge claim.

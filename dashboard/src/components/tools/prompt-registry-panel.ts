@@ -25,6 +25,8 @@ import {
 } from '../keeper-prompt-assembly-panel'
 import { PromptBookPanel } from './prompt-book-panel'
 import { PromptAuthoringIssues } from './prompt-authoring-issues'
+import { PromptSavedPresetsPanel } from './prompt-saved-presets-panel'
+import { executionWorkspaceAuthority } from '../../store'
 
 export type PromptSourceFilter = 'all' | PromptSource
 export type PromptPresetId = 'all' | 'attention' | `stage:${string}`
@@ -313,6 +315,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   const [runtimeAssets, setRuntimeAssets] = useState<DashboardRuntimePromptAsset[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [presetBusy, setPresetBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -370,14 +373,19 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
     setStatus(null)
   }, [draftDirty, selectedKey, selectedPromptVisible, firstVisibleKey, prompts])
 
-  async function loadPrompts(preferredKey?: string | null) {
+  async function loadPrompts(preferredKey?: string | null, preserveDraft = false) {
+    const authority = executionWorkspaceAuthority.peek()
     setLoading(true)
     setError(null)
     try {
       const response = await fetchDashboardPrompts()
+      if (preserveDraft && executionWorkspaceAuthority.peek() !== authority) return
       const nextPrompts = response.prompts ?? []
       setRuntimeAssets(response.runtime_assets ?? [])
       setPrompts(nextPrompts)
+      // A restore refreshes rows without changing the latest editor target or
+      // an input the operator changed while the request was pending.
+      if (preserveDraft) return
       const nextSelectedKey =
         preferredKey && nextPrompts.some(prompt => prompt.key === preferredKey)
           ? preferredKey
@@ -463,15 +471,20 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   }
 
   const body = html`
+      <${PromptSavedPresetsPanel}
+        disabledReason=${saving ? 'Override 저장을 마친 뒤 프리셋 작업을 진행하세요.' : null}
+        onBusyChange=${setPresetBusy}
+        onRestored=${() => { void loadPrompts(selectedPrompt?.key ?? null, true) }}
+      />
       <div class="mb-4 text-xs text-[var(--color-fg-muted)] leading-relaxed">
         <div>기준 원문은 resolved config root의 <code>prompts/*.md</code>입니다. 경로는 설정 경로 상세 패널에서 확인할 수 있습니다.</div>
         <div>이 화면에서는 현재 effective 값 확인과 runtime override 적용/해제만 합니다.</div>
       </div>
 
-      <section class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] p-3" aria-label="프리셋 원문" data-prompt-preset-content data-active-preset=${activePreset}>
+      <section class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] p-3" aria-label="실행 단계별 원문" data-prompt-preset-content data-active-preset=${activePreset}>
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <label class="text-sm">프리셋
-            <select aria-label="원문을 볼 프리셋" class="ml-2 rounded-md border border-border bg-[var(--color-bg-surface)] p-1"
+          <label class="text-sm">실행 단계 보기
+            <select aria-label="원문을 볼 실행 단계" class="ml-2 rounded-md border border-border bg-[var(--color-bg-surface)] p-1"
               value=${activePreset} onChange=${(event: Event) => {
                 setPreset((event.target as HTMLSelectElement).value as PromptPresetId)
                 setStatus(null)
@@ -483,15 +496,15 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
           <button type="button" class="rounded-md border border-border px-2 py-1 text-sm focus-visible:ring-2 focus-visible:ring-ring"
             aria-expanded=${showPresetContent}
             onClick=${() => setShowPresetContent(!showPresetContent)}>
-            ${showPresetContent ? '프리셋 원문 접기' : '프리셋 전체 원문 보기'}
+            ${showPresetContent ? '단계 원문 접기' : '단계 전체 원문 보기'}
           </button>
         </div>
         ${showPresetContent ? html`
           <p class="my-2 text-xs text-[var(--color-fg-muted)]">
-            선택한 프리셋의 현재 원문 전체입니다. 아래 검색·출처 필터와 편집 중인 초안은 이 보기에 영향을 주지 않습니다.
+            선택한 실행 단계의 현재 원문 전체입니다. 아래 검색·출처 필터와 편집 중인 초안은 이 보기에 영향을 주지 않습니다.
             실행 시 채워지는 변수는 그대로 표시되며, 실제 실행 입력은 각 턴의 기록에서 확인할 수 있습니다.
           </p>
-          ${presetPrompts.length === 0 ? html`<p>이 프리셋에 등록된 원문이 없습니다.</p>` : null}
+          ${presetPrompts.length === 0 ? html`<p>이 단계에 등록된 원문이 없습니다.</p>` : null}
           ${presetPrompts.map(prompt => html`
             <article key=${prompt.key} class="my-3" data-preset-prompt=${prompt.key}>
               <h3 class="text-sm font-semibold">${prompt.key}</h3>
@@ -575,7 +588,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
                 ? html`<span class="ml-1 normal-case tracking-normal text-[var(--color-fg-muted)]">${visiblePrompts.length} / ${prompts.length}</span>`
                 : null}
             </div>
-            <${ActionButton} variant="ghost" size="sm" disabled=${loading || saving} onClick=${() => { void loadPrompts(selectedPrompt?.key ?? null) }}>
+            <${ActionButton} variant="ghost" size="sm" testId="prompt-registry-refresh" disabled=${loading || saving} onClick=${() => { void loadPrompts(selectedPrompt?.key ?? null) }}>
               ${loading ? '새로고침 중' : '새로고침'}
             <//>
           </div>
@@ -706,10 +719,10 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
             />
 
             <div class="mt-4 flex flex-wrap gap-2">
-              <${ActionButton} variant="primary" size="md" disabled=${saving || loading || draft.trim().length === 0} onClick=${() => { void applyOverride() }}>
+              <${ActionButton} variant="primary" size="md" disabled=${saving || presetBusy || loading || draft.trim().length === 0} onClick=${() => { void applyOverride() }}>
                 ${saving ? '저장 중...' : '오버라이드 적용'}
               <//>
-              <${ActionButton} variant="ghost" size="md" disabled=${saving || loading || selectedPrompt.source !== 'override'} onClick=${() => { void clearOverride() }}>
+              <${ActionButton} variant="ghost" size="md" disabled=${saving || presetBusy || loading || selectedPrompt.source !== 'override'} onClick=${() => { void clearOverride() }}>
                 오버라이드 제거
               <//>
               <${ActionButton} variant="ghost" size="md" disabled=${saving || loading} onClick=${() => {

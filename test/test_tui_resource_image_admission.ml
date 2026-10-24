@@ -148,7 +148,20 @@ let test_local_sources_on_resources () =
   state.resource_content_error <- None;
   check_owners ()
 
+let test_suspended_diagram_preparation () =
+  let state = state () in
+  let original = parts () in
+  state.resource_content <- Some (uri,original);
+  state.resource_diagrams <- Some (Masc_tui_resource_diagrams.create
+    ~mime_type:None ~contents:original ~width:640 ~cell_pixels:(8,16) ~colors:None);
+  Types.suspend_workspace_readings state;
+  check bool "withdrawn epoch releases its preparation" true
+    (Option.is_none state.resource_diagrams);
+  check bool "retained original response remains readable" true
+    (saved state == original)
+
 let () = run "resource image admission" ["stored source",[
+  test_case "workspace suspension retires diagram preparation" `Quick test_suspended_diagram_preparation;
   test_case "original SVG and multipart admission" `Quick test_original_admission;
   test_case "wrong pending URI" `Quick test_wrong_pending;
   test_case "failed and detached completion" `Quick test_failed_read;

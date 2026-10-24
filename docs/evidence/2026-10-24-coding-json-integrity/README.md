@@ -24,5 +24,5 @@ with existing input-change, corpus-oracle and symlink controls. The command
 in `after.json` ran five tests: four passed and the actual Docker test was
 explicitly skipped. Docker grading code did not change and was not rerun by
 this author. The earlier Docker receipts remain evidence for their recorded
-source/image only. `git diff --check` also passed. No local Dune build, native
+source/image only. The product diff passed `git diff --check`. The preserved raw baseline unittest log contains trailing whitespace, so the full evidence-inclusive diff does not pass that check. No local Dune build, native
 report execution, provider call or live Keeper experiment was run here.

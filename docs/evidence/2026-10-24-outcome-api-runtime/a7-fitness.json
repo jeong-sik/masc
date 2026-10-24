@@ -1,0 +1,45 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.64.0"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"count\":1,\"agents\":[{\"agent_id\":\"goal-canary-operator\",\"components\":null,\"metrics\":null}]}",
+          "status": "ok",
+          "tool": "masc_agent_fitness"
+        },
+        "trace_id": "2",
+        "agent_id": "goal-canary-operator",
+        "tool": "masc_agent_fitness",
+        "duration_ms": 1,
+        "attempts": 1,
+        "timestamp": "2026-10-24T09:40:50Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"count\":1,\"agents\":[{\"agent_id\":\"goal-canary-operator\",\"components\":null,\"metrics\":null}]}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "count": 1,
+      "agents": [
+        {
+          "agent_id": "goal-canary-operator",
+          "components": null,
+          "metrics": null
+        }
+      ]
+    }
+  }
+}

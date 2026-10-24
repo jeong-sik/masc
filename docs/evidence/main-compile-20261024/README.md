@@ -3,8 +3,8 @@
 ## Source identity
 
 - Code PR: [#45683](https://github.com/jeong-sik/masc/pull/45683).
-- Code head: `937bbcf550a33685b893b1e1d6844cabd5e4047f`.
-- Reviewed base: `d12d24208f01c2b4f85abc3fc5c8aab29bf83fdd`.
+- Code head: `4748ef0815e389b0283dc50e81251197b41b65f1`.
+- Reviewed base: `9b70cf4eac0e6fa93641e13048cec16e08c211b4`.
 - Canonical source diff SHA-256: `b7eda83f88dc5e2a99e3bfd884a0433ca7f3dd31729d8fc54d959895a2800094`.
 - Carried source: [#45675](https://github.com/jeong-sik/masc/pull/45675), head `50fdf1166ec1381f17db1d87d1b4cd71679308ba`. Its branch and checkout were preserved.
 
@@ -32,4 +32,6 @@ The callback-based repairs #45664 and #45669 remain separate alternatives. Their
 
 The independent MASC source-review request for the exact code head was accepted as operation `kmsg-86ae3302016b1d24a5fb523bd3e07631` at `2026-10-24T03:21:53Z`; its returned state was `queued`. Queue acceptance is not completed review or approval.
 
-Fresh compile execution for the code head is pending. #45675's older build/test claims are not evidence for this code head. No local Dune build, executable test, installation or live runtime verification was performed by this external coding session. Native stack membership and the eventual completed build result must be read from the current PR/API and actual run before integration.
+The complete two-layer stack was rebased once with `gh stack rebase` onto main `9b70cf4eac0e6fa93641e13048cec16e08c211b4`. `git range-diff` reports both code commits unchanged from the original `d12d2420`-based source. The old source-review scope and queued requests remain historical; current-head approval must cite the new identities.
+
+Fresh compile execution for the current code head is pending. The earlier frozen top `7f30d5b39a5ff9b3bc901476623e99dddb9d6693` has explicitly requested [operator compile 40058167064](https://github.com/jeong-sik/masc/actions/runs/40058167064), [tree typecheck 40058238566](https://github.com/jeong-sik/masc/actions/runs/40058238566), and [two-suite behavior 40058240701](https://github.com/jeong-sik/masc/actions/runs/40058240701). The selected behavior suites are `test_anti_rationalization_empty_reject,test_keeper_tool_matrix_cases`, with `minimal=true`. Dispatch is not success. Those executions are scoped to their old source tree and do not prove the later main integration. #45675's older build/test claims are not evidence for this code head. No local Dune build, executable test, installation or live runtime verification was performed by this external coding session. Native stack membership and the eventual completed build result must be read from the current PR/API and actual run before integration.

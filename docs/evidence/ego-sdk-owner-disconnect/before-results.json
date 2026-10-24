@@ -1,0 +1,76 @@
+{
+  "source_file": "/tmp/ego-owner-loss-c040-before.ml",
+  "source_sha256": "1d089b2585a79e9afcc09df69d2c883ac0fd13c2ebc944c022d2dcf10306c33c",
+  "loop_sha256": "43545d69eac10e7b563d40e0a0da561c9c8f100f8e3cd18b19ab7c8107635fe9",
+  "runtime_executable": "/Applications/ego lite.app/Contents/Frameworks/ego Framework.framework/Versions/0.6.0.20/Helpers/ego-browser",
+  "runtime_executable_sha256": "6706a072959a4d09858d4dd29d8bde57584e78191ef704aeb56662c8e04cf4b0",
+  "runtime_version": "ego-browser 0.6.0.20\n  chromium 154.0.8037.44\n  node v24.21.0",
+  "assertions_enabled": false,
+  "cases": [
+    {
+      "case": "idle_handles",
+      "runtime": "installed Ego nodejs",
+      "pid": 70421,
+      "observed_after_seconds": 1.5029125420041964,
+      "exit_status": null,
+      "still_running_after_owner_loss": true,
+      "queued_effect_after_owner_loss": false,
+      "scope": "actual extracted production session loop; no TaskSpace or Page APIs invoked",
+      "live_owner_call_answered": false,
+      "live_owner_call_seconds": null,
+      "owned_probe_process_terminated_for_cleanup": true
+    },
+    {
+      "case": "pending_call",
+      "runtime": "installed Ego nodejs",
+      "pid": 71239,
+      "observed_after_seconds": 1.5058635829991545,
+      "exit_status": null,
+      "still_running_after_owner_loss": true,
+      "queued_effect_after_owner_loss": false,
+      "scope": "actual extracted production session loop; no TaskSpace or Page APIs invoked",
+      "live_owner_call_answered": false,
+      "live_owner_call_seconds": null,
+      "owned_probe_process_terminated_for_cleanup": true
+    },
+    {
+      "case": "queued_after_owner_loss",
+      "runtime": "installed Ego nodejs",
+      "pid": 71703,
+      "observed_after_seconds": 1.5064357080045738,
+      "exit_status": null,
+      "still_running_after_owner_loss": true,
+      "queued_effect_after_owner_loss": true,
+      "scope": "actual extracted production session loop; no TaskSpace or Page APIs invoked",
+      "live_owner_call_answered": false,
+      "live_owner_call_seconds": null,
+      "owned_probe_process_terminated_for_cleanup": true
+    },
+    {
+      "case": "owner_half_close",
+      "runtime": "installed Ego nodejs",
+      "pid": 72161,
+      "observed_after_seconds": 1.5027888750046259,
+      "exit_status": null,
+      "still_running_after_owner_loss": true,
+      "queued_effect_after_owner_loss": false,
+      "scope": "actual extracted production session loop; no TaskSpace or Page APIs invoked",
+      "live_owner_call_answered": false,
+      "live_owner_call_seconds": null,
+      "owned_probe_process_terminated_for_cleanup": true
+    },
+    {
+      "case": "live_owner_pending",
+      "runtime": "installed Ego nodejs",
+      "pid": 72477,
+      "observed_after_seconds": 1.5028850419985247,
+      "exit_status": null,
+      "still_running_after_owner_loss": true,
+      "queued_effect_after_owner_loss": false,
+      "scope": "actual extracted production session loop; no TaskSpace or Page APIs invoked",
+      "live_owner_call_answered": true,
+      "live_owner_call_seconds": 0.7406869999977062,
+      "owned_probe_process_terminated_for_cleanup": true
+    }
+  ]
+}

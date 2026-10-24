@@ -1,11 +1,14 @@
 (** The ego lite task space a browser Add-on worker serves as one live
     connection (RFC-browser-live-ego). The worker owns no browser process:
     one [ego-browser nodejs] process runs the connection's commands, one at
-    a time, and the task space is what lasts. *)
+    a time, and the task space is what lasts. Owner IPC end/close/error
+    terminates that SDK process, including pending async work, without
+    finishing the task space or undoing dispatched browser effects. This
+    requires a responsive Node event loop. *)
 
-(** The worker's arguments that carry [configuration]. Nothing in an ego
-    connection needs cleanup after the worker, so it rides the command line
-    instead of the cleanup descriptor. *)
+(** The worker's arguments that carry [configuration]. Ego owns the browser;
+    the worker owns its SDK session through IPC lifetime. No separate browser
+    process cleanup descriptor is used. *)
 val arguments : Browser_configuration.live_ego -> string list
 
 (** Runs [command] with [arguments], writes [stdin] to it and answers

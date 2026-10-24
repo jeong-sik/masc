@@ -69,6 +69,14 @@ let run_command ~env ~timeout_s ~stdin ~command arguments =
 let socket_name = "s"
 let socket_path_limit_bytes = 103
 
+(* The owner socket is also the SDK process's lifetime authority. A worker
+   can disappear while an async SDK call is pending, before the surrounding
+   process manager gets to kill its separate foreground group. Merely waking
+   the receive loop neither interrupts that call nor drops buffered scripts.
+   On owner loss exit this Node session, without finishing a task space or
+   closing Ego's user browser. Already dispatched effects remain unknown.
+   Socket events require a responsive Node event loop; this is not a promise
+   to interrupt arbitrary synchronous CPU work. *)
 let session_loop ~socket = String.concat "\n" [
   "const net = await import(\"node:net\");";
   "const AsyncFunction = (async () => {}).constructor;";
@@ -77,11 +85,13 @@ let session_loop ~socket = String.concat "\n" [
   "const received = [];";
   "let pending = \"\", closed = false, wake = () => {};";
   "socket.on(\"data\", chunk => { pending += chunk; let end; while ((end = pending.indexOf(\"\\n\")) >= 0) { received.push(pending.slice(0, end)); pending = pending.slice(end + 1); } wake(); });";
-  "socket.on(\"close\", () => { closed = true; wake(); });";
-  "socket.on(\"error\", () => { closed = true; wake(); });";
+  "const ownerGone = () => { if (closed) return; closed = true; socket.destroy(); process.exit(0); };";
+  "socket.once(\"end\", ownerGone);";
+  "socket.once(\"close\", ownerGone);";
+  "socket.once(\"error\", ownerGone);";
   "while (true) {";
   "  while (received.length === 0 && !closed) await new Promise(resolve => { wake = resolve; });";
-  "  if (received.length === 0) break;";
+  "  if (closed) break;";
   "  const command = JSON.parse(received.shift());";
   "  const lines = [];";
   "  const log = (...parts) => { lines.push(parts.map(String).join(\" \")); };";

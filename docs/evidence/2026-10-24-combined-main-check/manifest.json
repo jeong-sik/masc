@@ -1,0 +1,41 @@
+{
+  "evidence_checkout": "fde6f30f922bb5613f3cfea75be05fe2c833ce61",
+  "scope": "Frozen main evidence before the three-test consumer repair; no repaired candidate execution claimed.",
+  "files": [
+    {
+      "path": "main-four-products.json",
+      "bytes": 305,
+      "sha256": "709920c3138d84b5a6fee1d6932fca45671610d7e87dabd4093e3dae02c64049"
+    },
+    {
+      "path": "main-four-products-build.log",
+      "bytes": 3010,
+      "sha256": "b8cceef88aaf94529e001e5d9c3dcb4403d2cb3272ac65f5b797078f2633ecaa"
+    },
+    {
+      "path": "main-check-failure.json",
+      "bytes": 1437,
+      "sha256": "91a9674c9a7a5f46dffafaaf517e3612d0de801b25463fb192e24253060fa861"
+    },
+    {
+      "path": "main-check-three-errors.log",
+      "bytes": 3450,
+      "sha256": "5dcc3fa605bab72d84723b99dddb151a3d8ee47c07d0d830f774949bf8a8d690"
+    },
+    {
+      "path": "main-five-suite.log",
+      "bytes": 172826,
+      "sha256": "4fb7119ee2ca287e4474be48a9589346f7ce303f9f00e254a19009e4dce90c72"
+    },
+    {
+      "path": "main-five-suite-counts.json",
+      "bytes": 18319,
+      "sha256": "47f25c1475968e2f6665f2f7bfe99283d65a169b9cbff3e36a910a828337dc2e"
+    },
+    {
+      "path": "main-five-suite-critical.json",
+      "bytes": 6185,
+      "sha256": "1a9dadeab56b175afb7670aa5ac02b7d689cfb59148663c99ad26360c3bc64db"
+    }
+  ]
+}

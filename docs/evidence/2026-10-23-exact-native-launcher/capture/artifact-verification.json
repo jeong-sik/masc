@@ -1,0 +1,19 @@
+{
+  "masc": {
+    "actual_sha256": "eb5f32fbe3d6e9b79d01995b8e46505da834a2cfc301eab5dc0f4e21fe75cb25",
+    "receipt_sha256": "eb5f32fbe3d6e9b79d01995b8e46505da834a2cfc301eab5dc0f4e21fe75cb25",
+    "matches": true,
+    "embedded_commit": "a6fba325404c963061b7b95c4c564e35f5ea5e2e"
+  },
+  "masc-tui": {
+    "actual_sha256": "197191491c4ac4bb83fb1e35407788e2668c312dae5545f4ffb054908b6088d1",
+    "receipt_sha256": "197191491c4ac4bb83fb1e35407788e2668c312dae5545f4ffb054908b6088d1",
+    "matches": true,
+    "embedded_commit": "a6fba325404c963061b7b95c4c564e35f5ea5e2e"
+  },
+  "masc-native-addon-launcher": {
+    "actual_sha256": "fe2803bcddbed5865a5d6213b8340da3c188d67e1a0063391255711ac046e93d",
+    "receipt_sha256": "fe2803bcddbed5865a5d6213b8340da3c188d67e1a0063391255711ac046e93d",
+    "matches": true
+  }
+}

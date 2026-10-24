@@ -1,0 +1,22 @@
+{
+  "source_id": "vst-phrase",
+  "incarnation": "declared-exact-launcher-fixture",
+  "cursor": "1",
+  "complete": true,
+  "detail": "Explicit local input fixture; no real audio rendering or playback",
+  "observations": [
+    {
+      "id": "exact-launcher-fixture:1",
+      "kind": "vst_phrase",
+      "observed_at": 1792751169.9861279,
+      "actor": null,
+      "evidence": [],
+      "fields": {
+        "state": "failed",
+        "selection": null,
+        "render": null,
+        "error": "Declared exact-launcher input v1"
+      }
+    }
+  ]
+}

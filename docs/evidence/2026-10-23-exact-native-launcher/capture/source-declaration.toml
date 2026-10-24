@@ -1,0 +1,6 @@
+enabled = true
+id = "phrase-source"
+run_id = "exact-launcher-review"
+manifest_path = "/tmp/masc-exact-launcher-review-20261023/workspace/packages/vst-phrase/lane.toml"
+[binding]
+sources = [{source_id = "vst-phrase", kind = "snapshot_file", path = "/tmp/masc-exact-launcher-review-20261023/workspace/inputs/phrase.json"}]

@@ -32,6 +32,25 @@ let run_status_of_string_opt = function
   | _ -> None
 ;;
 
+type memory_mode = Seeded | Verified | Filtered | Source_bound | Off
+
+let memory_mode_to_string = function
+  | Seeded -> "seeded"
+  | Verified -> "verified"
+  | Filtered -> "filtered"
+  | Source_bound -> "source-bound"
+  | Off -> "off"
+;;
+
+let memory_mode_of_string = function
+  | "seeded" -> Ok Seeded
+  | "verified" -> Ok Verified
+  | "filtered" -> Ok Filtered
+  | "source-bound" -> Ok Source_bound
+  | "off" -> Ok Off
+  | value -> Error (Printf.sprintf "unknown memory_mode: %S" value)
+;;
+
 type row = {
   case_id : string;
   run_index : int;
@@ -41,6 +60,8 @@ type row = {
      means no accepted identity was observed; never reconstructed from run_id. *)
   provider : string;
   model : string;
+  experiment_digest : string;
+  memory_mode : memory_mode;
   status : run_status;
   verify_exit : int option;
   regression_exit : int option;
@@ -72,6 +93,8 @@ let row_keys =
   ; "operation_id"
   ; "provider"
   ; "model"
+  ; "experiment_digest"
+  ; "memory_mode"
   ; "status"
   ; "verify_exit"
   ; "regression_exit"
@@ -148,6 +171,17 @@ let row_of_json json =
     in
     let* provider = str "provider" in
     let* model = str "model" in
+    let* experiment_digest = str "experiment_digest" in
+    let* () =
+      if String.length experiment_digest = 64
+         && String.for_all
+              (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+              experiment_digest
+      then Ok ()
+      else Error "experiment_digest must be a lowercase SHA256 hex digest"
+    in
+    let* memory_mode_raw = str "memory_mode" in
+    let* memory_mode = memory_mode_of_string memory_mode_raw in
     let* status_raw = str "status" in
     let* status =
       match run_status_of_string_opt status_raw with
@@ -193,6 +227,12 @@ let row_of_json json =
     let* input_tokens = opt_int "input_tokens" in
     let* output_tokens = opt_int "output_tokens" in
     let* cost_usd = opt_float "cost_usd" in
+    let* () =
+      match cost_usd with
+      | None -> Ok ()
+      | Some cost when Float.is_finite cost && cost >= 0.0 -> Ok ()
+      | Some _ -> Error "cost_usd must be finite and nonnegative, or null"
+    in
     let* error = opt_str "error" in
     (* A run passes only when verify is green AND, if the case declares a
        PASS_TO_PASS regression guard, that guard stayed green too. A case with
@@ -230,6 +270,8 @@ let row_of_json json =
       ; operation_id
       ; provider
       ; model
+      ; experiment_digest
+      ; memory_mode
       ; status
       ; verify_exit
       ; regression_exit
@@ -392,34 +434,87 @@ let bucket_of_row (row : row) =
   | Run_transport_error -> Transport_error
 ;;
 
-type suite_report = {
+(** These are configured model labels from the producer, not an attestation of
+    the actual provider model selected after runtime failover. Every statistical
+    result belongs to exactly one such cohort and one immutable experiment. *)
+type cohort = {
+  provider : string;
+  model : string;
+  memory_mode : memory_mode;
+  experiment_digest : string;
+}
+
+module Cohorts = Map.Make (struct
+  type t = cohort
+  let compare = Stdlib.compare
+end)
+
+module Runs = Set.Make (struct
+  type t = cohort * string
+  let compare = Stdlib.compare
+end)
+module Repeats = Set.Make (struct
+  type t = cohort * string * int
+  let compare = Stdlib.compare
+end)
+
+type cohort_report = {
+  cohort : cohort;
   suite : Eval_harness.eval_suite_result;
   bucket_counts : (bucket * int) list;
   unrun_case_ids : string list;
 }
 
-let build_suite ~(cases : Coding_eval_case.t list) ~(rows : row list) ~k =
-  let ( let* ) = Result.bind in
-  let case_ids = List.map (fun (case : Coding_eval_case.t) -> case.id) cases in
-  let orphan_rows =
-    rows
-    |> List.filter (fun row -> not (List.mem row.case_id case_ids))
-    |> List.map (fun row -> row.case_id)
-    |> List.sort_uniq String.compare
+type suite_report = {
+  cohorts : cohort_report list;
+  case_ids : string list;
+}
+
+type cost_summary = {
+  observed_runs : int;
+  unreported_runs : int;
+  known_cost_usd : float;
+  total_cost_usd : float option;
+  cost_per_solved_task_usd : float option;
+}
+
+let cohort_of_row (row : row) : cohort =
+  { provider = row.provider; model = row.model; memory_mode = row.memory_mode;
+    experiment_digest = row.experiment_digest }
+;;
+
+(* The numerator includes failed episodes and their reported retry costs. It is
+   complete only when every episode has an observed full cost; no solved episode
+   or missing costs leave cost-per-solved unknown, never zero. *)
+let summarize_costs (runs : Eval_harness.eval_run list) =
+  let observed_runs, known_cost_usd, solved =
+    List.fold_left
+      (fun (observed, known, solved) (run : Eval_harness.eval_run) ->
+         let solved = solved + if run.passed then 1 else 0 in
+         match run.total_cost_usd with
+         | Some cost -> observed + 1, known +. cost, solved
+         | None -> observed, known, solved)
+      (0, 0.0, 0)
+      runs
   in
-  let* () =
-    if orphan_rows = []
-    then Ok ()
-    else
-      Error
-        (Printf.sprintf
-           "runs reference unknown case id(s): %s"
-           (String.concat ", " orphan_rows))
+  let unreported_runs = List.length runs - observed_runs in
+  let total_cost_usd =
+    if runs <> [] && unreported_runs = 0 then Some known_cost_usd else None
   in
+  let cost_per_solved_task_usd =
+    match total_cost_usd with
+    | Some cost when solved > 0 -> Some (cost /. float_of_int solved)
+    | Some _ | None -> None
+  in
+  { observed_runs; unreported_runs; known_cost_usd; total_cost_usd;
+    cost_per_solved_task_usd }
+;;
+
+let build_cohort ~cases ~rows ~k cohort =
   let results =
     cases
     |> List.filter_map (fun (case : Coding_eval_case.t) ->
-      match List.filter (fun row -> String.equal row.case_id case.id) rows with
+      match List.filter (fun (row : row) -> String.equal row.case_id case.id) rows with
       | [] -> None
       | case_rows ->
         let runs =
@@ -432,68 +527,124 @@ let build_suite ~(cases : Coding_eval_case.t list) ~(rows : row list) ~k =
   let unrun_case_ids =
     cases
     |> List.filter_map (fun (case : Coding_eval_case.t) ->
-      if List.exists (fun row -> String.equal row.case_id case.id) rows
-      then None
-      else Some case.id)
+      if List.exists (fun (row : row) -> String.equal row.case_id case.id) rows
+      then None else Some case.id)
   in
   let total_runs = List.length rows in
-  let passed_runs = List.length (List.filter (fun row -> row.passed) rows) in
-  let overall_pass_rate =
-    if total_runs = 0 then 0.0 else float_of_int passed_runs /. float_of_int total_runs
-  in
-  let costs = List.filter_map (fun row -> row.cost_usd) rows in
-  let total_cost_usd =
-    (* A missing cost stays unknown for the total: summing only the known
-       subset would understate spend while reading as complete. *)
-    if List.length costs = total_runs && total_runs > 0
-    then Some (List.fold_left ( +. ) 0.0 costs)
-    else None
-  in
+  let passed_runs = List.length (List.filter (fun (row : row) -> row.passed) rows) in
+  let costs = summarize_costs (List.map eval_run_of_row rows) in
   let started_at =
-    List.fold_left (fun acc row -> Float.min acc row.recorded_at) infinity rows
+    List.fold_left (fun acc (row : row) -> Float.min acc row.recorded_at) infinity rows
   in
   let ended_at =
-    List.fold_left (fun acc row -> Float.max acc row.recorded_at) neg_infinity rows
+    List.fold_left (fun acc (row : row) -> Float.max acc row.recorded_at) neg_infinity rows
   in
   let suite : Eval_harness.eval_suite_result =
     { suite_name = "coding-eval"
     ; started_at = (if total_runs = 0 then 0.0 else started_at)
     ; ended_at = (if total_runs = 0 then 0.0 else ended_at)
     ; results
-    ; overall_pass_rate
-    ; total_cost_usd
+    ; overall_pass_rate =
+        (if total_runs = 0 then 0.0 else float_of_int passed_runs /. float_of_int total_runs)
+    ; total_cost_usd = costs.total_cost_usd
     ; total_runs
     }
   in
   let bucket_counts =
     List.map
       (fun bucket ->
-         ( bucket
-         , List.length (List.filter (fun row -> bucket_of_row row = bucket) rows) ))
+         bucket, List.length (List.filter (fun row -> bucket_of_row row = bucket) rows))
       all_buckets
   in
-  Ok { suite; bucket_counts; unrun_case_ids }
+  { cohort; suite; bucket_counts; unrun_case_ids }
 ;;
+
+let build_suite ~(cases : Coding_eval_case.t list) ~(rows : row list) ~k =
+  let ( let* ) = Result.bind in
+  let case_ids = List.map (fun (case : Coding_eval_case.t) -> case.id) cases in
+  let* groups, _, _ =
+    List.fold_left
+      (fun acc (row : row) ->
+         let* groups, run_ids, repeats = acc in
+         let cohort = cohort_of_row row in
+         let run_id = cohort, row.run_id in
+         let repeat = cohort, row.case_id, row.run_index in
+         if not (List.mem row.case_id case_ids) then
+           Error (Printf.sprintf "run references unknown case id: %s" row.case_id)
+         else if Runs.mem run_id run_ids then
+           Error (Printf.sprintf "duplicate cohort run_id: %s" row.run_id)
+         else if Repeats.mem repeat repeats then
+           Error (Printf.sprintf "duplicate cohort repeat: %s r%d" row.case_id row.run_index)
+         else
+           let prior = match Cohorts.find_opt cohort groups with Some prior -> prior | None -> [] in
+           Ok (Cohorts.add cohort (row :: prior) groups,
+               Runs.add run_id run_ids, Repeats.add repeat repeats))
+      (Ok (Cohorts.empty, Runs.empty, Repeats.empty)) rows
+  in
+  let cohorts = Cohorts.bindings groups |> List.map (fun (cohort, rows) ->
+    build_cohort ~cases ~rows:(List.rev rows) ~k cohort) in
+  Ok { cohorts; case_ids }
+;;
+
+let runs_of_cohort (report : cohort_report) =
+  List.concat_map (fun (result : Eval_harness.eval_result) -> result.runs) report.suite.results
+;;
+
+let runs_of_report (report : suite_report) = List.concat_map runs_of_cohort report.cohorts
+
+let cost_to_string = function Some cost -> Printf.sprintf "%.6f" cost | None -> "unknown"
 
 let render_report (report : suite_report) =
   let buffer = Buffer.create 2048 in
-  Buffer.add_string buffer (Eval_harness.report_to_string report.suite);
-  Buffer.add_string buffer "\n## Failure taxonomy (RFC-0396 D5)\n\n";
-  List.iter
-    (fun (bucket, count) ->
-       Buffer.add_string
-         buffer
-         (Printf.sprintf "- %s: %d\n" (bucket_to_string bucket) count))
-    report.bucket_counts;
-  (match report.unrun_case_ids with
-   | [] -> ()
-   | unrun ->
-     Buffer.add_string
-       buffer
-       (Printf.sprintf
-          "\n## Cases with no recorded runs yet\n\n- %s\n"
-          (String.concat "\n- " unrun)));
+  let runs = runs_of_report report in
+  Buffer.add_string buffer "# Coding outcome evaluation\n\n";
+  Buffer.add_string buffer
+    (Printf.sprintf "Recorded episodes: %d. Separate cohorts: %d.\n\n"
+       (List.length runs) (List.length report.cohorts));
+  Buffer.add_string buffer
+    "Provider/model are configured labels; they do not attest the selected model after failover.\n\n";
+  List.iteri
+    (fun index (report : cohort_report) ->
+       Buffer.add_string buffer (Printf.sprintf "## Cohort %d\n\n" (index + 1));
+       Buffer.add_string buffer
+         (Printf.sprintf "Provider: `%s`; model: `%s`; memory: `%s`; experiment: `%s`.\n\n"
+            report.cohort.provider report.cohort.model
+            (memory_mode_to_string report.cohort.memory_mode) report.cohort.experiment_digest);
+       Buffer.add_string buffer (Eval_harness.report_to_string report.suite);
+       let costs = summarize_costs (runs_of_cohort report) in
+       Buffer.add_string buffer
+         (Printf.sprintf
+            "\nCost coverage: %d observed / %d unreported episodes. Known subtotal: USD %.6f. Full total: %s. Cost per solved acceptance: %s.\n"
+            costs.observed_runs costs.unreported_runs costs.known_cost_usd
+            (cost_to_string costs.total_cost_usd) (cost_to_string costs.cost_per_solved_task_usd));
+       Buffer.add_string buffer "\n### Failure taxonomy (RFC-0396 D5)\n\n";
+       List.iter (fun (bucket, count) -> Buffer.add_string buffer
+         (Printf.sprintf "- %s: %d\n" (bucket_to_string bucket) count)) report.bucket_counts;
+       match report.unrun_case_ids with
+       | [] -> ()
+       | unrun -> Buffer.add_string buffer
+           (Printf.sprintf "\nCases with no recorded runs: %s\n\n" (String.concat ", " unrun)))
+    report.cohorts;
+  if report.cohorts = [] then
+    Buffer.add_string buffer ("No cohort has recorded runs. Corpus cases: "
+                              ^ String.concat ", " report.case_ids ^ "\n");
   Buffer.contents buffer
+;;
+
+let cost_accounting_fields summary =
+  let number = function Some cost -> `Float cost | None -> `Null in
+  [ "observed_runs", `Int summary.observed_runs
+  ; "unreported_runs", `Int summary.unreported_runs
+  ; "known_cost_usd", `Float summary.known_cost_usd
+  ; "total_cost_usd", number summary.total_cost_usd ]
+;;
+
+let cost_summary_json summary =
+  `Assoc (cost_accounting_fields summary
+          @ [ "cost_per_solved_task_usd",
+              (match summary.cost_per_solved_task_usd with
+               | Some cost -> `Float cost
+               | None -> `Null) ])
 ;;
 
 let report_json (report : suite_report) : Yojson.Safe.t =
@@ -501,33 +652,39 @@ let report_json (report : suite_report) : Yojson.Safe.t =
     `Assoc
       [ "case_id", `String result.scenario.id
       ; "runs", `Int (List.length result.runs)
+      ; "passed_runs", `Int (List.length (List.filter (fun (run : Eval_harness.eval_run) -> run.passed) result.runs))
       ; "pass_at_k", `Float result.pass_at_k
       ; "mean_score", `Float result.mean_score
       ; "consistency", `Float result.consistency
       ; "ci95_low", `Float result.ci95_low
       ; "ci95_high", `Float result.ci95_high
       ; "min_runs_met", `Bool result.min_runs_met
-      ; ( "total_cost_usd"
-        , match result.total_cost_usd with
-          | Some cost -> `Float cost
-          | None -> `Null )
+      ; "cost", cost_summary_json (summarize_costs result.runs)
       ]
   in
+  let cohort_json (report : cohort_report) =
+    `Assoc
+      [ "provider", `String report.cohort.provider
+      ; "model", `String report.cohort.model
+      ; "memory_mode", `String (memory_mode_to_string report.cohort.memory_mode)
+      ; "experiment_digest", `String report.cohort.experiment_digest
+      ; "total_runs", `Int report.suite.total_runs
+      ; "overall_pass_rate", `Float report.suite.overall_pass_rate
+      ; "cost", cost_summary_json (summarize_costs (runs_of_cohort report))
+      ; "results", `List (List.map result_json report.suite.results)
+      ; "bucket_counts", `Assoc (List.map
+          (fun (bucket, count) -> bucket_to_string bucket, `Int count) report.bucket_counts)
+      ; "unrun_case_ids", `List (List.map (fun id -> `String id) report.unrun_case_ids)
+      ]
+  in
+  let runs = runs_of_report report in
   `Assoc
-    [ "suite_name", `String report.suite.suite_name
-    ; "total_runs", `Int report.suite.total_runs
-    ; "overall_pass_rate", `Float report.suite.overall_pass_rate
-    ; ( "total_cost_usd"
-      , match report.suite.total_cost_usd with
-        | Some cost -> `Float cost
-        | None -> `Null )
-    ; "results", `List (List.map result_json report.suite.results)
-    ; ( "bucket_counts"
-      , `Assoc
-          (List.map
-             (fun (bucket, count) -> bucket_to_string bucket, `Int count)
-             report.bucket_counts) )
-    ; ( "unrun_case_ids"
-      , `List (List.map (fun id -> `String id) report.unrun_case_ids) )
+    [ "suite_name", `String "coding-eval"
+    ; "model_identity_scope", `String "configured_model"
+    ; "total_runs", `Int (List.length runs)
+    ; "passed_runs", `Int (List.length (List.filter (fun (run : Eval_harness.eval_run) -> run.passed) runs))
+    ; "cost", `Assoc (cost_accounting_fields (summarize_costs runs))
+    ; "corpus_case_ids", `List (List.map (fun id -> `String id) report.case_ids)
+    ; "cohorts", `List (List.map cohort_json report.cohorts)
     ]
 ;;

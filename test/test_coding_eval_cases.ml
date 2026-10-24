@@ -130,6 +130,12 @@ let test_case_json_rejects_undeclared_keys () =
 ;;
 
 let row_json
+      ?(provider = "ollama")
+      ?(model = "test-model")
+      ?(experiment_digest = String.make 64 'a')
+      ?(memory_mode = "off")
+      ?(cost_usd = None)
+      ?run_id
       ?(regression_exit = None)
       ?(edited_source_files = None)
       ?(edited_target_files = None)
@@ -147,9 +153,13 @@ let row_json
   `Assoc
     [ "case_id", `String "l1-calc-add"
     ; "run_index", `Int run_index
-    ; "run_id", `String (Printf.sprintf "run-%d" run_index)
-    ; "provider", `String "ollama"
-    ; "model", `String "test-model"
+    ; "run_id", `String (match run_id with
+          | Some run_id -> run_id
+          | None -> Printf.sprintf "%s-%s-run-%d" provider model run_index)
+    ; "provider", `String provider
+    ; "model", `String model
+    ; "experiment_digest", `String experiment_digest
+    ; "memory_mode", `String memory_mode
     ; "status", `String status
     ; "verify_exit", int_or_null verify_exit
     ; "regression_exit", int_or_null regression_exit
@@ -162,7 +172,7 @@ let row_json
     ; "tool_calls", `List [ `String "Read"; `String "Edit"; `String "Execute" ]
     ; "input_tokens", `Null
     ; "output_tokens", `Null
-    ; "cost_usd", `Null
+    ; "cost_usd", (match cost_usd with Some cost -> `Float cost | None -> `Null)
     ; "error", `Null
     ]
 ;;
@@ -175,6 +185,12 @@ let write_jsonl path rows =
        List.iter
          (fun row -> output_string channel (Yojson.Safe.to_string row ^ "\n"))
          rows)
+;;
+
+let single_cohort (report : Coding_eval_report.suite_report) =
+  match report.cohorts with
+  | [ cohort ] -> cohort
+  | cohorts -> Alcotest.failf "expected one cohort, got %d" (List.length cohorts)
 ;;
 
 let test_report_pipeline_on_fixed_rows () =
@@ -194,15 +210,16 @@ let test_report_pipeline_on_fixed_rows () =
   match Coding_eval_report.build_suite ~cases ~rows ~k:1 with
   | Error message -> Alcotest.failf "suite failed to build: %s" message
   | Ok report ->
-    check int "total runs" 2 report.suite.total_runs;
-    check (float 0.0001) "overall pass rate" 0.5 report.suite.overall_pass_rate;
-    (match report.suite.results with
+    let cohort = single_cohort report in
+    check int "total runs" 2 cohort.suite.total_runs;
+    check (float 0.0001) "overall pass rate" 0.5 cohort.suite.overall_pass_rate;
+    (match cohort.suite.results with
      | [ result ] ->
        check (float 0.0001) "pass@1 over n=2 c=1" 0.5 result.pass_at_k;
        check bool "n=2 is below the min-runs gate" false result.min_runs_met
      | results -> Alcotest.failf "expected one scenario result, got %d" (List.length results));
     let bucket_count bucket =
-      List.assoc bucket report.bucket_counts
+      List.assoc bucket cohort.bucket_counts
     in
     check int "verify_green bucket" 1 (bucket_count Coding_eval_report.Verify_green);
     check int "verify_red bucket" 1 (bucket_count Coding_eval_report.Verify_red);
@@ -217,7 +234,8 @@ let test_report_decodes_real_harness_rows () =
   List.iteri
     (fun index (status, verify_exit, regression_exit, acceptance) ->
        let args =
-         [ helper; acceptance; "l1-calc-add"; string_of_int (index + 1); "observed-run"
+         [ helper; acceptance; "l1-calc-add"; string_of_int (index + 1)
+         ; Printf.sprintf "observed-run-%d" (index + 1)
          ; "provider"; "model"; status; verify_exit; "100"; "1234"
          ; "[]"; "null"; "null"; "null"; "null"; regression_exit
          ; "1"; "1"; "null"
@@ -229,7 +247,7 @@ let test_report_decodes_real_harness_rows () =
              "set -euo pipefail; source \"$1\"; acceptance=\"$2\"; shift 2; \
               operation_id=null; if [[ \"$acceptance\" != null ]]; then \
               operation_id=\"$(printf '%s' \"$acceptance\" | coding_eval_operation_id)\"; fi; \
-              evidence_row \"$@\" \"$operation_id\""
+              evidence_row \"$@\" \"$operation_id\" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa off"
          ^ " coding-eval-emitter "
          ^ String.concat " " (List.map Filename.quote args)
          ^ " >> " ^ Filename.quote runs_path
@@ -266,8 +284,9 @@ let test_report_decodes_real_harness_rows () =
   match Coding_eval_report.build_suite ~cases:(loaded_cases ()) ~rows ~k:1 with
   | Error message -> fail message
   | Ok report ->
-    check int "all actual emitted rows enter the report" 6 report.suite.total_runs;
-    check (float 0.0001) "one passing coding evaluation" (1.0 /. 6.0) report.suite.overall_pass_rate
+    let cohort = single_cohort report in
+    check int "all actual emitted rows enter the report" 6 cohort.suite.total_runs;
+    check (float 0.0001) "one passing coding evaluation" (1.0 /. 6.0) cohort.suite.overall_pass_rate
 ;;
 
 let test_failed_admission_is_recorded_without_grading () =
@@ -406,6 +425,114 @@ let test_row_disagreeing_with_its_verdict_is_refused () =
   | Ok _ -> Alcotest.fail "expected the inconsistent row to be refused"
   | Error message ->
     check bool "error says the row disagrees" true (string_contains message "disagrees")
+;;
+
+let decode_report_row json =
+  match Coding_eval_report.row_of_json json with
+  | Ok row -> row
+  | Error message -> Alcotest.failf "report row refused: %s" message
+;;
+
+let report_of_rows rows =
+  match Coding_eval_report.build_suite ~cases:(loaded_cases ()) ~rows ~k:1 with
+  | Ok report -> report
+  | Error message -> Alcotest.failf "report refused: %s" message
+;;
+
+let test_report_separates_model_memory_and_experiment () =
+  let row ?provider ?model ?memory_mode ?experiment_digest passed =
+    row_json ?provider ?model ?memory_mode ?experiment_digest
+      ~run_index:1 ~status:"ok" ~verify_exit:(Some (if passed then 0 else 1))
+      ~passed () |> decode_report_row
+  in
+  let rows =
+    [ row true
+    ; row ~model:"other-model" false
+    ; row ~provider:"other-provider" false
+    ; row ~memory_mode:"seeded" false
+    ; row ~experiment_digest:(String.make 64 'b') false
+    ]
+  in
+  let report = report_of_rows rows in
+  check int "every comparison dimension separates cohorts" 5 (List.length report.cohorts);
+  List.iter
+    (fun (cohort : Coding_eval_report.cohort_report) ->
+       check int "a cohort has its own single recorded episode" 1 cohort.suite.total_runs;
+       match cohort.suite.results with
+       | [ result ] ->
+         check bool "different cohorts cannot fill the minimum sample" false result.min_runs_met;
+         let expected = if List.exists
+             (fun (row : Coding_eval_report.row) ->
+                Coding_eval_report.cohort_of_row row = cohort.cohort && row.passed)
+             rows then 1.0 else 0.0 in
+         check (float 0.0001) "pass@1 is specific to that cohort" expected result.pass_at_k
+       | _ -> Alcotest.fail "one recorded case per cohort was expected")
+    report.cohorts;
+  let json = Coding_eval_report.report_json report in
+  let open Yojson.Safe.Util in
+  check string "model labels are not selected-weight attestation" "configured_model"
+    (json |> member "model_identity_scope" |> to_string);
+  check bool "no pooled model-quality pass rate" true
+    (json |> member "overall_pass_rate" = `Null);
+  check bool "no pooled cost per solved acceptance" true
+    (json |> member "cost" |> member "cost_per_solved_task_usd" = `Null);
+  check int "all cohort identities reach the artifact" 5
+    (json |> member "cohorts" |> to_list |> List.length)
+;;
+
+let test_report_cost_counts_failed_episodes_and_keeps_unknown () =
+  let row run_index passed cost_usd =
+    row_json ~run_index ~status:"ok" ~verify_exit:(Some (if passed then 0 else 1))
+      ~cost_usd ~passed () |> decode_report_row
+  in
+  let succeeded = row 1 true (Some 1.0) in
+  let failed = row 2 false (Some 2.0) in
+  let report = report_of_rows [ succeeded; failed ] |> single_cohort in
+  let costs = Coding_eval_report.summarize_costs (Coding_eval_report.runs_of_cohort report) in
+  check (option (float 0.0001)) "failed spend is in the full numerator" (Some 3.0) costs.total_cost_usd;
+  check (option (float 0.0001)) "one solved acceptance bears both episode costs"
+    (Some 3.0) costs.cost_per_solved_task_usd;
+  let report = report_of_rows [ succeeded; row 2 false None ] |> single_cohort in
+  let costs = Coding_eval_report.summarize_costs (Coding_eval_report.runs_of_cohort report) in
+  check int "priced episode coverage" 1 costs.observed_runs;
+  check int "unreported episode coverage" 1 costs.unreported_runs;
+  check (float 0.0001) "known subtotal is explicitly partial" 1.0 costs.known_cost_usd;
+  check (option (float 0.0001)) "missing failed spend prevents a full total" None costs.total_cost_usd;
+  check (option (float 0.0001)) "missing cost prevents a solved-task price" None costs.cost_per_solved_task_usd;
+  (match report.suite.results with
+   | [ result ] ->
+     check (option (float 0.0001)) "generic case total agrees with suite unknown"
+       None result.total_cost_usd
+   | _ -> Alcotest.fail "one case result was expected");
+  let report = report_of_rows [ failed ] |> single_cohort in
+  let costs = Coding_eval_report.summarize_costs (Coding_eval_report.runs_of_cohort report) in
+  check (option (float 0.0001)) "no solved acceptance has no finite price" None costs.cost_per_solved_task_usd
+;;
+
+let test_report_refuses_duplicate_samples () =
+  let first = row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 0) ~passed:true ()
+      |> decode_report_row in
+  List.iter
+    (fun repeated ->
+       match Coding_eval_report.build_suite ~cases:(loaded_cases ()) ~rows:[first;repeated] ~k:1 with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "a duplicate sample inflated the cohort")
+    [ first; { first with run_id = "another-id-for-the-same-repeat" } ]
+;;
+
+let test_report_requires_experiment_identity () =
+  let base = row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 0) ~passed:true () in
+  let fields = match base with `Assoc fields -> fields | _ -> Alcotest.fail "row object expected" in
+  List.iter
+    (fun json ->
+       match Coding_eval_report.row_of_json json with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "an unknown or malformed experiment was admitted")
+    [ `Assoc (List.remove_assoc "experiment_digest" fields)
+    ; `Assoc (("experiment_digest", `String "old-evidence") :: List.remove_assoc "experiment_digest" fields)
+    ; `Assoc (List.remove_assoc "memory_mode" fields)
+    ; `Assoc (("memory_mode", `String "imagined-mode") :: List.remove_assoc "memory_mode" fields)
+    ]
 ;;
 
 let base_case_fields =
@@ -659,6 +786,12 @@ let () =
         ] )
     ; ( "report"
       , [ test_case "fixed rows pipeline" `Quick test_report_pipeline_on_fixed_rows
+        ; test_case "model memory and experiment cohorts stay separate" `Quick
+            test_report_separates_model_memory_and_experiment
+        ; test_case "solved-task cost includes failures and unknown coverage" `Quick
+            test_report_cost_counts_failed_episodes_and_keeps_unknown
+        ; test_case "duplicate samples are refused" `Quick test_report_refuses_duplicate_samples
+        ; test_case "experiment identity is required" `Quick test_report_requires_experiment_identity
         ; test_case "real harness rows decode" `Quick test_report_decodes_real_harness_rows
         ; test_case "failed admission records its episode without grading" `Quick
             test_failed_admission_is_recorded_without_grading

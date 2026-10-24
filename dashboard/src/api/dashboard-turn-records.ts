@@ -17,6 +17,7 @@ export const TURN_PROMPT_BLOCK_IDS = [
   'keeper_instructions',
   'dynamic_context',
   'active_goals',
+  'completion_authority',
   'temporal_summary',
   'memory_os_recall',
   'librarian_working_context',

@@ -351,6 +351,122 @@ let test_goal_survives_read_then_task_creation () =
         | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
         | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content) checkpoint.messages)
 
+let test_completion_observation_survives_tool_reply approved () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  install_catalog ~sw;
+  Masc_test_deps.init_unified_tool_registry ();
+  let base_path = Filename.temp_dir "authority-tool-loop-wire-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  install_prompts base_path;
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String "authority-wire"; "trace_id", `String "trace-authority-wire"]) with
+    | Ok meta -> meta | Error detail -> fail detail in
+  let authority = Masc_domain.Human_operator {operator_id="fixture-operator"} in
+  let task_id = "task-authority-wire" and verification_id = "vrf-authority-wire" in
+  let payload, post_id =
+    if approved then
+      let outcome : Keeper_event_queue.task_outcome =
+        {to_task_id=task_id;to_verification_id=verification_id;to_producer=meta.name;to_authority=authority} in
+      Keeper_event_queue.Task_outcome outcome, Keeper_event_queue.task_outcome_post_id outcome
+    else
+      let rejection : Keeper_event_queue.completion_authority_rejection =
+        {car_task_id=task_id;car_verification_id=verification_id;
+         car_authority=authority;car_reason="required artifact was absent"} in
+      Keeper_event_queue.Completion_authority_rejected rejection,
+      Keeper_event_queue.completion_authority_rejection_post_id rejection in
+  let stimulus : Keeper_event_queue.stimulus =
+    {post_id;urgency=Immediate;arrived_at=42.;payload} in
+  let pending = Keeper_event_queue.enqueue Keeper_event_queue.empty stimulus in
+  let before = Keeper_event_queue.queue_to_yojson pending in
+  let event = match Keeper_world_observation.pending_board_event_of_stimulus ~base_path ~meta stimulus with
+    | Ok (Some event) -> event | Ok None | Error _ -> fail "authority event was not projected" in
+  let observation : Keeper_world_observation.world_observation =
+    {pending_messages=[];pending_board_events=[event];idle_seconds=0;active_goals=Ok [];
+     unclaimed_task_count=0;claimable_tasks=[];held_task_skills=[];failed_task_count=0;
+     scheduled_automation=Keeper_world_observation.empty_scheduled_automation_observation;
+     approval_authority={revision=1;state=Approval_authority_complete;pending=[]};
+     backlog_revision=Some 1;running_keeper_fiber_count=0;connected_surfaces=[];
+     connected_surface_failures=[];own_recent_board_posts=[];fleet_messages=[];own_recent_actions=Ok []} in
+  let turn_decision = Keeper_world_observation.keeper_cycle_decision ~meta observation in
+  let rendered = Prompt.build_prompt ~turn_decision
+      ~current_task:Keeper_world_observation_inputs.No_current_task ~observation () in
+  let previous = ref None in
+  let issued_requests = ref [] in
+  let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params;messages;_} ->
+      let issued = Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_AUTHORITY_WIRE"
+          ~post_tool_round:(Keeper_run_prompt.is_later_round_of_this_turn
+            ~injected_this_turn:(Option.is_some !previous) messages)
+          ~previous_assembly:!previous ~dynamic_context_partition:(Some rendered.world_partition)
+          ~existing_extra_system_context:current_params.extra_system_context
+          ~blocks:[Prompt_block_id.Dynamic_context,rendered.world_state;
+                   Prompt_block_id.Temporal_summary,"INITIAL_CLOCK"] in
+      previous := Some issued;
+      issued_requests := issued :: !issued_requests;
+      AdjustParams {current_params with extra_system_context=issued.extra_system_context;
+        system_prompt_override=Keeper_context_assembly.system_prompt_override
+          ~previous:current_params.system_prompt_override issued}
+    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+    | OnStop _ | OnError _ | OnToolError _ -> Continue)} in
+  let reply message finish = Yojson.Safe.to_string (`Assoc ["id",`String "authority-wire";
+    "model",`String model_id;"choices",`List [`Assoc ["index",`Int 0;"message",message;
+      "finish_reason",`String finish]]]) in
+  let responses = [|
+    reply (`Assoc ["role",`String "assistant";"content",`Null;"tool_calls",`List [`Assoc [
+      "id",`String "read-after-verdict";"type",`String "function";"function",`Assoc [
+        "name",`String "Read";"arguments",`String "{}"]]]]) "tool_calls";
+    reply (`Assoc ["role",`String "assistant";"content",`String "Observed."]) "stop" |] in
+  let received = ref [] in
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply_with (fun index body ->
+        received := body :: !received;
+        if index < Array.length responses then `OK,responses.(index)
+        else `Bad_request,"unexpected provider request")) in
+  let provider_cfg = Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture"
+      ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions" ~tool_stream:false () in
+  let read_tool = Agent_core.Tool.create ~name:"Read" ~description:"Fixture artifact read"
+      ~parameters:[] (fun _ -> Ok {Agent_core.Types.content="artifact read after verdict";
+                                  content_blocks=None;_meta=None}) in
+  let runtime = Runtime_agent.default_config ~name:meta.name ~provider_cfg
+      ~system_prompt:"BASE_AUTHORITY_WIRE" ~tools:[read_tool] in
+  let result = match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
+      "Inspect the next artifact." with
+    | Ok ({stop_reason=Runtime_agent.Completed _;_} as result) -> result
+    | Ok _ -> fail "authority fixture did not complete"
+    | Error error -> fail (Agent_core.Error.to_string error) in
+  let requests = List.rev !received and assemblies = List.rev !issued_requests in
+  check int "verdict followed by a tool result reaches two real HTTP requests" 2 (List.length requests);
+  List.iteri (fun index (body, issued) ->
+    let messages = Json.member "messages" (Yojson.Safe.from_string body) |> Json.to_list in
+    let system = match List.filter (fun message -> Json.member "role" message = `String "system") messages with
+      | [message] -> Json.member "content" message |> Json.to_string
+      | _ -> fail "one System carrier required" in
+    List.iter (fun marker -> check bool "every request retains exact authority correlation" true
+      (contains ~needle:marker system)) [task_id;verification_id;post_id;"fixture-operator";"human_operator"];
+    check bool "the verdict kind is preserved" true
+      (contains ~needle:(if approved then "Approved Task Outcomes" else "Completion Authority Decisions") system);
+    let issued = match issued.Keeper_context_assembly.system_prompt with
+      | Some issued -> issued | None -> fail "physical System receipt missing" in
+    check string "physical issuer bytes match the received System carrier" issued.text system;
+    check int "exactly one completion-authority source span" 1
+      (List.length (List.filter (fun (span : Keeper_context_assembly.span) ->
+        span.kind = Keeper_context_assembly.Block Prompt_block_id.Completion_authority) issued.partition.spans));
+    if index > 0 then (
+      check bool "tool feedback remains the newest message" true
+        (Json.member "role" (List.hd (List.rev messages)) = `String "tool");
+      check bool "clock is not rebroadcast" false (contains ~needle:"INITIAL_CLOCK" body)))
+    (List.combine requests assemblies);
+  check bool "projection does not acknowledge or rewrite pending events" true
+    (Keeper_event_queue.queue_to_yojson pending = before);
+  let checkpoint = match result.checkpoint with Some value -> value | None -> fail "checkpoint missing" in
+  List.iter (fun (message : Agent_core.Types.message) -> List.iter (function
+    | Text text -> check bool "authority observation is absent from durable history" false
+        (contains ~needle:verification_id text)
+    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+    | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
+
 let () = run "direct Goal context on actual provider wire"
   ["direct owner requests",[
     test_case "current criterion and measurement reach HTTP receiver" `Quick (run_case Current);
@@ -359,4 +475,8 @@ let () = run "direct Goal context on actual provider wire"
     test_case "Goal primary failure never borrows recovery context" `Quick (run_case Goal_unavailable);
     test_case "independent work needs no synthetic Goal" `Quick (run_case Empty);
     test_case "Goal survives Read and actual Task creation without other world replay" `Quick
-      test_goal_survives_read_then_task_creation]]
+      test_goal_survives_read_then_task_creation;
+    test_case "Task approval survives the following tool reply" `Quick
+      (test_completion_observation_survives_tool_reply true);
+    test_case "Task rejection survives the following tool reply" `Quick
+      (test_completion_observation_survives_tool_reply false)]]

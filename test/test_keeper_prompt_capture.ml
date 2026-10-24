@@ -127,12 +127,13 @@ let test_system_observation_has_a_separate_physical_capture () =
     let extra = A.assemble ~dynamic_context_partition:None
         ~existing_extra_system_context:None ~blocks:[] in
     List.iter (fun previous ->
-      let unchanged = A.with_goal_system_prompt ~base_text:(Option.value ~default:"base" previous)
-          ~goal_text:None extra in
+      let unchanged = A.with_system_observations ~base_text:(Option.value ~default:"base" previous)
+          ~observations:[] extra in
       Alcotest.(check (option string)) "no Goal preserves None versus an empty override"
         previous (A.system_prompt_override ~previous unchanged)) [None;Some "";Some "prior override"];
-    let issued = A.with_goal_system_prompt ~base_text:"prior override"
-        ~goal_text:(Some "Goal observation: 1/3") extra in
+    let issued = A.with_system_observations ~base_text:"prior override"
+        ~observations:[A.Active_goals "Goal observation: 1/3";
+                       A.Completion_authority "Approved task-1; verification vrf-1"] extra in
     Capture.write ~config ~keeper ~trace_id:"trace-system" ~absolute_turn:2
       ~blocks:((Block_id.Keeper_instructions,"prior override") :: A.logical_blocks issued)
       ~assembled:issued.extra_system_context ~system_prompt:issued.system_prompt;
@@ -140,9 +141,9 @@ let test_system_observation_has_a_separate_physical_capture () =
       | Ok capture -> capture | Error error -> Alcotest.fail (Capture.read_error_to_string error) in
     Alcotest.(check (option string)) "extra carrier remains absent" None capture.assembled;
     Alcotest.(check (option string)) "system suffix survives capture without reclassification"
-      (Some "prior override\n\nGoal observation: 1/3") capture.system_prompt;
+      (Some "prior override\n\nGoal observation: 1/3\n\nApproved task-1; verification vrf-1") capture.system_prompt;
     Alcotest.(check (list string)) "instructions and Goal are attributed exactly once"
-      ["keeper_instructions";"active_goals"]
+      ["keeper_instructions";"active_goals";"completion_authority"]
       (List.map (fun (block : Capture.block) -> Block_id.to_string block.id) capture.blocks);
     Alcotest.(check bool) "the retained partition explicitly names its physical carrier" true
       (match capture.system_prompt_partition with

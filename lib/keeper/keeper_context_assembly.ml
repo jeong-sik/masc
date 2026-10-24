@@ -13,9 +13,15 @@ type receipt =
   ; sha256 : string
   ; spans : span list
   }
+type system_observation = Active_goals of string | Completion_authority of string
+
+let observation_block = function
+  | Active_goals text -> Prompt_block_id.Active_goals, text
+  | Completion_authority text -> Prompt_block_id.Completion_authority, text
+
 type system_prompt =
   { base_text : string
-  ; goal_text : string option
+  ; observations : system_observation list
   ; text : string
   ; partition : receipt
   }
@@ -39,7 +45,8 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
         when String.equal text (Keeper_context_layers.text rendered) ->
         Issued (Keeper_context_layers.receipt_to_json rendered)
       | Block Prompt_block_id.Dynamic_context, _ -> Unavailable
-      | ((Block (Prompt_block_id.Keeper_instructions | Prompt_block_id.Active_goals) | Unattributed _), _)
+      | ((Block (Prompt_block_id.Keeper_instructions | Prompt_block_id.Active_goals
+          | Prompt_block_id.Completion_authority) | Unattributed _), _)
       | (Block (Prompt_block_id.Temporal_summary), _)
       | (Block (Prompt_block_id.Memory_os_recall), _)
       | (Block (Prompt_block_id.Librarian_working_context), _)
@@ -87,12 +94,15 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
     }
 ;;
 
-let with_goal_system_prompt ~base_text ~goal_text assembly =
+let with_system_observations ~base_text ~observations assembly =
+  let blocks = List.map observation_block observations in
+  if List.length (List.sort_uniq (fun (left, _) (right, _) -> compare left right) blocks)
+     <> List.length blocks then invalid_arg "duplicate System observation kind";
   let issued = assemble ~dynamic_context_partition:None
       ~existing_extra_system_context:(Some base_text)
-      ~blocks:(match goal_text with None -> [] | Some text -> [Prompt_block_id.Active_goals, text]) in
+      ~blocks in
   let system_prompt = match issued.extra_system_context, issued.receipt with
-    | Some text, Some partition -> Some {base_text; goal_text; text; partition}
+    | Some text, Some partition -> Some {base_text; observations; text; partition}
     | Some _, None | None, _ -> assert false in
   { assembly with system_prompt }
 ;;
@@ -100,8 +110,7 @@ let with_goal_system_prompt ~base_text ~goal_text assembly =
 let logical_blocks assembly =
   (match assembly.system_prompt with
    | None -> []
-   | Some {goal_text = None; _} -> []
-   | Some {goal_text = Some text; _} -> [Prompt_block_id.Active_goals, text])
+   | Some issued -> List.map observation_block issued.observations)
   @ assembly.blocks
 ;;
 
@@ -111,8 +120,8 @@ let effective_system_prompt ~base_text assembly =
 
 let system_prompt_override ~previous assembly =
   match assembly.system_prompt with
-  | None | Some {goal_text = None; _} -> previous
-  | Some ({goal_text = Some _; _} as issued) -> Some issued.text
+  | None | Some {observations = []; _} -> previous
+  | Some ({observations = _ :: _; _} as issued) -> Some issued.text
 ;;
 
 let dynamic_context_sections assembly =

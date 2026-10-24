@@ -1467,7 +1467,7 @@ let test_goal_observation_cannot_mask_blank_keeper_instructions () =
         ~composed_context:(Some (fun () -> !issued)) initial in
     check bool "the actual hook issued a Goal carrier" true
       (match !issued with
-       | Some {system_prompt=Some {goal_text=Some _;_};_} -> true
+       | Some {system_prompt=Some {observations=_ :: _;_};_} -> true
        | Some _ | None -> false);
     result in
   List.iter (fun (initial, override) -> check_refused_system_prompt
@@ -2787,11 +2787,67 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
   check bool "held omission retains explicit System source proof" true
     (List.exists (fun proof -> member "source_carrier" proof = `String "system_prompt")
       (omitted |> member "omitted_held" |> to_list));
-  let stale = Keeper_context_submission_link.encoded_system_goal ~assembly:(Some first)
+  let stale = Keeper_context_submission_link.encoded_system_observation ~block:Prompt_block_id.Active_goals ~assembly:(Some first)
       (Agent_core.Types.user_msg new_text) in
   check string "an observation cannot borrow an older System receipt" "unavailable"
     (binding stale (Keeper_context_submission_link.text stale)
       |> member "issuer_attribution" |> member "status" |> to_string)
+;;
+
+let test_system_authority_repeats_with_exact_source_on_official_resume () =
+  let module A = Keeper_context_assembly in
+  let block = Prompt_block_id.Completion_authority in
+  let text = "Approved task-approved; verification vrf-approved; authority operator-fixture" in
+  let assembly = A.assemble ~dynamic_context_partition:None
+      ~existing_extra_system_context:None ~blocks:[]
+    |> A.with_system_observations ~base_text:"BASE"
+         ~observations:[A.Completion_authority text] in
+  let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+      Agent_core.Hooks.AdjustParams {current_params with
+        system_prompt_override=A.system_prompt_override ~previous:current_params.system_prompt_override assembly}
+    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+    | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
+  let prepared = match Host.prepare_turn ~runtime_label:"held-authority-fixture"
+      ~composed_context:(Some (fun () -> Some assembly)) ~keeper_name:"held-authority"
+      ~turn_count:1 ~system_prompt:"BASE" ~tools:[]
+      ~initial_messages:[Agent_core.Types.user_msg "OWNER"] ~model_input_projection:None
+      ~hooks:(Some hooks) ~configured_reasoning_effort:None with
+    | Ok prepared -> prepared | Error error -> fail (Agent_core.Error.to_string error) in
+  check string "Start issues the actual authority observation in System"
+    ("BASE\n\n" ^ text) prepared.system_prompt;
+  let held = {Keeper_official_client_session_store.context=Context_block block;
+              sha256=Digestif.SHA256.(digest_string text |> to_hex)}
+             :: Host.start_held_context ~composed_context:assembly prepared.messages in
+  let deliver held = Host.resume_prompt ~goal:"OWNER" ~held ~composed_context:assembly prepared.messages in
+  let first = deliver held in
+  let second = deliver first.held_context in
+  check bool "authority keeps its original Sent_every_resume semantics" true
+    (Prompt_block_id.resent_when_held block);
+  check string "the held authority is sent again with identical bytes" first.prompt second.prompt;
+  check bool "Resume actually contains the authority row" true (contains second.prompt text);
+  let binding = Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write second.context_projection
+      (Runtime_official_client_write.raw second.prompt) in
+  let open Yojson.Safe.Util in
+  let source = match binding |> member "occurrences" |> to_list with
+    | [occurrence] -> member "source" occurrence | _ -> fail "one authority source occurrence required" in
+  check string "source carrier is System" "system_prompt" (source |> member "source_carrier" |> to_string);
+  let physical = Option.get assembly.system_prompt in
+  let index = match source |> member "source_span_indices" |> to_list with
+    | [index] -> to_int index | _ -> fail "one authority source index required" in
+  let span = List.nth physical.partition.spans index in
+  check bool "proof names the authority span rather than the Goal span" true
+    (span.kind = A.Block block);
+  check string "selected physical bytes equal the repeated observation" text
+    (String.sub physical.text span.offset span.bytes);
+  let missing = Keeper_context_submission_link.encoded_system_observation ~block ~assembly:None
+      (Agent_core.Types.user_msg text) in
+  let missing_binding = Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write missing
+      (Runtime_official_client_write.raw (Keeper_context_submission_link.text missing)) in
+  check string "an absent issuer remains unavailable" "unavailable"
+    (missing_binding |> member "issuer_attribution" |> member "status" |> to_string)
 ;;
 
 (* One session: the wiki, the memory ledger and the Board posts stay the same
@@ -3185,6 +3241,8 @@ let () =
     ; ( "World State sections on resume"
       , [ test_case "changed System Goal reaches a held session" `Quick
             test_a_changed_system_goal_reaches_a_held_official_session
+        ; test_case "System authority repeats with its exact source on official Resume" `Quick
+            test_system_authority_repeats_with_exact_source_on_official_resume
         ; test_case
             "a resume sends only the changed sections"
             `Quick

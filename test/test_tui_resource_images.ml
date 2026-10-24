@@ -197,7 +197,28 @@ let test_diagram_preparation_ownership () =
     (Option.is_none (Diagrams.image ~source rejected));
   check int "invalid bytes retain a failure" 1 (List.length (Diagrams.failures rejected))
 
+let test_crlf_diagram_association () =
+  let module Diagrams = Masc_tui_resource_diagrams in
+  let report = "# Report\r\n\r\n```mermaid\r\nflowchart LR\r\n A[계정] --> B[확인]\r\n```\r\n" in
+  let parts = [text (Some "text/markdown") report] in
+  let cache = Diagrams.create ~mime_type:None ~contents:parts
+    ~width:640 ~cell_pixels:(8,16) ~colors:None in
+  let request = Diagrams.request cache in
+  let source = match Diagrams.sources request with [source] -> source
+    | [] | _ :: _ -> fail "expected one retained diagram" in
+  let png = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lV8AAAAASUVORK5CYII=" in
+  let prepared = Diagrams.settle request ~source (Ok png) cache in
+  check bool "PNG accepted before association" true
+    (Option.is_some (Diagrams.image ~source prepared));
+  let displayed = Masc_tui_text_block.lines report |> String.concat "\n"
+    |> Masc_tui_markdown.mermaid_sources in
+  match displayed with
+  | [source] -> check bool "full CRLF document resolves its prepared source" true
+      (Option.is_some (Diagrams.image_for_display ~source prepared))
+  | [] | _ :: _ -> fail "full document lost its diagram"
+
 let () = run "resource image sources" ["source decisions", [
+  test_case "CRLF document retains diagram association" `Quick test_crlf_diagram_association;
   test_case "diagram preparation owns response and request" `Quick test_diagram_preparation_ownership;
   test_case "Markdown diagrams retain source and part ownership" `Quick test_markdown_diagrams;
   test_case "wire conservation" `Quick test_wire_conservation;

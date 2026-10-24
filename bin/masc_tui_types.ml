@@ -11745,6 +11745,7 @@ let suspend_verification_evidence_read state =
   state.verification_evidence_request <- None
 
 let suspend_workspace_readings state =
+  state.resource_diagrams <- None;
   state.listen_request <- None;
   close_task_inspection state
     ~reason:(Masc_tui_original_task_read.Workspace_unconfirmed "Waiting for original workspace identity.");

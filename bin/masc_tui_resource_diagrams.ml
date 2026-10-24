@@ -56,7 +56,11 @@ let image ~source t = match List.assoc_opt source t.entries with
   | Some (Pending | Failed _) | None -> None
 let image_for_display ~source t =
   let matches = List.filter_map (fun (original,outcome) ->
-    let displayed = Masc_tui_text_block.lines original
+    (* A closed fence's final line ended in LF. Restore that context before
+       CRLF normalization, then remove only the synthetic terminal empty line. *)
+    let lines = Masc_tui_text_block.lines (original ^ "\n") |> List.rev in
+    let lines = match lines with "" :: rest -> List.rev rest | _ -> List.rev lines in
+    let displayed = lines
       |> List.map Masc.Tui_terminal_text.sanitize_terminal_text |> String.concat "\n" in
     if String.equal source displayed then Some outcome else None) t.entries in
   match matches with

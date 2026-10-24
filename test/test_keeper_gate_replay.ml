@@ -811,7 +811,8 @@ let test_connector_post_replay_retains_terminal_target () =
          "terminal target remains the approved channel"
          "D-exact"
          channel_id
-     | ( Masc.Keeper_surface_post.To_dashboard
+     | ( Masc.Keeper_surface_post.To_native _
+       | Masc.Keeper_surface_post.To_dashboard
        | Masc.Keeper_surface_post.To_slack _ ) ->
        Alcotest.fail "Discord replay produced the wrong terminal target")
   | Error detail -> Alcotest.fail detail

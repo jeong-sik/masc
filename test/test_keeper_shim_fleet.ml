@@ -114,8 +114,6 @@ let test_profiles_are_sorted_without_probing_or_preparing_ssh () =
     (fun () ->
       Masc_test_deps.with_process_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" (Some "true")
         (fun () ->
-          let control_dir = Config_dir_resolver.run_ssh_dir ~base_path:config.base_path in
-          check bool "no control directory before the read" false (Sys.file_exists control_dir);
           let rows = fleet config in
           check (list string) "sorted persisted owners" [ "a-docker"; "m-guest"; "z-ssh" ]
             (List.map (string_field "keeper") rows);
@@ -128,8 +126,7 @@ let test_profiles_are_sorted_without_probing_or_preparing_ssh () =
              check string "SSH not asked" "not_asked" (string_field "state" (field "probe" ssh));
              check string "SSH endpoint" endpoint.name (string_field "endpoint" ssh)
            | _ -> fail "one row per persisted owner");
-          check bool "no SSH command executed" false (Sys.file_exists marker);
-          check bool "no SSH control directory created" false (Sys.file_exists control_dir)))
+          check bool "no SSH command executed" false (Sys.file_exists marker)))
 ;;
 
 let test_absent_store_is_not_created () =

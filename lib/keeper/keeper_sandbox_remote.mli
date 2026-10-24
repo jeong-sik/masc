@@ -6,7 +6,6 @@ type openssh =
   ; ssh_bin : string
   ; identity_file : string  (** Resolved against the workspace base path. *)
   ; known_hosts_file : string  (** Resolved against the workspace base path. *)
-  ; control_path_dir : string  (** Existing 0700 ControlPath directory. *)
   }
 
 type container_exec =
@@ -200,11 +199,13 @@ val outdated_shim_repair : t -> string
 
 val report_openssh : base_path:string -> openssh -> lane_report
 (** Read observations bound to this complete endpoint declaration and resolved
-    transport configuration without creating a runner, SSH control directory,
+    transport configuration without creating a runner,
     cache entry, or remote probe. A changed host, root, credential path, policy
     or transport does not inherit the previous declaration's observations.
-    File contents replaced at an unchanged credential path and an already
-    connected SSH ControlMaster are not identified by this config value. *)
+    File contents replaced at an unchanged credential path are not identified
+    by this observation key. Each transport invocation nevertheless opens a
+    new connection and authenticates against the current dedicated key and
+    pinned hosts file; cached observations never authorize a connection. *)
 
 val report : t -> lane_report
 

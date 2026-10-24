@@ -196,10 +196,6 @@ val constitution_dir : base_path:string -> string
     another, so the path is base-path scoped like every other state directory
     here. *)
 
-val run_ssh_dir : base_path:string -> string
-(** [<base_path>/.masc/run/ssh/]. SSH ControlMaster sockets for the remote
-    execution lane. *)
-
 val microvm_shim_dir : base_path:string -> string
 (** [<base_path>/.masc/microvm/shim/]. The static [masc-exec-shim] the
     operator installs for Apple [container] guests, and the config the

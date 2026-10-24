@@ -2,8 +2,7 @@
 
     The runner itself is transport-neutral ({!Keeper_sandbox_remote}). This
     module owns what is OpenSSH-specific: the runtime.toml endpoint registry,
-    the dedicated key and pinned host-key paths, and the ControlPath
-    directory. *)
+    the dedicated key and pinned host-key paths. *)
 
 let ( let* ) = Result.bind
 
@@ -79,19 +78,6 @@ let resolve_endpoint ~base_path ~keeper_name =
 
 let ssh_bin_override : string option Atomic.t = Atomic.make None
 
-let ensure_control_path_dir path =
-  try
-    Fs_compat.mkdir_p path;
-    Unix.chmod path 0o700;
-    Ok ()
-  with
-  | Sys_error msg | Unix.Unix_error (_, _, msg) ->
-    Error
-      (Printf.sprintf
-         "remote_ssh_control_path_unavailable: cannot create %s: %s"
-         path msg)
-;;
-
 let openssh_configuration ?ssh_bin ~base_path
     ~(endpoint : Exec_ssh_endpoint.t) () : Keeper_sandbox_remote.openssh =
   let ssh_bin =
@@ -99,12 +85,10 @@ let openssh_configuration ?ssh_bin ~base_path
     | Some path -> path
     | None -> Option.value (Atomic.get ssh_bin_override) ~default:"ssh"
   in
-  let control_path_dir = Config_dir_resolver.run_ssh_dir ~base_path in
   { endpoint
   ; ssh_bin
   ; identity_file = resolve_path ~base_path endpoint.identity_file
   ; known_hosts_file = resolve_path ~base_path endpoint.known_hosts_file
-  ; control_path_dir
   }
 ;;
 
@@ -115,8 +99,6 @@ let create ?ssh_bin ~base_path ~keeper_name
       ~host:endpoint.host ~user:endpoint.user
   in
   let openssh = openssh_configuration ?ssh_bin ~base_path ~endpoint () in
-  let control_path_dir = openssh.control_path_dir in
-  let* () = ensure_control_path_dir control_path_dir in
   Ok
     (Keeper_sandbox_remote.of_openssh ~base_path ~keeper_name
        openssh)

@@ -46,6 +46,16 @@ Omitted path defaults resolve against the MASC base path:
 
 Unknown endpoint keys and unknown endpoint names are load errors.
 
+Each shim/probe command authenticates a new SSH connection using the dedicated
+identity and pinned hosts file. MASC disables connection sharing, ambient agent
+authentication, default identity selection and system known-hosts fallback.
+Replacing a key or pin is therefore enforced on the next
+connection, even while readiness observations are cached. Observation timestamps
+describe prior probes and dispatches; they are not a new authentication check.
+`max_concurrent_sessions` bounds active requests for the endpoint across
+Keepers. Independent authentication adds a connection handshake per command;
+there is no workspace-relative Unix control socket or idle SSH master.
+
 ## 2. Build the static shim
 
 From the MASC repository:
@@ -288,7 +298,6 @@ sentence saying so is not.
 | `remote_ssh_runtime_config_invalid` | Runtime TOML or endpoint registry failed strict parsing. | Fix the named path/key/value; do not bypass the decoder. |
 | `remote_ssh_endpoint_missing` | The keeper has no endpoint name. | Set `remote_endpoint` in the same keeper update. |
 | `remote_ssh_endpoint_unknown` | The name is absent from the endpoint registry. | Declare the exact table or correct the keeper name. |
-| `remote_ssh_control_path_unavailable` | The local ControlMaster directory cannot be created or secured. | Fix base-path ownership/permissions; keep the path short enough for the host socket limit. |
 | `remote_ssh_host_key_confirmation_mismatch` | Retyped fingerprint differs from the scan. | Stop and re-verify out of band; do not write the key. |
 | `remote_ssh_endpoint_unreachable` | Pinned SSH connect/probe failed or exited 255. | Check host/port, sshd, key authorization, host key, and connect timeout. |
 | `remote_ssh_probe_invalid` | `--probe` did not return the typed probe JSON. | Verify the installed binary and remote PATH; reinstall the shim. |

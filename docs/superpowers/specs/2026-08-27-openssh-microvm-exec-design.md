@@ -223,17 +223,20 @@ like `Docker`. `Exec_dispatch` routes `Ssh` to its runner the same way.
 - spawns the OpenSSH client via the existing `Process_eio` substrate;
 - isolates client config: `-F none` (ignore `/etc/ssh/ssh_config` and
   `~/.ssh/config`), `ForwardAgent=no`, `ClearAllForwardings=yes`;
-- reuses connections: `ControlMaster=auto`, `ControlPersist=120`,
-  `ControlPath=<base>/.masc/run/ssh/%C`, `ServerAliveInterval=15`
-  `ServerAliveCountMax=2` (a dead master is detected, not hung on);
-- pins trust: `BatchMode=yes IdentitiesOnly=yes IdentityFile=<dedicated key>`
+- authenticates every command independently: `ControlMaster=no`,
+  `ControlPath=none`, `ServerAliveInterval=15`, `ServerAliveCountMax=2`;
+  credential replacements apply on the next connection, with no Unix socket
+  path or idle master;
+- pins trust: `BatchMode=yes IdentitiesOnly=yes IdentityAgent=none`,
+  `IdentityFile=none -i <dedicated key>` (no default identities)
   `StrictHostKeyChecking=yes UserKnownHostsFile=<endpoint known_hosts>`
+  `GlobalKnownHostsFile=none`
   `ConnectTimeout=<connect_timeout_sec>`;
 - reproduces the `dispatch_result` contract: split `on_stdout_chunk`/
   `on_stderr_chunk` streaming from the ssh channel, per-bucket timeouts
   (`Env_config_sandbox.Shell_timeout`);
 - budgets wall-clock as `connect_timeout_sec + timeout_sec + drain grace`, so
-  a cold ControlMaster connect cannot eat the command's budget; the shim also
+  connection authentication cannot eat the command's budget; the shim also
   enforces `timeout_sec` server-side and reports `timed_out` in its trailer,
   so local-timeout vs remote-timeout vs transport failure stay three distinct
   named errors;
@@ -343,7 +346,7 @@ provisions the per-keeper remote GitHub identity (see Secret policy).
 remote readiness: ssh reachable, shim present and version-compatible, remote
 `git --version`, playground root exists with a disk-free floor, repo checkouts
 present (clone/rsync over ssh on first up), per-keeper remote gh identity
-present, local ControlPath dir creatable. Unready ⇒ `keeper_up` fails with a
+present. Unready ⇒ `keeper_up` fails with a
 named error — **no fallback to any other lane** (a silent downgrade to
 `docker` violates RFC-0001 exactly like a downgrade to local). Boot checks
 config validity only; endpoint readiness is checked at keeper_up and
@@ -363,7 +366,7 @@ mid-session fails the tool call with a named error.
 | `known_hosts_file` | `<base>/.masc/ssh/known_hosts.d/<name>` | pinned host keys (public; may be committed) |
 | `remote_root` | — (required) | remote playground root |
 | `connect_timeout_sec` | 10 | → `ConnectTimeout` |
-| `max_concurrent_sessions` | 8 | sessions multiplex onto one ControlMaster connection; sshd `MaxSessions` defaults to 10, so the ceiling must be explicit |
+| `max_concurrent_sessions` | 8 | concurrent SSH requests admitted for the endpoint across Keepers; each authenticates its own connection |
 | `env_allowlist` | `[]` | request env names allowed to cross the wire |
 | `capabilities` | `[]` | reserved: `kvm`, `firecracker` (Phase 2); unknown values warn-and-ignore |
 | `private_home` | `false` | the operator declares this account's home is the keeper's alone. Required before a keeper on this endpoint may set `observation_run = "guest_local"` (RFC-0422 §3.4); without it a guest_local request keeps the judge |
@@ -431,8 +434,8 @@ differ:
 - **`examples/extensions/ssh.ts`** — delegates read/write/edit/bash to a remote
   host via pluggable per-tool "operations" objects. This validates our Phase 1
   seam: `Sandbox_target.Ssh` carrying an injected runner is the same shape.
-  Deliberate upgrades over the example: it spawns one ssh process per operation
-  (we reuse connections via ControlMaster/ControlPersist); it quotes through a
+  Both implementations authenticate one SSH connection per operation.
+  Deliberate upgrades over the example: it quotes through a
   remote shell with `JSON.stringify` (our shim receives base64 JSON and execs
   without a shell); its path mapping is naive string replace (ours is a single
   typed translation module).

@@ -28,8 +28,8 @@ val default_connect_timeout_sec : int
 (** [10] — maps to ssh [ConnectTimeout]. *)
 
 val default_max_concurrent_sessions : int
-(** [8] — sessions multiplex onto one ControlMaster connection; sshd
-    [MaxSessions] defaults to 10, so the ceiling is explicit. *)
+(** [8] — concurrent SSH requests admitted for this endpoint across Keepers.
+    Each request authenticates its own connection. *)
 
 val validate_destination : host:string -> user:string -> (unit, string) result
 (** Reject values that OpenSSH could parse as an option instead of the single
@@ -58,8 +58,8 @@ type t =
   ; connect_timeout_sec : int
     (** Maps to ssh [ConnectTimeout]. Default {!default_connect_timeout_sec}. *)
   ; max_concurrent_sessions : int
-    (** Sessions multiplex onto one ControlMaster connection; sshd
-        [MaxSessions] defaults to 10, so the ceiling is explicit. Default
+    (** Concurrent SSH requests admitted for this endpoint across Keepers.
+        Each request authenticates its own connection. Default
         {!default_max_concurrent_sessions}. *)
   ; env_allowlist : string list
     (** Request env names allowed to cross the wire. Default [[]]. *)

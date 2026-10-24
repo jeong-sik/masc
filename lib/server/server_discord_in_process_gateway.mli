@@ -95,7 +95,9 @@ val start :
   unit
 (** Fork the gateway fiber. Returns immediately. Warnings and the
     eventual gateway crash (if any) are emitted via [Log.Server].
-    Cancellation propagates through [~sw]. *)
+    Cancellation propagates through [~sw]. Resolves and publishes the
+    configured trigger policy before checking for transport credentials, so
+    disconnected status retains the configured default and live overrides. *)
 
 type directory_rest_failure =
   | Directory_authentication_failed

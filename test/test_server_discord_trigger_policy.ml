@@ -371,31 +371,64 @@ module Gw = Discord_gateway_state
    restart, so what it must hold is: an override wins, and clearing one returns
    to the configured answer rather than to the hardcoded baseline. *)
 
-let installed_policy () = ps (Runtime_params.get Runtime_settings.discord_trigger_policy)
+let installed_policy () = ps (Runtime_params.get Connector_trigger_params.discord)
 
 let set_override policy =
-  match Runtime_params.set Runtime_settings.discord_trigger_policy policy with
+  match Runtime_params.set Connector_trigger_params.discord policy with
   | Ok () -> ()
   | Error detail -> fail ("override rejected: " ^ detail)
 ;;
 
 let with_clean_override f =
   Fun.protect
-    ~finally:(fun () -> Runtime_params.clear Runtime_settings.discord_trigger_policy)
+    ~finally:(fun () -> Runtime_params.clear Connector_trigger_params.discord)
     f
+;;
+
+let test_start_without_token_publishes_configured_policy () =
+  with_temp_dir @@ fun base_path ->
+  write_file (Filename.concat base_path "runtime.toml")
+    "[discord]\ntrigger_policy = \"all\"\n";
+  with_config_root base_path @@ fun () ->
+  with_env Env_config_core.base_path_env_key base_path @@ fun () ->
+  with_env "DISCORD_BOT_TOKEN" "" @@ fun () ->
+  with_clean_override @@ fun () ->
+  Fun.protect
+    ~finally:(fun () ->
+      Connector_trigger_params.set_discord_configured Gw.Mention_or_thread)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let state = Mcp_server.For_testing.create_state ~base_path in
+      List.iter (fun override ->
+        Connector_trigger_params.set_discord_configured Gw.Mention_or_thread;
+        Runtime_params.clear Connector_trigger_params.discord;
+        Option.iter set_override override;
+        G.start ~sw ~env ~clock:(Eio.Stdenv.clock env) ~state;
+        let expected = Option.value ~default:Gw.All override in
+        List.iter (fun json ->
+          check string "start without a token reports the effective policy"
+            (ps expected)
+            Yojson.Safe.Util.(json |> member "trigger_policy" |> to_string))
+          [State.status_json (); State.connector_json ()];
+        check bool "transport remains disconnected" false (State.connected ());
+        Runtime_params.clear Connector_trigger_params.discord;
+        check string "clearing exposes the configuration published by start"
+          (ps Gw.All) (installed_policy ()))
+        [None; Some Gw.Mention_only])
 ;;
 
 let test_configured_answers_without_override () =
   with_clean_override (fun () ->
-    Runtime_params.clear Runtime_settings.discord_trigger_policy;
-    Runtime_settings.set_discord_trigger_policy_configured Gw.All;
+    Runtime_params.clear Connector_trigger_params.discord;
+    Connector_trigger_params.set_discord_configured Gw.All;
     check string "the configured policy answers when nothing overrides it"
       (ps Gw.All) (installed_policy ()))
 ;;
 
 let test_override_wins_over_configured () =
   with_clean_override (fun () ->
-    Runtime_settings.set_discord_trigger_policy_configured Gw.All;
+    Connector_trigger_params.set_discord_configured Gw.All;
     set_override Gw.Mention_only;
     check string "an operator override outranks env and TOML"
       (ps Gw.Mention_only) (installed_policy ()))
@@ -403,9 +436,9 @@ let test_override_wins_over_configured () =
 
 let test_clear_returns_to_configured () =
   with_clean_override (fun () ->
-    Runtime_settings.set_discord_trigger_policy_configured Gw.Mention_or_thread;
+    Connector_trigger_params.set_discord_configured Gw.Mention_or_thread;
     set_override Gw.All;
-    Runtime_params.clear Runtime_settings.discord_trigger_policy;
+    Runtime_params.clear Connector_trigger_params.discord;
     check string "clearing returns to what env and TOML said, not the baseline"
       (ps Gw.Mention_or_thread) (installed_policy ()))
 ;;
@@ -426,8 +459,8 @@ let test_status_follows_param_set_clear_and_failed_audit () =
   with_temp_dir @@ fun base_path ->
   with_env Env_config_core.base_path_env_key base_path (fun () ->
     with_clean_override (fun () ->
-      Runtime_settings.set_discord_trigger_policy_configured Gw.Mention_or_thread;
-      let key = Runtime_params.key Runtime_settings.discord_trigger_policy in
+      Connector_trigger_params.set_discord_configured Gw.Mention_or_thread;
+      let key = Runtime_params.key Connector_trigger_params.discord in
       let mutate f =
         match
           Server_routes_http_routes_activity.mutate_runtime_param_with_effects
@@ -505,7 +538,9 @@ let () =
             test_full_directory_pages_keep_channels_and_global_people
         ] )
     ; ( "params_plane"
-      , [ test_case "configured answers without an override" `Quick
+      , [ test_case "start without token publishes configuration and keeps overrides" `Quick
+            test_start_without_token_publishes_configured_policy
+        ; test_case "configured answers without an override" `Quick
             test_configured_answers_without_override
         ; test_case "override wins over configured" `Quick
             test_override_wins_over_configured

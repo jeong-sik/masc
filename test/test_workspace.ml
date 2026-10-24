@@ -679,10 +679,29 @@ let test_complete_by_wrong_agent () =
     let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
 
     (* Provider_f tries to complete claude's task - should fail *)
-    let result = transition_done config ~agent_name:"gemini" ~task_id:"task-001" ~notes:"" in
-    Alcotest.(check bool) "wrong agent blocked" true (contains_error result);
-    Alcotest.(check bool) "wrong agent points at current assignee" true
-      (str_contains result "current_assignee=claude")
+    (match transition_done_r config ~agent_name:"gemini" ~task_id:"task-001" ~notes:"" with
+     | Error (Masc_domain.Task (Masc_domain.Task_error.TransitionRejected
+         { task_id; requested_agent; action;
+           reason = Masc_domain.Task_error.Current_owner_required { current_assignee };
+           _ })) ->
+       Alcotest.(check string) "refusal identifies the attempted task" "task-001" task_id;
+       Alcotest.(check string) "refusal identifies the attempted actor" "gemini" requested_agent;
+       Alcotest.(check bool) "refusal identifies the completion submission" true
+         (action = Masc_domain.Submit_for_verification);
+       Alcotest.(check string) "refusal identifies the current assignee" "claude" current_assignee
+     | Error error ->
+       Alcotest.failf "expected the typed owner refusal, received: %s"
+         (Masc_domain.masc_error_to_string error)
+     | Ok result -> Alcotest.failf "wrong agent completed the task: %s" result);
+    let backlog = match Workspace.read_backlog_r config with
+      | Ok backlog -> backlog
+      | Error detail -> Alcotest.failf "cannot read the final authoritative backlog: %s" detail in
+    match backlog.tasks
+          |> List.find_opt (fun (task : Masc_domain.task) -> task.id = "task-001") with
+    | Some { task_status = Masc_domain.Claimed { assignee; _ }; _ } ->
+      Alcotest.(check string) "refused submission preserves the claimed owner" "claude" assignee
+    | Some _ -> Alcotest.fail "refused submission changed the task state"
+    | None -> Alcotest.fail "refused submission lost the task"
   )
 
 let test_complete_nonexistent_task () =

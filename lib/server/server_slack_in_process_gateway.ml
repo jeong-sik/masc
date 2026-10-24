@@ -92,7 +92,7 @@ let resolved_trigger_policy () = Policy_load.resolve ()
    params surface holds one, otherwise what runtime.toml said at boot. Read
    per step by the client, so a change lands on the next message. *)
 let current_trigger_policy () =
-  Runtime_params.get Runtime_settings.slack_trigger_policy
+  Runtime_params.get Connector_trigger_params.slack
 ;;
 ;;
 
@@ -758,34 +758,32 @@ end
 (* ---------------------------------------------------------------- *)
 
 let start ~sw ~env ~state =
-  match Env_config_slack.app_token_opt () with
-  | None ->
-    (match Env_config_slack.connector_state () with
-     | Invalid_configuration detail ->
-       State.record_startup_error detail;
-       Log.Server.error "%s; Slack gateway not started" detail
-     | Disabled ->
-       State.clear_startup_error ();
-       Log.Server.info "Slack connector disabled by [slack] enabled=false"
-     | Enabled ->
-       State.clear_startup_error ();
-       Log.Server.warn
-         "RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not \
-          started")
-  | Some app_token ->
-    (match resolved_trigger_policy () with
-     | Error error ->
-       let detail = trigger_policy_load_error_to_string error in
-       State.record_startup_error detail;
-       Log.Server.error
-         "RFC-0317: Slack trigger-policy configuration rejected; gateway not \
-          started (%s)"
-         detail
-     | Ok configured ->
-       State.clear_startup_error ();
-       (* What env and runtime.toml said, published so the params surface can
-          offer it as the value a cleared override returns to. *)
-       Runtime_settings.set_slack_trigger_policy_configured configured;
+  match resolved_trigger_policy () with
+  | Error error ->
+    let detail = trigger_policy_load_error_to_string error in
+    State.record_startup_error detail;
+    Log.Server.error
+      "RFC-0317: Slack trigger-policy configuration rejected; gateway not \
+       started (%s)"
+      detail
+  | Ok configured ->
+    (* Publish configuration before disabled/token admission; transport state
+       must not substitute a baseline for the operator's configured policy. *)
+    Connector_trigger_params.set_slack_configured configured;
+    State.clear_startup_error ();
+    match Env_config_slack.app_token_opt () with
+    | None ->
+      (match Env_config_slack.connector_state () with
+       | Invalid_configuration detail ->
+         State.record_startup_error detail;
+         Log.Server.error "%s; Slack gateway not started" detail
+       | Disabled ->
+         Log.Server.info "Slack connector disabled by [slack] enabled=false"
+       | Enabled ->
+         Log.Server.warn
+           "RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not \
+            started")
+    | Some app_token ->
        (* An override left on the params surface outlives a restart, so what
           this gateway judges by is the param, not [configured] alone. *)
        let policy = current_trigger_policy () in
@@ -879,4 +877,4 @@ let start ~sw ~env ~state =
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
            Log.Server.error "RFC-0317: in-process Slack gateway crashed: %s"
-             (Printexc.to_string exn)))
+             (Printexc.to_string exn))

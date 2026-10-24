@@ -13,7 +13,7 @@ module Replay_prefix = Masc.Keeper_replay_prefix
    raises -- so every caller names it. These cases are not about the window and
    pass what production passes. *)
 let history_retained () =
-  Masc.Runtime_params.get Masc.Runtime_settings.keeper_checkpoint_history_retained
+  Runtime_params.get Masc.Runtime_settings.keeper_checkpoint_history_retained
 
 let message role content =
   Agent_core.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }

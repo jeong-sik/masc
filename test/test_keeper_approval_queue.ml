@@ -1402,8 +1402,8 @@ let test_monotonic_sequence_survives_restart () =
 let hitl_concurrency_key = "keeper.hitl.max_concurrent_per_keeper"
 
 let with_hitl_concurrency n f =
-  let restore () = ignore (Masc.Runtime_params.clear_by_key hitl_concurrency_key) in
-  (match Masc.Runtime_params.set_by_key hitl_concurrency_key (`Int n) with
+  let restore () = ignore (Runtime_params.clear_by_key hitl_concurrency_key) in
+  (match Runtime_params.set_by_key hitl_concurrency_key (`Int n) with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "could not set HITL concurrency: %s" detail);
   Fun.protect ~finally:restore f

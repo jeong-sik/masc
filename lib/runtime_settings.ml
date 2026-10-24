@@ -98,37 +98,6 @@ let register_bool ~key ~default ?meta () =
     ?meta
     ()
 
-(** Register a parameter whose values carry names.  [to_string] / [of_string]
-    are the owning module's own spelling, so the wire form, the runtime.toml
-    form and the picker label are one vocabulary rather than three.
-
-    [choices] is what a picker may offer.  A domain that is only partly closed
-    lists its closed names there and still accepts the rest through
-    [of_string]: the picker walks the common values and the parameterized form
-    is typed. *)
-let register_enum ~key ~default ~to_string ~of_string ~choices ~description () =
-  Runtime_params.register
-    ~key
-    ~default
-    (* [of_string] is the judge.  A value that does not survive the round trip
-       is not one this param holds, whatever handed it over. *)
-    ~validate:(fun v ->
-      match of_string (to_string v) with
-      | Ok (_ : 'a) -> Ok ()
-      | Error detail -> Error (Printf.sprintf "%s: %s" key detail))
-    ~serialize:(fun v -> `String (to_string v))
-    ~deserialize:(fun json ->
-      match json with
-      | `String raw -> of_string raw
-      | other ->
-          Error
-            (Printf.sprintf
-               "deserialize_enum: expected JSON string, got %s"
-               (Json_util.kind_name other)))
-    ~meta:{ description; value_type = "enum";
-            min_value = None; max_value = None; choices }
-    ()
-
 (* ── dashboard surface (display-only) ────────────────────────── *)
 
 (** Maximum path length before truncation in dashboard output. *)
@@ -320,63 +289,6 @@ let keeper_chat_redact_identity_scalars =
     ~meta:{ description = "secret 파일의 계정명(user 등) 값도 채팅·도구 출력에서 [REDACTED] 처리 (토큰류는 항상 처리)";
             value_type = "bool";
             min_value = None; max_value = None; choices = [] }
-    ()
-
-(* ── connector trigger surface ───────────────────────────────── *)
-
-(* What a connector's gateway resolved from [MASC_*_TRIGGER_POLICY] and
-   runtime.toml at startup.  The param default reads this rather than walking
-   those planes itself, because [Runtime_params.get] calls the default thunk on
-   every read and a policy check happens per inbound message: resolution is a
-   file read, and it belongs to boot.
-
-   A gateway that never starts (no bot token) leaves the hardcoded baseline
-   here.  The gateways therefore install this before checking their token, so
-   the params surface reports the configured policy even for a connector that
-   is switched off — otherwise the screen would say [mention_or_thread] while
-   runtime.toml said something else. *)
-let discord_trigger_policy_configured =
-  ref (Discord_gateway_state.Mention_or_thread : Discord_gateway_state.trigger_policy)
-
-let slack_trigger_policy_configured =
-  ref (Slack_gateway_state.Mention_or_thread : Slack_gateway_state.trigger_policy)
-
-let set_discord_trigger_policy_configured policy =
-  discord_trigger_policy_configured := policy
-
-let set_slack_trigger_policy_configured policy =
-  slack_trigger_policy_configured := policy
-
-(* [user_only:<id>] is left out of [choices] on purpose: it carries an id, so
-   it is not a value a picker can offer.  Both parsers still accept it, and the
-   operator types that form. *)
-let trigger_policy_choices = [ "mention_only"; "mention_or_thread"; "all" ]
-
-let trigger_policy_description =
-  "봇이 언제 응답하는가 — mention_only: 멘션된 글만. mention_or_thread: \
-   멘션 또는 스레드 안의 모든 글. all: 사람이 쓴 모든 글. \
-   user_only:<id> 로 한 사람만 받을 수도 있다"
-
-(** Which Discord messages start a turn. *)
-let discord_trigger_policy =
-  register_enum
-    ~key:"discord.trigger_policy"
-    ~default:(fun () -> !discord_trigger_policy_configured)
-    ~to_string:Discord_gateway_state.trigger_policy_to_string
-    ~of_string:Discord_gateway_state.parse_trigger_policy
-    ~choices:trigger_policy_choices
-    ~description:trigger_policy_description
-    ()
-
-(** Which Slack messages start a turn. *)
-let slack_trigger_policy =
-  register_enum
-    ~key:"slack.trigger_policy"
-    ~default:(fun () -> !slack_trigger_policy_configured)
-    ~to_string:Slack_gateway_state.trigger_policy_to_string
-    ~of_string:Slack_gateway_state.parse_trigger_policy
-    ~choices:trigger_policy_choices
-    ~description:trigger_policy_description
     ()
 
 (* ── schedule retention surface ──────────────────────────────── *)
@@ -581,8 +493,8 @@ let ensure_init () =
   let (_ : _) = Runtime_params.get dashboard_min_border_length in
   let (_ : _) = Runtime_params.get dashboard_agent_quiet_threshold_sec in
   let (_ : _) = Runtime_params.get dashboard_agent_stuck_threshold_sec in
-  let (_ : _) = Runtime_params.get discord_trigger_policy in
-  let (_ : _) = Runtime_params.get slack_trigger_policy in
+  let (_ : _) = Runtime_params.get Connector_trigger_params.discord in
+  let (_ : _) = Runtime_params.get Connector_trigger_params.slack in
   Keeper_config.ensure_runtime_params_init ()
 
 let surfaces_json () =

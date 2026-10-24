@@ -538,31 +538,102 @@ module Gw = Slack_gateway_state
    restart, so what it must hold is: an override wins, and clearing one returns
    to the configured answer rather than to the hardcoded baseline. *)
 
-let installed_policy () = ps (Runtime_params.get Runtime_settings.slack_trigger_policy)
+let installed_policy () = ps (Runtime_params.get Connector_trigger_params.slack)
 
 let set_override policy =
-  match Runtime_params.set Runtime_settings.slack_trigger_policy policy with
+  match Runtime_params.set Connector_trigger_params.slack policy with
   | Ok () -> ()
   | Error detail -> fail ("override rejected: " ^ detail)
 ;;
 
 let with_clean_override f =
   Fun.protect
-    ~finally:(fun () -> Runtime_params.clear Runtime_settings.slack_trigger_policy)
+    ~finally:(fun () -> Runtime_params.clear Connector_trigger_params.slack)
     f
+;;
+
+let test_start_without_transport_publishes_configured_policy () =
+  with_temp_dir @@ fun base_path ->
+  write_policy base_path "all";
+  with_config_root base_path @@ fun () ->
+  with_env Env_config_core.base_path_env_key base_path @@ fun () ->
+  with_env "SLACK_APP_TOKEN" "" @@ fun () ->
+  with_env "SLACK_BOT_TOKEN" "" @@ fun () ->
+  with_clean_override @@ fun () ->
+  let previous_connector = Env_config_slack.connector_state () in
+  Fun.protect
+    ~finally:(fun () ->
+      Env_config_slack.configure_connector previous_connector;
+      State.clear_startup_error ();
+      Connector_trigger_params.set_slack_configured Gw.Mention_or_thread)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let state = Mcp_server.For_testing.create_state ~base_path in
+      List.iter (fun connector ->
+        Env_config_slack.configure_connector connector;
+        List.iter (fun override ->
+          Connector_trigger_params.set_slack_configured Gw.Mention_or_thread;
+          Runtime_params.clear Connector_trigger_params.slack;
+          Option.iter set_override override;
+          G.start ~sw ~env ~state;
+          let expected = Option.value ~default:Gw.All override in
+          List.iter (fun json ->
+            check string "start without transport reports the effective policy"
+              (ps expected)
+              Yojson.Safe.Util.(json |> member "trigger_policy" |> to_string))
+            [State.status_json (); State.connector_json ()];
+          check bool "transport remains disconnected" false (State.connected ());
+          Runtime_params.clear Connector_trigger_params.slack;
+          check string "clearing exposes the configuration published by start"
+            (ps Gw.All) (installed_policy ()))
+          [None; Some Gw.Mention_only])
+        [Env_config_slack.Enabled; Env_config_slack.Disabled])
+;;
+
+let test_start_without_token_preserves_policy_error () =
+  with_temp_dir @@ fun base_path ->
+  write_policy base_path "mention_ony";
+  with_config_root base_path @@ fun () ->
+  with_env Env_config_core.base_path_env_key base_path @@ fun () ->
+  with_env "SLACK_APP_TOKEN" "" @@ fun () ->
+  with_clean_override @@ fun () ->
+  let previous_connector = Env_config_slack.connector_state () in
+  Fun.protect
+    ~finally:(fun () ->
+      Env_config_slack.configure_connector previous_connector;
+      State.clear_startup_error ();
+      Connector_trigger_params.set_slack_configured Gw.Mention_or_thread)
+    (fun () ->
+      Env_config_slack.configure_connector Env_config_slack.Enabled;
+      Connector_trigger_params.set_slack_configured Gw.All;
+      Runtime_params.clear Connector_trigger_params.slack;
+      let expected_error = match G.resolved_trigger_policy () with
+        | Error error -> G.trigger_policy_load_error_to_string error
+        | Ok _ -> fail "fixture must reject its invalid configured policy" in
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let state = Mcp_server.For_testing.create_state ~base_path in
+      G.start ~sw ~env ~state;
+      check string "strict policy error is authoritative without a token"
+        expected_error
+        Yojson.Safe.Util.(State.status_json () |> member "error" |> to_string);
+      check string "invalid configuration did not publish a fallback"
+        (ps Gw.All) (installed_policy ());
+      check bool "invalid policy did not start transport" false (State.connected ()))
 ;;
 
 let test_configured_answers_without_override () =
   with_clean_override (fun () ->
-    Runtime_params.clear Runtime_settings.slack_trigger_policy;
-    Runtime_settings.set_slack_trigger_policy_configured Gw.All;
+    Runtime_params.clear Connector_trigger_params.slack;
+    Connector_trigger_params.set_slack_configured Gw.All;
     check string "the configured policy answers when nothing overrides it"
       (ps Gw.All) (installed_policy ()))
 ;;
 
 let test_override_wins_over_configured () =
   with_clean_override (fun () ->
-    Runtime_settings.set_slack_trigger_policy_configured Gw.All;
+    Connector_trigger_params.set_slack_configured Gw.All;
     set_override Gw.Mention_only;
     check string "an operator override outranks env and TOML"
       (ps Gw.Mention_only) (installed_policy ()))
@@ -570,9 +641,9 @@ let test_override_wins_over_configured () =
 
 let test_clear_returns_to_configured () =
   with_clean_override (fun () ->
-    Runtime_settings.set_slack_trigger_policy_configured Gw.Mention_or_thread;
+    Connector_trigger_params.set_slack_configured Gw.Mention_or_thread;
     set_override Gw.All;
-    Runtime_params.clear Runtime_settings.slack_trigger_policy;
+    Runtime_params.clear Connector_trigger_params.slack;
     check string "clearing returns to what env and TOML said, not the baseline"
       (ps Gw.Mention_or_thread) (installed_policy ()))
 ;;
@@ -593,8 +664,8 @@ let test_status_follows_param_set_clear_and_failed_audit () =
   with_temp_dir @@ fun base_path ->
   with_env Env_config_core.base_path_env_key base_path (fun () ->
     with_clean_override (fun () ->
-      Runtime_settings.set_slack_trigger_policy_configured Gw.Mention_or_thread;
-      let key = Runtime_params.key Runtime_settings.slack_trigger_policy in
+      Connector_trigger_params.set_slack_configured Gw.Mention_or_thread;
+      let key = Runtime_params.key Connector_trigger_params.slack in
       let mutate f =
         match
           Server_routes_http_routes_activity.mutate_runtime_param_with_effects
@@ -906,7 +977,11 @@ let () =
             test_binding_store_failure_does_not_enqueue
         ] )
     ; ( "params_plane"
-      , [ test_case "configured answers without an override" `Quick
+      , [ test_case "start without transport publishes configuration and keeps overrides" `Quick
+            test_start_without_transport_publishes_configured_policy
+        ; test_case "start without token keeps the strict policy error" `Quick
+            test_start_without_token_preserves_policy_error
+        ; test_case "configured answers without an override" `Quick
             test_configured_answers_without_override
         ; test_case "override wins over configured" `Quick
             test_override_wins_over_configured

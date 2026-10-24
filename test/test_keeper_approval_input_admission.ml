@@ -5,7 +5,7 @@ module Admission = Masc.Keeper_approval_input_admission
    raises -- so every caller names it. These cases are not about the window and
    pass what production passes. *)
 let history_retained () =
-  Masc.Runtime_params.get Masc.Runtime_settings.keeper_checkpoint_history_retained
+  Runtime_params.get Masc.Runtime_settings.keeper_checkpoint_history_retained
 
 let checkpoint ?(working_context = Some (`Assoc [])) messages =
   Agent_core.Checkpoint.

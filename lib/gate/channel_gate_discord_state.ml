@@ -286,7 +286,7 @@ let read_status ~audit_limit =
     binding_store_error;
     configured_bindings;
     recent_audit;
-    trigger_policy = Runtime_params.get Runtime_settings.discord_trigger_policy;
+    trigger_policy = Runtime_params.get Connector_trigger_params.discord;
     last_ready = Atomic.get last_ready;
     bot_user_name = Atomic.get last_bot_user_name;
     guild_count = List.length (current_guild_ids ());

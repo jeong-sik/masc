@@ -433,18 +433,18 @@ let hitl_concurrency_key = "keeper.hitl.max_concurrent_per_keeper"
 
 let with_thinking_blocks_kept n f =
   let restore () =
-    ignore (Masc.Runtime_params.clear_by_key thinking_blocks_key)
+    ignore (Runtime_params.clear_by_key thinking_blocks_key)
   in
-  (match Masc.Runtime_params.set_by_key thinking_blocks_key (`Int n) with
+  (match Runtime_params.set_by_key thinking_blocks_key (`Int n) with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "could not set the knob: %s" detail);
   Fun.protect ~finally:restore f
 
 let with_hitl_concurrency n f =
   let restore () =
-    ignore (Masc.Runtime_params.clear_by_key hitl_concurrency_key)
+    ignore (Runtime_params.clear_by_key hitl_concurrency_key)
   in
-  (match Masc.Runtime_params.set_by_key hitl_concurrency_key (`Int n) with
+  (match Runtime_params.set_by_key hitl_concurrency_key (`Int n) with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "could not set HITL concurrency: %s" detail);
   Fun.protect ~finally:restore f

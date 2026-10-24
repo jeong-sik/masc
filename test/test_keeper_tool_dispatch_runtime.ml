@@ -5,7 +5,7 @@ open Alcotest
    raises -- so every caller names it. These cases are not about the window and
    pass what production passes. *)
 let history_retained () =
-  Masc.Runtime_params.get Masc.Runtime_settings.keeper_checkpoint_history_retained
+  Runtime_params.get Masc.Runtime_settings.keeper_checkpoint_history_retained
 
 (* The Gate replay/resolution wording lives in managed prompt templates
    under the config/prompts/keeper.gate_replay prefix; without a loaded

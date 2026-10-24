@@ -614,6 +614,11 @@ module Response_replay : sig
   val retain_metadata : original_content:content_block list -> content:content_block list -> retained_indices:int list -> (string * Yojson.Safe.t) list -> ((string * Yojson.Safe.t) list, string) result
 end
 
+type reported_model =
+  | Provider_reported_model of string
+  | Provider_model_not_reported
+[@@deriving show, yojson]
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option
@@ -629,6 +634,10 @@ type inference_telemetry =
     (** e.g. "none", "low", "medium", "high" — as sent to provider *)
   ; canonical_model_id : string option
     (** Model ID used for the API request after alias resolution (e.g. "glm-4.7") *)
+  ; reported_model : reported_model option [@default None]
+    (** Captured by the raw response parser before model fallback. [None]
+        means no such capture exists; it never licenses a model inference
+        from [api_response.model] or the configured request model. *)
   ; reasoning_source : Reasoning_source.t option
     (** Exact replay provenance stamped by the live inference boundary. *)
   ; reasoning_prefix : Reasoning_prefix.t option
@@ -731,6 +740,11 @@ val equal_output_token_receipt : output_token_receipt -> output_token_receipt ->
 (** Default/zero inference telemetry value owned by the telemetry type module.
     Callers should record-update this value instead of duplicating every field. *)
 val default_inference_telemetry : inference_telemetry
+
+val with_reported_model : model:string -> inference_telemetry option -> inference_telemetry
+(** Raw parser boundary only: preserve the observed model or its explicit
+    absence before any response normalization. Repatching telemetry must
+    retain this fact rather than recapture a fallback-normalized model. *)
 
 type api_response =
   { id : string

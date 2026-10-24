@@ -257,6 +257,8 @@ let patch_telemetry
   : Types.api_response
   =
   let pk = Some config.kind in
+  (* Display/model-routing fallback is independent of the raw parser's
+     [reported_model] observation. Preserve that fact through every patch. *)
   let model = if String.trim resp.model = "" then config.model_id else resp.model in
   let caps, capability_source = resolve_capabilities_for_config config in
   let ctx_window = Provider_config.context_window config in

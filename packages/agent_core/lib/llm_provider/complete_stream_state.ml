@@ -1243,8 +1243,9 @@ let finalize_completed state stop_reason =
     ; stop_reason
     ; content
     ; usage = Option.map terminal_usage state.usage
-    ; telemetry = Option.map (fun response_replay ->
-        {Types.default_inference_telemetry with response_replay=Some response_replay}) response_replay
+    ; telemetry = Some (Types.with_reported_model ~model:state.model
+        (Option.map (fun response_replay ->
+          {Types.default_inference_telemetry with response_replay=Some response_replay}) response_replay))
     }
 ;;
 

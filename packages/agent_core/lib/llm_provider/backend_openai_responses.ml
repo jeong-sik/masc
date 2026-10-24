@@ -782,18 +782,17 @@ let parse_response_result json_str =
           content
       in
       let* stop_reason = stop_reason_of_response_json ~has_tool_calls json in
+      let model = opt_bind (json_assoc_opt "model" json) json_string_opt |> Option.value ~default:"" in
       Ok
         { id =
             opt_bind (json_assoc_opt "id" json) json_string_opt
             |> Option.value ~default:""
-        ; model =
-            opt_bind (json_assoc_opt "model" json) json_string_opt
-            |> Option.value ~default:""
+        ; model
         ; stop_reason
         ; content
         ; usage = usage_of_response_json json
         ; telemetry = Some
-            { (Option.value ~default:Types.default_inference_telemetry
+            { (Types.with_reported_model ~model
                  (telemetry_of_response_json json)) with response_replay = Some replay }
         }
   with

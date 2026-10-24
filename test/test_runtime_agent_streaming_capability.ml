@@ -216,7 +216,8 @@ let run_case ?(callbacks = Persist_callbacks) ?(observer_failure = false)
    text-only observer delivery as proof of a working tool loop. The rejected
    call precedes the admitted one: synthesizing the filtered AfterTurn
    response would lose its original inventory and assign the wrong block. *)
-let completed_media_and_tools ?(execution_actor = Some "actual-keeper") entry () =
+let completed_media_and_tools ?(execution_actor = Some "actual-keeper")
+    ?(reported_model = model_id) entry () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -239,7 +240,7 @@ let completed_media_and_tools ?(execution_actor = Some "actual-keeper") entry ()
   let response ~id ~content ~stop_reason =
     Yojson.Safe.to_string (`Assoc [
       "id", `String id; "type", `String "message"; "role", `String "assistant";
-      "model", `String model_id; "content", content;
+      "model", `String reported_model; "content", content;
       "stop_reason", `String stop_reason; "stop_sequence", `Null;
       "usage", `Assoc ["input_tokens", `Int 10; "output_tokens", `Int 20]]) in
   let replies = ref 0 in
@@ -333,17 +334,18 @@ let completed_media_and_tools ?(execution_actor = Some "actual-keeper") entry ()
     | Ok completed -> completed
     | Error error -> fail (Agent_core.Error.to_string error) in
   check int "one admitted effect executes" 1 !executions;
-  (match execution_actor, !submitting_response with
-   | None, None -> ()
-   | None, Some _ -> fail "a synthetic agent name must not invent a host actor"
-   | Some _, None -> fail "the native tool must retain its actual provider response identity"
-   | Some actor, Some identity ->
+  let expected_model = if String.trim reported_model = "" then None else Some reported_model in
+  (match execution_actor, expected_model, !submitting_response with
+   | None, _, None | _, None, None -> ()
+   | None, _, Some _ | _, None, Some _ -> fail "missing wire evidence must not invent response identity"
+   | Some _, Some _, None -> fail "the native tool must retain its actual provider response identity"
+   | Some actor, Some reported_model, Some identity ->
      check string "the tool belongs to the earlier response, not the final one"
        "media-tools" identity.response_id;
      check string "the admitted invocation owns the identity" "accepted-call" identity.tool_use_id;
      check string "actual provider identity is retained" "fixture" identity.provider_id;
      check string "the host actor is independent of its synthetic agent name" actor identity.actor;
-     check string "actual reported model is retained" model_id identity.model_id);
+     check string "actual reported model is retained" reported_model identity.model_id);
   check bool "the completed native scope does not leak into its caller" true
     (Option.is_none (Runtime_response_identity_scope.current ()));
   check int "completed response preserves the Keeper stream contract" 0
@@ -386,6 +388,30 @@ let failed_completion_has_no_progress () =
   check int "one refused JSON request" 1 (Exact_output_fixture.post_count server);
   check int "refusal does not synthesize a successful response" 0 (List.length !events)
 
+let duplicate_wire_ids_across_names_have_no_occurrence_identity () =
+  Eio_main.run @@ fun _ ->
+  Runtime_response_identity_scope.with_scope ~actor:(Some "actual-keeper")
+    ~runtime_id:"runtime" ~provider_id:(Some "provider") (fun ~hooks ~wrap_tool ->
+      let response : Agent_core.Types.api_response =
+        { id="response"; model="reported-model"; stop_reason=StopToolUse; usage=None
+        ; content=[ToolUse {id="duplicate";name="first";input=`Assoc []};
+                   ToolUse {id="duplicate";name="second";input=`Assoc []}]
+        ; telemetry=Some (Llm_provider.Types.with_reported_model ~model:"reported-model" None) } in
+      ignore (Agent_core.Hooks.invoke_validated hooks.after_turn
+        (Agent_core.Hooks.AfterTurn {turn=1;response;tool_source_map=None}));
+      let ran = ref false in
+      let tool=Agent_core.Tool.create ~name:"first" ~description:"probe" ~parameters:[] (fun _ ->
+        ran:=true;
+        check bool "duplicate IDs cannot identify an exact occurrence" true
+          (Option.is_none (Runtime_response_identity_scope.current ()));
+        Ok {Agent_core.Types.content="ok";content_blocks=None;_meta=None}) |> wrap_tool in
+      let invocation=Agent_core.Tool_contract.Invocation.create ~tool_use_id:"duplicate" ~turn:1
+        ~schedule:{planned_index=0;batch_index=0;batch_size=2;execution_mode=Serial}
+        ~completion:Continue_after_success in
+      (match Agent_core.Tool.execute ~invocation tool (`Assoc []) with
+       | Ok _ -> () | Error error -> fail error.message);
+      check bool "unknown metadata does not block the tool" true !ran)
+
 let () =
   run "runtime agent streaming capability"
     (List.map
@@ -414,7 +440,11 @@ let () =
             "cooperative checkpoint", Cooperative_checkpoint]
        ; "response identity gaps",
          [test_case "a synthetic agent name cannot replace a missing host actor" `Quick
-           (completed_media_and_tools ~execution_actor:None Fresh)]
+           (completed_media_and_tools ~execution_actor:None Fresh)
+         ; test_case "a blank reported model remains unknown after presentation fallback" `Quick
+           (completed_media_and_tools ~reported_model:"" Fresh)
+         ; test_case "duplicate wire IDs across tool names remain unknown" `Quick
+           duplicate_wire_ids_across_names_have_no_occurrence_identity]
        ; "callback persistence failures",
          [ test_case "fresh JSON scope failure admits no provider request" `Quick
              (run_case ~callbacks:Fail_scope_sink Fresh

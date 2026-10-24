@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { createReadStream } from 'node:fs'
 import JZZ from 'jzz'
+import { umpMessages } from './ump-packets.mjs'
 import midiFiles from 'jzz-midi-smf'
 import { readWaveMetadata } from './wave-file.mjs'
 import { captureRange, captureRegionTime } from './capture-time.mjs'
@@ -51,17 +52,7 @@ export function unpackMidi(row) {
     if (!Number.isInteger(word) || word < 0 || word > 0xffffffff) throw new Error('Invalid UMP word')
     bytes.writeUInt32BE(word, index * 4)
   })
-  // MIDI 2.0 UMP message type defines length, including reserved types.
-  // The same table is enforced by JZZ.UMP; keep every message, not only notes.
-  const sizes = [4, 4, 4, 8, 8, 16, 4, 4, 8, 8, 8, 12, 12, 16, 16, 16]
-  const messages = []
-  for (let offset = 0; offset < bytes.length;) {
-    const end = offset + sizes[bytes[offset] >>> 4]
-    if (end > bytes.length) throw new Error('Truncated UMP message')
-    messages.push(JZZ.UMP([...bytes.subarray(offset, end)]))
-    offset = end
-  }
-  return messages
+  return [...umpMessages(bytes)].map(row => row.message)
 }
 
 export class CaptureTimeline {

@@ -128,7 +128,7 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
   | Agent_core.Types.ContentBlockStop _ -> Some "sse_content_block_stop"
   | Agent_core.Types.MessageDelta _ -> Some "sse_message_delta"
   | Agent_core.Types.MessageStop -> Some "sse_message_stop"
-  | Agent_core.Types.ResponsesOutputItems _ | Agent_core.Types.Ping -> None
+  | Agent_core.Types.InlineContentReplay _ | Agent_core.Types.ResponsesOutputItems _ | Agent_core.Types.Ping -> None
   | Agent_core.Types.SSEError _ -> Some "sse_error"
   | Agent_core.Types.NDJSONError _ -> Some "ndjson_error"
   | Agent_core.Types.SSEParseFailed _ -> Some "sse_parse_failed"

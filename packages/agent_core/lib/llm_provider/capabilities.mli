@@ -62,6 +62,9 @@ type tool_schema_conformance = Capability_vocab.tool_schema_conformance =
 type content_inline_reasoning = Capability_vocab.content_inline_reasoning =
   | No_content_inline_reasoning
   | Think_tags
+    (** Split tagged content for display; no original Chat carrier authority. *)
+  | Think_tags_with_chat_replay
+    (** Also retain/replay the original scalar Chat content through a validated witness. *)
       (** The model also wraps reasoning in [<think>] tags inside its content
           channel. Independent of {!reasoning_streaming_format}: a model can do
           both, and separating them is what keeps a wall of thinking out of the

@@ -58,7 +58,8 @@ val project_history
     dispatcher. *)
 
 val dialect_messages_of_history
-  :  ?control_lowering:Message_origin_lowering.policy
+  :  ?content_inline_reasoning:Capabilities.content_inline_reasoning
+  -> ?control_lowering:Message_origin_lowering.policy
   -> ?assistant_tool_content_format:Capability_vocab.assistant_tool_content_format
   -> replay_capability:Reasoning_dialect.replay_capability
   -> stream:bool

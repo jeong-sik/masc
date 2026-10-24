@@ -77,6 +77,7 @@ type tool_schema_conformance = Capability_vocab.tool_schema_conformance =
 type content_inline_reasoning = Capability_vocab.content_inline_reasoning =
   | No_content_inline_reasoning
   | Think_tags
+  | Think_tags_with_chat_replay
 
 type reasoning_output_format = Capability_vocab.reasoning_output_format =
   | No_reasoning_output_format

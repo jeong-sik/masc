@@ -73,6 +73,7 @@ type t =
   ; disposition : disposition
   ; failure : Types.stream_error option
   ; blocks : block Blocks.t
+  ; inline_content_carrier : (string * int list) option
   ; response_output_items : (Types.Response_replay.kind * int list) list option
   }
 
@@ -91,6 +92,7 @@ let empty =
   ; disposition = Natural
   ; failure = None
   ; blocks = Blocks.empty
+  ; inline_content_carrier = None
   ; response_output_items = None
   }
 ;;
@@ -550,7 +552,7 @@ let normalize_event state event =
       }
   | Types.ContentBlockStop _
   | Types.MessageDelta _
-  | Types.ResponsesOutputItems _
+  | Types.InlineContentReplay _ | Types.ResponsesOutputItems _
   | Types.MessageStop
   | Types.Ping
   | Types.SSEError _
@@ -803,6 +805,13 @@ let transition_open state = function
        { state with
          blocks = Blocks.add index { block with lifecycle = Closed } state.blocks
        })
+  | Types.InlineContentReplay {raw_content;block_indices} ->
+    if state.message_lifecycle <> Accepting_content then
+      terminal_event_failure "inline_content_replay:after_terminal" state
+    else (match state.inline_content_carrier with
+      | None -> {state with inline_content_carrier=Some (raw_content,block_indices)}
+      | Some previous when previous=(raw_content,block_indices) -> state
+      | Some _ -> terminal_event_failure "inline_content_replay:conflicting_carrier" state)
   | Types.ResponsesOutputItems groups ->
     if state.message_lifecycle <> Accepting_content then
       terminal_event_failure "responses_output_items_after_terminal" state
@@ -1234,6 +1243,22 @@ let has_tool_block =
 let finalize_completed state stop_reason =
   let* indexed_content = collect_content state stop_reason in
   let* content, response_replay = group_content state indexed_content in
+  let* inline_content_replay = match state.inline_content_carrier, response_replay with
+    | None, _ -> Ok None
+    | Some _, Some _ -> stream_parse_failed ~reason:"inline_content_replay:incompatible_output_items" ()
+    | Some (raw_content, native_indices), None ->
+      let positions = List.mapi (fun position (index,_) -> index,position) indexed_content in
+      let rec remap acc = function
+        | [] -> Ok (List.rev acc)
+        | index :: rest ->
+          (match List.assoc_opt index positions with
+           | None -> stream_parse_failed ~reason:"inline_content_replay:missing_block_identity" ()
+           | Some position -> remap (position::acc) rest) in
+      let* block_indices = remap [] native_indices in
+      (match Types.Inline_content_replay.make ~content ~raw_content ~block_indices with
+       | Ok replay -> Ok (Some replay)
+       | Error reason -> stream_parse_failed ~reason ())
+  in
   let stop_reason =
     Stop_reason_wire.reconcile stop_reason ~has_tool_blocks:(has_tool_block content)
   in
@@ -1243,8 +1268,9 @@ let finalize_completed state stop_reason =
     ; stop_reason
     ; content
     ; usage = Option.map terminal_usage state.usage
-    ; telemetry = Option.map (fun response_replay ->
-        {Types.default_inference_telemetry with response_replay=Some response_replay}) response_replay
+    ; telemetry = (match response_replay,inline_content_replay with
+        | None,None -> None
+        | _ -> Some {Types.default_inference_telemetry with response_replay;inline_content_replay})
     }
 ;;
 

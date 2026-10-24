@@ -352,6 +352,7 @@ let build_request_assoc_artifact
     let history =
       match
         Backend_openai_serialize.dialect_messages_of_history
+          ~content_inline_reasoning:caps.Capabilities.content_inline_reasoning
           ~control_lowering
           ~assistant_tool_content_format
           ~replay_capability

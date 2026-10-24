@@ -533,6 +533,16 @@ let test_minimax_native_catalog_replay () =
       ~model_capabilities_override:caps
       ()
   in
+  check_bool "native catalog declares exact scalar Chat replay" true
+    (caps.content_inline_reasoning=Capabilities.Think_tags_with_chat_replay);
+  let dialect_contract = Reasoning_dialect.replay_contract (Reasoning_dialect.for_provider_config config) in
+  check_bool "resolved dialect carries complete carrier identity" true
+    (dialect_contract.content_carrier=Reasoning_replay_contract.Inline_chat_content);
+  (match Reasoning_dialect.replay_capability_for_provider_config config with
+   | Error detail -> Alcotest.fail detail
+   | Ok capability -> check_bool "stable producer and request consumer bind carrier identity" true
+       (capability.target.replay_contract.content_carrier=Inline_chat_content
+        && capability.contract.content_carrier=Inline_chat_content));
   let call =
     `Assoc
       [ "id", `String "weather-call"
@@ -545,6 +555,10 @@ let test_minimax_native_catalog_replay () =
   in
   let assistant response =
     let response = Complete_common.patch_telemetry response ~config None in
+    let response = Cache.response_to_json response |> Yojson.Safe.to_string
+      |> Yojson.Safe.from_string |> Cache.response_of_json in
+    let response = match response with Some response -> response
+      | None -> Alcotest.fail "MiniMax response cache round-trip failed" in
     match assistant_message_of_response response with
     | Ok message -> message
     | Error error -> Alcotest.fail (show_assistant_message_error error)
@@ -560,10 +574,11 @@ let test_minimax_native_catalog_replay () =
   let stream content fields =
     let dialect = Reasoning_dialect.for_provider_config config in
     let inline_reasoning = match caps.content_inline_reasoning with
-      | Capabilities.Think_tags -> true
+      | Capabilities.Think_tags | Capabilities.Think_tags_with_chat_replay -> true
       | Capabilities.No_content_inline_reasoning -> false
     in
-    let state = Streaming.create_openai_stream_state ~inline_reasoning () in
+    let state = Streaming.create_openai_stream_state ~inline_reasoning
+        ~preserve_inline_content:(caps.content_inline_reasoning=Capabilities.Think_tags_with_chat_replay) () in
     let acc = Complete_stream_acc.create_stream_acc () in
     let feed wire =
       let parsed = Streaming.parse_openai_sse_chunk
@@ -580,7 +595,11 @@ let test_minimax_native_catalog_replay () =
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
         Alcotest.fail "tool fixture must be an object"
     in
-    feed (chunk (("content", content) :: fields) `Null);
+    (match content with
+     | `String text when text <> "" && String.for_all (fun byte -> Char.code byte < 128) text ->
+       feed (chunk fields `Null);
+       String.iter (fun byte -> feed (chunk ["content",`String (String.make 1 byte)] `Null)) text
+     | _ -> feed (chunk (("content", content) :: fields) `Null));
     feed (chunk ["tool_calls", `List [indexed_call]] `Null);
     feed (chunk [] (`String "tool_calls"));
     feed "[DONE]";
@@ -588,10 +607,8 @@ let test_minimax_native_catalog_replay () =
     | Ok response -> assistant response
     | Error _ -> Alcotest.fail "native MiniMax SSE fixture failed"
   in
-  (* Inline <think> preservation in replayed assistant content remains tracked
-     under #27924; this fixture covers split/structured reasoning fields and
-     tool calls without thinking so it does not lock in empty content for
-     inline <think> responses. *)
+  (* Original inline bytes must stay in content, independently of native
+     sidechannel reasoning. ASCII stream inputs split every tag byte; Unicode deltas remain valid UTF-8. *)
   let cases =
     [ "split reasoning", `String "", ["reasoning_content", `String "check forecast"],
         Some "check forecast"
@@ -603,6 +620,14 @@ let test_minimax_native_catalog_replay () =
              "text", `String "check forecast"]] ],
         Some "check forecast"
     ; "tool without thinking", `Null, [], None
+    ; "explicit empty content", `String "", [], None
+    ; "inline reasoning only", `String "<think>check forecast</think>", [], None
+    ; "inline text and repeated reasoning", `String "before<think>x</think>middle<think>y</think>after", [], None
+    ; "inline whitespace and Unicode", `String "  <think>검토\n</think> 답변  ", [], None
+    ; "unfinished inline reasoning", `String "<think>unfinished", [], None
+    ; "empty inline tags", `String "<think></think>", [], None
+    ; "inline and independent native reasoning", `String "<think>inline thought</think>visible",
+        ["reasoning_content",`String "native thought"], Some "native thought"
     ]
   in
   let last = match Parse.parse_openai_response_result_json
@@ -643,13 +668,75 @@ let test_minimax_native_catalog_replay () =
           match List.assoc_opt "reasoning_details" fields with
           | Some details -> details
           | None -> `Null);
-       check_bool (label ^ " reasoning stays out of visible answer") true
-         (match member "content" replay with
-          | `Null | `String "" -> true
-          | `String _ | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> false);
+       check_bool (label ^ " original content carrier preserved") true
+         (member "content" replay = content);
+       let visible = String.concat "\n" (List.filter_map (function Text text -> Some text
+          | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+          | Image _ | Document _ | Audio _ -> None) first.content) in
+       let expected_visible = match content with
+         | `String raw ->
+           let split = Inline_reasoning_split.create () in
+           let head = Inline_reasoning_split.feed_segments split raw in
+           let pieces = head @ Inline_reasoning_split.flush_segments split in
+           String.concat "\n" (List.filter_map (function Inline_reasoning_split.Text text -> Some text
+             | Inline_reasoning_split.Reasoning _ -> None) pieces)
+         | _ -> "" in
+       check_string (label ^ " visible text excludes reasoning") expected_visible visible;
+       let changed_config = {config with Provider_config.model_id="different-model"} in
+       let changed = Backend_openai_request.build_request ~config:changed_config ~messages:history ()
+          |> Yojson.Safe.from_string |> member "messages" |> to_list |> fun wire -> List.nth wire 1 in
+       check_bool (label ^ " source change cannot replay raw carrier") true
+         (member "content" changed = (if String.trim expected_visible="" then `Null else `String expected_visible));
        check_string (label ^ " answer without thinking retained") "Sunny"
          (member "content" (List.nth wire 3) |> to_string))
     cases) ["sync", sync; "stream", stream]
+;;
+
+let test_inline_carrier_validation_and_synthetic_stream () =
+  let raw_content = "before<think>private</think>after" in
+  let content = [Text "before";Thinking {content="private";signature=None};Text "after"] in
+  let witness = match Inline_content_replay.make ~content ~raw_content ~block_indices:[0;1;2] with
+    | Ok witness -> witness | Error detail -> Alcotest.fail detail in
+  List.iter (fun (label,blocks,indices) ->
+    check_bool label true (Result.is_error (Inline_content_replay.make ~content:blocks ~raw_content ~block_indices:indices)))
+    ["uncovered appended Text is refused",content@[Text "new"],[0;1;2]
+    ;"modified bound Text is refused",[Text "changed";Thinking {content="private";signature=None};Text "after"],[0;1;2]
+    ;"duplicate occurrence is refused",content,[0;1;1;2]];
+  check_bool "duplicate witness metadata is refused" true
+    (Result.is_error (Inline_content_replay.of_metadata ~content
+      [Inline_content_replay.metadata witness;Inline_content_replay.metadata witness]));
+  let response = {id="inline-synthetic";model="minimax-m3";stop_reason=EndTurn;content;usage=None;
+    telemetry=Some {default_inference_telemetry with inline_content_replay=Some witness}} in
+  let acc = Complete_stream_acc.create_stream_acc () in
+  Streaming.emit_synthetic_events response (Complete_stream_acc.accumulate_event acc);
+  (match Complete_stream_acc.finalize_stream_acc acc with
+   | Ok reread -> check_bool "synthetic stream preserves exact witness" true
+       (Option.bind reread.telemetry (fun telemetry -> telemetry.inline_content_replay)=Some witness)
+   | Error _ -> Alcotest.fail "synthetic inline stream failed");
+  let interleaved = [Text "before";ToolUse {id="unknown";name="missing";input=`Assoc []};
+    Thinking {content="private";signature=None};Text "after"] in
+  let interleaved_witness = match Inline_content_replay.make ~content:interleaved ~raw_content ~block_indices:[0;2;3] with
+    | Ok replay -> replay | Error detail -> Alcotest.fail detail in
+  let interleaved_response = {response with content=interleaved;
+    telemetry=Some {default_inference_telemetry with inline_content_replay=Some interleaved_witness}} in
+  let admission = Agent_core.Agent_tools.admit_tool_use_names
+      (Agent_core.Agent_tools.build_index []) interleaved in
+  (match retain_response_content ~retained_indices:admission.retained_content_indices
+      ~content:admission.admitted interleaved_response with
+   | Error detail -> Alcotest.fail detail
+   | Ok retained ->
+     check_bool "tool admission remaps the exact carrier occurrences" true
+       (Option.bind retained.telemetry (fun telemetry -> telemetry.inline_content_replay)=Some witness);
+     let config = Provider_config.make ~kind:OpenAI_compat ~provider_id:"minimax"
+       ~model_id:"minimax-m3" ~base_url:"https://api.minimax.io"
+       ~model_capabilities_override:(require_model_capabilities "minimax-m3") () in
+     check_bool "admitted carrier can enter canonical history" true
+       (Result.is_ok (assistant_message_of_response (Complete_common.patch_telemetry retained ~config None))));
+  let partial = [Text "before";Text "after"] in
+  (match Inline_content_replay.retain_metadata ~original_content:content ~content:partial
+      ~retained_indices:[0;2] [Inline_content_replay.metadata witness] with
+   | Ok metadata -> check_bool "excluded thinking removes raw carrier" true (metadata=[])
+   | Error detail -> Alcotest.fail detail)
 ;;
 
 let test_parse_reasoning_details_rejects_malformed () =
@@ -3466,6 +3553,8 @@ let () =
             "MiniMax native catalog parse/history/request replay"
             `Quick
             test_minimax_native_catalog_replay
+        ; Alcotest.test_case "inline carrier trust boundary and synthetic stream" `Quick
+            test_inline_carrier_validation_and_synthetic_stream
         ; Alcotest.test_case
             "reasoning_details rejects malformed"
             `Quick

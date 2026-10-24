@@ -90,6 +90,7 @@ type t =
   ; replay_policy : replay_policy
   ; streaming : streaming_reasoning
   ; output_wire : output_wire
+  ; content_carrier : Reasoning_replay_contract.content_carrier
   }
 
 let sampling_supported = { ignored_always = []; ignored_when_thinking = [] }
@@ -103,6 +104,7 @@ let default =
   ; replay_policy = No_replay
   ; streaming = No_streaming_reasoning
   ; output_wire = No_output_control
+  ; content_carrier = Reasoning_replay_contract.Canonical_blocks
   }
 ;;
 
@@ -125,7 +127,10 @@ let base_of_capabilities (caps : Capabilities.capabilities) =
     | No_reasoning_output_format -> No_output_control
     | Split_reasoning_fields -> Reasoning_split
   in
-  let default = { default with sampling_policy = sampling_policy_of_capabilities caps } in
+  let content_carrier = match caps.content_inline_reasoning with
+    | Think_tags_with_chat_replay -> Reasoning_replay_contract.Inline_chat_content
+    | No_content_inline_reasoning | Think_tags -> Reasoning_replay_contract.Canonical_blocks in
+  let default = { default with sampling_policy = sampling_policy_of_capabilities caps;content_carrier } in
   match caps.thinking_control_format with
   | No_thinking_control ->
     let dialect = { default with preserve_wire; output_wire } in
@@ -151,6 +156,7 @@ let base_of_capabilities (caps : Capabilities.capabilities) =
     ; replay_policy = Tool_call_assistant_messages_all_history
     ; streaming = Delta_field "reasoning_content"
     ; output_wire
+    ; content_carrier
     }
   | Thinking_object_adaptive ->
     { default with
@@ -642,9 +648,10 @@ let apply_clear_thinking_replay_gate (config : Provider_config.t) dialect =
 let apply_transport_replay_override (config : Provider_config.t) dialect =
   match Provider_http_codec.of_config config with
   | Provider_http_codec.Openai_responses ->
-    { dialect with replay_policy = Provider_opaque_state }
-  | Anthropic_messages | Openai_chat | Ollama_chat | Gemini_generate_content | Glm_chat ->
-    dialect
+    { dialect with replay_policy = Provider_opaque_state;content_carrier=Canonical_blocks }
+  | Openai_chat | Glm_chat -> dialect
+  | Anthropic_messages | Ollama_chat | Gemini_generate_content ->
+    {dialect with content_carrier=Canonical_blocks}
 ;;
 
 let for_provider_config (config : Provider_config.t) =
@@ -661,6 +668,7 @@ let replay_contract dialect : Reasoning_replay_contract.t =
   { replay_policy = dialect.replay_policy
   ; streaming = dialect.streaming
   ; output_wire = dialect.output_wire
+  ; content_carrier = dialect.content_carrier
   }
 ;;
 

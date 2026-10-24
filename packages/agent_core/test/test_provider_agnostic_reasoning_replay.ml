@@ -5,7 +5,7 @@ let check_bool = Alcotest.(check bool)
 let check_int = Alcotest.(check int)
 
 let contract replay_policy : Reasoning_replay_contract.t =
-  { replay_policy; streaming = No_streaming_reasoning; output_wire = No_output_control }
+  { replay_policy; streaming = No_streaming_reasoning; output_wire = No_output_control; content_carrier = Canonical_blocks }
 ;;
 
 let source
@@ -54,7 +54,7 @@ let project
     ; contract =
         { Reasoning_replay_contract.replay_policy = policy
         ; streaming = Reasoning_replay_contract.No_streaming_reasoning
-        ; output_wire = Reasoning_replay_contract.No_output_control
+        ; output_wire = Reasoning_replay_contract.No_output_control; content_carrier = Canonical_blocks
         }
     ; rotation
     }
@@ -365,7 +365,7 @@ let test_selected_unsupported_block_fails_closed () =
         ; contract =
             { Reasoning_replay_contract.replay_policy = All_assistant_messages
             ; streaming = Reasoning_replay_contract.No_streaming_reasoning
-            ; output_wire = Reasoning_replay_contract.No_output_control
+            ; output_wire = Reasoning_replay_contract.No_output_control; content_carrier = Canonical_blocks
             }
         ; rotation = Reasoning_replay_contract.Require_identical_source
         }

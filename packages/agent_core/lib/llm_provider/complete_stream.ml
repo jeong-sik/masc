@@ -48,7 +48,7 @@ let event_carries_stream_failure = function
   | Types.ContentBlockDelta _
   | Types.ContentBlockStop _
   | Types.MessageDelta _
-  | Types.ResponsesOutputItems _
+  | Types.InlineContentReplay _ | Types.ResponsesOutputItems _
   | Types.MessageStop
   | Types.Ping
   | Types.Timeout _
@@ -144,7 +144,7 @@ let%test "OpenAI-compatible parser reads only the declared reasoning member" =
 (* Native reasoning dialect and inline content framing are independent axes.
    Only the explicit content contract authorizes parsing reply bytes as tags. *)
 let inline_reasoning_enabled = function
-  | Capabilities.Think_tags -> true
+  | Capabilities.Think_tags | Capabilities.Think_tags_with_chat_replay -> true
   | Capabilities.No_content_inline_reasoning -> false
 ;;
 
@@ -575,7 +575,7 @@ let complete_stream_http
            | None -> `Skip)
         | Types.MessageDelta _ -> `Skip
         | Types.MessageStop -> `Done
-        | Types.ResponsesOutputItems _ -> `Skip
+        | Types.InlineContentReplay _ | Types.ResponsesOutputItems _ -> `Skip
         | Types.Ping -> `Heartbeat
         (* A provider-owned error envelope is NOT a wire failure: the response
            satisfied its contract and the provider reported a problem inside
@@ -733,6 +733,9 @@ let complete_stream_http
                       ~provider
                       ~model
                       ~inline_reasoning
+                      ~preserve_inline_content:(match content_inline_reasoning with
+                        | Capabilities.Think_tags_with_chat_replay -> true
+                        | Capabilities.Think_tags | Capabilities.No_content_inline_reasoning -> false)
                       ()
                   in
                   openai_state := Some s;
@@ -975,7 +978,7 @@ let complete_stream_http
                                      | Types.SSEUnknownEventType _
                                      | Types.SSEUnsupportedPart _
                                      | Types.SSEUnsupportedResponse _
-                                     | Types.ResponsesOutputItems _
+                                     | Types.InlineContentReplay _ | Types.ResponsesOutputItems _
                                      | Types.Connected
                                      | Types.Timeout _
                                      | Types.StreamIncomplete _) as evt) ->

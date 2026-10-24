@@ -65,6 +65,8 @@ val failure : t -> Types.stream_error option
     Response [usage] is [None] when no usage field was observed in the input
     events. Explicit
     counter or cost zero is an observation; an all-[None] delta is not.
+    Inline Chat carrier witnesses are validated against exact accumulated block
+    identities and persisted in response telemetry.
     This does not restore per-field absence already lost by a parser or by
     the integer fields of {!Types.api_usage}. *)
 val finalize : t -> receipt

@@ -60,7 +60,8 @@ for line in sys.stdin:
         if len(sys.argv) > 1:
             with open(sys.argv[1],"a") as output: output.write(params["name"]+"\n")
         if params["name"] == "lane_companion":
-            value = {"version":2 if mode=="companion-version" else 1,"tools":["increment"]}
+            assert params["arguments"] == {"version":2}
+            value = {"version":3 if mode=="companion-version" else 2,"tools":["increment"]}
             print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":{"content":[],"structuredContent":value}}),flush=True)
             continue
         if params["name"] == "lane_controller_snapshot" and mode == "companion-controller-error":

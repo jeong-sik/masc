@@ -9,6 +9,35 @@ let home_request_of_approval = function
   | Gate_row pending -> Home_gate_request pending.Tui_decode.gp_id
   | Operator_row item -> Home_operator_request item.ap_token
 
+module Action_table = Hashtbl.Make (struct
+  type t = home_action
+
+  (* Keep the structural key comparison used by [List.assoc_opt]. *)
+  let equal left right = Stdlib.compare left right = 0
+  let hash = Hashtbl.hash
+end)
+
+let ordered_decision_rows rows =
+  (* The index belongs to this projection. The reversed list, never table
+     iteration, owns the first-seen order; only the shared Agenda destination
+     combines labels from more than one source. *)
+  let labels = Action_table.create (List.length rows) in
+  let reversed =
+    List.fold_left (fun reversed (action, label) ->
+      match Action_table.find_opt labels action with
+      | None ->
+          let held = ref label in
+          Action_table.add labels action held;
+          (action, held) :: reversed
+      | Some held ->
+          (match action with
+           | Home_agenda -> held := !held ^ "; " ^ label
+           | Home_approvals | Home_request _ | Home_resume _ | Home_read_last _
+           | Home_choose_keeper | Home_create_keeper -> ());
+          reversed) [] rows
+  in
+  List.rev_map (fun (action, label) -> action, !label) reversed
+
 (* Current successes survive another source's failure. Stale snapshots are
    reachable through their source reading, never offered as current requests. *)
 let home_decision_rows (state : state) =
@@ -97,13 +126,7 @@ let home_decision_rows (state : state) =
   in
   (* Equality is kind plus authoritative request ID, never a Keeper/task
      grouping key. Distinct calls belonging to one Keeper remain distinct. *)
-  List.fold_left (fun rows ((action, label) as row) ->
-    match List.assoc_opt action rows with
-    | None -> rows @ [row]
-    | Some previous when action = Home_agenda ->
-        List.map (fun (key, text) ->
-          if key = action then key, previous ^ "; " ^ label else key, text) rows
-    | Some _ -> rows) [] (approval_rows @ questions @ goals @ tasks @ approvals)
+  ordered_decision_rows (approval_rows @ questions @ goals @ tasks @ approvals)
 
 let clear_ask_answering state =
   state.ask_answer_mode <- Ask_browsing;
